@@ -67,6 +67,9 @@ impl Value {
 							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
+					Part::Optional => {
+						stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
+					}
 					// Otherwise return none
 					_ => Ok(Value::None),
 				},
@@ -184,6 +187,9 @@ impl Value {
 
 						stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 					}
+					Part::Optional => {
+						stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
+					}
 					_ => Ok(Value::None),
 				},
 				// Current value at path is an array
@@ -261,6 +267,9 @@ impl Value {
 							})
 							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+					}
+					Part::Optional => {
+						stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
 					}
 					_ => {
 						let len = match path.get(1) {
@@ -379,6 +388,9 @@ impl Value {
 									})
 									.await?;
 								stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+							}
+							Part::Optional => {
+								stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
 							}
 							// This is a remote field expression
 							_ => {
