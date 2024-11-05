@@ -1777,7 +1777,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
             RETURN string::replace($html, /<[^>]*>/, "");
         };
         DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
-        DEFINE ANALYZER englishLemmatizer TOKENIZERS blank,class FILTERS mapper('tests/data/lemmatization-en.txt');
+        DEFINE ANALYZER englishLemmatizer TOKENIZERS blank,class FILTERS mapper('../tests/data/lemmatization-en.txt');
 		INFO FOR DB;
 	"#;
 	let mut t = Test::new(sql).await?;
@@ -1789,7 +1789,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			analyzers: {
 				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
 				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
-				englishLemmatizer: 'DEFINE ANALYZER englishLemmatizer TOKENIZERS BLANK,CLASS FILTERS MAPPER(tests/data/lemmatization-en.txt)',
+				englishLemmatizer: 'DEFINE ANALYZER englishLemmatizer TOKENIZERS BLANK,CLASS FILTERS MAPPER(../tests/data/lemmatization-en.txt)',
 				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
 			},
 			configs: {},
