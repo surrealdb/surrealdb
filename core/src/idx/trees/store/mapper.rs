@@ -18,7 +18,7 @@ impl Mappers {
 					if !p.exists() || !p.is_file() {
 						return Err(Error::Internal(format!("Invalid mapper path: {p:?}")));
 					}
-					let mapper = Mapper::new(&p).await?;
+					let mapper = Mapper::new(p).await?;
 					self.0.insert(path.to_string(), mapper);
 				}
 			}

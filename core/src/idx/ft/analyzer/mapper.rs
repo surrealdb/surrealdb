@@ -15,7 +15,6 @@ pub(in crate::idx) struct Mapper {
 
 impl Mapper {
 	pub(in crate::idx) async fn new(path: &Path) -> Result<Self, Error> {
-		println!("Loading: {path:?}");
 		let file = File::open(path).await?;
 		let reader = BufReader::new(file);
 
@@ -34,7 +33,6 @@ impl Mapper {
 				}
 			}
 		}
-		println!("Terms inserted: {}", terms.size);
 		Ok(Self {
 			terms: Arc::new(terms),
 		})
