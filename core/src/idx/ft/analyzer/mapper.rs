@@ -27,17 +27,25 @@ impl Mapper {
 		})
 	}
 
-	fn add_line_tree(terms: &mut Tree<VariableSizeKey, String>, line: String) -> Result<(), Error> {
-		let mut parts = line.splitn(2, '\t');
-		if let Some(lemme) = parts.next() {
-			if let Some(word) = parts.next() {
-				let key = VariableSizeKey::from_str(word)
-					.map_err(|_| Error::Internal(format!("Can't create key from {word}")))?;
-				terms
-					.insert_unchecked(&key, lemme.to_string(), 0, 0)
-					.map_err(|e| Error::Internal(e.to_string()))?;
-			}
+	fn add_line_tree(
+		terms: &mut Tree<VariableSizeKey, String>,
+		line: String,
+		line_number: usize,
+	) -> Result<(), Error> {
+		let parts: Vec<&str> = line.split('\t').collect();
+		if parts.len() != 2 {
+			return Err(Error::AnalyzerError(format!(
+				"Expected two terms separated by a tab line {line_number}: {}",
+				parts.join("\t")
+			)));
 		}
+		let word = parts[1];
+		let key = VariableSizeKey::from_str(word)
+			.map_err(|_| Error::AnalyzerError(format!("Can't create key from {word}")))?;
+		terms
+			.insert_unchecked(&key, parts[0].to_string(), 0, 0)
+			.map_err(|e| Error::AnalyzerError(e.to_string()))?;
+
 		Ok(())
 	}
 
@@ -49,8 +57,10 @@ impl Mapper {
 		let file = File::open(path).await?;
 		let reader = BufReader::new(file);
 		let mut lines = reader.lines();
+		let mut line_number = 0;
 		while let Some(line) = lines.next_line().await? {
-			Self::add_line_tree(terms, line)?;
+			Self::add_line_tree(terms, line, line_number)?;
+			line_number += 1;
 		}
 		Ok(())
 	}
