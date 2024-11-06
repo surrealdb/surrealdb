@@ -72,9 +72,11 @@ impl Mapper {
 	) -> Result<(), Error> {
 		let file = File::open(path)?;
 		let reader = BufReader::new(file);
+		let mut line_number = 0;
 		for line_result in reader.lines() {
 			let line = line_result?;
-			Self::add_line_tree(terms, line)?;
+			Self::add_line_tree(terms, line, line_number)?;
+			line_number += 1;
 		}
 		Ok(())
 	}
