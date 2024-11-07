@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
+use crate::sql::version::Version;
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::define::config::graphql::TablesConfig;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
@@ -36,6 +37,7 @@ use crate::gql::utils::{GQLTx, GqlValueUtils};
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
 use crate::sql::Value as SqlValue;
+use crate::syn;
 
 type ErasedRecord = (GQLTx, Thing);
 
@@ -46,6 +48,12 @@ fn field_val_erase_owned(val: ErasedRecord) -> FieldValue<'static> {
 macro_rules! limit_input {
 	() => {
 		InputValue::new("limit", TypeRef::named(TypeRef::INT))
+	};
+}
+
+macro_rules! version_input {
+	() => {
+		InputValue::new("version", TypeRef::named("datetime"))
 	};
 }
 
@@ -159,6 +167,19 @@ pub async fn generate_schema(
 
 						let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| l.intox());
 
+						let version = args.get("version")
+							.and_then(|v| {
+								let val: &String = &v.clone().into_value().to_string()
+									.chars()
+									.filter(|&c| c != '"' && c != '\\')
+									.collect();
+
+								let dt = syn::datetime(&val)
+									.expect("Could not convert datetime to rfc3339");
+
+								Some(Version(dt.into()))
+							});
+
 						let order = args.get("order");
 
 						let filter = args.get("filter");
@@ -238,6 +259,7 @@ pub async fn generate_schema(
 								cond,
 								limit,
 								start,
+								version,
 								..Default::default()
 							}
 						});
@@ -278,6 +300,7 @@ pub async fn generate_schema(
 			.description(if let Some(ref c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
 			.argument(limit_input!())
 			.argument(start_input!())
+			.argument(version_input!())
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
 			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
 		);
