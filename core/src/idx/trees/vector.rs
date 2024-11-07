@@ -149,12 +149,7 @@ impl Vector {
 		let norm_a = Self::normalize(a);
 		let norm_b = Self::normalize(b);
 		let mut s = Self::dot(&norm_a, &norm_b);
-		if s < -1.0 {
-			s = -1.0;
-		}
-		if s > 1.0 {
-			s = 1.0;
-		}
+		s = s.clamp(-1.0, 1.0);
 		1.0 - s
 	}
 

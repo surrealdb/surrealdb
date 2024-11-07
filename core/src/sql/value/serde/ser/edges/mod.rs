@@ -6,34 +6,7 @@ use crate::sql::Tables;
 use crate::sql::Thing;
 use ser::Serializer as _;
 use serde::ser::Error as _;
-use serde::ser::Impossible;
 use serde::ser::Serialize;
-
-pub(super) struct Serializer;
-
-impl ser::Serializer for Serializer {
-	type Ok = Edges;
-	type Error = Error;
-
-	type SerializeSeq = Impossible<Edges, Error>;
-	type SerializeTuple = Impossible<Edges, Error>;
-	type SerializeTupleStruct = Impossible<Edges, Error>;
-	type SerializeTupleVariant = Impossible<Edges, Error>;
-	type SerializeMap = Impossible<Edges, Error>;
-	type SerializeStruct = SerializeEdges;
-	type SerializeStructVariant = Impossible<Edges, Error>;
-
-	const EXPECTED: &'static str = "a struct `Edges`";
-
-	#[inline]
-	fn serialize_struct(
-		self,
-		_name: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeStruct, Error> {
-		Ok(SerializeEdges::default())
-	}
-}
 
 #[derive(Default)]
 pub(super) struct SerializeEdges {
@@ -81,9 +54,7 @@ impl serde::ser::SerializeStruct for SerializeEdges {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::sql::thing;
-	use serde::Serialize;
+	use crate::sql::*;
 
 	#[test]
 	fn edges() {
@@ -92,7 +63,7 @@ mod tests {
 			from: thing("foo:bar").unwrap(),
 			what: Tables(Vec::new()),
 		};
-		let serialized = edges.serialize(Serializer.wrap()).unwrap();
+		let serialized = from_value(to_value(&edges).unwrap()).unwrap();
 		assert_eq!(edges, serialized);
 	}
 }

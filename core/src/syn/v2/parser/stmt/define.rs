@@ -47,14 +47,9 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
-		loop {
-			match self.peek_kind() {
-				t!("COMMENT") => {
-					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
-				}
-				_ => break,
-			}
+		while let t!("COMMENT") = self.peek_kind() {
+			self.pop_peek();
+			res.comment = Some(self.next_token_value()?);
 		}
 
 		Ok(res)

@@ -62,10 +62,9 @@ impl fmt::Display for Order {
 		if self.numeric {
 			write!(f, " NUMERIC")?;
 		}
-		match self.direction {
-			false => write!(f, " DESC")?,
-			true => (),
-		};
+		if !self.direction {
+			write!(f, " DESC")?;
+		}
 		Ok(())
 	}
 }
