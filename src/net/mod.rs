@@ -211,7 +211,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		// Setup the Axum server with TLS
 		let server = axum_server::bind_rustls(opt.bind, tls);
 		// Log the server startup to the CLI
-		info!(target: LOG, "Started web server on {}", opt.bind);
+		info!(target: LOG, "Started web server on {}", &opt.bind);
 		// Start the server and listen for connections
 		server
 			.handle(handle)
@@ -232,7 +232,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 	if let Err(e) = res {
 		if opt.bind.port() < 1024 {
 			if let io::ErrorKind::PermissionDenied = e.kind() {
-				error!(target: LOG, "Binding to ports below 1024 requires root privileges.");
+				error!(target: LOG, "Binding to ports below 1024 requires privileged access or special permissions.");
 			}
 		}
 		return Err(e.into());
