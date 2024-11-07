@@ -8,6 +8,7 @@ use crate::sql::{Base, Ident, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::str::FromStr;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -127,8 +128,9 @@ impl RunAs {
 			}
 			RunAsKind::Roles(roles) => {
 				let name = "system_auth".into();
-				let roles: Vec<Role> = roles.iter().map(Into::into).collect();
-				Ok(Auth::new(Actor::new(name, roles, level)))
+				let roles: Result<Vec<Role>, _> =
+					roles.iter().map(|r| Role::from_str(r.as_str())).collect();
+				Ok(Auth::new(Actor::new(name, roles?, level)))
 			}
 		}
 	}
