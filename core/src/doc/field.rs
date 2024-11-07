@@ -73,7 +73,7 @@ impl Document {
 				}
 
 				// NONE-values should never be stored
-				if let Value::None = self.current.doc.pick(fd) {
+				if self.current.doc.pick(fd).is_none() {
 					self.current.doc.to_mut().del(stk, ctx, opt, fd).await?;
 				}
 			}
@@ -81,7 +81,7 @@ impl Document {
 			// Loop over every field in the document
 			for fd in self.current.doc.every(None, true, true).iter() {
 				// NONE-values should never be stored
-				if let Value::None = self.current.doc.pick(fd) {
+				if self.current.doc.pick(fd).is_none() {
 					self.current.doc.to_mut().del(stk, ctx, opt, fd).await?;
 				}
 			}
