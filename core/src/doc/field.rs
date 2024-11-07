@@ -69,6 +69,10 @@ impl Document {
 						},
 					}
 				}
+
+				if let Value::None = self.current.doc.pick(fd) {
+					self.current.doc.to_mut().del(stk, ctx, opt, fd).await?;
+				}
 			}
 		} else {
 			// Loop over every field in the document

@@ -1022,11 +1022,25 @@ async fn upsert_none_removes_field() -> Result<(), Error> {
 				c: NONE,
 			}
 		};
+
+		DEFINE TABLE flex SCHEMAFULL;
+		DEFINE FIELD obj ON flex FLEXIBLE TYPE object;
+		UPSERT flex:1 CONTENT {
+			obj: {
+				a: 1
+			}
+		};
+
+		UPSERT flex:1 CONTENT {
+			obj: {
+				a: NONE,
+			}
+		};
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -1048,6 +1062,36 @@ async fn upsert_none_removes_field() -> Result<(), Error> {
 			{
 				id: test:1,
 				b: {}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).output();
+	assert!(tmp.is_ok(), "failed to create table: {:?}", tmp);
+	//
+	let tmp = res.remove(0).output();
+	assert!(tmp.is_ok(), "failed to create field: {:?}", tmp);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: flex:1,
+				obj: {
+					a: 1
+				}
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: flex:1,
+				obj: {}
 			}
 		]",
 	);
