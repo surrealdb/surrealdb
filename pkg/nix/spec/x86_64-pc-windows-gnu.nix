@@ -10,8 +10,10 @@
 
     depsBuildBuild = [ pkgsCross.mingwW64.stdenv.cc ];
 
-    buildInputs = [ pkgsCross.mingwW64.windows.pthreads ];
+    buildInputs = [ pkgsCross.mingwW64.windows.pthreads onnxruntime ];
 
     CARGO_BUILD_TARGET = target;
+
+    ONNXRUNTIME_LIB_PATH = "${onnxruntime.outPath}/lib/onnxruntime.dll";
   };
 }
