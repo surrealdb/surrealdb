@@ -4,10 +4,10 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints};
-use crate::kvs::Check;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::kvs::{
+	savepoint::{SaveOperation, SavePointImpl, SavePoints},
+	Check, Key, Val, Version,
+};
 use futures::lock::Mutex;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -514,6 +514,24 @@ impl super::api::Transaction for Transaction {
 		};
 		// Return result
 		Ok(response.values)
+	}
+
+	/// Retrieve all the versions from a range of keys from the databases
+	/// This is a no-op for surrealcs.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		Err(Error::UnsupportedVersionedQueries)
 	}
 }
 

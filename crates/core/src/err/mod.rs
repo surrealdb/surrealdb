@@ -353,7 +353,7 @@ pub enum Error {
 		value: String,
 	},
 
-	// The cluster node does not exist
+	/// The cluster node does not exist
 	#[error("The node '{value}' does not exist")]
 	NdNotFound {
 		value: String,
@@ -1039,7 +1039,7 @@ pub enum Error {
 	},
 
 	/// The requested root access grant does not exist
-	#[error("The root access grant '{gr}' does not exist")]
+	#[error("The root access grant '{gr}' does not exist for '{ac}'")]
 	AccessGrantRootNotFound {
 		ac: String,
 		gr: String,
@@ -1053,7 +1053,7 @@ pub enum Error {
 	},
 
 	/// The requested namespace access grant does not exist
-	#[error("The access grant '{gr}' does not exist in the namespace '{ns}'")]
+	#[error("The access grant '{gr}' does not exist for '{ac}' in the namespace '{ns}'")]
 	AccessGrantNsNotFound {
 		ac: String,
 		gr: String,
@@ -1069,7 +1069,7 @@ pub enum Error {
 	},
 
 	/// The requested database access grant does not exist
-	#[error("The access grant '{gr}' does not exist in the database '{db}'")]
+	#[error("The access grant '{gr}' does not exist for '{ac}' in the database '{db}'")]
 	AccessGrantDbNotFound {
 		ac: String,
 		gr: String,

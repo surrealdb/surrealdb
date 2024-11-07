@@ -5,7 +5,7 @@ mod location;
 mod mac;
 mod render;
 pub use location::Location;
-pub(crate) use mac::{bail, error};
+pub(crate) use mac::{bail, syntax_error};
 pub use render::{RenderedError, Snippet};
 
 #[derive(Debug, Clone, Copy)]

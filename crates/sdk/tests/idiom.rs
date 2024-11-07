@@ -83,3 +83,89 @@ async fn idiom_select_all_from_nested_array_prop() -> Result<(), Error> {
 		.expect_val("[{id: a:2}]")?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn idiom_graph_with_filter_should_be_flattened() -> Result<(), Error> {
+	let sql = r#"
+    	CREATE person:1, person:2, person:3;
+		RELATE person:1->likes:1->person:2;
+		RELATE person:2->likes:2->person:3;
+		person:1->likes->person->likes->person;
+		person:1->likes->person[?true]->likes->person;
+		person:1->likes->person[?true];
+		[person:1][?true]->likes->person;
+		[person:1]->likes->person[?true]->likes->person;
+		SELECT ->likes[?true]->person as likes FROM person;
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("[{id: person:1}, {id: person:2}, {id: person:3}]")?
+		.expect_val("[{id: likes:1, in: person:1, out: person:2}]")?
+		.expect_val("[{id: likes:2, in: person:2, out: person:3}]")?
+		.expect_val("[person:3]")?
+		.expect_val("[person:3]")?
+		.expect_val("[person:2]")?
+		.expect_val("[[person:2]]")?
+		.expect_val("[[person:3]]")?
+		.expect_val(
+			"[
+			{likes: [person:2]},
+			{likes: [person:3]},
+			{likes: []},
+		]",
+		)?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn idiom_optional_after_value_should_pass_through() -> Result<(), Error> {
+	let sql = r#"
+		none?;
+		null?;
+		1?;
+		'a'?;
+		1s?;
+		time::EPOCH?;
+		u'0192fb97-e8ee-7683-8198-95710b103bd5'?;
+		[]?;
+		{}?;
+		(89.0, 90.0)?;
+		<bytes>"hhehehe"?;
+		person:aeon?;
+		{
+			type: "Polygon",
+			coordinates: [[
+				[-111.0690, 45.0032],
+				[-104.0838, 44.9893],
+				[-104.0910, 40.9974],
+				[-111.0672, 40.9862]
+			]]
+		}?;
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("none")?
+		.expect_val("null")?
+		.expect_val("1")?
+		.expect_val("'a'")?
+		.expect_val("1s")?
+		.expect_val("d'1970-01-01T00:00:00Z'")?
+		.expect_val("u'0192fb97-e8ee-7683-8198-95710b103bd5'")?
+		.expect_val("[]")?
+		.expect_val("{}")?
+		.expect_val("(89.0, 90.0)")?
+		.expect_bytes(&[104, 104, 101, 104, 101, 104, 101])?
+		.expect_val("person:aeon")?
+		.expect_val(
+			"{
+			type: 'Polygon',
+			coordinates: [[
+				[-111.0690, 45.0032],
+				[-104.0838, 44.9893],
+				[-104.0910, 40.9974],
+				[-111.0672, 40.9862]
+			]]
+		}",
+		)?;
+	Ok(())
+}

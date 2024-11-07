@@ -3,7 +3,7 @@ use reblessive::Stk;
 use crate::{
 	sql::{Function, Ident, Model, Value},
 	syn::{
-		error::error,
+		error::syntax_error,
 		parser::mac::{expected, expected_whitespace, unexpected},
 		token::{t, TokenKind},
 	},
@@ -59,38 +59,35 @@ impl Parser<'_> {
 		let start = expected!(self, t!("<")).span;
 
 		let token = self.next();
-		let major: u32 = match token.kind {
-			TokenKind::Digits => self
-				.lexer
-				.span_str(token.span)
-				.parse()
-				.map_err(|e| error!("Failed to parse model version: {e}", @token.span))?,
-			_ => unexpected!(self, token, "an integer"),
-		};
+		let major: u32 =
+			match token.kind {
+				TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
+					|e| syntax_error!("Failed to parse model version: {e}", @token.span),
+				)?,
+				_ => unexpected!(self, token, "an integer"),
+			};
 
 		expected_whitespace!(self, t!("."));
 
 		let token = self.next_whitespace();
-		let minor: u32 = match token.kind {
-			TokenKind::Digits => self
-				.lexer
-				.span_str(token.span)
-				.parse()
-				.map_err(|e| error!("Failed to parse model version: {e}", @token.span))?,
-			_ => unexpected!(self, token, "an integer"),
-		};
+		let minor: u32 =
+			match token.kind {
+				TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
+					|e| syntax_error!("Failed to parse model version: {e}", @token.span),
+				)?,
+				_ => unexpected!(self, token, "an integer"),
+			};
 
 		expected_whitespace!(self, t!("."));
 
 		let token = self.next_whitespace();
-		let patch: u32 = match token.kind {
-			TokenKind::Digits => self
-				.lexer
-				.span_str(token.span)
-				.parse()
-				.map_err(|e| error!("Failed to parse model version: {e}", @token.span))?,
-			_ => unexpected!(self, token, "an integer"),
-		};
+		let patch: u32 =
+			match token.kind {
+				TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
+					|e| syntax_error!("Failed to parse model version: {e}", @token.span),
+				)?,
+				_ => unexpected!(self, token, "an integer"),
+			};
 
 		self.expect_closing_delimiter(t!(">"), start)?;
 
