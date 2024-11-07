@@ -70,6 +70,13 @@ impl Document {
 					}
 				}
 			}
+		} else {
+			// Loop over every field in the document
+			for fd in self.current.doc.every(None, true, true).iter() {
+				if let Value::None = self.current.doc.pick(fd) {
+					self.current.doc.to_mut().del(stk, ctx, opt, fd).await?;
+				}
+			}
 		}
 		// Carry on
 		Ok(())
