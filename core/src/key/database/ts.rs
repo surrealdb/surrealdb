@@ -27,7 +27,7 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64) -> Ts<'a> {
 /// Returns the prefix for the whole database timestamps
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b't', b's']);
+	k.extend_from_slice(b"!ts");
 	k
 }
 

@@ -668,12 +668,9 @@ impl Datastore {
 		let hbs = tx.scan_hb(&end_of_time, NON_PAGED_BATCH_SIZE).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
-			match unreachable_nodes.remove(&hb.nd.to_string()) {
-				None => {
-					// Didnt exist in cluster and should be deleted
-					tx.del_hb(hb.hb, hb.nd).await?;
-				}
-				Some(_) => {}
+			if unreachable_nodes.remove(&hb.nd.to_string()).is_none() {
+				// Didnt exist in cluster and should be deleted
+				tx.del_hb(hb.hb, hb.nd).await?;
 			}
 		}
 		// Remove unreachable nodes

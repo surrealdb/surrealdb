@@ -8,18 +8,9 @@ impl From<js::CaughtError<'_>> for Error {
 				Error::InvalidScript {
 					message: format!(
 						"An exception occurred{}: {}{}",
-						match e.file() {
-							Some(file) => format!(" at {file}:{line}"),
-							None => String::default(),
-						},
-						match e.message() {
-							Some(message) => message,
-							None => String::default(),
-						},
-						match e.stack() {
-							Some(stack) => format!("\n{stack}"),
-							None => String::default(),
-						}
+						e.file().map(|file| format!(" at {file}:{line}")).unwrap_or_default(),
+						e.message().unwrap_or_default(),
+						e.stack().map(|stack| format!("\n{stack}")).unwrap_or_default()
 					),
 				}
 			}

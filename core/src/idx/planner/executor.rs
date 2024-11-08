@@ -75,6 +75,7 @@ impl IteratorEntry {
 	}
 }
 impl InnerQueryExecutor {
+	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn new(
 		ctx: &Context<'_>,
 		opt: &Options,
@@ -212,6 +213,7 @@ impl QueryExecutor {
 	}
 
 	pub(super) async fn build_knn_set(&self) -> KnnSet {
+		#[allow(clippy::mutable_key_type)]
 		let mut set = HashMap::with_capacity(self.0.knn_entries.len());
 		for (exp, (p, _, _, _)) in &self.0.knn_entries {
 			set.insert(exp.clone(), p.build().await);
