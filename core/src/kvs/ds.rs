@@ -51,7 +51,7 @@ const TARGET: &str = "surrealdb::core::kvs::ds";
 const LQ_CHANNEL_SIZE: usize = 100;
 
 // The role assigned to the initial user created when starting the server with credentials for the first time
-const INITIAL_USER_ROLE: &str = "owner";
+const INITIAL_USER_ROLE: Role = Role::Owner;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -600,7 +600,7 @@ impl Datastore {
 			// Display information in the logs
 			info!(target: TARGET, "Credentials were provided, and no root users were found. The root user '{user}' will be created");
 			// Create and new root user definition
-			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
+			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE.into()));
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = MutableContext::default();
 			ctx.set_transaction(txn.clone());

@@ -21,7 +21,7 @@ use crate::{
 		},
 		table_type,
 		tokenizer::Tokenizer,
-		user, AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand,
+		user, AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Role, Scoring, Strand,
 		TableType, Values,
 	},
 	syn::{
@@ -210,7 +210,7 @@ impl Parser<'_> {
 		let mut res = DefineUserStatement::from_parsed_values(
 			name,
 			base,
-			vec!["Viewer".into()], // New users get the viewer role by default
+			vec![Role::Viewer], // New users get the viewer role by default
 			user::UserDuration::default(),
 		);
 
@@ -238,9 +238,17 @@ impl Parser<'_> {
 				}
 				t!("ROLES") => {
 					self.pop_peek();
-					res.roles = vec![self.next_token_value()?];
+					let next = self.next();
+					match next.kind {
+						TokenKind::Role(role) => res.roles = vec![role],
+						_ => unexpected!(self, next, "a valid role"),
+					};
 					while self.eat(t!(",")) {
-						res.roles.push(self.next_token_value()?);
+						let next = self.next();
+						match next.kind {
+							TokenKind::Role(role) => res.roles.push(role),
+							_ => unexpected!(self, next, "a valid role"),
+						};
 					}
 				}
 				t!("DURATION") => {

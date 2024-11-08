@@ -37,8 +37,8 @@ use crate::{
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
-		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
+		Permission, Permissions, Role, Scoring, Split, Splits, Start, Statement, Strand, Subquery,
+		Table, TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::parser::mac::test_parse,
 };
@@ -241,7 +241,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert!(stmt.hash.starts_with("$argon2id$"));
-		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(stmt.roles, vec![Role::Viewer]);
 		assert_eq!(stmt.comment, Some(Strand("*******".to_string())));
 		assert_eq!(
 			stmt.duration,
@@ -266,7 +266,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.hash, "hunter2".to_owned());
-		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(stmt.roles, vec![Role::Viewer]);
 		assert_eq!(stmt.comment, Some(Strand("*******".to_string())));
 		assert_eq!(
 			stmt.duration,
@@ -280,7 +280,7 @@ fn parse_define_user() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES foo, bar"#
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES editor, owner"#
 		)
 		.unwrap();
 
@@ -291,7 +291,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.hash, "hunter2".to_owned());
-		assert_eq!(stmt.roles, vec![Ident("foo".to_string()), Ident("bar".to_string())]);
+		assert_eq!(stmt.roles, vec![Role::Editor, Role::Owner]);
 		assert_eq!(
 			stmt.duration,
 			UserDuration {
@@ -315,7 +315,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.hash, "hunter2".to_owned());
-		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(stmt.roles, vec![Role::Viewer]);
 		assert_eq!(
 			stmt.duration,
 			UserDuration {
@@ -339,7 +339,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.hash, "hunter2".to_owned());
-		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(stmt.roles, vec![Role::Viewer]);
 		assert_eq!(
 			stmt.duration,
 			UserDuration {

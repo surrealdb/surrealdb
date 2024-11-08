@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, ResourceKind, Role as IamRole};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	escape::quote_str, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Strand, Value,
+	escape::quote_str, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Role, Strand, Value,
 };
 use argon2::{
 	password_hash::{PasswordHasher, SaltString},
@@ -16,8 +16,9 @@ use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::str::FromStr;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -26,7 +27,8 @@ pub struct DefineUserStatement {
 	pub base: Base,
 	pub hash: String,
 	pub code: String,
-	pub roles: Vec<Ident>,
+	#[revision(end = 5, convert_fn = "convert_ident_to_role")]
+	pub _roles: Vec<Ident>,
 	#[revision(start = 3)]
 	pub duration: UserDuration,
 	pub comment: Option<Strand>,
@@ -34,10 +36,33 @@ pub struct DefineUserStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 4)]
 	pub overwrite: bool,
+	#[revision(start = 5)]
+	pub roles: Vec<Role>,
 }
 
-impl From<(Base, &str, &str, &str)> for DefineUserStatement {
-	fn from((base, user, pass, role): (Base, &str, &str, &str)) -> Self {
+impl DefineUserStatement {
+	fn convert_ident_to_role(
+		&mut self,
+		_revision: u16,
+		roles: Vec<Ident>,
+	) -> Result<(), revision::Error> {
+		self.roles = roles
+			.iter()
+			.map(|r| -> Result<Role, revision::Error> {
+				match IamRole::from_str(r.as_str()) {
+					Ok(role) => Ok(role.into()),
+					Err(_) => {
+						Err(revision::Error::Conversion(format!("unexpected role: {}", r.as_str())))
+					}
+				}
+			})
+			.collect::<Result<Vec<_>, _>>()?;
+		Ok(())
+	}
+}
+
+impl From<(Base, &str, &str, Role)> for DefineUserStatement {
+	fn from((base, user, pass, role): (Base, &str, &str, Role)) -> Self {
 		DefineUserStatement {
 			base,
 			name: user.into(),
@@ -50,7 +75,7 @@ impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 				.take(128)
 				.map(char::from)
 				.collect::<String>(),
-			roles: vec![role.into()],
+			roles: vec![role],
 			duration: UserDuration::default(),
 			comment: None,
 			if_not_exists: false,
@@ -63,7 +88,7 @@ impl DefineUserStatement {
 	pub(crate) fn from_parsed_values(
 		name: Ident,
 		base: Base,
-		roles: Vec<Ident>,
+		roles: Vec<Role>,
 		duration: UserDuration,
 	) -> Self {
 		DefineUserStatement {
@@ -267,7 +292,7 @@ impl InfoStructure for DefineUserStatement {
 			"name".to_string() => self.name.structure(),
 			"base".to_string() => self.base.structure(),
 			"hash".to_string() => self.hash.into(),
-			"roles".to_string() => self.roles.into_iter().map(Ident::structure).collect(),
+			"roles".to_string() => self.roles.into_iter().map(Role::structure).collect(),
 			"duration".to_string() => Value::from(map! {
 				"token".to_string() => self.duration.token.into(),
 				"session".to_string() => self.duration.session.into(),

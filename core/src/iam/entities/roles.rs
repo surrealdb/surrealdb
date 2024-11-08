@@ -1,5 +1,4 @@
 use crate::iam::Error;
-use crate::sql::Ident;
 use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -17,13 +16,19 @@ pub enum Role {
 	Owner,
 }
 
+impl Role {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::Viewer => "Viewer",
+			Self::Editor => "Editor",
+			Self::Owner => "Owner",
+		}
+	}
+}
+
 impl std::fmt::Display for Role {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match self {
-			Self::Viewer => write!(f, "Viewer"),
-			Self::Editor => write!(f, "Editor"),
-			Self::Owner => write!(f, "Owner"),
-		}
+		write!(f, "{}", self.as_str())
 	}
 }
 
@@ -36,18 +41,6 @@ impl FromStr for Role {
 			"owner" => Ok(Self::Owner),
 			_ => Err(Error::InvalidRole(s.to_string())),
 		}
-	}
-}
-
-impl std::convert::From<&Ident> for Role {
-	fn from(id: &Ident) -> Self {
-		Role::from_str(id).unwrap()
-	}
-}
-
-impl std::convert::From<Role> for Ident {
-	fn from(role: Role) -> Self {
-		role.to_string().into()
 	}
 }
 

@@ -6,7 +6,7 @@ mod keyword;
 pub(crate) use keyword::keyword_t;
 pub use keyword::Keyword;
 mod mac;
-use crate::sql::{language::Language, Algorithm};
+use crate::sql::{language::Language, Algorithm, Role};
 pub(crate) use mac::t;
 
 /// A location in the source passed to the lexer.
@@ -339,6 +339,7 @@ pub enum TokenKind {
 	Distance(DistanceKind),
 	VectorType(VectorTypeKind),
 	Operator(Operator),
+	Role(Role),
 	OpenDelim(Delim),
 	CloseDelim(Delim),
 	/// a token denoting the opening of a string, i.e. `r"`
@@ -431,6 +432,7 @@ impl TokenKind {
 			TokenKind::Language(x) => x.as_str(),
 			TokenKind::Distance(x) => x.as_str(),
 			TokenKind::VectorType(x) => x.as_str(),
+			TokenKind::Role(x) => x.as_str(),
 			TokenKind::OpenDelim(Delim::Paren) => "(",
 			TokenKind::OpenDelim(Delim::Brace) => "{",
 			TokenKind::OpenDelim(Delim::Bracket) => "[",
