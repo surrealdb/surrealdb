@@ -61,12 +61,12 @@ impl Value {
 				// Exclude the recurse part from the path
 				let next = path.next();
 
-				// Wether we need to flatten the result on each iteration
-				let flatten = match (next.last(), next.first()) {
-					(Some(Part::Graph(_)), Some(Part::Graph(_))) => true,
-					(Some(Part::Graph(_)), Some(Part::Where(_))) => true,
-					_ => false,
-				};
+				// Whether we need to flatten the result on each iteration
+				let flatten = matches!(
+					(next.last(), next.first()),
+					(Some(Part::Graph(_)), Some(Part::Graph(_)))
+						| (Some(Part::Graph(_)), Some(Part::Where(_)))
+				);
 
 				// Counter and current value
 				let mut i = 0;
