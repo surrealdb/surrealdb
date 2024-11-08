@@ -1,5 +1,5 @@
 use crate::{
-	sql::{language::Language, Algorithm},
+	sql::{language::Language, Algorithm, Role},
 	syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind},
 };
 use phf::{phf_map, phf_set};
@@ -384,4 +384,8 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("I32") => TokenKind::VectorType(VectorTypeKind::I32),
 	UniCase::ascii("I16") => TokenKind::VectorType(VectorTypeKind::I16),
 
+	// Roles
+	UniCase::ascii("VIEWER") => TokenKind::Role(Role::Viewer),
+	UniCase::ascii("EDITOR") => TokenKind::Role(Role::Editor),
+	UniCase::ascii("OWNER") => TokenKind::Role(Role::Owner),
 };

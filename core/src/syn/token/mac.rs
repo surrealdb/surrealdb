@@ -342,6 +342,17 @@ macro_rules! t {
 	($t:tt) => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::keyword_t!($t))
 	};
+
+	// Role
+	("VIEWER") => {
+		$crate::syn::token::TokenKind::Role($crate::sql::Role::Viewer)
+	};
+	("EDITOR") => {
+		$crate::syn::token::TokenKind::Role($crate::sql::Role::Editor)
+	};
+	("OWNER") => {
+		$crate::syn::token::TokenKind::Role($crate::sql::Role::Owner)
+	};
 }
 
 pub(crate) use t;
