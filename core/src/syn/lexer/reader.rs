@@ -130,7 +130,7 @@ impl<'a> BytesReader<'a> {
 				val |= next as u32;
 				char::from_u32(val).ok_or(CharError::Unicode)
 			}
-			_ => return Err(CharError::Unicode),
+			_ => Err(CharError::Unicode),
 		}
 	}
 }
