@@ -312,7 +312,7 @@ fn parse_define_user() {
 			res
 		);
 	}
-	// With existent and noexistent roles.
+	// With existent and nonexistent roles.
 	{
 		let res = test_parse!(
 			parse_stmt,
