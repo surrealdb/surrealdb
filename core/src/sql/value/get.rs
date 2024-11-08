@@ -10,7 +10,7 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::{Next, NextMethod, Recurse};
+use crate::sql::part::{Next, NextMethod};
 use crate::sql::part::{Part, Skip};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
@@ -18,6 +18,16 @@ use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use crate::sql::Function;
 use reblessive::tree::Stk;
+
+// Method used to check if the value 
+// inside a recursed idiom path is final
+fn is_final(v: &Value) -> bool {
+	match v {
+		Value::None => true,
+		Value::Array(v) => v.is_empty(),
+		_ => false,
+	}
+}
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -43,56 +53,57 @@ impl Value {
 			}
 			// The knowledge of the value is not relevant to Part::Recurse
 			Some(Part::Recurse(v)) => {
-				let min = match v {
-					Recurse::Fixed(v) => v,
-					Recurse::Range(min, _) => &min.unwrap_or(0),
-				};
+				// Find minimum and maximum amount of iterations
+				let min = v.min()?;
+				let max = v.max()?;
 
-				let max = match v {
-					Recurse::Fixed(v) => Some(v),
-					Recurse::Range(_, max) => match &max {
-						Some(v) => Some(v),
-						None => None,
-					},
-				};
-
-				fn dead_end(v: &Value) -> bool {
-					match v {
-						Value::None => true,
-						Value::Array(v) => v.is_empty(),
-						_ => false,
-					}
-				}
-
+				// Exclude the recurse part from the path
 				let next = path.next();
+
+				// Wether we need to flatten the result on each iteration
 				let flatten = match (next.last(), next.first()) {
 					(Some(Part::Graph(_)), Some(Part::Graph(_))) => true,
 					(Some(Part::Graph(_)), Some(Part::Where(_))) => true,
 					_ => false,
 				};
 
+				// Counter and current value
 				let mut i = 0;
 				let mut current = self.clone();
+
 				loop {
+					// Bump iteration
 					i += 1;
+
+					// Obtain the processed value for this iteration
 					let v = stk.run(|stk| current.get(stk, ctx, opt, doc, next)).await?;
 					let v  = match (i, flatten) {
 						(1, _) | (_, false) => v,
 						_ => v.flatten(),
 					};
 
+					// Process the value for this iteration
 					match v {
-						v if dead_end(&v) => return Ok(match &i <= min {
+						v if is_final(&v) => return Ok(match i <= min {
+							// If the value is final, and we reached the minimum 
+							// amount of required iterations, we can return the value
 							true => Value::None,
+
+							// If we have not yet reached the minimum amount of
+							// required iterations it's a dead end, and we return NONE
 							false => current,
 						}),
 						v => {
+							// Otherwise we can update the value and 
+							// continue to the next iteration.
 							current = v.to_owned();
 						}
 					};
 
+					// If we have reached the maximum amount of iterations,
+					// we can return the current value and break the loop.
 					if let Some(max) = max {
-						if &i >= max {
+						if i >= max {
 							return Ok(current);
 						}
 					}

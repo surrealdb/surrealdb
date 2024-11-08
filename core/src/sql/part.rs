@@ -1,4 +1,4 @@
-use crate::sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Value};
+use crate::{cnf::IDIOM_RECURSION_LIMIT, err::Error, sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Value}};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -251,6 +251,39 @@ impl fmt::Display for DestructurePart {
 pub enum Recurse {
 	Fixed(i64),
 	Range(Option<i64>, Option<i64>),
+}
+
+impl Recurse {
+	pub fn min(&self) -> Result<i64, Error> {
+		let min = match self {
+			Recurse::Fixed(v) => v.to_owned(),
+			Recurse::Range(min, _) => min.unwrap_or(1),
+		};
+
+		if min < 1 {
+			Err(Error::InvalidBound {
+				found: min.to_string(),
+				expected: "at least 1".into(),
+			})
+		} else {
+			Ok(min)
+		}
+	}
+
+	pub fn max(&self) -> Result<Option<i64>, Error> {
+		let max = match self {
+			Recurse::Fixed(v) => Some(v.to_owned()),
+			Recurse::Range(_, max) => max.to_owned()
+		};
+
+		match max {
+			Some(max) if max > (*IDIOM_RECURSION_LIMIT as i64) => Err(Error::InvalidBound {
+				found: max.to_string(),
+				expected: format!("{} at most", *IDIOM_RECURSION_LIMIT)
+			}),
+			max => Ok(max),
+		}
+	}
 }
 
 impl fmt::Display for Recurse {

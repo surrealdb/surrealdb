@@ -1175,6 +1175,13 @@ pub enum Error {
 
 	#[error("Error while ordering a result: {0}.")]
 	OrderingError(String),
+
+	/// Found an unexpected value in a range
+	#[error("Found {found} for bound but expected {expected}.")]
+	InvalidBound {
+		found: String,
+		expected: String,
+	},
 }
 
 impl From<Error> for String {
