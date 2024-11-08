@@ -300,6 +300,30 @@ fn parse_define_user() {
 			}
 		);
 	}
+	// With noexistent role.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES foo"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of user with nonexistent role: {:?}",
+			res
+		);
+	}
+	// With existent and noexistent roles.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES Viewer, foo"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of user with nonexistent role: {:?}",
+			res
+		);
+	}
 	// With session duration.
 	{
 		let res = test_parse!(
