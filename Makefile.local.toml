@@ -85,6 +85,12 @@ category = "LOCAL USAGE"
 command = "cargo"
 args = ["run", "--profile", "make", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "sql", "--pretty", "${@}"]
 
+# REPL
+[tasks.repl]
+category = "LOCAL USAGE"
+command = "cargo"
+args = ["run", "--profile", "make", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "sql", "--pretty", "--conn", "memory", "--ns", "test", "--db", "test", "${@}"]
+
 # Build
 [tasks.build]
 category = "LOCAL USAGE"
