@@ -339,10 +339,6 @@ macro_rules! t {
 		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I16)
 	};
 
-	($t:tt) => {
-		$crate::syn::token::TokenKind::Keyword($crate::syn::token::keyword_t!($t))
-	};
-
 	// Role
 	("VIEWER") => {
 		$crate::syn::token::TokenKind::Role($crate::sql::Role::Viewer)
@@ -352,6 +348,10 @@ macro_rules! t {
 	};
 	("OWNER") => {
 		$crate::syn::token::TokenKind::Role($crate::sql::Role::Owner)
+	};
+
+	($t:tt) => {
+		$crate::syn::token::TokenKind::Keyword($crate::syn::token::keyword_t!($t))
 	};
 }
 
