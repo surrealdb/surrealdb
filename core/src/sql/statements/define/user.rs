@@ -48,15 +48,14 @@ impl DefineUserStatement {
 	) -> Result<(), revision::Error> {
 		self.roles = roles
 			.iter()
-			.map(|r| -> Result<Role, revision::Error> {
-				match IamRole::from_str(r.as_str()) {
-					Ok(role) => Ok(role.into()),
-					Err(_) => {
-						Err(revision::Error::Conversion(format!("unexpected role: {}", r.as_str())))
-					}
+			.filter_map(|r| match IamRole::from_str(r.as_str()) {
+				Ok(role) => Some(role.into()),
+				Err(_) => {
+					warn!("Ignoring nonexistent role '{}' from user '{}'", r.as_str(), self.name);
+					None
 				}
 			})
-			.collect::<Result<Vec<_>, _>>()?;
+			.collect();
 		Ok(())
 	}
 }
