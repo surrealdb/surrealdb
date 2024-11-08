@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ops::Deref;
 
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::Context;
@@ -93,7 +94,7 @@ impl Value {
 								// If we have not yet reached the minimum amount of
 								// required iterations it's a dead end, and we return NONE
 								false => current,
-							})
+							});
 						}
 						v => {
 							// Otherwise we can update the value and
@@ -110,6 +111,17 @@ impl Value {
 						}
 					}
 				}
+			}
+			Some(Part::Doc) => {
+				let v = match doc {
+					Some(doc) => match &doc.rid {
+						Some(id) => Value::Thing(id.deref().to_owned()),
+						_ => Value::None,
+					},
+					None => Value::None,
+				};
+
+				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 			}
 			// Get the current value at the path
 			Some(p) => match self {

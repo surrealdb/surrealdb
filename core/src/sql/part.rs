@@ -34,6 +34,8 @@ pub enum Part {
 	Nest(Idiom),
 	#[revision(start = 3)]
 	Recurse(Recurse),
+	#[revision(start = 3)]
+	Doc,
 }
 
 impl From<i32> for Part {
@@ -140,6 +142,7 @@ impl fmt::Display for Part {
 			Part::Optional => write!(f, "?"),
 			Part::Nest(v) => write!(f, ".({v})"),
 			Part::Recurse(v) => write!(f, ".{{{v}}}"),
+			Part::Doc => write!(f, "@"),
 		}
 	}
 }

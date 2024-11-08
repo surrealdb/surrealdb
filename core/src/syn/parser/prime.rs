@@ -175,6 +175,15 @@ impl Parser<'_> {
 	pub(super) async fn parse_idiom_expression(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
 		let value = match token.kind {
+			t!("@") => {
+				self.pop_peek();
+				let mut res = vec![Part::Doc];
+				if !self.peek_continues_idiom() {
+					res.push(self.parse_dot_part(ctx).await?);
+				}
+
+				Value::Idiom(Idiom(res))
+			}
 			t!("NONE") => {
 				self.pop_peek();
 				Value::None
