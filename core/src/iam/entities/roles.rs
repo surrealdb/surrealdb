@@ -16,6 +16,12 @@ pub enum Role {
 	Owner,
 }
 
+impl std::fmt::Display for Role {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "{}", self.as_str())
+	}
+}
+
 impl Role {
 	pub fn as_str(&self) -> &'static str {
 		match self {
@@ -23,12 +29,6 @@ impl Role {
 			Self::Editor => "Editor",
 			Self::Owner => "Owner",
 		}
-	}
-}
-
-impl std::fmt::Display for Role {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		write!(f, "{}", self.as_str())
 	}
 }
 
