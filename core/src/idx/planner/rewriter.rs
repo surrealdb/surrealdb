@@ -155,7 +155,8 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Part::First
 			| Part::Field(_)
 			| Part::Index(_)
-			| Part::Optional => Some(p.clone()),
+			| Part::Optional 
+			| Part::Recurse(_) => Some(p.clone()),
 			Part::Where(v) => self.eval_value(v).map(Part::Where),
 			Part::Graph(_) => None,
 			Part::Value(v) => self.eval_value(v).map(Part::Value),

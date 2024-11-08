@@ -2,13 +2,10 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		part::DestructurePart, Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables,
-		Value,
-	},
-	syn::{
-		error::bail,
-		token::{t, Glued, Span, TokenKind},
-	},
+		part::{DestructurePart, Recurse}, Dir, Edges, Field, Fields, Graph, Ident, Idiom, Number, Part, Table, Tables, Value
+	}, syn::{
+		error::bail, token::{t, Glued, Span, TokenKind}
+	}
 };
 
 use super::{mac::unexpected, ParseResult, Parser};
@@ -274,7 +271,7 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_destructure_part(ctx)).await?
+				ctx.run(|ctx| self.parse_curly_part(ctx)).await?
 			}
 			t!("(") => {
 				self.pop_peek();
@@ -300,6 +297,13 @@ impl Parser<'_> {
 		Ok(Part::Method(name.0, args))
 	}
 	/// Parse the part after the `.{` in an idiom
+	pub(super) async fn parse_curly_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
+		match self.peek_kind() {
+			t!("*") | t!("..") | TokenKind::Digits => self.parse_recurse_part().await,
+			_ => self.parse_destructure_part(ctx).await,
+		}
+	}
+	/// Parse a destructure part, expects `.{` to already be parsed
 	pub(super) async fn parse_destructure_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
 		let mut destructured: Vec<DestructurePart> = Vec::new();
@@ -339,6 +343,54 @@ impl Parser<'_> {
 		}
 
 		Ok(Part::Destructure(destructured))
+	}
+	/// Parse a recurse part, expects `.{` to already be parsed
+	pub(super) async fn parse_recurse_part(&mut self) -> ParseResult<Part> {
+		let start = self.last_span();
+
+		if self.eat(t!("*")) {
+			self.expect_closing_delimiter(t!("}"), start)?;
+			return Ok(Part::Recurse(Recurse::Range(None, None)))
+		}
+
+		let min = if matches!(self.peek().kind, TokenKind::Digits) {
+			match self.next_token_value::<Number>()? {
+				Number::Int(v) => Some(v),
+				found => {
+					bail!("Unexpected token `{}` expected an integer", found, @self.last_span());
+				}
+			}
+		} else {
+			None
+		};
+
+		match (self.eat_whitespace(t!("..")), min) {
+			(true, _) => (),
+			(false, Some(v)) => {
+				self.expect_closing_delimiter(t!("}"), start)?;
+				return Ok(Part::Recurse(Recurse::Fixed(v)))
+			},
+			_ => {
+				let found = self.next().kind;
+				bail!("Unexpected token `{}` expected an integer or ..", found, @self.last_span());
+			}
+		}
+
+		// parse ending id.
+		let max = if matches!(self.peek_whitespace().kind, TokenKind::Digits) {
+			match self.next_token_value::<Number>()? {
+				Number::Int(v) => Some(v),
+				found => {
+					bail!("Unexpected token `{}` expected an integer", found, @self.last_span());
+				}
+			}
+		} else {
+			None
+		};
+
+		self.expect_closing_delimiter(t!("}"), start)?;
+
+		Ok(Part::Recurse(Recurse::Range(min, max)))
 	}
 	/// Parse the part after the `.(` in an idiom
 	pub(super) async fn parse_nest_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {

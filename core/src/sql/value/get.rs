@@ -10,7 +10,7 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::{Next, NextMethod};
+use crate::sql::part::{Next, NextMethod, Recurse};
 use crate::sql::part::{Part, Skip};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
@@ -40,6 +40,63 @@ impl Value {
 			Some(Part::Nest(nested)) => {
 				let v = stk.run(|stk| self.get(stk, ctx, opt, doc, nested)).await?;
 				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+			}
+			// The knowledge of the value is not relevant to Part::Recurse
+			Some(Part::Recurse(v)) => {
+				let min = match v {
+					Recurse::Fixed(v) => v,
+					Recurse::Range(min, _) => &min.unwrap_or(0),
+				};
+
+				let max = match v {
+					Recurse::Fixed(v) => Some(v),
+					Recurse::Range(_, max) => match &max {
+						Some(v) => Some(v),
+						None => None,
+					},
+				};
+
+				fn dead_end(v: &Value) -> bool {
+					match v {
+						Value::None => true,
+						Value::Array(v) => v.is_empty(),
+						_ => false,
+					}
+				}
+
+				let next = path.next();
+				let flatten = match (next.last(), next.first()) {
+					(Some(Part::Graph(_)), Some(Part::Graph(_))) => true,
+					(Some(Part::Graph(_)), Some(Part::Where(_))) => true,
+					_ => false,
+				};
+
+				let mut i = 0;
+				let mut current = self.clone();
+				loop {
+					i += 1;
+					let v = stk.run(|stk| current.get(stk, ctx, opt, doc, next)).await?;
+					let v  = match (i, flatten) {
+						(1, _) | (_, false) => v,
+						_ => v.flatten(),
+					};
+
+					match v {
+						v if dead_end(&v) => return Ok(match &i <= min {
+							true => Value::None,
+							false => current,
+						}),
+						v => {
+							current = v.to_owned();
+						}
+					};
+
+					if let Some(max) = max {
+						if &i >= max {
+							return Ok(current);
+						}
+					}
+				}
 			}
 			// Get the current value at the path
 			Some(p) => match self {

@@ -27,7 +27,9 @@ pub enum Part {
 	Destructure(Vec<DestructurePart>),
 	Optional,
 	#[revision(start = 3)]
-	Nest(Idiom)
+	Nest(Idiom),
+	#[revision(start = 3)]
+	Recurse(Recurse),
 }
 
 impl From<i32> for Part {
@@ -133,6 +135,7 @@ impl fmt::Display for Part {
 			}
 			Part::Optional => write!(f, "?"),
 			Part::Nest(v) => write!(f, ".({v})"),
+			Part::Recurse(v) => write!(f, ".{{{v}}}"),
 		}
 	}
 }
@@ -234,6 +237,31 @@ impl fmt::Display for DestructurePart {
 			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
 			DestructurePart::Destructure(fd, d) => {
 				write!(f, "{fd}{}", Part::Destructure(d.clone()))
+			}
+		}
+	}
+}
+
+// ------------------------------
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum Recurse {
+	Fixed(i64),
+	Range(Option<i64>, Option<i64>),
+}
+
+impl fmt::Display for Recurse {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Recurse::Fixed(v) => write!(f, "{v}"),
+			Recurse::Range(beg, end) => match (beg, end) {
+				(None, None) => write!(f, ".."),
+				(Some(beg), None) => write!(f, "{beg}.."),
+				(None, Some(end)) => write!(f, "..{end}"),
+				(Some(beg), Some(end)) => write!(f, "{beg}..{end}"),
 			}
 		}
 	}
