@@ -45,6 +45,7 @@ impl Parser<'_> {
 				| TokenKind::Algorithm(_)
 				| TokenKind::Distance(_)
 				| TokenKind::VectorType(_)
+				| TokenKind::Role(_)
 		)
 	}
 
@@ -57,6 +58,7 @@ impl Parser<'_> {
 				| TokenKind::Algorithm(_)
 				| TokenKind::Distance(_)
 				| TokenKind::VectorType(_)
+				| TokenKind::Role(_)
 				| TokenKind::Identifier
 		)
 	}
