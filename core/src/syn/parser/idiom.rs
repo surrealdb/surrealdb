@@ -2,10 +2,13 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		part::{DestructurePart, Recurse}, Dir, Edges, Field, Fields, Graph, Ident, Idiom, Number, Part, Table, Tables, Value
-	}, syn::{
-		error::bail, token::{t, Glued, Span, TokenKind}
-	}
+		part::{DestructurePart, Recurse},
+		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Number, Part, Table, Tables, Value,
+	},
+	syn::{
+		error::bail,
+		token::{t, Glued, Span, TokenKind},
+	},
 };
 
 use super::{mac::unexpected, ParseResult, Parser};
@@ -350,7 +353,7 @@ impl Parser<'_> {
 
 		if self.eat(t!("*")) {
 			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Part::Recurse(Recurse::Range(None, None)))
+			return Ok(Part::Recurse(Recurse::Range(None, None)));
 		}
 
 		let min = if matches!(self.peek().kind, TokenKind::Digits) {
@@ -368,8 +371,8 @@ impl Parser<'_> {
 			(true, _) => (),
 			(false, Some(v)) => {
 				self.expect_closing_delimiter(t!("}"), start)?;
-				return Ok(Part::Recurse(Recurse::Fixed(v)))
-			},
+				return Ok(Part::Recurse(Recurse::Fixed(v)));
+			}
 			_ => {
 				let found = self.next().kind;
 				bail!("Unexpected token `{}` expected an integer or ..", found, @self.last_span());
@@ -395,14 +398,14 @@ impl Parser<'_> {
 	/// Parse the part after the `.(` in an idiom
 	pub(super) async fn parse_nest_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
-		// We allow skipping the dot within nested parts. 
-		// If the initial run results in an empty idiom, 
+		// We allow skipping the dot within nested parts.
+		// If the initial run results in an empty idiom,
 		// we assume a dot-part and then continue parsing the idiom
 		let idiom = match self.parse_remaining_idiom(ctx, vec![]).await? {
 			v if v.is_empty() => {
 				let start = self.parse_dot_part(ctx).await?;
 				self.parse_remaining_idiom(ctx, vec![start]).await?
-			},
+			}
 			v => v,
 		};
 		self.expect_closing_delimiter(t!(")"), start)?;

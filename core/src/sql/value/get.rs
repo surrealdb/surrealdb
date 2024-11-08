@@ -19,7 +19,7 @@ use crate::sql::value::{Value, Values};
 use crate::sql::Function;
 use reblessive::tree::Stk;
 
-// Method used to check if the value 
+// Method used to check if the value
 // inside a recursed idiom path is final
 fn is_final(v: &Value) -> bool {
 	match v {
@@ -77,24 +77,26 @@ impl Value {
 
 					// Obtain the processed value for this iteration
 					let v = stk.run(|stk| current.get(stk, ctx, opt, doc, next)).await?;
-					let v  = match (i, flatten) {
+					let v = match (i, flatten) {
 						(1, _) | (_, false) => v,
 						_ => v.flatten(),
 					};
 
 					// Process the value for this iteration
 					match v {
-						v if is_final(&v) => return Ok(match i <= min {
-							// If the value is final, and we reached the minimum 
-							// amount of required iterations, we can return the value
-							true => Value::None,
+						v if is_final(&v) => {
+							return Ok(match i <= min {
+								// If the value is final, and we reached the minimum
+								// amount of required iterations, we can return the value
+								true => Value::None,
 
-							// If we have not yet reached the minimum amount of
-							// required iterations it's a dead end, and we return NONE
-							false => current,
-						}),
+								// If we have not yet reached the minimum amount of
+								// required iterations it's a dead end, and we return NONE
+								false => current,
+							})
+						}
 						v => {
-							// Otherwise we can update the value and 
+							// Otherwise we can update the value and
 							// continue to the next iteration.
 							current = v.to_owned();
 						}

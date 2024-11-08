@@ -1,4 +1,8 @@
-use crate::{cnf::IDIOM_RECURSION_LIMIT, err::Error, sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Value}};
+use crate::{
+	cnf::IDIOM_RECURSION_LIMIT,
+	err::Error,
+	sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Value},
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -273,13 +277,13 @@ impl Recurse {
 	pub fn max(&self) -> Result<Option<i64>, Error> {
 		let max = match self {
 			Recurse::Fixed(v) => Some(v.to_owned()),
-			Recurse::Range(_, max) => max.to_owned()
+			Recurse::Range(_, max) => max.to_owned(),
 		};
 
 		match max {
 			Some(max) if max > (*IDIOM_RECURSION_LIMIT as i64) => Err(Error::InvalidBound {
 				found: max.to_string(),
-				expected: format!("{} at most", *IDIOM_RECURSION_LIMIT)
+				expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
 			}),
 			max => Ok(max),
 		}
@@ -295,7 +299,7 @@ impl fmt::Display for Recurse {
 				(Some(beg), None) => write!(f, "{beg}.."),
 				(None, Some(end)) => write!(f, "..{end}"),
 				(Some(beg), Some(end)) => write!(f, "{beg}..{end}"),
-			}
+			},
 		}
 	}
 }
