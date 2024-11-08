@@ -4,6 +4,8 @@ use crate::ctx::{Canceller, MutableContext};
 use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::Plan;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::dbs::processor::ParallelCollector;
 use crate::dbs::result::Results;
 use crate::dbs::Options;
 use crate::dbs::Statement;
@@ -137,7 +139,7 @@ impl Clone for Iterator {
 
 impl Iterator {
 	/// Creates a new iterator
-	pub fn new() -> Self {
+	pub(crate) fn new() -> Self {
 		Self::default()
 	}
 
@@ -536,18 +538,18 @@ impl Iterator {
 	#[cfg(target_arch = "wasm32")]
 	async fn iterate(
 		&mut self,
-		stk: &mut Stk,
+		_stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
-		// If any iterator requires distinct, we new to create a global distinct instance
+		// If any iterator requires distinct, we need to create a global distinct instance
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			v.iterate(stk, ctx, opt, stm, self, distinct.as_mut()).await?;
+			v.iterate(ctx, opt, stm, self, distinct.as_mut()).await?;
 		}
 		// Everything processed ok
 		Ok(())
@@ -573,7 +575,7 @@ impl Iterator {
 				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(stk, ctx, opt, stm, self, distinct.as_mut()).await?;
+					v.iterate(ctx, opt, stm, self, distinct.as_mut()).await?;
 				}
 				// Everything processed ok
 				Ok(())
@@ -589,22 +591,37 @@ impl Iterator {
 				// Create a channel to shutdown
 				let (end, exit) = channel::bounded::<()>(1);
 				// Create an unbounded channel
-				let (chn, docs) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
-				// Create an async closure for prepared values
-				let adocs = async {
+				let (chn, collected) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
+				// Create an async closure to collect key/value
+				let acollect = async {
 					// Process all prepared values
 					for v in vals {
 						// Clone the results channel for the async task
 						let chn = chn.clone();
+						// Spawn an asynchronous task to process the prepared value
+						e.spawn(async move { v.channel(ctx, opt, chn).await })
+							// Ensure we detach the spawned task
+							.detach();
+					}
+					// Drop the uncloned channel instance
+					drop(chn);
+				};
+				// Create an async closure to process key/values
+				let (chn, docs) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
+				let adocs = async {
+					// Process all prepared values
+					while let Ok(coll) = collected.recv().await {
+						// Clone the results channel for the async task
+						let chn = chn.clone();
 						// Distinct is passed only for iterators that really requires it
 						let distinct = distinct.clone();
+						// Take the transaction
+						let tx = ctx.tx();
 						// Spawn an asynchronous task to process the prepared value
 						e.spawn(async move {
-							let mut stack = TreeStack::new();
-							stack
-								.enter(|stk| v.channel(stk, ctx, opt, stm, chn, distinct))
-								.finish()
-								.await
+							let pro = coll.process(opt, &tx).await?;
+							ParallelCollector::process(distinct, pro, chn).await?;
+							Ok::<(), Error>(())
 						})
 						// Ensure we detach the spawned task
 						.detach();
@@ -646,9 +663,9 @@ impl Iterator {
 				// Run all executor tasks
 				let fut = e.run(exit.recv());
 				// Wait for all closures
-				let res = futures::join!(adocs, avals, aproc, fut);
+				let res = futures::join!(acollect, adocs, avals, aproc, fut);
 				// Consume executor error
-				let _ = res.3;
+				let _ = res.4;
 				// Everything processed ok
 				Ok(())
 			}
