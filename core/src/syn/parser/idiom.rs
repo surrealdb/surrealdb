@@ -276,6 +276,10 @@ impl Parser<'_> {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_destructure_part(ctx)).await?
 			}
+			t!("(") => {
+				self.pop_peek();
+				ctx.run(|ctx| self.parse_nest_part(ctx)).await?
+			}
 			_ => {
 				let ident: Ident = self.next_token_value()?;
 				if self.eat(t!("(")) {
@@ -335,6 +339,22 @@ impl Parser<'_> {
 		}
 
 		Ok(Part::Destructure(destructured))
+	}
+	/// Parse the part after the `.(` in an idiom
+	pub(super) async fn parse_nest_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
+		let start = self.last_span();
+		// We allow skipping the dot within nested parts. 
+		// If the initial run results in an empty idiom, 
+		// we assume a dot-part and then continue parsing the idiom
+		let idiom = match self.parse_remaining_idiom(ctx, vec![]).await? {
+			v if v.is_empty() => {
+				let start = self.parse_dot_part(ctx).await?;
+				self.parse_remaining_idiom(ctx, vec![start]).await?
+			},
+			v => v,
+		};
+		self.expect_closing_delimiter(t!(")"), start)?;
+		Ok(Part::Nest(idiom))
 	}
 	/// Parse the part after the `[` in a idiom
 	pub(super) async fn parse_bracket_part(

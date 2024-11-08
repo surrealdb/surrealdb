@@ -36,6 +36,11 @@ impl Value {
 			return Err(Error::ComputationDepthExceeded);
 		}
 		match path.first() {
+			// The knowledge of the value is not relevant to Part::Nest
+			Some(Part::Nest(nested)) => {
+				let v = stk.run(|stk| self.get(stk, ctx, opt, doc, nested)).await?;
+				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+			}
 			// Get the current value at the path
 			Some(p) => match self {
 				// Current value at path is a geometry

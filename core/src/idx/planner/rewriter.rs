@@ -162,6 +162,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			Part::Start(v) => self.eval_value(v).map(Part::Start),
 			Part::Method(n, p) => self.eval_values(p).map(|v| Part::Method(n.clone(), v)),
 			Part::Destructure(p) => self.eval_destructure_parts(p).map(Part::Destructure),
+			Part::Nest(v) => self.eval_idiom(v).map(Part::Nest),
 		}
 	}
 

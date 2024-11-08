@@ -7,7 +7,7 @@ use std::str;
 
 use super::fmt::{is_pretty, pretty_indent};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -26,6 +26,8 @@ pub enum Part {
 	#[revision(start = 2)]
 	Destructure(Vec<DestructurePart>),
 	Optional,
+	#[revision(start = 3)]
+	Nest(Idiom)
 }
 
 impl From<i32> for Part {
@@ -130,6 +132,7 @@ impl fmt::Display for Part {
 				}
 			}
 			Part::Optional => write!(f, "?"),
+			Part::Nest(v) => write!(f, ".({v})"),
 		}
 	}
 }
