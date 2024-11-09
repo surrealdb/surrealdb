@@ -130,7 +130,7 @@ impl<'a> BytesReader<'a> {
 				val |= next as u32;
 				char::from_u32(val).ok_or(CharError::Unicode)
 			}
-			x => panic!("start byte did not start multi byte character: {:b}", x),
+			_ => Err(CharError::Unicode),
 		}
 	}
 }
