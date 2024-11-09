@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ops::Deref;
 
-use crate::cnf::MAX_COMPUTATION_DEPTH;
+use crate::cnf::{IDIOM_RECURSION_LIMIT, MAX_COMPUTATION_DEPTH};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -57,6 +57,7 @@ impl Value {
 				// Find minimum and maximum amount of iterations
 				let min = v.min()?;
 				let max = v.max()?;
+				let limit = *IDIOM_RECURSION_LIMIT as i64;
 
 				// Exclude the recurse part from the path
 				let next = path.next();
@@ -109,6 +110,10 @@ impl Value {
 						if i >= max {
 							return Ok(current);
 						}
+					} else if i >= limit {
+						return Err(Error::IdiomRecursionLimitExceeded {
+							limit,
+						});
 					}
 				}
 			}

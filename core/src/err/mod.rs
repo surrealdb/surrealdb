@@ -1182,6 +1182,12 @@ pub enum Error {
 		found: String,
 		expected: String,
 	},
+
+	/// Found an unexpected value in a range
+	#[error("Reached the idiom recursion limit of {limit}.")]
+	IdiomRecursionLimitExceeded {
+		limit: i64,
+	},
 }
 
 impl From<Error> for String {
