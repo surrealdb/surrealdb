@@ -25,7 +25,8 @@ use reblessive::tree::Stk;
 fn is_final(v: &Value) -> bool {
 	match v {
 		Value::None => true,
-		Value::Array(v) => v.is_empty(),
+		Value::Null => true,
+		Value::Array(v) => v.is_empty() || v.is_all_none_or_null(),
 		_ => false,
 	}
 }
@@ -62,13 +63,6 @@ impl Value {
 				// Exclude the recurse part from the path
 				let next = path.next();
 
-				// Whether we need to flatten the result on each iteration
-				let flatten = matches!(
-					(next.last(), next.first()),
-					(Some(Part::Graph(_)), Some(Part::Graph(_)))
-						| (Some(Part::Graph(_)), Some(Part::Where(_)))
-				);
-
 				// Counter and current value
 				let mut i = 0;
 				let mut current = self.clone();
@@ -78,11 +72,7 @@ impl Value {
 					i += 1;
 
 					// Obtain the processed value for this iteration
-					let v = stk.run(|stk| current.get(stk, ctx, opt, doc, next)).await?;
-					let v = match (i, flatten) {
-						(1, _) | (_, false) => v,
-						_ => v.flatten(),
-					};
+					let v = stk.run(|stk| current.get(stk, ctx, opt, doc, next)).await?.flatten();
 
 					// Process the value for this iteration
 					match v {
