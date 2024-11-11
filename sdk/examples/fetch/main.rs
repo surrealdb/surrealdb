@@ -12,7 +12,6 @@ const STUDENT: &str = "student";
 
 // Dance class table schema
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct DanceClass {
 	id: RecordId,
 	name: String,
@@ -21,7 +20,6 @@ struct DanceClass {
 
 // Student table schema
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct Student {
 	id: RecordId,
 	name: String,
@@ -31,7 +29,6 @@ struct Student {
 
 // Student model with full class details
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 struct StudentClasses {
 	id: RecordId,
@@ -65,7 +62,7 @@ async fn main() -> surrealdb::Result<()> {
 		})
 		.await?;
 
-	// Create a student and assign them to the previous dance class
+	// Create a student and assign her to the previous dance class
 	// We don't care about the result here so we don't need to
 	// type-hint and store it. We use `Resource::from` to return
 	// a `sql::Value` instead and ignore it.
@@ -78,11 +75,11 @@ async fn main() -> surrealdb::Result<()> {
 		})
 		.await?;
 
-	// Prepare the SQL query to retrieve students and full class info
-	let sql = format!("SELECT * FROM {STUDENT} FETCH classes");
+	// Prepare the query to retrieve students and full class info
+	let q = format!("SELECT * FROM {STUDENT} FETCH classes");
 
 	// Run the query
-	let mut results = db.query(sql).await?;
+	let mut results = db.query(q).await?;
 
 	// Extract the first query statement result and deserialise it as a vector of students
 	let students: Vec<StudentClasses> = results.take(0)?;
