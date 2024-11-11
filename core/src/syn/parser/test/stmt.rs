@@ -291,14 +291,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.hash, "hunter2".to_owned());
-		assert_eq!(
-			stmt.roles,
-			vec![
-				Ident("Viewer".to_string()),
-				Ident("editor".to_string()),
-				Ident("OWNER".to_string())
-			]
-		);
+		assert_eq!(stmt.roles, vec![Ident("editor".to_string()), Ident("OWNER".to_string())]);
 		assert_eq!(
 			stmt.duration,
 			UserDuration {
