@@ -21,18 +21,26 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{Id, IdRange};
+#[cfg(not(target_arch = "wasm32"))]
+use futures::stream;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::stream::StreamExt;
 use reblessive::tree::Stk;
 #[cfg(not(target_arch = "wasm32"))]
 use reblessive::TreeStack;
 use std::mem;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::sync::mpsc::channel;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_stream::wrappers::ReceiverStream;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
 #[derive(Clone)]
 pub(crate) enum Iterable {
 	/// Any [Value] which does not exist in storage. This
-	/// could be the result of a query, an arbritrary
+	/// could be the result of a query, an arbitrary
 	/// SurrealQL value, object, or array of values.
 	Value(Value),
 	/// An iterable which does not actually fetch the record
@@ -566,7 +574,7 @@ impl Iterator {
 		// Compute iteration limits
 		self.compute_start_limit(ctx, stm);
 		// Prevent deep recursion
-		let opt = &opt.dive(4)?;
+		let opt = opt.dive(4)?;
 		// Check if iterating in parallel
 		match stm.parallel() {
 			// Run statements sequentially
@@ -575,97 +583,91 @@ impl Iterator {
 				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(ctx, opt, stm, self, distinct.as_mut()).await?;
+					v.iterate(ctx, &opt, stm, self, distinct.as_mut()).await?;
 				}
 				// Everything processed ok
 				Ok(())
 			}
 			// Run statements in parallel
 			true => {
+				let max_concurrent_tasks = *crate::cnf::MAX_CONCURRENT_TASKS;
 				// If any iterator requires distinct, we need to create a global distinct instance
 				let distinct = AsyncDistinct::new(ctx);
 				// Create a new executor
-				let e = executor::Executor::new();
 				// Take all of the iterator values
 				let vals = mem::take(&mut self.entries);
-				// Create a channel to shutdown
-				let (end, exit) = channel::bounded::<()>(1);
 				// Create an unbounded channel
-				let (chn, collected) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, collected) = channel(max_concurrent_tasks);
 				// Create an async closure to collect key/value
 				let acollect = async {
 					// Process all prepared values
-					for v in vals {
-						// Clone the results channel for the async task
-						let chn = chn.clone();
-						// Spawn an asynchronous task to process the prepared value
-						e.spawn(async move { v.channel(ctx, opt, chn).await })
-							// Ensure we detach the spawned task
-							.detach();
-					}
+					stream::iter(vals)
+						.map(|v| async {
+							let chn = chn.clone();
+							let opt = opt.clone();
+							v.channel(ctx, &opt, chn).await
+						})
+						.buffer_unordered(max_concurrent_tasks)
+						.count()
+						.await;
 					// Drop the uncloned channel instance
 					drop(chn);
 				};
 				// Create an async closure to process key/values
-				let (chn, docs) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, docs) = channel(max_concurrent_tasks);
 				let adocs = async {
 					// Process all prepared values
-					while let Ok(coll) = collected.recv().await {
-						// Clone the results channel for the async task
-						let chn = chn.clone();
-						// Distinct is passed only for iterators that really requires it
-						let distinct = distinct.clone();
-						// Take the transaction
-						let tx = ctx.tx();
-						// Spawn an asynchronous task to process the prepared value
-						e.spawn(async move {
-							let pro = coll.process(opt, &tx).await?;
+					ReceiverStream::new(collected)
+						.map(|coll| async {
+							// Clone the results channel for the async task
+							let chn = chn.clone();
+							let opt = opt.clone();
+							// Distinct is passed only for iterators that really requires it
+							let distinct = distinct.clone();
+							// Take the transaction
+							let tx = ctx.tx();
+							let pro = coll.process(&opt, &tx).await?;
 							ParallelCollector::process(distinct, pro, chn).await?;
 							Ok::<(), Error>(())
 						})
-						// Ensure we detach the spawned task
-						.detach();
-					}
+						.buffer_unordered(max_concurrent_tasks)
+						.count()
+						.await;
 					// Drop the uncloned channel instance
 					drop(chn);
 				};
 				// Create an unbounded channel
-				let (chn, vals) = channel::bounded(*crate::cnf::MAX_CONCURRENT_TASKS);
+				let (chn, mut vals) = channel(max_concurrent_tasks);
 				// Create an async closure for received values
 				let avals = async {
 					// Process all received values
-					while let Ok(pro) = docs.recv().await {
-						// Clone the results channel for the async task
-						let chn = chn.clone();
-						// Spawn an asynchronous task to process the received value
-						e.spawn(async move {
+					ReceiverStream::new(docs)
+						.map(|pro| async {
+							// Clone the results channel for the async task
+							let chn = chn.clone();
+							let opt = opt.clone();
+							// Spawn an asynchronous task to process the received value
 							let mut stack = TreeStack::new();
 							stack
-								.enter(|stk| Document::compute(stk, ctx, opt, stm, chn, pro))
+								.enter(|stk| Document::compute(stk, ctx, &opt, stm, chn, pro))
 								.finish()
 								.await
 						})
-						// Ensure we detach the spawned task
-						.detach();
-					}
+						.buffer_unordered(max_concurrent_tasks)
+						.count()
+						.await;
 					// Drop the uncloned channel instance
 					drop(chn);
 				};
 				// Create an async closure to process results
 				let aproc = async {
 					// Process all processed values
-					while let Ok(r) = vals.recv().await {
-						self.result(stk, ctx, opt, stm, r).await;
+					while let Some(r) = vals.recv().await {
+						self.result(stk, ctx, &opt, stm, r).await;
 					}
-					// Shutdown the executor
-					let _ = end.send(()).await;
 				};
-				// Run all executor tasks
-				let fut = e.run(exit.recv());
 				// Wait for all closures
-				let res = futures::join!(acollect, adocs, avals, aproc, fut);
-				// Consume executor error
-				let _ = res.4;
+				futures::join!(acollect, adocs, avals, aproc);
 				// Everything processed ok
 				Ok(())
 			}

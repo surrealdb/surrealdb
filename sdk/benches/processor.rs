@@ -3,7 +3,7 @@ use std::time::Duration;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb_core::sql::Value;
-use tokio::runtime::Runtime;
+use tokio::runtime::{Builder, Runtime};
 
 fn bench_processor(c: &mut Criterion) {
 	let rt = Runtime::new().unwrap();
@@ -15,31 +15,32 @@ fn bench_processor(c: &mut Criterion) {
 	group.measurement_time(Duration::from_secs(15));
 
 	group.bench_function("table-iterator", |b| {
-		b.to_async(Runtime::new().unwrap()).iter(|| run(&i, "SELECT * FROM item", i.count * 5))
+		b.to_async(Builder::new_multi_thread().build().unwrap())
+			.iter(|| run(&i, "SELECT * FROM item", i.count * 5))
 	});
 
 	group.bench_function("table-iterator-parallel", |b| {
-		b.to_async(Runtime::new().unwrap())
+		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM item PARALLEL", i.count * 5))
 	});
 
 	group.bench_function("non-uniq-index-iterator", |b| {
-		b.to_async(Runtime::new().unwrap())
+		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM item WHERE number=4", i.count))
 	});
 
 	group.bench_function("non-uniq-index-iterator-parallel", |b| {
-		b.to_async(Runtime::new().unwrap())
+		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM item WHERE number=4 PARALLEL", i.count))
 	});
 
 	group.bench_function("full-text-index-iterator", |b| {
-		b.to_async(Runtime::new().unwrap())
+		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM item WHERE label @@ 'charlie'", i.count))
 	});
 
 	group.bench_function("full-text-index-iterator-parallel", |b| {
-		b.to_async(Runtime::new().unwrap())
+		b.to_async(Builder::new_multi_thread().build().unwrap())
 			.iter(|| run(&i, "SELECT * FROM item WHERE label @@ 'charlie' PARALLEL", i.count))
 	});
 

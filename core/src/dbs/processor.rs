@@ -13,13 +13,14 @@ use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
 use crate::sql::{Edges, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
-use channel::Sender;
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use reblessive::TreeStack;
 use std::borrow::Cow;
 use std::ops::Bound;
 use std::vec;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::sync::mpsc::Sender;
 
 impl Iterable {
 	pub(super) async fn iterate(
@@ -385,14 +386,14 @@ impl ParallelCollector {
 				return Ok(());
 			}
 		}
-		chn.send(pro).await?;
+		chn.send(pro).await.map_err(|e| Error::Channel(e.to_string()))?;
 		Ok(())
 	}
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl Collector for ParallelCollector {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
-		self.0.send(collected).await?;
+		self.0.send(collected).await.map_err(|e| Error::Channel(e.to_string()))?;
 		Ok(())
 	}
 }
