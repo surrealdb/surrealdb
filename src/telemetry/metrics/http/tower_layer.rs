@@ -1,5 +1,5 @@
-use axum::extract::MatchedPath;
 use crate::cli::CF;
+use axum::extract::MatchedPath;
 use opentelemetry::{metrics::MetricsError, KeyValue};
 use pin_project_lite::pin_project;
 use std::{
