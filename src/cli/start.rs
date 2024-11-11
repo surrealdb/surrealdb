@@ -39,8 +39,8 @@ pub struct StartCommandArguments {
 	#[arg(hide = true)] // Not currently in use
 	key: Option<String>,
 	#[arg(help = "Namespace to store metrics under")]
-	#[arg(env = "SURREAL_NAMESPACE", short = 'n', long = "namespace")]
-	namespace: Option<String>,
+	#[arg(env = "SURREAL_METRICS_NAMESPACE", short = 'n', long = "namespace")]
+	metrics_namespace: Option<String>,
 	//
 	// Tasks
 	//
