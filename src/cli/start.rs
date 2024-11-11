@@ -172,7 +172,7 @@ pub async fn init(
 		changefeed_gc_interval,
 		no_banner,
 		no_identification_headers,
-		namespace ,
+		namespace,
 		..
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
