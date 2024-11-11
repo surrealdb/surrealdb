@@ -171,7 +171,7 @@ async fn idiom_optional_after_value_should_pass_through() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_recursion() -> Result<(), Error> {
+async fn idiom_recursion_graph() -> Result<(), Error> {
 	let sql = r#"
 		INSERT INTO person [
 			{ id: person:tobie, name: 'Tobie' },
@@ -245,6 +245,76 @@ async fn idiom_recursion() -> Result<(), Error> {
 			{ name: 'Tobie', names_3rds: ['Tim'] },
 		]",
 		)?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn idiom_recursion_record_links() -> Result<(), Error> {
+	let sql = r#"
+		INSERT [
+			{ id: planet:earth, 		name: 'Earth', 				contains: [country:us, country:canada] },
+
+			{ id: country:us, 			name: 'United States', 		contains: [state:california, state:texas] },
+			{ id: country:canada, 		name: 'Canada', 			contains: [province:ontario, province:bc] },
+
+			{ id: state:california, 	name: 'California', 		contains: [city:los_angeles, city:san_francisco] },
+			{ id: state:texas, 			name: 'Texas', 				contains: [city:houston, city:dallas] },
+			{ id: province:ontario, 	name: 'Ontario', 			contains: [city:toronto, city:ottawa] },
+			{ id: province:bc, 			name: 'British Columbia', 	contains: [city:vancouver, city:victoria] },
+
+			{ id: city:los_angeles, 	name: 'Los Angeles' },
+			{ id: city:san_francisco, 	name: 'San Francisco' },
+			{ id: city:houston, 		name: 'Houston' },
+			{ id: city:dallas, 			name: 'Dallas' },
+			{ id: city:toronto, 		name: 'Toronto' },
+			{ id: city:ottawa,			name: 'Ottowa' },
+			{ id: city:vancouver,		name: 'Vancouver' },
+			{ id: city:victoria,		name: 'Victoria' },
+		];
+
+		planet:earth.({2}.contains).name;
+		planet:earth.({3}.contains).name;
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("[
+			{ id: planet:earth, 		name: 'Earth', 				contains: [country:us, country:canada] },
+
+			{ id: country:us, 			name: 'United States', 		contains: [state:california, state:texas] },
+			{ id: country:canada, 		name: 'Canada', 			contains: [province:ontario, province:bc] },
+
+			{ id: state:california, 	name: 'California', 		contains: [city:los_angeles, city:san_francisco] },
+			{ id: state:texas, 			name: 'Texas', 				contains: [city:houston, city:dallas] },
+			{ id: province:ontario, 	name: 'Ontario', 			contains: [city:toronto, city:ottawa] },
+			{ id: province:bc, 			name: 'British Columbia', 	contains: [city:vancouver, city:victoria] },
+
+			{ id: city:los_angeles, 	name: 'Los Angeles' },
+			{ id: city:san_francisco, 	name: 'San Francisco' },
+			{ id: city:houston, 		name: 'Houston' },
+			{ id: city:dallas, 			name: 'Dallas' },
+			{ id: city:toronto, 		name: 'Toronto' },
+			{ id: city:ottawa,			name: 'Ottowa' },
+			{ id: city:vancouver,		name: 'Vancouver' },
+			{ id: city:victoria,		name: 'Victoria' },
+		]",
+		)?
+		.expect_val("[
+			'California',
+			'Texas',
+			'Ontario',
+			'British Columbia'
+		]",
+		)?
+		.expect_val("[
+			'Los Angeles',
+			'San Francisco',
+			'Houston',
+			'Dallas',
+			'Toronto',
+			'Ottowa',
+			'Vancouver',
+			'Victoria'
+		]")?;
 	Ok(())
 }
 
