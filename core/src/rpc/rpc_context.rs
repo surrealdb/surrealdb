@@ -10,7 +10,13 @@ use crate::{
 	dbs::{capabilities::MethodTarget, QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{Array, Function, Model, Statement, Strand, Value},
+	sql::{
+		statements::{
+			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
+			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
+		},
+		Array, Fields, Function, Model, Output, Query, Strand, Value,
+	},
 };
 
 use super::{method::Method, response::Data, rpc_error::RpcError};
@@ -40,77 +46,73 @@ pub trait RpcContext {
 		unimplemented!("graphql_schema_cache must be implemented if GQL_SUPPORT = true")
 	}
 
+	/// Executes any method on this RPC implementation
 	async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
-			method: method.clone(),
+			method,
 		}) {
 			warn!("Capabilities denied RPC method call attempt, target: '{}'", method.to_str());
 			return Err(RpcError::MethodNotAllowed);
 		}
-
+		// Execute the desired method
 		match method {
 			Method::Ping => Ok(Value::None.into()),
-			Method::Info => self.info().await.map(Into::into).map_err(Into::into),
-			Method::Use => self.yuse(params).await.map(Into::into).map_err(Into::into),
-			Method::Signup => self.signup(params).await.map(Into::into).map_err(Into::into),
-			Method::Signin => self.signin(params).await.map(Into::into).map_err(Into::into),
-			Method::Invalidate => self.invalidate().await.map(Into::into).map_err(Into::into),
-			Method::Authenticate => {
-				self.authenticate(params).await.map(Into::into).map_err(Into::into)
-			}
-			Method::Kill => self.kill(params).await.map(Into::into).map_err(Into::into),
-			Method::Live => self.live(params).await.map(Into::into).map_err(Into::into),
-			Method::Set => self.set(params).await.map(Into::into).map_err(Into::into),
-			Method::Unset => self.unset(params).await.map(Into::into).map_err(Into::into),
-			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
-			Method::Insert => self.insert(params).await.map(Into::into).map_err(Into::into),
-			Method::Create => self.create(params).await.map(Into::into).map_err(Into::into),
-			Method::Upsert => self.upsert(params).await.map(Into::into).map_err(Into::into),
-			Method::Update => self.update(params).await.map(Into::into).map_err(Into::into),
-			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
-			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
-			Method::Delete => self.delete(params).await.map(Into::into).map_err(Into::into),
-			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
-			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
-			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
-			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
-			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
-			Method::InsertRelation => {
-				self.insert_relation(params).await.map(Into::into).map_err(Into::into)
-			}
+			Method::Info => self.info().await,
+			Method::Use => self.yuse(params).await,
+			Method::Signup => self.signup(params).await,
+			Method::Signin => self.signin(params).await,
+			Method::Invalidate => self.invalidate().await,
+			Method::Authenticate => self.authenticate(params).await,
+			Method::Kill => self.kill(params).await,
+			Method::Live => self.live(params).await,
+			Method::Set => self.set(params).await,
+			Method::Unset => self.unset(params).await,
+			Method::Select => self.select(params).await,
+			Method::Insert => self.insert(params).await,
+			Method::Create => self.create(params).await,
+			Method::Upsert => self.upsert(params).await,
+			Method::Update => self.update(params).await,
+			Method::Merge => self.merge(params).await,
+			Method::Patch => self.patch(params).await,
+			Method::Delete => self.delete(params).await,
+			Method::Version => self.version(params).await,
+			Method::Query => self.query(params).await,
+			Method::Relate => self.relate(params).await,
+			Method::Run => self.run(params).await,
+			Method::GraphQL => self.graphql(params).await,
+			Method::InsertRelation => self.insert_relation(params).await,
 			Method::Unknown => Err(RpcError::MethodNotFound),
 		}
 	}
 
+	/// Executes any immutable method on this RPC implementation
 	async fn execute_immut(&self, method: Method, params: Array) -> Result<Data, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
-			method: method.clone(),
+			method,
 		}) {
 			warn!("Capabilities denied RPC method call attempt, target: '{}'", method.to_str());
 			return Err(RpcError::MethodNotAllowed);
 		}
-
+		// Execute the desired method
 		match method {
 			Method::Ping => Ok(Value::None.into()),
-			Method::Info => self.info().await.map(Into::into).map_err(Into::into),
-			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
-			Method::Insert => self.insert(params).await.map(Into::into).map_err(Into::into),
-			Method::Create => self.create(params).await.map(Into::into).map_err(Into::into),
-			Method::Upsert => self.upsert(params).await.map(Into::into).map_err(Into::into),
-			Method::Update => self.update(params).await.map(Into::into).map_err(Into::into),
-			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
-			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
-			Method::Delete => self.delete(params).await.map(Into::into).map_err(Into::into),
-			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
-			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
-			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
-			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
-			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
-			Method::InsertRelation => {
-				self.insert_relation(params).await.map(Into::into).map_err(Into::into)
-			}
+			Method::Info => self.info().await,
+			Method::Select => self.select(params).await,
+			Method::Insert => self.insert(params).await,
+			Method::Create => self.create(params).await,
+			Method::Upsert => self.upsert(params).await,
+			Method::Update => self.update(params).await,
+			Method::Merge => self.merge(params).await,
+			Method::Patch => self.patch(params).await,
+			Method::Delete => self.delete(params).await,
+			Method::Version => self.version(params).await,
+			Method::Query => self.query(params).await,
+			Method::Relate => self.relate(params).await,
+			Method::Run => self.run(params).await,
+			Method::GraphQL => self.graphql(params).await,
+			Method::InsertRelation => self.insert_relation(params).await,
 			Method::Unknown => Err(RpcError::MethodNotFound),
 			_ => Err(RpcError::MethodNotFound),
 		}
@@ -125,30 +127,34 @@ pub trait RpcContext {
 		// We need to be able to adjust either ns or db without affecting the other
 		// To be able to select a namespace, and then list resources in that namespace, as an example
 		let (ns, db) = params.needs_two()?;
-		let unset_ns = matches!(ns, Value::Null);
-		let unset_db = matches!(db, Value::Null);
-
-		// If we unset the namespace, we must also unset the database
-		if unset_ns && !unset_db {
-			return Err(RpcError::InvalidParams);
+		// Update the selected namespace
+		match ns {
+			Value::None => (),
+			Value::Null => self.session_mut().ns = None,
+			Value::Strand(ns) => self.session_mut().ns = Some(ns.0),
+			_ => {
+				return Err(RpcError::InvalidParams);
+			}
 		}
-
-		if unset_ns {
-			self.session_mut().ns = None;
-		} else if let Value::Strand(ns) = ns {
-			self.session_mut().ns = Some(ns.0);
+		// Update the selected database
+		match db {
+			Value::None => (),
+			Value::Null => self.session_mut().db = None,
+			Value::Strand(db) => self.session_mut().db = Some(db.0),
+			_ => {
+				return Err(RpcError::InvalidParams);
+			}
 		}
-
-		if unset_db {
+		// Clear any residual database
+		if self.session().ns.is_none() && self.session().db.is_some() {
 			self.session_mut().db = None;
-		} else if let Value::Strand(db) = db {
-			self.session_mut().db = Some(db.0);
 		}
-
+		// Return nothing
 		Ok(Value::None.into())
 	}
 
 	async fn signup(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -165,6 +171,7 @@ pub trait RpcContext {
 	}
 
 	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -184,6 +191,7 @@ pub trait RpcContext {
 	}
 
 	async fn authenticate(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -202,13 +210,19 @@ pub trait RpcContext {
 
 	async fn info(&self) -> Result<Data, RpcError> {
 		// Specify the SQL query string
-		let sql = "SELECT * FROM $auth";
+		let sql = {
+			// SELECT * FROM $auth
+			SelectStatement {
+				expr: Fields::all(),
+				what: vec![Value::Param("auth".into())].into(),
+				..Default::default()
+			}
+			.into()
+		};
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), None).await?;
+		let mut res = self.kvs().process(sql, self.session(), None).await?;
 		// Extract the first value from the result
-		let res = res.remove(0).result?.first();
-		// Return the result to the client
-		Ok(res.into())
+		Ok(res.remove(0).result?.first().into())
 	}
 
 	// ------------------------------
@@ -216,6 +230,7 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn set(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok((Value::Strand(key), val)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -231,14 +246,18 @@ pub trait RpcContext {
 			// Store the variable if defined
 			v => self.vars_mut().insert(key.0, v),
 		};
+		// Return nothing
 		Ok(Value::Null.into())
 	}
 
 	async fn unset(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok(Value::Strand(key)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Remove the set parameter
 		self.vars_mut().remove(&key.0);
+		// Return nothing
 		Ok(Value::Null.into())
 	}
 
@@ -247,39 +266,57 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn kill(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let id = params.needs_one()?;
 		// Specify the SQL query string
-		let sql = "KILL $id";
+		let sql = {
+			// KILL $id
+			KillStatement {
+				id: Value::Param("id".into()),
+			}
+			.into()
+		};
 		// Specify the query parameters
 		let var = map! {
 			String::from("id") => id,
 			=> &self.vars()
 		};
 		// Execute the query on the database
-		// let mut res = self.query_with(Value::from(sql), Object::from(var)).await?;
-		let mut res = self.query_inner(Value::from(sql), Some(var)).await?;
+		let mut res = self.query_inner(Value::Query(sql), Some(var)).await?;
 		// Extract the first query result
-		let response = res.remove(0);
-		response.result.map_err(Into::into).map(Into::into)
+		Ok(res.remove(0).result?.into())
 	}
 
 	async fn live(&mut self, params: Array) -> Result<Data, RpcError> {
-		let (tb, diff) = params.needs_one_or_two()?;
+		// Process the method arguments
+		let (what, diff) = params.needs_one_or_two()?;
 		// Specify the SQL query string
-		let sql = match diff.is_true() {
-			true => "LIVE SELECT DIFF FROM $tb",
-			false => "LIVE SELECT * FROM $tb",
+		let sql = if diff.is_true() {
+			// LIVE SELECT DIFF FROM $what
+			LiveStatement {
+				expr: Fields::default(),
+				what: vec![Value::Param("what".into())].into(),
+				..Default::default()
+			}
+			.into()
+		} else {
+			// LIVE SELECT * FROM $what
+			LiveStatement {
+				expr: Fields::all(),
+				what: vec![Value::Param("what".into())].into(),
+				..Default::default()
+			}
+			.into()
 		};
 		// Specify the query parameters
 		let var = map! {
-			String::from("tb") => tb.could_be_table(),
+			String::from("what") => what.could_be_table(),
 			=> &self.vars()
 		};
 		// Execute the query on the database
-		let mut res = self.query_inner(Value::from(sql), Some(var)).await?;
+		let mut res = self.query_inner(Value::Query(sql), Some(var)).await?;
 		// Extract the first query result
-		let response = res.remove(0);
-		response.result.map_err(Into::into).map(Into::into)
+		Ok(res.remove(0).result?.into())
 	}
 
 	// ------------------------------
@@ -287,27 +324,34 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn select(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok(what) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
 		let one = what.is_thing_single();
 		// Specify the SQL query string
-		let sql = "SELECT * FROM $what";
+		let sql = {
+			// SELECT * FROM $what
+			SelectStatement {
+				expr: Fields::all(),
+				what: vec![Value::Param("what".into())].into(),
+				..Default::default()
+			}
+			.into()
+		};
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
-		// Return the result to the client
-		Ok(res.into())
+		Ok(match one {
+			true => res.remove(0).result?.first().into(),
+			false => res.remove(0).result?.into(),
+		})
 	}
 
 	// ------------------------------
@@ -315,64 +359,110 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn insert(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
 		};
-		// Specify the SQL query string
-
+		// Process the insert request
 		let mut res = match what {
 			Value::None | Value::Null => {
-				let sql = "INSERT $data RETURN AFTER";
+				// Specify the SQL query string
+				let sql = {
+					// INSERT $data RETURN AFTER
+					InsertStatement {
+						data: crate::sql::Data::SingleExpression(Value::Param("data".into())),
+						output: Some(Output::After),
+						..Default::default()
+					}
+					.into()
+				};
+				// Specify the query parameters
 				let var = Some(map! {
 					String::from("data") => data,
 					=> &self.vars()
 				});
-				self.kvs().execute(sql, self.session(), var).await?
+				// Execute the query on the database
+				self.kvs().process(sql, self.session(), var).await?
 			}
 			what => {
-				let sql = "INSERT INTO $what $data RETURN AFTER";
+				// Specify the SQL query string
+				let sql = {
+					// INSERT INTO $what $data RETURN AFTER
+					InsertStatement {
+						into: Some(Value::Param("what".into())),
+						data: crate::sql::Data::SingleExpression(Value::Param("data".into())),
+						output: Some(Output::After),
+						..Default::default()
+					}
+					.into()
+				};
+				// Specify the query parameters
 				let var = Some(map! {
 					String::from("what") => what.could_be_table(),
 					String::from("data") => data,
 					=> &self.vars()
 				});
-				self.kvs().execute(sql, self.session(), var).await?
+				// Execute the query on the database
+				self.kvs().process(sql, self.session(), var).await?
 			}
 		};
-
-		let res = res.remove(0).result?;
-		// Return the result to the client
-		Ok(res.into())
+		// Extract the first query result
+		Ok(res.remove(0).result?.into())
 	}
 
-	async fn insert_relation(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn insert_relation(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
 		};
-
+		// Process the insert request
 		let mut res = match what {
 			Value::None | Value::Null => {
-				let sql = "INSERT RELATION $data RETURN AFTER";
+				// Specify the SQL query string
+				let sql = {
+					// INSERT RELATION $data RETURN AFTER
+					InsertStatement {
+						relation: true,
+						data: crate::sql::Data::SingleExpression(Value::Param("data".into())),
+						output: Some(Output::After),
+						..Default::default()
+					}
+					.into()
+				};
+				// Specify the query parameters
 				let vars = Some(map! {
 					String::from("data") => data,
 					=> &self.vars()
 				});
-				self.kvs().execute(sql, self.session(), vars).await?
+				// Execute the query on the database
+				self.kvs().process(sql, self.session(), vars).await?
 			}
 			Value::Table(_) | Value::Strand(_) => {
-				let sql = "INSERT RELATION INTO $what $data RETURN AFTER";
+				// Specify the SQL query string
+				let sql = {
+					// INSERT RELATION INTO $what $data RETURN AFTER
+					InsertStatement {
+						relation: true,
+						into: Some(Value::Param("what".into())),
+						data: crate::sql::Data::SingleExpression(Value::Param("data".into())),
+						output: Some(Output::After),
+						..Default::default()
+					}
+					.into()
+				};
+				// Specify the query parameters
 				let vars = Some(map! {
-						String::from("data") => data,
-				String::from("what") => what.could_be_table(),
-						=> &self.vars()
-					});
-				self.kvs().execute(sql, self.session(), vars).await?
+					String::from("data") => data,
+					String::from("what") => what.could_be_table(),
+					=> &self.vars()
+				});
+				// Execute the query on the database
+				self.kvs().process(sql, self.session(), vars).await?
 			}
 			_ => return Err(RpcError::InvalidParams),
 		};
-
-		let res = res.remove(0).result?;
-		Ok(res)
+		// Extract the first query result
+		Ok(res.remove(0).result?.into())
 	}
 
 	// ------------------------------
@@ -380,6 +470,7 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn create(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -388,9 +479,22 @@ pub trait RpcContext {
 		let one = what.is_thing_single() || what.is_table();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
-			"CREATE $what RETURN AFTER"
+			// CREATE $what RETURN AFTER
+			CreateStatement {
+				what: vec![Value::Param("what".into())].into(),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		} else {
-			"CREATE $what CONTENT $data RETURN AFTER"
+			// CREATE $what CONTENT $data RETURN AFTER
+			CreateStatement {
+				what: vec![Value::Param("what".into())].into(),
+				data: Some(crate::sql::Data::MergeExpression(Value::Param("data".into()))),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		};
 		// Specify the query parameters
 		let var = Some(map! {
@@ -399,14 +503,12 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
-		// Return the result to the client
-		Ok(res.into())
+		Ok(match one {
+			true => res.remove(0).result?.first().into(),
+			false => res.remove(0).result?.into(),
+		})
 	}
 
 	// ------------------------------
@@ -414,6 +516,7 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn upsert(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -421,9 +524,22 @@ pub trait RpcContext {
 		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
-			"UPSERT $what RETURN AFTER"
+			// UPSERT $what RETURN AFTER
+			UpsertStatement {
+				what: vec![Value::Param("what".into())].into(),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		} else {
-			"UPSERT $what CONTENT $data RETURN AFTER"
+			// UPSERT $what CONTENT $data RETURN AFTER
+			UpsertStatement {
+				what: vec![Value::Param("what".into())].into(),
+				data: Some(crate::sql::Data::ContentExpression(Value::Param("data".into()))),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		};
 		// Specify the query parameters
 		let var = Some(map! {
@@ -432,14 +548,12 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
-		// Return the result to the client
-		Ok(res.into())
+		Ok(match one {
+			true => res.remove(0).result?.first().into(),
+			false => res.remove(0).result?.into(),
+		})
 	}
 
 	// ------------------------------
@@ -447,6 +561,7 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn update(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -454,9 +569,22 @@ pub trait RpcContext {
 		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
-			"UPDATE $what RETURN AFTER"
+			// UPDATE $what RETURN AFTER
+			UpdateStatement {
+				what: vec![Value::Param("what".into())].into(),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		} else {
-			"UPDATE $what CONTENT $data RETURN AFTER"
+			// UPDATE $what CONTENT $data RETURN AFTER
+			UpdateStatement {
+				what: vec![Value::Param("what".into())].into(),
+				data: Some(crate::sql::Data::ContentExpression(Value::Param("data".into()))),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		};
 		// Specify the query parameters
 		let var = Some(map! {
@@ -465,14 +593,12 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
-		// Return the result to the client
-		Ok(res.into())
+		Ok(match one {
+			true => res.remove(0).result?.first().into(),
+			false => res.remove(0).result?.into(),
+		})
 	}
 
 	// ------------------------------
@@ -480,6 +606,7 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn merge(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -487,9 +614,22 @@ pub trait RpcContext {
 		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
-			"UPDATE $what RETURN AFTER"
+			// UPDATE $what RETURN AFTER
+			UpdateStatement {
+				what: vec![Value::Param("what".into())].into(),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		} else {
-			"UPDATE $what MERGE $data RETURN AFTER"
+			// UPDATE $what MERGE $data RETURN AFTER
+			UpdateStatement {
+				what: vec![Value::Param("what".into())].into(),
+				data: Some(crate::sql::Data::MergeExpression(Value::Param("data".into()))),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		};
 		// Specify the query parameters
 		let var = Some(map! {
@@ -498,14 +638,12 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
-		// Return the result to the client
-		Ok(res.into())
+		Ok(match one {
+			true => res.remove(0).result?.first().into(),
+			false => res.remove(0).result?.into(),
+		})
 	}
 
 	// ------------------------------
@@ -513,15 +651,31 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn patch(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok((what, data, diff)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
 		let one = what.is_thing_single();
 		// Specify the SQL query string
-		let sql = match diff.is_true() {
-			true => "UPDATE $what PATCH $data RETURN DIFF",
-			false => "UPDATE $what PATCH $data RETURN AFTER",
+		let sql = if diff.is_true() {
+			// UPDATE $what PATCH $data RETURN DIFF
+			UpdateStatement {
+				what: vec![Value::Param("what".into())].into(),
+				data: Some(crate::sql::Data::PatchExpression(Value::Param("data".into()))),
+				output: Some(Output::Diff),
+				..Default::default()
+			}
+			.into()
+		} else {
+			// UPDATE $what PATCH $data RETURN AFTER
+			UpdateStatement {
+				what: vec![Value::Param("what".into())].into(),
+				data: Some(crate::sql::Data::PatchExpression(Value::Param("data".into()))),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		};
 		// Specify the query parameters
 		let var = Some(map! {
@@ -530,14 +684,12 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
-		// Return the result to the client
-		Ok(res.into())
+		Ok(match one {
+			true => res.remove(0).result?.first().into(),
+			false => res.remove(0).result?.into(),
+		})
 	}
 
 	// ------------------------------
@@ -545,6 +697,7 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn relate(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok((from, kind, to, data)) = params.needs_three_or_four() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -552,9 +705,26 @@ pub trait RpcContext {
 		let one = from.is_single() && to.is_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
-			"RELATE $from->$kind->$to"
+			// RELATE $from->$kind->$to RETURN AFTER
+			RelateStatement {
+				from: Value::Param("from".into()),
+				kind: Value::Param("kind".into()),
+				with: Value::Param("to".into()),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		} else {
-			"RELATE $from->$kind->$to CONTENT $data"
+			// RELATE $from->$kind->$to CONTENT $data RETURN AFTER
+			RelateStatement {
+				from: Value::Param("from".into()),
+				kind: Value::Param("kind".into()),
+				with: Value::Param("to".into()),
+				data: Some(crate::sql::Data::ContentExpression(Value::Param("data".into()))),
+				output: Some(Output::After),
+				..Default::default()
+			}
+			.into()
 		};
 		// Specify the query parameters
 		let var = Some(map! {
@@ -565,14 +735,12 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
-		// Return the result to the client
-		Ok(res.into())
+		Ok(match one {
+			true => res.remove(0).result?.first().into(),
+			false => res.remove(0).result?.into(),
+		})
 	}
 
 	// ------------------------------
@@ -580,27 +748,34 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn delete(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok(what) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
 		let one = what.is_thing_single();
 		// Specify the SQL query string
-		let sql = "DELETE $what RETURN BEFORE";
+		let sql = {
+			// DELETE $what RETURN BEFORE
+			DeleteStatement {
+				what: vec![Value::Param("what".into())].into(),
+				output: Some(Output::Before),
+				..Default::default()
+			}
+			.into()
+		};
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		let res = match one {
-			true => res.remove(0).result?.first(),
-			false => res.remove(0).result?,
-		};
-		// Return the result to the client
-		Ok(res.into())
+		Ok(match one {
+			true => res.remove(0).result?.first().into(),
+			false => res.remove(0).result?.into(),
+		})
 	}
 
 	// ------------------------------
@@ -619,6 +794,7 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn query(&self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok((query, o)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -645,39 +821,45 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn run(&self, params: Array) -> Result<Data, RpcError> {
-		let Ok((Value::Strand(Strand(func_name)), version, args)) = params.needs_one_two_or_three()
-		else {
+		// Process the method arguments
+		let Ok((name, version, args)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
-
+		// Parse the function name argument
+		let name = match name {
+			Value::Strand(Strand(v)) => v,
+			_ => return Err(RpcError::InvalidParams),
+		};
+		// Parse any function version argument
 		let version = match version {
 			Value::Strand(Strand(v)) => Some(v),
 			Value::None | Value::Null => None,
 			_ => return Err(RpcError::InvalidParams),
 		};
-
+		// Parse the function arguments if specified
 		let args = match args {
 			Value::Array(Array(arr)) => arr,
 			Value::None | Value::Null => vec![],
 			_ => return Err(RpcError::InvalidParams),
 		};
-
-		let func: Value = match &func_name[0..4] {
-			"fn::" => Function::Custom(func_name.chars().skip(4).collect(), args).into(),
+		// Specify the function to run
+		let func: Query = match &name[0..4] {
+			"fn::" => Function::Custom(name.chars().skip(4).collect(), args).into(),
 			"ml::" => Model {
-				name: func_name.chars().skip(4).collect(),
+				name: name.chars().skip(4).collect(),
 				version: version.ok_or(RpcError::InvalidParams)?,
 				args,
 			}
 			.into(),
-			_ => Function::Normal(func_name, args).into(),
+			_ => Function::Normal(name, args).into(),
 		};
-
-		let mut res = self
-			.kvs()
-			.process(Statement::Value(func).into(), self.session(), Some(self.vars().clone()))
-			.await?;
-		res.remove(0).result.map_err(Into::into).map(Into::into)
+		//
+		// Specify the query variables
+		let vars = Some(self.vars().clone());
+		// Execute the function on the database
+		let mut res = self.kvs().process(func, self.session(), vars).await?;
+		// Extract the first query result
+		Ok(res.remove(0).result?.into())
 	}
 
 	// ------------------------------
@@ -685,8 +867,8 @@ pub trait RpcContext {
 	// ------------------------------
 
 	#[cfg(any(target_arch = "wasm32", not(surrealdb_unstable)))]
-	async fn graphql(&self, _params: Array) -> Result<impl Into<Data>, RpcError> {
-		Result::<Value, _>::Err(RpcError::MethodNotFound)
+	async fn graphql(&self, _params: Array) -> Result<Data, RpcError> {
+		Err(RpcError::MethodNotFound)
 	}
 
 	#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
