@@ -182,7 +182,7 @@ impl HttpCallMetricTracker {
 			res.push(KeyValue::new("server.address", host.to_owned()));
 		}
 
-		if TELEMETRY_NAMESPACE.trim().is_empty() {
+		if !TELEMETRY_NAMESPACE.trim().is_empty() {
 			res.push(KeyValue::new("namespace", TELEMETRY_NAMESPACE.clone()));
 		};
 
