@@ -38,9 +38,6 @@ pub struct StartCommandArguments {
 	#[arg(value_parser = super::validator::key_valid)]
 	#[arg(hide = true)] // Not currently in use
 	key: Option<String>,
-	#[arg(help = "Namespace to store metrics under")]
-	#[arg(env = "SURREAL_METRICS_NAMESPACE", short = 'n', long = "namespace")]
-	metrics_namespace: Option<String>,
 	//
 	// Tasks
 	//
@@ -172,7 +169,6 @@ pub async fn init(
 		changefeed_gc_interval,
 		no_banner,
 		no_identification_headers,
-		metrics_namespace,
 		..
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
@@ -212,7 +208,6 @@ pub async fn init(
 		engine,
 		crt,
 		key,
-		metrics_namespace,
 	};
 	// Setup the command-line options
 	let _ = CF.set(config);

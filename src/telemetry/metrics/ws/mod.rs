@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::cli::CF;
+use crate::cnf::TELEMETRY_NAMESPACE;
 use opentelemetry::metrics::Meter;
 use opentelemetry::{global, KeyValue};
 use opentelemetry::{
@@ -43,10 +43,9 @@ pub static RPC_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(||
 });
 
 fn otel_common_attrs() -> Vec<KeyValue> {
-	let opt = CF.get().unwrap();
 	let mut common = vec![KeyValue::new("rpc.service", "surrealdb")];
-	if let Some(namespace) = opt.metrics_namespace.clone() {
-		common.push(KeyValue::new("namespace", namespace));
+	if TELEMETRY_NAMESPACE.trim().is_empty() {
+		common.push(KeyValue::new("namespace", TELEMETRY_NAMESPACE.clone()));
 	};
 	common
 }
