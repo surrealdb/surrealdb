@@ -583,13 +583,13 @@ pub async fn reduce(
 			}
 			_ => {
 				// Get the first item
-				let mut iter = array.into_iter().enumerate();
-				let Some((_, mut accum)) = iter.next() else {
+				let mut iter = array.into_iter();
+				let Some(mut accum) = iter.next() else {
 					return Ok(Value::None);
 				};
-				for (i, val) in iter {
+				for (idx, val) in iter.enumerate() {
 					let fnc =
-						Function::Anonymous(mapper.clone().into(), vec![accum, val, i.into()]);
+						Function::Anonymous(mapper.clone().into(), vec![accum, val, idx.into()]);
 					accum = fnc.compute(stk, ctx, opt, doc).await?;
 				}
 				Ok(accum)

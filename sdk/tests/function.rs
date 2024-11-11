@@ -695,7 +695,7 @@ async fn function_array_reduce() -> Result<(), Error> {
 
 	// The index can also be accessed in the same way as array::map
 	let sql = r#"
-	[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].reduce(|$one, $two, $three| $one + $two + $three);
+	[10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0].reduce(|$one, $two, $three| $one + $two + $three);
 	"#;
 	Test::new(sql).await?.expect_val("100")?;
 
@@ -710,6 +710,14 @@ async fn function_array_reduce() -> Result<(), Error> {
 	[9].reduce(|$x, $y, $z| $x + $y + $z);
 	"#;
 	Test::new(sql).await?.expect_val("9")?;
+
+	let sql = r#"
+	[1,2].reduce(|$x, $y, $idx| $idx)"#;
+	Test::new(sql).await?.expect_val("0")?;
+
+	let sql = r#"
+	[1,2,3].reduce(|$x, $y, $idx| $idx)"#;
+	Test::new(sql).await?.expect_val("1")?;
 
 	Ok(())
 }
