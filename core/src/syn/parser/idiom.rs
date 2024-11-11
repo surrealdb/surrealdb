@@ -272,6 +272,10 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::All
 			}
+			t!("@") => {
+				self.pop_peek();
+				Part::RepeatRecurse
+			}
 			t!("{") => {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_curly_part(ctx)).await?
