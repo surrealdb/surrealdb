@@ -1,4 +1,5 @@
 use axum::extract::MatchedPath;
+use crate::cli::CF;
 use opentelemetry::{metrics::MetricsError, KeyValue};
 use pin_project_lite::pin_project;
 use std::{
@@ -180,6 +181,11 @@ impl HttpCallMetricTracker {
 		if let Some(host) = &self.host {
 			res.push(KeyValue::new("server.address", host.to_owned()));
 		}
+
+		let opt = CF.get().unwrap();
+		if let Some(namespace) = opt.namespace.clone() {
+			res.push(KeyValue::new("namespace", namespace));
+		};
 
 		res
 	}
