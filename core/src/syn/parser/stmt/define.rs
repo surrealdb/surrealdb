@@ -238,6 +238,7 @@ impl Parser<'_> {
 				}
 				t!("ROLES") => {
 					self.pop_peek();
+					let mut roles = Vec::new();
 					loop {
 						let token = self.peek();
 						let role = self.next_token_value::<Ident>()?;
@@ -248,9 +249,10 @@ impl Parser<'_> {
 						if !matches!(role.to_lowercase().as_str(), "viewer" | "editor" | "owner") {
 							unexpected!(self, token, "an existent role");
 						}
-						res.roles.push(role);
+						roles.push(role);
 
 						if !self.eat(t!(",")) {
+							res.roles = roles;
 							break;
 						}
 					}
