@@ -45,7 +45,7 @@ pub static RPC_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(||
 fn otel_common_attrs() -> Vec<KeyValue> {
 	let opt = CF.get().unwrap();
 	let mut common = vec![KeyValue::new("rpc.service", "surrealdb")];
-	if let Some(namespace) = opt.namespace.clone() {
+	if let Some(namespace) = opt.metrics_namespace.clone() {
 		common.push(KeyValue::new("namespace", namespace));
 	};
 	common

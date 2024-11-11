@@ -183,7 +183,7 @@ impl HttpCallMetricTracker {
 		}
 
 		let opt = CF.get().unwrap();
-		if let Some(namespace) = opt.namespace.clone() {
+		if let Some(namespace) = opt.metrics_namespace.clone() {
 			res.push(KeyValue::new("namespace", namespace));
 		};
 

@@ -172,7 +172,7 @@ pub async fn init(
 		changefeed_gc_interval,
 		no_banner,
 		no_identification_headers,
-		namespace,
+		metrics_namespace,
 		..
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
@@ -212,7 +212,7 @@ pub async fn init(
 		engine,
 		crt,
 		key,
-		namespace,
+		metrics_namespace,
 	};
 	// Setup the command-line options
 	let _ = CF.set(config);

@@ -16,5 +16,5 @@ pub struct Config {
 	pub key: Option<PathBuf>,
 	pub engine: EngineOptions,
 	pub no_identification_headers: bool,
-	pub namespace: Option<String>,
+	pub metrics_namespace: Option<String>,
 }
