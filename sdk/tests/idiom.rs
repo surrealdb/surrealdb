@@ -169,3 +169,98 @@ async fn idiom_optional_after_value_should_pass_through() -> Result<(), Error> {
 		)?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn idiom_recursion() -> Result<(), Error> {
+	let sql = r#"
+		INSERT INTO person [
+			{ id: person:tobie, name: 'Tobie' },
+			{ id: person:jaime, name: 'Jaime' },
+			{ id: person:micha, name: 'Micha' },
+			{ id: person:john, name: 'John' },
+			{ id: person:mary, name: 'Mary' },
+			{ id: person:tim, name: 'Tim' },
+		];
+
+		INSERT RELATION INTO knows [
+			{ id: knows:1, in: person:tobie, out: person:jaime },
+			{ id: knows:2, in: person:tobie, out: person:micha },
+			{ id: knows:3, in: person:micha, out: person:john },
+			{ id: knows:4, in: person:jaime, out: person:mary },
+			{ id: knows:5, in: person:mary, out: person:tim },
+		];
+
+		SELECT name, @({1}->knows->person).name AS names_1sts FROM person;
+		SELECT name, @({2}->knows->person).name AS names_2nds FROM person;
+		SELECT name, @({3}->knows->person).name AS names_3rds FROM person;
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val(
+			"[
+			{ id: person:tobie, name: 'Tobie' },
+			{ id: person:jaime, name: 'Jaime' },
+			{ id: person:micha, name: 'Micha' },
+			{ id: person:john, name: 'John' },
+			{ id: person:mary, name: 'Mary' },
+			{ id: person:tim, name: 'Tim' },
+		]",
+		)?
+		.expect_val(
+			"[
+			{ id: knows:1, in: person:tobie, out: person:jaime },
+			{ id: knows:2, in: person:tobie, out: person:micha },
+			{ id: knows:3, in: person:micha, out: person:john },
+			{ id: knows:4, in: person:jaime, out: person:mary },
+			{ id: knows:5, in: person:mary, out: person:tim },
+		]",
+		)?
+		.expect_val(
+			"[
+			{ name: 'Jaime', names_1sts: ['Mary'] },
+			{ name: 'John', names_1sts: NONE },
+			{ name: 'Mary', names_1sts: ['Tim'] },
+			{ name: 'Micha', names_1sts: ['John'] },
+			{ name: 'Tim', names_1sts: NONE },
+			{ name: 'Tobie', names_1sts: ['Jaime', 'Micha'] },
+		]",
+		)?
+		.expect_val(
+			"[
+			{ name: 'Jaime', names_2nds: ['Tim'] },
+			{ name: 'John', names_2nds: NONE },
+			{ name: 'Mary', names_2nds: NONE },
+			{ name: 'Micha', names_2nds: NONE },
+			{ name: 'Tim', names_2nds: NONE },
+			{ name: 'Tobie', names_2nds: ['Mary', 'John'] },
+		]",
+		)?
+		.expect_val(
+			"[
+			{ name: 'Jaime', names_3rds: NONE },
+			{ name: 'John', names_3rds: NONE },
+			{ name: 'Mary', names_3rds: NONE },
+			{ name: 'Micha', names_3rds: NONE },
+			{ name: 'Tim', names_3rds: NONE },
+			{ name: 'Tobie', names_3rds: ['Tim'] },
+		]",
+		)?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn idiom_recursion_limits() -> Result<(), Error> {
+	let sql = r#"
+		a:1.{0..};
+		a:1.{1..};
+		a:1.{..256};
+		a:1.{..257};
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_error("Found 0 for bound but expected at least 1.")?
+		.expect_error("Exceeded the idiom recursion limit of 256.")?
+		.expect_val("a:1")?
+		.expect_error("Found 257 for bound but expected 256 at most.")?;
+	Ok(())
+}
