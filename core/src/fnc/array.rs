@@ -587,12 +587,10 @@ pub async fn reduce(
 				let Some(mut accum) = iter.next() else {
 					return Ok(Value::None);
 				};
-				let mut idx = 0;
-				for val in iter {
+				for (idx, val) in iter.enumerate() {
 					let fnc =
 						Function::Anonymous(mapper.clone().into(), vec![accum, val, idx.into()]);
 					accum = fnc.compute(stk, ctx, opt, doc).await?;
-					idx += 1;
 				}
 				Ok(accum)
 			}
