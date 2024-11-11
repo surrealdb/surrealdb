@@ -317,7 +317,7 @@ pub async fn db_access(
 						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								roles.iter().map(Role::from).collect(),
+								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
 								Level::Database(ns, db),
 							)));
 						}
@@ -377,7 +377,7 @@ pub async fn db_user(
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
+			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -506,7 +506,7 @@ pub async fn ns_access(
 						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								roles.iter().map(Role::from).collect(),
+								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
 								Level::Namespace(ns),
 							)));
 						}
@@ -557,7 +557,7 @@ pub async fn ns_user(
 			session.tk = Some((&val).into());
 			session.ns = Some(ns.to_owned());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
+			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -602,7 +602,7 @@ pub async fn root_user(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Root).into());
+			session.au = Arc::new((&u, Level::Root).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -727,7 +727,7 @@ pub async fn root_access(
 						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								roles.iter().map(Role::from).collect(),
+								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
 								Level::Root,
 							)));
 						}
