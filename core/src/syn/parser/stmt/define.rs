@@ -238,9 +238,21 @@ impl Parser<'_> {
 				}
 				t!("ROLES") => {
 					self.pop_peek();
-					res.roles = vec![self.next_token_value()?];
-					while self.eat(t!(",")) {
-						res.roles.push(self.next_token_value()?);
+					loop {
+						let token = self.peek();
+						let role = self.next_token_value::<Ident>()?;
+						// NOTE(gguillemas): This hardcoded list is a temporary fix in order
+						// to avoid making breaking changes to the DefineUserStatement structure
+						// while still providing parsing feedback to users referencing unexistent roles.
+						// This list should be removed once arbitrary roles can be defined by users.
+						if !matches!(role.to_lowercase().as_str(), "viewer" | "editor" | "owner") {
+							unexpected!(self, token, "an existent role");
+						}
+						res.roles.push(role);
+
+						if !self.eat(t!(",")) {
+							break;
+						}
 					}
 				}
 				t!("DURATION") => {

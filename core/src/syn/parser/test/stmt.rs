@@ -280,7 +280,7 @@ fn parse_define_user() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES foo, bar"#
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES editor, OWNER"#
 		)
 		.unwrap();
 
@@ -291,7 +291,14 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.hash, "hunter2".to_owned());
-		assert_eq!(stmt.roles, vec![Ident("foo".to_string()), Ident("bar".to_string())]);
+		assert_eq!(
+			stmt.roles,
+			vec![
+				Ident("Viewer".to_string()),
+				Ident("editor".to_string()),
+				Ident("OWNER".to_string())
+			]
+		);
 		assert_eq!(
 			stmt.duration,
 			UserDuration {
@@ -357,6 +364,30 @@ fn parse_define_user() {
 		assert!(
 			res.is_err(),
 			"Unexpected successful parsing of user with none token duration: {:?}",
+			res
+		);
+	}
+	// With nonexistent role.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES foo"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of user with nonexistent role: {:?}",
+			res
+		);
+	}
+	// With existent and nonexistent roles.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES Viewer, foo"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of user with nonexistent role: {:?}",
 			res
 		);
 	}
