@@ -5856,7 +5856,7 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "surreal"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "argon2",
  "assert_fs",
@@ -5919,7 +5919,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.5.5"
+version = "1.5.6"
 dependencies = [
  "async-channel 1.9.0",
  "bincode",
@@ -5951,8 +5951,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "surrealdb-core 1.5.3",
- "surrealdb-core 2.0.0-1.5.5",
+ "surrealdb-core 1.5.6",
+ "surrealdb-core 2.0.0-1.5.6",
  "temp-dir",
  "test-log",
  "thiserror",
@@ -5974,9 +5974,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "1.5.3"
+version = "1.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccd148e590f41ee5beb013b0f201c66aeffb009a1e436126a741cc53ccd36d60"
+checksum = "cd916d013234ff20ea94196a98a0f9d1f1cd85501a5b01c199cd24fa8168afb7"
 dependencies = [
  "addr",
  "any_ascii",
@@ -6057,7 +6057,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "2.0.0-1.5.5"
+version = "2.0.0-1.5.6"
 dependencies = [
  "addr",
  "ahash 0.8.11",
