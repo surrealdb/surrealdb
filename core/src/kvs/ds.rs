@@ -1138,6 +1138,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[allow(unreachable_code)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
@@ -1196,7 +1197,6 @@ impl Datastore {
 
 		let (send, recv): (Sender<LqEntry>, Receiver<LqEntry>) = channel::bounded(LQ_CHANNEL_SIZE);
 
-		#[allow(unreachable_code)]
 		Ok(Transaction {
 			inner,
 			cache: super::cache::Cache::default(),
