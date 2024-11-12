@@ -114,6 +114,7 @@ compile_error!(
 );
 
 #[macro_use]
+#[allow(unused_imports)] // Not used by the HTTP engine
 extern crate tracing;
 
 mod api;
