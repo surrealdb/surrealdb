@@ -5951,7 +5951,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "surrealdb-core 1.5.3",
+ "surrealdb-core 1.5.6",
  "surrealdb-core 2.0.0-1.5.5",
  "temp-dir",
  "test-log",
@@ -5974,9 +5974,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "1.5.3"
+version = "1.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccd148e590f41ee5beb013b0f201c66aeffb009a1e436126a741cc53ccd36d60"
+checksum = "cd916d013234ff20ea94196a98a0f9d1f1cd85501a5b01c199cd24fa8168afb7"
 dependencies = [
  "addr",
  "any_ascii",
