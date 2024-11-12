@@ -742,12 +742,9 @@ impl Datastore {
 		let hbs = tx.scan_hb(&end_of_time, NON_PAGED_BATCH_SIZE).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
-			match unreachable_nodes.remove(&hb.nd.to_string()) {
-				None => {
-					// Didnt exist in cluster and should be deleted
-					tx.del_hb(hb.hb, hb.nd).await?;
-				}
-				Some(_) => {}
+			if unreachable_nodes.remove(&hb.nd.to_string()).is_none() {
+				// Didnt exist in cluster and should be deleted
+				tx.del_hb(hb.hb, hb.nd).await?;
 			}
 		}
 		// Remove unreachable nodes
@@ -1303,6 +1300,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[allow(unreachable_code)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
@@ -1362,7 +1360,6 @@ impl Datastore {
 		let (send, recv): (Sender<TrackedResult>, Receiver<TrackedResult>) =
 			channel::bounded(LQ_CHANNEL_SIZE);
 
-		#[allow(unreachable_code)]
 		Ok(Transaction {
 			inner,
 			cache: super::cache::Cache::default(),
