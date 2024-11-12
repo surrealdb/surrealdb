@@ -13,14 +13,14 @@ use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
 use crate::sql::{Edges, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
+use async_channel::Sender;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use reblessive::TreeStack;
 use std::borrow::Cow;
 use std::ops::Bound;
 use std::vec;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::sync::mpsc::Sender;
 
 impl Iterable {
 	pub(super) async fn iterate(
@@ -376,9 +376,9 @@ pub(super) struct ParallelCollector(Sender<Collected>);
 #[cfg(not(target_arch = "wasm32"))]
 impl ParallelCollector {
 	pub(super) async fn process(
-		distinct: Option<AsyncDistinct>,
+		distinct: Option<&AsyncDistinct>,
 		pro: Processed,
-		chn: Sender<Processed>,
+		chn: &Sender<Processed>,
 	) -> Result<(), Error> {
 		if let Some(d) = distinct {
 			// If the record has already been processed, we can return
@@ -386,7 +386,7 @@ impl ParallelCollector {
 				return Ok(());
 			}
 		}
-		chn.send(pro).await.map_err(|e| Error::Channel(e.to_string()))?;
+		chn.send(pro).await?;
 		Ok(())
 	}
 }

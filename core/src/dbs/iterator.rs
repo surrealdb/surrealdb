@@ -4,6 +4,7 @@ use crate::ctx::{Canceller, MutableContext};
 use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::Plan;
+use crate::dbs::processor::Collected;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::processor::ParallelCollector;
 use crate::dbs::result::Results;
@@ -22,18 +23,11 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{Id, IdRange};
 #[cfg(not(target_arch = "wasm32"))]
-use futures::stream;
-#[cfg(not(target_arch = "wasm32"))]
-use futures::stream::StreamExt;
+use async_channel::{bounded, Receiver, Sender};
 use reblessive::tree::Stk;
-#[cfg(not(target_arch = "wasm32"))]
 use reblessive::TreeStack;
 use std::mem;
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::sync::mpsc::channel;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio_stream::wrappers::ReceiverStream;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -590,87 +584,123 @@ impl Iterator {
 			}
 			// Run statements in parallel
 			true => {
-				let max_concurrent_tasks = *crate::cnf::MAX_CONCURRENT_TASKS;
 				// If any iterator requires distinct, we need to create a global distinct instance
 				let distinct = AsyncDistinct::new(ctx);
+				// Get the maximum number of threads
+				let max_threads = num_cpus::get();
+				// Get the maximum number of concurrent tasks
+				let max_concurrent_tasks = *crate::cnf::MAX_CONCURRENT_TASKS;
 				// Create a new executor
+				let exe = async_executor::Executor::new();
 				// Take all of the iterator values
 				let vals = mem::take(&mut self.entries);
-				// Create an unbounded channel
-				let (chn, collected) = channel(max_concurrent_tasks);
+				// Create a channel to shutdown
+				let (end, exit) = tokio::sync::oneshot::channel();
+				// Create an channel for collection
+				let (chn, collected) = bounded(max_concurrent_tasks);
 				// Create an async closure to collect key/value
-				let acollect = async {
-					// Process all prepared values
-					stream::iter(vals)
-						.map(|v| async {
-							let chn = chn.clone();
-							let opt = opt.clone();
-							v.channel(ctx, &opt, chn).await
-						})
-						.buffer_unordered(max_concurrent_tasks)
-						.count()
-						.await;
-					// Drop the uncloned channel instance
-					drop(chn);
-				};
+				let collecting = Self::collecting(ctx, &opt, &exe, vals, chn);
 				// Create an async closure to process key/values
-				let (chn, docs) = channel(max_concurrent_tasks);
-				let adocs = async {
-					// Process all prepared values
-					ReceiverStream::new(collected)
-						.map(|coll| async {
-							// Clone the results channel for the async task
-							let chn = chn.clone();
-							let opt = opt.clone();
-							// Distinct is passed only for iterators that really requires it
-							let distinct = distinct.clone();
-							// Take the transaction
-							let tx = ctx.tx();
-							let pro = coll.process(&opt, &tx).await?;
-							ParallelCollector::process(distinct, pro, chn).await?;
-							Ok::<(), Error>(())
-						})
-						.buffer_unordered(max_concurrent_tasks)
-						.count()
-						.await;
-					// Drop the uncloned channel instance
-					drop(chn);
-				};
+				let (chn, docs) = bounded(max_concurrent_tasks);
+				let processing =
+					Self::processing(ctx, &opt, &exe, max_threads, distinct, collected, chn);
 				// Create an unbounded channel
-				let (chn, mut vals) = channel(max_concurrent_tasks);
+				let (chn, vals) = bounded(max_concurrent_tasks);
 				// Create an async closure for received values
-				let avals = async {
-					// Process all received values
-					ReceiverStream::new(docs)
-						.map(|pro| async {
-							// Clone the results channel for the async task
-							let chn = chn.clone();
-							let opt = opt.clone();
-							// Spawn an asynchronous task to process the received value
-							let mut stack = TreeStack::new();
-							stack
-								.enter(|stk| Document::compute(stk, ctx, &opt, stm, chn, pro))
-								.finish()
-								.await
-						})
-						.buffer_unordered(max_concurrent_tasks)
-						.count()
-						.await;
-					// Drop the uncloned channel instance
-					drop(chn);
-				};
+				let computing = Self::computing(ctx, &opt, stm, &exe, max_threads, docs, chn);
 				// Create an async closure to process results
-				let aproc = async {
+				let resulting = async {
 					// Process all processed values
-					while let Some(r) = vals.recv().await {
+					while let Ok(r) = vals.recv().await {
 						self.result(stk, ctx, &opt, stm, r).await;
 					}
+					// Shutdown the executor
+					let _ = end.send(());
 				};
+				// Run all executor tasks
+				let fut = exe.run(exit);
 				// Wait for all closures
-				futures::join!(acollect, adocs, avals, aproc);
+				let r = futures::join!(collecting, processing, computing, resulting, fut);
+				let (_, _, _, _) = (r.0, r.1, r.2, r.3);
 				// Everything processed ok
+
 				Ok(())
 			}
+		}
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
+	async fn collecting<'a>(
+		ctx: &'a Context,
+		opt: &'a Options,
+		exe: &async_executor::Executor<'a>,
+		vals: Vec<Iterable>,
+		chn: Sender<Collected>,
+	) {
+		// Process all prepared values
+		for v in vals {
+			let chn = chn.clone();
+			let proc = v.channel(ctx, opt, chn);
+			exe.spawn(proc).detach();
+		}
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
+	async fn processing<'a>(
+		ctx: &'a Context,
+		opt: &'a Options,
+		exe: &async_executor::Executor<'a>,
+		max_threads: usize,
+		distinct: Option<AsyncDistinct>,
+		collected: Receiver<Collected>,
+		chn: Sender<Processed>,
+	) {
+		for _ in 0..max_threads {
+			let tx = ctx.tx();
+			let chn = chn.clone();
+			let collected = collected.clone();
+			let distinct = distinct.clone();
+			let process = async move {
+				while let Ok(coll) = collected.recv().await {
+					let pro = coll.process(opt, &tx).await?;
+					ParallelCollector::process(distinct.as_ref(), pro, &chn).await?;
+				}
+				Ok::<_, Error>(())
+			};
+			exe.spawn(process).detach();
+		}
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
+	async fn computing<'a>(
+		ctx: &'a Context,
+		opt: &'a Options,
+		stm: &'a Statement<'a>,
+		exe: &async_executor::Executor<'a>,
+		max_threads: usize,
+		docs: Receiver<Processed>,
+		chn: Sender<Result<Value, Error>>,
+	) {
+		for _ in 0..max_threads {
+			let docs = docs.clone();
+			let chn = chn.clone();
+			let compute = async move {
+				let mut stack = TreeStack::new();
+				stack
+					.enter(|stk| async {
+						while let Ok(pro) = docs.recv().await {
+							// Clone the results channel for the async task
+							let chn = chn.clone();
+							// Spawn an asynchronous task to process the received value
+							Document::compute(stk, ctx, opt, stm, chn, pro).await?;
+						}
+						Ok::<(), Error>(())
+					})
+					.finish()
+					.await?;
+				Ok::<_, Error>(())
+			};
+			exe.spawn(compute).detach();
 		}
 	}
 
