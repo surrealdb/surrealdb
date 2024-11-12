@@ -11,7 +11,9 @@ use crate::idx::trees::store::IndexStores;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
+use crate::sql::part::Recurse;
 use crate::sql::value::Value;
+use crate::sql::Part;
 use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -19,7 +21,7 @@ use std::fmt::{self, Debug};
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use trice::Instant;
 #[cfg(feature = "http")]
@@ -71,6 +73,8 @@ pub struct MutableContext {
 	transaction: Option<Arc<Transaction>>,
 	// Does not read from parent `values`.
 	isolated: bool,
+	// Idiom recursion details
+	idiom_recursion: Option<(Arc<Mutex<i64>>, i64, Recurse, Vec<Part>)>,
 }
 
 impl Default for MutableContext {
@@ -123,6 +127,7 @@ impl MutableContext {
 			temporary_directory,
 			transaction: None,
 			isolated: false,
+			idiom_recursion: None,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -148,6 +153,7 @@ impl MutableContext {
 			temporary_directory: None,
 			transaction: None,
 			isolated: false,
+			idiom_recursion: None,
 		}
 	}
 
@@ -170,6 +176,7 @@ impl MutableContext {
 			transaction: parent.transaction.clone(),
 			isolated: false,
 			parent: Some(parent.clone()),
+			idiom_recursion: parent.idiom_recursion.clone(),
 		}
 	}
 	pub(crate) fn freeze(self) -> Context {
@@ -200,6 +207,7 @@ impl MutableContext {
 			transaction: parent.transaction.clone(),
 			isolated: true,
 			parent: Some(parent.clone()),
+			idiom_recursion: parent.idiom_recursion.clone(),
 		}
 	}
 
@@ -222,6 +230,7 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			parent: None,
+			idiom_recursion: from.idiom_recursion.clone(),
 		}
 	}
 
@@ -438,6 +447,39 @@ impl MutableContext {
 				Ok(())
 			}
 			_ => Err(Error::InvalidUrl(url.to_string())),
+		}
+	}
+
+	pub fn idiom_recursion(&self) -> Option<(&i64, &Recurse, &Vec<Part>)> {
+		match &self.idiom_recursion {
+			Some((_, i, r, n)) => Some((i, r, n)),
+			None => None,
+		}
+	}
+
+	pub fn start_idiom_recursion(&mut self, recurse: Recurse, next: Vec<Part>) {
+		self.idiom_recursion = Some((Arc::new(Mutex::new(0)), 0, recurse, next));
+	}
+
+	pub fn bump_idiom_recursion(&mut self) {
+		if let Some((i, mut local, recurse, next)) = self.idiom_recursion.clone() {
+			let mut lock = i.lock().unwrap();
+			
+			local += 1;
+			if *lock < local {
+				*lock = local;
+			}
+
+			drop(lock);
+
+			self.idiom_recursion = Some((i, local, recurse, next));
+		}
+	}
+
+	pub fn idiom_recursion_iterated(&self) -> Option<i64> {
+		match &self.idiom_recursion {
+			Some((i, _, _, _)) => Some(*i.lock().unwrap()),
+			None => None,
 		}
 	}
 }

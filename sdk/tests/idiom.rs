@@ -272,8 +272,26 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 			{ id: city:victoria,		name: 'Victoria' },
 		];
 
+		planet:earth.({1}.contains).name;
 		planet:earth.({2}.contains).name;
 		planet:earth.({3}.contains).name;
+		planet:earth.({4}.contains).name;
+
+		planet:earth.{1}.contains.@;
+		planet:earth.{2}.contains.@;
+		planet:earth.{3}.contains.@;
+		planet:earth.{1}.contains.@.name;
+		planet:earth.{2}.contains.@.name;
+		planet:earth.{3}.contains.@.name;
+
+		planet:earth.{1}.{ id, name, places: contains.@ };
+		planet:earth.{2}.{ id, name, places: contains.@ };
+		planet:earth.{3}.{ id, name, places: contains.@ };
+		planet:earth.{4}.{ id, name, places: contains.@ };
+		planet:earth.{..}.{ id, name, places: contains.@ };
+		planet:earth.{5..}.{ id, name, places: contains.@ };
+
+		planet:earth.{..}.{ id, name, places: contains.@.chain(|$v| $v ?? []) };
 	"#;
 	Test::new(sql)
 		.await?
@@ -299,6 +317,11 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 		]",
 		)?
 		.expect_val("[
+			'United States',
+			'Canada',
+		]",
+		)?
+		.expect_val("[
 			'California',
 			'Texas',
 			'Ontario',
@@ -314,7 +337,382 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 			'Ottowa',
 			'Vancouver',
 			'Victoria'
-		]")?;
+		]")?
+		.expect_val("[]")?
+		.expect_val("[
+			country:us,
+			country:canada,
+		]")?
+		.expect_val("[
+			state:california,
+			state:texas,
+			province:ontario,
+			province:bc,
+		]")?
+		.expect_val("[
+			city:los_angeles,
+			city:san_francisco,
+			city:houston,
+			city:dallas,
+			city:toronto,
+			city:ottawa,
+			city:vancouver,
+			city:victoria,
+		]")?
+		.expect_val("[
+			'United States',
+			'Canada',
+		]",
+		)?
+		.expect_val("[
+			'California',
+			'Texas',
+			'Ontario',
+			'British Columbia'
+		]",
+		)?
+		.expect_val("[
+			'Los Angeles',
+			'San Francisco',
+			'Houston',
+			'Dallas',
+			'Toronto',
+			'Ottowa',
+			'Vancouver',
+			'Victoria'
+		]")?
+		.expect_val("{
+			id: planet:earth,
+			name: 'Earth',
+			places: [
+				country:us,
+				country:canada
+			]
+		}",
+		)?
+		.expect_val("{
+			id: planet:earth,
+			name: 'Earth',
+			places: [
+				{
+					id: country:us,
+					name: 'United States',
+					places: [
+						state:california,
+						state:texas
+					]
+				},
+				{
+					id: country:canada,
+					name: 'Canada',
+					places: [
+						province:ontario,
+						province:bc
+					]
+				}
+			]
+		}",
+		)?
+		.expect_val("{
+			id: planet:earth,
+			name: 'Earth',
+			places: [
+				{
+					id: country:us,
+					name: 'United States',
+					places: [
+						{
+							id: state:california,
+							name: 'California',
+							places: [
+								city:los_angeles,
+								city:san_francisco
+							]
+						},
+						{
+							id: state:texas,
+							name: 'Texas',
+							places: [
+								city:houston,
+								city:dallas
+							]
+						}
+					]
+				},
+				{
+					id: country:canada,
+					name: 'Canada',
+					places: [
+						{
+							id: province:ontario,
+							name: 'Ontario',
+							places: [
+								city:toronto,
+								city:ottawa
+							]
+						},
+						{
+							id: province:bc,
+							name: 'British Columbia',
+							places: [
+								city:vancouver,
+								city:victoria
+							]
+						}
+					]
+				}
+			]
+		}")?
+		.expect_val("{
+			id: planet:earth,
+			name: 'Earth',
+			places: [
+				{
+					id: country:us,
+					name: 'United States',
+					places: [
+						{
+							id: state:california,
+							name: 'California',
+							places: [
+								{
+									id: city:los_angeles,
+									name: 'Los Angeles',
+									places: NONE
+								},
+								{
+									id: city:san_francisco,
+									name: 'San Francisco',
+									places: NONE
+								}
+							]
+						},
+						{
+							id: state:texas,
+							name: 'Texas',
+							places: [
+								{
+									id: city:houston,
+									name: 'Houston',
+									places: NONE
+								},
+								{
+									id: city:dallas,
+									name: 'Dallas',
+									places: NONE
+								}
+							]
+						}
+					]
+				},
+				{
+					id: country:canada,
+					name: 'Canada',
+					places: [
+						{
+							id: province:ontario,
+							name: 'Ontario',
+							places: [
+								{
+									id: city:toronto,
+									name: 'Toronto',
+									places: NONE
+								},
+								{
+									id: city:ottawa,
+									name: 'Ottowa',
+									places: NONE
+								}
+							]
+						},
+						{
+							id: province:bc,
+							name: 'British Columbia',
+							places: [
+								{
+									id: city:vancouver,
+									name: 'Vancouver',
+									places: NONE
+								},
+								{
+									id: city:victoria,
+									name: 'Victoria',
+									places: NONE
+								}
+							]
+						}
+					]
+				}
+			]
+		}",
+		)?
+		.expect_val("{
+			id: planet:earth,
+			name: 'Earth',
+			places: [
+				{
+					id: country:us,
+					name: 'United States',
+					places: [
+						{
+							id: state:california,
+							name: 'California',
+							places: [
+								{
+									id: city:los_angeles,
+									name: 'Los Angeles',
+									places: NONE
+								},
+								{
+									id: city:san_francisco,
+									name: 'San Francisco',
+									places: NONE
+								}
+							]
+						},
+						{
+							id: state:texas,
+							name: 'Texas',
+							places: [
+								{
+									id: city:houston,
+									name: 'Houston',
+									places: NONE
+								},
+								{
+									id: city:dallas,
+									name: 'Dallas',
+									places: NONE
+								}
+							]
+						}
+					]
+				},
+				{
+					id: country:canada,
+					name: 'Canada',
+					places: [
+						{
+							id: province:ontario,
+							name: 'Ontario',
+							places: [
+								{
+									id: city:toronto,
+									name: 'Toronto',
+									places: NONE
+								},
+								{
+									id: city:ottawa,
+									name: 'Ottowa',
+									places: NONE
+								}
+							]
+						},
+						{
+							id: province:bc,
+							name: 'British Columbia',
+							places: [
+								{
+									id: city:vancouver,
+									name: 'Vancouver',
+									places: NONE
+								},
+								{
+									id: city:victoria,
+									name: 'Victoria',
+									places: NONE
+								}
+							]
+						}
+					]
+				}
+			]
+		}",
+		)?
+		.expect_val("NONE")?
+		.expect_val("{
+			id: planet:earth,
+			name: 'Earth',
+			places: [
+				{
+					id: country:us,
+					name: 'United States',
+					places: [
+						{
+							id: state:california,
+							name: 'California',
+							places: [
+								{
+									id: city:los_angeles,
+									name: 'Los Angeles',
+									places: []
+								},
+								{
+									id: city:san_francisco,
+									name: 'San Francisco',
+									places: []
+								}
+							]
+						},
+						{
+							id: state:texas,
+							name: 'Texas',
+							places: [
+								{
+									id: city:houston,
+									name: 'Houston',
+									places: []
+								},
+								{
+									id: city:dallas,
+									name: 'Dallas',
+									places: []
+								}
+							]
+						}
+					]
+				},
+				{
+					id: country:canada,
+					name: 'Canada',
+					places: [
+						{
+							id: province:ontario,
+							name: 'Ontario',
+							places: [
+								{
+									id: city:toronto,
+									name: 'Toronto',
+									places: []
+								},
+								{
+									id: city:ottawa,
+									name: 'Ottowa',
+									places: []
+								}
+							]
+						},
+						{
+							id: province:bc,
+							name: 'British Columbia',
+							places: [
+								{
+									id: city:vancouver,
+									name: 'Vancouver',
+									places: []
+								},
+								{
+									id: city:victoria,
+									name: 'Victoria',
+									places: []
+								}
+							]
+						}
+					]
+				}
+			]
+		}",
+		)?;
 	Ok(())
 }
 

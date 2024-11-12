@@ -206,6 +206,30 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 
 // ------------------------------
 
+pub trait SliceRepeatRecurse<'a> {
+	fn slice_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])>;
+}
+
+impl<'a> SliceRepeatRecurse<'a> for &'a [Part] {
+	fn slice_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])> {
+		match self.iter().position(|p| matches!(p, Part::RepeatRecurse)) {
+			None => None,
+			Some(i) => Some((&self[..=i], &self[(i + 1)..])),
+		}
+	}
+}
+
+impl<'a> SliceRepeatRecurse<'a> for &'a Idiom {
+	fn slice_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])> {
+		match self.iter().position(|p| matches!(p, Part::RepeatRecurse)) {
+			None => None,
+			Some(i) => Some((&self[..=i], &self[(i + 1)..])),
+		}
+	}
+}
+
+// ------------------------------
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::ops::Deref;
 
-use crate::cnf::{IDIOM_RECURSION_LIMIT, MAX_COMPUTATION_DEPTH};
-use crate::ctx::Context;
+use crate::cnf::MAX_COMPUTATION_DEPTH;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -11,7 +11,7 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::{Next, NextMethod};
+use crate::sql::part::{Next, NextMethod, SliceRepeatRecurse};
 use crate::sql::part::{Part, Skip};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
@@ -20,16 +20,7 @@ use crate::sql::value::{Value, Values};
 use crate::sql::Function;
 use reblessive::tree::Stk;
 
-// Method used to check if the value
-// inside a recursed idiom path is final
-fn is_final(v: &Value) -> bool {
-	match v {
-		Value::None => true,
-		Value::Null => true,
-		Value::Array(v) => v.is_empty() || v.is_all_none_or_null(),
-		_ => false,
-	}
-}
+use super::idiom_recursion::compute_idiom_recursion;
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -54,58 +45,32 @@ impl Value {
 				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 			}
 			// The knowledge of the value is not relevant to Part::Recurse
-			Some(Part::Recurse(v)) => {
-				// Find minimum and maximum amount of iterations
-				let min = v.min()?;
-				let max = v.max()?;
-				let limit = *IDIOM_RECURSION_LIMIT as i64;
-
-				// Exclude the recurse part from the path
-				let next = path.next();
-
-				// Counter and current value
-				let mut i = 0;
-				let mut current = self.clone();
-
-				loop {
-					// Bump iteration
-					i += 1;
-
-					// Obtain the processed value for this iteration
-					let v = stk.run(|stk| current.get(stk, ctx, opt, doc, next)).await?.flatten();
-
-					// Process the value for this iteration
-					match v {
-						v if is_final(&v) => {
-							return Ok(match i <= min {
-								// If the value is final, and we reached the minimum
-								// amount of required iterations, we can return the value
-								true => Value::None,
-
-								// If we have not yet reached the minimum amount of
-								// required iterations it's a dead end, and we return NONE
-								false => current,
-							});
-						}
-						v => {
-							// Otherwise we can update the value and
-							// continue to the next iteration.
-							current = v.to_owned();
-						}
-					};
-
-					// If we have reached the maximum amount of iterations,
-					// we can return the current value and break the loop.
-					if let Some(max) = max {
-						if i >= max {
-							return Ok(current);
-						}
-					} else if i >= limit {
-						return Err(Error::IdiomRecursionLimitExceeded {
-							limit,
-						});
-					}
+			Some(Part::Recurse(recurse)) => {
+				if ctx.idiom_recursion().is_some() {
+					return Err(Error::Unreachable("No nested recursion".into()));
 				}
+
+				let next = path.next();
+				let (next, after) = match next.slice_repeat_recurse() {
+					Some((next, after)) => (next, Some(after)),
+					_ => (next, None)
+				};
+
+				let mut recurse_ctx = MutableContext::new(ctx);
+				recurse_ctx.start_idiom_recursion(recurse.to_owned(), Vec::from(next));
+				let recurse_ctx = recurse_ctx.freeze();
+
+				let v = compute_idiom_recursion(stk, &recurse_ctx, opt, doc, self, false).await?;
+
+				match after {
+					Some(after) => stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await,
+					_ => Ok(v)
+				}
+			}
+			// The knowledge of the value is not relevant to Part::Recurse
+			Some(Part::RepeatRecurse) => {
+				let v = compute_idiom_recursion(stk, ctx, opt, doc, &self.clone().flatten(), true).await?;
+				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 			}
 			Some(Part::Doc) => {
 				let v = match doc {

@@ -34,3 +34,4 @@ mod replace;
 mod rid;
 mod set;
 mod walk;
+pub(crate) mod idiom_recursion;
