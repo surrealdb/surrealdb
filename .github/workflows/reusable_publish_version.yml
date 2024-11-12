@@ -180,7 +180,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ inputs.rust_version }}
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
