@@ -324,7 +324,35 @@ impl Parser<'_> {
 			let part = match self.peek_kind() {
 				t!(":") => {
 					self.pop_peek();
-					DestructurePart::Aliased(field, self.parse_local_idiom(ctx).await?)
+					let start = match self.peek_kind() {
+						TokenKind::Identifier => Part::Field(self.next_token_value()?),
+						t!("->") => {
+							self.pop_peek();
+							let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
+							Part::Graph(graph)
+						}
+						found @ t!("<") => match self.peek_whitespace1().kind {
+							t!("-") => {
+								self.pop_peek();
+								self.pop_peek();
+								let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
+								Part::Graph(graph)
+							},
+							t!("->") => {
+								self.pop_peek();
+								self.pop_peek();
+								let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
+								Part::Graph(graph)
+							}
+							_ => {
+								bail!("Unexpected token `{}` expected an identifier, `->`, `<-` or `<->`", found, @self.recent_span());
+							}
+						}
+						found => {
+							bail!("Unexpected token `{}` expected an identifier, `->`, `<-` or `<->`", found, @self.recent_span());
+						}
+					};
+					DestructurePart::Aliased(field, self.parse_remaining_idiom(ctx, vec![start]).await?)
 				}
 				t!(".") => {
 					self.pop_peek();
