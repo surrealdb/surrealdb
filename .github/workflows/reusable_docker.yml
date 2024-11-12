@@ -1,6 +1,10 @@
 on:
   workflow_call:
     inputs:
+      environment:
+        required: true
+        type: string
+        description: "The name of this release environment. It can be a 'nightly', 'beta' or 'stable'"
       git-ref:
         required: true
         type: string
@@ -123,6 +127,18 @@ jobs:
           username: ${{ secrets.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PASS }}
 
+      - name: Get tag info
+        id: tags
+        run: |
+          set -x
+          if [[ "${{ inputs.environment }}" == "stable" ]]; then
+            major=$(echo ${{ inputs.tag-prefix }} | tr "." "\n" | sed -n 1p)
+            minor=$(echo ${{ inputs.tag-prefix }} | tr "." "\n" | sed -n 2p)
+            echo "tags=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}.${minor}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
+          else
+            echo "tags=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
+          fi
+
       - name: Push to DockerHub
         uses: docker/build-push-action@v5
         if: ${{ inputs.push }}
@@ -132,7 +148,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           file: docker/Dockerfile
           target: ${{ matrix.build-target }}
-          tags: surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }}
+          tags: ${{ steps.tags.outputs.tags }}
           build-args: |
             ARTIFACT_PREFIX=surreal-${{ inputs.tag-prefix }}
 
