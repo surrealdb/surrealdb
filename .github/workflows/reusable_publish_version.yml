@@ -93,88 +93,17 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
-
-          if [[ $currentVersion == *"-beta"* ]]; then
-            git push origin --delete releases/stable || true
-            git checkout -b releases/stable
-            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            version=${major}.${minor}.0
-
-            # Bump the crate version
-            sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
-            sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
-            sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
-
-            # Update dependency versions
-            sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"${major}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" lib/Cargo.toml
-
-            # Update Cargo.lock without updating dependency versions
-            cargo check --no-default-features --features storage-mem
-
-            # Commit changes
-            git commit -am "Prepare v${version} release"
-          else
-            version=${currentVersion}
-          fi
+          version=$(taplo get -f Cargo.toml "package.version")
 
           # Create the tag
           git tag -a v${version} -m "Release ${version}" || true
 
-      - name: Create or patch beta branch
-        if: ${{ inputs.environment == 'beta' }}
-        run: |
-          set -x
-
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
-
-          if [[ $currentVersion == *"-beta"* ]]; then
-            if [[ "${{ inputs.bump-version }}" == "true" ]]; then
-              major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-              minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-              patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
-              betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-              betaVersion=${major}.${minor}.${patchAndMeta}.$(($betaNum + 1))
-            else
-              betaVersion=$currentVersion
-            fi
-
-            # Update dependency versions
-            sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${betaVersion}\"#" lib/Cargo.toml
-          else
-            git checkout -b releases/beta
-            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            betaVersion=${major}.${minor}.0-beta.1
-
-            # Update dependency versions
-            sed -i "s#surrealdb = { version = \"${major}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${betaVersion}\"#" lib/Cargo.toml
-          fi
-
-          # Bump the crate version
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"2.0.0-${betaVersion}\"#" core/Cargo.toml
-
-          # Update Cargo.lock without updating dependency versions
-          cargo check --no-default-features --features storage-mem
-
-          # Commit changes
-          git commit -am "Prepare v${betaVersion} release" || true
-
-          # Create the tag
-          git tag -a v${betaVersion} -m "Release ${betaVersion}" || true
-
       - name: Push changes
-        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'stable') }}
+        if: ${{ inputs.publish }}
         run: git push
 
       - name: Push tag
-        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'stable') }}
+        if: ${{ inputs.publish }}
         run: git push --tags || true
 
       - name: Set outputs
@@ -184,22 +113,14 @@ jobs:
 
           version=$(taplo get -f Cargo.toml "package.version")
 
-          if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "stable")  ]]; then
+          if [[ "${{ inputs.publish }}" == "true"  ]]; then
             echo "git-ref=v${version}" >> $GITHUB_OUTPUT
           else
             echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
           fi
 
-          if [[ "${{ inputs.environment }}" == "nightly" ]]; then
-            echo "name=${{ inputs.environment }}" >> $GITHUB_OUTPUT
-
-            date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
-            rev=$(git rev-parse --short HEAD)
-            echo "build-metadata=${date}.${rev}" >> $GITHUB_OUTPUT
-          else
-            echo "name=v${version}" >> $GITHUB_OUTPUT
-            echo "build-metadata=" >> $GITHUB_OUTPUT
-          fi
+          echo "name=v${version}" >> $GITHUB_OUTPUT
+          echo "build-metadata=" >> $GITHUB_OUTPUT
 
   test:
     name: Test
@@ -581,63 +502,6 @@ jobs:
           git_tag_enable = false
           EOF
 
-      - name: Patch beta crate version
-        if: ${{ inputs.environment == 'beta' }}
-        run: |
-          set -x
-
-          # Derive crate version
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
-          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-          betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-          version=${major}.${minor}.$(($betaNum - 1))
-
-          # Update crate version
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" lib/Cargo.toml
-
-      - name: Patch nightly crate version
-        if: ${{ inputs.environment == 'nightly' }}
-        run: |
-          # Get the date of the last commit
-          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
-
-          # Derive crate version
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
-          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-          # This sets the nightly version to something like `1.3.20231117`
-          version=${major}.${minor}.${date}
-
-          # Update the version to a nightly one
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" lib/Cargo.toml
-
-      - name: Patch crate name and description
-        if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
-        run: |
-          set -x
-
-          # Patch crate name
-          sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" lib/Cargo.toml
-          sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" core/Cargo.toml
-
-          # Patch lib dependency
-          sed -i "s#package = \"surrealdb-core\"#package = \"surrealdb-core-${{ inputs.environment }}\"#" lib/Cargo.toml
-
-          # Patch the description
-          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" lib/Cargo.toml
-          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb-core crate\"#" core/Cargo.toml
-
-          # Temporarily commit patches
-          # These should not be pushed back to the repo
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git commit -am "Name and version patches"
-
       - name: Publish the crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -691,6 +555,7 @@ jobs:
     needs: [ prepare-vars, publish ]
     uses: ./.github/workflows/reusable_docker.yml
     with:
+      environment: ${{ inputs.environment }}
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
       tag-prefix: ${{ needs.prepare-vars.outputs.name }}
       latest: ${{ inputs.latest }}
