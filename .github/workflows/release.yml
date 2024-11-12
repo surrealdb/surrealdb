@@ -10,7 +10,7 @@ on:
       branch:
         required: true
         type: string
-        description: "The github branch of this release. Should be 'releases/beta' or 'patches/x.y'"
+        description: "The github branch of this release."
         default: 1.x
       publish:
         required: false
