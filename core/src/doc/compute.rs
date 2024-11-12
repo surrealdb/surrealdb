@@ -17,7 +17,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-		chn: Sender<Result<Value, Error>>,
+		chn: &Sender<Result<Value, Error>>,
 		mut pro: Processed,
 	) -> Result<(), Error> {
 		// Whether we are retrying

@@ -76,6 +76,7 @@ dashmap = "5.5.3"
 derive = { version = "0.12.0", package = "surrealdb-derive" }
 deunicode = "1.4.1"
 dmp = "0.2.0"
+easy-parallel = "3.3.1"
 ext-sort = { version = "^0.1.4", optional = true }
 foundationdb = { version = "0.9.0", default-features = false, features = [
     "embedded-fdb-include",

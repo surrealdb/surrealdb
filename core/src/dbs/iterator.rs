@@ -22,10 +22,18 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{Id, IdRange};
+use async_channel::unbounded;
 #[cfg(not(target_arch = "wasm32"))]
 use async_channel::{bounded, Receiver, Sender};
+#[cfg(not(target_arch = "wasm32"))]
+use async_executor::Executor;
+use easy_parallel::Parallel;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::executor::block_on;
 use reblessive::tree::Stk;
 use reblessive::TreeStack;
+use std::future::Future;
+#[cfg(not(target_arch = "wasm32"))]
 use std::mem;
 use std::sync::Arc;
 
@@ -591,11 +599,10 @@ impl Iterator {
 				// Get the maximum number of concurrent tasks
 				let max_concurrent_tasks = *crate::cnf::MAX_CONCURRENT_TASKS;
 				// Create a new executor
-				let exe = async_executor::Executor::new();
+				let exe = Executor::new();
+				let (signal, shutdown) = unbounded::<()>();
 				// Take all of the iterator values
 				let vals = mem::take(&mut self.entries);
-				// Create a channel to shutdown
-				let (end, exit) = tokio::sync::oneshot::channel();
 				// Create an channel for collection
 				let (chn, collected) = bounded(max_concurrent_tasks);
 				// Create an async closure to collect key/value
@@ -614,16 +621,15 @@ impl Iterator {
 					while let Ok(r) = vals.recv().await {
 						self.result(stk, ctx, &opt, stm, r).await;
 					}
-					// Shutdown the executor
-					let _ = end.send(());
 				};
-				// Run all executor tasks
-				let fut = exe.run(exit);
-				// Wait for all closures
-				let r = futures::join!(collecting, processing, computing, resulting, fut);
-				let (_, _, _, _) = (r.0, r.1, r.2, r.3);
+				Self::execute(
+					max_threads,
+					signal,
+					shutdown,
+					&exe,
+					(collecting, processing, computing, resulting),
+				);
 				// Everything processed ok
-
 				Ok(())
 			}
 		}
@@ -633,11 +639,10 @@ impl Iterator {
 	async fn collecting<'a>(
 		ctx: &'a Context,
 		opt: &'a Options,
-		exe: &async_executor::Executor<'a>,
+		exe: &Executor<'a>,
 		vals: Vec<Iterable>,
 		chn: Sender<Collected>,
 	) {
-		// Process all prepared values
 		for v in vals {
 			let chn = chn.clone();
 			let proc = v.channel(ctx, opt, chn);
@@ -649,7 +654,7 @@ impl Iterator {
 	async fn processing<'a>(
 		ctx: &'a Context,
 		opt: &'a Options,
-		exe: &async_executor::Executor<'a>,
+		exe: &Executor<'a>,
 		max_threads: usize,
 		distinct: Option<AsyncDistinct>,
 		collected: Receiver<Collected>,
@@ -676,7 +681,7 @@ impl Iterator {
 		ctx: &'a Context,
 		opt: &'a Options,
 		stm: &'a Statement<'a>,
-		exe: &async_executor::Executor<'a>,
+		exe: &Executor<'a>,
 		max_threads: usize,
 		docs: Receiver<Processed>,
 		chn: Sender<Result<Value, Error>>,
@@ -689,10 +694,8 @@ impl Iterator {
 				stack
 					.enter(|stk| async {
 						while let Ok(pro) = docs.recv().await {
-							// Clone the results channel for the async task
-							let chn = chn.clone();
 							// Spawn an asynchronous task to process the received value
-							Document::compute(stk, ctx, opt, stm, chn, pro).await?;
+							Document::compute(stk, ctx, opt, stm, &chn, pro).await?;
 						}
 						Ok::<(), Error>(())
 					})
@@ -752,5 +755,37 @@ impl Iterator {
 				self.run.cancel()
 			}
 		}
+	}
+
+	fn execute(
+		max_threads: usize,
+		signal: Sender<()>,
+		shutdown: Receiver<()>,
+		exe: &Executor<'_>,
+		tasks: (
+			impl Future<Output = ()> + Sized,
+			impl Future<Output = ()> + Sized,
+			impl Future<Output = ()> + Sized,
+			impl Future<Output = ()> + Sized,
+		),
+	) {
+		// Start executor threads
+		Parallel::new()
+			// Each of the 4 threads will run an executor
+			.each(0..max_threads, |_| {
+				let shutdown = shutdown.clone();
+				// Run the executor in each thread
+				block_on(async {
+					let _ = exe.run(shutdown.recv()).await;
+				});
+			}) // Run the main future on the current thread to spawn tasks
+			.finish(|| {
+				block_on(async {
+					// Wait for all closures
+					futures::join!(tasks.0, tasks.1, tasks.2, tasks.3);
+					// Stop every threads
+					drop(signal);
+				});
+			});
 	}
 }
