@@ -189,6 +189,8 @@ async fn idiom_recursion_graph() -> Result<(), Error> {
 			{ id: knows:4, in: person:jaime, out: person:mary },
 			{ id: knows:5, in: person:mary, out: person:tim },
 		];
+		
+		SELECT VALUE @{..}.{ name, knows: ->knows->person.@ } FROM person;
 
 		SELECT name, @({1}->knows->person).name AS names_1sts FROM person;
 		SELECT name, @({2}->knows->person).name AS names_2nds FROM person;
@@ -243,6 +245,62 @@ async fn idiom_recursion_graph() -> Result<(), Error> {
 			{ name: 'Micha', names_3rds: NONE },
 			{ name: 'Tim', names_3rds: NONE },
 			{ name: 'Tobie', names_3rds: ['Tim'] },
+		]",
+		)?
+		.expect_val(
+			"[
+			{
+				knows: [{
+					knows: [{
+						knows: [],
+						name: 'Tim'
+					}],
+					name: 'Mary'
+				}],
+				name: 'Jaime'
+			},
+			{
+				knows: NONE,
+				name: 'John'
+			},
+			{
+				knows: [{
+					knows: [],
+					name: 'Tim'
+				}],
+				name: 'Mary'
+			},
+			{
+				knows: [{
+					knows: [],
+					name: 'John'
+				}],
+				name: 'Micha'
+			},
+			{
+				knows: NONE,
+				name: 'Tim'
+			},
+			{
+				knows: [{
+					knows: [{
+						knows: [{
+							knows: [],
+							name: 'Tim'
+						}],
+						name: 'Mary'
+					}],
+					name: 'Jaime'
+				},
+				{
+					knows: [{
+						knows: [],
+						name: 'John'
+					}],
+					name: 'Micha'
+				}],
+				name: 'Tobie'
+			}
 		]",
 		)?;
 	Ok(())
