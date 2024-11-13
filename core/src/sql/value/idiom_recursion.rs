@@ -52,7 +52,7 @@ pub(crate) async fn compute_idiom_recursion(
 	// Find minimum and maximum amount of iterations
 	let min = recurse.min()?;
 	let max = recurse.max()?;
-	let limit = *IDIOM_RECURSION_LIMIT as i64;
+	let limit = *IDIOM_RECURSION_LIMIT as u32;
 
 	// Counter for the local loop and current value
 	let mut i = i.to_owned();

@@ -1186,7 +1186,7 @@ pub enum Error {
 	/// Found an unexpected value in a range
 	#[error("Exceeded the idiom recursion limit of {limit}.")]
 	IdiomRecursionLimitExceeded {
-		limit: i64,
+		limit: u32,
 	},
 
 	/// Found an unexpected value in a range

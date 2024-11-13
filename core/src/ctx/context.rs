@@ -40,6 +40,18 @@ impl<'a> From<&'a Value> for Cow<'a, Value> {
 }
 
 pub type Context = Arc<MutableContext>;
+pub type IdiomRecursionContext = (
+	// This counter is used to track the deepest we have recursed
+	// for idiom recursions where we generate a recursive tree structure
+	Arc<Mutex<u32>>, 
+	// This counter represents the local depth for the current path
+	// we're processing
+	u32, 
+	// Stores the configuration for the current recursion
+	Recurse, 
+	// Stores the path to apply when encountering a RepeatRecurse symbol
+	Vec<Part>
+);
 
 #[non_exhaustive]
 pub struct MutableContext {
@@ -74,8 +86,7 @@ pub struct MutableContext {
 	// Does not read from parent `values`.
 	isolated: bool,
 	// Idiom recursion details
-	#[allow(clippy::type_complexity)]
-	idiom_recursion: Option<(Arc<Mutex<i64>>, i64, Recurse, Vec<Part>)>,
+	idiom_recursion: Option<IdiomRecursionContext>,
 }
 
 impl Default for MutableContext {
@@ -451,7 +462,7 @@ impl MutableContext {
 		}
 	}
 
-	pub fn idiom_recursion(&self) -> Option<(&i64, &Recurse, &Vec<Part>)> {
+	pub fn idiom_recursion(&self) -> Option<(&u32, &Recurse, &Vec<Part>)> {
 		self.idiom_recursion.as_ref().map(|(_, i, r, n)| (i, r, n))
 	}
 
@@ -478,7 +489,7 @@ impl MutableContext {
 		Ok(())
 	}
 
-	pub fn idiom_recursion_iterated(&self) -> Result<Option<i64>, Error> {
+	pub fn idiom_recursion_iterated(&self) -> Result<Option<u32>, Error> {
 		Ok(match &self.idiom_recursion {
 			Some((i, _, _, _)) => Some(*i.lock().map_err(|_| {
 				Error::Unreachable("Failed to obtain lock for idiom recursion counter".into())

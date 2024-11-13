@@ -393,7 +393,12 @@ impl Parser<'_> {
 
 		let min = if matches!(self.peek().kind, TokenKind::Digits) {
 			match self.next_token_value::<Number>()? {
-				Number::Int(v) => Some(v),
+				Number::Int(v) => Some(match u32::try_from(v) {
+					Ok(v) => v,
+					_ => {
+						bail!("Unexpected integer `{}`, expected a u32", v, @self.last_span());
+					}
+				}),
 				found => {
 					bail!("Unexpected token `{}` expected an integer", found, @self.last_span());
 				}
@@ -417,7 +422,12 @@ impl Parser<'_> {
 		// parse ending id.
 		let max = if matches!(self.peek_whitespace().kind, TokenKind::Digits) {
 			match self.next_token_value::<Number>()? {
-				Number::Int(v) => Some(v),
+				Number::Int(v) => Some(match u32::try_from(v) {
+					Ok(v) => v,
+					_ => {
+						bail!("Unexpected integer `{}`, expected a u32", v, @self.last_span());
+					}
+				}),
 				found => {
 					bail!("Unexpected token `{}` expected an integer", found, @self.last_span());
 				}

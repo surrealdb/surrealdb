@@ -287,12 +287,12 @@ impl fmt::Display for DestructurePart {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Recurse {
-	Fixed(i64),
-	Range(Option<i64>, Option<i64>),
+	Fixed(u32),
+	Range(Option<u32>, Option<u32>),
 }
 
 impl Recurse {
-	pub fn min(&self) -> Result<i64, Error> {
+	pub fn min(&self) -> Result<u32, Error> {
 		let min = match self {
 			Recurse::Fixed(v) => v.to_owned(),
 			Recurse::Range(min, _) => min.unwrap_or(1),
@@ -308,14 +308,14 @@ impl Recurse {
 		}
 	}
 
-	pub fn max(&self) -> Result<Option<i64>, Error> {
+	pub fn max(&self) -> Result<Option<u32>, Error> {
 		let max = match self {
 			Recurse::Fixed(v) => Some(v.to_owned()),
 			Recurse::Range(_, max) => max.to_owned(),
 		};
 
 		match max {
-			Some(max) if max > (*IDIOM_RECURSION_LIMIT as i64) => Err(Error::InvalidBound {
+			Some(max) if max > (*IDIOM_RECURSION_LIMIT as u32) => Err(Error::InvalidBound {
 				found: max.to_string(),
 				expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
 			}),
