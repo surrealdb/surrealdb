@@ -74,6 +74,7 @@ pub struct MutableContext {
 	// Does not read from parent `values`.
 	isolated: bool,
 	// Idiom recursion details
+	#[allow(clippy::type_complexity)]
 	idiom_recursion: Option<(Arc<Mutex<i64>>, i64, Recurse, Vec<Part>)>,
 }
 
