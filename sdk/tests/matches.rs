@@ -554,11 +554,13 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
  		SELECT id, search::score(1) as sc1, search::score(2) as sc2
     		FROM page WHERE
     		host = 'test'
-    		AND (title @1@ 'dog' OR content @2@ 'dog');
+    		AND (title @1@ 'dog' OR content @2@ 'dog')
+    		ORDER BY id;
     	SELECT id, search::score(1) as sc1, search::score(2) as sc2
     		FROM page WHERE
     		host = 'test'
-    		AND (title @1@ 'dog' OR content @2@ 'dog') PARALLEL;
+    		AND (title @1@ 'dog' OR content @2@ 'dog')
+    		ORDER BY id PARALLEL;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
