@@ -7,7 +7,7 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::Value;
-use channel::Sender;
+use async_channel::Sender;
 use chrono::prelude::Utc;
 use chrono::TimeZone;
 

@@ -24,11 +24,11 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{Id, IdRange};
 #[cfg(not(target_arch = "wasm32"))]
-use channel::{bounded, unbounded, Receiver, Sender};
+use async_channel::{bounded, unbounded, Receiver, Sender};
+#[cfg(not(target_arch = "wasm32"))]
+use async_executor::Executor;
 #[cfg(not(target_arch = "wasm32"))]
 use easy_parallel::Parallel;
-#[cfg(not(target_arch = "wasm32"))]
-use executor::Executor;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::executor::block_on;
 use reblessive::tree::Stk;

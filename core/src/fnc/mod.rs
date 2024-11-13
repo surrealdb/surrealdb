@@ -452,7 +452,7 @@ pub async fn asynchronous(
 	#[cfg(not(target_arch = "wasm32"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> executor::Task<R> {
+	) -> impl FnOnce() -> async_executor::Task<R> {
 		|| crate::exe::spawn(async move { function() })
 	}
 
