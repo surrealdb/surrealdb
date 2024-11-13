@@ -47,7 +47,9 @@ impl Value {
 			// The knowledge of the value is not relevant to Part::Recurse
 			Some(Part::Recurse(recurse)) => {
 				if ctx.idiom_recursion().is_some() {
-					return Err(Error::Unreachable("No nested recursion".into()));
+					return Err(Error::IdiomRecursionAlreadyRecursing {
+						symbol: format!("{{{}}}", recurse),
+					});
 				}
 
 				let next = path.next();

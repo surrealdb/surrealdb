@@ -1188,6 +1188,16 @@ pub enum Error {
 	IdiomRecursionLimitExceeded {
 		limit: i64,
 	},
+
+	/// Found an unexpected value in a range
+	#[error("Tried to use a `@` repeat recurse symbol, while not recursing.")]
+	RepeatRecurseNotRecursing,
+
+	/// Found an unexpected value in a range
+	#[error("Tried to use a `{symbol}` recursion symbol, while already recursing.")]
+	IdiomRecursionAlreadyRecursing {
+		symbol: String,
+	},
 }
 
 impl From<Error> for String {

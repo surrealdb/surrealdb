@@ -458,9 +458,11 @@ impl MutableContext {
 		self.idiom_recursion = Some((Arc::new(Mutex::new(0)), 0, recurse, next));
 	}
 
-	pub fn bump_idiom_recursion(&mut self) {
+	pub fn bump_idiom_recursion(&mut self) -> Result<(), Error> {
 		if let Some((i, mut local, recurse, next)) = self.idiom_recursion.clone() {
-			let mut lock = i.lock().unwrap();
+			let mut lock = i.lock().map_err(|_| {
+				Error::Unreachable("Failed to obtain lock for idiom recursion counter".into())
+			})?;
 
 			local += 1;
 			if *lock < local {
@@ -471,9 +473,16 @@ impl MutableContext {
 
 			self.idiom_recursion = Some((i, local, recurse, next));
 		}
+
+		Ok(())
 	}
 
-	pub fn idiom_recursion_iterated(&self) -> Option<i64> {
-		self.idiom_recursion.as_ref().map(|(i, _, _, _)| *i.lock().unwrap())
+	pub fn idiom_recursion_iterated(&self) -> Result<Option<i64>, Error> {
+		Ok(match &self.idiom_recursion {
+			Some((i, _, _, _)) => Some(*i.lock().map_err(|_| {
+				Error::Unreachable("Failed to obtain lock for idiom recursion counter".into())
+			})?),
+			None => None,
+		})
 	}
 }

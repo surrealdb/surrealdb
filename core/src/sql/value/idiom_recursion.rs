@@ -40,7 +40,7 @@ pub(crate) async fn compute_idiom_recursion(
 	// Get recursion context
 	let (i, recurse, next) = match ctx.idiom_recursion() {
 		Some((i, recurse, next)) => (i, recurse, next),
-		_ => return Err(Error::Unreachable("Not recursing".into())),
+		_ => return Err(Error::RepeatRecurseNotRecursing),
 	};
 
 	// We recursed and found a final value, let's return
@@ -75,7 +75,7 @@ pub(crate) async fn compute_idiom_recursion(
 	loop {
 		// Bump iteration
 		let mut ctx = MutableContext::new(ctx);
-		ctx.bump_idiom_recursion();
+		ctx.bump_idiom_recursion()?;
 		let ctx = ctx.freeze();
 		i += 1;
 
@@ -86,7 +86,7 @@ pub(crate) async fn compute_idiom_recursion(
 		// in the idiom path "next", we have iterated further
 		// than we are aware of here, in which case we can
 		// break the loop
-		let nested_iteration = match ctx.idiom_recursion_iterated() {
+		let nested_iteration = match ctx.idiom_recursion_iterated()? {
 			Some(i) => i,
 			None => i,
 		};

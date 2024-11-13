@@ -775,6 +775,9 @@ async fn idiom_recursion_limits() -> Result<(), Error> {
 		a:1.{1..}.link;
 		a:1.{..256}.link;
 		a:1.{..257}.link;
+
+		a:1.@;
+		a:1.{..}.{..};
 	"#;
 	Test::new(sql)
 		.await?
@@ -782,6 +785,8 @@ async fn idiom_recursion_limits() -> Result<(), Error> {
 		.expect_error("Found 0 for bound but expected at least 1.")?
 		.expect_error("Exceeded the idiom recursion limit of 256.")?
 		.expect_val("a:257")?
-		.expect_error("Found 257 for bound but expected 256 at most.")?;
+		.expect_error("Found 257 for bound but expected 256 at most.")?
+		.expect_error("Tried to use a `@` repeat recurse symbol, while not recursing.")?
+		.expect_error("Tried to use a `{..}` recursion symbol, while already recursing.")?;
 	Ok(())
 }
