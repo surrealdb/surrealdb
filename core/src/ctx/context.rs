@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 #[cfg(storage)]
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use trice::Instant;
 #[cfg(feature = "http")]
@@ -43,14 +43,14 @@ pub type Context = Arc<MutableContext>;
 pub type IdiomRecursionContext = (
 	// This counter is used to track the deepest we have recursed
 	// for idiom recursions where we generate a recursive tree structure
-	Arc<Mutex<u32>>, 
+	Arc<AtomicU32>,
 	// This counter represents the local depth for the current path
 	// we're processing
-	u32, 
+	u32,
 	// Stores the configuration for the current recursion
-	Recurse, 
+	Recurse,
 	// Stores the path to apply when encountering a RepeatRecurse symbol
-	Vec<Part>
+	Vec<Part>,
 );
 
 #[non_exhaustive]
@@ -467,23 +467,17 @@ impl MutableContext {
 	}
 
 	pub fn start_idiom_recursion(&mut self, recurse: Recurse, next: Vec<Part>) {
-		self.idiom_recursion = Some((Arc::new(Mutex::new(0)), 0, recurse, next));
+		self.idiom_recursion = Some((Arc::new(AtomicU32::new(0)), 0, recurse, next));
 	}
 
 	pub fn bump_idiom_recursion(&mut self) -> Result<(), Error> {
-		if let Some((i, mut local, recurse, next)) = self.idiom_recursion.clone() {
-			let mut lock = i.lock().map_err(|_| {
-				Error::Unreachable("Failed to obtain lock for idiom recursion counter".into())
-			})?;
-
+		if let Some((atom, mut local, recurse, next)) = self.idiom_recursion.clone() {
 			local += 1;
-			if *lock < local {
-				*lock = local;
+			if atom.load(Ordering::Relaxed) < local {
+				atom.store(local, Ordering::Relaxed);
 			}
 
-			drop(lock);
-
-			self.idiom_recursion = Some((i, local, recurse, next));
+			self.idiom_recursion = Some((atom, local, recurse, next));
 		}
 
 		Ok(())
@@ -491,9 +485,7 @@ impl MutableContext {
 
 	pub fn idiom_recursion_iterated(&self) -> Result<Option<u32>, Error> {
 		Ok(match &self.idiom_recursion {
-			Some((i, _, _, _)) => Some(*i.lock().map_err(|_| {
-				Error::Unreachable("Failed to obtain lock for idiom recursion counter".into())
-			})?),
+			Some((atom, _, _, _)) => Some(atom.load(Ordering::Relaxed)),
 			None => None,
 		})
 	}
