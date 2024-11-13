@@ -212,19 +212,17 @@ pub trait SliceRepeatRecurse<'a> {
 
 impl<'a> SliceRepeatRecurse<'a> for &'a [Part] {
 	fn slice_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])> {
-		match self.iter().position(|p| matches!(p, Part::RepeatRecurse)) {
-			None => None,
-			Some(i) => Some((&self[..=i], &self[(i + 1)..])),
-		}
+		self.iter()
+			.position(|p| matches!(p, Part::RepeatRecurse))
+			.map(|i| (&self[..=i], &self[(i + 1)..]))
 	}
 }
 
 impl<'a> SliceRepeatRecurse<'a> for &'a Idiom {
 	fn slice_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])> {
-		match self.iter().position(|p| matches!(p, Part::RepeatRecurse)) {
-			None => None,
-			Some(i) => Some((&self[..=i], &self[(i + 1)..])),
-		}
+		self.iter()
+			.position(|p| matches!(p, Part::RepeatRecurse))
+			.map(|i| (&self[..=i], &self[(i + 1)..]))
 	}
 }
 

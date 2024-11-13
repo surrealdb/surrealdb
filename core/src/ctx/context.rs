@@ -451,10 +451,7 @@ impl MutableContext {
 	}
 
 	pub fn idiom_recursion(&self) -> Option<(&i64, &Recurse, &Vec<Part>)> {
-		match &self.idiom_recursion {
-			Some((_, i, r, n)) => Some((i, r, n)),
-			None => None,
-		}
+		self.idiom_recursion.as_ref().map(|(_, i, r, n)| (i, r, n))
 	}
 
 	pub fn start_idiom_recursion(&mut self, recurse: Recurse, next: Vec<Part>) {
@@ -477,9 +474,6 @@ impl MutableContext {
 	}
 
 	pub fn idiom_recursion_iterated(&self) -> Option<i64> {
-		match &self.idiom_recursion {
-			Some((i, _, _, _)) => Some(*i.lock().unwrap()),
-			None => None,
-		}
+		self.idiom_recursion.as_ref().map(|(i, _, _, _)| *i.lock().unwrap())
 	}
 }
