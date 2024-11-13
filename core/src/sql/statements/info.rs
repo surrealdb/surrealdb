@@ -138,7 +138,10 @@ impl InfoStatement {
 				let ns = opt.ns()?;
 				let db = opt.db()?;
 				// Convert the version to u64 if present
-				let version = version.as_ref().map(|v| v.to_u64());
+				let version = match &self.version {
+					Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
+					_ => None,
+				};
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
@@ -220,7 +223,10 @@ impl InfoStatement {
 				let ns = opt.ns()?;
 				let db = opt.db()?;
 				// Convert the version to u64 if present
-				let version = version.as_ref().map(|v| v.to_u64());
+				let version = match &self.version {
+					Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
+					_ => None,
+				};
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set

@@ -2,6 +2,7 @@ use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::iam::{Action, Auth, ResourceKind, Role};
+use crate::sql::version::ComputedVersion;
 use crate::sql::{
 	statements::define::DefineIndexStatement, statements::define::DefineTableStatement, Base,
 };
@@ -49,7 +50,7 @@ pub struct Options {
 	/// The channel over which we send notifications
 	pub sender: Option<Sender<Notification>>,
 	/// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<u64>,
+	pub version: Option<ComputedVersion>,
 }
 
 #[derive(Clone, Debug)]
@@ -241,7 +242,7 @@ impl Options {
 	}
 
 	// Set the version
-	pub fn with_version(mut self, version: Option<u64>) -> Self {
+	pub fn with_version(mut self, version: Option<ComputedVersion>) -> Self {
 		self.version = version;
 		self
 	}
@@ -257,6 +258,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			futures: self.futures.clone(),
+			version: self.version.clone(),
 			perms,
 			..*self
 		}
@@ -270,6 +272,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			futures: self.futures.clone(),
+			version: self.version.clone(),
 			force,
 			..*self
 		}
@@ -284,6 +287,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			futures: self.futures.clone(),
+			version: self.version.clone(),
 			strict,
 			..*self
 		}
@@ -298,6 +302,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			futures: self.futures.clone(),
+			version: self.version.clone(),
 			import,
 			..*self
 		}
@@ -318,6 +323,7 @@ impl Options {
 					false => Futures::Disabled,
 				},
 			},
+			version: self.version.clone(),
 			..*self
 		}
 	}
@@ -331,6 +337,7 @@ impl Options {
 			force: self.force.clone(),
 			futures: self.futures.clone(),
 			sender: Some(sender),
+			version: self.version.clone(),
 			..*self
 		}
 	}
@@ -361,6 +368,7 @@ impl Options {
 			force: self.force.clone(),
 			futures: self.futures.clone(),
 			dive: self.dive - cost as u32,
+			version: self.version.clone(),
 			..*self
 		})
 	}

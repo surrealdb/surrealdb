@@ -1175,6 +1175,13 @@ pub enum Error {
 
 	#[error("Error while ordering a result: {0}.")]
 	OrderingError(String),
+
+	#[error(
+		"Error while computing version: expected a datetime or a datetime-range, but found {found}"
+	)]
+	InvalidVersion {
+		found: Value,
+	},
 }
 
 impl From<Error> for String {
