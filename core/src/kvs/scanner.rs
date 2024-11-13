@@ -22,7 +22,10 @@ pub(super) struct Scanner<'a, I> {
 	results: VecDeque<I>,
 	#[allow(clippy::type_complexity)]
 	/// The currently running future to be polled
+	#[cfg(not(target_arch = "wasm32"))]
 	future: Option<Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a + Send>>>,
+	#[cfg(target_arch = "wasm32")]
+	future: Option<Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a>>>,
 	/// Whether this stream should try to fetch more
 	exhausted: bool,
 	/// Version as timestamp, 0 means latest.

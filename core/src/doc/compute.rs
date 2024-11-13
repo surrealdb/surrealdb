@@ -6,7 +6,7 @@ use crate::dbs::{Options, Processed};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
-use async_channel::Sender;
+use channel::Sender;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 

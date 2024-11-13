@@ -277,15 +277,15 @@ impl Transaction {
 	///
 	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream<'a, 'b: 'a, K>(
-		&'b self,
+	pub fn stream<K>(
+		&self,
 		rng: Range<K>,
 		version: Option<u64>,
-	) -> impl Stream<Item = Result<(Key, Val), Error>> + 'a + Send
+	) -> impl Stream<Item = Result<(Key, Val), Error>> + '_
 	where
 		K: Into<Key> + Debug,
 	{
-		Scanner::<'a, (Key, Val)>::new(
+		Scanner::<(Key, Val)>::new(
 			self,
 			*NORMAL_FETCH_SIZE,
 			Range {

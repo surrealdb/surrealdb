@@ -4,6 +4,7 @@ use crate::ctx::{Canceller, MutableContext};
 use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::Plan;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::processor::Collected;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::processor::ParallelCollector;
@@ -22,18 +23,19 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{Id, IdRange};
-use async_channel::unbounded;
 #[cfg(not(target_arch = "wasm32"))]
-use async_channel::{bounded, Receiver, Sender};
+use channel::{bounded, unbounded, Receiver, Sender};
 #[cfg(not(target_arch = "wasm32"))]
-use async_executor::Executor;
 use easy_parallel::Parallel;
+#[cfg(not(target_arch = "wasm32"))]
+use executor::Executor;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::executor::block_on;
 use reblessive::tree::Stk;
-use reblessive::TreeStack;
-use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
+use reblessive::TreeStack;
+#[cfg(not(target_arch = "wasm32"))]
+use std::future::Future;
 use std::mem;
 use std::sync::Arc;
 
@@ -757,6 +759,7 @@ impl Iterator {
 		}
 	}
 
+	#[cfg(not(target_arch = "wasm32"))]
 	fn execute(
 		max_threads: usize,
 		signal: Sender<()>,

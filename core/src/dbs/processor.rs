@@ -13,8 +13,7 @@ use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
 use crate::sql::{Edges, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
-use async_channel::Sender;
-#[cfg(not(target_arch = "wasm32"))]
+use channel::Sender;
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use reblessive::TreeStack;

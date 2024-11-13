@@ -6,7 +6,7 @@ use surrealdb_core::sql::Value;
 use tokio::runtime::{Builder, Runtime};
 
 fn bench_processor(c: &mut Criterion) {
-	let rt = Runtime::new().unwrap();
+	let rt = Builder::new_multi_thread().build().unwrap();
 	let i = rt.block_on(prepare_data());
 
 	let mut group = c.benchmark_group("processor");

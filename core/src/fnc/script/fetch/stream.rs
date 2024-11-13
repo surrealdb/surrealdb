@@ -1,6 +1,6 @@
 use std::{future::Future, pin::Pin};
 
-use async_channel::Receiver;
+use channel::Receiver;
 use futures::{Stream, StreamExt};
 
 /// A newtype struct over receiver implementing the [`Stream`] trait.
@@ -39,8 +39,8 @@ impl<R: Clone + 'static + Send + Sync> ReadableStream<R> {
 
 		// Unbounded, otherwise when one channel gets awaited it might block forever because the
 		// other channel fills up.
-		let (send_a, recv_a) = async_channel::unbounded::<R>();
-		let (send_b, recv_b) = async_channel::unbounded::<R>();
+		let (send_a, recv_a) = channel::unbounded::<R>();
+		let (send_b, recv_b) = channel::unbounded::<R>();
 		let new_stream = Box::pin(recv_a);
 		let mut old_stream = std::mem::replace(&mut self.0, new_stream);
 		let drive = async move {
