@@ -6056,7 +6056,6 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
- "tokio-stream",
  "tokio-tungstenite 0.21.0",
  "tracing",
  "tracing-subscriber",

@@ -197,7 +197,6 @@ tokio = { version = "1.40.0", default-features = false, features = [
     "time",
     "sync",
 ] }
-tokio-stream = { version = "0.1.16", default-features = false }
 tokio-tungstenite = { version = "0.21.0", optional = true }
 uuid = { version = "1.10.0", features = ["serde", "v4", "v7"] }
 
