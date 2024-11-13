@@ -414,16 +414,39 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn upsert(&self, params: Array) -> Result<Data, RpcError> {
-		let Ok((what, data)) = params.needs_one_or_two() else {
+		let Ok((what, data, opts)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
+
+		// Get the kind of clause to be used and what result we return
+		let (kind, returns) = match opts {
+			Value::None | Value::Null => ("CONTENT".to_string(), "AFTER".to_string()),
+			Value::Strand(str) => {
+				let str = str.to_uppercase();
+				let parts = str.split("+").collect::<Vec<&str>>();
+
+				let kind = match parts.first() {
+					Some(v) if matches!(*v, "CONTENT" | "REPLACE" | "MERGE" | "PATCH") => v.to_string(),
+					_ => return Err(RpcError::InvalidParams),
+				};
+
+				let returns = match parts.get(1) {
+					Some(v) if matches!(*v, "DIFF" | "AFTER" | "BEFORE" | "NONE") => v.to_string(),
+					_ => "AFTER".to_string(),
+				};
+
+				(kind, returns)
+			},
+			_ => return Err(RpcError::InvalidParams),
+		};
+
 		// Return a single result?
 		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
-			"UPSERT $what RETURN AFTER"
+			format!("UPSERT $what RETURN {returns}")
 		} else {
-			"UPSERT $what CONTENT $data RETURN AFTER"
+			format!("UPSERT $what {kind} $data RETURN {returns}")
 		};
 		// Specify the query parameters
 		let var = Some(map! {
@@ -432,7 +455,7 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		let mut res = self.kvs().execute(sql.as_str(), self.session(), var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -447,16 +470,39 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn update(&self, params: Array) -> Result<Data, RpcError> {
-		let Ok((what, data)) = params.needs_one_or_two() else {
+		let Ok((what, data, opts)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
+
+		// Get the kind of clause to be used and what result we return
+		let (kind, returns) = match opts {
+			Value::None | Value::Null => ("CONTENT".to_string(), "AFTER".to_string()),
+			Value::Strand(str) => {
+				let str = str.to_uppercase();
+				let parts = str.split("+").collect::<Vec<&str>>();
+
+				let kind = match parts.first() {
+					Some(v) if matches!(*v, "CONTENT" | "REPLACE" | "MERGE" | "PATCH") => v.to_string(),
+					_ => return Err(RpcError::InvalidParams),
+				};
+
+				let returns = match parts.get(1) {
+					Some(v) if matches!(*v, "DIFF" | "AFTER" | "BEFORE" | "NONE") => v.to_string(),
+					_ => "AFTER".to_string(),
+				};
+
+				(kind, returns)
+			},
+			_ => return Err(RpcError::InvalidParams),
+		};
+
 		// Return a single result?
 		let one = what.is_thing_single();
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
-			"UPDATE $what RETURN AFTER"
+			format!("UPSERT $what RETURN {returns}")
 		} else {
-			"UPDATE $what CONTENT $data RETURN AFTER"
+			format!("UPSERT $what {kind} $data RETURN {returns}")
 		};
 		// Specify the query parameters
 		let var = Some(map! {
@@ -465,7 +511,7 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		let mut res = self.kvs().execute(sql.as_str(), self.session(), var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
