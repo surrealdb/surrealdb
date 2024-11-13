@@ -32,18 +32,23 @@ impl Mapper {
 		line: String,
 		line_number: usize,
 	) -> Result<(), Error> {
-		let parts: Vec<&str> = line.split('\t').collect();
-		if parts.len() != 2 {
+		let Some((word, rest)) = line.split_once('\t') else {
 			return Err(Error::AnalyzerError(format!(
 				"Expected two terms separated by a tab line {line_number}: {}",
-				parts.join("\t")
+				line
+			)));
+		};
+
+		if rest.contains('\t') {
+			return Err(Error::AnalyzerError(format!(
+				"Expected two terms to not contain more then one tab {line_number}: {}\t{}",
+				word, rest
 			)));
 		}
-		let word = parts[1];
 		let key = VariableSizeKey::from_str(word)
 			.map_err(|_| Error::AnalyzerError(format!("Can't create key from {word}")))?;
 		terms
-			.insert_unchecked(&key, parts[0].to_string(), 0, 0)
+			.insert_unchecked(&key, rest.to_string(), 0, 0)
 			.map_err(|e| Error::AnalyzerError(e.to_string()))?;
 
 		Ok(())
