@@ -206,23 +206,29 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 
 // ------------------------------
 
-pub trait SliceRepeatRecurse<'a> {
-	fn slice_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])>;
+pub trait SplitByRepeatRecurse<'a> {
+	fn split_by_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])>;
 }
 
-impl<'a> SliceRepeatRecurse<'a> for &'a [Part] {
-	fn slice_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])> {
+impl<'a> SplitByRepeatRecurse<'a> for &'a [Part] {
+	fn split_by_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])> {
 		self.iter()
 			.position(|p| matches!(p, Part::RepeatRecurse))
-			.map(|i| (&self[..=i], &self[(i + 1)..]))
+			// We exclude the `@` repeat recurse symbol here, because
+			// it ensures we will loop the idiom path, instead of using
+			// `.get()` to recurse
+			.map(|i| (&self[..i], &self[(i + 1)..]))
 	}
 }
 
-impl<'a> SliceRepeatRecurse<'a> for &'a Idiom {
-	fn slice_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])> {
+impl<'a> SplitByRepeatRecurse<'a> for &'a Idiom {
+	fn split_by_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])> {
 		self.iter()
 			.position(|p| matches!(p, Part::RepeatRecurse))
-			.map(|i| (&self[..=i], &self[(i + 1)..]))
+			// We exclude the `@` repeat recurse symbol here, because
+			// it ensures we will loop the idiom path, instead of using
+			// `.get()` to recurse
+			.map(|i| (&self[..i], &self[(i + 1)..]))
 	}
 }
 

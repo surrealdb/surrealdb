@@ -11,7 +11,7 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::{Next, NextMethod, SliceRepeatRecurse};
+use crate::sql::part::{Next, NextMethod, SplitByRepeatRecurse};
 use crate::sql::part::{Part, Skip};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
@@ -57,12 +57,12 @@ impl Value {
 				// We split the path when we encounter a root-level repeat recurse part
 				// The path after a root-level repeat-recurse part is processed after the recursion
 				let next = path.next();
-				let (next, after) = match next.slice_repeat_recurse() {
+				let (next, after) = match next.split_by_repeat_recurse() {
 					Some((next, after)) => (next, Some(after)),
 					_ => (next, None),
 				};
 
-				// Update the context with the recursion details, used by the 
+				// Update the context with the recursion details, used by the
 				// `compute_idiom_recursion` method and repeat recurse part.
 				let mut recurse_ctx = MutableContext::new(ctx);
 				recurse_ctx.start_idiom_recursion(recurse.to_owned(), Vec::from(next));
@@ -85,7 +85,7 @@ impl Value {
 				// indicate this to the compute method, indicating there is no need to loop
 				let v = compute_idiom_recursion(stk, ctx, opt, doc, &self.clone().flatten(), true)
 					.await?;
-				
+
 				// Process a potential left-over path. When the repeat-recurse symbol
 				// is used nested, it does not operate on the the output value, so we
 				// apply it every iteration.
