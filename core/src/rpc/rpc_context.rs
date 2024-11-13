@@ -426,7 +426,9 @@ pub trait RpcContext {
 				let parts = str.split("+").collect::<Vec<&str>>();
 
 				let kind = match parts.first() {
-					Some(v) if matches!(*v, "CONTENT" | "REPLACE" | "MERGE" | "PATCH") => v.to_string(),
+					Some(v) if matches!(*v, "CONTENT" | "REPLACE" | "MERGE" | "PATCH") => {
+						v.to_string()
+					}
 					_ => return Err(RpcError::InvalidParams),
 				};
 
@@ -436,7 +438,7 @@ pub trait RpcContext {
 				};
 
 				(kind, returns)
-			},
+			}
 			_ => return Err(RpcError::InvalidParams),
 		};
 
@@ -482,7 +484,9 @@ pub trait RpcContext {
 				let parts = str.split("+").collect::<Vec<&str>>();
 
 				let kind = match parts.first() {
-					Some(v) if matches!(*v, "CONTENT" | "REPLACE" | "MERGE" | "PATCH") => v.to_string(),
+					Some(v) if matches!(*v, "CONTENT" | "REPLACE" | "MERGE" | "PATCH") => {
+						v.to_string()
+					}
 					_ => return Err(RpcError::InvalidParams),
 				};
 
@@ -492,7 +496,7 @@ pub trait RpcContext {
 				};
 
 				(kind, returns)
-			},
+			}
 			_ => return Err(RpcError::InvalidParams),
 		};
 
