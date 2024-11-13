@@ -45,10 +45,10 @@ impl Mapper {
 				word, rest
 			)));
 		}
-		let key = VariableSizeKey::from_str(word)
+		let key = VariableSizeKey::from_str(rest.trim())
 			.map_err(|_| Error::AnalyzerError(format!("Can't create key from {word}")))?;
 		terms
-			.insert_unchecked(&key, rest.to_string(), 0, 0)
+			.insert_unchecked(&key, word.trim().to_string(), 0, 0)
 			.map_err(|e| Error::AnalyzerError(e.to_string()))?;
 
 		Ok(())
