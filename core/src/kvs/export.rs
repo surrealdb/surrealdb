@@ -151,7 +151,7 @@ impl Transaction {
 		db: &str,
 	) -> Result<(), Error> {
 		// Output OPTIONS
-		self.export_section("OPTION", vec!["OPTION IMPORT;"], chn).await?;
+		self.export_section("OPTION", vec!["OPTION IMPORT"], chn).await?;
 
 		// Output USERS
 		if cfg.users {
