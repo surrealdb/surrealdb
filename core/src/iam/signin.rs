@@ -317,7 +317,7 @@ pub async fn db_access(
 						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								roles.iter().map(Role::from).collect(),
+								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
 								Level::Database(ns, db),
 							)));
 						}
@@ -377,7 +377,7 @@ pub async fn db_user(
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
+			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -506,7 +506,7 @@ pub async fn ns_access(
 						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								roles.iter().map(Role::from).collect(),
+								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
 								Level::Namespace(ns),
 							)));
 						}
@@ -557,7 +557,7 @@ pub async fn ns_user(
 			session.tk = Some((&val).into());
 			session.ns = Some(ns.to_owned());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
+			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -602,7 +602,7 @@ pub async fn root_user(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Root).into());
+			session.au = Arc::new((&u, Level::Root).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -727,7 +727,7 @@ pub async fn root_access(
 						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								roles.iter().map(Role::from).collect(),
+								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
 								Level::Root,
 							)));
 						}
@@ -3433,6 +3433,104 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected a generic authentication error, but instead received: {:?}",
 					res
 				),
+			}
+		}
+	}
+
+	#[tokio::test]
+	async fn test_signin_nonexistent_role() {
+		use crate::iam::Error as IamError;
+		use crate::sql::{
+			statements::{define::DefineStatement, DefineUserStatement},
+			user::UserDuration,
+			Base, Statement,
+		};
+		let test_levels = vec![
+			TestLevel {
+				level: "ROOT",
+				ns: None,
+				db: None,
+			},
+			TestLevel {
+				level: "NS",
+				ns: Some("test"),
+				db: None,
+			},
+			TestLevel {
+				level: "DB",
+				ns: Some("test"),
+				db: Some("test"),
+			},
+		];
+
+		for level in &test_levels {
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+
+			let base = match level.level {
+				"ROOT" => Base::Root,
+				"NS" => Base::Ns,
+				"DB" => Base::Db,
+				_ => panic!("Unsupported level"),
+			};
+
+			let user = DefineUserStatement {
+				base,
+				name: "user".into(),
+				// This is the Argon2id hash for "pass" with a random salt.
+				hash: "$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
+					.to_string(),
+				code: "dummy".to_string(),
+				roles: vec!["nonexistent".into()],
+				duration: UserDuration::default(),
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			};
+
+			// Use pre-parsed definition, which bypasses the existent role check during parsing.
+			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, None)
+				.await
+				.unwrap();
+
+			let mut sess = Session {
+				ns: level.ns.map(String::from),
+				db: level.db.map(String::from),
+				..Default::default()
+			};
+
+			// Sign in using the newly defined user.
+			let res = match level.level {
+				"ROOT" => root_user(&ds, &mut sess, "user".to_string(), "pass".to_string()).await,
+				"NS" => {
+					ns_user(
+						&ds,
+						&mut sess,
+						level.ns.unwrap().to_string(),
+						"user".to_string(),
+						"pass".to_string(),
+					)
+					.await
+				}
+				"DB" => {
+					db_user(
+						&ds,
+						&mut sess,
+						level.ns.unwrap().to_string(),
+						level.db.unwrap().to_string(),
+						"user".to_string(),
+						"pass".to_string(),
+					)
+					.await
+				}
+				_ => panic!("Unsupported level"),
+			};
+
+			match res {
+				Err(Error::IamError(IamError::InvalidRole(_))) => {} // ok
+				res => {
+					panic!("Expected an invalid role IAM error, but instead received: {:?}", res)
+				}
 			}
 		}
 	}
