@@ -86,7 +86,8 @@ pub(crate) async fn compute_idiom_recursion(
 
         // Process the value for this iteration
         match v {
-            v if is_final(&v) => {
+            // We reached a final value
+            v if is_final(&v) || v == current => {
                 return Ok(match i <= min {
                     // If we have not yet reached the minimum amount of
                     // required iterations it's a dead end, and we return NONE
