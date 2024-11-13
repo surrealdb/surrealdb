@@ -190,11 +190,11 @@ async fn idiom_recursion_graph() -> Result<(), Error> {
 			{ id: knows:5, in: person:mary, out: person:tim },
 		];
 		
-		SELECT VALUE @{..}.{ name, knows: ->knows->person.@ } FROM person;
-
 		SELECT name, @({1}->knows->person).name AS names_1sts FROM person;
 		SELECT name, @({2}->knows->person).name AS names_2nds FROM person;
 		SELECT name, @({3}->knows->person).name AS names_3rds FROM person;
+
+		SELECT VALUE @{..}.{ name, knows: ->knows->person.@ } FROM person;
 	"#;
 	Test::new(sql)
 		.await?
@@ -220,30 +220,30 @@ async fn idiom_recursion_graph() -> Result<(), Error> {
 		.expect_val(
 			"[
 			{ name: 'Jaime', names_1sts: ['Mary'] },
-			{ name: 'John', names_1sts: NONE },
+			{ name: 'John', names_1sts: [] },
 			{ name: 'Mary', names_1sts: ['Tim'] },
 			{ name: 'Micha', names_1sts: ['John'] },
-			{ name: 'Tim', names_1sts: NONE },
+			{ name: 'Tim', names_1sts: [] },
 			{ name: 'Tobie', names_1sts: ['Jaime', 'Micha'] },
 		]",
 		)?
 		.expect_val(
 			"[
 			{ name: 'Jaime', names_2nds: ['Tim'] },
-			{ name: 'John', names_2nds: NONE },
-			{ name: 'Mary', names_2nds: NONE },
-			{ name: 'Micha', names_2nds: NONE },
-			{ name: 'Tim', names_2nds: NONE },
+			{ name: 'John', names_2nds: [] },
+			{ name: 'Mary', names_2nds: [] },
+			{ name: 'Micha', names_2nds: [] },
+			{ name: 'Tim', names_2nds: [] },
 			{ name: 'Tobie', names_2nds: ['Mary', 'John'] },
 		]",
 		)?
 		.expect_val(
 			"[
-			{ name: 'Jaime', names_3rds: NONE },
-			{ name: 'John', names_3rds: NONE },
-			{ name: 'Mary', names_3rds: NONE },
-			{ name: 'Micha', names_3rds: NONE },
-			{ name: 'Tim', names_3rds: NONE },
+			{ name: 'Jaime', names_3rds: [] },
+			{ name: 'John', names_3rds: [] },
+			{ name: 'Mary', names_3rds: [] },
+			{ name: 'Micha', names_3rds: [] },
+			{ name: 'Tim', names_3rds: [] },
 			{ name: 'Tobie', names_3rds: ['Tim'] },
 		]",
 		)?
@@ -372,20 +372,17 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 			{ id: city:ottawa,			name: 'Ottowa' },
 			{ id: city:vancouver,		name: 'Vancouver' },
 			{ id: city:victoria,		name: 'Victoria' },
-		]",
-		)?
+		]")?
 		.expect_val("[
 			'United States',
 			'Canada',
-		]",
-		)?
+		]")?
 		.expect_val("[
 			'California',
 			'Texas',
 			'Ontario',
 			'British Columbia'
-		]",
-		)?
+		]")?
 		.expect_val("[
 			'Los Angeles',
 			'San Francisco',
@@ -420,15 +417,13 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 		.expect_val("[
 			'United States',
 			'Canada',
-		]",
-		)?
+		]")?
 		.expect_val("[
 			'California',
 			'Texas',
 			'Ontario',
 			'British Columbia'
-		]",
-		)?
+		]")?
 		.expect_val("[
 			'Los Angeles',
 			'San Francisco',
@@ -446,8 +441,7 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 				country:us,
 				country:canada
 			]
-		}",
-		)?
+		}")?
 		.expect_val("{
 			id: planet:earth,
 			name: 'Earth',
@@ -469,8 +463,7 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 					]
 				}
 			]
-		}",
-		)?
+		}")?
 		.expect_val("{
 			id: planet:earth,
 			name: 'Earth',
@@ -602,8 +595,7 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 					]
 				}
 			]
-		}",
-		)?
+		}")?
 		.expect_val("{
 			id: planet:earth,
 			name: 'Earth',
@@ -685,8 +677,7 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 					]
 				}
 			]
-		}",
-		)?
+		}")?
 		.expect_val("NONE")?
 		.expect_val("{
 			id: planet:earth,
@@ -769,24 +760,28 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 					]
 				}
 			]
-		}",
-		)?;
+		}")?;
 	Ok(())
 }
 
 #[tokio::test]
 async fn idiom_recursion_limits() -> Result<(), Error> {
 	let sql = r#"
-		a:1.{0..};
-		a:1.{1..};
-		a:1.{..256};
-		a:1.{..257};
+		FOR $i IN 1..=300 {
+			UPSERT type::thing('a', $i) SET link = type::thing('a', $i + 1);
+		};
+
+		a:1.{0..}.link;
+		a:1.{1..}.link;
+		a:1.{..256}.link;
+		a:1.{..257}.link;
 	"#;
 	Test::new(sql)
 		.await?
+		.expect_val("NONE")?
 		.expect_error("Found 0 for bound but expected at least 1.")?
 		.expect_error("Exceeded the idiom recursion limit of 256.")?
-		.expect_val("a:1")?
+		.expect_val("a:257")?
 		.expect_error("Found 257 for bound but expected 256 at most.")?;
 	Ok(())
 }

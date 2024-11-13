@@ -53,7 +53,7 @@ impl Value {
 				let next = path.next();
 				let (next, after) = match next.slice_repeat_recurse() {
 					Some((next, after)) => (next, Some(after)),
-					_ => (next, None)
+					_ => (next, None),
 				};
 
 				let mut recurse_ctx = MutableContext::new(ctx);
@@ -64,12 +64,13 @@ impl Value {
 
 				match after {
 					Some(after) => stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await,
-					_ => Ok(v)
+					_ => Ok(v),
 				}
 			}
 			// The knowledge of the value is not relevant to Part::Recurse
 			Some(Part::RepeatRecurse) => {
-				let v = compute_idiom_recursion(stk, ctx, opt, doc, &self.clone().flatten(), true).await?;
+				let v = compute_idiom_recursion(stk, ctx, opt, doc, &self.clone().flatten(), true)
+					.await?;
 				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 			}
 			Some(Part::Doc) => {

@@ -464,7 +464,7 @@ impl MutableContext {
 	pub fn bump_idiom_recursion(&mut self) {
 		if let Some((i, mut local, recurse, next)) = self.idiom_recursion.clone() {
 			let mut lock = i.lock().unwrap();
-			
+
 			local += 1;
 			if *lock < local {
 				*lock = local;
