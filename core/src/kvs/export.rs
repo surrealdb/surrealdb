@@ -96,8 +96,8 @@ impl TryFrom<&Value> for TableConfig {
 			},
 			Value::None | Value::Null => Ok(TableConfig::None),
 			Value::Array(v) => v
-				.to_owned()
-				.into_iter()
+				.iter()
+				.cloned()
 				.map(|v| match v {
 					Value::Strand(str) => Ok(str.0),
 					v => Err(Error::InvalidExportConfig(v.to_owned(), "a string".into())),
