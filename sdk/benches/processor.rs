@@ -3,7 +3,7 @@ use std::time::Duration;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb_core::sql::Value;
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::Builder;
 
 fn bench_processor(c: &mut Criterion) {
 	let rt = Builder::new_multi_thread().build().unwrap();

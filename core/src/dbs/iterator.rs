@@ -38,6 +38,7 @@ use reblessive::TreeStack;
 use std::future::Future;
 use std::mem;
 use std::sync::Arc;
+use std::thread::available_parallelism;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -597,7 +598,8 @@ impl Iterator {
 				// If any iterator requires distinct, we need to create a global distinct instance
 				let distinct = AsyncDistinct::new(ctx);
 				// Get the maximum number of threads
-				let max_threads = num_cpus::get();
+				let max_threads =
+					available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get());
 				// Get the maximum number of concurrent tasks
 				let max_concurrent_tasks = *crate::cnf::MAX_CONCURRENT_TASKS;
 				// Create a new executor
