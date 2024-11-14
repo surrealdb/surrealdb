@@ -787,6 +787,13 @@ impl Iterator {
 					})
 				})
 				.collect::<Vec<_>>();
+				
+			block_on(async {
+				// Wait for all closures
+				futures::join!(tasks.0, tasks.1, tasks.2, tasks.3);
+				// Stop every threads
+				drop(signal);
+			});
 
 			let mut err = None;
 			for h in handles {
@@ -798,13 +805,6 @@ impl Iterator {
 			if let Some(err) = err {
 				std::panic::resume_unwind(err);
 			}
-		});
-
-		block_on(async {
-			// Wait for all closures
-			futures::join!(tasks.0, tasks.1, tasks.2, tasks.3);
-			// Stop every threads
-			drop(signal);
 		});
 	}
 }
