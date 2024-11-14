@@ -1,12 +1,14 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{
 	Capabilities, FuncTarget, MethodTarget, NetTarget, RouteTarget, Targets,
 };
+use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 
 #[derive(Args, Debug)]
@@ -34,6 +36,10 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", long = "temporary-directory")]
 	#[arg(value_parser = super::cli::validator::dir_exists)]
 	temporary_directory: Option<PathBuf>,
+	#[arg(help = "Path to a SurrealQL file that will be imported when starting the server")]
+	#[arg(env = "SURREAL_IMPORT_FILE", long = "import-file")]
+	#[arg(value_parser = super::cli::validator::file_exists)]
+	import_file: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -379,6 +385,7 @@ pub async fn init(
 		unauthenticated,
 		capabilities,
 		temporary_directory,
+		import_file,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore, Error> {
 	// Get local copy of options
@@ -417,6 +424,11 @@ pub async fn init(
 		.with_capabilities(capabilities);
 	// Ensure the storage version is up-to-date to prevent corruption
 	dbs.check_version().await?;
+	// Import file at start, if provided
+	if let Some(file) = import_file {
+		let sql = fs::read_to_string(file)?;
+		dbs.import(&sql, &Session::owner()).await?;
+	}
 	// Setup initial server auth credentials
 	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
 		dbs.initialise_credentials(user, pass).await?;
@@ -444,7 +456,6 @@ pub async fn fix(path: String) -> Result<(), Error> {
 mod tests {
 	use std::str::FromStr;
 
-	use surrealdb::dbs::Session;
 	use surrealdb::iam::verify::verify_root_creds;
 	use surrealdb::kvs::{LockType::*, TransactionType::*};
 	use test_log::test;
