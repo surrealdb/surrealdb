@@ -19,7 +19,7 @@ use crate::{
 	},
 };
 
-use super::{method::Method, response::Data, rpc_error::RpcError};
+use super::{method::Method, response::Data, rpc_error::RpcError, statement_options::StatementOptions};
 
 #[allow(async_fn_in_trait)]
 pub trait RpcContext {
@@ -517,39 +517,35 @@ pub trait RpcContext {
 
 	async fn upsert(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_one_or_two() else {
+		let Ok((what, data, opts_value)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Insert data
+		if !data.is_none_or_null() {
+			opts.with_data_content(data);
+		}
+		// Apply user options
+		if !opts_value.is_none_or_null() {
+			opts.process_options(opts_value)?;
+		}
 		// Return a single result?
 		let one = what.is_thing_single();
-		// Specify the SQL query string
-		let sql = if data.is_none_or_null() {
-			// UPSERT $what RETURN AFTER
-			UpsertStatement {
-				what: vec![Value::Param("what".into())].into(),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		} else {
-			// UPSERT $what CONTENT $data RETURN AFTER
-			UpsertStatement {
-				what: vec![Value::Param("what".into())].into(),
-				data: Some(crate::sql::Data::ContentExpression(Value::Param("data".into()))),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		};
-		// Specify the query parameters
-		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
-			String::from("data") => data,
-			=> &self.vars()
-		});
-		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
-		// Extract the first query result
+		// Get the variables
+		let vars = Some(opts.merge_vars(self.vars()));
+		// Prepare the SQL statement
+		let sql = UpsertStatement {
+			what: vec![what].into(),
+			data: opts.data_expr(),
+			output: Some(opts.output),
+			cond: opts.cond,
+			..Default::default()
+		}
+		.into();
+		// Execute the statement on the database
+		let mut res = self.kvs().process(sql, self.session(), vars).await?;
+		// Extract the first statement result
 		Ok(match one {
 			true => res.remove(0).result?.first().into(),
 			false => res.remove(0).result?.into(),
@@ -562,39 +558,35 @@ pub trait RpcContext {
 
 	async fn update(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_one_or_two() else {
+		let Ok((what, data, opts_value)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Insert data
+		if !data.is_none_or_null() {
+			opts.with_data_content(data);
+		}
+		// Apply user options
+		if !opts_value.is_none_or_null() {
+			opts.process_options(opts_value)?;
+		}
 		// Return a single result?
 		let one = what.is_thing_single();
-		// Specify the SQL query string
-		let sql = if data.is_none_or_null() {
-			// UPDATE $what RETURN AFTER
-			UpdateStatement {
-				what: vec![Value::Param("what".into())].into(),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		} else {
-			// UPDATE $what CONTENT $data RETURN AFTER
-			UpdateStatement {
-				what: vec![Value::Param("what".into())].into(),
-				data: Some(crate::sql::Data::ContentExpression(Value::Param("data".into()))),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		};
-		// Specify the query parameters
-		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
-			String::from("data") => data,
-			=> &self.vars()
-		});
-		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
-		// Extract the first query result
+		// Get the variables
+		let vars = Some(opts.merge_vars(self.vars()));
+		// Prepare the SQL statement
+		let sql = UpdateStatement {
+			what: vec![what].into(),
+			data: opts.data_expr(),
+			output: Some(opts.output),
+			cond: opts.cond,
+			..Default::default()
+		}
+		.into();
+		// Execute the statement on the database
+		let mut res = self.kvs().process(sql, self.session(), vars).await?;
+		// Extract the first statement result
 		Ok(match one {
 			true => res.remove(0).result?.first().into(),
 			false => res.remove(0).result?.into(),

@@ -3,7 +3,7 @@
 use crate::{
 	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
 	err::Error,
-	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
+	sql::{Block, Cond, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
 };
 
 pub mod error;
@@ -19,6 +19,7 @@ pub trait Parse<T> {
 #[cfg(test)]
 mod test;
 
+use error::RenderedError;
 use lexer::{compound, Lexer};
 use parser::Parser;
 use reblessive::Stack;
@@ -269,6 +270,38 @@ pub fn block(input: &str) -> Result<Block, Error> {
 				.with_span(token.span, error::MessageKind::Error)
 				.render_on(input),
 		)),
+	}
+}
+
+
+/// Parses JSON into an inert SurrealQL [`Value`]
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn condition(input: &str) -> Result<Cond, Error> {
+	trace!(target: TARGET, "Parsing inert JSON value");
+
+	let input = format!("WHERE {input}");
+
+	if input.len() > u32::MAX as usize {
+		return Err(Error::QueryTooLarge);
+	}
+
+	let mut parser = Parser::new(input.as_bytes())
+		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
+		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut stack = Stack::new();
+	let cond = stack
+		.enter(|stk| parser.try_parse_condition(stk))
+		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input.as_str()))
+		.map_err(Error::InvalidQuery)?;
+
+	match cond {
+		Some(cond) => Ok(cond),
+		_ => Err(Error::InvalidQuery(RenderedError {
+			errors: vec!["Missing Condition".into()],
+			snippets: vec![]
+		}))
 	}
 }
 
