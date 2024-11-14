@@ -720,3 +720,33 @@ async fn select_where_matches_analyser_without_tokenizer() -> Result<(), Error> 
 	t.expect_val("[{ id: t:1, text: 'ab' }]")?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_where_matches_analyser_with_mapper() -> Result<(), Error> {
+	let sql = r"
+		DEFINE ANALYZER mapper TOKENIZERS blank,class FILTERS lowercase,mapper('../tests/data/lemmatization-en.txt');
+		CREATE t:1 SET text = 'He drives to work every day, taking the scenic route through town';
+		DEFINE INDEX search_idx ON TABLE t COLUMNS text SEARCH ANALYZER mapper BM25;
+		SELECT * FROM t WHERE text @@ 'driven'";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(4)?;
+	t.skip_ok(3)?;
+	t.expect_val(
+		"[{ id: t:1, text: 'He drives to work every day, taking the scenic route through town' }]",
+	)?;
+	// Reload the database
+	let mut t = t
+		.restart(
+			r"
+		SELECT * FROM t WHERE text @@ 'driven';
+		REMOVE INDEX search_idx ON TABLE t;
+		REMOVE ANALYZER mapper",
+		)
+		.await?;
+	t.expect_size(3)?;
+	t.expect_val(
+		"[{ id: t:1, text: 'He drives to work every day, taking the scenic route through town' }]",
+	)?;
+	t.skip_ok(2)?;
+	Ok(())
+}
