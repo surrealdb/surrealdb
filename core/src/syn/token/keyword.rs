@@ -120,6 +120,7 @@ keyword! {
 	Lm => "LM",
 	M => "M",
 	M0 => "M0",
+	Mapper => "MAPPER",
 	Merge => "MERGE",
 	Model => "MODEL",
 	MTree => "MTREE",
