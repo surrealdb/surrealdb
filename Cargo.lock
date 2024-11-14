@@ -6038,6 +6038,7 @@ dependencies = [
  "sha2",
  "snap",
  "storekey",
+ "strsim",
  "subtle",
  "surrealcs",
  "surrealdb-derive",
