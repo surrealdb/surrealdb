@@ -791,10 +791,6 @@ criteria = "safe-to-deploy"
 version = "1.3.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.libc]]
-version = "0.2.153"
-criteria = "safe-to-deploy"
-
 [[exemptions.libloading]]
 version = "0.7.4"
 criteria = "safe-to-deploy"
