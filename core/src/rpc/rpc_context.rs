@@ -853,7 +853,6 @@ pub trait RpcContext {
 			.into(),
 			_ => Function::Normal(name, args).into(),
 		};
-		//
 		// Specify the query variables
 		let vars = Some(self.vars().clone());
 		// Execute the function on the database
