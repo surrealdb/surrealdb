@@ -22,7 +22,7 @@ mod first;
 mod flatten;
 mod generate;
 mod get;
-mod idiom_recursion;
+pub(crate) mod idiom_recursion;
 mod inc;
 mod increment;
 mod into_json;

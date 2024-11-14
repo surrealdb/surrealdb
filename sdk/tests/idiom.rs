@@ -260,7 +260,7 @@ async fn idiom_recursion_graph() -> Result<(), Error> {
 				name: 'Jaime'
 			},
 			{
-				knows: NONE,
+				knows: [],
 				name: 'John'
 			},
 			{
@@ -278,7 +278,7 @@ async fn idiom_recursion_graph() -> Result<(), Error> {
 				name: 'Micha'
 			},
 			{
-				knows: NONE,
+				knows: [],
 				name: 'Tim'
 			},
 			{
@@ -765,6 +765,148 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn idiom_recursion_path_elimination() -> Result<(), Error> {
+	let sql = r#"
+		INSERT [
+			{ id: a:1, name: 'One',   links: [a:2, a:3] },
+			{ id: a:2, name: 'Two',   links: [a:3] },
+			{ id: a:3, name: 'Three', links: [] },
+		];
+
+		a:1.{1}.{ name, links: links.@ };
+		a:1.{2}.{ name, links: links.@ };
+		a:1.{3}.{ name, links: links.@ };
+		a:1.{4}.{ name, links: links.@ };
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val(
+			"[
+			{ id: a:1, name: 'One',   links: [a:2, a:3] },
+			{ id: a:2, name: 'Two',   links: [a:3] },
+			{ id: a:3, name: 'Three', links: [] },
+		]",
+		)?
+		.expect_val(
+			"{
+			name: 'One',
+			links: [a:2, a:3],
+		}",
+		)?
+		.expect_val(
+			"{
+			name: 'One',
+			links: [
+				{
+					name: 'Two',
+					links: [a:3]
+				},
+				{
+					name: 'Three',
+					links: [],
+				}
+			],
+		}",
+		)?
+		.expect_val(
+			"{
+			name: 'One',
+			links: [
+				{
+					name: 'Two',
+					links: [
+						{
+							name: 'Three',
+							links: [],
+						}
+					]
+				}
+			],
+		}",
+		)?
+		.expect_val("NONE")?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn idiom_recursion_repeat_recurse_nested_destructure() -> Result<(), Error> {
+	let sql = r#"
+		INSERT [
+			{ id: a:1, name: 'One',   links: { a: [a:2, a:3] } },
+			{ id: a:2, name: 'Two',   links: { a: [a:3] } },
+			{ id: a:3, name: 'Three', links: { a: [] } },
+		];
+
+		a:1.{1}.{ name, links.{ a: a.@ } };
+		a:1.{2}.{ name, links.{ a: a.@ } };
+		a:1.{3}.{ name, links.{ a: a.@ } };
+		a:1.{4}.{ name, links.{ a: a.@ } };
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val(
+			"[
+			{ id: a:1, name: 'One',   links: { a: [a:2, a:3] } },
+			{ id: a:2, name: 'Two',   links: { a: [a:3] } },
+			{ id: a:3, name: 'Three', links: { a: [] } },
+		]",
+		)?
+		.expect_val(
+			"{
+			name: 'One',
+			links: {
+				a: [a:2, a:3]
+			},
+		}",
+		)?
+		.expect_val(
+			"{
+			name: 'One',
+			links: {
+				a: [
+					{
+						name: 'Two',
+						links: {
+							a: [a:3]
+						}
+					},
+					{
+						name: 'Three',
+						links: {
+							a: []
+						}
+					}
+				]
+			},
+		}",
+		)?
+		.expect_val(
+			"{
+			name: 'One',
+			links: {
+				a: [
+					{
+						name: 'Two',
+						links: {
+							a: [
+								{
+									name: 'Three',
+									links: { 
+										a: [] 
+									}
+								}
+							]
+						}
+					}
+				]
+			},
+		}",
+		)?
+		.expect_val("NONE")?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn idiom_recursion_limits() -> Result<(), Error> {
 	let sql = r#"
 		FOR $i IN 1..=300 {
@@ -777,7 +919,6 @@ async fn idiom_recursion_limits() -> Result<(), Error> {
 		a:1.{..257}.link;
 
 		a:1.@;
-		a:1.{..}.{..};
 	"#;
 	Test::new(sql)
 		.await?
@@ -786,7 +927,8 @@ async fn idiom_recursion_limits() -> Result<(), Error> {
 		.expect_error("Exceeded the idiom recursion limit of 256.")?
 		.expect_val("a:257")?
 		.expect_error("Found 257 for bound but expected 256 at most.")?
-		.expect_error("Tried to use a `@` repeat recurse symbol, while not recursing.")?
-		.expect_error("Tried to use a `{..}` recursion symbol, while already recursing.")?;
+		.expect_error(
+			"Tried to use a `@` repeat recurse symbol in a position where it is not supported",
+		)?;
 	Ok(())
 }

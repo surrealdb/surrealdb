@@ -1198,6 +1198,10 @@ pub enum Error {
 	IdiomRecursionAlreadyRecursing {
 		symbol: String,
 	},
+
+	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
+	#[error("Tried to use a `@` repeat recurse symbol in a position where it is not supported")]
+	UnsupportedRepeatRecurse,
 }
 
 impl From<Error> for String {

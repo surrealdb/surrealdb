@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::ops::Deref;
 
 use crate::cnf::MAX_COMPUTATION_DEPTH;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -11,7 +11,7 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::{Next, NextMethod, SplitByRepeatRecurse};
+use crate::sql::part::{FindRecursionPlan, Next, NextMethod};
 use crate::sql::part::{Part, Skip};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
@@ -46,52 +46,21 @@ impl Value {
 			}
 			// The knowledge of the current value is not relevant to Part::Recurse
 			Some(Part::Recurse(recurse)) => {
-				// We do not allow idiom recursion inside idiom recursion
-				if ctx.idiom_recursion().is_some() {
-					return Err(Error::IdiomRecursionAlreadyRecursing {
-						symbol: format!("{{{}}}", recurse),
-					});
-				}
-
-				// Collect the following path
-				// We split the path when we encounter a root-level repeat recurse part
-				// The path after a root-level repeat-recurse part is processed after the recursion
 				let next = path.next();
-				let (next, after) = match next.split_by_repeat_recurse() {
-					Some((next, after)) => (next, Some(after)),
-					_ => (next, None),
+				let (next, plan, after) = match next.find_recursion_plan() {
+					Some((next, plan, after)) => (next, Some(plan), Some(after)),
+					_ => (next, None, None),
 				};
 
-				// Update the context with the recursion details, used by the
-				// `compute_idiom_recursion` method and repeat recurse part.
-				let mut recurse_ctx = MutableContext::new(ctx);
-				recurse_ctx.start_idiom_recursion(recurse.to_owned(), Vec::from(next));
-				let recurse_ctx = recurse_ctx.freeze();
+				let v = compute_idiom_recursion(stk, ctx, opt, doc, recurse, &0, self, next, &plan)
+					.await?;
 
-				// Compute the recursion
-				let v = compute_idiom_recursion(stk, &recurse_ctx, opt, doc, self, false).await?;
-
-				// If we previously encountered a root-level repeat recurse part, we
-				// can now apply the left-over path to the result of the recursion
 				match after {
 					Some(after) => stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await,
 					_ => Ok(v),
 				}
 			}
-			// The knowledge of the current value is not relevant to Part::RepeatRecurse
-			Some(Part::RepeatRecurse) => {
-				// Process the recursion based on the recursion details in the context
-				// Because we now know that we are recursing instead of looping, let's
-				// indicate this to the compute method, indicating there is no need to loop
-				let v = compute_idiom_recursion(stk, ctx, opt, doc, &self.clone().flatten(), true)
-					.await?;
-
-				// Process a potential left-over path. When the repeat-recurse symbol
-				// is used nested, it does not operate on the the output value, so we
-				// apply it every iteration.
-				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-			}
-			// The knowledge of the current value is not relevant to Part::Doc
+			Some(Part::RepeatRecurse) => Err(Error::UnsupportedRepeatRecurse),
 			Some(Part::Doc) => {
 				// Try to obtain a Record ID from the document, otherwise we'll operate on NONE
 				let v = match doc {

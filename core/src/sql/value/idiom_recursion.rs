@@ -1,10 +1,13 @@
 use crate::{
 	cnf::IDIOM_RECURSION_LIMIT,
-	ctx::{Context, MutableContext},
+	ctx::Context,
 	dbs::Options,
 	doc::CursorDoc,
 	err::Error,
-	sql::Array,
+	sql::{
+		part::{Recurse, RecursionPlan},
+		Array, Part,
+	},
 };
 
 use super::Value;
@@ -12,7 +15,7 @@ use reblessive::tree::Stk;
 
 // Method used to check if the value
 // inside a recursed idiom path is final
-fn is_final(v: &Value) -> bool {
+pub(crate) fn is_final(v: &Value) -> bool {
 	match v {
 		Value::None => true,
 		Value::Null => true,
@@ -21,11 +24,19 @@ fn is_final(v: &Value) -> bool {
 	}
 }
 
-fn get_final(v: &Value) -> Value {
+pub(crate) fn get_final(v: &Value) -> Value {
 	match v {
 		Value::Array(_) => Value::Array(Array(vec![])),
 		Value::Null => Value::Null,
 		_ => Value::None,
+	}
+}
+
+pub(crate) fn clean_iteration(v: Value) -> Value {
+	if let Value::Array(v) = v {
+		Value::from(v.0.into_iter().filter(|v| !is_final(v)).collect::<Vec<Value>>()).flatten()
+	} else {
+		v
 	}
 }
 
@@ -34,31 +45,28 @@ pub(crate) async fn compute_idiom_recursion(
 	ctx: &Context,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
+	recurse: &Recurse,
+	i: &u32,
 	value: &Value,
-	recursed: bool,
+	next: &[Part],
+	plan: &Option<RecursionPlan>,
 ) -> Result<Value, Error> {
-	// Get recursion context
-	let (i, recurse, next) = match ctx.idiom_recursion() {
-		Some((i, recurse, next)) => (i, recurse, next),
-		_ => return Err(Error::RepeatRecurseNotRecursing),
-	};
-
-	// We recursed and found a final value, let's return
-	// it for the previous iteration to pick up on this
-	if recursed && is_final(value) {
-		return Ok(get_final(value));
-	}
-
 	// Find minimum and maximum amount of iterations
 	let min = recurse.min()?;
 	let max = recurse.max()?;
 	let limit = *IDIOM_RECURSION_LIMIT as u32;
 
+	// We recursed and found a final value, let's return
+	// it for the previous iteration to pick up on this
+	if plan.is_some() && is_final(value) {
+		return Ok(get_final(value));
+	}
+
 	// Counter for the local loop and current value
 	let mut i = i.to_owned();
 	let mut current = value.clone();
 
-	if recursed {
+	if plan.is_some() {
 		// If we have reached the maximum amount of iterations,
 		// we can return the current value and break the loop.
 		if let Some(max) = max {
@@ -72,24 +80,23 @@ pub(crate) async fn compute_idiom_recursion(
 		}
 	}
 
+	println!("plan {:?}", plan);
+
 	loop {
 		// Bump iteration
-		let mut ctx = MutableContext::new(ctx);
-		ctx.bump_idiom_recursion()?;
-		let ctx = ctx.freeze();
 		i += 1;
 
-		// Obtain the processed value for this iteration
-		let v = stk.run(|stk| current.get(stk, &ctx, opt, doc, next.as_slice())).await?.flatten();
+		let v = stk.run(|stk| current.get(stk, &ctx, opt, doc, next)).await?;
 
-		// When using the Continue Recurse (@) symbol nested
-		// in the idiom path "next", we have iterated further
-		// than we are aware of here, in which case we can
-		// break the loop
-		let nested_iteration = match ctx.idiom_recursion_iterated()? {
-			Some(i) => i,
-			None => i,
+		// println!("i {i}");
+		// println!("b {value}");
+		// println!("a {v}");
+		let v = match plan {
+			Some(ref p) => p.compute(stk, ctx, opt, doc, recurse, &i, &v, next, plan).await?,
+			_ => v,
 		};
+
+		let v = clean_iteration(v);
 
 		// Process the value for this iteration
 		match v {
@@ -103,18 +110,6 @@ pub(crate) async fn compute_idiom_recursion(
 					// If the value is final, and we reached the minimum
 					// amount of required iterations, we can return the value
 					false => current,
-				});
-			}
-			// We iterated in a nested recursion invocation
-			v if i < nested_iteration => {
-				return Ok(match nested_iteration < min {
-					// If we have not yet reached the minimum amount of
-					// required iterations it's a dead end, and we return NONE
-					true => get_final(&v),
-
-					// If the value is final, and we reached the minimum
-					// amount of required iterations, we can return the value
-					false => v,
 				});
 			}
 			v => {
@@ -140,7 +135,7 @@ pub(crate) async fn compute_idiom_recursion(
 		// as the loop will continue on the whole value, and
 		// not on the potentially nested value which triggered
 		// the recurse, resulting in a potential infinite loop
-		if recursed {
+		if plan.is_some() {
 			return Ok(current);
 		}
 	}
