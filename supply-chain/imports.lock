@@ -113,13 +113,6 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
-[[publisher.echodb]]
-version = "0.7.0"
-when = "2024-06-10"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
 [[publisher.encoding_rs]]
 version = "0.8.33"
 when = "2023-08-23"
@@ -252,6 +245,13 @@ when = "2023-03-26"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.libc]]
+version = "0.2.153"
+when = "2024-01-31"
+user-id = 51017
+user-login = "JohnTitor"
+user-name = "Yuki Okushi"
 
 [[publisher.loom]]
 version = "0.5.6"
@@ -498,6 +498,13 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
+[[publisher.surrealkv]]
+version = "0.5.1"
+when = "2024-11-14"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
 [[publisher.surrealml-core]]
 version = "0.1.2"
 when = "2024-04-02"
@@ -585,6 +592,13 @@ user-name = "Manish Goregaokar"
 [[publisher.vart]]
 version = "0.6.0"
 when = "2024-10-17"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.vart]]
+version = "0.7.0"
+when = "2024-10-28"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -942,6 +956,17 @@ size of this crate comes from the large generated unicode tables file. This
 crate is broadly used throughout the ecosystem and does not contain anything
 suspicious.
 """
+
+[[audits.bytecode-alliance.audits.libc]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.153 -> 0.2.158"
+notes = "More platforms, more definitions, more headers, it's still just `libc`"
+
+[[audits.bytecode-alliance.audits.libc]]
+who = "Dan Gohman <dev@sunfishcode.online>"
+criteria = "safe-to-deploy"
+delta = "0.2.158 -> 0.2.161"
 
 [[audits.bytecode-alliance.audits.matchers]]
 who = "Pat Hickey <phickey@fastly.com>"
@@ -1671,6 +1696,16 @@ who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 version = "0.2.2"
 
+[[audits.isrg.audits.getrandom]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.2.12 -> 0.2.14"
+
+[[audits.isrg.audits.getrandom]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.2.14 -> 0.2.15"
+
 [[audits.isrg.audits.hmac]]
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
@@ -1800,7 +1835,7 @@ who = "Henri Sivonen <hsivonen@hsivonen.fi>"
 criteria = "safe-to-deploy"
 user-id = 4484 # Henri Sivonen (hsivonen)
 start = "2019-02-26"
-end = "2024-08-28"
+end = "2025-10-23"
 notes = "I, Henri Sivonen, wrote encoding_rs for Gecko and have reviewed contributions by others. There are two caveats to the certification: 1) The crate does things that are documented to be UB but that do not appear to actually be UB due to integer types differing from the general rule; https://github.com/hsivonen/encoding_rs/issues/79 . 2) It would be prudent to re-review the code that reinterprets buffers of integers as SIMD vectors; see https://github.com/hsivonen/encoding_rs/issues/87 ."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 

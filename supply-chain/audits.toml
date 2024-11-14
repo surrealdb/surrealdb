@@ -1,7 +1,10 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.libc]]
+who = "arriqaaq <farhan.khan@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.161 -> 0.2.162"
 
 [[trusted.addr]]
 criteria = "safe-to-deploy"
@@ -170,6 +173,12 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-03-26"
 end = "2025-01-24"
+
+[[trusted.libc]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2020-03-17"
+end = "2025-11-14"
 
 [[trusted.loom]]
 criteria = "safe-to-deploy"
