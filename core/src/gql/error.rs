@@ -13,6 +13,8 @@ pub enum GqlError {
 	SchemaError(String),
 	#[error("Error resolving request: {0}")]
 	ResolverError(String),
+	#[error("Auth error: {0}")]
+	AuthError(String),
 	#[error("No Namespace specified")]
 	UnspecifiedNamespace,
 	#[error("No Database specified")]
@@ -31,6 +33,8 @@ pub enum GqlError {
 pub fn schema_error(msg: impl Into<String>) -> GqlError {
 	GqlError::SchemaError(msg.into())
 }
+
+pub fn auth_error(msg: impl Into<String>) -> GqlError { GqlError::AuthError(msg.into()) }
 
 pub fn resolver_error(msg: impl Into<String>) -> GqlError {
 	GqlError::ResolverError(msg.into())
