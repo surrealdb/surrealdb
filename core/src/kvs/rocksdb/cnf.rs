@@ -30,6 +30,9 @@ pub static ROCKSDB_MIN_BLOB_SIZE: LazyLock<u64> =
 pub static ROCKSDB_KEEP_LOG_FILE_NUM: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_ROCKSDB_KEEP_LOG_FILE_NUM", usize, 20);
 
+pub static ROCKSDB_STORAGE_LOG_LEVEL: LazyLock<String> =
+	lazy_env_parse!("SURREAL_ROCKSDB_STORAGE_LOG_LEVEL", String, "warn".to_string());
+
 pub static ROCKSDB_COMPACTION_STYLE: LazyLock<String> =
 	lazy_env_parse!("SURREAL_ROCKSDB_COMPACTION_STYLE", String);
 
