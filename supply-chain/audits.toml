@@ -171,6 +171,12 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-03-26"
 end = "2025-01-24"
 
+[[trusted.libc]]
+criteria = "safe-to-deploy"
+user-id = 51017
+start = "2020-03-17"
+end = "2025-11-14"
+
 [[trusted.loom]]
 criteria = "safe-to-deploy"
 user-id = 10
