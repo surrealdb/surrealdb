@@ -292,7 +292,7 @@ pub trait RpcContext {
 			// LIVE SELECT DIFF FROM $what
 			LiveStatement {
 				expr: Fields::default(),
-				what: vec![what.could_be_table()].into(),
+				what: what.could_be_table(),
 				..Default::default()
 			}
 			.into()
@@ -300,7 +300,7 @@ pub trait RpcContext {
 			// LIVE SELECT * FROM $what
 			LiveStatement {
 				expr: Fields::all(),
-				what: vec![what.could_be_table()].into(),
+				what: what.could_be_table(),
 				..Default::default()
 			}
 			.into()
