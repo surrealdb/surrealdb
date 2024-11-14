@@ -164,7 +164,26 @@ pub trait RpcContext {
 		out.map(Into::into)
 	}
 
+	// TODO(gguillemas): Remove this method in 3.0.0 and make `signinv2` the default.
 	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
+		let Ok(Value::Object(v)) = params.needs_one() else {
+			return Err(RpcError::InvalidParams);
+		};
+		let mut tmp_session = mem::take(self.session_mut());
+		let out: Result<Value, RpcError> =
+			crate::iam::signin::signin(self.kvs(), &mut tmp_session, v)
+				.await
+				// The default signin method just returns the token.
+				.map(|data| data.token.into())
+				.map_err(Into::into);
+		*self.session_mut() = tmp_session;
+		out.map(Into::into)
+	}
+	
+	// TODO(gguillemas): This should be made the default in 3.0.0.
+	// This method for signing in returns an object instead of a string, supporting additional values.
+	// The original motivation for this method was the introduction of refresh tokens.
+	async fn signinv2(&mut self, params: Array) -> Result<Data, RpcError> {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};

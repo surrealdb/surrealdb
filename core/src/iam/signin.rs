@@ -10,7 +10,7 @@ use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::statements::{access, AccessGrant};
-use crate::sql::AccessType;
+use crate::sql::{access_type, AccessType};
 use crate::sql::Datetime;
 use crate::sql::Object;
 use crate::sql::Value;
@@ -19,8 +19,33 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
+use std::str::FromStr;
+use crate::ctx::Context;
+use serde::{Deserialize, Serialize};
+use revision::revisioned;
 
-pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<String, Error> {
+#[doc(hidden)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct SigninData {
+	pub token: String,
+	pub refresh: Option<String>,
+}
+
+impl From<SigninData> for Value {
+	fn from(v: SigninData) -> Value {
+		let mut out = Object::default();
+		out.insert("token".to_string(), v.token.into());
+		if let Some(refresh) = v.refresh {
+			out.insert("refresh".to_string(), refresh.into());
+		}
+		out.into()
+	}
+}
+
+pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SigninData, Error> {
 	// Check vars contains only computed values
 	vars.validate_computed()?;
 	// Parse the specified variables
@@ -114,7 +139,7 @@ pub async fn db_access(
 	db: String,
 	ac: String,
 	vars: Object,
-) -> Result<String, Error> {
+) -> Result<SigninData, Error> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -177,6 +202,26 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
+
+											let refresh = match &at.bearer {
+												Some(_) => {
+													let grant = access::AccessStatementGrant{
+														ac: av.name.clone(),
+														base: Some(av.base.clone()),
+														subject: access::Subject::Record(rid.clone()),
+													};
+													// Create a new context.
+													let ctx = Context::default();
+													// Setup the system session for creating the grant.
+													let sess =
+														Session::owner().with_ns(&ns).with_db(&db);
+													// TODO(PR): Call intermediate function to get just the key.
+													let bearer = access::compute_grant(&grant, &ctx, &kvs.setup_options(&sess), None).await?;
+													Some(bearer.to_string())
+												},
+												None => None,
+											};
+											 
 											// Log the authenticated access method info
 											trace!(
 												"Signing in to database with access method `{}`",
@@ -200,7 +245,8 @@ pub async fn db_access(
 											// Check the authentication token
 											match enc {
 												// The auth token was created successfully
-												Ok(tk) => Ok(tk),
+												// TODO(PR): Return additional refresh bearer grant.
+												Ok(token) => Ok(SigninData{token, refresh}),
 												_ => Err(Error::TokenMakingFailed),
 											}
 										}
@@ -303,6 +349,11 @@ pub async fn db_access(
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
 					}
+					
+					// TODO(PR): If the bearer grant is of refresh type, revoke it.
+					// TODO(PR): Generate new bearer grant of refresh type.
+					let refresh = None;
+					
 					// Log the authenticated access method information.
 					trace!("Signing in to database with bearer access method `{}`", ac);
 					// Create the authentication token.
@@ -333,7 +384,8 @@ pub async fn db_access(
 					// Check the authentication token.
 					match enc {
 						// The authentication token was created successfully.
-						Ok(tk) => Ok(tk),
+						// TODO(PR): Return additional refresh bearer grant, if refreshing.
+						Ok(token) => Ok(SigninData{token, refresh}),
 						_ => Err(Error::TokenMakingFailed),
 					}
 				}
@@ -351,7 +403,7 @@ pub async fn db_user(
 	db: String,
 	user: String,
 	pass: String,
-) -> Result<String, Error> {
+) -> Result<SigninData, Error> {
 	match verify_db_creds(kvs, &ns, &db, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -381,7 +433,7 @@ pub async fn db_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(tk),
+				Ok(tk) => Ok(SigninData{token: tk, refresh: None}),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -399,7 +451,7 @@ pub async fn ns_access(
 	ns: String,
 	ac: String,
 	vars: Object,
-) -> Result<String, Error> {
+) -> Result<SigninData, Error> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -516,7 +568,7 @@ pub async fn ns_access(
 					// Check the authentication token.
 					match enc {
 						// The authentication token was created successfully.
-						Ok(tk) => Ok(tk),
+						Ok(tk) => Ok(SigninData{token: tk, refresh: None}),
 						_ => Err(Error::TokenMakingFailed),
 					}
 				}
@@ -533,7 +585,7 @@ pub async fn ns_user(
 	ns: String,
 	user: String,
 	pass: String,
-) -> Result<String, Error> {
+) -> Result<SigninData, Error> {
 	match verify_ns_creds(kvs, &ns, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -561,7 +613,7 @@ pub async fn ns_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(tk),
+				Ok(tk) => Ok(SigninData{token: tk, refresh: None}),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -580,7 +632,7 @@ pub async fn root_user(
 	session: &mut Session,
 	user: String,
 	pass: String,
-) -> Result<String, Error> {
+) -> Result<SigninData, Error> {
 	match verify_root_creds(kvs, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -606,7 +658,7 @@ pub async fn root_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(tk),
+				Ok(tk) => Ok(SigninData{token: tk, refresh: None}),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -623,7 +675,7 @@ pub async fn root_access(
 	session: &mut Session,
 	ac: String,
 	vars: Object,
-) -> Result<String, Error> {
+) -> Result<SigninData, Error> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -737,7 +789,7 @@ pub async fn root_access(
 					// Check the authentication token.
 					match enc {
 						// The authentication token was created successfully.
-						Ok(tk) => Ok(tk),
+						Ok(tk) => Ok(SigninData{token: tk, refresh: None}),
 						_ => Err(Error::TokenMakingFailed),
 					}
 				}
@@ -754,27 +806,20 @@ pub fn validate_grant_bearer(vars: Object) -> Result<(String, String), Error> {
 		Some(key) => key.to_raw_string(),
 		None => return Err(Error::AccessBearerMissingKey),
 	};
-	if key.len() != access::GRANT_BEARER_LENGTH {
+	let parts: Vec<&str> = key.split("-").collect();
+	if parts.len() != 4 {
 		return Err(Error::AccessGrantBearerInvalid);
 	}
-	// Retrieve the prefix from the provided key.
-	let prefix: String = key.chars().take(access::GRANT_BEARER_PREFIX.len()).collect();
-	// Check the length of the key prefix.
-	if prefix != access::GRANT_BEARER_PREFIX {
-		return Err(Error::AccessGrantBearerInvalid);
-	}
+	// Check that the prefix type exists.
+	access_type::BearerAccessType::from_str(parts[1])?;
 	// Retrieve the key identifier from the provided key.
-	let kid: String = key
-		.chars()
-		.skip(access::GRANT_BEARER_PREFIX.len() + 1)
-		.take(access::GRANT_BEARER_ID_LENGTH)
-		.collect();
+	let kid = parts[2];
 	// Check the length of the key identifier.
 	if kid.len() != access::GRANT_BEARER_ID_LENGTH {
 		return Err(Error::AccessGrantBearerInvalid);
 	};
 
-	Ok((kid, key))
+	Ok((kid.to_string(), key))
 }
 
 pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<(), Error> {
@@ -1067,12 +1112,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			// Decode token and check that it has been issued as intended
-			if let Ok(tk) = res {
+			if let Ok(sd) = res {
 				// Check that token can be verified with the defined algorithm
 				let val = Validation::new(Algorithm::RS256);
 				// Check that token can be verified with the defined public key
 				let token_data = decode::<Claims>(
-					&tk,
+					&sd.token,
 					&DecodingKey::from_rsa_pem(public_key.as_ref()).unwrap(),
 					&val,
 				)
@@ -1276,9 +1321,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					}
 
 					// Check issued token
-					if let Ok(tk) = res {
+					if let Ok(sd) = res {
 						// Decode token without validation
-						let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+						let token_data = decode::<Claims>(&sd.token, &DecodingKey::from_secret(&[]), &{
 							let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
 							validation.insecure_disable_signature_validation();
 							validation.validate_nbf = false;
@@ -2311,7 +2356,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				// Replace a character from the key prefix
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
-				invalid_key[access::GRANT_BEARER_PREFIX.len() - 2] = '_';
+				invalid_key["surreal-".len() + 2] = '_';
 				let key: String = invalid_key.into_iter().collect();
 
 				// Sign in with the bearer key
@@ -2397,7 +2442,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				// Remove a character from the bearer key
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
-				invalid_key.truncate(access::GRANT_BEARER_LENGTH - 1);
+				invalid_key.truncate(invalid_key.len() - 1);
 				let key: String = invalid_key.into_iter().collect();
 
 				// Sign in with the bearer key
@@ -2483,7 +2528,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				// Replace a character from the key identifier
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
-				invalid_key[access::GRANT_BEARER_PREFIX.len() + 2] = '_';
+				invalid_key[access_type::BearerAccessType::Bearer.prefix().len() + 2] = '_';
 				let key: String = invalid_key.into_iter().collect();
 
 				// Sign in with the bearer key
@@ -2569,8 +2614,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				// Replace a character from the key value
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
-				invalid_key
-					[access::GRANT_BEARER_PREFIX.len() + 1 + access::GRANT_BEARER_ID_LENGTH + 2] = '_';
+				invalid_key[valid_key.len() - 2] = '_';
 				let key: String = invalid_key.into_iter().collect();
 
 				// Sign in with the bearer key
@@ -3207,7 +3251,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Replace a character from the key prefix
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key[access::GRANT_BEARER_PREFIX.len() - 2] = '_';
+			invalid_key["surreal-".len() + 2] = '_';
 			let key: String = invalid_key.into_iter().collect();
 
 			// Sign in with the bearer key
@@ -3273,7 +3317,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Remove a character from the bearer key
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key.truncate(access::GRANT_BEARER_LENGTH - 1);
+			invalid_key.truncate(invalid_key.len() - 1);
 			let key: String = invalid_key.into_iter().collect();
 
 			// Sign in with the bearer key
@@ -3339,7 +3383,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Replace a character from the key identifier
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key[access::GRANT_BEARER_PREFIX.len() + 2] = '_';
+			invalid_key[access_type::BearerAccessType::Bearer.prefix().len() + 2] = '_';
 			let key: String = invalid_key.into_iter().collect();
 
 			// Sign in with the bearer key
@@ -3405,8 +3449,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Replace a character from the key value
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
-			invalid_key
-				[access::GRANT_BEARER_PREFIX.len() + 1 + access::GRANT_BEARER_ID_LENGTH + 2] = '_';
+			invalid_key[valid_key.len() - 2] = '_';
 			let key: String = invalid_key.into_iter().collect();
 
 			// Sign in with the bearer key

@@ -16,18 +16,19 @@ use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
+use surrealdb::iam::signin::{signin, SigninData};
 
 #[derive(Serialize)]
 struct Success {
 	code: u16,
 	details: String,
-	token: Option<String>,
+	data: SigninData,
 }
 
 impl Success {
-	fn new(token: String) -> Success {
+	fn new(data: SigninData) -> Success {
 		Success {
-			token: Some(token),
+			data: data,
 			code: 200,
 			details: String::from("Authentication succeeded"),
 		}
@@ -63,18 +64,19 @@ async fn handler(
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match surrealdb::iam::signin::signin(kvs, &mut session, vars).await.map_err(Error::from)
+			match signin(kvs, &mut session, vars).await.map_err(Error::from)
 			{
 				// Authentication was successful
-				Ok(v) => match accept.as_deref() {
+				Ok(data) => match accept.as_deref() {
 					// Simple serialization
-					Some(Accept::ApplicationJson) => Ok(output::json(&Success::new(v))),
-					Some(Accept::ApplicationCbor) => Ok(output::cbor(&Success::new(v))),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&Success::new(v))),
+					Some(Accept::ApplicationJson) => Ok(output::json(&Success::new(data))),
+					Some(Accept::ApplicationCbor) => Ok(output::cbor(&Success::new(data))),
+					Some(Accept::ApplicationPack) => Ok(output::pack(&Success::new(data))),
 					// Text serialization
-					Some(Accept::TextPlain) => Ok(output::text(v)),
+					// TODO(PR): Find a way to support refresh tokens here.
+					Some(Accept::TextPlain) => Ok(output::text(data.token)),
 					// Internal serialization
-					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v))),
+					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(data))),
 					// Return nothing
 					None => Ok(output::none()),
 					// An incorrect content-type was requested

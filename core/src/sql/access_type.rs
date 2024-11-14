@@ -7,6 +7,8 @@ use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
+use std::str::FromStr;
+use crate::err::Error;
 
 /// The type of access methods available
 #[revisioned(revision = 2)]
@@ -297,7 +299,7 @@ pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
@@ -306,6 +308,8 @@ pub struct RecordAccess {
 	pub jwt: JwtAccess,
 	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
 	pub authenticate: Option<Value>,
+	#[revision(start = 4)]
+	pub bearer: Option<BearerAccess>,
 }
 
 impl RecordAccess {
@@ -328,6 +332,7 @@ impl Default for RecordAccess {
 			jwt: JwtAccess {
 				..Default::default()
 			},
+			bearer: None,
 		}
 	}
 }
@@ -344,6 +349,7 @@ impl Jwt for RecordAccess {
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BearerAccess {
+	pub kind: BearerAccessType,
 	pub subject: BearerAccessSubject,
 	pub jwt: JwtAccess,
 }
@@ -351,6 +357,7 @@ pub struct BearerAccess {
 impl Default for BearerAccess {
 	fn default() -> Self {
 		Self {
+			kind: BearerAccessType::Bearer,
 			subject: BearerAccessSubject::User,
 			jwt: JwtAccess {
 				..Default::default()
@@ -362,6 +369,35 @@ impl Default for BearerAccess {
 impl Jwt for BearerAccess {
 	fn jwt(&self) -> &JwtAccess {
 		&self.jwt
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum BearerAccessType {
+	Bearer,
+	Refresh,
+}
+
+impl BearerAccessType {
+	pub fn prefix(&self) -> &'static str {
+        match self {
+            Self::Bearer => "surreal-bearer",
+            Self::Refresh => "surreal-refresh",
+        }
+    }
+}
+
+impl FromStr for BearerAccessType {
+	type Err = Error;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s.to_ascii_lowercase().as_str() {
+			"bearer" => Ok(Self::Bearer),
+			"refresh" => Ok(Self::Refresh),
+			_ => Err(Error::AccessGrantBearerInvalid),
+		}
 	}
 }
 

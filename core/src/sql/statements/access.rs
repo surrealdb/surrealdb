@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-pub static GRANT_BEARER_PREFIX: &str = "surreal-bearer";
 // Keys and their identifiers are generated randomly from a 62-character pool.
 pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =
 	b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -26,9 +25,6 @@ pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =
 pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 // With 24 characters from the pool, the key part has ~140 bits of entropy.
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
-// Total bearer key length.
-pub static GRANT_BEARER_LENGTH: usize =
-	GRANT_BEARER_PREFIX.len() + 1 + GRANT_BEARER_ID_LENGTH + 1 + GRANT_BEARER_KEY_LENGTH;
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
 #[doc(hidden)]
@@ -268,7 +264,7 @@ pub struct GrantBearer {
 
 impl GrantBearer {
 	#[doc(hidden)]
-	pub fn new() -> Self {
+	pub fn new(prefix: &str) -> Self {
 		let id = format!(
 			"{}{}",
 			// The pool for the first character of the key identifier excludes digits.
@@ -278,7 +274,7 @@ impl GrantBearer {
 		let secret = random_string(GRANT_BEARER_KEY_LENGTH, GRANT_BEARER_CHARACTER_POOL);
 		Self {
 			id: id.clone().into(),
-			key: format!("{GRANT_BEARER_PREFIX}-{id}-{secret}").into(),
+			key: format!("{prefix}-{id}-{secret}").into(),
 		}
 	}
 }
@@ -294,7 +290,8 @@ fn random_string(length: usize, pool: &[u8]) -> String {
 	string
 }
 
-async fn compute_grant(
+#[doc(hidden)]
+pub async fn compute_grant(
 	stmt: &AccessStatementGrant,
 	ctx: &Context,
 	opt: &Options,
@@ -327,9 +324,73 @@ async fn compute_grant(
 		AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
 			feature: format!("Grants for JWT on {base}"),
 		}),
-		AccessType::Record(_) => Err(Error::FeatureNotYetImplemented {
-			feature: format!("Grants for record on {base}"),
-		}),
+		AccessType::Record(at) => {
+			match &stmt.subject {
+				Subject::User(_) => {
+					return Err(Error::AccessGrantInvalidSubject);
+				}
+				Subject::Record(_) => {
+					// If the grant is being created for a record, a database must be selected.
+					if !matches!(base, Base::Db) {
+						return Err(Error::DbEmpty);
+					}
+				}
+			};
+			// The record access type must allow issuing bearer grants.
+			let atb = match &at.bearer {
+				Some(bearer) => bearer,
+				None => return Err(Error::AccessMethodMismatch),
+			};
+			// Create a new bearer key.
+			let grant = GrantBearer::new(atb.kind.prefix());
+			let gr = AccessGrant {
+				ac: ac.name.clone(),
+				// Unique grant identifier.
+				// In the case of bearer grants, the key identifier.
+				id: grant.id.clone(),
+				// Current time.
+				creation: Datetime::default(),
+				// Current time plus grant duration. Only if set.
+				expiration: ac.duration.grant.map(|d| d + Datetime::default()),
+				// The grant is initially not revoked.
+				revocation: None,
+				// Subject associated with the grant.
+				subject: stmt.subject.to_owned(),
+				// The contents of the grant.
+				grant: Grant::Bearer(grant),
+			};
+
+			// Create the grant.
+			// On the very unlikely event of a collision, "put" will return an error.
+			let res = match base {
+				Base::Db => {
+					let key =
+						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &gr.ac, &gr.id);
+					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+					txn.put(key, &gr, None).await
+				}
+				_ => return Err(Error::AccessLevelMismatch)
+			};
+
+			// Check if a collision was found in order to log a specific error on the server.
+			// For an access method with a billion grants, this chance is of only one in 295 billion.
+			if let Err(Error::TxKeyAlreadyExists) = res {
+				error!("A collision was found when attempting to create a new grant. Purging inactive grants is advised")
+			}
+			res?;
+
+			info!(
+				"Access method '{}' was used to create grant '{}' of type '{}' for '{}' by '{}'",
+				gr.ac,
+				gr.id,
+				gr.grant.variant(),
+				gr.subject.id(),
+				opt.auth.id()
+			);
+
+			Ok(Value::Object(gr.into()))
+		},
 		AccessType::Bearer(at) => {
 			match &stmt.subject {
 				Subject::User(user) => {
@@ -360,7 +421,7 @@ async fn compute_grant(
 				}
 			};
 			// Create a new bearer key.
-			let grant = GrantBearer::new();
+			let grant = GrantBearer::new(at.kind.prefix());
 			let gr = AccessGrant {
 				ac: ac.name.clone(),
 				// Unique grant identifier.
