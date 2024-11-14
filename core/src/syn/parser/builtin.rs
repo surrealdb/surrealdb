@@ -309,12 +309,12 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::uppercase") => PathKind::Function,
 		UniCase::ascii("string::words") => PathKind::Function,
 		//
-		UniCase::ascii("string::distance::damerau") => PathKind::Function,
-		UniCase::ascii("string::distance::damerau_nrm") => PathKind::Function,
+		UniCase::ascii("string::distance::damerau_levenshtein") => PathKind::Function,
 		UniCase::ascii("string::distance::hamming") => PathKind::Function,
 		UniCase::ascii("string::distance::levenshtein") => PathKind::Function,
-		UniCase::ascii("string::distance::levenshtein_nrm") => PathKind::Function,
-		UniCase::ascii("string::distance::levenshtein_osa") => PathKind::Function,
+		UniCase::ascii("string::distance::normalized_damerau_levenshtein") => PathKind::Function,
+		UniCase::ascii("string::distance::normalized_levenshtein") => PathKind::Function,
+		UniCase::ascii("string::distance::osa_distance") => PathKind::Function,
 		//
 		UniCase::ascii("string::html::encode") => PathKind::Function,
 		UniCase::ascii("string::html::sanitize") => PathKind::Function,

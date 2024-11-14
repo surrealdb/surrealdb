@@ -4261,26 +4261,26 @@ async fn function_string_distance_hamming() -> Result<(), Error> {
 #[tokio::test]
 async fn function_string_distance_damerau() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::distance::damerau("", "");
-		RETURN string::distance::damerau("damerau", "damerau");
-		RETURN string::distance::damerau("", "damerau");
-		RETURN string::distance::damerau("damerau", "");
-		RETURN string::distance::damerau("ca", "abc");
-		RETURN string::distance::damerau("damerau", "aderua");
-		RETURN string::distance::damerau("aderua", "damerau");
-		RETURN string::distance::damerau("öঙ香", "abc");
-		RETURN string::distance::damerau("abc", "öঙ香");
-		RETURN string::distance::damerau("damerau", "aderuaxyz");
-		RETURN string::distance::damerau("aderuaxyz", "damerau");
-		RETURN string::distance::damerau("Stewart", "Colbert");
-		RETURN string::distance::damerau("abcdefghijkl", "bacedfgihjlk");
-		RETURN string::distance::damerau(
+		RETURN string::distance::damerau_levenshtein("", "");
+		RETURN string::distance::damerau_levenshtein("damerau", "damerau");
+		RETURN string::distance::damerau_levenshtein("", "damerau");
+		RETURN string::distance::damerau_levenshtein("damerau", "");
+		RETURN string::distance::damerau_levenshtein("ca", "abc");
+		RETURN string::distance::damerau_levenshtein("damerau", "aderua");
+		RETURN string::distance::damerau_levenshtein("aderua", "damerau");
+		RETURN string::distance::damerau_levenshtein("öঙ香", "abc");
+		RETURN string::distance::damerau_levenshtein("abc", "öঙ香");
+		RETURN string::distance::damerau_levenshtein("damerau", "aderuaxyz");
+		RETURN string::distance::damerau_levenshtein("aderuaxyz", "damerau");
+		RETURN string::distance::damerau_levenshtein("Stewart", "Colbert");
+		RETURN string::distance::damerau_levenshtein("abcdefghijkl", "bacedfgihjlk");
+		RETURN string::distance::damerau_levenshtein(
 			"The quick brown fox jumped over the angry dog.",
 			"Lehem ipsum dolor sit amet, dicta latine an eam."
 		);
-		RETURN string::distance::damerau("foobar", "ofobar");
-		RETURN string::distance::damerau("specter", "spectre");
-		RETURN string::distance::damerau("a cat", "an abct");
+		RETURN string::distance::damerau_levenshtein("foobar", "ofobar");
+		RETURN string::distance::damerau_levenshtein("specter", "spectre");
+		RETURN string::distance::damerau_levenshtein("a cat", "an abct");
 	"#;
 	let mut test = Test::new(sql).await?;
 	// damerau_levenshtein_empty
@@ -4339,13 +4339,13 @@ async fn function_string_distance_damerau() -> Result<(), Error> {
 
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1223)
 #[tokio::test]
-async fn function_string_distance_damerau_nrm() -> Result<(), Error> {
+async fn function_string_distance_normalized_damerau_levenshtein() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::distance::damerau_nrm("levenshtein", "löwenbräu");
-		RETURN string::distance::damerau_nrm("", "");
-		RETURN string::distance::damerau_nrm("", "flower");
-		RETURN string::distance::damerau_nrm("tree", "");
-		RETURN string::distance::damerau_nrm("sunglasses", "sunglasses");
+		RETURN string::distance::normalized_damerau_levenshtein("levenshtein", "löwenbräu");
+		RETURN string::distance::normalized_damerau_levenshtein("", "");
+		RETURN string::distance::normalized_damerau_levenshtein("", "flower");
+		RETURN string::distance::normalized_damerau_levenshtein("tree", "");
+		RETURN string::distance::normalized_damerau_levenshtein("sunglasses", "sunglasses");
 	"#;
 	let mut test = Test::new(sql).await?;
 	// normalized_damerau_levenshtein_diff_short
@@ -4417,13 +4417,13 @@ async fn function_string_distance_levenshtein() -> Result<(), Error> {
 
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1032)
 #[tokio::test]
-async fn function_string_distance_levenshtein_nrm() -> Result<(), Error> {
+async fn function_string_distance_normalized_levenshtein() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::distance::levenshtein_nrm("kitten", "sitting");
-		RETURN string::distance::levenshtein_nrm("", "");
-		RETURN string::distance::levenshtein_nrm("", "second");
-		RETURN string::distance::levenshtein_nrm("first", "");
-		RETURN string::distance::levenshtein_nrm("identical", "identical");
+		RETURN string::distance::normalized_levenshtein("kitten", "sitting");
+		RETURN string::distance::normalized_levenshtein("", "");
+		RETURN string::distance::normalized_levenshtein("", "second");
+		RETURN string::distance::normalized_levenshtein("first", "");
+		RETURN string::distance::normalized_levenshtein("identical", "identical");
 	"#;
 	let mut test = Test::new(sql).await?;
 	// normalized_levenshtein_diff_short
@@ -4448,28 +4448,28 @@ async fn function_string_distance_levenshtein_nrm() -> Result<(), Error> {
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1057)
 /// which, in turn, are taken from [`aceakash/string-similarity`](https://github.com/aceakash/string-similarity/blob/f83ba3cd7bae874c20c429774e911ae8cff8bced/src/spec/index.spec.js#L11)
 #[tokio::test]
-async fn function_string_distance_levenshtein_osa() -> Result<(), Error> {
+async fn function_string_distance_osa_distance() -> Result<(), Error> {
 	let sql = r#"
-        RETURN string::distance::levenshtein_osa("", "");
-        RETURN string::distance::levenshtein_osa("damerau", "damerau");
-        RETURN string::distance::levenshtein_osa("", "damerau");
-        RETURN string::distance::levenshtein_osa("damerau", "");
-        RETURN string::distance::levenshtein_osa("ca", "abc");
-        RETURN string::distance::levenshtein_osa("damerau", "aderua");
-        RETURN string::distance::levenshtein_osa("aderua", "damerau");
-        RETURN string::distance::levenshtein_osa("öঙ香", "abc");
-        RETURN string::distance::levenshtein_osa("abc", "öঙ香");
-        RETURN string::distance::levenshtein_osa("damerau", "aderuaxyz");
-        RETURN string::distance::levenshtein_osa("aderuaxyz", "damerau");
-        RETURN string::distance::levenshtein_osa("Stewart", "Colbert");
-        RETURN string::distance::levenshtein_osa("abcdefghijkl", "bacedfgihjlk");
-        RETURN string::distance::levenshtein_osa(
+        RETURN string::distance::osa_distance("", "");
+        RETURN string::distance::osa_distance("damerau", "damerau");
+        RETURN string::distance::osa_distance("", "damerau");
+        RETURN string::distance::osa_distance("damerau", "");
+        RETURN string::distance::osa_distance("ca", "abc");
+        RETURN string::distance::osa_distance("damerau", "aderua");
+        RETURN string::distance::osa_distance("aderua", "damerau");
+        RETURN string::distance::osa_distance("öঙ香", "abc");
+        RETURN string::distance::osa_distance("abc", "öঙ香");
+        RETURN string::distance::osa_distance("damerau", "aderuaxyz");
+        RETURN string::distance::osa_distance("aderuaxyz", "damerau");
+        RETURN string::distance::osa_distance("Stewart", "Colbert");
+        RETURN string::distance::osa_distance("abcdefghijkl", "bacedfgihjlk");
+        RETURN string::distance::osa_distance(
             "The quick brown fox jumped over the angry dog.",
             "Lehem ipsum dolor sit amet, dicta latine an eam."
         );
-        RETURN string::distance::levenshtein_osa("foobar", "ofobar");
-        RETURN string::distance::levenshtein_osa("specter", "spectre");
-        RETURN string::distance::levenshtein_osa("a cat", "an abct");
+        RETURN string::distance::osa_distance("foobar", "ofobar");
+        RETURN string::distance::osa_distance("specter", "spectre");
+        RETURN string::distance::osa_distance("a cat", "an abct");
     "#;
 	let mut test = Test::new(sql).await?;
 	// osa_distance_empty

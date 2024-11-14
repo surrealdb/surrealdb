@@ -306,12 +306,12 @@ pub fn synchronous(
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
 		//
-		"string::distance::damerau" => string::distance::damerau,
-		"string::distance::damerau_nrm" => string::distance::damerau_nrm,
+		"string::distance::damerau_levenshtein" => string::distance::damerau_levenshtein,
 		"string::distance::hamming" => string::distance::hamming,
 		"string::distance::levenshtein" => string::distance::levenshtein,
-		"string::distance::levenshtein_nrm" => string::distance::levenshtein_nrm,
-		"string::distance::levenshtein_osa" => string::distance::levenshtein_osa,
+		"string::distance::normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein,
+		"string::distance::normalized_levenshtein" => string::distance::normalized_levenshtein,
+		"string::distance::osa_distance" => string::distance::osa_distance,
 		//
 		"string::html::encode" => string::html::encode,
 		"string::html::sanitize" => string::html::sanitize,
