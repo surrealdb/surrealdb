@@ -28,8 +28,6 @@ use async_channel::{bounded, unbounded, Receiver, Sender};
 #[cfg(not(target_arch = "wasm32"))]
 use async_executor::Executor;
 #[cfg(not(target_arch = "wasm32"))]
-use easy_parallel::Parallel;
-#[cfg(not(target_arch = "wasm32"))]
 use futures::executor::block_on;
 use reblessive::tree::Stk;
 #[cfg(not(target_arch = "wasm32"))]
@@ -787,7 +785,7 @@ impl Iterator {
 					})
 				})
 				.collect::<Vec<_>>();
-				
+
 			block_on(async {
 				// Wait for all closures
 				futures::join!(tasks.0, tasks.1, tasks.2, tasks.3);

@@ -189,7 +189,6 @@ wasmtimer = { version = "0.2.0", default-features = false, features = [
 ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-easy-parallel = "3.3.1"
 tokio = { version = "1.41.1", default-features = false, features = [
     "macros",
     "io-util",

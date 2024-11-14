@@ -1833,12 +1833,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "easy-parallel"
-version = "3.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2afbb9b0aef60e4f0d2b18129b6c0dff035a6f7dbbd17c2f38c1432102ee223c"
-
-[[package]]
 name = "either"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5990,7 +5984,6 @@ dependencies = [
  "dashmap",
  "deunicode",
  "dmp",
- "easy-parallel",
  "env_logger 0.10.2",
  "ext-sort",
  "flate2",
