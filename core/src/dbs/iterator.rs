@@ -775,22 +775,36 @@ impl Iterator {
 		),
 	) {
 		// Start executor threads
-		Parallel::new()
-			// Each of the 4 threads will run an executor
-			.each(0..max_threads, |_| {
-				let shutdown = shutdown.clone();
-				// Run the executor in each thread
-				block_on(async {
-					let _ = exe.run(shutdown.recv()).await;
-				});
-			}) // Run the main future on the current thread to spawn tasks
-			.finish(|| {
-				block_on(async {
-					// Wait for all closures
-					futures::join!(tasks.0, tasks.1, tasks.2, tasks.3);
-					// Stop every threads
-					drop(signal);
-				});
-			});
+		std::thread::scope(|scope| {
+			let handles = (0..max_threads)
+				.map(|_| {
+					scope.spawn(|| {
+						let shutdown = shutdown.clone();
+						// Run the executor in each thread
+						block_on(async {
+							let _ = exe.run(shutdown.recv()).await;
+						});
+					})
+				})
+				.collect::<Vec<_>>();
+
+			let mut err = None;
+			for h in handles {
+				if let Err(e) = h.join() {
+					err = Some(e);
+				}
+			}
+
+			if let Some(err) = err {
+				std::panic::resume_unwind(err);
+			}
+		});
+
+		block_on(async {
+			// Wait for all closures
+			futures::join!(tasks.0, tasks.1, tasks.2, tasks.3);
+			// Stop every threads
+			drop(signal);
+		});
 	}
 }
