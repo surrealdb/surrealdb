@@ -16,7 +16,6 @@ use crate::sql::{Edges, Table, Thing, Value};
 use async_channel::Sender;
 use futures::StreamExt;
 use reblessive::tree::Stk;
-use reblessive::TreeStack;
 use std::borrow::Cow;
 use std::ops::Bound;
 use std::vec;
@@ -24,6 +23,7 @@ use std::vec;
 impl Iterable {
 	pub(super) async fn iterate(
 		self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
@@ -31,30 +31,24 @@ impl Iterable {
 		dis: Option<&mut SyncDistinct>,
 	) -> Result<(), Error> {
 		if self.iteration_stage_check(ctx) {
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| async {
-					let txn = ctx.tx();
-					let mut coll = ConcurrentCollector {
-						stk,
-						ctx,
-						opt,
-						txn: &txn,
-						stm,
-						ite,
-					};
-					if let Some(dis) = dis {
-						let mut coll = ConcurrentDistinctCollector {
-							coll,
-							dis,
-						};
-						coll.collect_iterable(ctx, opt, self).await
-					} else {
-						coll.collect_iterable(ctx, opt, self).await
-					}
-				})
-				.finish()
-				.await?;
+			let txn = ctx.tx();
+			let mut coll = ConcurrentCollector {
+				stk,
+				ctx,
+				opt,
+				txn: &txn,
+				stm,
+				ite,
+			};
+			if let Some(dis) = dis {
+				let mut coll = ConcurrentDistinctCollector {
+					coll,
+					dis,
+				};
+				coll.collect_iterable(ctx, opt, self).await?;
+			} else {
+				coll.collect_iterable(ctx, opt, self).await?;
+			}
 		}
 		Ok(())
 	}

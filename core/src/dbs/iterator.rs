@@ -549,7 +549,7 @@ impl Iterator {
 	#[cfg(target_arch = "wasm32")]
 	async fn iterate(
 		&mut self,
-		_stk: &mut Stk,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
@@ -560,7 +560,7 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			v.iterate(ctx, opt, stm, self, distinct.as_mut()).await?;
+			v.iterate(stk, ctx, opt, stm, self, distinct.as_mut()).await?;
 		}
 		// Everything processed ok
 		Ok(())
@@ -586,7 +586,7 @@ impl Iterator {
 				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(ctx, &opt, stm, self, distinct.as_mut()).await?;
+					v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
 				}
 				// Everything processed ok
 				Ok(())
