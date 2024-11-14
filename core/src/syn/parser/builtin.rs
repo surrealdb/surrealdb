@@ -12,7 +12,7 @@ use reblessive::Stk;
 use unicase::UniCase;
 
 const MAX_LEVENSTHEIN_CUT_OFF: u8 = 4;
-const MAX_FUNCTION_NAME_LEN: usize = 33;
+const MAX_FUNCTION_NAME_LEN: usize = 48;
 const LEVENSTHEIN_ARRAY_SIZE: usize = 1 + MAX_FUNCTION_NAME_LEN + MAX_LEVENSTHEIN_CUT_OFF as usize;
 
 /// simple function calculating levenshtein distance with a cut-off.
