@@ -39,9 +39,7 @@ pub enum Part {
 	Destructure(Vec<DestructurePart>),
 	Optional,
 	#[revision(start = 3)]
-	Nest(Idiom),
-	#[revision(start = 3)]
-	Recurse(Recurse),
+	Recurse(Recurse, Option<Idiom>),
 	#[revision(start = 3)]
 	Doc,
 	#[revision(start = 3)]
@@ -190,8 +188,14 @@ impl fmt::Display for Part {
 				}
 			}
 			Part::Optional => write!(f, "?"),
-			Part::Nest(v) => write!(f, ".({v})"),
-			Part::Recurse(v) => write!(f, ".{{{v}}}"),
+			Part::Recurse(v, nest) => {
+				write!(f, ".{{{v}}}")?;
+				if let Some(nest) = nest {
+					write!(f, "({nest})")?;
+				}
+
+				Ok(())
+			}
 			Part::Doc => write!(f, "@"),
 			Part::RepeatRecurse => write!(f, ".@"),
 		}
@@ -254,9 +258,9 @@ impl<'a> RecursionPlan {
 		match self {
 			Self::Repeat => compute_idiom_recursion(stk, ctx, opt, doc, rec).await,
 			Self::Destructure(destructure, field, before, local_plan, after) => {
-				let v = stk.run(|stk| rec.current.get(stk, &ctx, opt, doc, before)).await?;
+				let v = stk.run(|stk| rec.current.get(stk, ctx, opt, doc, before)).await?;
 				let v = local_plan.compute(stk, ctx, opt, doc, rec.with_current(&v)).await?;
-				let v = stk.run(|stk| v.get(stk, &ctx, opt, doc, after)).await?;
+				let v = stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await?;
 				let v = clean_iteration(v);
 
 				if rec.iterated < rec.min && is_final(&v) {
@@ -268,7 +272,7 @@ impl<'a> RecursionPlan {
 				}
 
 				let path = &[Part::Destructure(destructure.to_owned())];
-				match stk.run(|stk| rec.current.get(stk, &ctx, opt, doc, path)).await? {
+				match stk.run(|stk| rec.current.get(stk, ctx, opt, doc, path)).await? {
 					Value::Object(mut obj) => {
 						obj.insert(field.to_raw(), v);
 						Ok(Value::Object(obj))

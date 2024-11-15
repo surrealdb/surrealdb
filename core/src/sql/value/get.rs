@@ -39,27 +39,28 @@ impl Value {
 			return Err(Error::ComputationDepthExceeded);
 		}
 		match path.first() {
-			// The knowledge of the current value is not relevant to Part::Nest
-			Some(Part::Nest(nested)) => {
-				let v = stk.run(|stk| self.get(stk, ctx, opt, doc, nested)).await?;
-				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-			}
 			// The knowledge of the current value is not relevant to Part::Recurse
-			Some(Part::Recurse(recurse)) => {
-				let next = path.next();
+			Some(Part::Recurse(recurse, inner_path)) => {
+				// Find the path to recurse and what path to process after the recursion is finished
+				let (path, after) = match inner_path {
+					Some(p) => (p.0.as_slice(), path.next().to_vec()),
+					_ => (path.next(), vec![]),
+				};
 
 				// We first try to split out a root-level repeat-recurse symbol
 				// By doing so, we can eliminate un-needed recursion, as we can
 				// simply loop.
-				let (next, plan, after) = match next.split_by_repeat_recurse() {
-					Some((next, after)) => (next, None, Some(after)),
+				let (path, plan, after) = match path.split_by_repeat_recurse() {
+					Some((path, local_after)) => (path, None, [local_after, &after].concat()),
 
 					// If we do not find a root-level repeat-recurse symbol, we
 					// can scan for a nested one. We only ever allow for a single
 					// repeat recurse symbol, hence the separate check.
-					_ => match next.find_recursion_plan() {
-						Some((next, plan, after)) => (next, Some(plan), Some(after)),
-						_ => (next, None, None),
+					_ => match path.find_recursion_plan() {
+						Some((path, plan, local_after)) => {
+							(path, Some(plan), [local_after, &after].concat())
+						}
+						_ => (path, None, after),
 					},
 				};
 
@@ -71,7 +72,7 @@ impl Value {
 					max,
 					iterated: &0,
 					current: self,
-					path: &next,
+					path,
 					plan: plan.as_ref(),
 				};
 
@@ -79,11 +80,10 @@ impl Value {
 				let v = compute_idiom_recursion(stk, ctx, opt, doc, rec).await?;
 
 				// If we have a leftover path, process it
-				match after {
-					Some(after) if after.len() > 0 => {
-						stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await
-					}
-					_ => Ok(v),
+				if !after.is_empty() {
+					stk.run(|stk| v.get(stk, ctx, opt, doc, after.as_slice())).await
+				} else {
+					Ok(v)
 				}
 			}
 			// We only support repeat recurse symbol in certain scenarios, to

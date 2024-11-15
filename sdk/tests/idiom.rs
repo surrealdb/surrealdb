@@ -190,9 +190,9 @@ async fn idiom_recursion_graph() -> Result<(), Error> {
 			{ id: knows:5, in: person:mary, out: person:tim },
 		];
 		
-		SELECT name, @({1}->knows->person).name AS names_1sts FROM person;
-		SELECT name, @({2}->knows->person).name AS names_2nds FROM person;
-		SELECT name, @({3}->knows->person).name AS names_3rds FROM person;
+		SELECT name, @{1}(->knows->person).name AS names_1sts FROM person;
+		SELECT name, @{2}(->knows->person).name AS names_2nds FROM person;
+		SELECT name, @{3}(->knows->person).name AS names_3rds FROM person;
 
 		SELECT VALUE @{..}.{ name, knows: ->knows->person.@ } FROM person;
 	"#;
@@ -330,10 +330,10 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 			{ id: city:victoria,		name: 'Victoria' },
 		];
 
-		planet:earth.({1}.contains).name;
-		planet:earth.({2}.contains).name;
-		planet:earth.({3}.contains).name;
-		planet:earth.({4}.contains).name;
+		planet:earth.{1}(.contains).name;
+		planet:earth.{2}(.contains).name;
+		planet:earth.{3}(.contains).name;
+		planet:earth.{4}(.contains).name;
 
 		planet:earth.{1}.contains.@;
 		planet:earth.{2}.contains.@;

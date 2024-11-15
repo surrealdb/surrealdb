@@ -280,10 +280,6 @@ impl Parser<'_> {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_curly_part(ctx)).await?
 			}
-			t!("(") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_nest_part(ctx)).await?
-			}
 			_ => {
 				let ident: Ident = self.next_token_value()?;
 				if self.eat(t!("(")) {
@@ -306,7 +302,7 @@ impl Parser<'_> {
 	/// Parse the part after the `.{` in an idiom
 	pub(super) async fn parse_curly_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		match self.peek_kind() {
-			t!("*") | t!("..") | TokenKind::Digits => self.parse_recurse_part().await,
+			t!("*") | t!("..") | TokenKind::Digits => self.parse_recurse_part(ctx).await,
 			_ => self.parse_destructure_part(ctx).await,
 		}
 	}
@@ -382,13 +378,10 @@ impl Parser<'_> {
 
 		Ok(Part::Destructure(destructured))
 	}
-	/// Parse a recurse part, expects `.{` to already be parsed
-	pub(super) async fn parse_recurse_part(&mut self) -> ParseResult<Part> {
-		let start = self.last_span();
-
+	/// Parse the inner part of a recurse, expects a valid recurse value in the current position
+	pub(super) fn parse_recurse_inner(&mut self) -> ParseResult<Recurse> {
 		if self.eat(t!("*")) {
-			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Part::Recurse(Recurse::Range(None, None)));
+			return Ok(Recurse::Range(None, None));
 		}
 
 		let min = if matches!(self.peek().kind, TokenKind::Digits) {
@@ -410,8 +403,7 @@ impl Parser<'_> {
 		match (self.eat_whitespace(t!("..")), min) {
 			(true, _) => (),
 			(false, Some(v)) => {
-				self.expect_closing_delimiter(t!("}"), start)?;
-				return Ok(Part::Recurse(Recurse::Fixed(v)));
+				return Ok(Recurse::Fixed(v));
 			}
 			_ => {
 				let found = self.next().kind;
@@ -436,25 +428,24 @@ impl Parser<'_> {
 			None
 		};
 
+		Ok(Recurse::Range(min, max))
+	}
+	/// Parse a recurse part, expects `.{` to already be parsed
+	pub(super) async fn parse_recurse_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
+		let start = self.last_span();
+		let recurse = self.parse_recurse_inner()?;
 		self.expect_closing_delimiter(t!("}"), start)?;
 
-		Ok(Part::Recurse(Recurse::Range(min, max)))
-	}
-	/// Parse the part after the `.(` in an idiom
-	pub(super) async fn parse_nest_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
-		let start = self.last_span();
-		// We allow skipping the dot within nested parts.
-		// If the initial run results in an empty idiom,
-		// we assume a dot-part and then continue parsing the idiom
-		let idiom = match self.parse_remaining_idiom(ctx, vec![]).await? {
-			v if v.is_empty() => {
-				let start = self.parse_dot_part(ctx).await?;
-				self.parse_remaining_idiom(ctx, vec![start]).await?
-			}
-			v => v,
+		let nest = if self.eat(t!("(")) {
+			let start = self.last_span();
+			let idiom = self.parse_remaining_idiom(ctx, vec![]).await?;
+			self.expect_closing_delimiter(t!(")"), start)?;
+			Some(idiom)
+		} else {
+			None
 		};
-		self.expect_closing_delimiter(t!(")"), start)?;
-		Ok(Part::Nest(idiom))
+
+		Ok(Part::Recurse(recurse, nest))
 	}
 	/// Parse the part after the `[` in a idiom
 	pub(super) async fn parse_bracket_part(

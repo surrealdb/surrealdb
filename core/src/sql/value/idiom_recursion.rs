@@ -102,10 +102,10 @@ pub(crate) async fn compute_idiom_recursion<'a>(
 		i += 1;
 
 		// Process the path, not accounting for any recursive plans
-		let v = stk.run(|stk| current.get(stk, &ctx, opt, doc, rec.path)).await?;
+		let v = stk.run(|stk| current.get(stk, ctx, opt, doc, rec.path)).await?;
 		let v = match rec.plan {
 			// We found a recursion plan, let's apply it
-			Some(ref p) => {
+			Some(p) => {
 				p.compute(stk, ctx, opt, doc, rec.with_iterated(&i).with_current(&v)).await?
 			}
 			_ => v,
