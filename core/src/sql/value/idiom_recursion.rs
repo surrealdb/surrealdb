@@ -4,14 +4,37 @@ use crate::{
 	dbs::Options,
 	doc::CursorDoc,
 	err::Error,
-	sql::{
-		part::{Recurse, RecursionPlan},
-		Array, Part,
-	},
+	sql::{part::RecursionPlan, Array, Part},
 };
 
 use super::Value;
 use reblessive::tree::Stk;
+
+#[derive(Clone, Copy, Debug)]
+pub struct Recursion<'a> {
+	pub min: &'a u32,
+	pub max: Option<&'a u32>,
+	pub iterated: &'a u32,
+	pub current: &'a Value,
+	pub path: &'a [Part],
+	pub plan: Option<&'a RecursionPlan>,
+}
+
+impl<'a> Recursion<'a> {
+	pub fn with_iterated(self, iterated: &'a u32) -> Self {
+		Self {
+			iterated,
+			..self
+		}
+	}
+
+	pub fn with_current(self, current: &'a Value) -> Self {
+		Self {
+			current,
+			..self
+		}
+	}
+}
 
 // Method used to check if the value
 // inside a recursed idiom path is final
@@ -40,37 +63,31 @@ pub(crate) fn clean_iteration(v: Value) -> Value {
 	}
 }
 
-pub(crate) async fn compute_idiom_recursion(
+pub(crate) async fn compute_idiom_recursion<'a>(
 	stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
-	recurse: &Recurse,
-	i: &u32,
-	value: &Value,
-	next: &[Part],
-	plan: &Option<RecursionPlan>,
+	rec: Recursion<'a>,
 ) -> Result<Value, Error> {
 	// Find minimum and maximum amount of iterations
-	let min = recurse.min()?;
-	let max = recurse.max()?;
 	let limit = *IDIOM_RECURSION_LIMIT as u32;
 
 	// We recursed and found a final value, let's return
 	// it for the previous iteration to pick up on this
-	if plan.is_some() && is_final(value) {
-		return Ok(get_final(value));
+	if rec.plan.is_some() && is_final(rec.current) {
+		return Ok(get_final(rec.current));
 	}
 
 	// Counter for the local loop and current value
-	let mut i = i.to_owned();
-	let mut current = value.clone();
+	let mut i = rec.iterated.to_owned();
+	let mut current = rec.current.to_owned();
 
-	if plan.is_some() {
+	if rec.plan.is_some() {
 		// If we have reached the maximum amount of iterations,
 		// we can return the current value and break the loop.
-		if let Some(max) = max {
-			if i >= max {
+		if let Some(max) = rec.max {
+			if &i >= max {
 				return Ok(current);
 			}
 		} else if i >= limit {
@@ -80,19 +97,17 @@ pub(crate) async fn compute_idiom_recursion(
 		}
 	}
 
-	println!("plan {:?}", plan);
-
 	loop {
 		// Bump iteration
 		i += 1;
 
-		let v = stk.run(|stk| current.get(stk, &ctx, opt, doc, next)).await?;
-
-		// println!("i {i}");
-		// println!("b {value}");
-		// println!("a {v}");
-		let v = match plan {
-			Some(ref p) => p.compute(stk, ctx, opt, doc, recurse, &i, &v, next, plan).await?,
+		let v = stk.run(|stk| current.get(stk, &ctx, opt, doc, rec.path)).await?;
+		let v = match rec.plan {
+			Some(ref p) => {
+				let v = current.clone();
+				let rec = rec.with_iterated(&i).with_current(&v);
+				p.compute(stk, ctx, opt, doc, rec).await?
+			}
 			_ => v,
 		};
 
@@ -102,7 +117,7 @@ pub(crate) async fn compute_idiom_recursion(
 		match v {
 			// We reached a final value
 			v if is_final(&v) || v == current => {
-				return Ok(match i <= min {
+				return Ok(match &i <= rec.min {
 					// If we have not yet reached the minimum amount of
 					// required iterations it's a dead end, and we return NONE
 					true => get_final(&v),
@@ -121,8 +136,8 @@ pub(crate) async fn compute_idiom_recursion(
 
 		// If we have reached the maximum amount of iterations,
 		// we can return the current value and break the loop.
-		if let Some(max) = max {
-			if i >= max {
+		if let Some(max) = rec.max {
+			if &i >= max {
 				return Ok(current);
 			}
 		} else if i >= limit {
@@ -135,7 +150,7 @@ pub(crate) async fn compute_idiom_recursion(
 		// as the loop will continue on the whole value, and
 		// not on the potentially nested value which triggered
 		// the recurse, resulting in a potential infinite loop
-		if plan.is_some() {
+		if rec.plan.is_some() {
 			return Ok(current);
 		}
 	}

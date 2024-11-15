@@ -20,7 +20,7 @@ use crate::sql::value::{Value, Values};
 use crate::sql::Function;
 use reblessive::tree::Stk;
 
-use super::idiom_recursion::compute_idiom_recursion;
+use super::idiom_recursion::{compute_idiom_recursion, Recursion};
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -52,8 +52,17 @@ impl Value {
 					_ => (next, None, None),
 				};
 
-				let v = compute_idiom_recursion(stk, ctx, opt, doc, recurse, &0, self, next, &plan)
-					.await?;
+				let (min, max) = recurse.try_into()?;
+				let rec = Recursion {
+					min,
+					max,
+					iterated: &0,
+					current: self,
+					path: &next,
+					plan: plan.as_ref(),
+				};
+
+				let v = compute_idiom_recursion(stk, ctx, opt, doc, rec).await?;
 
 				match after {
 					Some(after) => stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await,

@@ -16,7 +16,7 @@ use std::str;
 
 use super::{
 	fmt::{is_pretty, pretty_indent},
-	value::idiom_recursion::{clean_iteration, compute_idiom_recursion, is_final},
+	value::idiom_recursion::{clean_iteration, compute_idiom_recursion, is_final, Recursion},
 };
 
 #[revisioned(revision = 3)]
@@ -217,35 +217,29 @@ pub enum RecursionPlan {
 	),
 }
 
-impl RecursionPlan {
+impl<'a> RecursionPlan {
 	pub async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-		recurse: &Recurse,
-		i: &u32,
-		value: &Value,
-		next: &[Part],
-		plan: &Option<RecursionPlan>,
+		rec: Recursion<'a>,
 	) -> Result<Value, Error> {
-		match value {
+		match rec.current {
 			Value::Array(value) => stk
 				.scope(|scope| {
 					let futs = value.iter().map(|value| {
 						scope.run(|stk| {
-							self.compute_inner(stk, ctx, opt, doc, recurse, i, value, next, plan)
+							let rec = rec.with_current(value);
+							self.compute_inner(stk, ctx, opt, doc, rec)
 						})
 					});
 					try_join_all_buffered(futs)
 				})
 				.await
 				.map(Into::into),
-			value => {
-				stk.run(|stk| self.compute_inner(stk, ctx, opt, doc, recurse, i, value, next, plan))
-					.await
-			}
+			_ => stk.run(|stk| self.compute_inner(stk, ctx, opt, doc, rec)).await,
 		}
 	}
 
@@ -255,24 +249,17 @@ impl RecursionPlan {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-		recurse: &Recurse,
-		i: &u32,
-		value: &Value,
-		next: &[Part],
-		plan: &Option<RecursionPlan>,
+		rec: Recursion<'a>,
 	) -> Result<Value, Error> {
 		match self {
-			Self::Repeat => {
-				compute_idiom_recursion(stk, ctx, opt, doc, recurse, i, value, next, plan).await
-			}
+			Self::Repeat => compute_idiom_recursion(stk, ctx, opt, doc, rec).await,
 			Self::Destructure(destructure, field, before, local_plan, after) => {
-				let min = recurse.min()?;
-				let v = stk.run(|stk| value.get(stk, &ctx, opt, doc, before)).await?;
-				let v = local_plan.compute(stk, ctx, opt, doc, recurse, i, &v, next, plan).await?;
+				let v = stk.run(|stk| rec.current.get(stk, &ctx, opt, doc, before)).await?;
+				let v = local_plan.compute(stk, ctx, opt, doc, rec.with_current(&v)).await?;
 				let v = stk.run(|stk| v.get(stk, &ctx, opt, doc, after)).await?;
 				let v = clean_iteration(v);
 
-				if i < &min && is_final(&v) {
+				if rec.iterated < rec.min && is_final(&v) {
 					// We do not use get_final here, because it's not a result
 					// the user will see, it's rather about path elimination
 					// By returning NONE, an array to be eliminated will be
@@ -281,7 +268,7 @@ impl RecursionPlan {
 				}
 
 				let path = &[Part::Destructure(destructure.to_owned())];
-				match stk.run(|stk| value.get(stk, &ctx, opt, doc, path)).await? {
+				match stk.run(|stk| rec.current.get(stk, &ctx, opt, doc, path)).await? {
 					Value::Object(mut obj) => {
 						obj.insert(field.to_raw(), v);
 						Ok(Value::Object(obj))
@@ -436,6 +423,36 @@ impl fmt::Display for DestructurePart {
 pub enum Recurse {
 	Fixed(u32),
 	Range(Option<u32>, Option<u32>),
+}
+
+impl<'a> TryInto<(&'a u32, Option<&'a u32>)> for &'a Recurse {
+	type Error = Error;
+	fn try_into(self) -> Result<(&'a u32, Option<&'a u32>), Error> {
+		let v = match self {
+			Recurse::Fixed(v) => (v, Some(v)),
+			Recurse::Range(min, max) => {
+				let min = if let Some(min) = min {
+					min
+				} else {
+					&1
+				};
+
+				(min, max.as_ref())
+			}
+		};
+
+		match v {
+			(min, _) if min < &1 => Err(Error::InvalidBound {
+				found: min.to_string(),
+				expected: "at least 1".into(),
+			}),
+			(_, Some(max)) if max > &(*IDIOM_RECURSION_LIMIT as u32) => Err(Error::InvalidBound {
+				found: max.to_string(),
+				expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
+			}),
+			v => Ok(v),
+		}
+	}
 }
 
 impl Recurse {
