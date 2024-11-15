@@ -1,3 +1,4 @@
+use crate::err::Error;
 use std::{collections::BTreeMap, mem};
 
 #[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
@@ -210,15 +211,12 @@ pub trait RpcContext {
 
 	async fn info(&self) -> Result<Data, RpcError> {
 		// Specify the SQL query string
-		let sql = {
-			// SELECT * FROM $auth
-			SelectStatement {
-				expr: Fields::all(),
-				what: vec![Value::Param("auth".into())].into(),
-				..Default::default()
-			}
-			.into()
-		};
+		let sql = SelectStatement {
+			expr: Fields::all(),
+			what: vec![Value::Param("auth".into())].into(),
+			..Default::default()
+		}
+		.into();
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), None).await?;
 		// Extract the first value from the result
@@ -269,13 +267,10 @@ pub trait RpcContext {
 		// Process the method arguments
 		let id = params.needs_one()?;
 		// Specify the SQL query string
-		let sql = {
-			// KILL $id
-			KillStatement {
-				id,
-			}
-			.into()
-		};
+		let sql = KillStatement {
+			id,
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
@@ -288,23 +283,15 @@ pub trait RpcContext {
 		// Process the method arguments
 		let (what, diff) = params.needs_one_or_two()?;
 		// Specify the SQL query string
-		let sql = if diff.is_true() {
-			// LIVE SELECT DIFF FROM $what
-			LiveStatement {
-				expr: Fields::default(),
-				what: what.could_be_table(),
-				..Default::default()
-			}
-			.into()
-		} else {
-			// LIVE SELECT * FROM $what
-			LiveStatement {
-				expr: Fields::all(),
-				what: what.could_be_table(),
-				..Default::default()
-			}
-			.into()
-		};
+		let sql = LiveStatement {
+			expr: match diff.is_true() {
+				true => Fields::default(),
+				false => Fields::all(),
+			},
+			what: what.could_be_table(),
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
@@ -323,22 +310,26 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the SQL query string
-		let sql = {
-			// SELECT * FROM $what
-			SelectStatement {
-				only: what.is_thing_single(),
-				expr: Fields::all(),
-				what: vec![what.could_be_table()].into(),
-				..Default::default()
-			}
-			.into()
-		};
+		let sql = SelectStatement {
+			only: what.is_thing_single(),
+			expr: Fields::all(),
+			what: vec![what.could_be_table()].into(),
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		Ok(res.remove(0).result?.into())
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e {
+				Error::SingleOnlyOutput => Ok(Value::None),
+				e => Err(e),
+			})?
+			.into())
 	}
 
 	// ------------------------------
@@ -351,33 +342,30 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the SQL query string
-		let sql = match what {
-			Value::None | Value::Null => {
-				// INSERT $data RETURN AFTER
-				InsertStatement {
-					data: crate::sql::Data::SingleExpression(data),
-					output: Some(Output::After),
-					..Default::default()
-				}
-				.into()
-			}
-			what => {
-				// INSERT INTO $what $data RETURN AFTER
-				InsertStatement {
-					into: Some(what.could_be_table()),
-					data: crate::sql::Data::SingleExpression(data),
-					output: Some(Output::After),
-					..Default::default()
-				}
-				.into()
-			}
-		};
+		let sql = InsertStatement {
+			into: Some(what.could_be_table()),
+			into: match what.is_none_or_null() {
+				false => Some(what.could_be_table()),
+				true => None,
+			},
+			data: crate::sql::Data::SingleExpression(data),
+			output: Some(Output::After),
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		Ok(res.remove(0).result?.into())
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e {
+				Error::SingleOnlyOutput => Ok(Value::None),
+				e => Err(e),
+			})?
+			.into())
 	}
 
 	async fn insert_relation(&self, params: Array) -> Result<Data, RpcError> {
@@ -386,36 +374,30 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the SQL query string
-		let sql = match what {
-			Value::None | Value::Null => {
-				// INSERT RELATION $data RETURN AFTER
-				InsertStatement {
-					relation: true,
-					data: crate::sql::Data::SingleExpression(data),
-					output: Some(Output::After),
-					..Default::default()
-				}
-				.into()
-			}
-			Value::Table(_) | Value::Strand(_) => {
-				// INSERT RELATION INTO $what $data RETURN AFTER
-				InsertStatement {
-					relation: true,
-					into: Some(what.could_be_table()),
-					data: crate::sql::Data::SingleExpression(data),
-					output: Some(Output::After),
-					..Default::default()
-				}
-				.into()
-			}
-			_ => return Err(RpcError::InvalidParams),
-		};
+		let sql = InsertStatement {
+			relation: true,
+			into: match what.is_none_or_null() {
+				false => Some(what.could_be_table()),
+				true => None,
+			},
+			data: crate::sql::Data::SingleExpression(data),
+			output: Some(Output::After),
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		Ok(res.remove(0).result?.into())
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e {
+				Error::SingleOnlyOutput => Ok(Value::None),
+				e => Err(e),
+			})?
+			.into())
 	}
 
 	// ------------------------------
@@ -429,32 +411,30 @@ pub trait RpcContext {
 		};
 		let what = what.could_be_table();
 		// Specify the SQL query string
-		let sql = if data.is_none_or_null() {
-			// CREATE $what RETURN AFTER
-			CreateStatement {
-				only: what.is_thing_single() || what.is_table(),
-				what: vec![what.could_be_table()].into(),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		} else {
-			// CREATE $what CONTENT $data RETURN AFTER
-			CreateStatement {
-				only: what.is_thing_single() || what.is_table(),
-				what: vec![what.could_be_table()].into(),
-				data: Some(crate::sql::Data::MergeExpression(data)),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		};
+		let sql = CreateStatement {
+			only: what.is_thing_single() || what.is_table(),
+			what: vec![what.could_be_table()].into(),
+			data: match data.is_none_or_null() {
+				false => Some(crate::sql::Data::ContentExpression(data)),
+				true => None,
+			},
+			output: Some(Output::After),
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		Ok(res.remove(0).result?.into())
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e {
+				Error::SingleOnlyOutput => Ok(Value::None),
+				e => Err(e),
+			})?
+			.into())
 	}
 
 	// ------------------------------
@@ -467,32 +447,30 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the SQL query string
-		let sql = if data.is_none_or_null() {
-			// UPSERT $what RETURN AFTER
-			UpsertStatement {
-				only: what.is_thing_single(),
-				what: vec![what.could_be_table()].into(),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		} else {
-			// UPSERT $what CONTENT $data RETURN AFTER
-			UpsertStatement {
-				only: what.is_thing_single(),
-				what: vec![what.could_be_table()].into(),
-				data: Some(crate::sql::Data::ContentExpression(data)),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		};
+		let sql = UpsertStatement {
+			only: what.is_thing_single(),
+			what: vec![what.could_be_table()].into(),
+			data: match data.is_none_or_null() {
+				false => Some(crate::sql::Data::ContentExpression(data)),
+				true => None,
+			},
+			output: Some(Output::After),
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		Ok(res.remove(0).result?.into())
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e {
+				Error::SingleOnlyOutput => Ok(Value::None),
+				e => Err(e),
+			})?
+			.into())
 	}
 
 	// ------------------------------
@@ -505,32 +483,30 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the SQL query string
-		let sql = if data.is_none_or_null() {
-			// UPDATE $what RETURN AFTER
-			UpdateStatement {
-				only: what.is_thing_single(),
-				what: vec![what.could_be_table()].into(),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		} else {
-			// UPDATE $what CONTENT $data RETURN AFTER
-			UpdateStatement {
-				only: what.is_thing_single(),
-				what: vec![what.could_be_table()].into(),
-				data: Some(crate::sql::Data::ContentExpression(data)),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		};
+		let sql = UpdateStatement {
+			only: what.is_thing_single(),
+			what: vec![what.could_be_table()].into(),
+			data: match data.is_none_or_null() {
+				false => Some(crate::sql::Data::ContentExpression(data)),
+				true => None,
+			},
+			output: Some(Output::After),
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		Ok(res.remove(0).result?.into())
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e {
+				Error::SingleOnlyOutput => Ok(Value::None),
+				e => Err(e),
+			})?
+			.into())
 	}
 
 	// ------------------------------
@@ -543,32 +519,30 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the SQL query string
-		let sql = if data.is_none_or_null() {
-			// UPDATE $what RETURN AFTER
-			UpdateStatement {
-				only: what.is_thing_single(),
-				what: vec![what.could_be_table()].into(),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		} else {
-			// UPDATE $what MERGE $data RETURN AFTER
-			UpdateStatement {
-				only: what.is_thing_single(),
-				what: vec![what.could_be_table()].into(),
-				data: Some(crate::sql::Data::MergeExpression(data)),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		};
+		let sql = UpdateStatement {
+			only: what.is_thing_single(),
+			what: vec![what.could_be_table()].into(),
+			data: match data.is_none_or_null() {
+				false => Some(crate::sql::Data::MergeExpression(data)),
+				true => None,
+			},
+			output: Some(Output::After),
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		Ok(res.remove(0).result?.into())
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e {
+				Error::SingleOnlyOutput => Ok(Value::None),
+				e => Err(e),
+			})?
+			.into())
 	}
 
 	// ------------------------------
@@ -581,33 +555,30 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the SQL query string
-		let sql = if diff.is_true() {
-			// UPDATE $what PATCH $data RETURN DIFF
-			UpdateStatement {
-				only: what.is_thing_single(),
-				what: vec![what.could_be_table()].into(),
-				data: Some(crate::sql::Data::PatchExpression(data)),
-				output: Some(Output::Diff),
-				..Default::default()
-			}
-			.into()
-		} else {
-			// UPDATE $what PATCH $data RETURN AFTER
-			UpdateStatement {
-				only: what.is_thing_single(),
-				what: vec![what.could_be_table()].into(),
-				data: Some(crate::sql::Data::PatchExpression(data)),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		};
+		let sql = UpdateStatement {
+			only: what.is_thing_single(),
+			what: vec![what.could_be_table()].into(),
+			data: Some(crate::sql::Data::PatchExpression(data)),
+			output: match diff.is_true() {
+				true => Some(Output::Diff),
+				false => Some(Output::After),
+			},
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		Ok(res.remove(0).result?.into())
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e {
+				Error::SingleOnlyOutput => Ok(Value::None),
+				e => Err(e),
+			})?
+			.into())
 	}
 
 	// ------------------------------
@@ -620,36 +591,32 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the SQL query string
-		let sql = if data.is_none_or_null() {
-			// RELATE $from->$kind->$with RETURN AFTER
-			RelateStatement {
-				only: from.is_single() && with.is_single(),
-				from,
-				kind: kind.could_be_table(),
-				with,
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		} else {
-			// RELATE $from->$kind->$with CONTENT $data RETURN AFTER
-			RelateStatement {
-				only: from.is_single() && with.is_single(),
-				from,
-				kind: kind.could_be_table(),
-				with,
-				data: Some(crate::sql::Data::ContentExpression(data)),
-				output: Some(Output::After),
-				..Default::default()
-			}
-			.into()
-		};
+		let sql = RelateStatement {
+			only: from.is_single() && with.is_single(),
+			from,
+			kind: kind.could_be_table(),
+			with,
+			data: match data.is_none_or_null() {
+				false => Some(crate::sql::Data::ContentExpression(data)),
+				true => None,
+			},
+			output: Some(Output::After),
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		Ok(res.remove(0).result?.into())
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e {
+				Error::SingleOnlyOutput => Ok(Value::None),
+				e => Err(e),
+			})?
+			.into())
 	}
 
 	// ------------------------------
@@ -662,22 +629,26 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the SQL query string
-		let sql = {
-			// DELETE $what RETURN BEFORE
-			DeleteStatement {
-				only: what.is_thing_single(),
-				what: vec![what.could_be_table()].into(),
-				output: Some(Output::Before),
-				..Default::default()
-			}
-			.into()
-		};
+		let sql = DeleteStatement {
+			only: what.is_thing_single(),
+			what: vec![what.could_be_table()].into(),
+			output: Some(Output::Before),
+			..Default::default()
+		}
+		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, self.session(), var).await?;
 		// Extract the first query result
-		Ok(res.remove(0).result?.into())
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e {
+				Error::SingleOnlyOutput => Ok(Value::None),
+				e => Err(e),
+			})?
+			.into())
 	}
 
 	// ------------------------------
@@ -697,24 +668,20 @@ pub trait RpcContext {
 
 	async fn query(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
-		let Ok((query, o)) = params.needs_one_or_two() else {
+		let Ok((query, vars)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Check the query input type
 		if !(query.is_query() || query.is_strand()) {
 			return Err(RpcError::InvalidParams);
 		}
-
-		let o = match o {
-			Value::Object(v) => Some(v),
-			Value::None | Value::Null => None,
+		// Specify the query variables
+		let vars = match vars {
+			Value::Object(v) => Some(mrg! {v.0, &self.vars()}),
+			Value::None | Value::Null => Some(self.vars().clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};
-
-		// Specify the query parameters
-		let vars = match o {
-			Some(mut v) => Some(mrg! {v.0, &self.vars()}),
-			None => Some(self.vars().clone()),
-		};
+		// Execute the specified query
 		self.query_inner(query, vars).await.map(Into::into)
 	}
 
