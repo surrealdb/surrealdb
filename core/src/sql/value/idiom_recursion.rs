@@ -128,7 +128,7 @@ pub(crate) async fn compute_idiom_recursion<'a>(
 			v => {
 				// Otherwise we can update the value and
 				// continue to the next iteration.
-				current = v.to_owned();
+				current = v;
 			}
 		};
 
