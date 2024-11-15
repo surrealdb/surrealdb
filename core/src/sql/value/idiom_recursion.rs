@@ -70,7 +70,7 @@ pub(crate) async fn compute_idiom_recursion<'a>(
 	doc: Option<&CursorDoc>,
 	rec: Recursion<'a>,
 ) -> Result<Value, Error> {
-	// Find minimum and maximum amount of iterations
+	// Find the recursion limit
 	let limit = *IDIOM_RECURSION_LIMIT as u32;
 
 	// We recursed and found a final value, let's return
@@ -104,9 +104,7 @@ pub(crate) async fn compute_idiom_recursion<'a>(
 		let v = stk.run(|stk| current.get(stk, &ctx, opt, doc, rec.path)).await?;
 		let v = match rec.plan {
 			Some(ref p) => {
-				let v = current.clone();
-				let rec = rec.with_iterated(&i).with_current(&v);
-				p.compute(stk, ctx, opt, doc, rec).await?
+				p.compute(stk, ctx, opt, doc, rec.with_iterated(&i).with_current(&v)).await?
 			}
 			_ => v,
 		};
