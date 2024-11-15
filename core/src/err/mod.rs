@@ -1175,6 +1175,9 @@ pub enum Error {
 
 	#[error("Error while ordering a result: {0}.")]
 	OrderingError(String),
+
+	#[error("Encountered an issue while processed export config: found {0}, but expected {1}.")]
+	InvalidExportConfig(Value, String),
 }
 
 impl From<Error> for String {

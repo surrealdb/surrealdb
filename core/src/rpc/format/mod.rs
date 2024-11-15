@@ -79,4 +79,19 @@ impl Format {
 			Self::Revision => revision::res(val),
 		}
 	}
+
+	/// Process a request using the specified format
+	pub fn parse_value(&self, val: impl Into<Vec<u8>>) -> Result<Value, RpcError> {
+		let val = val.into();
+		match self {
+			Self::None => Err(RpcError::InvalidRequest),
+			Self::Unsupported => Err(RpcError::InvalidRequest),
+			Self::Json => json::parse_value(&val),
+			Self::Cbor => cbor::parse_value(val),
+			Self::Msgpack => msgpack::parse_value(val),
+			Self::Bincode => bincode::parse_value(&val),
+			Self::Revision => revision::parse_value(val),
+		}
+		.map_err(Into::into)
+	}
 }

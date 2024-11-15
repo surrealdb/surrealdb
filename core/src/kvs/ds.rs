@@ -1,3 +1,4 @@
+use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
@@ -1141,6 +1142,19 @@ impl Datastore {
 		sess: &Session,
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+		// Create a default export config
+		let cfg = super::export::Config::default();
+		self.export_with_config(sess, chn, cfg).await
+	}
+
+	/// Performs a full database export as SQL
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn export_with_config(
+		&self,
+		sess: &Session,
+		chn: Sender<Vec<u8>>,
+		cfg: export::Config,
+	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
 		// Check if the session has expired
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
@@ -1149,8 +1163,6 @@ impl Datastore {
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let txn = self.transaction(Read, Optimistic).await?;
-		// Create a default export config
-		let cfg = super::export::Config::default();
 		// Return an async export job
 		Ok(async move {
 			// Process the export
