@@ -892,7 +892,7 @@ mod cli_integration {
 		let ns = Ulid::new();
 		let db = Ulid::new();
 
-		info!("* Import and re-import root-level file");
+		info!("* Import and reimport root-level file");
 		{
 			// Start the server with an import file containing the following query:
 			let query = r#"DEFINE ACCESS OVERWRITE admin ON ROOT TYPE JWT URL "https://www.surrealdb.com/jwks.json";"#;
@@ -956,6 +956,32 @@ mod cli_integration {
 				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns} --database {db}");
 			let output = common::run(&args).input("SELECT * FROM user").output().expect("success");
 			assert!(output.contains(r#"{ id: user:1 }"#));
+			server.finish().unwrap();
+		}
+
+		info!("* Invalid import file");
+		{
+			// Start the server with an import file which contains invalid SurrealQL.
+			let query = r#"
+				DEFINE USER test ON ROOT PASSWORD "secret"; -- Valid
+				DEFINE USER ON ROOT test PASSWORD "secret"; -- Invalid
+			"#;
+			let import_file = common::tmp_file("import.surql");
+			let mut file = File::create(&import_file).unwrap();
+			file.write_all(query.as_bytes()).unwrap();
+			let res = common::start_server_with_import_file(&import_file).await;
+			match res {
+				Ok(_) => panic!("import file should contain parseable SurrealQL"),
+				Err(e) => {
+					assert!(e.to_string().contains("server failed to start"))
+				}
+			}
+			// Verify that no data has been created on the datastore.
+			let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+			let args =
+				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns}");
+			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
+			assert!(!output.contains(r#"DEFINE USER test ON ROOT PASSHASH"#));
 			server.finish().unwrap();
 		}
 
