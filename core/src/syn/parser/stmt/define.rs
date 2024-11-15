@@ -238,9 +238,23 @@ impl Parser<'_> {
 				}
 				t!("ROLES") => {
 					self.pop_peek();
-					res.roles = vec![self.next_token_value()?];
-					while self.eat(t!(",")) {
-						res.roles.push(self.next_token_value()?);
+					let mut roles = Vec::new();
+					loop {
+						let token = self.peek();
+						let role = self.next_token_value::<Ident>()?;
+						// NOTE(gguillemas): This hardcoded list is a temporary fix in order
+						// to avoid making breaking changes to the DefineUserStatement structure
+						// while still providing parsing feedback to users referencing unexistent roles.
+						// This list should be removed once arbitrary roles can be defined by users.
+						if !matches!(role.to_lowercase().as_str(), "viewer" | "editor" | "owner") {
+							unexpected!(self, token, "an existent role");
+						}
+						roles.push(role);
+
+						if !self.eat(t!(",")) {
+							res.roles = roles;
+							break;
+						}
 					}
 				}
 				t!("DURATION") => {
@@ -1185,6 +1199,12 @@ impl Parser<'_> {
 								let language = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Snowball(language))
+							}
+							t!("MAPPER") => {
+								let open_span = expected!(self, t!("(")).span;
+								let path: Strand = self.next_token_value()?;
+								self.expect_closing_delimiter(t!(")"), open_span)?;
+								filters.push(Filter::Mapper(path.into()))
 							}
 							_ => unexpected!(self, next, "a filter"),
 						}

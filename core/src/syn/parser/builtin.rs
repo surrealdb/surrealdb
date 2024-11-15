@@ -12,7 +12,7 @@ use reblessive::Stk;
 use unicase::UniCase;
 
 const MAX_LEVENSTHEIN_CUT_OFF: u8 = 4;
-const MAX_FUNCTION_NAME_LEN: usize = 33;
+const MAX_FUNCTION_NAME_LEN: usize = 48;
 const LEVENSTHEIN_ARRAY_SIZE: usize = 1 + MAX_FUNCTION_NAME_LEN + MAX_LEVENSTHEIN_CUT_OFF as usize;
 
 /// simple function calculating levenshtein distance with a cut-off.
@@ -308,8 +308,14 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::trim") => PathKind::Function,
 		UniCase::ascii("string::uppercase") => PathKind::Function,
 		UniCase::ascii("string::words") => PathKind::Function,
+		//
+		UniCase::ascii("string::distance::damerau_levenshtein") => PathKind::Function,
 		UniCase::ascii("string::distance::hamming") => PathKind::Function,
 		UniCase::ascii("string::distance::levenshtein") => PathKind::Function,
+		UniCase::ascii("string::distance::normalized_damerau_levenshtein") => PathKind::Function,
+		UniCase::ascii("string::distance::normalized_levenshtein") => PathKind::Function,
+		UniCase::ascii("string::distance::osa_distance") => PathKind::Function,
+		//
 		UniCase::ascii("string::html::encode") => PathKind::Function,
 		UniCase::ascii("string::html::sanitize") => PathKind::Function,
 		UniCase::ascii("string::is::alphanum") => PathKind::Function,
@@ -340,9 +346,12 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::semver::set::major") => PathKind::Function,
 		UniCase::ascii("string::semver::set::minor") => PathKind::Function,
 		UniCase::ascii("string::semver::set::patch") => PathKind::Function,
+		//
 		UniCase::ascii("string::similarity::fuzzy") => PathKind::Function,
 		UniCase::ascii("string::similarity::jaro") => PathKind::Function,
+		UniCase::ascii("string::similarity::jaro_winkler") => PathKind::Function,
 		UniCase::ascii("string::similarity::smithwaterman") => PathKind::Function,
+		UniCase::ascii("string::similarity::sorensen_dice") => PathKind::Function,
 		UniCase::ascii("string::matches") => PathKind::Function,
 		//
 		UniCase::ascii("time::ceil") => PathKind::Function,

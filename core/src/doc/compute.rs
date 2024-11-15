@@ -6,7 +6,7 @@ use crate::dbs::{Options, Processed};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
-use channel::Sender;
+use async_channel::Sender;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-		chn: Sender<Result<Value, Error>>,
+		chn: &Sender<Result<Value, Error>>,
 		mut pro: Processed,
 	) -> Result<(), Error> {
 		// Whether we are retrying

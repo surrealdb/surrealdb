@@ -1176,6 +1176,9 @@ pub enum Error {
 	#[error("Error while ordering a result: {0}.")]
 	OrderingError(String),
 
+	#[error("Encountered an issue while processed export config: found {0}, but expected {1}.")]
+	InvalidExportConfig(Value, String),
+  
 	/// Found an unexpected value in a range
 	#[error("Found {found} for bound but expected {expected}.")]
 	InvalidBound {
@@ -1279,14 +1282,14 @@ impl From<foundationdb::TransactionCommitError> for Error {
 	}
 }
 
-impl From<channel::RecvError> for Error {
-	fn from(e: channel::RecvError) -> Error {
+impl From<async_channel::RecvError> for Error {
+	fn from(e: async_channel::RecvError) -> Error {
 		Error::Channel(e.to_string())
 	}
 }
 
-impl<T> From<channel::SendError<T>> for Error {
-	fn from(e: channel::SendError<T>) -> Error {
+impl<T> From<async_channel::SendError<T>> for Error {
+	fn from(e: async_channel::SendError<T>) -> Error {
 		Error::Channel(e.to_string())
 	}
 }

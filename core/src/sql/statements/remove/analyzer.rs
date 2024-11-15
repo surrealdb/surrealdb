@@ -21,17 +21,21 @@ pub struct RemoveAnalyzerStatement {
 impl RemoveAnalyzerStatement {
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
 		let future = async {
+			let (ns, db) = (opt.ns()?, opt.db()?);
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 			// Get the transaction
 			let txn = ctx.tx();
 			// Get the definition
-			let az = txn.get_db_analyzer(opt.ns()?, opt.db()?, &self.name).await?;
+			let az = txn.get_db_analyzer(ns, db, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::database::az::new(opt.ns()?, opt.db()?, &az.name);
+			let key = crate::key::database::az::new(ns, db, &az.name);
 			txn.del(key).await?;
 			// Clear the cache
 			txn.clear();
+			// Cleanup in-memory mappers if not used anymore
+			let azs = txn.all_db_analyzers(ns, db).await?;
+			ctx.get_index_stores().mappers().cleanup(&azs);
 			// TODO Check that the analyzer is not used in any schema
 			// Ok all good
 			Ok(Value::None)
