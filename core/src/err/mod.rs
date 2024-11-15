@@ -1178,7 +1178,7 @@ pub enum Error {
 
 	#[error("Encountered an issue while processed export config: found {0}, but expected {1}.")]
 	InvalidExportConfig(Value, String),
-  
+
 	/// Found an unexpected value in a range
 	#[error("Found {found} for bound but expected {expected}.")]
 	InvalidBound {
