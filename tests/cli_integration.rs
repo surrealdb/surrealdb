@@ -962,12 +962,10 @@ mod cli_integration {
 		info!("* Invalid import file");
 		{
 			// Start the server with an import file which contains invalid SurrealQL.
-			let query = format!(
-				r#"
+			let query = r#"
 				DEFINE USER test ON ROOT PASSWORD "secret"; -- Valid
 				DEFINE USER ON ROOT test PASSWORD "secret"; -- Invalid
-			"#
-			);
+			"#;
 			let import_file = common::tmp_file("import.surql");
 			let mut file = File::create(&import_file).unwrap();
 			file.write_all(query.as_bytes()).unwrap();
