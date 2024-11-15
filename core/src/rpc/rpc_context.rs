@@ -343,7 +343,6 @@ pub trait RpcContext {
 		};
 		// Specify the SQL query string
 		let sql = InsertStatement {
-			into: Some(what.could_be_table()),
 			into: match what.is_none_or_null() {
 				false => Some(what.could_be_table()),
 				true => None,
@@ -677,7 +676,7 @@ pub trait RpcContext {
 		}
 		// Specify the query variables
 		let vars = match vars {
-			Value::Object(v) => Some(mrg! {v.0, &self.vars()}),
+			Value::Object(mut v) => Some(mrg! {v.0, &self.vars()}),
 			Value::None | Value::Null => Some(self.vars().clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};
