@@ -182,7 +182,7 @@ impl Executor {
 				let writeable = stmt.writeable();
 				let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
 				let receiver = self.ctx.has_notifications().then(|| {
-					let (send, recv) = channel::unbounded();
+					let (send, recv) = async_channel::unbounded();
 					self.opt.sender = Some(send);
 					recv
 				});
@@ -274,7 +274,7 @@ impl Executor {
 
 		// Create a sender for this transaction only if the context allows for notifications.
 		let receiver = self.ctx.has_notifications().then(|| {
-			let (send, recv) = channel::unbounded();
+			let (send, recv) = async_channel::unbounded();
 			self.opt.sender = Some(send);
 			recv
 		});

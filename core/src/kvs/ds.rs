@@ -25,8 +25,8 @@ use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
 use crate::syn::parser::{Parser, PartialResult};
+use async_channel::{Receiver, Sender};
 use bytes::Bytes;
-use channel::{Receiver, Sender};
 use futures::{Future, Stream};
 use reblessive::{Stack, TreeStack};
 use std::fmt;
@@ -444,7 +444,7 @@ impl Datastore {
 
 	/// Specify whether this datastore should enable live query notifications
 	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel = Some(channel::bounded(LQ_CHANNEL_SIZE));
+		self.notification_channel = Some(async_channel::bounded(LQ_CHANNEL_SIZE));
 		self
 	}
 

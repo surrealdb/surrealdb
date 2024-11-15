@@ -492,13 +492,6 @@ user-login = "mumoshu"
 user-name = "Yusuke Kuoka"
 
 [[publisher.surrealkv]]
-version = "0.4.0"
-when = "2024-10-21"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
-[[publisher.surrealkv]]
 version = "0.5.1"
 when = "2024-11-14"
 user-id = 145457
@@ -527,8 +520,8 @@ user-login = "dtolnay"
 user-name = "David Tolnay"
 
 [[publisher.tokio]]
-version = "1.40.0"
-when = "2024-08-30"
+version = "1.41.1"
+when = "2024-11-07"
 user-id = 6741
 user-login = "Darksonn"
 user-name = "Alice Ryhl"
@@ -588,13 +581,6 @@ when = "2023-09-19"
 user-id = 1139
 user-login = "Manishearth"
 user-name = "Manish Goregaokar"
-
-[[publisher.vart]]
-version = "0.6.0"
-when = "2024-10-17"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.vart]]
 version = "0.7.0"

@@ -275,10 +275,6 @@ criteria = "safe-to-deploy"
 version = "1.3.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.bitmaps]]
-version = "3.2.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.bitvec]]
 version = "1.0.1"
 criteria = "safe-to-deploy"
@@ -709,14 +705,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.iana-time-zone]]
 version = "0.1.60"
-criteria = "safe-to-deploy"
-
-[[exemptions.imbl]]
-version = "2.0.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.imbl-sized-chunks]]
-version = "0.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.indexmap]]
@@ -1201,10 +1189,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rand_hc]]
 version = "0.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_xoshiro]]
-version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rawpointer]]

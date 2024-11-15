@@ -1,6 +1,37 @@
 
 # cargo-vet audits file
 
+[[audits.async-executor]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "1.9.1 -> 1.13.1"
+
+[[audits.async-stream]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.5 -> 0.3.6"
+
+[[audits.async-stream-impl]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.5 -> 0.3.6"
+
+[[audits.async-task]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "4.7.0 -> 4.7.1"
+
+[[audits.easy-parallel]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "3.3.1"
+notes = "A very simple one file library, no unsafe code."
+
+[[audits.futures-lite]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "2.3.0 -> 2.5.0"
+
 [[audits.libc]]
 who = "arriqaaq <farhan.khan@surrealdb.com>"
 criteria = "safe-to-deploy"
