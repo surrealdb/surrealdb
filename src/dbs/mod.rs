@@ -426,6 +426,7 @@ pub async fn init(
 	dbs.check_version().await?;
 	// Import file at start, if provided
 	if let Some(file) = import_file {
+		info!("Importing data from file: {:?}", file);
 		let sql = fs::read_to_string(file)?;
 		dbs.import(&sql, &Session::owner()).await?;
 	}
