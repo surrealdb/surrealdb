@@ -11,7 +11,7 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::{FindRecursionPlan, Next, NextMethod};
+use crate::sql::part::{FindRecursionPlan, Next, NextMethod, SplitByRepeatRecurse};
 use crate::sql::part::{Part, Skip};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
@@ -47,12 +47,25 @@ impl Value {
 			// The knowledge of the current value is not relevant to Part::Recurse
 			Some(Part::Recurse(recurse)) => {
 				let next = path.next();
-				let (next, plan, after) = match next.find_recursion_plan() {
-					Some((next, plan, after)) => (next, Some(plan), Some(after)),
-					_ => (next, None, None),
+
+				// We first try to split out a root-level repeat-recurse symbol
+				// By doing so, we can eliminate un-needed recursion, as we can
+				// simply loop.
+				let (next, plan, after) = match next.split_by_repeat_recurse() {
+					Some((next, after)) => (next, None, Some(after)),
+
+					// If we do not find a root-level repeat-recurse symbol, we
+					// can scan for a nested one. We only ever allow for a single
+					// repeat recurse symbol, hence the separate check.
+					_ => match next.find_recursion_plan() {
+						Some((next, plan, after)) => (next, Some(plan), Some(after)),
+						_ => (next, None, None),
+					},
 				};
 
+				// Collect the min & max for the recursion context
 				let (min, max) = recurse.try_into()?;
+				// Construct the recursion context
 				let rec = Recursion {
 					min,
 					max,
@@ -62,13 +75,21 @@ impl Value {
 					plan: plan.as_ref(),
 				};
 
+				// Compute the recursion
 				let v = compute_idiom_recursion(stk, ctx, opt, doc, rec).await?;
 
+				// If we have a leftover path, process it
 				match after {
-					Some(after) => stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await,
+					Some(after) if after.len() > 0 => {
+						stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await
+					}
 					_ => Ok(v),
 				}
 			}
+			// We only support repeat recurse symbol in certain scenarios, to
+			// ensure we can process them efficiently. When encountering a
+			// recursion part, it will find the repeat recurse part and handle
+			// it. If we find one in any unsupported scenario, we throw an error.
 			Some(Part::RepeatRecurse) => Err(Error::UnsupportedRepeatRecurse),
 			Some(Part::Doc) => {
 				// Try to obtain a Record ID from the document, otherwise we'll operate on NONE

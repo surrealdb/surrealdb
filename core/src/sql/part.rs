@@ -314,6 +314,34 @@ impl<'a> FindRecursionPlan<'a> for &'a Idiom {
 
 // ------------------------------
 
+pub trait SplitByRepeatRecurse<'a> {
+	fn split_by_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])>;
+}
+
+impl<'a> SplitByRepeatRecurse<'a> for &'a [Part] {
+	fn split_by_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])> {
+		self.iter()
+			.position(|p| matches!(p, Part::RepeatRecurse))
+			// We exclude the `@` repeat recurse symbol here, because
+			// it ensures we will loop the idiom path, instead of using
+			// `.get()` to recurse
+			.map(|i| (&self[..i], &self[(i + 1)..]))
+	}
+}
+
+impl<'a> SplitByRepeatRecurse<'a> for &'a Idiom {
+	fn split_by_repeat_recurse(&'a self) -> Option<(&'a [Part], &'a [Part])> {
+		self.iter()
+			.position(|p| matches!(p, Part::RepeatRecurse))
+			// We exclude the `@` repeat recurse symbol here, because
+			// it ensures we will loop the idiom path, instead of using
+			// `.get()` to recurse
+			.map(|i| (&self[..i], &self[(i + 1)..]))
+	}
+}
+
+// ------------------------------
+
 pub trait Next<'a> {
 	fn next(&'a self) -> &'a [Part];
 }
