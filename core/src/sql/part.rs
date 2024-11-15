@@ -455,39 +455,6 @@ impl<'a> TryInto<(&'a u32, Option<&'a u32>)> for &'a Recurse {
 	}
 }
 
-impl Recurse {
-	pub fn min(&self) -> Result<u32, Error> {
-		let min = match self {
-			Recurse::Fixed(v) => v.to_owned(),
-			Recurse::Range(min, _) => min.unwrap_or(1),
-		};
-
-		if min < 1 {
-			Err(Error::InvalidBound {
-				found: min.to_string(),
-				expected: "at least 1".into(),
-			})
-		} else {
-			Ok(min)
-		}
-	}
-
-	pub fn max(&self) -> Result<Option<u32>, Error> {
-		let max = match self {
-			Recurse::Fixed(v) => Some(v.to_owned()),
-			Recurse::Range(_, max) => max.to_owned(),
-		};
-
-		match max {
-			Some(max) if max > (*IDIOM_RECURSION_LIMIT as u32) => Err(Error::InvalidBound {
-				found: max.to_string(),
-				expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
-			}),
-			max => Ok(max),
-		}
-	}
-}
-
 impl fmt::Display for Recurse {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
