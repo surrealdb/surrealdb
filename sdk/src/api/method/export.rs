@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
+use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
 
 /// A database export future
 #[derive(Debug)]
@@ -27,6 +28,7 @@ pub struct Export<'r, C: Connection, R, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) target: R,
 	pub(super) ml_config: Option<MlExportConfig>,
+	pub(super) db_config: Option<DbExportConfig>,
 	pub(super) response: PhantomData<R>,
 	pub(super) export_type: PhantomData<T>,
 }
@@ -44,6 +46,112 @@ where
 				name: name.to_owned(),
 				version: version.to_string(),
 			}),
+			db_config: self.db_config,
+			response: self.response,
+			export_type: PhantomData,
+		}
+	}
+
+	/// Whether to export users from the database
+	pub fn with_users(self, users: bool) -> Export<'r, C, R, Model> {
+		let mut db_config = self.db_config.unwrap_or_default();
+		db_config.users = users;
+
+		Export {
+			client: self.client,
+			target: self.target,
+			ml_config: self.ml_config,
+			db_config: Some(db_config),
+			response: self.response,
+			export_type: PhantomData,
+		}
+	}
+
+	/// Whether to export accesses from the database
+	pub fn with_accesses(self, accesses: bool) -> Export<'r, C, R, Model> {
+		let mut db_config = self.db_config.unwrap_or_default();
+		db_config.accesses = accesses;
+
+		Export {
+			client: self.client,
+			target: self.target,
+			ml_config: self.ml_config,
+			db_config: Some(db_config),
+			response: self.response,
+			export_type: PhantomData,
+		}
+	}
+
+	/// Whether to export params from the database
+	pub fn with_params(self, params: bool) -> Export<'r, C, R, Model> {
+		let mut db_config = self.db_config.unwrap_or_default();
+		db_config.params = params;
+
+		Export {
+			client: self.client,
+			target: self.target,
+			ml_config: self.ml_config,
+			db_config: Some(db_config),
+			response: self.response,
+			export_type: PhantomData,
+		}
+	}
+
+	/// Whether to export functions from the database
+	pub fn with_functions(self, functions: bool) -> Export<'r, C, R, Model> {
+		let mut db_config = self.db_config.unwrap_or_default();
+		db_config.functions = functions;
+
+		Export {
+			client: self.client,
+			target: self.target,
+			ml_config: self.ml_config,
+			db_config: Some(db_config),
+			response: self.response,
+			export_type: PhantomData,
+		}
+	}
+
+	/// Whether to export analyzers from the database
+	pub fn with_analyzers(self, analyzers: bool) -> Export<'r, C, R, Model> {
+		let mut db_config = self.db_config.unwrap_or_default();
+		db_config.analyzers = analyzers;
+
+		Export {
+			client: self.client,
+			target: self.target,
+			ml_config: self.ml_config,
+			db_config: Some(db_config),
+			response: self.response,
+			export_type: PhantomData,
+		}
+	}
+
+	/// Whether to export all versions of data from the database
+	pub fn versioned(self, versioned: bool) -> Export<'r, C, R, Model> {
+		let mut db_config = self.db_config.unwrap_or_default();
+		db_config.versions = versioned;
+
+		Export {
+			client: self.client,
+			target: self.target,
+			ml_config: self.ml_config,
+			db_config: Some(db_config),
+			response: self.response,
+			export_type: PhantomData,
+		}
+	}
+
+	/// Whether to export tables or which ones from the database
+	pub fn with_tables(self, tables: impl Into<TableConfig>) -> Export<'r, C, R, Model> {
+		let mut db_config = self.db_config.unwrap_or_default();
+		db_config.tables = tables.into();
+
+		Export {
+			client: self.client,
+			target: self.target,
+			ml_config: self.ml_config,
+			db_config: Some(db_config),
 			response: self.response,
 			export_type: PhantomData,
 		}
@@ -89,6 +197,7 @@ where
 			router
 				.execute_unit(Command::ExportFile {
 					path: self.target,
+					config: self.db_config,
 				})
 				.await
 		})
@@ -126,6 +235,7 @@ where
 			router
 				.execute_unit(Command::ExportBytes {
 					bytes: tx,
+					config: self.db_config,
 				})
 				.await?;
 

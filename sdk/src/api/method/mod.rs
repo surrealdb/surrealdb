@@ -1366,6 +1366,7 @@ where
 			client: Cow::Borrowed(self),
 			target: target.into_export_destination(),
 			ml_config: None,
+			db_config: None,
 			response: PhantomData,
 			export_type: PhantomData,
 		}

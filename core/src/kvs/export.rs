@@ -36,6 +36,26 @@ impl Default for Config {
 	}
 }
 
+impl Into<Value> for Config {
+	fn into(self) -> Value {
+		let obj = map!(
+			"users" => self.users.into(),
+			"accesses" => self.accesses.into(),
+			"params" => self.params.into(),
+			"functions" => self.functions.into(),
+			"analyzers" => self.analyzers.into(),
+			"versions" => self.versions.into(),
+			"tables" => match self.tables {
+				TableConfig::All => true.into(),
+				TableConfig::None => false.into(),
+				TableConfig::Some(v) => v.into()
+			}
+		);
+
+		obj.into()
+	}
+}
+
 impl TryFrom<&Value> for Config {
 	type Error = Error;
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
@@ -84,6 +104,21 @@ pub enum TableConfig {
 	All,
 	None,
 	Some(Vec<String>),
+}
+
+impl From<bool> for TableConfig {
+	fn from(value: bool) -> Self {
+		match value {
+			true => TableConfig::All,
+			false => TableConfig::None,
+		}
+	}
+}
+
+impl From<Vec<String>> for TableConfig {
+	fn from(value: Vec<String>) -> Self {
+		TableConfig::Some(value)
+	}
 }
 
 impl TryFrom<&Value> for TableConfig {
