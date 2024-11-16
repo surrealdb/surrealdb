@@ -6,9 +6,9 @@ use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
 use std::io::Read;
 use std::path::PathBuf;
+use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::sql::{Array as CoreArray, Object as CoreObject, Query, Value as CoreValue};
 use uuid::Uuid;
-use surrealdb_core::kvs::export::Config as DbExportConfig;
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use surrealdb_core::sql::Table as CoreTable;

@@ -44,6 +44,7 @@ use std::{
 	mem,
 	sync::Arc,
 };
+use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::sql::Function;
 use surrealdb_core::{
 	dbs::{Response, Session},
@@ -60,7 +61,6 @@ use surrealdb_core::{
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::bytes::BytesMut;
 use uuid::Uuid;
-use surrealdb_core::kvs::export::Config as DbExportConfig;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::{future::Future, path::PathBuf};
@@ -474,7 +474,12 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<CoreValue> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn export_file(kvs: &Datastore, sess: &Session, chn: channel::Sender<Vec<u8>>, config: Option<DbExportConfig>) -> Result<()> {
+async fn export_file(
+	kvs: &Datastore,
+	sess: &Session,
+	chn: channel::Sender<Vec<u8>>,
+	config: Option<DbExportConfig>,
+) -> Result<()> {
 	let res = match config {
 		Some(config) => kvs.export_with_config(sess, chn, config).await?.await,
 		None => kvs.export(sess, chn).await?.await,
