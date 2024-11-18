@@ -150,7 +150,7 @@ pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 	// Generate the random time
 	match Utc.timestamp_opt(val, 0).earliest() {
 		Some(v) => Ok(v.into()),
-		_ => Err(Error::Unreachable("Expected to find a datetime here".into()))
+		_ => Err(Error::Unreachable("Expected to find a datetime here".into())),
 	}
 }
 
