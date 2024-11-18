@@ -91,7 +91,7 @@ async fn export_with_config() {
     // Export, remove table, and import
     let res = async {
         db.export(&file).with_tables(vec!["user".to_string()]).await?;
-        db.query("REMOVE TABLE user, group").await?;
+        db.query("REMOVE TABLE user; REMOVE TABLE group;").await?;
         db.import(&file).await?;
         Result::<(), Error>::Ok(())
     }
@@ -103,7 +103,14 @@ async fn export_with_config() {
     // Check the result of the export/import operations
     res.unwrap();
 
-    // Verify that all records exist post-import
+    // Verify that no group records were imported
+    let mut response = db.query(&format!("SELECT count() AS count FROM group GROUP all")).await.unwrap();
+    let Some(count): Option<i64> = response.take("count").unwrap() else {
+        panic!("Failed to count group records");
+    };
+    assert_eq!(count, 0);
+
+    // Verify that all user records exist post-import
     for i in 0..10 {
         let mut response = db
             .query(&format!("SELECT name FROM user WHERE name = 'User {i}'"))
