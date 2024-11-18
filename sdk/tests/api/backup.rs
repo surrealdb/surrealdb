@@ -1,6 +1,7 @@
 // Tests for exporting and importing data
 // Supported by the storage engines and the HTTP protocol
 
+use surrealdb::sql::Array;
 use surrealdb_core::sql::Table;
 use tokio::fs::remove_file;
 
@@ -104,11 +105,9 @@ async fn export_with_config() {
     res.unwrap();
 
     // Verify that no group records were imported
-    let mut response = db.query(&format!("SELECT count() AS count FROM group GROUP all")).await.unwrap();
-    let Some(count): Option<i64> = response.take("count").unwrap() else {
-        panic!("Failed to count group records");
-    };
-    assert_eq!(count, 0);
+    let mut response = db.query(&format!("SELECT id FROM group")).await.unwrap();
+    let tmp: Option<Value> = response.take(0).unwrap();
+    assert_eq!(tmp, None);
 
     // Verify that all user records exist post-import
     for i in 0..10 {
