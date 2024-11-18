@@ -36,16 +36,16 @@ impl Default for Config {
 	}
 }
 
-impl Into<Value> for Config {
-	fn into(self) -> Value {
+impl From<Config> for Value {
+	fn from(config: Config) -> Value {
 		let obj = map!(
-			"users" => self.users.into(),
-			"accesses" => self.accesses.into(),
-			"params" => self.params.into(),
-			"functions" => self.functions.into(),
-			"analyzers" => self.analyzers.into(),
-			"versions" => self.versions.into(),
-			"tables" => match self.tables {
+			"users" => config.users.into(),
+			"accesses" => config.accesses.into(),
+			"params" => config.params.into(),
+			"functions" => config.functions.into(),
+			"analyzers" => config.analyzers.into(),
+			"versions" => config.versions.into(),
+			"tables" => match config.tables {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
 				TableConfig::Some(v) => v.into()
