@@ -143,7 +143,7 @@ where
 	}
 
 	/// Whether to export tables or which ones from the database
-	pub fn with_tables(self, tables: impl Into<TableConfig>) -> Export<'r, C, R, Model> {
+	pub fn with_tables(self, tables: impl Into<TableConfig>) -> Export<'r, C, R> {
 		let mut db_config = self.db_config.unwrap_or_default();
 		db_config.tables = tables.into();
 
