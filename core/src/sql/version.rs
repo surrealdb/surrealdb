@@ -51,6 +51,22 @@ impl Version {
 	}
 }
 
+impl TryInto<u64> for ComputedVersion {
+	type Error = Error;
+	fn try_into(self) -> Result<u64, Self::Error> {
+		match self {
+			Self::Fixed(v) => Ok(v),
+			Self::Range(v) => {
+				let found = Value::Range(Box::new((
+					Value::from(v.start),
+					Value::from(v.end),
+				).into()));
+				Err(Error::InvalidVersion { found })
+			}
+		}
+	}
+}
+
 impl fmt::Display for Version {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "VERSION {}", self.0)

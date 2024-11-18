@@ -139,6 +139,24 @@ impl From<(Bound<Id>, Bound<Id>)> for Range {
 	}
 }
 
+impl From<(Value, Value)> for Range {
+	fn from(v: (Value, Value)) -> Self {
+		Self {
+			beg: Bound::Included(v.0),
+			end: Bound::Excluded(v.1),
+		}
+	}
+}
+
+impl From<(Bound<Value>, Bound<Value>)> for Range {
+	fn from(v: (Bound<Value>, Bound<Value>)) -> Self {
+		Self {
+			beg: v.0,
+			end: v.1,
+		}
+	}
+}
+
 impl TryInto<std::ops::Range<i64>> for Range {
 	type Error = Error;
 	fn try_into(self) -> Result<std::ops::Range<i64>, Self::Error> {
