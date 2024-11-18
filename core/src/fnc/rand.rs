@@ -148,7 +148,10 @@ pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 		rand::thread_rng().gen_range(0..=LIMIT)
 	};
 	// Generate the random time
-	Ok(Utc.timestamp_opt(val, 0).earliest().unwrap().into())
+	match Utc.timestamp_opt(val, 0).earliest() {
+		Some(v) => Ok(v.into()),
+		_ => Err(Error::Unreachable("Expected to find a datetime here".into()))
+	}
 }
 
 pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
