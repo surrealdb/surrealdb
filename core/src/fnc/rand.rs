@@ -153,8 +153,8 @@ pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 			return Ok(v.into());
 		}
 	}
-
-	Err(Error::Unreachable("Expected to find a datetime here".into()))
+	// We were unable to generate a valid random datetime
+	Err(fail!("Expected a valid datetime, but were unable to generate one"))
 }
 
 pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
