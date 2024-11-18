@@ -53,7 +53,7 @@ where
 	}
 
 	/// Whether to export users from the database
-	pub fn with_users(self, users: bool) -> Export<'r, C, R, Model> {
+	pub fn with_users(self, users: bool) -> Export<'r, C, R> {
 		let mut db_config = self.db_config.unwrap_or_default();
 		db_config.users = users;
 
@@ -68,7 +68,7 @@ where
 	}
 
 	/// Whether to export accesses from the database
-	pub fn with_accesses(self, accesses: bool) -> Export<'r, C, R, Model> {
+	pub fn with_accesses(self, accesses: bool) -> Export<'r, C, R> {
 		let mut db_config = self.db_config.unwrap_or_default();
 		db_config.accesses = accesses;
 
@@ -83,7 +83,7 @@ where
 	}
 
 	/// Whether to export params from the database
-	pub fn with_params(self, params: bool) -> Export<'r, C, R, Model> {
+	pub fn with_params(self, params: bool) -> Export<'r, C, R> {
 		let mut db_config = self.db_config.unwrap_or_default();
 		db_config.params = params;
 
@@ -98,7 +98,7 @@ where
 	}
 
 	/// Whether to export functions from the database
-	pub fn with_functions(self, functions: bool) -> Export<'r, C, R, Model> {
+	pub fn with_functions(self, functions: bool) -> Export<'r, C, R> {
 		let mut db_config = self.db_config.unwrap_or_default();
 		db_config.functions = functions;
 
@@ -113,7 +113,7 @@ where
 	}
 
 	/// Whether to export analyzers from the database
-	pub fn with_analyzers(self, analyzers: bool) -> Export<'r, C, R, Model> {
+	pub fn with_analyzers(self, analyzers: bool) -> Export<'r, C, R> {
 		let mut db_config = self.db_config.unwrap_or_default();
 		db_config.analyzers = analyzers;
 
@@ -128,7 +128,7 @@ where
 	}
 
 	/// Whether to export all versions of data from the database
-	pub fn versioned(self, versioned: bool) -> Export<'r, C, R, Model> {
+	pub fn versioned(self, versioned: bool) -> Export<'r, C, R> {
 		let mut db_config = self.db_config.unwrap_or_default();
 		db_config.versions = versioned;
 
