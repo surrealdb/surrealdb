@@ -63,12 +63,12 @@ pub(crate) fn clean_iteration(v: Value) -> Value {
 	}
 }
 
-pub(crate) async fn compute_idiom_recursion<'a>(
+pub(crate) async fn compute_idiom_recursion(
 	stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
-	rec: Recursion<'a>,
+	rec: Recursion<'_>,
 ) -> Result<Value, Error> {
 	// Find the recursion limit
 	let limit = *IDIOM_RECURSION_LIMIT as u32;
