@@ -1,7 +1,7 @@
 use crate::sql::uuid;
-use js::class::Trace;
+use js::{class::Trace, JsLifetime};
 
-#[derive(Clone, Trace)]
+#[derive(Clone, Trace, JsLifetime)]
 #[js::class]
 #[non_exhaustive]
 pub struct Uuid {

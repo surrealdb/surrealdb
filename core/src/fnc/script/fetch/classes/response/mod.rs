@@ -1,10 +1,18 @@
 //! Response class implementation
 
-mod init;
+use super::{Blob, Headers};
+use crate::fnc::script::fetch::{
+	body::{Body, BodyKind},
+	util, RequestError,
+};
 use bytes::Bytes;
-pub use init::ResponseInit;
+use js::{
+	class::Trace, prelude::Opt, ArrayBuffer, Class, Ctx, Exception, JsLifetime, Result, Value,
+};
+use reqwest::Url;
 
-use js::{class::Trace, prelude::Opt, ArrayBuffer, Class, Ctx, Exception, Result, Value};
+mod init;
+pub use init::ResponseInit;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
@@ -18,17 +26,8 @@ pub enum ResponseType {
 	OpaqueRedirect,
 }
 
-use reqwest::Url;
-
-use crate::fnc::script::fetch::{
-	body::{Body, BodyKind},
-	util, RequestError,
-};
-
-use super::{Blob, Headers};
-
 #[allow(dead_code)]
-#[derive(Trace)]
+#[derive(Trace, JsLifetime)]
 #[js::class]
 #[non_exhaustive]
 pub struct Response<'js> {

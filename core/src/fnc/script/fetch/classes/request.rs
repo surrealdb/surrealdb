@@ -1,11 +1,16 @@
 //! Request class implementation
 
-use js::{class::Trace, prelude::Coerced, Class, Ctx, Exception, FromJs, Object, Result, Value};
-use reqwest::Method;
-
 use crate::fnc::script::fetch::{body::Body, RequestError};
+use bytes::Bytes;
+use js::{
+	class::Trace, function::Opt, prelude::Coerced, Class, Ctx, Exception, FromJs, JsLifetime,
+	Object, Result, Value,
+};
+use reqwest::{header::HeaderName, Method, Url};
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+use super::{Blob, Headers};
+
+#[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
 #[non_exhaustive]
 pub enum RequestMode {
 	Navigate,
@@ -43,7 +48,7 @@ impl<'js> FromJs<'js> for RequestMode {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
 #[non_exhaustive]
 pub enum RequestCredentials {
 	Omit,
@@ -78,7 +83,7 @@ impl<'js> FromJs<'js> for RequestCredentials {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
 #[non_exhaustive]
 pub enum RequestCache {
 	Default,
@@ -122,7 +127,7 @@ impl<'js> FromJs<'js> for RequestCache {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
 #[non_exhaustive]
 pub enum RequestRedirect {
 	Follow,
@@ -157,7 +162,7 @@ impl<'js> FromJs<'js> for RequestRedirect {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
 #[non_exhaustive]
 pub enum ReferrerPolicy {
 	Empty,
@@ -209,6 +214,7 @@ impl<'js> FromJs<'js> for ReferrerPolicy {
 	}
 }
 
+#[derive(JsLifetime)]
 #[non_exhaustive]
 pub struct RequestInit<'js> {
 	pub method: Method,
@@ -370,16 +376,9 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 	}
 }
 
-pub use super::*;
-
-use bytes::Bytes;
-use js::function::Opt;
-// TODO: change implementation based on features.
-use reqwest::{header::HeaderName, Url};
-
 #[allow(dead_code)]
 #[js::class]
-#[derive(Trace)]
+#[derive(Trace, JsLifetime)]
 #[non_exhaustive]
 pub struct Request<'js> {
 	#[qjs(skip_trace)]
