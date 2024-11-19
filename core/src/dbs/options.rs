@@ -257,7 +257,6 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			futures: self.futures.clone(),
-			version: self.version.clone(),
 			perms,
 			..*self
 		}
@@ -271,7 +270,6 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			futures: self.futures.clone(),
-			version: self.version.clone(),
 			force,
 			..*self
 		}
@@ -286,7 +284,6 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			futures: self.futures.clone(),
-			version: self.version.clone(),
 			strict,
 			..*self
 		}
@@ -301,7 +298,6 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			futures: self.futures.clone(),
-			version: self.version.clone(),
 			import,
 			..*self
 		}
@@ -322,7 +318,6 @@ impl Options {
 					false => Futures::Disabled,
 				},
 			},
-			version: self.version.clone(),
 			..*self
 		}
 	}
@@ -336,7 +331,6 @@ impl Options {
 			force: self.force.clone(),
 			futures: self.futures.clone(),
 			sender: Some(sender),
-			version: self.version.clone(),
 			..*self
 		}
 	}
@@ -367,7 +361,6 @@ impl Options {
 			force: self.force.clone(),
 			futures: self.futures.clone(),
 			dive: self.dive - cost as u32,
-			version: self.version.clone(),
 			..*self
 		})
 	}
