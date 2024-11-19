@@ -5,6 +5,7 @@ use crate::api::Connection;
 use crate::api::Error;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
+use crate::method::ExportConfig as Config;
 use crate::method::Model;
 use crate::method::OnceLockExt;
 use crate::Surreal;
@@ -52,120 +53,89 @@ where
 		}
 	}
 
-	/// Whether to export users from the database
-	pub fn with_users(self, users: bool) -> Export<'r, C, R> {
-		let mut db_config = self.db_config.unwrap_or_default();
-		db_config.users = users;
-
+	/// Configure the export options
+	pub fn with_config(self) -> Export<'r, C, R, Config> {
 		Export {
 			client: self.client,
 			target: self.target,
 			ml_config: self.ml_config,
-			db_config: Some(db_config),
+			// Use default configuration options
+			db_config: Some(Default::default()),
 			response: self.response,
 			export_type: PhantomData,
 		}
+	}
+}
+
+impl<'r, C, R> Export<'r, C, R, Config>
+where
+	C: Connection,
+{
+	/// Whether to export users from the database
+	pub fn users(mut self, users: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.users = users;
+		}
+		self
 	}
 
 	/// Whether to export accesses from the database
-	pub fn with_accesses(self, accesses: bool) -> Export<'r, C, R> {
-		let mut db_config = self.db_config.unwrap_or_default();
-		db_config.accesses = accesses;
-
-		Export {
-			client: self.client,
-			target: self.target,
-			ml_config: self.ml_config,
-			db_config: Some(db_config),
-			response: self.response,
-			export_type: PhantomData,
+	pub fn accesses(mut self, accesses: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.accesses = accesses;
 		}
+		self
 	}
 
 	/// Whether to export params from the database
-	pub fn with_params(self, params: bool) -> Export<'r, C, R> {
-		let mut db_config = self.db_config.unwrap_or_default();
-		db_config.params = params;
-
-		Export {
-			client: self.client,
-			target: self.target,
-			ml_config: self.ml_config,
-			db_config: Some(db_config),
-			response: self.response,
-			export_type: PhantomData,
+	pub fn params(mut self, params: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.params = params;
 		}
+		self
 	}
 
 	/// Whether to export functions from the database
-	pub fn with_functions(self, functions: bool) -> Export<'r, C, R> {
-		let mut db_config = self.db_config.unwrap_or_default();
-		db_config.functions = functions;
-
-		Export {
-			client: self.client,
-			target: self.target,
-			ml_config: self.ml_config,
-			db_config: Some(db_config),
-			response: self.response,
-			export_type: PhantomData,
+	pub fn functions(mut self, functions: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.functions = functions;
 		}
+		self
 	}
 
 	/// Whether to export analyzers from the database
-	pub fn with_analyzers(self, analyzers: bool) -> Export<'r, C, R> {
-		let mut db_config = self.db_config.unwrap_or_default();
-		db_config.analyzers = analyzers;
-
-		Export {
-			client: self.client,
-			target: self.target,
-			ml_config: self.ml_config,
-			db_config: Some(db_config),
-			response: self.response,
-			export_type: PhantomData,
+	pub fn analyzers(mut self, analyzers: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.analyzers = analyzers;
 		}
+		self
 	}
 
 	/// Whether to export all versions of data from the database
-	pub fn with_versions(self, versioned: bool) -> Export<'r, C, R> {
-		let mut db_config = self.db_config.unwrap_or_default();
-		db_config.versions = versioned;
-
-		Export {
-			client: self.client,
-			target: self.target,
-			ml_config: self.ml_config,
-			db_config: Some(db_config),
-			response: self.response,
-			export_type: PhantomData,
+	pub fn versions(mut self, versions: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.versions = versions;
 		}
+		self
 	}
 
 	/// Whether to export tables or which ones from the database
 	///
 	/// We can pass a `bool` to export all tables or none at all:
 	/// ```
-	/// db.export().with_tables(true);
-	/// db.export().with_tables(false);
+	/// db.export().with_config().tables(true);
+	/// db.export().with_config().tables(false);
 	/// ```
 	///
 	/// Or we can pass a `Vec<String>` to specify a list of tables to export:
 	/// ```
-	/// db.export().with_tables(vec!["users".into()]);
+	/// db.export().with_config().tables(vec!["users".into()]);
 	/// ```
-	pub fn with_tables(self, tables: impl Into<TableConfig>) -> Export<'r, C, R> {
-		let mut db_config = self.db_config.unwrap_or_default();
-		db_config.tables = tables.into();
-
-		Export {
-			client: self.client,
-			target: self.target,
-			ml_config: self.ml_config,
-			db_config: Some(db_config),
-			response: self.response,
-			export_type: PhantomData,
+	pub fn tables(mut self, tables: impl Into<TableConfig>) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.tables = tables.into();
 		}
+		self
 	}
 }
 
