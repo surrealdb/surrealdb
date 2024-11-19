@@ -5,7 +5,6 @@ use super::modules;
 use super::modules::loader;
 use super::modules::resolver;
 use super::modules::surrealdb::query::QueryContext;
-use super::modules::surrealdb::query::QUERY_DATA_PROP_NAME;
 use crate::cnf::SCRIPTING_MAX_MEMORY_LIMIT;
 use crate::cnf::SCRIPTING_MAX_STACK_SIZE;
 use crate::ctx::Context;
@@ -14,10 +13,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 use js::async_with;
-use js::object::Property;
 use js::prelude::*;
 use js::CatchResultExt;
-use js::{Class, Ctx, Function, Module, Promise};
+use js::{Ctx, Function, Module, Promise};
 
 /// Insert query data into the context,
 ///
@@ -32,18 +30,11 @@ pub unsafe fn create_query_data<'a>(
 	// remove the restricting lifetime.
 	let ctx = Ctx::from_raw(ctx.as_raw());
 
-	let object = Class::instance(
-		ctx.clone(),
-		QueryContext {
-			context,
-			opt,
-			doc,
-		},
-	)?;
-
-	// make the query data not enumerable, writeable, or configurable.
-	let prop = Property::from(object);
-	ctx.globals().prop(QUERY_DATA_PROP_NAME, prop)?;
+	ctx.store_userdata(QueryContext {
+		context,
+		opt,
+		doc,
+	});
 
 	Ok(())
 }
