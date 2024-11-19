@@ -50,7 +50,7 @@ pub struct Options {
 	/// The channel over which we send notifications
 	pub sender: Option<Sender<Notification>>,
 	/// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<ComputedVersion>,
+	pub version: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -242,9 +242,15 @@ impl Options {
 	}
 
 	// Set the version
-	pub fn with_version(mut self, version: Option<ComputedVersion>) -> Self {
-		self.version = version;
-		self
+	pub fn with_computed_version(
+		mut self,
+		version: Option<ComputedVersion>,
+	) -> Result<Self, Error> {
+		self.version = match version {
+			Some(v) => Some(v.try_into()?),
+			None => None,
+		};
+		Ok(self)
 	}
 
 	// --------------------------------------------------

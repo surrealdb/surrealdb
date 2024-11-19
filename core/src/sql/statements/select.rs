@@ -113,7 +113,7 @@ impl SelectStatement {
 			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
 			_ => None,
 		};
-		let opt = Arc::new(opt.new_with_futures(false).with_version(version));
+		let opt = Arc::new(opt.new_with_futures(false).with_computed_version(version)?);
 		// Extract the limit
 		let limit = i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Used for ONLY: is the limit 1?

@@ -6,6 +6,7 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::{Base, Ident, Object, Value, Version};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -42,6 +43,7 @@ impl InfoStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
@@ -138,8 +140,8 @@ impl InfoStatement {
 				let ns = opt.ns()?;
 				let db = opt.db()?;
 				// Convert the version to u64 if present
-				let version = match &self.version {
-					Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
+				let version = match version {
+					Some(v) => Some(v.compute(stk, ctx, opt, None).await?.try_into()?),
 					_ => None,
 				};
 				// Get the transaction
@@ -223,8 +225,8 @@ impl InfoStatement {
 				let ns = opt.ns()?;
 				let db = opt.db()?;
 				// Convert the version to u64 if present
-				let version = match &self.version {
-					Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
+				let version = match version {
+					Some(v) => Some(v.compute(stk, ctx, opt, None).await?.try_into()?),
 					_ => None,
 				};
 				// Get the transaction

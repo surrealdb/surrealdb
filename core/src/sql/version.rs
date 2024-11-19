@@ -15,6 +15,10 @@ pub struct Version(
 	#[revision(start = 2)] pub Value,
 );
 
+// Hidden for the moment as we may want to move
+// this to a different location once we start to
+// utilize the range entry
+#[doc(hidden)]
 #[derive(Clone, Debug)]
 pub enum ComputedVersion {
 	Fixed(u64),
@@ -57,11 +61,11 @@ impl TryInto<u64> for ComputedVersion {
 		match self {
 			Self::Fixed(v) => Ok(v),
 			Self::Range(v) => {
-				let found = Value::Range(Box::new((
-					Value::from(v.start),
-					Value::from(v.end),
-				).into()));
-				Err(Error::InvalidVersion { found })
+				let found =
+					Value::Range(Box::new((Value::from(v.start), Value::from(v.end)).into()));
+				Err(Error::InvalidVersion {
+					found,
+				})
 			}
 		}
 	}

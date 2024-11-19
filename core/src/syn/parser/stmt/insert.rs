@@ -40,7 +40,7 @@ impl Parser<'_> {
 			None
 		};
 		let output = self.try_parse_output(ctx).await?;
-		let version = self.try_parse_version()?;
+		let version = self.try_parse_version(ctx).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		Ok(InsertStatement {
