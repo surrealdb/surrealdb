@@ -288,6 +288,81 @@ mod tests {
 
 			assert!(res.is_err(), "Unexpected successful signup: {:?}", res);
 		}
+
+		// Test SIGNUP failing due to datastore transaction conflict
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+					)
+					SIGNUP {
+					    UPSERT count:1 SET count += 1; -- Concurrently write to the same document
+					    SLEEP(2s); -- Increase the duration of the transaction
+						RETURN (CREATE user CONTENT {
+							name: $user,
+							pass: crypto::argon2::generate($pass)
+						})
+					}
+					DURATION FOR SESSION 2h
+				;
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Sign up with the user twice at the same time
+			let mut sess1 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut sess2 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("user", "user".into());
+			vars.insert("pass", "pass".into());
+
+			let (res1, res2) = tokio::join!(
+				db_access(
+					&ds,
+					&mut sess1,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.clone().into(),
+				),
+				db_access(
+					&ds,
+					&mut sess2,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.into(),
+				)
+			);
+
+			match (res1, res2) {
+				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
+				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
+				(Err(e1), Ok(_)) => match &e1 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
+				(Ok(_), Err(e2)) => match &e2 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
+			}
+		}
 	}
 
 	#[tokio::test]
@@ -707,6 +782,76 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected authentication to generally fail, but instead received: {:?}",
 					res
 				),
+			}
+		}
+		// Test AUTHENTICATE failing due to datastore transaction conflict
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNUP (
+					   CREATE type::thing('user', $id)
+					)
+					AUTHENTICATE {
+					   UPSERT count:1 SET count += 1; -- Concurrently write to the same document
+					   SLEEP(2s); -- Increase the duration of the transaction
+					   $auth.id -- Continue with authentication
+					}
+					DURATION FOR SESSION 2h
+				;
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Sign up with the user twice at the same time
+			let mut sess1 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut sess2 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("id", 1.into());
+
+			let (res1, res2) = tokio::join!(
+				db_access(
+					&ds,
+					&mut sess1,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.clone().into(),
+				),
+				db_access(
+					&ds,
+					&mut sess2,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.into(),
+				)
+			);
+
+			match (res1, res2) {
+				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
+				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
+				(Err(e1), Ok(_)) => match &e1 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
+				(Ok(_), Err(e2)) => match &e2 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
 			}
 		}
 	}
