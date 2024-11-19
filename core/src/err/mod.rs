@@ -861,8 +861,16 @@ pub enum Error {
 	InvalidPass,
 
 	/// There was an error with authentication
+	///
+	/// This error hides different kinds of errors directly related to authentication
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
+
+	/// There was an unexpected error while performing authentication
+	///
+	/// This error hides different kinds of unexpected errors that may affect authentication
+	#[error("There was an unexpected error while performing authentication")]
+	UnexpectedAuth,
 
 	/// There was an error with signing up
 	#[error("There was a problem with signing up")]

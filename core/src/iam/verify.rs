@@ -670,6 +670,10 @@ pub async fn authenticate_record(
 		Err(e) => match e {
 			// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
 			Error::Thrown(_) => Err(e),
+			// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
+			// This allows clients to handle these errors, which may be retryable
+			Error::Tx(_) | Error::TxFailure => Err(Error::UnexpectedAuth),
+			// Otherwise, return a generic error unless it should be forwarded
 			e if *INSECURE_FORWARD_ACCESS_ERRORS => Err(e),
 			_ => Err(Error::InvalidAuth),
 		},
@@ -697,6 +701,10 @@ pub async fn authenticate_generic(
 		Err(e) => match e {
 			// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
 			Error::Thrown(_) => Err(e),
+			// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
+			// This allows clients to handle these errors, which may be retryable
+			Error::Tx(_) | Error::TxFailure => Err(Error::UnexpectedAuth),
+			// Otherwise, return a generic error unless it should be forwarded
 			e if *INSECURE_FORWARD_ACCESS_ERRORS => Err(e),
 			_ => Err(Error::InvalidAuth),
 		},
