@@ -9,5 +9,7 @@ impl_module_def!(
 	"string::similarity",
 	"fuzzy" => run,
 	"jaro" => run,
+	"jaro_winkler" => run,
+	"sorensen_dice" => run,
 	"smithwaterman" => run
 );

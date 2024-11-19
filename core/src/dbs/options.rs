@@ -6,7 +6,7 @@ use crate::sql::version::ComputedVersion;
 use crate::sql::{
 	statements::define::DefineIndexStatement, statements::define::DefineTableStatement, Base,
 };
-use channel::Sender;
+use async_channel::Sender;
 use std::sync::Arc;
 use uuid::Uuid;
 

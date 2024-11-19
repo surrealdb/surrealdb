@@ -554,11 +554,13 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
  		SELECT id, search::score(1) as sc1, search::score(2) as sc2
     		FROM page WHERE
     		host = 'test'
-    		AND (title @1@ 'dog' OR content @2@ 'dog');
+    		AND (title @1@ 'dog' OR content @2@ 'dog')
+    		ORDER BY id;
     	SELECT id, search::score(1) as sc1, search::score(2) as sc2
     		FROM page WHERE
     		host = 'test'
-    		AND (title @1@ 'dog' OR content @2@ 'dog') PARALLEL;
+    		AND (title @1@ 'dog' OR content @2@ 'dog')
+    		ORDER BY id PARALLEL;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -716,5 +718,35 @@ async fn select_where_matches_analyser_without_tokenizer() -> Result<(), Error> 
 	t.expect_size(4)?;
 	t.skip_ok(3)?;
 	t.expect_val("[{ id: t:1, text: 'ab' }]")?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches_analyser_with_mapper() -> Result<(), Error> {
+	let sql = r"
+		DEFINE ANALYZER mapper TOKENIZERS blank,class FILTERS lowercase,mapper('../tests/data/lemmatization-en.txt');
+		CREATE t:1 SET text = 'He drives to work every day, taking the scenic route through town';
+		DEFINE INDEX search_idx ON TABLE t COLUMNS text SEARCH ANALYZER mapper BM25;
+		SELECT * FROM t WHERE text @@ 'driven'";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(4)?;
+	t.skip_ok(3)?;
+	t.expect_val(
+		"[{ id: t:1, text: 'He drives to work every day, taking the scenic route through town' }]",
+	)?;
+	// Reload the database
+	let mut t = t
+		.restart(
+			r"
+		SELECT * FROM t WHERE text @@ 'driven';
+		REMOVE INDEX search_idx ON TABLE t;
+		REMOVE ANALYZER mapper",
+		)
+		.await?;
+	t.expect_size(3)?;
+	t.expect_val(
+		"[{ id: t:1, text: 'He drives to work every day, taking the scenic route through town' }]",
+	)?;
+	t.skip_ok(2)?;
 	Ok(())
 }

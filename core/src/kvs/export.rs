@@ -7,7 +7,7 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::Value;
-use channel::Sender;
+use async_channel::Sender;
 use chrono::prelude::Utc;
 use chrono::TimeZone;
 
@@ -36,12 +36,80 @@ impl Default for Config {
 	}
 }
 
+impl TryFrom<&Value> for Config {
+	type Error = Error;
+	fn try_from(value: &Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Object(obj) => {
+				let mut config = Config::default();
+
+				macro_rules! bool_prop {
+					($prop:ident) => {{
+						match obj.get(stringify!($prop)) {
+							Some(Value::Bool(v)) => {
+								config.$prop = v.to_owned();
+							}
+							Some(v) => {
+								return Err(Error::InvalidExportConfig(
+									v.to_owned(),
+									"a bool".into(),
+								))
+							}
+							_ => (),
+						}
+					}};
+				}
+
+				bool_prop!(users);
+				bool_prop!(accesses);
+				bool_prop!(params);
+				bool_prop!(functions);
+				bool_prop!(analyzers);
+				bool_prop!(versions);
+
+				if let Some(v) = obj.get("tables") {
+					config.tables = v.try_into()?;
+				}
+
+				Ok(config)
+			}
+			v => Err(Error::InvalidExportConfig(v.to_owned(), "an object".into())),
+		}
+	}
+}
+
 #[derive(Clone, Debug, Default)]
 pub enum TableConfig {
 	#[default]
 	All,
 	None,
 	Some(Vec<String>),
+}
+
+impl TryFrom<&Value> for TableConfig {
+	type Error = Error;
+	fn try_from(value: &Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Bool(b) => match b {
+				true => Ok(TableConfig::All),
+				false => Ok(TableConfig::None),
+			},
+			Value::None | Value::Null => Ok(TableConfig::None),
+			Value::Array(v) => v
+				.iter()
+				.cloned()
+				.map(|v| match v {
+					Value::Strand(str) => Ok(str.0),
+					v => Err(Error::InvalidExportConfig(v.to_owned(), "a string".into())),
+				})
+				.collect::<Result<Vec<String>, Error>>()
+				.map(TableConfig::Some),
+			v => Err(Error::InvalidExportConfig(
+				v.to_owned(),
+				"a bool, none, null or array<string>".into(),
+			)),
+		}
+	}
 }
 
 impl TableConfig {
@@ -83,7 +151,7 @@ impl Transaction {
 		db: &str,
 	) -> Result<(), Error> {
 		// Output OPTIONS
-		self.export_section("OPTION", vec!["OPTION IMPORT;"], chn).await?;
+		self.export_section("OPTION", vec!["OPTION IMPORT"], chn).await?;
 
 		// Output USERS
 		if cfg.users {

@@ -38,8 +38,9 @@ impl DefineAnalyzerStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
+		let (ns, db) = (opt.ns()?, opt.db()?);
 		// Check if the definition exists
-		if txn.get_db_analyzer(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+		if txn.get_db_analyzer(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
@@ -49,20 +50,17 @@ impl DefineAnalyzerStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::az::new(opt.ns()?, opt.db()?, &self.name);
-		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		txn.set(
-			key,
-			DefineAnalyzerStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			},
-			None,
-		)
-		.await?;
+		let key = crate::key::database::az::new(ns, db, &self.name);
+		txn.get_or_add_ns(ns, opt.strict).await?;
+		txn.get_or_add_db(ns, db, opt.strict).await?;
+		let az = DefineAnalyzerStatement {
+			// Don't persist the `IF NOT EXISTS` clause to schema
+			if_not_exists: false,
+			overwrite: false,
+			..self.clone()
+		};
+		ctx.get_index_stores().mappers().load(&az).await?;
+		txn.set(key, az, None).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

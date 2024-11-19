@@ -142,7 +142,7 @@ Join our growing community around the world, for help, ideas, and discussions re
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/contributing.svg?raw=true">&nbsp;&nbsp;Contributing</h2>
 
-We would &nbsp;<img width="15" src="https://github.com/surrealdb/surrealdb/blob/main/img/love.svg?raw=true">&nbsp; for you to get involved with SurrealDB development! If you wish to help, you can learn more about how you can contribute to this project in the [contribution guide](CONTRIBUTING.md).
+We would &nbsp;<img width="15" src="https://github.com/surrealdb/surrealdb/blob/main/img/love.svg?raw=true">&nbsp; for you to get involved with SurrealDB development! If you wish to help, you can learn more about how you can contribute to this project in the [contribution guide](../CONTRIBUTING.md).
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/security.svg?raw=true">&nbsp;&nbsp;Security</h2>
 

@@ -18,7 +18,8 @@ mod cache;
 mod cf;
 mod clock;
 mod ds;
-mod export;
+#[doc(hidden)]
+pub mod export;
 mod live;
 mod node;
 mod scanner;
