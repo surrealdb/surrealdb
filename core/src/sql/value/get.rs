@@ -476,7 +476,11 @@ impl Value {
 								};
 								let v =
 									stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
-								stk.run(|stk| v.get(stk, ctx, opt, None, path)).await
+								let next = match path.first() {
+									Some(Part::All) => path.next(),
+									_ => path
+								};
+								stk.run(|stk| v.get(stk, ctx, opt, None, next)).await
 							}
 						},
 					}
