@@ -5,10 +5,13 @@ use crate::syn;
 
 use super::ResTrait;
 
-pub fn req(val: &[u8]) -> Result<Request, RpcError> {
+pub fn parse_value(val: &[u8]) -> Result<Value, RpcError> {
 	syn::value_legacy_strand(std::str::from_utf8(val).or(Err(RpcError::ParseError))?)
-		.or(Err(RpcError::ParseError))?
-		.try_into()
+		.or(Err(RpcError::ParseError))
+}
+
+pub fn req(val: &[u8]) -> Result<Request, RpcError> {
+	parse_value(val)?.try_into()
 }
 
 pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {

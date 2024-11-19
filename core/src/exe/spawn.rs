@@ -1,6 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use executor::{Executor, Task};
+use async_executor::{Executor, Task};
 use std::future::Future;
 use std::panic::catch_unwind;
 use std::sync::LazyLock;

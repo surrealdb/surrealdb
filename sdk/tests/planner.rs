@@ -14,12 +14,12 @@ async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &three_multi_index_query("", ""), 12).await?;
 	skip_ok(&mut res, 8)?;
-	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
+	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
 	// OR results
-	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
+	check_result(&mut res, &three_multi_index_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
+	check_result(&mut res, &single_index_ft_explain(false))?;
 	Ok(())
 }
 
@@ -29,11 +29,11 @@ async fn select_where_iterate_three_multi_index_parallel() -> Result<(), Error> 
 	let mut res = execute_test(&dbs, &three_multi_index_query("", "PARALLEL"), 12).await?;
 	skip_ok(&mut res, 8)?;
 	// OR results
-	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
-	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
+	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
+	check_result(&mut res, &three_multi_index_explain(true))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
+	check_result(&mut res, &single_index_ft_explain(true))?;
 	Ok(())
 }
 
@@ -48,11 +48,11 @@ async fn select_where_iterate_three_multi_index_with_all_index() -> Result<(), E
 	.await?;
 	skip_ok(&mut res, 8)?;
 	// OR results
-	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
-	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
+	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
+	check_result(&mut res, &three_multi_index_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
+	check_result(&mut res, &single_index_ft_explain(false))?;
 	Ok(())
 }
 
@@ -65,10 +65,10 @@ async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()
 
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' } ]")?;
-	check_result(&mut res, THREE_TABLE_EXPLAIN)?;
+	check_result(&mut res, &three_table_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
+	check_result(&mut res, &single_index_ft_explain(false))?;
 	Ok(())
 }
 
@@ -81,10 +81,10 @@ async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), E
 
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' } ]")?;
-	check_result(&mut res, THREE_TABLE_EXPLAIN)?;
+	check_result(&mut res, &three_table_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_UNIQ_EXPLAIN)?;
+	check_result(&mut res, &single_index_uniq_explain(false))?;
 	Ok(())
 }
 
@@ -170,10 +170,10 @@ fn two_multi_index_query(with: &str, parallel: &str) -> String {
 		CREATE person:lizzie SET name = 'Lizzie', genre='f', company='SurrealDB';
 		DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE;
 		DEFINE INDEX idx_genre ON TABLE person COLUMNS genre;
-		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' {parallel} EXPLAIN FULL;
-		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' {parallel} EXPLAIN FULL;"
+		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' ORDER BY name {parallel};
+	    SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' ORDER BY name {parallel} EXPLAIN FULL;
+		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' ORDER BY name {parallel};
+	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' ORDER BY name {parallel} EXPLAIN FULL;"
 	)
 }
 
@@ -187,10 +187,10 @@ fn three_multi_index_query(with: &str, parallel: &str) -> String {
 		DEFINE INDEX ft_company ON person FIELDS company SEARCH ANALYZER simple BM25;
 		DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE;
 		DEFINE INDEX idx_genre ON TABLE person COLUMNS genre;
-		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' {parallel};
-		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' {parallel} EXPLAIN FULL;
-		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' {parallel} EXPLAIN FULL;")
+		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' ORDER BY name {parallel};
+		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' ORDER BY name {parallel} EXPLAIN FULL;
+		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' ORDER BY name {parallel};
+	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' ORDER BY name {parallel} EXPLAIN FULL;")
 }
 
 fn table_explain(fetch_count: usize) -> String {
@@ -204,7 +204,7 @@ fn table_explain(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				}},
 				operation: 'Collector'
 			}},
@@ -235,7 +235,7 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				}},
 				operation: 'Collector'
 			}},
@@ -249,126 +249,162 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 	)
 }
 
-const THREE_TABLE_EXPLAIN: &str = "[
-	{
-		detail: {
-			table: 'person'
-		},
-		operation: 'Iterate Table'
-	},
-	{
-		detail: {
-			type: 'Memory'
-		},
-		operation: 'Collector'
-	},
-	{
-		detail: {
-			count: 3
-		},
-		operation: 'Fetch'
-	}
-]";
+fn three_table_explain(parallel: bool) -> String {
+	let collector = if parallel {
+		"AsyncMemoryOrdered"
+	} else {
+		"MemoryOrdered"
+	};
+	format!(
+		"[
+			{{
+				detail: {{
+					table: 'person'
+				}},
+				operation: 'Iterate Table'
+			}},
+			{{
+				detail: {{
+					type: '{collector}'
+				}},
+				operation: 'Collector'
+			}},
+			{{
+				detail: {{
+					count: 3
+				}},
+				operation: 'Fetch'
+			}}
+		]"
+	)
+}
 
-const THREE_MULTI_INDEX_EXPLAIN: &str = "[
-				{
-					detail: {
-						plan: {
+fn three_multi_index_explain(parallel: bool) -> String {
+	let collector = if parallel {
+		"AsyncMemoryOrdered"
+	} else {
+		"MemoryOrdered"
+	};
+	format!(
+		"[
+				{{
+					detail: {{
+						plan: {{
 							index: 'uniq_name',
 							operator: '=',
 							value: 'Jaime'
-						},
+						}},
 						table: 'person',
-					},
+					}},
 					operation: 'Iterate Index'
-				},
-                {
-					detail: {
-						plan: {
+				}},
+                {{
+					detail: {{
+						plan: {{
 							index: 'idx_genre',
 							operator: '=',
 							value: 'm'
-						},
+						}},
 						table: 'person',
-					},
+					}},
 					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						plan: {
+				}},
+				{{
+					detail: {{
+						plan: {{
 							index: 'ft_company',
 							operator: '@@',
 							value: 'surrealdb'
-						},
+						}},
 						table: 'person',
-					},
+					}},
 					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
+				}},
+				{{
+					detail: {{
+						type: '{collector}'
+					}},
 					operation: 'Collector'
-				},
-				{
-					detail: {
+				}},
+				{{
+					detail: {{
 						count: 3
-					},
+					}},
 					operation: 'Fetch'
-				}
-			]";
+				}}
+			]"
+	)
+}
 
-const SINGLE_INDEX_FT_EXPLAIN: &str = "[
-				{
-					detail: {
-						plan: {
+fn single_index_ft_explain(parallel: bool) -> String {
+	let collector = if parallel {
+		"AsyncMemoryOrdered"
+	} else {
+		"MemoryOrdered"
+	};
+	format!(
+		"[
+				{{
+					detail: {{
+						plan: {{
 							index: 'ft_company',
 							operator: '@@',
 							value: 'surrealdb'
-						},
+						}},
 						table: 'person',
-					},
+					}},
 					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
+				}},
+				{{
+					detail: {{
+						type: '{collector}'
+					}},
 					operation: 'Collector'
-				},
-				{
-					detail: {
+				}},
+				{{
+					detail: {{
 						count: 1
-					},
+					}},
 					operation: 'Fetch'
-				}
-			]";
+				}}
+			]"
+	)
+}
 
-const SINGLE_INDEX_UNIQ_EXPLAIN: &str = "[
-				{
-					detail: {
-						plan: {
+fn single_index_uniq_explain(parallel: bool) -> String {
+	let collector = if parallel {
+		"AsyncMemoryOrdered"
+	} else {
+		"MemoryOrdered"
+	};
+	format!(
+		"[
+				{{
+					detail: {{
+						plan: {{
 							index: 'uniq_name',
 							operator: '=',
 							value: 'Jaime'
-						},
+						}},
 						table: 'person',
-					},
+					}},
 					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
+				}},
+				{{
+					detail: {{
+						type: '{collector}'
+					}},
 					operation: 'Collector'
-				},
-				{
-					detail: {
+				}},
+				{{
+					detail: {{
 						count: 1
-					},
+					}},
 					operation: 'Fetch'
-				}
-			]";
+				}}
+			]"
+	)
+}
 
 const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 	{
@@ -384,7 +420,7 @@ const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 	},
 	{
 		detail: {
-			type: 'Memory'
+			type: 'MemoryOrdered'
 		},
 		operation: 'Collector'
 	},
@@ -421,7 +457,7 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 				},
 				{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 				},

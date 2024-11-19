@@ -163,7 +163,7 @@ impl InfoStatement {
 						},
 						"analyzers".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_db_analyzers(ns, db).await?.iter() {
+							for v in txn.all_db_analyzers( ns, db).await?.iter() {
 								out.insert(v.name.to_raw(), v.to_string().into());
 							}
 							out.into()

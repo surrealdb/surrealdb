@@ -72,8 +72,10 @@ pub async fn query<'js>(
 		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 	let context = context.freeze();
 
-	let value = Stk::enter_run(|stk| query.query.compute(stk, &context, this.opt, this.doc))
-		.await
-		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+	let value = Stk::enter_scope(|stk| {
+		stk.run(|stk| query.query.compute(stk, &context, this.opt, this.doc))
+	})
+	.await
+	.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 	Ok(value)
 }
