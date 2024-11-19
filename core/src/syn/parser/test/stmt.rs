@@ -2155,7 +2155,7 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
 				"foo".to_owned()
 			))])))])),
-			version: Some(Version(Datetime(expected_datetime))),
+			version: Some(Version(Value::Datetime(Datetime(expected_datetime)))),
 			timeout: None,
 			parallel: false,
 			tempfiles: false,

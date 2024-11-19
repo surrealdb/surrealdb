@@ -1205,6 +1205,11 @@ pub enum Error {
 	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
 	#[error("Tried to use a `@` repeat recurse symbol in a position where it is not supported")]
 	UnsupportedRepeatRecurse,
+
+	#[error("Error while computing version: expected a datetime, but found {found}")]
+	InvalidVersion {
+		found: Value,
+	},
 }
 
 impl From<Error> for String {
