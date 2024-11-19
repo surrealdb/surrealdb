@@ -5,11 +5,11 @@ use std::str::FromStr;
 use js::{
 	class::Trace,
 	prelude::{Coerced, List},
-	Array, Ctx, Exception, Result, Value,
+	Array, Ctx, Exception, JsLifetime, Result, Value,
 };
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
-#[derive(Clone, Trace)]
+#[derive(Clone, Trace, JsLifetime)]
 #[js::class]
 #[non_exhaustive]
 pub struct Headers {

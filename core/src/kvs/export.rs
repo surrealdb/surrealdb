@@ -20,6 +20,7 @@ pub struct Config {
 	pub analyzers: bool,
 	pub tables: TableConfig,
 	pub versions: bool,
+	pub records: bool,
 }
 
 impl Default for Config {
@@ -32,6 +33,7 @@ impl Default for Config {
 			analyzers: true,
 			tables: TableConfig::default(),
 			versions: false,
+			records: true,
 		}
 	}
 }
@@ -86,6 +88,7 @@ impl TryFrom<&Value> for Config {
 				bool_prop!(functions);
 				bool_prop!(analyzers);
 				bool_prop!(versions);
+				bool_prop!(records);
 
 				if let Some(v) = obj.get("tables") {
 					config.tables = v.try_into()?;
@@ -262,7 +265,10 @@ impl Transaction {
 			}
 
 			self.export_table_structure(ns, db, table, chn).await?;
-			self.export_table_data(ns, db, table, cfg, chn).await?;
+
+			if cfg.records {
+				self.export_table_data(ns, db, table, cfg, chn).await?;
+			}
 		}
 
 		Ok(())
