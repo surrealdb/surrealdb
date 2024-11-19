@@ -3,7 +3,7 @@ use reblessive::Stk;
 use crate::{
 	sql::{
 		part::{DestructurePart, Recurse},
-		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Number, Part, Table, Tables, Value,
+		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value,
 	},
 	syn::{
 		error::bail,
@@ -380,22 +380,8 @@ impl Parser<'_> {
 	}
 	/// Parse the inner part of a recurse, expects a valid recurse value in the current position
 	pub(super) fn parse_recurse_inner(&mut self) -> ParseResult<Recurse> {
-		if self.eat(t!("*")) {
-			return Ok(Recurse::Range(None, None));
-		}
-
 		let min = if matches!(self.peek().kind, TokenKind::Digits) {
-			match self.next_token_value::<Number>()? {
-				Number::Int(v) => Some(match u32::try_from(v) {
-					Ok(v) => v,
-					_ => {
-						bail!("Unexpected integer `{}`, expected a u32", v, @self.last_span());
-					}
-				}),
-				found => {
-					bail!("Unexpected token `{}` expected an integer", found, @self.last_span());
-				}
-			}
+			Some(self.next_token_value::<u32>()?)
 		} else {
 			None
 		};
@@ -413,17 +399,7 @@ impl Parser<'_> {
 
 		// parse ending id.
 		let max = if matches!(self.peek_whitespace().kind, TokenKind::Digits) {
-			match self.next_token_value::<Number>()? {
-				Number::Int(v) => Some(match u32::try_from(v) {
-					Ok(v) => v,
-					_ => {
-						bail!("Unexpected integer `{}`, expected a u32", v, @self.last_span());
-					}
-				}),
-				found => {
-					bail!("Unexpected token `{}` expected an integer", found, @self.last_span());
-				}
-			}
+			Some(self.next_token_value::<u32>()?)
 		} else {
 			None
 		};

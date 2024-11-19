@@ -146,7 +146,13 @@ impl Part {
 					if let Some((field, before, plan, after)) = plan {
 						let mut parts = parts.clone();
 						parts.remove(j);
-						return Some(RecursionPlan::Destructure(parts, field, before, plan, after));
+						return Some(RecursionPlan::Destructure {
+							parts,
+							field,
+							before,
+							plan,
+							after,
+						});
 					}
 				}
 
@@ -207,18 +213,18 @@ impl fmt::Display for Part {
 #[derive(Clone, Debug)]
 pub enum RecursionPlan {
 	Repeat,
-	Destructure(
+	Destructure {
 		// The destructure parts
-		Vec<DestructurePart>,
+		parts: Vec<DestructurePart>,
 		// Which field contains the repeat symbol
-		Ident,
+		field: Ident,
 		// Path before the repeat symbol
-		Vec<Part>,
+		before: Vec<Part>,
 		// The recursion plan
-		Box<RecursionPlan>,
+		plan: Box<RecursionPlan>,
 		// Path after the repeat symbol
-		Vec<Part>,
-	),
+		after: Vec<Part>,
+	},
 }
 
 impl<'a> RecursionPlan {
@@ -257,9 +263,15 @@ impl<'a> RecursionPlan {
 	) -> Result<Value, Error> {
 		match self {
 			Self::Repeat => compute_idiom_recursion(stk, ctx, opt, doc, rec).await,
-			Self::Destructure(destructure, field, before, local_plan, after) => {
+			Self::Destructure {
+				parts,
+				field,
+				before,
+				plan,
+				after,
+			} => {
 				let v = stk.run(|stk| rec.current.get(stk, ctx, opt, doc, before)).await?;
-				let v = local_plan.compute(stk, ctx, opt, doc, rec.with_current(&v)).await?;
+				let v = plan.compute(stk, ctx, opt, doc, rec.with_current(&v)).await?;
 				let v = stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await?;
 				let v = clean_iteration(v);
 
@@ -271,7 +283,7 @@ impl<'a> RecursionPlan {
 					return Ok(Value::None);
 				}
 
-				let path = &[Part::Destructure(destructure.to_owned())];
+				let path = &[Part::Destructure(parts.to_owned())];
 				match stk.run(|stk| rec.current.get(stk, ctx, opt, doc, path)).await? {
 					Value::Object(mut obj) => {
 						obj.insert(field.to_raw(), v);
