@@ -128,7 +128,7 @@ where
 	}
 
 	/// Whether to export all versions of data from the database
-	pub fn versioned(self, versioned: bool) -> Export<'r, C, R> {
+	pub fn with_versions(self, versioned: bool) -> Export<'r, C, R> {
 		let mut db_config = self.db_config.unwrap_or_default();
 		db_config.versions = versioned;
 
@@ -143,6 +143,17 @@ where
 	}
 
 	/// Whether to export tables or which ones from the database
+	///
+	/// We can pass a `bool` to export all tables or none at all:
+	/// ```
+	/// db.export().with_tables(true);
+	/// db.export().with_tables(false);
+	/// ```
+	///
+	/// Or we can pass a `Vec<String>` to specify a list of tables to export:
+	/// ```
+	/// db.export().with_tables(vec!["users".into()]);
+	/// ```
 	pub fn with_tables(self, tables: impl Into<TableConfig>) -> Export<'r, C, R> {
 		let mut db_config = self.db_config.unwrap_or_default();
 		db_config.tables = tables.into();
