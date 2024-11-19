@@ -17,7 +17,10 @@ impl Value {
 						Some(v) => v._each(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
-					Part::All => self._each(path.next(), prev.push(p.clone())),
+					Part::All => v
+						.iter()
+						.flat_map(|(field, v)| v._each(path.next(), prev.clone().push(Part::Field(field.to_owned().into()))))
+						.collect::<Vec<_>>(),
 					_ => vec![],
 				},
 				// Current path part is an array
