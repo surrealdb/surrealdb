@@ -89,7 +89,7 @@ async fn export_with_config() {
 
 	// Export, remove table, and import
 	let res = async {
-		db.export(&file).with_config().tables(vec!["user".to_string()]).await?;
+		db.export(&file).with_config().tables(vec!["user"]).await?;
 		db.query("REMOVE TABLE user; REMOVE TABLE group;").await?;
 		db.import(&file).await?;
 		Result::<(), Error>::Ok(())

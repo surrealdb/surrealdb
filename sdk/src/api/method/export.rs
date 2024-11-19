@@ -129,7 +129,7 @@ where
 	///
 	/// Or we can pass a `Vec<String>` to specify a list of tables to export:
 	/// ```
-	/// db.export().with_config().tables(vec!["users".into()]);
+	/// db.export().with_config().tables(vec!["users"]);
 	/// ```
 	pub fn tables(mut self, tables: impl Into<TableConfig>) -> Self {
 		if let Some(cfg) = self.db_config.as_mut() {

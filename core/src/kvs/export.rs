@@ -124,6 +124,12 @@ impl From<Vec<String>> for TableConfig {
 	}
 }
 
+impl From<Vec<&str>> for TableConfig {
+	fn from(value: Vec<&str>) -> Self {
+		TableConfig::Some(value.into_iter().map(ToOwned::to_owned).collect())
+	}
+}
+
 impl TryFrom<&Value> for TableConfig {
 	type Error = Error;
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
