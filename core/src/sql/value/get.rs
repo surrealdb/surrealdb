@@ -126,6 +126,10 @@ impl Value {
 						let obj = Value::Object(v.as_object());
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path)).await
 					}
+					Part::All => {
+						let obj = Value::Object(v.as_object());
+						stk.run(|stk| obj.get(stk, ctx, opt, doc, path)).await
+					}
 					Part::Method(name, args) => {
 						let v = stk
 							.run(|stk| {
