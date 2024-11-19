@@ -88,7 +88,7 @@ geo-types = { version = "0.7.13", features = ["arbitrary"] }
 hex = { version = "0.4.3" }
 indxdb = { version = "0.5.0", optional = true }
 ipnet = "2.9.0"
-js = { version = "0.6.2", package = "rquickjs", features = [
+js = { version = "0.8.0", package = "rquickjs", features = [
     "array-buffer",
     "bindgen",
     "classes",

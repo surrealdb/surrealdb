@@ -1280,19 +1280,19 @@ version = "0.22.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs]]
-version = "0.6.2"
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-core]]
-version = "0.6.2"
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-macro]]
-version = "0.6.2"
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-sys]]
-version = "0.6.2"
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rstar]]
