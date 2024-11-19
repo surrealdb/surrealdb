@@ -208,7 +208,15 @@ pub async fn db_access(
 									}
 								}
 								Err(e) => match e {
+									// If the SIGNIN clause throws a specific error, authentication fails with that error
 									Error::Thrown(_) => Err(e),
+									// If the SIGNIN clause failed due to an unexpected error, be more specific
+									// This allows clients to handle these errors, which may be retryable
+									Error::Tx(_) | Error::TxFailure => {
+										debug!("Unexpected error found while executing a SIGNIN clause: {e}");
+										Err(Error::UnexpectedAuth)
+									}
+									// Otherwise, return a generic error unless it should be forwarded
 									e => {
 										debug!("Record user signin query failed: {e}");
 										if *INSECURE_FORWARD_ACCESS_ERRORS {
@@ -949,6 +957,86 @@ mod tests {
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
+
+		// Test SIGNIN failing due to datastore transaction conflict
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN {
+					    UPSERT count:1 SET count += 1; -- Concurrently write to the same document
+					    SLEEP(2s); -- Increase the duration of the transaction
+						RETURN (SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass))
+					}
+					SIGNUP (
+						CREATE user CONTENT {
+							name: $user,
+							pass: crypto::argon2::generate($pass)
+						}
+					)
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:test CONTENT {
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Sign in with the user twice at the same time
+			let mut sess1 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut sess2 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("user", "user".into());
+			vars.insert("pass", "pass".into());
+
+			let (res1, res2) = tokio::join!(
+				db_access(
+					&ds,
+					&mut sess1,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.clone().into(),
+				),
+				db_access(
+					&ds,
+					&mut sess2,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.into(),
+				)
+			);
+
+			match (res1, res2) {
+				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
+				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
+				(Err(e1), Ok(_)) => match &e1 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
+				(Ok(_), Err(e2)) => match &e2 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
+			}
+		}
 	}
 
 	#[tokio::test]
@@ -1586,6 +1674,78 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected authentication to generally fail, but instead received: {:?}",
 					res
 				),
+			}
+		}
+		// Test AUTHENTICATE failing due to datastore transaction conflict
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+					   SELECT * FROM type::thing('user', $id)
+					)
+					AUTHENTICATE {
+					   UPSERT count:1 SET count += 1; -- Concurrently write to the same document
+					   SLEEP(2s); -- Increase the duration of the transaction
+					   $auth.id -- Continue with authentication
+					}
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:1;
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Sign in with the user twice at the same time
+			let mut sess1 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut sess2 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("id", 1.into());
+
+			let (res1, res2) = tokio::join!(
+				db_access(
+					&ds,
+					&mut sess1,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.clone().into(),
+				),
+				db_access(
+					&ds,
+					&mut sess2,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.into(),
+				)
+			);
+
+			match (res1, res2) {
+				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
+				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
+				(Err(e1), Ok(_)) => match &e1 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
+				(Ok(_), Err(e2)) => match &e2 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
 			}
 		}
 	}
