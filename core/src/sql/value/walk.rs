@@ -23,7 +23,12 @@ impl Value {
 					},
 					Part::All => v
 						.iter()
-						.flat_map(|(field, v)| v._walk(path.next(), prev.clone().push(Part::Field(field.to_owned().into()))))
+						.flat_map(|(field, v)| {
+							v._walk(
+								path.next(),
+								prev.clone().push(Part::Field(field.to_owned().into())),
+							)
+						})
 						.collect::<Vec<_>>(),
 					_ => vec![],
 				},

@@ -213,9 +213,10 @@ impl Value {
 						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
 					Part::All => {
-						let v: Value = v.values().map(|v| v.to_owned()).collect::<Vec<Value>>().into();
+						let v: Value =
+							v.values().map(|v| v.to_owned()).collect::<Vec<Value>>().into();
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-					},
+					}
 					Part::Destructure(p) => {
 						let mut obj = BTreeMap::<String, Value>::new();
 						for p in p.iter() {

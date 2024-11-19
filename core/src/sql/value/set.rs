@@ -185,21 +185,23 @@ impl Value {
 					match place {
 						Value::Array(v) => {
 							stk.scope(|scope| {
-								let futs = v.iter_mut()
-									.map(|v| scope.run(|stk| v.set(stk, ctx, opt, path, val.clone())));
+								let futs = v.iter_mut().map(|v| {
+									scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
+								});
 								try_join_all_buffered(futs)
 							})
 							.await?;
-						},
+						}
 						Value::Object(v) => {
 							stk.scope(|scope| {
-								let futs = v.iter_mut()
-									.map(|(_, v)| scope.run(|stk| v.set(stk, ctx, opt, path, val.clone())));
+								let futs = v.iter_mut().map(|(_, v)| {
+									scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
+								});
 								try_join_all_buffered(futs)
 							})
 							.await?;
-						},
-						_ => ()
+						}
+						_ => (),
 					};
 
 					return Ok(());
