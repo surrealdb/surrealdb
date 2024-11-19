@@ -1178,6 +1178,38 @@ pub enum Error {
 
 	#[error("Encountered an issue while processed export config: found {0}, but expected {1}.")]
 	InvalidExportConfig(Value, String),
+
+	/// Found an unexpected value in a range
+	#[error("Found {found} for bound but expected {expected}.")]
+	InvalidBound {
+		found: String,
+		expected: String,
+	},
+
+	/// Found an unexpected value in a range
+	#[error("Exceeded the idiom recursion limit of {limit}.")]
+	IdiomRecursionLimitExceeded {
+		limit: u32,
+	},
+
+	/// Found an unexpected value in a range
+	#[error("Tried to use a `@` repeat recurse symbol, while not recursing.")]
+	RepeatRecurseNotRecursing,
+
+	/// Found an unexpected value in a range
+	#[error("Tried to use a `{symbol}` recursion symbol, while already recursing.")]
+	IdiomRecursionAlreadyRecursing {
+		symbol: String,
+	},
+
+	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
+	#[error("Tried to use a `@` repeat recurse symbol in a position where it is not supported")]
+	UnsupportedRepeatRecurse,
+
+	#[error("Error while computing version: expected a datetime, but found {found}")]
+	InvalidVersion {
+		found: Value,
+	},
 }
 
 impl From<Error> for String {

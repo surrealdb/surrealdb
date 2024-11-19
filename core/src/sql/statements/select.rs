@@ -109,7 +109,10 @@ impl SelectStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
-		let version = self.version.as_ref().map(|v| v.to_u64());
+		let version = match &self.version {
+			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
+			_ => None,
+		};
 		let opt = Arc::new(opt.new_with_futures(false).with_version(version));
 		// Extract the limit
 		let limit = i.setup_limit(stk, ctx, &opt, &stm).await?;
