@@ -137,6 +137,14 @@ where
 		}
 		self
 	}
+
+	/// Whether to export records from the database
+	pub fn records(mut self, records: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.records = records;
+		}
+		self
+	}
 }
 
 impl<C, R, T> Export<'_, C, R, T>
