@@ -57,7 +57,7 @@ impl CreateStatement {
 			_ => None,
 		};
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_computed_version(version)?;
+		let opt = &opt.new_with_futures(false).with_version(version);
 		// Check if there is a timeout
 		let ctx = match self.timeout.as_ref() {
 			Some(timeout) => {

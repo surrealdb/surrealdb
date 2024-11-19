@@ -1179,9 +1179,7 @@ pub enum Error {
 	#[error("Encountered an issue while processed export config: found {0}, but expected {1}.")]
 	InvalidExportConfig(Value, String),
 
-	#[error(
-		"Error while computing version: expected a datetime or a datetime-range, but found {found}"
-	)]
+	#[error("Error while computing version: expected a datetime, but found {found}")]
 	InvalidVersion {
 		found: Value,
 	},

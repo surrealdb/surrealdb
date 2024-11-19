@@ -2,7 +2,6 @@ use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::iam::{Action, Auth, ResourceKind, Role};
-use crate::sql::version::ComputedVersion;
 use crate::sql::{
 	statements::define::DefineIndexStatement, statements::define::DefineTableStatement, Base,
 };
@@ -242,15 +241,9 @@ impl Options {
 	}
 
 	// Set the version
-	pub fn with_computed_version(
-		mut self,
-		version: Option<ComputedVersion>,
-	) -> Result<Self, Error> {
-		self.version = match version {
-			Some(v) => Some(v.try_into()?),
-			None => None,
-		};
-		Ok(self)
+	pub fn with_version(mut self, version: Option<u64>) -> Self {
+		self.version = version;
+		self
 	}
 
 	// --------------------------------------------------

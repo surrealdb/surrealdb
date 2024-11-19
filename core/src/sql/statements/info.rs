@@ -141,7 +141,7 @@ impl InfoStatement {
 				let db = opt.db()?;
 				// Convert the version to u64 if present
 				let version = match version {
-					Some(v) => Some(v.compute(stk, ctx, opt, None).await?.try_into()?),
+					Some(v) => Some(v.compute(stk, ctx, opt, None).await?),
 					_ => None,
 				};
 				// Get the transaction
@@ -226,7 +226,7 @@ impl InfoStatement {
 				let db = opt.db()?;
 				// Convert the version to u64 if present
 				let version = match version {
-					Some(v) => Some(v.compute(stk, ctx, opt, None).await?.try_into()?),
+					Some(v) => Some(v.compute(stk, ctx, opt, None).await?),
 					_ => None,
 				};
 				// Get the transaction

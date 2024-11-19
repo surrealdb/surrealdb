@@ -1,4 +1,4 @@
-use super::{Datetime, Id};
+use super::Id;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -6,7 +6,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Number, Subquery, Value};
 use crate::syn;
-use chrono::Duration;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -139,24 +138,6 @@ impl From<(Bound<Id>, Bound<Id>)> for Range {
 	}
 }
 
-impl From<(Value, Value)> for Range {
-	fn from(v: (Value, Value)) -> Self {
-		Self {
-			beg: Bound::Included(v.0),
-			end: Bound::Excluded(v.1),
-		}
-	}
-}
-
-impl From<(Bound<Value>, Bound<Value>)> for Range {
-	fn from(v: (Bound<Value>, Bound<Value>)) -> Self {
-		Self {
-			beg: v.0,
-			end: v.1,
-		}
-	}
-}
-
 impl TryInto<std::ops::Range<i64>> for Range {
 	type Error = Error;
 	fn try_into(self) -> Result<std::ops::Range<i64>, Self::Error> {
@@ -179,25 +160,6 @@ impl TryInto<std::ops::Range<i64>> for Range {
 		} else {
 			Ok(beg..end)
 		}
-	}
-}
-
-impl TryInto<std::ops::Range<Datetime>> for Range {
-	type Error = Error;
-	fn try_into(self) -> Result<std::ops::Range<Datetime>, Self::Error> {
-		let beg = match self.beg {
-			Bound::Unbounded => Datetime::MIN_UTC,
-			Bound::Included(beg) => to_datetime(beg)?,
-			Bound::Excluded(beg) => Datetime::from(to_datetime(beg)?.0 + Duration::nanoseconds(1)),
-		};
-
-		let end = match self.end {
-			Bound::Unbounded => Datetime::MAX_UTC,
-			Bound::Included(end) => Datetime::from(to_datetime(end)?.0 + Duration::nanoseconds(1)),
-			Bound::Excluded(end) => to_datetime(end)?,
-		};
-
-		Ok(beg..end)
 	}
 }
 
@@ -336,16 +298,6 @@ fn to_i64(v: Value) -> Result<i64, Error> {
 		Value::Number(Number::Int(v)) => Ok(v),
 		v => Err(Error::InvalidRangeValue {
 			expected: "int".to_string(),
-			found: v.kindof().to_string(),
-		}),
-	}
-}
-
-fn to_datetime(v: Value) -> Result<Datetime, Error> {
-	match v {
-		Value::Datetime(v) => Ok(v),
-		v => Err(Error::InvalidRangeValue {
-			expected: "datetime".to_string(),
 			found: v.kindof().to_string(),
 		}),
 	}

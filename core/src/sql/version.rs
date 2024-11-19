@@ -2,7 +2,7 @@ use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::datetim
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::{fmt, ops::Range};
+use std::fmt;
 
 use super::Value;
 
@@ -14,16 +14,6 @@ pub struct Version(
 	#[revision(end = 2, convert_fn = "convert_version_datetime")] pub Datetime,
 	#[revision(start = 2)] pub Value,
 );
-
-// Hidden for the moment as we may want to move
-// this to a different location once we start to
-// utilize the range entry
-#[doc(hidden)]
-#[derive(Clone, Debug)]
-pub enum ComputedVersion {
-	Fixed(u64),
-	Range(Range<u64>),
-}
 
 impl Version {
 	fn convert_version_datetime(
@@ -41,32 +31,12 @@ impl Version {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<ComputedVersion, Error> {
+	) -> Result<u64, Error> {
 		match self.0.compute(stk, ctx, opt, doc).await? {
-			Value::Datetime(v) => Ok(ComputedVersion::Fixed(v.to_u64())),
-			Value::Range(r) => {
-				let r: Range<Datetime> = (*r).try_into()?;
-				Ok(ComputedVersion::Range(r.start.to_u64()..r.end.to_u64()))
-			}
+			Value::Datetime(v) => Ok(v.to_u64()),
 			found => Err(Error::InvalidVersion {
 				found,
 			}),
-		}
-	}
-}
-
-impl TryInto<u64> for ComputedVersion {
-	type Error = Error;
-	fn try_into(self) -> Result<u64, Self::Error> {
-		match self {
-			Self::Fixed(v) => Ok(v),
-			Self::Range(v) => {
-				let found =
-					Value::Range(Box::new((Value::from(v.start), Value::from(v.end)).into()));
-				Err(Error::InvalidVersion {
-					found,
-				})
-			}
 		}
 	}
 }
