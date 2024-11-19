@@ -476,10 +476,18 @@ impl Value {
 								};
 								let v =
 									stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
+
+								// .* on a record id means fetch the record's contents
+								// The above select statement results in an object, if
+								// we apply `.*` on that, we can an array with the record's
+								// values instead of just the content. Therefore, if we
+								// encounter the first part to be `.*`, we simply skip it here
 								let next = match path.first() {
 									Some(Part::All) => path.next(),
-									_ => path
+									_ => path,
 								};
+
+								// Continue processing the path on the now fetched record
 								stk.run(|stk| v.get(stk, ctx, opt, None, next)).await
 							}
 						},
