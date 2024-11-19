@@ -469,28 +469,23 @@ pub enum Recurse {
 	Range(Option<u32>, Option<u32>),
 }
 
-impl<'a> TryInto<(&'a u32, Option<&'a u32>)> for &'a Recurse {
+impl TryInto<(u32, Option<u32>)> for Recurse {
 	type Error = Error;
-	fn try_into(self) -> Result<(&'a u32, Option<&'a u32>), Error> {
+	fn try_into(self) -> Result<(u32, Option<u32>), Error> {
 		let v = match self {
 			Recurse::Fixed(v) => (v, Some(v)),
 			Recurse::Range(min, max) => {
-				let min = if let Some(min) = min {
-					min
-				} else {
-					&1
-				};
-
-				(min, max.as_ref())
+				let min = min.unwrap_or(1);
+				(min, max)
 			}
 		};
 
 		match v {
-			(min, _) if min < &1 => Err(Error::InvalidBound {
+			(min, _) if min < 1 => Err(Error::InvalidBound {
 				found: min.to_string(),
 				expected: "at least 1".into(),
 			}),
-			(_, Some(max)) if max > &(*IDIOM_RECURSION_LIMIT as u32) => Err(Error::InvalidBound {
+			(_, Some(max)) if max > (*IDIOM_RECURSION_LIMIT as u32) => Err(Error::InvalidBound {
 				found: max.to_string(),
 				expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
 			}),

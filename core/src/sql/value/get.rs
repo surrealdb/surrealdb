@@ -65,12 +65,12 @@ impl Value {
 				};
 
 				// Collect the min & max for the recursion context
-				let (min, max) = recurse.try_into()?;
+				let (min, max) = recurse.to_owned().try_into()?;
 				// Construct the recursion context
 				let rec = Recursion {
 					min,
 					max,
-					iterated: &0,
+					iterated: 0,
 					current: self,
 					path,
 					plan: plan.as_ref(),

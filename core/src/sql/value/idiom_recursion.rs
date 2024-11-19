@@ -12,16 +12,16 @@ use reblessive::tree::Stk;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Recursion<'a> {
-	pub min: &'a u32,
-	pub max: Option<&'a u32>,
-	pub iterated: &'a u32,
+	pub min: u32,
+	pub max: Option<u32>,
+	pub iterated: u32,
 	pub current: &'a Value,
 	pub path: &'a [Part],
 	pub plan: Option<&'a RecursionPlan>,
 }
 
 impl<'a> Recursion<'a> {
-	pub fn with_iterated(self, iterated: &'a u32) -> Self {
+	pub fn with_iterated(self, iterated: u32) -> Self {
 		Self {
 			iterated,
 			..self
@@ -87,7 +87,7 @@ pub(crate) async fn compute_idiom_recursion<'a>(
 		// If we have reached the maximum amount of iterations,
 		// we can return the current value and break the loop.
 		if let Some(max) = rec.max {
-			if &i >= max {
+			if i >= max {
 				return Ok(current);
 			}
 		} else if i >= limit {
@@ -105,9 +105,7 @@ pub(crate) async fn compute_idiom_recursion<'a>(
 		let v = stk.run(|stk| current.get(stk, ctx, opt, doc, rec.path)).await?;
 		let v = match rec.plan {
 			// We found a recursion plan, let's apply it
-			Some(p) => {
-				p.compute(stk, ctx, opt, doc, rec.with_iterated(&i).with_current(&v)).await?
-			}
+			Some(p) => p.compute(stk, ctx, opt, doc, rec.with_iterated(i).with_current(&v)).await?,
 			_ => v,
 		};
 
@@ -118,7 +116,7 @@ pub(crate) async fn compute_idiom_recursion<'a>(
 		match v {
 			// We reached a final value
 			v if is_final(&v) || v == current => {
-				return Ok(match &i <= rec.min {
+				return Ok(match i <= rec.min {
 					// If we have not yet reached the minimum amount of
 					// required iterations it's a dead end, and we return NONE
 					true => get_final(&v),
@@ -138,7 +136,7 @@ pub(crate) async fn compute_idiom_recursion<'a>(
 		// If we have reached the maximum amount of iterations,
 		// we can return the current value and break the loop.
 		if let Some(max) = rec.max {
-			if &i >= max {
+			if i >= max {
 				return Ok(current);
 			}
 		} else if i >= limit {
