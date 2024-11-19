@@ -212,7 +212,10 @@ pub async fn db_access(
 									Error::Thrown(_) => Err(e),
 									// If the SIGNIN clause failed due to an unexpected error, be more specific
 									// This allows clients to handle these errors, which may be retryable
-									Error::Tx(_) | Error::TxFailure => Err(Error::UnexpectedAuth),
+									Error::Tx(_) | Error::TxFailure => {
+										debug!("Unexpected error found while executing a SIGNIN clause: {e}");
+										Err(Error::UnexpectedAuth)
+									}
 									// Otherwise, return a generic error unless it should be forwarded
 									e => {
 										debug!("Record user signin query failed: {e}");

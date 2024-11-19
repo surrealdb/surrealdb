@@ -1,3 +1,4 @@
+use super::verify::authenticate_record;
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
@@ -106,33 +107,7 @@ pub async fn db_access(
 												sess.tk = Some((&claims).into());
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
-												// Compute the value with the params
-												match kvs.evaluate(au, &sess, None).await {
-													Ok(val) => match val.record() {
-														Some(id) => {
-															// Update rid with result from AUTHENTICATE clause
-															rid = id;
-														}
-														_ => {
-															debug!("Authentication attempt as record user rejected by AUTHENTICATE clause");
-															return Err(Error::InvalidAuth);
-														}
-													},
-													Err(e) => return match e {
-														// If the SIGNUP clause throws a specific error, authentication fails with that error
-														Error::Thrown(_) => Err(e),
-														// If the SIGNUP clause failed due to an unexpected error, be more specific
-														// This allows clients to handle these errors, which may be retryable
-														Error::Tx(_) | Error::TxFailure => {
-															Err(Error::UnexpectedAuth)
-														}
-														// Otherwise, return a generic error unless it should be forwarded
-														e if *INSECURE_FORWARD_ACCESS_ERRORS => {
-															Err(e)
-														}
-														_ => Err(Error::InvalidAuth),
-													},
-												}
+												rid = authenticate_record(kvs, &sess, au).await?;
 											}
 											// Log the authenticated access method info
 											trace!("Signing up with access method `{}`", ac);
@@ -162,7 +137,15 @@ pub async fn db_access(
 									}
 								}
 								Err(e) => match e {
+									// If the SIGNUP clause throws a specific error, authentication fails with that error
 									Error::Thrown(_) => Err(e),
+									// If the SIGNUP clause failed due to an unexpected error, be more specific
+									// This allows clients to handle these errors, which may be retryable
+									Error::Tx(_) | Error::TxFailure => {
+										debug!("Unexpected error found while executing a SIGNUP clause: {e}");
+										Err(Error::UnexpectedAuth)
+									}
+									// Otherwise, return a generic error unless it should be forwarded
 									e => {
 										debug!("Record user signup query failed: {e}");
 										if *INSECURE_FORWARD_ACCESS_ERRORS {
