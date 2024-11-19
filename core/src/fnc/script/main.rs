@@ -34,7 +34,8 @@ pub unsafe fn create_query_data<'a>(
 		context,
 		opt,
 		doc,
-	});
+	})
+	.expect("userdata shouldn't be in use");
 
 	Ok(())
 }
