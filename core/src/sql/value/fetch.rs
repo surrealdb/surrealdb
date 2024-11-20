@@ -155,8 +155,22 @@ impl Value {
 					_ => return Ok(()),
 				},
 				Part::All => match this {
-					Value::Object(_) => {
-						continue;
+					Value::Object(x) => {
+						let next_path = iter.as_slice();
+						// no need to spawn all those futures if their is no more paths to
+						// calculate
+						if next_path.is_empty() {
+							break;
+						}
+
+						stk.scope(|scope| {
+							let futs = x
+								.iter_mut()
+								.map(|(_, v)| scope.run(|stk| v.fetch(stk, ctx, opt, next_path)));
+							try_join_all(futs)
+						})
+						.await?;
+						return Ok(());
 					}
 					Value::Array(x) => {
 						let next_path = iter.as_slice();

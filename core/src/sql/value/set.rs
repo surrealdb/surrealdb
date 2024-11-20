@@ -181,18 +181,29 @@ impl Value {
 					place = x
 				}
 				Part::All => {
-					let Value::Array(arr) = place else {
-						return Ok(());
+					let path = iter.as_slice();
+					match place {
+						Value::Array(v) => {
+							stk.scope(|scope| {
+								let futs = v.iter_mut().map(|v| {
+									scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
+								});
+								try_join_all_buffered(futs)
+							})
+							.await?;
+						}
+						Value::Object(v) => {
+							stk.scope(|scope| {
+								let futs = v.iter_mut().map(|(_, v)| {
+									scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
+								});
+								try_join_all_buffered(futs)
+							})
+							.await?;
+						}
+						_ => (),
 					};
 
-					let path = iter.as_slice();
-					stk.scope(|scope| {
-						let futs = arr
-							.iter_mut()
-							.map(|v| scope.run(|stk| v.set(stk, ctx, opt, path, val.clone())));
-						try_join_all_buffered(futs)
-					})
-					.await?;
 					return Ok(());
 				}
 				Part::Where(w) => {

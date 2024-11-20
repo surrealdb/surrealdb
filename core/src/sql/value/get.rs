@@ -212,7 +212,11 @@ impl Value {
 						},
 						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
-					Part::All => stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await,
+					Part::All => {
+						let v: Value =
+							v.values().map(|v| v.to_owned()).collect::<Vec<Value>>().into();
+						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+					}
 					Part::Destructure(p) => {
 						let mut obj = BTreeMap::<String, Value>::new();
 						for p in p.iter() {
@@ -468,7 +472,19 @@ impl Value {
 								};
 								let v =
 									stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
-								stk.run(|stk| v.get(stk, ctx, opt, None, path)).await
+
+								// .* on a record id means fetch the record's contents
+								// The above select statement results in an object, if
+								// we apply `.*` on that, we can an array with the record's
+								// values instead of just the content. Therefore, if we
+								// encounter the first part to be `.*`, we simply skip it here
+								let next = match path.first() {
+									Some(Part::All) => path.next(),
+									_ => path,
+								};
+
+								// Continue processing the path on the now fetched record
+								stk.run(|stk| v.get(stk, ctx, opt, None, next)).await
 							}
 						},
 					}

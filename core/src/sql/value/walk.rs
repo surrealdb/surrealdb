@@ -21,7 +21,15 @@ impl Value {
 						Some(v) => v._walk(path.next(), prev.push(p.clone())),
 						None => Value::None._walk(path.next(), prev.push(p.clone())),
 					},
-					Part::All => self._walk(path.next(), prev.push(p.clone())),
+					Part::All => v
+						.iter()
+						.flat_map(|(field, v)| {
+							v._walk(
+								path.next(),
+								prev.clone().push(Part::Field(field.to_owned().into())),
+							)
+						})
+						.collect::<Vec<_>>(),
 					_ => vec![],
 				},
 				// Current path part is an array

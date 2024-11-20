@@ -18,7 +18,9 @@ impl Value {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					Part::All => self.pick(path.next()),
+					Part::All => {
+						v.iter().map(|(_, v)| v.pick(path.next())).collect::<Vec<_>>().into()
+					}
 					_ => Value::None,
 				},
 				// Current value at path is an array
