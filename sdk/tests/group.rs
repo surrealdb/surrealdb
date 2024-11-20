@@ -984,12 +984,17 @@ async fn select_count_range_keys_only() -> Result<(), Error> {
 	Ok(())
 }
 
-async fn select_count_range_keys_only_permissions(perms: &str, expect: &str) -> Result<(), Error> {
-	// Define the permissions
+async fn select_count_range_keys_only_permissions(
+	perms: &str,
+	expect_group_all: &str,
+	expect_count: &str,
+) -> Result<(), Error> {
+	// Define the permissions and create some records
 	let sql = format!(
 		r"
 			DEFINE TABLE table PERMISSIONS {perms};
-			CREATE table:baz CONTENT {{ bar: 'hello', foo: 'world'}};
+			CREATE table:me CONTENT {{ bar: 'hello', foo: 'world'}};
+			CREATE table:you CONTENT {{ bar: 'don\'t', foo: 'show up'}};
 		"
 	);
 	let mut t = Test::new(&sql).await?;
@@ -1003,7 +1008,7 @@ async fn select_count_range_keys_only_permissions(perms: &str, expect: &str) -> 
 		";
 	let mut t = Test::new_ds_session(
 		t.ds,
-		Session::for_record("test", "test", "test", Thing::from(("table", "baz")).into()),
+		Session::for_record("test", "test", "test", Thing::from(("table", "me")).into()),
 		sql,
 	)
 	.await?;
@@ -1032,7 +1037,7 @@ async fn select_count_range_keys_only_permissions(perms: &str, expect: &str) -> 
 			]",
 	)?;
 	// Check what is returned
-	t.expect_val(expect)?;
+	t.expect_val_info(expect_group_all, "GROUP ALL")?;
 	// The explain plan is still accessible
 	t.expect_val(
 		r#"[
@@ -1052,21 +1057,36 @@ async fn select_count_range_keys_only_permissions(perms: &str, expect: &str) -> 
 				]"#,
 	)?;
 	// Check what is returned
-	t.expect_val(expect)?;
+	t.expect_val_info(expect_count, "COUNT")?;
 	Ok(())
 }
 
 #[tokio::test]
 async fn select_count_range_keys_only_permissions_select_none() -> Result<(), Error> {
-	select_count_range_keys_only_permissions("FOR SELECT NONE", "[]").await
+	select_count_range_keys_only_permissions("FOR SELECT NONE", "[]", "[]").await
 }
 
 #[tokio::test]
 async fn select_count_range_keys_only_permissions_select_full() -> Result<(), Error> {
-	select_count_range_keys_only_permissions("FOR SELECT FULL", "[{ count: 1 }]").await
+	select_count_range_keys_only_permissions(
+		"FOR SELECT FULL",
+		"[{ count: 2 }]",
+		"[{ count: 1 }, { count: 1 }]",
+	)
+	.await
 }
 
 #[tokio::test]
 async fn select_count_range_keys_only_permissions_select_where_false() -> Result<(), Error> {
-	select_count_range_keys_only_permissions("FOR SELECT WHERE FALSE", "[]").await
+	select_count_range_keys_only_permissions("FOR SELECT WHERE FALSE", "[]", "[]").await
+}
+
+#[tokio::test]
+async fn select_count_range_keys_only_permissions_select_where_match() -> Result<(), Error> {
+	select_count_range_keys_only_permissions(
+		"FOR SELECT WHERE bar = 'hello'",
+		"[{ count: 1 }]",
+		"[{ count: 1 }]",
+	)
+	.await
 }
