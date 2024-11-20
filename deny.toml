@@ -85,8 +85,8 @@ allow = [
 	"Apache-2.0",
 	"BSD-2-Clause",
 	"BSD-3-Clause",
-	"BSD-2-Clause",
 	"Unlicense",
+    "Unicode-3.0",
 ]
 # The confidence threshold for detecting a license from license text.
 confidence-threshold = 0.95

@@ -6,6 +6,7 @@ use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
 use std::io::Read;
 use std::path::PathBuf;
+use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::sql::{Array as CoreArray, Object as CoreObject, Query, Value as CoreValue};
 use uuid::Uuid;
 
@@ -70,6 +71,7 @@ pub(crate) enum Command {
 	},
 	ExportFile {
 		path: PathBuf,
+		config: Option<DbExportConfig>,
 	},
 	ExportMl {
 		path: PathBuf,
@@ -77,6 +79,7 @@ pub(crate) enum Command {
 	},
 	ExportBytes {
 		bytes: Sender<Result<Vec<u8>>>,
+		config: Option<DbExportConfig>,
 	},
 	ExportBytesMl {
 		bytes: Sender<Result<Vec<u8>>>,

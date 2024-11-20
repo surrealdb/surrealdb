@@ -14,6 +14,8 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 
+const TARGET: &str = "surrealdb::core::kvs::rocksdb";
+
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct Datastore {
@@ -89,39 +91,53 @@ impl Datastore {
 		let mut opts = Options::default();
 		// Ensure we use fdatasync
 		opts.set_use_fsync(false);
-		// Only use warning log level
-		opts.set_log_level(LogLevel::Warn);
 		// Create database if missing
 		opts.create_if_missing(true);
 		// Create column families if missing
 		opts.create_missing_column_families(true);
-		// Set the number of log files to keep
-		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		// Increase the background thread count
+		debug!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
 		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
 		// Specify the max concurrent background jobs
+		debug!(target: TARGET, "Maximum background jobs count: {}", *cnf::ROCKSDB_JOBS_COUNT);
 		opts.set_max_background_jobs(*cnf::ROCKSDB_JOBS_COUNT);
-		// Set the amount of data to build up in memory
-		opts.set_write_buffer_size(*cnf::ROCKSDB_WRITE_BUFFER_SIZE);
 		// Set the maximum number of write buffers
+		debug!(target: TARGET, "Maximum write buffers: {}", *cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
 		opts.set_max_write_buffer_number(*cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
-		// Set minimum number of write buffers to merge
-		opts.set_min_write_buffer_number_to_merge(*cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
+		// Set the number of log files to keep
+		debug!(target: TARGET, "Number of log files to keep: {}", *cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
+		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
+		// Set the amount of data to build up in memory
+		debug!(target: TARGET, "Write buffer size: {}", *cnf::ROCKSDB_WRITE_BUFFER_SIZE);
+		opts.set_write_buffer_size(*cnf::ROCKSDB_WRITE_BUFFER_SIZE);
 		// Set the target file size for compaction
+		debug!(target: TARGET, "Target file size for compaction: {}", *cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		opts.set_target_file_size_base(*cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
+		// Set minimum number of write buffers to merge
+		debug!(target: TARGET, "Minimum write buffers to merge: {}", *cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
+		opts.set_min_write_buffer_number_to_merge(*cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
 		// Use separate write thread queues
+		debug!(target: TARGET, "Use separate thread queues: {}", *cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		opts.set_enable_pipelined_write(*cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		// Enable separation of keys and values
+		debug!(target: TARGET, "Enable separation of keys and values: {}", *cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		opts.set_enable_blob_files(*cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		// Store 4KB values separate from keys
+		debug!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
 		// Set the delete compaction factory
+		debug!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
+			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
+			*cnf::ROCKSDB_DELETION_FACTORY_DELETE_COUNT,
+			*cnf::ROCKSDB_DELETION_FACTORY_RATIO,
+		);
 		opts.add_compact_on_deletion_collector_factory(
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
 			*cnf::ROCKSDB_DELETION_FACTORY_DELETE_COUNT,
 			*cnf::ROCKSDB_DELETION_FACTORY_RATIO,
 		);
 		// Set the datastore compaction style
+		debug!(target: TARGET, "Setting compaction style: {}", *cnf::ROCKSDB_COMPACTION_STYLE);
 		opts.set_compaction_style(
 			match cnf::ROCKSDB_COMPACTION_STYLE.to_ascii_lowercase().as_str() {
 				"universal" => DBCompactionStyle::Universal,
@@ -129,6 +145,7 @@ impl Datastore {
 			},
 		);
 		// Set specific compression levels
+		debug!(target: TARGET, "Setting compression level");
 		opts.set_compression_per_level(&[
 			DBCompressionType::None,
 			DBCompressionType::None,
@@ -136,6 +153,18 @@ impl Datastore {
 			DBCompressionType::Lz4hc,
 			DBCompressionType::Lz4hc,
 		]);
+		// Set specific storage log level
+		debug!(target: TARGET, "Setting storage engine log level: {}", *cnf::ROCKSDB_STORAGE_LOG_LEVEL);
+		opts.set_log_level(match cnf::ROCKSDB_STORAGE_LOG_LEVEL.to_ascii_lowercase().as_str() {
+			"debug" => LogLevel::Debug,
+			"info" => LogLevel::Info,
+			"warn" => LogLevel::Warn,
+			"error" => LogLevel::Error,
+			"fatal" => LogLevel::Fatal,
+			l => {
+				return Err(Error::Ds(format!("Invalid storage engine log level specified: {l}")));
+			}
+		});
 		// Create the datastore
 		Ok(Datastore {
 			db: Arc::pin(OptimisticTransactionDB::open(&opts, path)?),

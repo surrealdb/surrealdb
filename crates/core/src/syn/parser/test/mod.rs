@@ -3,6 +3,8 @@ use crate::{
 	syn::parser::mac::test_parse,
 };
 
+use super::Parser;
+
 mod json;
 mod limit;
 mod stmt;
@@ -138,4 +140,14 @@ fn micro_second_duration() {
 		4us
 	"#;
 	test_parse!(parse_query, src).unwrap();
+}
+
+#[test]
+fn test_non_valid_utf8() {
+	let mut src = "SELECT * FROM foo;".as_bytes().to_vec();
+	src.push(0xff);
+
+	let mut parser = Parser::new(&src);
+	let mut stack = reblessive::Stack::new();
+	stack.enter(|ctx| parser.parse_query(ctx)).finish().unwrap_err();
 }

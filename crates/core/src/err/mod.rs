@@ -861,8 +861,16 @@ pub enum Error {
 	InvalidPass,
 
 	/// There was an error with authentication
+	///
+	/// This error hides different kinds of errors directly related to authentication
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
+
+	/// There was an unexpected error while performing authentication
+	///
+	/// This error hides different kinds of unexpected errors that may affect authentication
+	#[error("There was an unexpected error while performing authentication")]
+	UnexpectedAuth,
 
 	/// There was an error with signing up
 	#[error("There was a problem with signing up")]
@@ -1166,15 +1174,58 @@ pub enum Error {
 
 	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
 	QueryTooLarge,
+
 	/// Represents a failure in timestamp arithmetic related to database internals
-	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
+	#[error("Failed to compute: \"{0}\", as the operation results in an arithmetic overflow.")]
 	ArithmeticOverflow(String),
+
+	/// Represents a negative value for a type that must be zero or positive
+	#[error("Failed to compute: \"{0}\", as the operation results in a negative value.")]
+	ArithmeticNegativeOverflow(String),
+
+	#[error("Failed to allocate space for \"{0}\"")]
+	InsufficientReserve(String),
 
 	#[error("Received error while streaming query: {0}.")]
 	QueryStream(String),
 
 	#[error("Error while ordering a result: {0}.")]
 	OrderingError(String),
+
+	#[error("Encountered an issue while processed export config: found {0}, but expected {1}.")]
+	InvalidExportConfig(Value, String),
+
+	/// Found an unexpected value in a range
+	#[error("Found {found} for bound but expected {expected}.")]
+	InvalidBound {
+		found: String,
+		expected: String,
+	},
+
+	/// Found an unexpected value in a range
+	#[error("Exceeded the idiom recursion limit of {limit}.")]
+	IdiomRecursionLimitExceeded {
+		limit: u32,
+	},
+
+	/// Found an unexpected value in a range
+	#[error("Tried to use a `@` repeat recurse symbol, while not recursing.")]
+	RepeatRecurseNotRecursing,
+
+	/// Found an unexpected value in a range
+	#[error("Tried to use a `{symbol}` recursion symbol, while already recursing.")]
+	IdiomRecursionAlreadyRecursing {
+		symbol: String,
+	},
+
+	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
+	#[error("Tried to use a `@` repeat recurse symbol in a position where it is not supported")]
+	UnsupportedRepeatRecurse,
+
+	#[error("Error while computing version: expected a datetime, but found {found}")]
+	InvalidVersion {
+		found: Value,
+	},
 }
 
 impl From<Error> for String {
@@ -1252,14 +1303,14 @@ impl From<foundationdb::TransactionCommitError> for Error {
 	}
 }
 
-impl From<channel::RecvError> for Error {
-	fn from(e: channel::RecvError) -> Error {
+impl From<async_channel::RecvError> for Error {
+	fn from(e: async_channel::RecvError) -> Error {
 		Error::Channel(e.to_string())
 	}
 }
 
-impl<T> From<channel::SendError<T>> for Error {
-	fn from(e: channel::SendError<T>) -> Error {
+impl<T> From<async_channel::SendError<T>> for Error {
+	fn from(e: async_channel::SendError<T>) -> Error {
 		Error::Channel(e.to_string())
 	}
 }

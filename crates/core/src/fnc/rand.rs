@@ -147,8 +147,14 @@ pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 	} else {
 		rand::thread_rng().gen_range(0..=LIMIT)
 	};
-	// Generate the random time
-	Ok(Utc.timestamp_opt(val, 0).earliest().unwrap().into())
+	// Generate the random time, try up to 5 times
+	for _ in 0..5 {
+		if let Some(v) = Utc.timestamp_opt(val, 0).earliest() {
+			return Ok(v.into());
+		}
+	}
+	// We were unable to generate a valid random datetime
+	Err(fail!("Expected a valid datetime, but were unable to generate one"))
 }
 
 pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {

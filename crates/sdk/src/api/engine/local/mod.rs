@@ -44,6 +44,7 @@ use std::{
 	mem,
 	sync::Arc,
 };
+use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::sql::Function;
 use surrealdb_core::{
 	dbs::{Response, Session},
@@ -473,8 +474,18 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<CoreValue> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn export_file(kvs: &Datastore, sess: &Session, chn: channel::Sender<Vec<u8>>) -> Result<()> {
-	if let Err(error) = kvs.export(sess, chn).await?.await {
+async fn export_file(
+	kvs: &Datastore,
+	sess: &Session,
+	chn: channel::Sender<Vec<u8>>,
+	config: Option<DbExportConfig>,
+) -> Result<()> {
+	let res = match config {
+		Some(config) => kvs.export_with_config(sess, chn, config).await?.await,
+		None => kvs.export(sess, chn).await?.await,
+	};
+
+	if let Err(error) = res {
 		if let crate::error::Db::Channel(message) = error {
 			// This is not really an error. Just logging it for improved visibility.
 			trace!("{message}");
@@ -792,12 +803,13 @@ async fn router(
 		#[cfg(not(target_arch = "wasm32"))]
 		Command::ExportFile {
 			path: file,
+			config,
 		} => {
 			let (tx, rx) = crate::channel::bounded(1);
 			let (mut writer, mut reader) = io::duplex(10_240);
 
 			// Write to channel.
-			let export = export_file(kvs, session, tx);
+			let export = export_file(kvs, session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -885,6 +897,7 @@ async fn router(
 		#[cfg(not(target_arch = "wasm32"))]
 		Command::ExportBytes {
 			bytes,
+			config,
 		} => {
 			let (tx, rx) = crate::channel::bounded(1);
 
@@ -892,7 +905,7 @@ async fn router(
 			let session = session.clone();
 			tokio::spawn(async move {
 				let export = async {
-					if let Err(error) = export_file(&kvs, &session, tx).await {
+					if let Err(error) = export_file(&kvs, &session, tx, config).await {
 						let _ = bytes.send(Err(error)).await;
 					}
 				};

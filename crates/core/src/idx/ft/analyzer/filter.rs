@@ -1,6 +1,8 @@
 use crate::err::Error;
+use crate::idx::ft::analyzer::mapper::Mapper;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::idx::ft::offsets::Position;
+use crate::idx::trees::store::IndexStores;
 use crate::sql::filter::Filter as SqlFilter;
 use crate::sql::language::Language;
 use deunicode::deunicode;
@@ -18,11 +20,12 @@ pub(super) enum Filter {
 	EdgeNgram(u16, u16),
 	Lowercase,
 	Uppercase,
+	Mapper(Mapper),
 }
 
-impl From<&SqlFilter> for Filter {
-	fn from(f: &SqlFilter) -> Self {
-		match f {
+impl Filter {
+	fn new(ixs: &IndexStores, f: &SqlFilter) -> Result<Self, Error> {
+		let f = match f {
 			SqlFilter::Ascii => Filter::Ascii,
 			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(*min, *max),
 			SqlFilter::Lowercase => Filter::Lowercase,
@@ -50,17 +53,23 @@ impl From<&SqlFilter> for Filter {
 				Filter::Stemmer(a)
 			}
 			SqlFilter::Uppercase => Filter::Uppercase,
-		}
+			SqlFilter::Mapper(path) => Filter::Mapper(ixs.mappers().get(path)?),
+		};
+		Ok(f)
 	}
-}
 
-impl Filter {
-	pub(super) fn from(fs: &Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
+	pub(super) fn try_from(
+		ixs: &IndexStores,
+		fs: &Option<Vec<SqlFilter>>,
+	) -> Result<Option<Vec<Filter>>, Error> {
 		if let Some(fs) = fs {
-			let r = fs.iter().map(|f| f.into()).collect();
-			Some(r)
+			let mut r = Vec::with_capacity(fs.len());
+			for f in fs {
+				r.push(Self::new(ixs, f)?);
+			}
+			Ok(Some(r))
 		} else {
-			None
+			Ok(None)
 		}
 	}
 
@@ -95,6 +104,7 @@ impl Filter {
 			Filter::Ngram(min, max) => Self::ngram(c, *min, *max),
 			Filter::Stemmer(s) => Self::stem(s, c),
 			Filter::Uppercase => Self::uppercase(c),
+			Filter::Mapper(m) => m.map(c),
 		}
 	}
 
