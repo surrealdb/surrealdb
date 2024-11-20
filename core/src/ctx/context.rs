@@ -46,6 +46,8 @@ pub struct MutableContext {
 	query_executor: Option<QueryExecutor>,
 	// An optional iteration stage
 	iteration_stage: Option<IterationStage>,
+	// An optional datastore cache
+	cache: Option<Arc<Cache>>,
 	// The index store
 	index_stores: IndexStores,
 	// The index concurrent builders
@@ -101,6 +103,7 @@ impl MutableContext {
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
+			cache: None,
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: None,
 			#[cfg(storage)]
@@ -122,6 +125,7 @@ impl MutableContext {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			cache: parent.cache.clone(),
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: parent.index_builder.clone(),
 			#[cfg(storage)]
@@ -146,6 +150,7 @@ impl MutableContext {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			cache: parent.cache.clone(),
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: parent.index_builder.clone(),
 			#[cfg(storage)]
@@ -170,6 +175,7 @@ impl MutableContext {
 			iteration_stage: from.iteration_stage.clone(),
 			capabilities: from.capabilities.clone(),
 			index_stores: from.index_stores.clone(),
+			cache: from.cache.clone(),
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: from.index_builder.clone(),
 			#[cfg(storage)]
@@ -185,6 +191,7 @@ impl MutableContext {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
+		cache: Arc<Cache>,
 		#[cfg(not(target_arch = "wasm32"))] index_builder: IndexBuilder,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<MutableContext, Error> {
@@ -199,6 +206,7 @@ impl MutableContext {
 			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
+			cache: Some(cache),
 			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: Some(index_builder),
 			#[cfg(storage)]
@@ -326,8 +334,9 @@ impl MutableContext {
 		self.index_builder.as_ref()
 	}
 
-	pub(crate) fn get_cache(&self) -> Option<Cache> {
-		None
+	// Get the current datastore cache
+	pub(crate) fn get_cache(&self) -> Option<Arc<Cache>> {
+		self.cache.clone()
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may

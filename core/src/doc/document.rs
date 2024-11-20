@@ -39,7 +39,7 @@ pub(crate) struct Document {
 
 #[non_exhaustive]
 #[derive(Clone, Debug)]
-pub struct CursorDoc {
+pub(crate) struct CursorDoc {
 	pub(crate) rid: Option<Arc<Thing>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) doc: CursorValue,

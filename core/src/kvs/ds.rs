@@ -77,7 +77,7 @@ pub struct Datastore {
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// The index store cache
 	index_stores: IndexStores,
-	//
+	// The cross transaction cache
 	cache: Arc<Cache>,
 	// The index asynchronous builder
 	#[cfg(not(target_arch = "wasm32"))]
@@ -1209,6 +1209,7 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
+			self.cache.clone(),
 			#[cfg(not(target_arch = "wasm32"))]
 			self.index_builder.clone(),
 			#[cfg(storage)]
