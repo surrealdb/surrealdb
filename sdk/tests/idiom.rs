@@ -947,6 +947,8 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 		.expect_val("[1, 2]")?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
-		.expect_error("Found 'a' for field `obj[*]`, with record `test:1`, but expected a number")?;
+		.expect_error(
+			"Found 'a' for field `obj[*]`, with record `test:1`, but expected a number",
+		)?;
 	Ok(())
 }

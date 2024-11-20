@@ -26,11 +26,14 @@ async fn expr_value_in_range() -> Result<(), Error> {
 
 #[tokio::test]
 async fn expr_object_contains_key() -> Result<(), Error> {
-	Test::new("
+	Test::new(
+		"
 		'a' IN { a: 1 };
 		'b' IN { a: 1 };
-	").await?
-		.expect_val("true")?
-		.expect_val("false")?;
+	",
+	)
+	.await?
+	.expect_val("true")?
+	.expect_val("false")?;
 	Ok(())
 }
