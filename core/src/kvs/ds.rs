@@ -15,6 +15,8 @@ use crate::err::Error;
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
+use crate::kvs::cache;
+use crate::kvs::cache::ds::Cache;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
@@ -58,22 +60,24 @@ const INITIAL_USER_ROLE: &str = "owner";
 #[non_exhaustive]
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
-	// The unique id of this datastore, used in notifications
+	/// The unique id of this datastore, used in notifications.
 	id: Uuid,
-	// Whether this datastore runs in strict mode by default
+	/// Whether this datastore runs in strict mode by default.
 	strict: bool,
-	// Whether authentication is enabled on this datastore.
+	/// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
-	// The maximum duration timeout for running multiple statements in a query
+	/// The maximum duration timeout for running multiple statements in a query.
 	query_timeout: Option<Duration>,
-	// The maximum duration timeout for running multiple statements in a transaction
+	/// The maximum duration timeout for running multiple statements in a transaction.
 	transaction_timeout: Option<Duration>,
-	// Capabilities for this datastore
+	/// The security and feature capabilities for this datastore.
 	capabilities: Capabilities,
-	// Whether this datastore enables live query notifications to subscribers
-	pub(super) notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	// Whether this datastore enables live query notifications to subscribers.
+	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// The index store cache
 	index_stores: IndexStores,
+	//
+	cache: Arc<Cache>,
 	// The index asynchronous builder
 	#[cfg(not(target_arch = "wasm32"))]
 	index_builder: IndexBuilder,
@@ -266,6 +270,7 @@ impl Datastore {
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			transaction_factory: self.transaction_factory,
+			cache: Arc::new(cache::ds::new()),
 		}
 	}
 
@@ -425,6 +430,7 @@ impl Datastore {
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 				#[cfg(storage)]
 				temporary_directory: None,
+				cache: Arc::new(cache::ds::new()),
 			}
 		})
 	}

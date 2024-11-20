@@ -12,8 +12,6 @@ mod document; // The entry point for a document to be processed
 mod compute; // The point at which a document is processed
 mod process; // The point at which a document is processed
 
-mod cache; // The cache implementation for the document layer
-
 mod create; // Processes a CREATE statement for this document
 mod delete; // Processes a DELETE statement for this document
 mod insert; // Processes a INSERT statement for this document

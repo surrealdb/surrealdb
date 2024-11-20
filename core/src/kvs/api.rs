@@ -297,6 +297,42 @@ pub trait Transaction {
 		}
 	}
 
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn batch_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Continue with function logic
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+
+		// Scan for the next batch
+		let res = self.scan_all_versions(beg..end.clone(), batch).await?;
+
+		// Check if range is consumed
+		if res.len() < batch as usize && batch > 0 {
+			Ok(Batch::new_versioned(None, res))
+		} else {
+			match res.last() {
+				Some((k, _, _, _)) => Ok(Batch::new_versioned(
+					Some(Range {
+						start: k.clone().add(0x00),
+						end,
+					}),
+					res,
+				)),
+				// We have checked the length above, so
+				// there should be a last item in the
+				// vector, so we shouldn't arrive here
+				None => Ok(Batch::new_versioned(None, res)),
+			}
+		}
+	}
+
 	/// Obtain a new change timestamp for a key
 	/// which is replaced with the current timestamp when the transaction is committed.
 	/// NOTE: This should be called when composing the change feed entries for this transaction,
@@ -359,41 +395,5 @@ pub trait Transaction {
 		k.append(&mut ts.to_vec());
 		k.append(&mut suffix.into());
 		self.set(k, val, None).await
-	}
-
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
-	where
-		K: Into<Key> + Sprintable + Debug,
-	{
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TxFinished);
-		}
-		// Continue with function logic
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
-
-		// Scan for the next batch
-		let res = self.scan_all_versions(beg..end.clone(), batch).await?;
-
-		// Check if range is consumed
-		if res.len() < batch as usize && batch > 0 {
-			Ok(Batch::new_versioned(None, res))
-		} else {
-			match res.last() {
-				Some((k, _, _, _)) => Ok(Batch::new_versioned(
-					Some(Range {
-						start: k.clone().add(0x00),
-						end,
-					}),
-					res,
-				)),
-				// We have checked the length above, so
-				// there should be a last item in the
-				// vector, so we shouldn't arrive here
-				None => Ok(Batch::new_versioned(None, res)),
-			}
-		}
 	}
 }
