@@ -941,6 +941,18 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 		DEFINE FIELD obj ON test TYPE object;
 		DEFINE FIELD obj.* ON test TYPE number;
 		CREATE test:1 SET obj.a = 'a';
+
+		DEFINE FIELD emails.address ON TABLE user TYPE string;
+		-- Previously `emails.*` would be considered the same as `emails`
+		-- Resulting in two conflicting types for the same field. But now 
+		-- `emails.*`, for objects, targets all values when `emails` is an object
+		-- and all entries when `emails` is an array.
+		DEFINE FIELD emails.*.address ON TABLE user TYPE option<number>;
+		DEFINE FIELD tags.*.value ON TABLE user TYPE option<string>;
+
+		CREATE user SET emails.address = 9;
+		CREATE user SET emails.address = "me@me.com";
+		create user set tags = [{ value: 'bla' }], emails.address = "me@me.com"
 	"#;
 	Test::new(sql)
 		.await?
@@ -949,6 +961,32 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 		.expect_val("NONE")?
 		.expect_error(
 			"Found 'a' for field `obj[*]`, with record `test:1`, but expected a number",
-		)?;
+		)?
+		.expect_val("NONE")?
+		.expect_val("NONE")?
+		.expect_val("NONE")?
+		.expect_val("NONE")?
+		.expect_error("Found 9 for field `emails.address`, with record `user:j29qttc4fady01dw0met`, but expected a string")?
+		.expect_val("[
+			{
+				emails: {
+					address: 'me@me.com'
+				},
+				id: user:taczy40pn197dv2wg7ao
+			}
+		]")?
+		.expect_val("[
+			{
+				emails: {
+					address: 'me@me.com'
+				},
+				id: user:imek7ar10kberisp62hv,
+				tags: [
+					{
+						value: 'bla'
+					}
+				]
+			}
+		]")?;
 	Ok(())
 }
