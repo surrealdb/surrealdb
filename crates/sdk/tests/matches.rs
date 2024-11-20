@@ -724,7 +724,7 @@ async fn select_where_matches_analyser_without_tokenizer() -> Result<(), Error> 
 #[tokio::test]
 async fn select_where_matches_analyser_with_mapper() -> Result<(), Error> {
 	let sql = r"
-		DEFINE ANALYZER mapper TOKENIZERS blank,class FILTERS lowercase,mapper('../tests/data/lemmatization-en.txt');
+		DEFINE ANALYZER mapper TOKENIZERS blank,class FILTERS lowercase,mapper('../../ttests/data/lemmatization-en.txt');
 		CREATE t:1 SET text = 'He drives to work every day, taking the scenic route through town';
 		DEFINE INDEX search_idx ON TABLE t COLUMNS text SEARCH ANALYZER mapper BM25;
 		SELECT * FROM t WHERE text @@ 'driven'";
