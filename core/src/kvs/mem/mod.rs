@@ -2,9 +2,7 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::Check;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::kvs::{Check, Key, Val, Version};
 use std::fmt::Debug;
 use std::ops::Range;
 use surrealkv::Options;
@@ -397,6 +395,36 @@ impl super::api::Transaction for Transaction {
 				.collect(),
 		};
 		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve all the versions from a range of keys from the databases
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+
+		// Set the key range
+		let beg = rng.start.into();
+		let end = rng.end.into();
+		let range = beg.as_slice()..end.as_slice();
+
+		// Retrieve the scan range
+		let res = self
+			.inner
+			.scan_all_versions(range, Some(limit as usize))?
+			.into_iter()
+			.map(|kv| (kv.0, kv.1, kv.2, kv.3))
+			.collect();
+
 		Ok(res)
 	}
 }

@@ -52,10 +52,12 @@ impl Document {
 			for fd in self.current.doc.every(None, true, true).iter() {
 				if !keys.contains(fd) {
 					match fd {
+						// Built-in fields
 						fd if fd.is_id() => continue,
 						fd if fd.is_in() => continue,
 						fd if fd.is_out() => continue,
 						fd if fd.is_meta() => continue,
+						// Custom fields
 						fd => match opt.strict {
 							// If strict, then throw an error on an undefined field
 							true => {
@@ -68,6 +70,19 @@ impl Document {
 							false => self.current.doc.to_mut().del(stk, ctx, opt, fd).await?,
 						},
 					}
+				}
+
+				// NONE-values should never be stored
+				if self.current.doc.pick(fd).is_none() {
+					self.current.doc.to_mut().del(stk, ctx, opt, fd).await?;
+				}
+			}
+		} else {
+			// Loop over every field in the document
+			for fd in self.current.doc.every(None, true, true).iter() {
+				// NONE-values should never be stored
+				if self.current.doc.pick(fd).is_none() {
+					self.current.doc.to_mut().del(stk, ctx, opt, fd).await?;
 				}
 			}
 		}

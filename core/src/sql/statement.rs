@@ -159,7 +159,7 @@ impl Statement {
 		};
 
 		match stm {
-			Self::Access(v) => v.compute(ctx, opt, doc).await,
+			Self::Access(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
 			Self::Break(v) => v.compute(ctx, opt, doc).await,
@@ -169,7 +169,7 @@ impl Statement {
 			Self::Define(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Foreach(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Ifelse(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Info(v) => v.compute(ctx, opt, doc).await,
+			Self::Info(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Insert(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Kill(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Live(v) => v.compute(stk, ctx, opt, doc).await,

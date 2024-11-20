@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ops::Deref;
 
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::Context;
@@ -10,7 +11,7 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::{Next, NextMethod};
+use crate::sql::part::{FindRecursionPlan, Next, NextMethod, SplitByRepeatRecurse};
 use crate::sql::part::{Part, Skip};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
@@ -18,6 +19,8 @@ use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use crate::sql::Function;
 use reblessive::tree::Stk;
+
+use super::idiom_recursion::{compute_idiom_recursion, Recursion};
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -36,6 +39,70 @@ impl Value {
 			return Err(Error::ComputationDepthExceeded);
 		}
 		match path.first() {
+			// The knowledge of the current value is not relevant to Part::Recurse
+			Some(Part::Recurse(recurse, inner_path)) => {
+				// Find the path to recurse and what path to process after the recursion is finished
+				let (path, after) = match inner_path {
+					Some(p) => (p.0.as_slice(), path.next().to_vec()),
+					_ => (path.next(), vec![]),
+				};
+
+				// We first try to split out a root-level repeat-recurse symbol
+				// By doing so, we can eliminate un-needed recursion, as we can
+				// simply loop.
+				let (path, plan, after) = match path.split_by_repeat_recurse() {
+					Some((path, local_after)) => (path, None, [local_after, &after].concat()),
+
+					// If we do not find a root-level repeat-recurse symbol, we
+					// can scan for a nested one. We only ever allow for a single
+					// repeat recurse symbol, hence the separate check.
+					_ => match path.find_recursion_plan() {
+						Some((path, plan, local_after)) => {
+							(path, Some(plan), [local_after, &after].concat())
+						}
+						_ => (path, None, after),
+					},
+				};
+
+				// Collect the min & max for the recursion context
+				let (min, max) = recurse.to_owned().try_into()?;
+				// Construct the recursion context
+				let rec = Recursion {
+					min,
+					max,
+					iterated: 0,
+					current: self,
+					path,
+					plan: plan.as_ref(),
+				};
+
+				// Compute the recursion
+				let v = compute_idiom_recursion(stk, ctx, opt, doc, rec).await?;
+
+				// If we have a leftover path, process it
+				if !after.is_empty() {
+					stk.run(|stk| v.get(stk, ctx, opt, doc, after.as_slice())).await
+				} else {
+					Ok(v)
+				}
+			}
+			// We only support repeat recurse symbol in certain scenarios, to
+			// ensure we can process them efficiently. When encountering a
+			// recursion part, it will find the repeat recurse part and handle
+			// it. If we find one in any unsupported scenario, we throw an error.
+			Some(Part::RepeatRecurse) => Err(Error::UnsupportedRepeatRecurse),
+			Some(Part::Doc) => {
+				// Try to obtain a Record ID from the document, otherwise we'll operate on NONE
+				let v = match doc {
+					Some(doc) => match &doc.rid {
+						Some(id) => Value::Thing(id.deref().to_owned()),
+						_ => Value::None,
+					},
+					None => Value::None,
+				};
+
+				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+			}
 			// Get the current value at the path
 			Some(p) => match self {
 				// Current value at path is a geometry
@@ -66,6 +133,9 @@ impl Value {
 							})
 							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+					}
+					Part::Optional => {
+						stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// Otherwise return none
 					_ => Ok(Value::None),
@@ -184,6 +254,9 @@ impl Value {
 
 						stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 					}
+					Part::Optional => {
+						stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
+					}
 					_ => Ok(Value::None),
 				},
 				// Current value at path is an array
@@ -262,6 +335,9 @@ impl Value {
 							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
+					Part::Optional => {
+						stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
+					}
 					_ => {
 						let len = match path.get(1) {
 							// Say that we have a path like `[a:1].out.*`, then `.*`
@@ -283,6 +359,7 @@ impl Value {
 						// If we are chaining graph parts, we need to make sure to flatten the result
 						let mapped = match (path.first(), path.get(1)) {
 							(Some(Part::Graph(_)), Some(Part::Graph(_))) => mapped.flatten(),
+							(Some(Part::Graph(_)), Some(Part::Where(_))) => mapped.flatten(),
 							_ => mapped,
 						};
 
@@ -351,15 +428,14 @@ impl Value {
 											.run(|stk| v.get(stk, ctx, opt, None, path.next()))
 											.await?;
 										// We only want to flatten the results if the next part
-										// is a graph part. Reason being that if we flatten fields,
-										// the results of those fields (which could be arrays) will
-										// be merged into each other. So [1, 2, 3], [4, 5, 6] would
+										// is a graph or where part. Reason being that if we flatten
+										// fields, the results of those fields (which could be arrays)
+										// will be merged into each other. So [1, 2, 3], [4, 5, 6] would
 										// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
 										// as we have already checked the length of the path.
-										Ok(if let Part::Graph(_) = path[1] {
-											res.flatten()
-										} else {
-											res
+										Ok(match path[1] {
+											Part::Graph(_) | Part::Where(_) => res.flatten(),
+											_ => res,
 										})
 									}
 								}
@@ -379,6 +455,9 @@ impl Value {
 									})
 									.await?;
 								stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+							}
+							Part::Optional => {
+								stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
 							}
 							// This is a remote field expression
 							_ => {

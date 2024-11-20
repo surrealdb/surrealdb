@@ -121,7 +121,7 @@ async fn main() -> Result<(), Error> {
     db.use_ns("namespace").use_db("database").await?;
 
     // Create a new person with a random ID
-    let tobie: Vec<Person> = db
+    let tobie: Option<Person> = db
         .create("person")
         .content(Person {
             id: None,
@@ -164,7 +164,7 @@ async fn main() -> Result<(), Error> {
         GROUP BY marketing
     "#;
 
-    let groups = db.query(sql)
+    let groups = db.query(query)
         .bind(("table", "person"))
         .await?;
 

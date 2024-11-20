@@ -106,8 +106,10 @@ impl FtIndex {
 		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let tx = ctx.tx();
+		let ixs = ctx.get_index_stores();
 		let az = tx.get_db_analyzer(opt.ns()?, opt.db()?, az).await?;
-		Self::with_analyzer(ctx.get_index_stores(), &tx, az, index_key_base, p, tt).await
+		ixs.mappers().check(&az).await?;
+		Self::with_analyzer(ixs, &tx, az, index_key_base, p, tt).await
 	}
 	async fn with_analyzer(
 		ixs: &IndexStores,
@@ -145,7 +147,7 @@ impl FtIndex {
 		let terms = Arc::new(RwLock::new(
 			Terms::new(ixs, txn, index_key_base.clone(), p.terms_order, tt, p.terms_cache).await?,
 		));
-		let termdocs = TermDocs::new(index_key_base.clone());
+		let term_docs = TermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());
 		let mut bm25 = None;
 		if let Scoring::Bm {
@@ -158,18 +160,19 @@ impl FtIndex {
 				b,
 			});
 		}
+		let analyzer = Analyzer::new(ixs, az)?;
 		Ok(Self {
 			state,
 			state_key,
 			index_key_base,
 			bm25,
 			highlighting: p.hl,
-			analyzer: Analyzer::new(az),
+			analyzer,
 			doc_ids,
 			doc_lengths,
 			postings,
 			terms,
-			term_docs: termdocs,
+			term_docs,
 			offsets,
 		})
 	}

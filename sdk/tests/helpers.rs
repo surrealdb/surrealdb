@@ -461,4 +461,21 @@ impl Test {
 		}
 		Ok(self)
 	}
+
+	/// Expects the next value to be bytes
+	#[track_caller]
+	#[allow(dead_code)]
+	pub fn expect_bytes(&mut self, val: impl Into<Vec<u8>>) -> Result<&mut Self, Error> {
+		self.expect_bytes_info(val, "")
+	}
+
+	pub fn expect_bytes_info<I: Display>(
+		&mut self,
+		val: impl Into<Vec<u8>>,
+		info: I,
+	) -> Result<&mut Self, Error> {
+		let val: Vec<u8> = val.into();
+		let val = Value::Bytes(val.into());
+		self.expect_value_info(val, info)
+	}
 }

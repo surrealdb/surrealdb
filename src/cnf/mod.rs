@@ -86,9 +86,13 @@ pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
 pub static RUNTIME_MAX_BLOCKING_THREADS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS", usize, 512);
 
-/// How many threads which can be started for blocking operations (defaults to 512)
+/// If set to "otlp" then telemetry is sent to the GRPC OTEL collector
 pub static TELEMETRY_PROVIDER: LazyLock<String> =
 	lazy_env_parse!("SURREAL_TELEMETRY_PROVIDER", String);
+
+/// If set then use this as value for the namespace label when sending telemetry
+pub static TELEMETRY_NAMESPACE: LazyLock<String> =
+	lazy_env_parse!("SURREAL_TELEMETRY_NAMESPACE", String);
 
 /// The version identifier of this build
 pub static PKG_VERSION: LazyLock<String> =

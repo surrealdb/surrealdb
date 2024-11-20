@@ -843,7 +843,7 @@ impl Transaction {
 		.try_into_lvs()
 	}
 
-	/// Retrieve a specific namespace definition.
+	/// Retrieve a specific node in the cluster.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_node(&self, id: Uuid) -> Result<Arc<Node>, Error> {
 		let key = crate::key::root::nd::new(id).encode()?;
@@ -1704,5 +1704,16 @@ impl Transaction {
 			}
 		}
 		.try_into_type()
+	}
+
+	/// Retrieve a batched scan to scan all versions over a specific range of keys in the datastore.
+	///
+	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn batch_versions<K>(&self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.batch_versions(rng, batch).await
 	}
 }

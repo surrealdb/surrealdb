@@ -67,7 +67,7 @@ features = [
 targets = []
 
 [dependencies]
-arrayvec = "=0.7.4"
+arrayvec = "0.7.6"
 bincode = "1.3.3"
 channel = { version = "2.3.1", package = "async-channel" }
 chrono = { version = "0.4.38", features = ["serde"] }
@@ -211,5 +211,5 @@ name = "with_or_without_index"
 harness = false
 
 [[bench]]
-name = "sort"
+name = "order"
 harness = false

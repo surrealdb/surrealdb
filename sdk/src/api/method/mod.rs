@@ -109,6 +109,9 @@ pub struct Stats {
 /// Machine learning model marker type for import and export types
 pub struct Model;
 
+/// Marker type for configured exports
+pub struct ExportConfig;
+
 /// Live query marker type
 pub struct Live;
 
@@ -1366,6 +1369,7 @@ where
 			client: Cow::Borrowed(self),
 			target: target.into_export_destination(),
 			ml_config: None,
+			db_config: None,
 			response: PhantomData,
 			export_type: PhantomData,
 		}

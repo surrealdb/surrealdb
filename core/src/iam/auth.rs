@@ -89,9 +89,10 @@ impl Auth {
 	}
 }
 
-impl std::convert::From<(&DefineUserStatement, Level)> for Auth {
-	fn from(val: (&DefineUserStatement, Level)) -> Self {
-		Self::new((val.0, val.1).into())
+impl std::convert::TryFrom<(&DefineUserStatement, Level)> for Auth {
+	type Error = Error;
+	fn try_from(val: (&DefineUserStatement, Level)) -> Result<Self, Self::Error> {
+		Ok(Self::new((val.0, val.1).try_into()?))
 	}
 }
 
