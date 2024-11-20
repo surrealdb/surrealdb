@@ -355,7 +355,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Nds(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -374,7 +374,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Rus(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -393,7 +393,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Ras(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -412,7 +412,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Rag(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -431,7 +431,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Nss(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -450,7 +450,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Nus(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -469,7 +469,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Nas(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -492,7 +492,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Nag(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -511,7 +511,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Dbs(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -534,7 +534,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Dus(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -557,7 +557,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Das(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -581,7 +581,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Dag(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -604,7 +604,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Azs(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -627,7 +627,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Fcs(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -650,7 +650,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Pas(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -673,7 +673,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Mls(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -696,7 +696,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Cgs(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -720,7 +720,7 @@ impl Transaction {
 				let val = self.getr(beg..end, version).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Tbs(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -744,7 +744,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Evs(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -769,7 +769,7 @@ impl Transaction {
 				let val = self.getr(beg..end, version).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Fds(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -793,7 +793,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Ixs(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -817,7 +817,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Fts(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -841,7 +841,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
 				let val = cache::tx::Entry::Lvs(Arc::clone(&val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -861,7 +861,7 @@ impl Transaction {
 				})?;
 				let val: Node = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -881,7 +881,7 @@ impl Transaction {
 				})?;
 				let val: DefineUserStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -901,7 +901,7 @@ impl Transaction {
 				})?;
 				let val: DefineAccessStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -927,7 +927,7 @@ impl Transaction {
 					})?;
 				let val: AccessGrant = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -947,7 +947,7 @@ impl Transaction {
 				})?;
 				let val: DefineNamespaceStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -968,7 +968,7 @@ impl Transaction {
 				})?;
 				let val: DefineUserStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -993,7 +993,7 @@ impl Transaction {
 				})?;
 				let val: DefineAccessStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1021,7 +1021,7 @@ impl Transaction {
 					})?;
 				let val: AccessGrant = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1041,7 +1041,7 @@ impl Transaction {
 				})?;
 				let val: DefineDatabaseStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1068,7 +1068,7 @@ impl Transaction {
 				})?;
 				let val: DefineUserStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1095,7 +1095,7 @@ impl Transaction {
 				})?;
 				let val: DefineAccessStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1125,7 +1125,7 @@ impl Transaction {
 					})?;
 				let val: AccessGrant = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1151,7 +1151,7 @@ impl Transaction {
 				})?;
 				let val: DefineModelStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1176,7 +1176,7 @@ impl Transaction {
 				})?;
 				let val: DefineAnalyzerStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1201,7 +1201,7 @@ impl Transaction {
 				})?;
 				let val: DefineFunctionStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1226,7 +1226,7 @@ impl Transaction {
 				})?;
 				let val: DefineParamStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1251,7 +1251,7 @@ impl Transaction {
 				})?;
 				let val: DefineConfigStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1276,7 +1276,7 @@ impl Transaction {
 				})?;
 				let val: DefineTableStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1302,7 +1302,7 @@ impl Transaction {
 				})?;
 				let val: DefineEventStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1328,7 +1328,7 @@ impl Transaction {
 				})?;
 				let val: DefineFieldStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1354,7 +1354,7 @@ impl Transaction {
 				})?;
 				let val: DefineIndexStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				let _ = self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1382,7 +1382,7 @@ impl Transaction {
 					// The value exists in the datastore
 					Some(val) => {
 						let val = cache::tx::Entry::Val(Arc::new(val.into()));
-						let _ = self.cache.insert(qey.into(), val.clone());
+						self.cache.insert(qey.into(), val.clone());
 						val.try_into_val()
 					}
 					// The value is not in the datastore
@@ -1558,14 +1558,14 @@ impl Transaction {
 							self.put(&key, &val, None).await?;
 							cache::tx::Entry::Any(Arc::new(val))
 						};
-						let _ = self.cache.insert(qey.into(), val.clone());
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Store the fetched value in the cache
 					Ok(val) => {
 						let val: DefineNamespaceStatement = val.into();
 						let val = cache::tx::Entry::Any(Arc::new(val));
-						let _ = self.cache.insert(qey.into(), val.clone());
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Throw any received errors
@@ -1615,7 +1615,7 @@ impl Transaction {
 							self.put(&key, &val, None).await?;
 							cache::tx::Entry::Any(Arc::new(val))
 						};
-						let _ = self.cache.insert(qey.into(), val.clone());
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Check to see that the hierarchy exists
@@ -1631,7 +1631,7 @@ impl Transaction {
 					Ok(val) => {
 						let val: DefineDatabaseStatement = val.into();
 						let val = cache::tx::Entry::Any(Arc::new(val));
-						let _ = self.cache.insert(qey.into(), val.clone());
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Throw any received errors
@@ -1683,7 +1683,7 @@ impl Transaction {
 							self.put(&key, &val, None).await?;
 							cache::tx::Entry::Any(Arc::new(val))
 						};
-						let _ = self.cache.insert(qey.into(), val.clone());
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Check to see that the hierarchy exists
@@ -1700,7 +1700,7 @@ impl Transaction {
 					Ok(val) => {
 						let val: DefineTableStatement = val.into();
 						let val = cache::tx::Entry::Any(Arc::new(val));
-						let _ = self.cache.insert(qey.into(), val.clone());
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Throw any received errors

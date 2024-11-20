@@ -409,7 +409,7 @@ impl Document {
 				None => {
 					let val = ctx.tx().all_tb_views(ns, db, &tb.name).await?;
 					let val = cache::ds::Entry::Fts(val.clone());
-					let _ = cache.insert(key.into(), val.clone());
+					cache.insert(key.into(), val.clone());
 					val
 				}
 			}
@@ -440,7 +440,7 @@ impl Document {
 				None => {
 					let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
 					let val = cache::ds::Entry::Evs(val.clone());
-					let _ = cache.insert(key.into(), val.clone());
+					cache.insert(key.into(), val.clone());
 					val
 				}
 			}
@@ -471,7 +471,7 @@ impl Document {
 				None => {
 					let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
 					let val = cache::ds::Entry::Fds(val.clone());
-					let _ = cache.insert(key.into(), val.clone());
+					cache.insert(key.into(), val.clone());
 					val
 				}
 			}
@@ -502,7 +502,7 @@ impl Document {
 				None => {
 					let val = ctx.tx().all_tb_indexes(ns, db, &tb.name).await?;
 					let val = cache::ds::Entry::Ixs(val.clone());
-					let _ = cache.insert(key.into(), val.clone());
+					cache.insert(key.into(), val.clone());
 					val
 				}
 			}
@@ -529,7 +529,7 @@ impl Document {
 				None => {
 					let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
 					let val = cache::ds::Entry::Lvs(val.clone());
-					let _ = cache.insert(key.into(), val.clone());
+					cache.insert(key.into(), val.clone());
 					val
 				}
 			}
