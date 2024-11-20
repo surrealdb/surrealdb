@@ -22,6 +22,11 @@ impl Document {
 		let mut retry = false;
 		// Loop over maximum two times
 		for _ in 0..2 {
+			// Check current context
+			if ctx.is_done() {
+				// Don't process the document
+				return Err(Error::Ignore);
+			}
 			// Setup a new workable
 			let ins = match pro.val {
 				Operable::Value(v) => (v, Workable::Normal),

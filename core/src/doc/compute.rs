@@ -26,7 +26,8 @@ impl Document {
 		for _ in 0..2 {
 			// Check current context
 			if ctx.is_done() {
-				break;
+				// Don't process the document
+				return Ok(());
 			}
 			// Setup a new workable
 			let ins = match pro.val {
