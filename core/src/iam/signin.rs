@@ -966,8 +966,9 @@ mod tests {
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN {
-					    UPSERT count:1 SET count += 1; -- Concurrently write to the same document
-					    SLEEP(2s); -- Increase the duration of the transaction
+					    -- Concurrently write to the same document
+					    -- Artifically increase the duration of the transaction
+					    UPSERT count:1 SET count += sleep(2s) || 1;
 						RETURN (SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass))
 					}
 					SIGNUP (
@@ -1687,8 +1688,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					   SELECT * FROM type::thing('user', $id)
 					)
 					AUTHENTICATE {
-					   UPSERT count:1 SET count += 1; -- Concurrently write to the same document
-					   SLEEP(2s); -- Increase the duration of the transaction
+					   -- Concurrently write to the same document
+					   -- Artifically increase the duration of the transaction
+					   UPSERT count:1 SET count += sleep(2s) || 1;
 					   $auth.id -- Continue with authentication
 					}
 					DURATION FOR SESSION 2h

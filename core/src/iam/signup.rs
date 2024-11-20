@@ -300,8 +300,9 @@ mod tests {
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
 					SIGNUP {
-					    UPSERT count:1 SET count += 1; -- Concurrently write to the same document
-					    SLEEP(2s); -- Increase the duration of the transaction
+						-- Concurrently write to the same document
+						-- Artifically increase the duration of the transaction
+						UPSERT count:1 SET count += sleep(2s) || 1;
 						RETURN (CREATE user CONTENT {
 							name: $user,
 							pass: crypto::argon2::generate($pass)
@@ -795,8 +796,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					   CREATE type::thing('user', $id)
 					)
 					AUTHENTICATE {
-					   UPSERT count:1 SET count += 1; -- Concurrently write to the same document
-					   SLEEP(2s); -- Increase the duration of the transaction
+					   -- Concurrently write to the same document
+					   -- Artifically increase the duration of the transaction
+					   UPSERT count:1 SET count += sleep(2s) || 1;
 					   $auth.id -- Continue with authentication
 					}
 					DURATION FOR SESSION 2h
