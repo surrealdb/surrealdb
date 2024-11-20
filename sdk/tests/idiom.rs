@@ -950,9 +950,9 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 		DEFINE FIELD emails.*.address ON TABLE user TYPE option<number>;
 		DEFINE FIELD tags.*.value ON TABLE user TYPE option<string>;
 
-		CREATE user SET emails.address = 9;
-		CREATE user SET emails.address = "me@me.com";
-		create user set tags = [{ value: 'bla' }], emails.address = "me@me.com"
+		CREATE user:1 SET emails.address = 9;
+		CREATE user:2 SET emails.address = "me@me.com";
+		create user:3 set tags = [{ value: 'bla' }], emails.address = "me@me.com"
 	"#;
 	Test::new(sql)
 		.await?
@@ -965,14 +965,13 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 		.expect_val("NONE")?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
-		.expect_val("NONE")?
-		.expect_error("Found 9 for field `emails.address`, with record `user:j29qttc4fady01dw0met`, but expected a string")?
+		.expect_error("Found 9 for field `emails.address`, with record `user:1`, but expected a string")?
 		.expect_val("[
 			{
 				emails: {
 					address: 'me@me.com'
 				},
-				id: user:taczy40pn197dv2wg7ao
+				id: user:2
 			}
 		]")?
 		.expect_val("[
@@ -980,7 +979,7 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 				emails: {
 					address: 'me@me.com'
 				},
-				id: user:imek7ar10kberisp62hv,
+				id: user:3,
 				tags: [
 					{
 						value: 'bla'
