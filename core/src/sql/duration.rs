@@ -285,7 +285,7 @@ impl TrySub for Duration {
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
 		self.0
 			.checked_sub(other.0)
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} - {other}")))
+			.ok_or_else(|| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
 			.map(Duration::from)
 	}
 }
@@ -305,7 +305,7 @@ impl<'a, 'b> TrySub<&'b Duration> for &'a Duration {
 	fn try_sub(self, other: &'b Duration) -> Result<Duration, Error> {
 		self.0
 			.checked_sub(other.0)
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} - {other}")))
+			.ok_or_else(|| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
 			.map(Duration::from)
 	}
 }
@@ -355,9 +355,9 @@ impl TrySub<Datetime> for Duration {
 		match chrono::Duration::from_std(self.0) {
 			Ok(d) => match other.0.checked_sub_signed(d) {
 				Some(v) => Ok(Datetime::from(v)),
-				None => Err(Error::ArithmeticOverflow(format!("{self} - {other}"))),
+				None => Err(Error::ArithmeticNegativeOverflow(format!("{self} - {other}"))),
 			},
-			Err(_) => Err(Error::ArithmeticOverflow(format!("{self} - {other}"))),
+			Err(_) => Err(Error::ArithmeticNegativeOverflow(format!("{self} - {other}"))),
 		}
 	}
 }
