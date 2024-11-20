@@ -2825,6 +2825,7 @@ async fn select_from_standard_index_descending() -> Result<(), Error> {
 		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
 		SELECT * FROM session ORDER BY time DESC LIMIT 4 EXPLAIN;
 		SELECT * FROM session ORDER BY time DESC LIMIT 4;
+		SELECT * FROM session ORDER BY time DESC LIMIT 4 PARALLEL;
 		SELECT * FROM session ORDER BY time DESC EXPLAIN;
 		SELECT * FROM session ORDER BY time DESC;
 	";
@@ -2844,6 +2845,24 @@ async fn select_from_standard_index_descending() -> Result<(), Error> {
 					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
 			}
 		]",
 		"[
