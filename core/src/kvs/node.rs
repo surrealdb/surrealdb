@@ -68,7 +68,7 @@ impl Datastore {
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::new(id);
-		let val = txn.get_node(id).await?;
+		let val = catch!(txn, txn.get_node(id).await);
 		let val = val.as_ref().archive();
 		run!(txn, txn.set(key, val, None).await)
 	}
