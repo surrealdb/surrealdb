@@ -1174,9 +1174,17 @@ pub enum Error {
 
 	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
 	QueryTooLarge,
+
 	/// Represents a failure in timestamp arithmetic related to database internals
-	#[error("Failed to compute: \"{0}\", as the operation results in an overflow.")]
+	#[error("Failed to compute: \"{0}\", as the operation results in an arithmetic overflow.")]
 	ArithmeticOverflow(String),
+
+	/// Represents a negative value for a type that must be zero or positive
+	#[error("Failed to compute: \"{0}\", as the operation results in a negative value.")]
+	ArithmeticNegativeOverflow(String),
+
+	#[error("Failed to allocate space for \"{0}\"")]
+	InsufficientReserve(String),
 
 	#[error("Received error while streaming query: {0}.")]
 	QueryStream(String),

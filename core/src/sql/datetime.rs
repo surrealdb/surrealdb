@@ -126,7 +126,7 @@ impl TrySub for Datetime {
 	fn try_sub(self, other: Self) -> Result<Duration, Error> {
 		(self.0 - other.0)
 			.to_std()
-			.map_err(|_| Error::ArithmeticOverflow(format!("{self} - {other}")))
+			.map_err(|_| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
 			.map(Duration::from)
 	}
 }

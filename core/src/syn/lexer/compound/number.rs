@@ -291,31 +291,31 @@ pub fn duration(lexer: &mut Lexer, start: Token) -> Result<Duration, SyntaxError
 			DurationSuffix::Second => Duration::from_secs(numeric_value),
 			DurationSuffix::Minute => {
 				let minutes = numeric_value.checked_mul(SECONDS_PER_MINUTE).ok_or_else(
-					|| syntax_error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
+					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
 				Duration::from_secs(minutes)
 			}
 			DurationSuffix::Hour => {
 				let hours = numeric_value.checked_mul(SECONDS_PER_HOUR).ok_or_else(
-					|| syntax_error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
+					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
 				Duration::from_secs(hours)
 			}
 			DurationSuffix::Day => {
 				let day = numeric_value.checked_mul(SECONDS_PER_DAY).ok_or_else(
-					|| syntax_error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
+					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
 				Duration::from_secs(day)
 			}
 			DurationSuffix::Week => {
 				let week = numeric_value.checked_mul(SECONDS_PER_WEEK).ok_or_else(
-					|| syntax_error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
+					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
 				Duration::from_secs(week)
 			}
 			DurationSuffix::Year => {
 				let year = numeric_value.checked_mul(SECONDS_PER_YEAR).ok_or_else(
-					|| syntax_error!("Invalid duartion, value overflowed maximum allowed value", @lexer.current_span()),
+					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
 				Duration::from_secs(year)
 			}
