@@ -968,7 +968,7 @@ mod tests {
 					SIGNIN {
 					    -- Concurrently write to the same document
 					    -- Artifically increase the duration of the transaction
-					    UPSERT count:1 SET count += sleep(2s) || 1;
+					    UPSERT count:1 SET count += sleep(duration::from::millis(rand::int(1000,3000))) || 1;
 						RETURN (SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass))
 					}
 					SIGNUP (
@@ -1690,7 +1690,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					AUTHENTICATE {
 					   -- Concurrently write to the same document
 					   -- Artifically increase the duration of the transaction
-					   UPSERT count:1 SET count += sleep(2s) || 1;
+					   UPSERT count:1 SET count += sleep(duration::from::millis(rand::int(1000,3000))) || 1;
 					   $auth.id -- Continue with authentication
 					}
 					DURATION FOR SESSION 2h
