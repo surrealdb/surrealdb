@@ -942,6 +942,8 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 		DEFINE FIELD obj.* ON test TYPE number;
 		CREATE test:1 SET obj.a = 'a';
 
+		--------
+
 		DEFINE FIELD emails.address ON TABLE user TYPE string;
 		-- Previously `emails.*` would be considered the same as `emails`
 		-- Resulting in two conflicting types for the same field. But now 
@@ -952,7 +954,23 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 
 		CREATE user:1 SET emails.address = 9;
 		CREATE user:2 SET emails.address = "me@me.com";
-		create user:3 set tags = [{ value: 'bla' }], emails.address = "me@me.com"
+		create user:3 set tags = [{ value: 'bla' }], emails.address = "me@me.com";
+
+		--------
+
+		create only person:tobie set name = 'tobie';
+
+		select * from ONLY person:tobie;
+
+		select * from ONLY person:tobie.*;   -- this
+		select * from ONLY (person:tobie.*); -- does this
+		(select * from ONLY person:tobie).*; -- not this
+
+		select * from ONLY { id: person:tobie, name: 'tobie' };
+		select * from { id: person:tobie, name: 'tobie' }.*;
+		select * from person:tobie, 'tobie';
+		return person:tobie;
+		return person:tobie.*;
 	"#;
 	Test::new(sql)
 		.await?
@@ -990,6 +1008,67 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 				]
 			}
 		]",
+		)?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?
+		.expect_val(
+			"[
+			person:tobie,
+			'tobie'
+		]",
+		)?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?
+		.expect_val(
+			"[
+			{
+				id: person:tobie,
+				name: 'tobie'
+			},
+			'tobie'
+		]",
+		)?
+		.expect_val(
+			"[
+			{
+				id: person:tobie,
+				name: 'tobie'
+			},
+			'tobie'
+		]",
+		)?
+		.expect_val("person:tobie")?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
 		)?;
 	Ok(())
 }
