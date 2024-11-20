@@ -55,7 +55,7 @@ async fn export_import_versions_with_inserts_updates_deletes() {
 
 	// Export the database to a file
 	let export_file = format!("{db_name}.sql");
-    db.export(&export_file).await.unwrap();
+    db.export(&export_file).with_config().versions(true).await.unwrap();
 
     // Remove the table to simulate a fresh import
     db.query("REMOVE TABLE user").await.unwrap();
@@ -146,7 +146,7 @@ async fn export_import_different_data_types() {
 
     // Export the database to a file
     let export_file = "different_data_types_backup.sql";
-    db.export(export_file).await.unwrap();
+    db.export(export_file).with_config().versions(true).await.unwrap();
 
     // Remove the table to simulate a fresh import
     db.query("REMOVE TABLE user").await.unwrap();
@@ -200,7 +200,7 @@ async fn export_import_multiple_tables() {
 
     // Export the database to a file
     let export_file = "multiple_tables_backup.sql";
-    db.export(export_file).await.unwrap();
+    db.export(export_file).with_config().versions(true).await.unwrap();
 
     // Remove the tables to simulate a fresh import
     db.query("REMOVE TABLE user").await.unwrap();
@@ -264,7 +264,7 @@ async fn export_import_versioned_records() {
 
     // Export the database to a file
     let export_file = "versioned_records_backup.sql";
-    db.export(export_file).await.unwrap();
+    db.export(export_file).with_config().versions(true).await.unwrap();
 
     // Remove the table to simulate a fresh import
     db.query("REMOVE TABLE user").await.unwrap();
@@ -336,7 +336,7 @@ async fn export_import_versioned_range_queries() {
 
 	// Export the database to a file
     let export_file = "versioned_range_queries_backup.sql";
-    db.export(export_file).await.unwrap();
+    db.export(export_file).with_config().versions(true).await.unwrap();
 
     // Remove the table to simulate a fresh import
     db.query("REMOVE TABLE user").await.unwrap();
@@ -395,7 +395,7 @@ async fn export_import_retrieve_specific_versions() {
 
     // Export the database to a file
     let export_file = "retrieve_specific_versions_backup.sql";
-    db.export(export_file).await.unwrap();
+    db.export(export_file).with_config().versions(true).await.unwrap();
 
     // Remove the table to simulate a fresh import
     db.query("REMOVE TABLE user").await.unwrap();
