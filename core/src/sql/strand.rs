@@ -82,7 +82,10 @@ impl TryAdd for Strand {
 			self.0.push_str(other.as_str());
 			Ok(self)
 		} else {
-			Err(Error::ArithmeticOverflow(format!("{self} + {other}")))
+			Err(Error::InsufficientReserve(format!(
+				"additional string of length {} bytes",
+				other.0.len()
+			)))
 		}
 	}
 }

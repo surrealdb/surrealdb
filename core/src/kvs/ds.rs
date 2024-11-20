@@ -1,3 +1,4 @@
+use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
@@ -26,8 +27,8 @@ use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
 use crate::syn::parser::{Parser, PartialResult};
+use async_channel::{Receiver, Sender};
 use bytes::Bytes;
-use channel::{Receiver, Sender};
 use futures::{Future, Stream};
 use reblessive::{Stack, TreeStack};
 use std::fmt;
@@ -449,7 +450,7 @@ impl Datastore {
 
 	/// Specify whether this datastore should enable live query notifications
 	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel = Some(channel::bounded(LQ_CHANNEL_SIZE));
+		self.notification_channel = Some(async_channel::bounded(LQ_CHANNEL_SIZE));
 		self
 	}
 
@@ -1147,6 +1148,19 @@ impl Datastore {
 		sess: &Session,
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+		// Create a default export config
+		let cfg = super::export::Config::default();
+		self.export_with_config(sess, chn, cfg).await
+	}
+
+	/// Performs a full database export as SQL
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn export_with_config(
+		&self,
+		sess: &Session,
+		chn: Sender<Vec<u8>>,
+		cfg: export::Config,
+	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
 		// Check if the session has expired
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
@@ -1155,8 +1169,6 @@ impl Datastore {
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let txn = self.transaction(Read, Optimistic).await?;
-		// Create a default export config
-		let cfg = super::export::Config::default();
 		// Return an async export job
 		Ok(async move {
 			// Process the export

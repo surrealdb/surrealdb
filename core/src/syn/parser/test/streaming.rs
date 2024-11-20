@@ -523,7 +523,7 @@ fn statements() -> Vec<Statement> {
 			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
 				"foo".to_owned(),
 			))])))])),
-			version: Some(Version(Datetime(expected_datetime))),
+			version: Some(Version(Value::Datetime(Datetime(expected_datetime)))),
 			timeout: None,
 			parallel: false,
 			tempfiles: false,

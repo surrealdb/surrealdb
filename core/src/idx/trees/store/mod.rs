@@ -1,6 +1,7 @@
 pub mod cache;
 pub(crate) mod hnsw;
 mod lru;
+mod mapper;
 pub(crate) mod tree;
 
 use crate::ctx::Context;
@@ -11,6 +12,7 @@ use crate::idx::trees::btree::{BTreeNode, BTreeStore};
 use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
 use crate::idx::trees::store::cache::{TreeCache, TreeCaches};
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
+use crate::idx::trees::store::mapper::Mappers;
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
@@ -219,6 +221,7 @@ struct Inner {
 	btree_trie_caches: TreeCaches<BTreeNode<TrieKeys>>,
 	mtree_caches: TreeCaches<MTreeNode>,
 	hnsw_indexes: HnswIndexes,
+	mappers: Mappers,
 }
 impl Default for IndexStores {
 	fn default() -> Self {
@@ -227,6 +230,7 @@ impl Default for IndexStores {
 			btree_trie_caches: TreeCaches::default(),
 			mtree_caches: TreeCaches::default(),
 			hnsw_indexes: HnswIndexes::default(),
+			mappers: Mappers::default(),
 		}))
 	}
 }
@@ -374,5 +378,9 @@ impl IndexStores {
 			&& self.0.btree_fst_caches.is_empty()
 			&& self.0.btree_trie_caches.is_empty()
 			&& self.0.hnsw_indexes.is_empty().await
+	}
+
+	pub(crate) fn mappers(&self) -> &Mappers {
+		&self.0.mappers
 	}
 }

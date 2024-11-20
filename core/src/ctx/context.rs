@@ -13,7 +13,7 @@ use crate::kvs::cache::ds::Cache;
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::sql::value::Value;
-use channel::Sender;
+use async_channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};

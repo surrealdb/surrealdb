@@ -58,7 +58,7 @@ impl Parser<'_> {
 			(limit, start)
 		};
 		let fetch = self.try_parse_fetch(stk).await?;
-		let version = self.try_parse_version()?;
+		let version = self.try_parse_version(stk).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		let tempfiles = self.eat(t!("TEMPFILES"));
@@ -231,11 +231,14 @@ impl Parser<'_> {
 		Ok(Some(Start(value)))
 	}
 
-	pub(crate) fn try_parse_version(&mut self) -> ParseResult<Option<Version>> {
+	pub(crate) async fn try_parse_version(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<Option<Version>> {
 		if !self.eat(t!("VERSION")) {
 			return Ok(None);
 		}
-		let time = self.next_token_value()?;
+		let time = self.parse_value_inherit(ctx).await?;
 		Ok(Some(Version(time)))
 	}
 }

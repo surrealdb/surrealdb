@@ -715,3 +715,19 @@ async fn script_geometry_into() -> Result<(), Error> {
 	dbs.execute(sql, &ses, None).await?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn script_parallel_query() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			await Promise.all([
+				surrealdb.query("1")
+				surrealdb.query("1")
+			])
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	dbs.execute(sql, &ses, None).await?;
+	Ok(())
+}

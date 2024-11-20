@@ -2,8 +2,8 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		part::DestructurePart, Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables,
-		Value,
+		part::{DestructurePart, Recurse},
+		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value,
 	},
 	syn::{
 		error::bail,
@@ -272,9 +272,13 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::All
 			}
+			t!("@") => {
+				self.pop_peek();
+				Part::RepeatRecurse
+			}
 			t!("{") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_destructure_part(ctx)).await?
+				ctx.run(|ctx| self.parse_curly_part(ctx)).await?
 			}
 			_ => {
 				let ident: Ident = self.next_token_value()?;
@@ -296,6 +300,13 @@ impl Parser<'_> {
 		Ok(Part::Method(name.0, args))
 	}
 	/// Parse the part after the `.{` in an idiom
+	pub(super) async fn parse_curly_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
+		match self.peek_kind() {
+			t!("*") | t!("..") | TokenKind::Digits => self.parse_recurse_part(ctx).await,
+			_ => self.parse_destructure_part(ctx).await,
+		}
+	}
+	/// Parse a destructure part, expects `.{` to already be parsed
 	pub(super) async fn parse_destructure_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
 		let mut destructured: Vec<DestructurePart> = Vec::new();
@@ -309,7 +320,38 @@ impl Parser<'_> {
 			let part = match self.peek_kind() {
 				t!(":") => {
 					self.pop_peek();
-					DestructurePart::Aliased(field, self.parse_local_idiom(ctx).await?)
+					let start = match self.peek_kind() {
+						x if Parser::kind_is_identifier(x) => Part::Field(self.next_token_value()?),
+						t!("->") => {
+							self.pop_peek();
+							let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
+							Part::Graph(graph)
+						}
+						found @ t!("<") => match self.peek_whitespace1().kind {
+							t!("-") => {
+								self.pop_peek();
+								self.pop_peek();
+								let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
+								Part::Graph(graph)
+							}
+							t!("->") => {
+								self.pop_peek();
+								self.pop_peek();
+								let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
+								Part::Graph(graph)
+							}
+							_ => {
+								bail!("Unexpected token `{}` expected an identifier, `->`, `<-` or `<->`", found, @self.recent_span());
+							}
+						},
+						found => {
+							bail!("Unexpected token `{}` expected an identifier, `->`, `<-` or `<->`", found, @self.recent_span());
+						}
+					};
+					DestructurePart::Aliased(
+						field,
+						self.parse_remaining_idiom(ctx, vec![start]).await?,
+					)
 				}
 				t!(".") => {
 					self.pop_peek();
@@ -335,6 +377,51 @@ impl Parser<'_> {
 		}
 
 		Ok(Part::Destructure(destructured))
+	}
+	/// Parse the inner part of a recurse, expects a valid recurse value in the current position
+	pub(super) fn parse_recurse_inner(&mut self) -> ParseResult<Recurse> {
+		let min = if matches!(self.peek().kind, TokenKind::Digits) {
+			Some(self.next_token_value::<u32>()?)
+		} else {
+			None
+		};
+
+		match (self.eat_whitespace(t!("..")), min) {
+			(true, _) => (),
+			(false, Some(v)) => {
+				return Ok(Recurse::Fixed(v));
+			}
+			_ => {
+				let found = self.next().kind;
+				bail!("Unexpected token `{}` expected an integer or ..", found, @self.last_span());
+			}
+		}
+
+		// parse ending id.
+		let max = if matches!(self.peek_whitespace().kind, TokenKind::Digits) {
+			Some(self.next_token_value::<u32>()?)
+		} else {
+			None
+		};
+
+		Ok(Recurse::Range(min, max))
+	}
+	/// Parse a recurse part, expects `.{` to already be parsed
+	pub(super) async fn parse_recurse_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
+		let start = self.last_span();
+		let recurse = self.parse_recurse_inner()?;
+		self.expect_closing_delimiter(t!("}"), start)?;
+
+		let nest = if self.eat(t!("(")) {
+			let start = self.last_span();
+			let idiom = self.parse_remaining_idiom(ctx, vec![]).await?;
+			self.expect_closing_delimiter(t!(")"), start)?;
+			Some(idiom)
+		} else {
+			None
+		};
+
+		Ok(Part::Recurse(recurse, nest))
 	}
 	/// Parse the part after the `[` in a idiom
 	pub(super) async fn parse_bracket_part(

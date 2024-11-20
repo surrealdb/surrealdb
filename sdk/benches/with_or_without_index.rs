@@ -29,6 +29,8 @@ fn bench_with_or_without_index(c: &mut Criterion) {
 	});
 
 	group.finish();
+
+	rt.block_on(async { drop(i) });
 }
 
 struct Input {

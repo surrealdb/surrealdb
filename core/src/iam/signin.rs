@@ -208,7 +208,15 @@ pub async fn db_access(
 									}
 								}
 								Err(e) => match e {
+									// If the SIGNIN clause throws a specific error, authentication fails with that error
 									Error::Thrown(_) => Err(e),
+									// If the SIGNIN clause failed due to an unexpected error, be more specific
+									// This allows clients to handle these errors, which may be retryable
+									Error::Tx(_) | Error::TxFailure => {
+										debug!("Unexpected error found while executing a SIGNIN clause: {e}");
+										Err(Error::UnexpectedAuth)
+									}
+									// Otherwise, return a generic error unless it should be forwarded
 									e => {
 										debug!("Record user signin query failed: {e}");
 										if *INSECURE_FORWARD_ACCESS_ERRORS {
@@ -317,7 +325,7 @@ pub async fn db_access(
 						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								roles.iter().map(Role::from).collect(),
+								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
 								Level::Database(ns, db),
 							)));
 						}
@@ -377,7 +385,7 @@ pub async fn db_user(
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
+			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -506,7 +514,7 @@ pub async fn ns_access(
 						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								roles.iter().map(Role::from).collect(),
+								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
 								Level::Namespace(ns),
 							)));
 						}
@@ -557,7 +565,7 @@ pub async fn ns_user(
 			session.tk = Some((&val).into());
 			session.ns = Some(ns.to_owned());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
+			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -602,7 +610,7 @@ pub async fn root_user(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Root).into());
+			session.au = Arc::new((&u, Level::Root).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -727,7 +735,7 @@ pub async fn root_access(
 						access::Subject::User(user) => {
 							session.au = Arc::new(Auth::new(Actor::new(
 								user.to_string(),
-								roles.iter().map(Role::from).collect(),
+								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
 								Level::Root,
 							)));
 						}
@@ -948,6 +956,86 @@ mod tests {
 			.await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
+		}
+
+		// Test SIGNIN failing due to datastore transaction conflict
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN {
+					    UPSERT count:1 SET count += 1; -- Concurrently write to the same document
+					    SLEEP(2s); -- Increase the duration of the transaction
+						RETURN (SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass))
+					}
+					SIGNUP (
+						CREATE user CONTENT {
+							name: $user,
+							pass: crypto::argon2::generate($pass)
+						}
+					)
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:test CONTENT {
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Sign in with the user twice at the same time
+			let mut sess1 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut sess2 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("user", "user".into());
+			vars.insert("pass", "pass".into());
+
+			let (res1, res2) = tokio::join!(
+				db_access(
+					&ds,
+					&mut sess1,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.clone().into(),
+				),
+				db_access(
+					&ds,
+					&mut sess2,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.into(),
+				)
+			);
+
+			match (res1, res2) {
+				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
+				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
+				(Err(e1), Ok(_)) => match &e1 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
+				(Ok(_), Err(e2)) => match &e2 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
+			}
 		}
 	}
 
@@ -1586,6 +1674,78 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected authentication to generally fail, but instead received: {:?}",
 					res
 				),
+			}
+		}
+		// Test AUTHENTICATE failing due to datastore transaction conflict
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+					   SELECT * FROM type::thing('user', $id)
+					)
+					AUTHENTICATE {
+					   UPSERT count:1 SET count += 1; -- Concurrently write to the same document
+					   SLEEP(2s); -- Increase the duration of the transaction
+					   $auth.id -- Continue with authentication
+					}
+					DURATION FOR SESSION 2h
+				;
+
+				CREATE user:1;
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Sign in with the user twice at the same time
+			let mut sess1 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut sess2 = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("id", 1.into());
+
+			let (res1, res2) = tokio::join!(
+				db_access(
+					&ds,
+					&mut sess1,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.clone().into(),
+				),
+				db_access(
+					&ds,
+					&mut sess2,
+					"test".to_string(),
+					"test".to_string(),
+					"user".to_string(),
+					vars.into(),
+				)
+			);
+
+			match (res1, res2) {
+				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
+				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
+				(Err(e1), Ok(_)) => match &e1 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
+				(Ok(_), Err(e2)) => match &e2 {
+						Error::UnexpectedAuth => {} // ok
+						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				}
 			}
 		}
 	}
@@ -3433,6 +3593,104 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected a generic authentication error, but instead received: {:?}",
 					res
 				),
+			}
+		}
+	}
+
+	#[tokio::test]
+	async fn test_signin_nonexistent_role() {
+		use crate::iam::Error as IamError;
+		use crate::sql::{
+			statements::{define::DefineStatement, DefineUserStatement},
+			user::UserDuration,
+			Base, Statement,
+		};
+		let test_levels = vec![
+			TestLevel {
+				level: "ROOT",
+				ns: None,
+				db: None,
+			},
+			TestLevel {
+				level: "NS",
+				ns: Some("test"),
+				db: None,
+			},
+			TestLevel {
+				level: "DB",
+				ns: Some("test"),
+				db: Some("test"),
+			},
+		];
+
+		for level in &test_levels {
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+
+			let base = match level.level {
+				"ROOT" => Base::Root,
+				"NS" => Base::Ns,
+				"DB" => Base::Db,
+				_ => panic!("Unsupported level"),
+			};
+
+			let user = DefineUserStatement {
+				base,
+				name: "user".into(),
+				// This is the Argon2id hash for "pass" with a random salt.
+				hash: "$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
+					.to_string(),
+				code: "dummy".to_string(),
+				roles: vec!["nonexistent".into()],
+				duration: UserDuration::default(),
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			};
+
+			// Use pre-parsed definition, which bypasses the existent role check during parsing.
+			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, None)
+				.await
+				.unwrap();
+
+			let mut sess = Session {
+				ns: level.ns.map(String::from),
+				db: level.db.map(String::from),
+				..Default::default()
+			};
+
+			// Sign in using the newly defined user.
+			let res = match level.level {
+				"ROOT" => root_user(&ds, &mut sess, "user".to_string(), "pass".to_string()).await,
+				"NS" => {
+					ns_user(
+						&ds,
+						&mut sess,
+						level.ns.unwrap().to_string(),
+						"user".to_string(),
+						"pass".to_string(),
+					)
+					.await
+				}
+				"DB" => {
+					db_user(
+						&ds,
+						&mut sess,
+						level.ns.unwrap().to_string(),
+						level.db.unwrap().to_string(),
+						"user".to_string(),
+						"pass".to_string(),
+					)
+					.await
+				}
+				_ => panic!("Unsupported level"),
+			};
+
+			match res {
+				Err(Error::IamError(IamError::InvalidRole(_))) => {} // ok
+				res => {
+					panic!("Expected an invalid role IAM error, but instead received: {:?}", res)
+				}
 			}
 		}
 	}

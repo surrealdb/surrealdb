@@ -6,10 +6,10 @@ use crate::fnc::script::{
 		classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
 		RequestError,
 	},
-	modules::surrealdb::query::{QueryContext, QUERY_DATA_PROP_NAME},
+	modules::surrealdb::query::QueryContext,
 };
 use futures::TryStreamExt;
-use js::{class::OwnedBorrow, function::Opt, Class, Ctx, Exception, Result, Value};
+use js::{function::Opt, Class, Ctx, Exception, Result, Value};
 use reqwest::{
 	header::{HeaderValue, CONTENT_TYPE},
 	redirect, Body as ReqBody,
@@ -31,9 +31,7 @@ pub async fn fetch<'js>(
 	let url = js_req.url;
 
 	// Check if the url is allowed to be fetched.
-	if ctx.globals().contains_key(QUERY_DATA_PROP_NAME)? {
-		let query_ctx =
-			ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
+	if let Some(query_ctx) = ctx.userdata::<QueryContext<'js>>() {
 		query_ctx
 			.context
 			.check_allowed_net(&url)

@@ -5,7 +5,7 @@ use crate::iam::{Action, Auth, ResourceKind, Role};
 use crate::sql::{
 	statements::define::DefineIndexStatement, statements::define::DefineTableStatement, Base,
 };
-use channel::Sender;
+use async_channel::Sender;
 use std::sync::Arc;
 use uuid::Uuid;
 

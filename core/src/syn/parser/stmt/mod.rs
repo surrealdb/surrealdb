@@ -147,7 +147,7 @@ impl Parser<'_> {
 			}
 			t!("INFO") => {
 				self.pop_peek();
-				self.parse_info_stmt().map(Statement::Info)
+				ctx.run(|ctx| self.parse_info_stmt(ctx)).await.map(Statement::Info)
 			}
 			t!("INSERT") => {
 				self.pop_peek();
@@ -587,7 +587,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `INFO` to already be consumed.
-	pub(super) fn parse_info_stmt(&mut self) -> ParseResult<InfoStatement> {
+	pub(super) async fn parse_info_stmt(&mut self, stk: &mut Stk) -> ParseResult<InfoStatement> {
 		expected!(self, t!("FOR"));
 		let next = self.next();
 		let mut stmt = match next.kind {
@@ -613,7 +613,7 @@ impl Parser<'_> {
 			_ => unexpected!(self, next, "an info target"),
 		};
 
-		if let Some(version) = self.try_parse_version()? {
+		if let Some(version) = self.try_parse_version(stk).await? {
 			stmt = stmt.versionize(version);
 		}
 

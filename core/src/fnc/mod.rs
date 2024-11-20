@@ -305,8 +305,14 @@ pub fn synchronous(
 		"string::trim" => string::trim,
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
+		//
+		"string::distance::damerau_levenshtein" => string::distance::damerau_levenshtein,
 		"string::distance::hamming" => string::distance::hamming,
 		"string::distance::levenshtein" => string::distance::levenshtein,
+		"string::distance::normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein,
+		"string::distance::normalized_levenshtein" => string::distance::normalized_levenshtein,
+		"string::distance::osa_distance" => string::distance::osa_distance,
+		//
 		"string::html::encode" => string::html::encode,
 		"string::html::sanitize" => string::html::sanitize,
 		"string::is::alphanum" => string::is::alphanum,
@@ -327,9 +333,13 @@ pub fn synchronous(
 		"string::is::ulid" => string::is::ulid,
 		"string::is::uuid" => string::is::uuid,
 		"string::is::record" => string::is::record,
+		//
 		"string::similarity::fuzzy" => string::similarity::fuzzy,
 		"string::similarity::jaro" => string::similarity::jaro,
+		"string::similarity::jaro_winkler" => string::similarity::jaro_winkler,
 		"string::similarity::smithwaterman" => string::similarity::smithwaterman,
+		"string::similarity::sorensen_dice" => string::similarity::sorensen_dice,
+		//
 		"string::semver::compare" => string::semver::compare,
 		"string::semver::major" => string::semver::major,
 		"string::semver::minor" => string::semver::minor,
@@ -452,7 +462,7 @@ pub async fn asynchronous(
 	#[cfg(not(target_arch = "wasm32"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> executor::Task<R> {
+	) -> impl FnOnce() -> async_executor::Task<R> {
 		|| crate::exe::spawn(async move { function() })
 	}
 
@@ -729,8 +739,11 @@ pub async fn idiom(
 				"trim" => string::trim,
 				"uppercase" => string::uppercase,
 				"words" => string::words,
+				"distance_damerau_levenshtein" => string::distance::damerau_levenshtein,
 				"distance_hamming" => string::distance::hamming,
 				"distance_levenshtein" => string::distance::levenshtein,
+				"distance_normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein,
+				"distance_normalized_levenshtein" => string::distance::normalized_levenshtein,
 				"html_encode" => string::html::encode,
 				"html_sanitize" => string::html::sanitize,
 				"is_alphanum" => string::is::alphanum,
@@ -753,7 +766,9 @@ pub async fn idiom(
 				"is_record" => string::is::record,
 				"similarity_fuzzy" => string::similarity::fuzzy,
 				"similarity_jaro" => string::similarity::jaro,
+				"similarity_jaro_winkler" => string::similarity::jaro_winkler,
 				"similarity_smithwaterman" => string::similarity::smithwaterman,
+				"similarity_sorensen_dice" => string::similarity::sorensen_dice,
 				"semver_compare" => string::semver::compare,
 				"semver_major" => string::semver::major,
 				"semver_minor" => string::semver::minor,

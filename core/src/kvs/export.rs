@@ -7,7 +7,7 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::Value;
-use channel::Sender;
+use async_channel::Sender;
 use chrono::prelude::Utc;
 use chrono::TimeZone;
 
@@ -20,6 +20,7 @@ pub struct Config {
 	pub analyzers: bool,
 	pub tables: TableConfig,
 	pub versions: bool,
+	pub records: bool,
 }
 
 impl Default for Config {
@@ -32,6 +33,70 @@ impl Default for Config {
 			analyzers: true,
 			tables: TableConfig::default(),
 			versions: false,
+			records: true,
+		}
+	}
+}
+
+impl From<Config> for Value {
+	fn from(config: Config) -> Value {
+		let obj = map!(
+			"users" => config.users.into(),
+			"accesses" => config.accesses.into(),
+			"params" => config.params.into(),
+			"functions" => config.functions.into(),
+			"analyzers" => config.analyzers.into(),
+			"versions" => config.versions.into(),
+			"tables" => match config.tables {
+				TableConfig::All => true.into(),
+				TableConfig::None => false.into(),
+				TableConfig::Some(v) => v.into()
+			}
+		);
+
+		obj.into()
+	}
+}
+
+impl TryFrom<&Value> for Config {
+	type Error = Error;
+	fn try_from(value: &Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Object(obj) => {
+				let mut config = Config::default();
+
+				macro_rules! bool_prop {
+					($prop:ident) => {{
+						match obj.get(stringify!($prop)) {
+							Some(Value::Bool(v)) => {
+								config.$prop = v.to_owned();
+							}
+							Some(v) => {
+								return Err(Error::InvalidExportConfig(
+									v.to_owned(),
+									"a bool".into(),
+								))
+							}
+							_ => (),
+						}
+					}};
+				}
+
+				bool_prop!(users);
+				bool_prop!(accesses);
+				bool_prop!(params);
+				bool_prop!(functions);
+				bool_prop!(analyzers);
+				bool_prop!(versions);
+				bool_prop!(records);
+
+				if let Some(v) = obj.get("tables") {
+					config.tables = v.try_into()?;
+				}
+
+				Ok(config)
+			}
+			v => Err(Error::InvalidExportConfig(v.to_owned(), "an object".into())),
 		}
 	}
 }
@@ -42,6 +107,53 @@ pub enum TableConfig {
 	All,
 	None,
 	Some(Vec<String>),
+}
+
+impl From<bool> for TableConfig {
+	fn from(value: bool) -> Self {
+		match value {
+			true => TableConfig::All,
+			false => TableConfig::None,
+		}
+	}
+}
+
+impl From<Vec<String>> for TableConfig {
+	fn from(value: Vec<String>) -> Self {
+		TableConfig::Some(value)
+	}
+}
+
+impl From<Vec<&str>> for TableConfig {
+	fn from(value: Vec<&str>) -> Self {
+		TableConfig::Some(value.into_iter().map(ToOwned::to_owned).collect())
+	}
+}
+
+impl TryFrom<&Value> for TableConfig {
+	type Error = Error;
+	fn try_from(value: &Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Bool(b) => match b {
+				true => Ok(TableConfig::All),
+				false => Ok(TableConfig::None),
+			},
+			Value::None | Value::Null => Ok(TableConfig::None),
+			Value::Array(v) => v
+				.iter()
+				.cloned()
+				.map(|v| match v {
+					Value::Strand(str) => Ok(str.0),
+					v => Err(Error::InvalidExportConfig(v.to_owned(), "a string".into())),
+				})
+				.collect::<Result<Vec<String>, Error>>()
+				.map(TableConfig::Some),
+			v => Err(Error::InvalidExportConfig(
+				v.to_owned(),
+				"a bool, none, null or array<string>".into(),
+			)),
+		}
+	}
 }
 
 impl TableConfig {
@@ -83,7 +195,7 @@ impl Transaction {
 		db: &str,
 	) -> Result<(), Error> {
 		// Output OPTIONS
-		self.export_section("OPTION", vec!["OPTION IMPORT;"], chn).await?;
+		self.export_section("OPTION", vec!["OPTION IMPORT"], chn).await?;
 
 		// Output USERS
 		if cfg.users {
@@ -159,7 +271,10 @@ impl Transaction {
 			}
 
 			self.export_table_structure(ns, db, table, chn).await?;
-			self.export_table_data(ns, db, table, cfg, chn).await?;
+
+			if cfg.records {
+				self.export_table_data(ns, db, table, cfg, chn).await?;
+			}
 		}
 
 		Ok(())

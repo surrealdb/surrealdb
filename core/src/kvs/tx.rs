@@ -848,7 +848,7 @@ impl Transaction {
 		.try_into_lvs()
 	}
 
-	/// Retrieve a specific namespace definition.
+	/// Retrieve a specific node in the cluster.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_node(&self, id: Uuid) -> Result<Arc<Node>, Error> {
 		let qey = cache::tx::Lookup::Nd(id);
