@@ -5,6 +5,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::{Check, Key, Val, Version};
 use std::fmt::Debug;
 use std::ops::Range;
+use surrealkv::Mode;
 use surrealkv::Options;
 use surrealkv::Store;
 use surrealkv::Transaction as Tx;
@@ -88,7 +89,12 @@ impl Datastore {
 		#[cfg(debug_assertions)]
 		let check = Check::Panic;
 		// Create a new transaction
-		match self.db.begin() {
+		let txn = match write {
+			true => self.db.begin_with_mode(Mode::ReadWrite),
+			false => self.db.begin_with_mode(Mode::ReadOnly),
+		};
+		// Return the new transaction
+		match txn {
 			Ok(inner) => Ok(Transaction {
 				done: false,
 				check,

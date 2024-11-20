@@ -932,3 +932,143 @@ async fn idiom_recursion_limits() -> Result<(), Error> {
 		)?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn idiom_object_dot_star() -> Result<(), Error> {
+	let sql = r#"
+		{ a: 1, b: 2 }.*;
+
+		DEFINE FIELD obj ON test TYPE object;
+		DEFINE FIELD obj.* ON test TYPE number;
+		CREATE test:1 SET obj.a = 'a';
+
+		--------
+
+		DEFINE FIELD emails.address ON TABLE user TYPE string;
+		-- Previously `emails.*` would be considered the same as `emails`
+		-- Resulting in two conflicting types for the same field. But now 
+		-- `emails.*`, for objects, targets all values when `emails` is an object
+		-- and all entries when `emails` is an array.
+		DEFINE FIELD emails.*.address ON TABLE user TYPE option<number>;
+		DEFINE FIELD tags.*.value ON TABLE user TYPE option<string>;
+
+		CREATE user:1 SET emails.address = 9;
+		CREATE user:2 SET emails.address = "me@me.com";
+		create user:3 set tags = [{ value: 'bla' }], emails.address = "me@me.com";
+
+		--------
+
+		create only person:tobie set name = 'tobie';
+
+		select * from ONLY person:tobie;
+
+		select * from ONLY person:tobie.*;   -- this
+		select * from ONLY (person:tobie.*); -- does this
+		(select * from ONLY person:tobie).*; -- not this
+
+		select * from ONLY { id: person:tobie, name: 'tobie' };
+		select * from { id: person:tobie, name: 'tobie' }.*;
+		select * from person:tobie, 'tobie';
+		return person:tobie;
+		return person:tobie.*;
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("[1, 2]")?
+		.expect_val("NONE")?
+		.expect_val("NONE")?
+		.expect_error("Found 'a' for field `obj[*]`, with record `test:1`, but expected a number")?
+		.expect_val("NONE")?
+		.expect_val("NONE")?
+		.expect_val("NONE")?
+		.expect_error(
+			"Found 9 for field `emails.address`, with record `user:1`, but expected a string",
+		)?
+		.expect_val(
+			"[
+			{
+				emails: {
+					address: 'me@me.com'
+				},
+				id: user:2
+			}
+		]",
+		)?
+		.expect_val(
+			"[
+			{
+				emails: {
+					address: 'me@me.com'
+				},
+				id: user:3,
+				tags: [
+					{
+						value: 'bla'
+					}
+				]
+			}
+		]",
+		)?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?
+		.expect_val(
+			"[
+			person:tobie,
+			'tobie'
+		]",
+		)?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?
+		.expect_val(
+			"[
+			{
+				id: person:tobie,
+				name: 'tobie'
+			},
+			'tobie'
+		]",
+		)?
+		.expect_val(
+			"[
+			{
+				id: person:tobie,
+				name: 'tobie'
+			},
+			'tobie'
+		]",
+		)?
+		.expect_val("person:tobie")?
+		.expect_val(
+			"{
+			id: person:tobie,
+			name: 'tobie'
+		}",
+		)?;
+	Ok(())
+}
