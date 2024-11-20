@@ -932,3 +932,24 @@ async fn idiom_recursion_limits() -> Result<(), Error> {
 		)?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn idiom_object_dot_star() -> Result<(), Error> {
+	let sql = r#"
+		{ a: 1, b: 2 }.*;
+
+		DEFINE FIELD obj ON test TYPE object;
+		DEFINE FIELD obj.* ON test TYPE number;
+		CREATE test:1 SET obj.a = 'a';
+
+		(1, 2).*;
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("[1, 2]")?
+		.expect_val("NONE")?
+		.expect_val("NONE")?
+		.expect_error("Found 'a' for field `obj[*]`, with record `test:1`, but expected a number")?
+		.expect_val("[[1f, 2f], 'Point']")?;
+	Ok(())
+}
