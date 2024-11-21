@@ -272,7 +272,7 @@ async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await?;
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -282,15 +282,15 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	// Send LET command
 	socket.send_request("let", json!(["let_var", "let_value",])).await?;
 	// Verify the variable is set
-	let res = socket.send_message_query("SELECT * FROM $let_var").await?;
-	assert_eq!(res[0]["result"], json!(["let_value"]), "result: {res:?}");
+	let res = socket.send_message_query("RETURN $let_var").await?;
+	assert_eq!(res[0]["result"], json!("let_value"), "result: {res:?}");
 	// Send UNSET command
-	socket.send_request("unset", json!(["let_var",])).await?;
+	socket.send_request("unset", json!(["let_var"])).await?;
 	// Verify the variable is unset
-	let res = socket.send_message_query("SELECT * FROM $let_var").await?;
-	assert_eq!(res[0]["result"], json!([null]), "result: {res:?}");
+	let res = socket.send_message_query("RETURN $let_var").await?;
+	assert_eq!(res[0]["result"], json!(null), "result: {res:?}");
 	// Test passed
-	server.finish().unwrap();
+	server.finish()?;
 	Ok(())
 }
 

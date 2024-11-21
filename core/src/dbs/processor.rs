@@ -416,7 +416,7 @@ pub(super) trait Collector {
 			match iterable {
 				Iterable::Value(v) => {
 					if v.is_some() {
-						self.collect(Collected::Value(v)).await?
+						return self.collect(Collected::Value(v)).await;
 					}
 				}
 				Iterable::Yield(v) => self.collect(Collected::Yield(v)).await?,
