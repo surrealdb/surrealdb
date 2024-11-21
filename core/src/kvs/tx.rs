@@ -188,6 +188,47 @@ impl Transaction {
 		self.lock().await.delp(key).await
 	}
 
+	/// Delete all versions of a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn clr<K>(&self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.clr(key).await
+	}
+
+	/// Delete all versions of a key from the datastore if the current value matches a condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn clrc<K, V>(&self, key: K, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
+	{
+		self.lock().await.clrc(key, chk).await
+	}
+
+	/// Delete all versions of a range of keys from the datastore.
+	///
+	/// This function deletes entries from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn clrr<K>(&self, rng: Range<K>) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.clrr(rng).await
+	}
+
+	/// Delete all versions of a prefix of keys from the datastore.
+	///
+	/// This function deletes entries from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn clrp<K>(&self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.clrp(key).await
+	}
+
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn set<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<(), Error>

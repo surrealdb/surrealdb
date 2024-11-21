@@ -34,10 +34,16 @@ impl RemoveDatabaseStatement {
 			let db = txn.get_db(opt.ns()?, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::namespace::db::new(opt.ns()?, &db.name);
-			txn.del(key).await?;
+			match self.expunge {
+				true => txn.clr(key).await?,
+				false => txn.del(key).await?,
+			};
 			// Delete the resource data
 			let key = crate::key::database::all::new(opt.ns()?, &db.name);
-			txn.delp(key).await?;
+			match self.expunge {
+				true => txn.clrp(key).await?,
+				false => txn.delp(key).await?,
+			};
 			// Clear the cache
 			txn.clear();
 			// Ok all good

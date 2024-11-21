@@ -57,16 +57,6 @@ pub trait Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug;
 
-	/// Insert or replace a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
-	where
-		K: Into<Key> + Sprintable + Debug,
-		V: Into<Val> + Debug,
-	{
-		self.set(key, val, None).await
-	}
-
 	/// Insert or update a key in the datastore.
 	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
@@ -130,6 +120,35 @@ pub trait Transaction {
 	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
+
+	/// Insert or replace a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
+	{
+		self.set(key, val, None).await
+	}
+
+	/// Delete all versions of a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn clr<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		self.del(key).await
+	}
+
+	/// Delete all versions of a key from the datastore if the current value matches a condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn clrc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
+	{
+		self.delc(key, chk).await
+	}
 
 	/// Fetch many keys from the datastore.
 	///
@@ -251,6 +270,58 @@ pub trait Transaction {
 			next = res.next;
 			for (k, _) in res.values.into_iter() {
 				self.del(k).await?;
+			}
+		}
+		Ok(())
+	}
+
+	/// Delete all versions of a range of prefixed keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn clrp<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TxReadonly);
+		}
+		// Continue with function logic
+		let beg: Key = key.into();
+		let end: Key = beg.clone().add(0xff);
+		self.clrr(beg..end).await
+	}
+
+	/// Delete all versions of a range of keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn clrr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TxReadonly);
+		}
+		// Continue with function logic
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let mut next = Some(beg..end);
+		while let Some(rng) = next {
+			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false, None).await?;
+			next = res.next;
+			for (k, _) in res.values.into_iter() {
+				self.clr(k).await?;
 			}
 		}
 		Ok(())
