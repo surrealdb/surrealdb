@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 #[non_exhaustive]
-pub enum Entry {
+pub(crate) enum Entry {
 	/// A slice of DefineEventStatement specified on a table.
 	Evs(Arc<[DefineEventStatement]>),
 	/// A slice of DefineFieldStatement specified on a table.

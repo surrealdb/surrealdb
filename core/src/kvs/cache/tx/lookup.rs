@@ -4,7 +4,7 @@ use quick_cache::Equivalent;
 use uuid::Uuid;
 
 #[derive(Hash, Eq, PartialEq)]
-pub enum Lookup<'a> {
+pub(crate) enum Lookup<'a> {
 	/// A cache key for nodes
 	Nds,
 	/// A cache key for root users

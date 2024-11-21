@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 #[non_exhaustive]
-pub enum Entry {
+pub(crate) enum Entry {
 	/// A cached entry of any type
 	Any(Arc<dyn Any + Send + Sync>),
 	/// A cached record document content
