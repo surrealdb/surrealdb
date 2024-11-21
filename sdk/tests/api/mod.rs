@@ -1223,17 +1223,17 @@ async fn changefeed() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	// Enable change feeds
 	let sql = "
-	DEFINE TABLE testuser CHANGEFEED 1h;
+	DEFINE TABLE user CHANGEFEED 1h;
 	";
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
-	// Create and update testusers
+	// Create and update users
 	let sql = "
-        CREATE testuser:amos SET name = 'Amos';
-        CREATE testuser:jane SET name = 'Jane';
-        UPDATE testuser:amos SET name = 'AMOS';
+        CREATE user:amos SET name = 'Amos';
+        CREATE user:jane SET name = 'Jane';
+        UPDATE user:amos SET name = 'AMOS';
     ";
-	let table = "testuser";
+	let table = "user";
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
 	let users: Vec<RecordBuf> = db
@@ -1245,11 +1245,11 @@ async fn changefeed() {
 		.unwrap();
 	let expected = &[
 		RecordBuf {
-			id: "testuser:amos".parse().unwrap(),
+			id: "user:amos".parse().unwrap(),
 			name: "Doe".to_owned(),
 		},
 		RecordBuf {
-			id: "testuser:jane".parse().unwrap(),
+			id: "user:jane".parse().unwrap(),
 			name: "Doe".to_owned(),
 		},
 	];
@@ -1257,7 +1257,7 @@ async fn changefeed() {
 	let users: Vec<RecordBuf> = db.select(table).await.unwrap();
 	assert_eq!(users, expected);
 	let sql = "
-        SHOW CHANGES FOR TABLE testuser SINCE 0 LIMIT 10;
+        SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
     ";
 	let mut response = db.query(sql).await.unwrap();
 	drop(permit);
@@ -1280,14 +1280,14 @@ async fn changefeed() {
 		"[
 		{
 			define_table: {
-				name: 'testuser'
+				name: 'user'
 			}
 		}
 	]"
 		.parse()
 		.unwrap()
 	);
-	// UPDATE testuser:amos
+	// UPDATE user:amos
 	let a = array.get(1).unwrap();
 	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
@@ -1303,7 +1303,7 @@ async fn changefeed() {
 				r#"[
 				 {
 					  create: {
-						  id: testuser:amos,
+						  id: user:amos,
 						  name: 'Amos'
 					  }
 				 }
@@ -1318,7 +1318,7 @@ async fn changefeed() {
 				r#"[
 				 {
 					  update: {
-						  id: testuser:amos,
+						  id: user:amos,
 						  name: 'Amos'
 					  }
 				 }
@@ -1328,7 +1328,7 @@ async fn changefeed() {
 			);
 		}
 	}
-	// UPDATE testuser:jane
+	// UPDATE user:jane
 	let a = array.get(2).unwrap();
 	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
@@ -1345,7 +1345,7 @@ async fn changefeed() {
 				"[
 					{
 						 create: {
-							 id: testuser:jane,
+							 id: user:jane,
 							 name: 'Jane'
 						 }
 					}
@@ -1360,7 +1360,7 @@ async fn changefeed() {
 				"[
 					{
 						 update: {
-							 id: testuser:jane,
+							 id: user:jane,
 							 name: 'Jane'
 						 }
 					}
@@ -1370,7 +1370,7 @@ async fn changefeed() {
 			);
 		}
 	}
-	// UPDATE testuser:amos
+	// UPDATE user:amos
 	let a = array.get(3).unwrap();
 	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
@@ -1387,7 +1387,7 @@ async fn changefeed() {
 				"[
 					{
 						create: {
-							id: testuser:amos,
+							id: user:amos,
 							name: 'AMOS'
 						}
 					}
@@ -1402,7 +1402,7 @@ async fn changefeed() {
 				"[
 					{
 						update: {
-							id: testuser:amos,
+							id: user:amos,
 							name: 'AMOS'
 						}
 					}
@@ -1427,13 +1427,13 @@ async fn changefeed() {
 		"[
 		{
 			update: {
-				id: testuser:amos,
+				id: user:amos,
 				name: 'Doe'
 			}
 		},
 		{
 			update: {
-				id: testuser:jane,
+				id: user:jane,
 				name: 'Doe'
 			}
 		}
