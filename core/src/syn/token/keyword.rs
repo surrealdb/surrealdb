@@ -82,6 +82,7 @@ keyword! {
 	Exists => "EXISTS",
 	Expired => "EXPIRED",
 	Explain => "EXPLAIN",
+	Expunge => "EXPUNGE",
 	ExtendCandidates => "EXTEND_CANDIDATES",
 	False => "false",
 	Fetch => "FETCH",

@@ -8,7 +8,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -16,6 +16,8 @@ pub struct RemoveDatabaseStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
 	pub if_exists: bool,
+	#[revision(start = 3)]
+	pub expunge: bool,
 }
 
 impl RemoveDatabaseStatement {
@@ -32,10 +34,16 @@ impl RemoveDatabaseStatement {
 			let db = txn.get_db(opt.ns()?, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::namespace::db::new(opt.ns()?, &db.name);
-			txn.del(key).await?;
+			match self.expunge {
+				true => txn.clr(key).await?,
+				false => txn.del(key).await?,
+			};
 			// Delete the resource data
 			let key = crate::key::database::all::new(opt.ns()?, &db.name);
-			txn.delp(key).await?;
+			match self.expunge {
+				true => txn.clrp(key).await?,
+				false => txn.delp(key).await?,
+			};
 			// Clear the cache
 			txn.clear();
 			// Ok all good

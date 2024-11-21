@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Auth;
 use crate::kvs::Live;
+use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
 use derive::Store;
@@ -112,14 +113,26 @@ impl LiveStatement {
 				let txn = ctx.tx();
 				// Ensure that the table definition exists
 				txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
-				// Lock the transaction
-				let mut txn = txn.lock().await;
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, id);
 				txn.put(key, lq, None).await?;
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
 				txn.put(key, stm, None).await?;
+				// Refresh the table cache for lives
+				let key = crate::key::database::tb::new(ns, db, &tb);
+				let tb = txn.get_tb(ns, db, &tb).await?;
+				txn.set(
+					key,
+					DefineTableStatement {
+						cache_lives_ts: uuid::Uuid::now_v7(),
+						..tb.as_ref().clone()
+					},
+					None,
+				)
+				.await?;
+				// Clear the cache
+				txn.clear();
 			}
 			v => {
 				return Err(Error::LiveStatement {

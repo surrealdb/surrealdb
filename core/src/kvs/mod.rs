@@ -14,7 +14,6 @@
 
 mod api;
 mod batch;
-mod cache;
 mod cf;
 mod clock;
 mod ds;
@@ -36,6 +35,8 @@ mod rocksdb;
 mod surrealcs;
 mod surrealkv;
 mod tikv;
+
+pub(crate) mod cache;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod index;

@@ -218,34 +218,34 @@ async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<(), Error> 
 	};
 	let sql = format!(
 		"
-		UPDATE wallet:1 CONTENT {{ value: 20.0, day: 1 }} RETURN NONE;
-		UPDATE wallet:2 CONTENT {{ value: 5.0, day: 1 }} RETURN NONE;
+		UPSERT wallet:1 CONTENT {{ value: 20.0dec, day: 1 }} RETURN NONE;
+		UPSERT wallet:2 CONTENT {{ value: 5.0dec, day: 1 }} RETURN NONE;
 		// 0
 		DEFINE TABLE wallet_agr AS SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 1
-		UPDATE wallet:1 CONTENT {{ value: 10.0, day: 1 }} RETURN NONE;
+		UPSERT wallet:1 CONTENT {{ value: 10.0dec, day: 1 }} RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 2
-		UPDATE wallet:2 CONTENT {{ value: 15.0, day: 1 }} RETURN NONE;
+		UPSERT wallet:2 CONTENT {{ value: 15.0dec, day: 1 }} RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 3
-		UPDATE wallet:3 CONTENT {{ value: 10.0, day: 2 }} RETURN NONE;
+		UPSERT wallet:3 CONTENT {{ value: 10.0dec, day: 2 }} RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 4
-		UPDATE wallet:4 CONTENT {{ value: 5.0, day: 2 }} RETURN NONE;
+		UPSERT wallet:4 CONTENT {{ value: 5.0dec, day: 2 }} RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 5
-		UPDATE wallet:2 SET value = 3.0 RETURN NONE;
+		UPSERT wallet:2 SET value = 3.0dec RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 6
-		UPDATE wallet:4 SET day = 3 RETURN NONE;
+		UPSERT wallet:4 SET day = 3 RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 7

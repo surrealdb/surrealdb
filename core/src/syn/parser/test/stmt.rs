@@ -1670,6 +1670,11 @@ fn parse_define_table() {
 			if_not_exists: false,
 			overwrite: false,
 			kind: TableType::Normal,
+			cache_fields_ts: uuid::Uuid::default(),
+			cache_events_ts: uuid::Uuid::default(),
+			cache_tables_ts: uuid::Uuid::default(),
+			cache_indexes_ts: uuid::Uuid::default(),
+			cache_lives_ts: uuid::Uuid::default(),
 		}))
 	);
 }
@@ -2546,6 +2551,7 @@ fn parse_remove() {
 		Statement::Remove(RemoveStatement::Namespace(RemoveNamespaceStatement {
 			name: Ident("ns".to_owned()),
 			if_exists: false,
+			expunge: false,
 		}))
 	);
 
@@ -2555,6 +2561,7 @@ fn parse_remove() {
 		Statement::Remove(RemoveStatement::Database(RemoveDatabaseStatement {
 			name: Ident("database".to_owned()),
 			if_exists: false,
+			expunge: false,
 		}))
 	);
 
@@ -2600,6 +2607,7 @@ fn parse_remove() {
 		Statement::Remove(RemoveStatement::Table(RemoveTableStatement {
 			name: Ident("foo".to_owned()),
 			if_exists: false,
+			expunge: false,
 		}))
 	);
 
