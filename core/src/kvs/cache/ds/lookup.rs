@@ -1,18 +1,19 @@
 use super::key::Key;
 use quick_cache::Equivalent;
+use uuid::Uuid;
 
 #[derive(Hash, Eq, PartialEq)]
 pub enum Lookup<'a> {
 	/// A cache key for events (on a table)
-	Evs(&'a str, &'a str, &'a str, u64),
+	Evs(&'a str, &'a str, &'a str, Uuid),
 	/// A cache key for fields (on a table)
-	Fds(&'a str, &'a str, &'a str, u64),
+	Fds(&'a str, &'a str, &'a str, Uuid),
 	/// A cache key for views (on a table)
-	Fts(&'a str, &'a str, &'a str, u64),
+	Fts(&'a str, &'a str, &'a str, Uuid),
 	/// A cache key for indexes (on a table)
-	Ixs(&'a str, &'a str, &'a str, u64),
+	Ixs(&'a str, &'a str, &'a str, Uuid),
 	/// A cache key for live queries (on a table)
-	Lvs(&'a str, &'a str, &'a str, u64),
+	Lvs(&'a str, &'a str, &'a str, Uuid),
 }
 
 impl<'a> Equivalent<Key> for Lookup<'a> {

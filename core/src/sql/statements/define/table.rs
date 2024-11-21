@@ -18,8 +18,8 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
-use std::ops::Add;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -43,19 +43,19 @@ pub struct DefineTableStatement {
 	pub overwrite: bool,
 	/// The last time that a DEFINE FIELD was added to this table
 	#[revision(start = 5)]
-	pub cache_fields_ts: u64,
+	pub cache_fields_ts: Uuid,
 	/// The last time that a DEFINE EVENT was added to this table
 	#[revision(start = 5)]
-	pub cache_events_ts: u64,
+	pub cache_events_ts: Uuid,
 	/// The last time that a DEFINE TABLE was added to this table
 	#[revision(start = 5)]
-	pub cache_tables_ts: u64,
+	pub cache_tables_ts: Uuid,
 	/// The last time that a DEFINE INDEX was added to this table
 	#[revision(start = 5)]
-	pub cache_indexes_ts: u64,
+	pub cache_indexes_ts: Uuid,
 	/// The last time that a LIVE query was added to this table
 	#[revision(start = 5)]
-	pub cache_lives_ts: u64,
+	pub cache_lives_ts: Uuid,
 }
 
 impl DefineTableStatement {
@@ -122,7 +122,7 @@ impl DefineTableStatement {
 				txn.set(
 					key,
 					DefineTableStatement {
-						cache_tables_ts: tb.cache_tables_ts.add(1),
+						cache_tables_ts: Uuid::now_v7(),
 						..tb.as_ref().clone()
 					},
 					None,
@@ -202,7 +202,7 @@ impl DefineTableStatement {
 				txn.set(
 					key,
 					DefineTableStatement {
-						cache_fields_ts: tb.cache_fields_ts.add(1),
+						cache_fields_ts: Uuid::now_v7(),
 						..tb.as_ref().clone()
 					},
 					None,

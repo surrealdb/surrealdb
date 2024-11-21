@@ -1,17 +1,18 @@
 use super::lookup::Lookup;
+use uuid::Uuid;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub(crate) enum Key {
 	/// A cache key for events (on a table)
-	Evs(String, String, String, u64),
+	Evs(String, String, String, Uuid),
 	/// A cache key for fieds (on a table)
-	Fds(String, String, String, u64),
+	Fds(String, String, String, Uuid),
 	/// A cache key for views (on a table)
-	Fts(String, String, String, u64),
+	Fts(String, String, String, Uuid),
 	/// A cache key for indexes (on a table)
-	Ixs(String, String, String, u64),
+	Ixs(String, String, String, Uuid),
 	/// A cache key for live queries (on a table)
-	Lvs(String, String, String, u64),
+	Lvs(String, String, String, Uuid),
 }
 
 impl<'a> From<Lookup<'a>> for Key {

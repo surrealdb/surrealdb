@@ -12,8 +12,8 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
-use std::ops::Add;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -98,7 +98,7 @@ impl DefineIndexStatement {
 		txn.set(
 			key,
 			DefineTableStatement {
-				cache_indexes_ts: tb.cache_indexes_ts.add(1),
+				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
 			None,

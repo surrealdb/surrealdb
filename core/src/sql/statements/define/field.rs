@@ -13,7 +13,7 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
-use std::ops::Add;
+use uuid::Uuid;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -86,7 +86,7 @@ impl DefineFieldStatement {
 		txn.set(
 			key,
 			DefineTableStatement {
-				cache_fields_ts: tb.cache_fields_ts.add(1),
+				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
 			},
 			None,
@@ -166,7 +166,7 @@ impl DefineFieldStatement {
 					if relation.from.as_ref() != self.kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
 						let val = DefineTableStatement {
-							cache_fields_ts: tb.cache_fields_ts.add(1),
+							cache_fields_ts: Uuid::now_v7(),
 							kind: TableType::Relation(Relation {
 								from: self.kind.to_owned(),
 								..relation.to_owned()
@@ -198,7 +198,7 @@ impl DefineFieldStatement {
 					if relation.from.as_ref() != self.kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
 						let val = DefineTableStatement {
-							cache_fields_ts: tb.cache_fields_ts.add(1),
+							cache_fields_ts: Uuid::now_v7(),
 							kind: TableType::Relation(Relation {
 								to: self.kind.to_owned(),
 								..relation.to_owned()

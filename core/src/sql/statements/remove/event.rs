@@ -8,7 +8,7 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::ops::Add;
+use uuid::Uuid;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -40,7 +40,7 @@ impl RemoveEventStatement {
 			txn.set(
 				key,
 				DefineTableStatement {
-					cache_events_ts: tb.cache_events_ts.add(1),
+					cache_events_ts: Uuid::now_v7(),
 					..tb.as_ref().clone()
 				},
 				None,

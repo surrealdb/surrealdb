@@ -10,7 +10,6 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::ops::Add;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -69,7 +68,7 @@ impl KillStatement {
 				txn.set(
 					key,
 					DefineTableStatement {
-						cache_lives_ts: tb.cache_lives_ts.add(1),
+						cache_lives_ts: uuid::Uuid::now_v7(),
 						..tb.as_ref().clone()
 					},
 					None,
