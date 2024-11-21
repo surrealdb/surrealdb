@@ -1442,8 +1442,8 @@ async fn select_from_none() -> Result<(), Error> {
 		SELECT * FROM NULL, NULL;
 		SELECT 'A' FROM NONE, NONE;
 		SELECT 'A' FROM NULL, NULL;
-		SELECT '*' FROM [NONE, NONE];
-		SELECT '*' FROM [NULL, NULL];
+		SELECT * FROM [NONE, NONE];
+		SELECT * FROM [NULL, NULL];
 		SELECT 'A' FROM [NONE, NONE];
 		SELECT 'A' FROM [NULL, NULL];
 	";
