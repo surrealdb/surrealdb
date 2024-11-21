@@ -57,6 +57,16 @@ pub trait Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug;
 
+	/// Insert or replace a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
+	{
+		self.set(key, val, None).await
+	}
+
 	/// Insert or update a key in the datastore.
 	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where

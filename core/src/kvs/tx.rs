@@ -198,6 +198,16 @@ impl Transaction {
 		self.lock().await.set(key, val, version).await
 	}
 
+	/// Insert or replace a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn replace<K, V>(&self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
+	{
+		self.lock().await.replace(key, val).await
+	}
+
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn put<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<(), Error>

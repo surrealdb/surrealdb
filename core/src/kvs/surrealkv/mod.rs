@@ -215,6 +215,28 @@ impl super::api::Transaction for Transaction {
 		Ok(())
 	}
 
+	/// Insert or replace a key in the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		// Replace the key
+		self.inner.insert_or_replace(&key.into(), &val.into())?;
+
+		// Return result
+		Ok(())
+	}
+
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>

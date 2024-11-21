@@ -51,7 +51,7 @@ impl Datastore {
 		let key = crate::key::root::nd::new(id);
 		let now = self.clock_now().await;
 		let val = Node::new(id, now, false);
-		run!(txn, txn.set(key, val, None).await)
+		run!(txn, txn.replace(key, val).await)
 	}
 
 	/// Deletes a node from the cluster.
