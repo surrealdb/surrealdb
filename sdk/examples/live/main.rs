@@ -2,8 +2,8 @@ use futures::StreamExt;
 use serde::Deserialize;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::sql::Thing;
 use surrealdb::Notification;
+use surrealdb::RecordId;
 use surrealdb::Result;
 use surrealdb::Surreal;
 
@@ -12,7 +12,7 @@ const ACCOUNT: &str = "account";
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct Account {
-	id: Thing,
+	id: RecordId,
 	balance: String,
 }
 

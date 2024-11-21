@@ -1,7 +1,6 @@
 use thiserror::Error;
 
-use crate::syn::token::Span;
-use std::fmt;
+use crate::syn::{error::SyntaxError, token::Span};
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -12,20 +11,22 @@ pub enum CharError {
 	Unicode,
 }
 
-#[derive(Clone)]
+impl From<CharError> for SyntaxError {
+	fn from(value: CharError) -> Self {
+		let e = SyntaxError::new("Invalid, non valid UTF-8 bytes, in source");
+		if let CharError::Eof = value {
+			e.with_data_pending()
+		} else {
+			e
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct BytesReader<'a> {
 	data: &'a [u8],
 	current: usize,
-}
-
-impl fmt::Debug for BytesReader<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("BytesReader")
-			.field("used", &self.used())
-			.field("remaining", &self.remaining())
-			.finish()
-	}
 }
 
 impl<'a> BytesReader<'a> {
@@ -34,16 +35,6 @@ impl<'a> BytesReader<'a> {
 			data: slice,
 			current: 0,
 		}
-	}
-
-	#[inline]
-	pub fn full(&self) -> &'a [u8] {
-		self.data
-	}
-
-	#[inline]
-	pub fn used(&self) -> &'a [u8] {
-		&self.data[..self.current]
 	}
 
 	#[inline]
@@ -75,6 +66,11 @@ impl<'a> BytesReader<'a> {
 	#[inline]
 	pub fn peek(&self) -> Option<u8> {
 		self.remaining().first().copied()
+	}
+
+	#[inline]
+	pub fn peek1(&self) -> Option<u8> {
+		self.remaining().get(1).copied()
 	}
 
 	#[inline]
@@ -134,7 +130,7 @@ impl<'a> BytesReader<'a> {
 				val |= next as u32;
 				char::from_u32(val).ok_or(CharError::Unicode)
 			}
-			x => panic!("start byte did not start multi byte character: {:b}", x),
+			_ => Err(CharError::Unicode),
 		}
 	}
 }

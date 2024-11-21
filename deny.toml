@@ -85,8 +85,8 @@ allow = [
 	"Apache-2.0",
 	"BSD-2-Clause",
 	"BSD-3-Clause",
-	"BSD-2-Clause",
 	"Unlicense",
+    "Unicode-3.0",
 ]
 # The confidence threshold for detecting a license from license text.
 confidence-threshold = 0.95
@@ -106,12 +106,20 @@ name = "surrealdb"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealcs"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealdb-core"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
 name = "surrealml-core"
 allow = ["Apache-2.0"]
+
+[[licenses.exceptions]]
+name = "surrealcs-kernel"
+allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
 name = "unicode-ident"

@@ -47,17 +47,104 @@ impl Default for Kind {
 }
 
 impl Kind {
-	// Returns true if this type is an `any`
+	/// Returns true if this type is an `any`
 	pub(crate) fn is_any(&self) -> bool {
 		matches!(self, Kind::Any)
 	}
 
-	// Returns true if this type is a record
+	/// Returns true if this type is a record
 	pub(crate) fn is_record(&self) -> bool {
 		matches!(self, Kind::Record(_))
 	}
 
-	// return the kind of the contained value.
+	/// Returns true if this type is optional
+	pub(crate) fn can_be_none(&self) -> bool {
+		matches!(self, Kind::Option(_) | Kind::Any)
+	}
+
+	/// Returns the kind in case of a literal, otherwise returns the kind itself
+	fn to_kind(&self) -> Self {
+		match self {
+			Kind::Literal(l) => l.to_kind(),
+			k => k.to_owned(),
+		}
+	}
+
+	/// Returns true if this type is a literal, or contains a literal
+	pub(crate) fn is_literal_nested(&self) -> bool {
+		if matches!(self, Kind::Literal(_)) {
+			return true;
+		}
+
+		if let Kind::Option(x) = self {
+			return x.is_literal_nested();
+		}
+
+		if let Kind::Either(x) = self {
+			return x.iter().any(|x| x.is_literal_nested());
+		}
+
+		false
+	}
+
+	/// Returns Some if this type can be converted into a discriminated object, None otherwise
+	pub(crate) fn to_discriminated(&self) -> Option<Kind> {
+		match self {
+			Kind::Either(nested) => {
+				if let Some(nested) = nested
+					.iter()
+					.map(|k| match k {
+						Kind::Literal(Literal::Object(o)) => Some(o),
+						_ => None,
+					})
+					.collect::<Option<Vec<&BTreeMap<String, Kind>>>>()
+				{
+					if let Some(first) = nested.first() {
+						let mut key: Option<String> = None;
+
+						'key: for (k, v) in first.iter() {
+							let mut kinds: Vec<Kind> = vec![v.to_owned()];
+							for item in nested[1..].iter() {
+								if let Some(kind) = item.get(k) {
+									match kind {
+										Kind::Literal(l)
+											if kinds.contains(&l.to_kind())
+												|| kinds.contains(&Kind::Literal(l.to_owned())) =>
+										{
+											continue 'key;
+										}
+										kind if kinds.iter().any(|k| *kind == k.to_kind()) => {
+											continue 'key;
+										}
+										kind => {
+											kinds.push(kind.to_owned());
+										}
+									}
+								} else {
+									continue 'key;
+								}
+							}
+
+							key = Some(k.clone());
+							break;
+						}
+
+						if let Some(key) = key {
+							return Some(Kind::Literal(Literal::DiscriminatedObject(
+								key.clone(),
+								nested.into_iter().map(|o| o.to_owned()).collect(),
+							)));
+						}
+					}
+				}
+
+				None
+			}
+			_ => None,
+		}
+	}
+
+	// Return the kind of the contained value.
 	//
 	// For example: for `array<number>` or `set<number>` this returns `number`.
 	// For `array<number> | set<float>` this returns `number | float`.
@@ -169,6 +256,7 @@ pub enum Literal {
 	Duration(Duration),
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),
+	DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
 }
 
 impl Literal {
@@ -187,6 +275,7 @@ impl Literal {
 				Kind::Array(Box::new(Kind::Any), None)
 			}
 			Self::Object(_) => Kind::Object,
+			Self::DiscriminatedObject(_, _) => Kind::Object,
 		}
 	}
 
@@ -226,7 +315,7 @@ impl Literal {
 			},
 			Self::Object(o) => match value {
 				Value::Object(x) => {
-					if o.len() != x.len() {
+					if o.len() < x.len() {
 						return false;
 					}
 
@@ -235,12 +324,40 @@ impl Literal {
 							if value.to_owned().coerce_to(v).is_err() {
 								return false;
 							}
-						} else {
+						} else if !v.can_be_none() {
 							return false;
 						}
 					}
 
 					true
+				}
+				_ => false,
+			},
+			Self::DiscriminatedObject(key, discriminants) => match value {
+				Value::Object(x) => {
+					let value = x.get(key).unwrap_or(&Value::None);
+					if let Some(o) = discriminants
+						.iter()
+						.find(|o| value.to_owned().coerce_to(o.get(key).unwrap()).is_ok())
+					{
+						if o.len() < x.len() {
+							return false;
+						}
+
+						for (k, v) in o.iter() {
+							if let Some(value) = x.get(k) {
+								if value.to_owned().coerce_to(v).is_err() {
+									return false;
+								}
+							} else if !v.can_be_none() {
+								return false;
+							}
+						}
+
+						true
+					} else {
+						false
+					}
 				}
 				_ => false,
 			},
@@ -288,6 +405,40 @@ impl Display for Literal {
 				} else {
 					f.write_str(" }")
 				}
+			}
+			Literal::DiscriminatedObject(_, discriminants) => {
+				let mut f = Pretty::from(f);
+
+				for (i, o) in discriminants.iter().enumerate() {
+					if i > 0 {
+						f.write_str(" | ")?;
+					}
+
+					if is_pretty() {
+						f.write_char('{')?;
+					} else {
+						f.write_str("{ ")?;
+					}
+					if !o.is_empty() {
+						let indent = pretty_indent();
+						write!(
+							f,
+							"{}",
+							Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
+								args,
+								|(k, v), f| write!(f, "{}: {}", escape_key(k), v)
+							)),)
+						)?;
+						drop(indent);
+					}
+					if is_pretty() {
+						f.write_char('}')?;
+					} else {
+						f.write_str(" }")?;
+					}
+				}
+
+				Ok(())
 			}
 		}
 	}

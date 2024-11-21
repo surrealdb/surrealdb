@@ -68,12 +68,12 @@ impl Surreal<Client> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::remote::http::Client;
 	/// use surrealdb::engine::remote::http::Http;
 	///
-	/// static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -443,24 +443,34 @@ async fn router(
 		#[cfg(not(target_arch = "wasm32"))]
 		Command::ExportFile {
 			path,
+			config,
 		} => {
 			let req_path = base_url.join("export")?;
+			let config = config.unwrap_or_default();
+			let config_value: CoreValue = config.into();
 			let request = client
-				.get(req_path)
+				.post(req_path)
+				.body(config_value.into_json().to_string())
 				.headers(headers.clone())
 				.auth(auth)
+				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::ExportBytes {
 			bytes,
+			config,
 		} => {
 			let req_path = base_url.join("export")?;
+			let config = config.unwrap_or_default();
+			let config_value: CoreValue = config.into();
 			let request = client
-				.get(req_path)
+				.post(req_path)
+				.body(config_value.into_json().to_string())
 				.headers(headers.clone())
 				.auth(auth)
+				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
 			Ok(DbResponse::Other(CoreValue::None))

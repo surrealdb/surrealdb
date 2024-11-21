@@ -191,7 +191,7 @@ impl TryFrom<Cbor> for Value {
 					TAG_RANGE => Ok(Value::Range(Box::new(Range::try_from(*v)?))),
 					TAG_FUTURE => match *v {
 						Data::Text(v) => {
-							let block = crate::syn::block(format!("{{{v}}}").as_str())
+							let block = crate::syn::block(v.as_str())
 								.map_err(|_| "Failed to parse block")?;
 							Ok(Value::Future(Box::new(Future(block))))
 						}
@@ -393,13 +393,13 @@ impl TryFrom<Value> for Cbor {
 						Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
-						Id::Range(v) => Data::try_from(*v)?,
+						Id::Range(v) => Data::Tag(TAG_RANGE, Box::new(Data::try_from(*v)?)),
 					},
 				])),
 			))),
 			Value::Table(v) => Ok(Cbor(Data::Tag(TAG_TABLE, Box::new(Data::Text(v.0))))),
 			Value::Geometry(v) => Ok(Cbor(encode_geometry(v)?)),
-			Value::Range(v) => Ok(Cbor(Data::try_from(*v)?)),
+			Value::Range(v) => Ok(Cbor(Data::Tag(TAG_RANGE, Box::new(Data::try_from(*v)?)))),
 			Value::Future(v) => {
 				let bin = Data::Text(format!("{}", (*v).0));
 				Ok(Cbor(Data::Tag(TAG_FUTURE, Box::new(bin))))

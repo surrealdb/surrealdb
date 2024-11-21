@@ -1,6 +1,7 @@
 pub mod cache;
 pub(crate) mod hnsw;
 mod lru;
+mod mapper;
 pub(crate) mod tree;
 
 use crate::ctx::Context;
@@ -11,6 +12,7 @@ use crate::idx::trees::btree::{BTreeNode, BTreeStore};
 use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
 use crate::idx::trees::store::cache::{TreeCache, TreeCaches};
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
+use crate::idx::trees::store::mapper::Mappers;
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
@@ -24,6 +26,7 @@ pub type NodeId = u64;
 pub type StoreGeneration = u64;
 
 #[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
 pub enum TreeStore<N>
 where
 	N: TreeNode + Debug + Clone,
@@ -52,7 +55,7 @@ where
 	) -> Result<StoredNode<N>, Error> {
 		match self {
 			Self::Write(w) => w.get_node_mut(tx, node_id).await,
-			_ => Err(Error::Unreachable("TreeStore::get_node_mut")),
+			_ => Err(fail!("TreeStore::get_node_mut")),
 		}
 	}
 
@@ -63,7 +66,7 @@ where
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
 			Self::Read(r) => r.get_node(tx, node_id).await,
-			_ => Err(Error::Unreachable("TreeStore::get_node")),
+			_ => Err(fail!("TreeStore::get_node")),
 		}
 	}
 
@@ -77,7 +80,7 @@ where
 				let tx = ctx.tx();
 				r.get_node(&tx, node_id).await
 			}
-			_ => Err(Error::Unreachable("TreeStore::get_node_txn")),
+			_ => Err(fail!("TreeStore::get_node_txn")),
 		}
 	}
 
@@ -88,14 +91,14 @@ where
 	) -> Result<(), Error> {
 		match self {
 			Self::Write(w) => w.set_node(node, updated),
-			_ => Err(Error::Unreachable("TreeStore::set_node")),
+			_ => Err(fail!("TreeStore::set_node")),
 		}
 	}
 
 	pub(in crate::idx) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
 		match self {
 			Self::Write(w) => Ok(w.new_node(id, node)),
-			_ => Err(Error::Unreachable("TreeStore::new_node")),
+			_ => Err(fail!("TreeStore::new_node")),
 		}
 	}
 
@@ -106,7 +109,7 @@ where
 	) -> Result<(), Error> {
 		match self {
 			Self::Write(w) => w.remove_node(node_id, node_key),
-			_ => Err(Error::Unreachable("TreeStore::remove_node")),
+			_ => Err(fail!("TreeStore::remove_node")),
 		}
 	}
 
@@ -218,6 +221,7 @@ struct Inner {
 	btree_trie_caches: TreeCaches<BTreeNode<TrieKeys>>,
 	mtree_caches: TreeCaches<MTreeNode>,
 	hnsw_indexes: HnswIndexes,
+	mappers: Mappers,
 }
 impl Default for IndexStores {
 	fn default() -> Self {
@@ -226,6 +230,7 @@ impl Default for IndexStores {
 			btree_trie_caches: TreeCaches::default(),
 			mtree_caches: TreeCaches::default(),
 			hnsw_indexes: HnswIndexes::default(),
+			mappers: Mappers::default(),
 		}))
 	}
 }
@@ -311,7 +316,7 @@ impl IndexStores {
 		ns: &str,
 		db: &str,
 	) -> Result<(), Error> {
-		for tb in tx.all_tb(ns, db).await?.iter() {
+		for tb in tx.all_tb(ns, db, None).await?.iter() {
 			self.table_removed(tx, ns, db, &tb.name).await?;
 		}
 		Ok(())
@@ -373,5 +378,9 @@ impl IndexStores {
 			&& self.0.btree_fst_caches.is_empty()
 			&& self.0.btree_trie_caches.is_empty()
 			&& self.0.hnsw_indexes.is_empty().await
+	}
+
+	pub(crate) fn mappers(&self) -> &Mappers {
+		&self.0.mappers
 	}
 }

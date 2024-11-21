@@ -81,13 +81,23 @@ impl DefineFieldStatement {
 		.await?;
 
 		// find existing field definitions.
-		let fields = txn.all_tb_fields(ns, db, &self.what).await.ok();
+		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
 
 		// Process possible recursive_definitions.
 		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
 			let mut name = self.name.clone();
 			loop {
+				if let Kind::Any = cur_kind {
+					// DEFINE FIELD foo ON bar TYPE array;
+					// Already implies
+					// DEFINE FIELD foo[*] ON bar TYPE any;
+					// so we don't need to write sub types if the sub types are essentially a non
+					// trait bound.
+					break;
+				}
+
 				let new_kind = cur_kind.inner_kind();
+
 				name.0.push(Part::All);
 
 				// Get the name of the field
@@ -225,7 +235,11 @@ impl Display for DefineFieldStatement {
 			f.write_char(' ')?;
 			None
 		};
-		write!(f, "{}", self.permissions)?;
+		// Alternate permissions display implementation ignores delete permission
+		// This display is used to show field permissions, where delete has no effect
+		// Displaying the permission could mislead users into thinking it has an effect
+		// Additionally, including the permission will cause a parsing error in 3.0.0
+		write!(f, "{:#}", self.permissions)?;
 		Ok(())
 	}
 }

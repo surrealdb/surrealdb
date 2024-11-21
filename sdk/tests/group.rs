@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::Test;
 use helpers::new_ds;
 use helpers::skip_ok;
 use surrealdb::dbs::Session;
@@ -732,5 +733,165 @@ async fn select_aggregate_mean_update() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_count_group_all() -> Result<(), Error> {
+	let sql = r#"
+		CREATE table CONTENT { bar: "hello", foo: "Man"};
+		CREATE table CONTENT { bar: "hello", foo: "World"};
+		CREATE table CONTENT { bar: "world"};
+		SELECT COUNT() FROM table GROUP ALL EXPLAIN;
+		SELECT COUNT() FROM table GROUP ALL;
+		SELECT COUNT() FROM table EXPLAIN;
+		SELECT COUNT() FROM table;
+	"#;
+	let mut t = Test::new(sql).await?;
+	t.expect_size(7)?;
+	//
+	t.skip_ok(3)?;
+	//
+	t.expect_val(
+		r#"[
+				{
+					detail: {
+						table: 'table'
+					},
+					operation: 'Iterate Table Keys'
+				},
+				{
+					detail: {
+						idioms: {
+							count: [
+								'count'
+							]
+						},
+						type: 'Group'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	)?;
+	//
+	t.expect_val(
+		r#"[
+					{
+						count: 3
+					}
+				]"#,
+	)?;
+	//
+	t.expect_val(
+		r#"[
+					{
+						detail: {
+							table: 'table'
+						},
+						operation: 'Iterate Table Keys'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	)?;
+	//
+	t.expect_val(
+		r#"[
+				{
+					count: 1
+				},
+				{
+					count: 1
+				},
+				{
+					count: 1
+				}
+			]"#,
+	)?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_count_range_keys_only() -> Result<(), Error> {
+	let sql = r#"
+		CREATE table:1 CONTENT { bar: "hello", foo: "Man"};
+		CREATE table:2 CONTENT { bar: "hello", foo: "World"};
+		CREATE table:3 CONTENT { bar: "world"};
+		SELECT COUNT() FROM table:1..4 GROUP ALL EXPLAIN;
+		SELECT COUNT() FROM table:1..4 GROUP ALL;
+		SELECT COUNT() FROM table:1..4 EXPLAIN;
+		SELECT COUNT() FROM table:1..4;
+	"#;
+	let mut t = Test::new(sql).await?;
+	t.expect_size(7)?;
+	//
+	t.skip_ok(3)?;
+	//
+	t.expect_val(
+		r#"[
+				{
+					detail: {
+						range: 1..4,
+						table: 'table'
+					},
+					operation: 'Iterate Range Keys'
+				},
+				{
+					detail: {
+						idioms: {
+							count: [
+								'count'
+							]
+						},
+						type: 'Group'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	)?;
+	//
+	t.expect_val(
+		r#"[
+					{
+						count: 3
+					}
+				]"#,
+	)?;
+	//
+	t.expect_val(
+		r#"[
+					{
+						detail: {
+							range: 1..4,
+							table: 'table'
+						},
+						operation: 'Iterate Range Keys'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	)?;
+	//
+	t.expect_val(
+		r#"[
+				{
+					count: 1
+				},
+				{
+					count: 1
+				},
+				{
+					count: 1
+				}
+			]"#,
+	)?;
 	Ok(())
 }

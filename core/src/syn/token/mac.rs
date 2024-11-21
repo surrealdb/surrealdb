@@ -63,39 +63,6 @@ macro_rules! t {
 		}
 	};
 
-	("ns") => {
-		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Nano)
-	};
-	("us") => {
-		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Micro)
-	};
-	("µs") => {
-		$crate::syn::token::TokenKind::DurationSuffix(
-			$crate::syn::token::DurationSuffix::MicroUnicode,
-		)
-	};
-	("ms") => {
-		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Milli)
-	};
-	("s") => {
-		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Second)
-	};
-	("m") => {
-		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Minute)
-	};
-	("h") => {
-		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Hour)
-	};
-	("d") => {
-		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Day)
-	};
-	("w") => {
-		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Week)
-	};
-	("y") => {
-		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Year)
-	};
-
 	("f") => {
 		$crate::syn::token::TokenKind::NumberSuffix($crate::syn::token::NumberSuffix::Float)
 	};
@@ -139,12 +106,6 @@ macro_rules! t {
 	};
 	(":") => {
 		$crate::syn::token::TokenKind::Colon
-	};
-	("<-") => {
-		$crate::syn::token::TokenKind::ArrowLeft
-	};
-	("<->") => {
-		$crate::syn::token::TokenKind::BiArrow
 	};
 	("->") => {
 		$crate::syn::token::TokenKind::ArrowRight
@@ -215,7 +176,7 @@ macro_rules! t {
 	};
 
 	("?") => {
-		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Like)
+		$crate::syn::token::TokenKind::Question
 	};
 	("?:") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::Tco)

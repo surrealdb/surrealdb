@@ -1,12 +1,12 @@
 use criterion::{Criterion, Throughput};
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 use std::time::Duration;
 use surrealdb::{engine::any::Any, sql::Id, Surreal};
 
 mod routines;
 
-static DB: Lazy<Surreal<Any>> = Lazy::new(Surreal::init);
+static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Record {

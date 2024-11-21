@@ -52,9 +52,11 @@ pub async fn run(
 		|| name.eq("array::filter")
 		|| name.eq("array::find_index")
 		|| name.eq("array::find")
+		|| name.eq("array::fold")
 		|| name.eq("array::includes")
 		|| name.eq("array::index_of")
 		|| name.eq("array::map")
+		|| name.eq("array::reduce")
 		|| name.eq("array::some")
 		|| name.eq("record::exists")
 		|| name.eq("type::field")
@@ -194,6 +196,7 @@ pub fn synchronous(
 		"geo::distance" => geo::distance,
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
+		"geo::is::valid" => geo::is::valid,
 		//
 		"math::abs" => math::abs,
 		"math::acos" => math::acos,
@@ -237,6 +240,9 @@ pub fn synchronous(
 		"math::top" => math::top,
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
+		//
+		"meta::id" => record::id,
+		"meta::tb" => record::tb,
 		//
 		"not" => not::not,
 		//
@@ -299,8 +305,14 @@ pub fn synchronous(
 		"string::trim" => string::trim,
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
+		//
+		"string::distance::damerau_levenshtein" => string::distance::damerau_levenshtein,
 		"string::distance::hamming" => string::distance::hamming,
 		"string::distance::levenshtein" => string::distance::levenshtein,
+		"string::distance::normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein,
+		"string::distance::normalized_levenshtein" => string::distance::normalized_levenshtein,
+		"string::distance::osa_distance" => string::distance::osa_distance,
+		//
 		"string::html::encode" => string::html::encode,
 		"string::html::sanitize" => string::html::sanitize,
 		"string::is::alphanum" => string::is::alphanum,
@@ -318,11 +330,16 @@ pub fn synchronous(
 		"string::is::numeric" => string::is::numeric,
 		"string::is::semver" => string::is::semver,
 		"string::is::url" => string::is::url,
+		"string::is::ulid" => string::is::ulid,
 		"string::is::uuid" => string::is::uuid,
 		"string::is::record" => string::is::record,
+		//
 		"string::similarity::fuzzy" => string::similarity::fuzzy,
 		"string::similarity::jaro" => string::similarity::jaro,
+		"string::similarity::jaro_winkler" => string::similarity::jaro_winkler,
 		"string::similarity::smithwaterman" => string::similarity::smithwaterman,
+		"string::similarity::sorensen_dice" => string::similarity::sorensen_dice,
+		//
 		"string::semver::compare" => string::semver::compare,
 		"string::semver::major" => string::semver::major,
 		"string::semver::minor" => string::semver::minor,
@@ -360,7 +377,10 @@ pub fn synchronous(
 		"time::from::micros" => time::from::micros,
 		"time::from::millis" => time::from::millis,
 		"time::from::secs" => time::from::secs,
+		"time::from::ulid" => time::from::ulid,
 		"time::from::unix" => time::from::unix,
+		"time::from::uuid" => time::from::uuid,
+		"time::is::leap_year" => time::is::leap_year,
 		//
 		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,
@@ -442,7 +462,7 @@ pub async fn asynchronous(
 	#[cfg(not(target_arch = "wasm32"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> executor::Task<R> {
+	) -> impl FnOnce() -> async_executor::Task<R> {
 		|| crate::exe::spawn(async move { function() })
 	}
 
@@ -465,9 +485,11 @@ pub async fn asynchronous(
 		"array::filter_index" => array::filter_index((stk, ctx, Some(opt), doc)).await,
 		"array::find" => array::find((stk, ctx, Some(opt), doc)).await,
 		"array::find_index" => array::find_index((stk, ctx, Some(opt), doc)).await,
+		"array::fold" => array::fold((stk, ctx, Some(opt), doc)).await,
 		"array::includes" => array::any((stk, ctx, Some(opt), doc)).await,
 		"array::index_of" => array::find_index((stk, ctx, Some(opt), doc)).await,
 		"array::map" => array::map((stk, ctx, Some(opt), doc)).await,
+		"array::reduce" => array::reduce((stk, ctx, Some(opt), doc)).await,
 		"array::some" => array::any((stk, ctx, Some(opt), doc)).await,
 		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
@@ -543,6 +565,7 @@ pub async fn idiom(
 				"find" => array::find((stk, ctx, Some(opt), doc)).await,
 				"find_index" => array::find_index((stk, ctx, Some(opt), doc)).await,
 				"first" => array::first,
+				"fold" => array::fold((stk, ctx, Some(opt), doc)).await,
 				"flatten" => array::flatten,
 				"group" => array::group,
 				"includes" => array::any((stk, ctx, Some(opt), doc)).await,
@@ -563,6 +586,7 @@ pub async fn idiom(
 				"pop" => array::pop,
 				"prepend" => array::prepend,
 				"push" => array::push,
+				"reduce" => array::reduce((stk, ctx, Some(opt), doc)).await,
 				"remove" => array::remove,
 				"reverse" => array::reverse,
 				"shuffle" => array::shuffle,
@@ -638,6 +662,7 @@ pub async fn idiom(
 				"distance" => geo::distance,
 				"hash_decode" => geo::hash::decode,
 				"hash_encode" => geo::hash::encode,
+				"is_valid" => geo::is::valid,
 			)
 		}
 		Value::Thing(_) => {
@@ -664,6 +689,33 @@ pub async fn idiom(
 				"values" => object::values,
 			)
 		}
+		Value::Number(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the number type",
+				//
+				"abs" => math::abs,
+				"acos" => math::acos,
+				"acot" => math::acot,
+				"asin" => math::asin,
+				"atan" => math::atan,
+				"ceil" => math::ceil,
+				"cos" => math::cos,
+				"cot" => math::cot,
+				"deg2rad" => math::deg2rad,
+				"floor" => math::floor,
+				"ln" => math::ln,
+				"log" => math::log,
+				"log10" => math::log10,
+				"log2" => math::log2,
+				"rad2deg" => math::rad2deg,
+				"round" => math::round,
+				"sign" => math::sign,
+				"sin" => math::sin,
+				"tan" => math::tan,
+			)
+		}
 		Value::Strand(_) => {
 			dispatch!(
 				name,
@@ -687,8 +739,11 @@ pub async fn idiom(
 				"trim" => string::trim,
 				"uppercase" => string::uppercase,
 				"words" => string::words,
+				"distance_damerau_levenshtein" => string::distance::damerau_levenshtein,
 				"distance_hamming" => string::distance::hamming,
 				"distance_levenshtein" => string::distance::levenshtein,
+				"distance_normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein,
+				"distance_normalized_levenshtein" => string::distance::normalized_levenshtein,
 				"html_encode" => string::html::encode,
 				"html_sanitize" => string::html::sanitize,
 				"is_alphanum" => string::is::alphanum,
@@ -706,11 +761,14 @@ pub async fn idiom(
 				"is_numeric" => string::is::numeric,
 				"is_semver" => string::is::semver,
 				"is_url" => string::is::url,
+				"is_ulid" => string::is::ulid,
 				"is_uuid" => string::is::uuid,
 				"is_record" => string::is::record,
 				"similarity_fuzzy" => string::similarity::fuzzy,
 				"similarity_jaro" => string::similarity::jaro,
+				"similarity_jaro_winkler" => string::similarity::jaro_winkler,
 				"similarity_smithwaterman" => string::similarity::smithwaterman,
+				"similarity_sorensen_dice" => string::similarity::sorensen_dice,
 				"semver_compare" => string::semver::compare,
 				"semver_major" => string::semver::major,
 				"semver_minor" => string::semver::minor,
@@ -735,6 +793,7 @@ pub async fn idiom(
 				"format" => time::format,
 				"group" => time::group,
 				"hour" => time::hour,
+				"is_leap_year" => time::is::leap_year,
 				"micros" => time::micros,
 				"millis" => time::millis,
 				"minute" => time::minute,

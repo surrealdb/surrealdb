@@ -17,7 +17,7 @@ use crate::sql::{Part, Thing, Value};
 use reblessive::tree::Stk;
 
 impl Document {
-	pub async fn index(
+	pub async fn store_index_data(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -44,7 +44,7 @@ impl Document {
 			return Ok(());
 		}
 		// Get the record id
-		let rid = self.id.as_ref().unwrap();
+		let rid = self.id()?;
 		// Loop through all index statements
 		for ix in ixs.iter() {
 			// Calculate old values
@@ -55,7 +55,7 @@ impl Document {
 
 			// Update the index entries
 			if targeted_force || o != n {
-				Self::one_index(stk, ctx, opt, ix, o, n, rid).await?;
+				Self::one_index(stk, ctx, opt, ix, o, n, &rid).await?;
 			}
 		}
 		// Carry on

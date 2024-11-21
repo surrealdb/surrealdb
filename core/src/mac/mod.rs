@@ -1,3 +1,10 @@
+/// Throws an unreachable error with location details
+macro_rules! fail {
+	($($arg:tt)+) => {
+		$crate::err::Error::Unreachable(format!("{}:{}: {}", file!(), line!(), std::format_args!($($arg)+)))
+	};
+}
+
 /// Converts some text into a new line byte string
 macro_rules! bytes {
 	($expression:expr) => {
@@ -55,7 +62,7 @@ macro_rules! catch {
 /// transaction in an uncommitted state without rolling back.
 macro_rules! run {
 	($txn:ident, $default:expr) => {
-		match $default.await {
+		match $default {
 			Err(e) => {
 				let _ = $txn.cancel().await;
 				Err(e)
@@ -83,12 +90,19 @@ macro_rules! run {
 ///
 /// # Return Value
 ///
-/// A lazy static variable of type `once_cell::sync::Lazy`, which holds the parsed value
+/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed value
 /// from the environment variable or the default value.
 #[macro_export]
 macro_rules! lazy_env_parse {
+	($key:expr, $t:ty) => {
+		std::sync::LazyLock::new(|| {
+			std::env::var($key)
+				.and_then(|s| Ok(s.parse::<$t>().unwrap_or_default()))
+				.unwrap_or_default()
+		})
+	};
 	($key:expr, $t:ty, $default:expr) => {
-		once_cell::sync::Lazy::new(|| {
+		std::sync::LazyLock::new(|| {
 			std::env::var($key)
 				.and_then(|s| Ok(s.parse::<$t>().unwrap_or($default)))
 				.unwrap_or($default)
@@ -111,7 +125,7 @@ macro_rules! lazy_env_parse {
 #[macro_export]
 macro_rules! lazy_env_parse_or_else {
 	($key:expr, $t:ty, $default:expr) => {
-		once_cell::sync::Lazy::new(|| {
+		std::sync::LazyLock::new(|| {
 			std::env::var($key)
 				.and_then(|s| Ok(s.parse::<$t>().unwrap_or_else($default)))
 				.unwrap_or_else($default)
@@ -203,6 +217,8 @@ macro_rules! async_defer{
 
 #[cfg(test)]
 mod test {
+	use crate::err::Error;
+
 	#[tokio::test]
 	async fn async_defer_basic() {
 		let mut counter = 0;
@@ -240,5 +256,21 @@ mod test {
 			panic!("this panic should be caught")
 		})
 		.await;
+	}
+
+	#[test]
+	fn fail_literal() {
+		let Error::Unreachable(msg) = fail!("Reached unreachable code") else {
+			panic!()
+		};
+		assert_eq!("core/src/mac/mod.rs:263: Reached unreachable code", msg);
+	}
+
+	#[test]
+	fn fail_arguments() {
+		let Error::Unreachable(msg) = fail!("Found {} but expected {}", "test", "other") else {
+			panic!()
+		};
+		assert_eq!("core/src/mac/mod.rs:271: Found test but expected other", msg);
 	}
 }

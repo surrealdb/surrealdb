@@ -33,6 +33,14 @@ impl Cast {
 }
 
 impl Cast {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		self.1.writeable()
+	}
+	/// Checks whether all array values are static values
+	pub(crate) fn is_static(&self) -> bool {
+		self.1.is_static()
+	}
 	/// Was marked recursively
 	pub(crate) async fn compute(
 		&self,

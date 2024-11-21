@@ -21,11 +21,14 @@ use axum::{
 };
 use bytes::Bytes;
 use futures_util::{future::BoxFuture, StreamExt};
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::gql::cache::{Invalidator, SchemaCache};
 use surrealdb::gql::error::resolver_error;
 use surrealdb::kvs::Datastore;
 use tower_service::Service;
+
+use crate::err::Error as SurrealError;
 
 /// A GraphQL service.
 #[derive(Clone)]
@@ -65,6 +68,17 @@ where
 		let req = req.map(Body::new);
 
 		Box::pin(async move {
+			// Check if capabilities allow querying the requested HTTP route
+			if !cache.datastore.allows_http_route(&RouteTarget::GraphQL) {
+				warn!(
+					"Capabilities denied HTTP route request attempt, target: '{}'",
+					&RouteTarget::GraphQL
+				);
+				return Ok(
+					SurrealError::ForbiddenRoute(RouteTarget::GraphQL.to_string()).into_response()
+				);
+			}
+
 			let session =
 				req.extensions().get::<Session>().expect("session extractor should always succeed");
 
@@ -91,7 +105,6 @@ where
 					return Ok(to_rejection(e).into_response());
 				}
 			};
-
 			let is_accept_multipart_mixed = req
 				.headers()
 				.get("accept")
@@ -104,17 +117,10 @@ where
 					Ok(req) => req,
 					Err(err) => return Ok(err.into_response()),
 				};
-
 				let stream = Executor::execute_stream(&executor, req.0, None);
 				let body = Body::from_stream(
-					create_multipart_mixed_stream(
-						stream,
-						tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
-							Duration::from_secs(30),
-						))
-						.map(|_| ()),
-					)
-					.map(Ok::<_, std::io::Error>),
+					create_multipart_mixed_stream(stream, Duration::from_secs(30))
+						.map(Ok::<_, std::io::Error>),
 				);
 				Ok(HttpResponse::builder()
 					.header("content-type", "multipart/mixed; boundary=graphql")

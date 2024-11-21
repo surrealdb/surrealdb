@@ -1,11 +1,14 @@
-use super::common::{self, Format, Socket, DB, NS, PASS, USER};
-use http::header::{HeaderMap, HeaderValue};
+use super::common::{self, Format, Socket, StartServerArguments, DB, NS, PASS, USER};
 use assert_fs::TempDir;
+use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 use test_log::test;
+
+const HDR_SURREAL: &str = "surreal-id";
+const HDR_REQUEST: &str = "x-request-id";
 
 #[test(tokio::test)]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
@@ -345,13 +348,44 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	// Send INSERT command trying to create multiple records
+	let res = socket
+		.send_request(
+			"insert",
+			json!([
+				"tester",
+				[
+					{
+						"name": "foo",
+						"value": "bar",
+					},
+					{
+						"name": "foo",
+						"value": "bar",
+					}
+				]
+			]),
+		)
+		.await?;
+	assert!(res.is_object(), "result: {res:?}");
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let res = res["result"].as_array().unwrap();
+	assert_eq!(res.len(), 2, "result: {res:?}");
+	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	assert_eq!(res[1]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[1]["value"], "bar", "result: {res:?}");
 	// Verify the data was inserted and can be queried
 	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
 	let res = res[0]["result"].as_array().unwrap();
-	assert_eq!(res.len(), 1, "result: {res:?}");
+	assert_eq!(res.len(), 3, "result: {res:?}");
 	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	assert_eq!(res[1]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[1]["value"], "bar", "result: {res:?}");
+	assert_eq!(res[2]["name"], "foo", "result: {res:?}");
+	assert_eq!(res[2]["value"], "bar", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
 	Ok(())
@@ -380,10 +414,9 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 		)
 		.await?;
 	assert!(res.is_object(), "result: {res:?}");
-	assert!(res["result"].is_array(), "result: {res:?}");
-	let res = res["result"].as_array().unwrap();
-	assert_eq!(res.len(), 1, "result: {res:?}");
-	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["value"], "bar", "result: {res:?}");
 	// Verify the data was created
 	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
@@ -1473,6 +1506,25 @@ async fn session_reauthentication_expired() {
 }
 
 #[test(tokio::test)]
+async fn session_failed_reauthentication() {
+	// Setup database server without authentication
+	let (addr, mut server) = common::start_server_without_auth().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Specify a namespace and database to use
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Check that we have are have a database and namespace selected
+	socket.send_message_query("INFO FOR DB").await.unwrap();
+	// Authenticate using an invalid token
+	socket.send_request("authenticate", json!(["invalid",])).await.unwrap();
+	// Check to see if we still have a namespace and database selected
+	let res = socket.send_message_query("INFO FOR DB").await.unwrap();
+	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
 async fn session_use_change_database() {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -1669,7 +1721,7 @@ async fn session_use_change_database_scope() {
 #[test(tokio::test)]
 async fn run_functions() {
 	// Setup database server
-	let (addr, mut server) = common::start_server_with_functions().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 	// Authenticate the connection
@@ -1731,7 +1783,7 @@ async fn relate_rpc() {
 	// test
 
 	let mut res = socket.send_message_query("RETURN foo:a->bar.val").await.unwrap();
-	let expected = json!(42);
+	let expected = json!([42]);
 	assert_eq!(res.remove(0)["result"], expected);
 
 	let mut res = socket.send_message_query("RETURN foo:a->bar->foo").await.unwrap();
@@ -1761,7 +1813,7 @@ async fn temporary_directory() {
 	// These selects use the memory collector
 	let mut res =
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC EXPLAIN").await.unwrap();
-	let expected = json!([{"detail": { "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "Memory" }, "operation": "Collector" }]);
+	let expected = json!([{"detail": { "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "MemoryOrdered" }, "operation": "Collector" }]);
 	assert_eq!(res.remove(0)["result"], expected);
 	// And return the correct result
 	let mut res = socket.send_message_query("SELECT * FROM test ORDER BY id DESC").await.unwrap();
@@ -1791,7 +1843,7 @@ async fn session_id_defined() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a specific SurrealDB header
 	let mut headers = HeaderMap::new();
-	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert(HDR_SURREAL, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1813,7 +1865,7 @@ async fn session_id_defined_generic() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a generic header
 	let mut headers = HeaderMap::new();
-	headers.insert("x-request-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert(HDR_REQUEST, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1835,8 +1887,8 @@ async fn session_id_defined_both() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via both headers
 	let mut headers = HeaderMap::new();
-	headers.insert("surreal-id", HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
-	headers.insert("x-request-id", HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
+	headers.insert(HDR_SURREAL, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
+	headers.insert(HDR_REQUEST, HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
 	// Connect to WebSocket
 	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
 	// Authenticate the connection
@@ -1859,7 +1911,8 @@ async fn session_id_invalid() {
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a specific SurrealDB header
 	let mut headers = HeaderMap::new();
-	headers.insert("surreal-id", HeaderValue::from_static("123")); // Not a valid UUIDv4
+	// Not a valid UUIDv4
+	headers.insert(HDR_SURREAL, HeaderValue::from_static("123"));
 	// Connect to WebSocket
 	let socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await;
 	assert!(socket.is_err(), "unexpected success using connecting with invalid id header");
@@ -1886,4 +1939,226 @@ async fn session_id_undefined() {
 
 	// Test passed
 	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn rpc_capability() {
+	// Deny some
+	{
+		// Start server disallowing some RPC methods
+		let (addr, mut server) = common::start_server(StartServerArguments {
+			// Deny all routes except for RPC
+			args: "--deny-rpc info,query".to_string(),
+			// Auth disabled to ensure unauthorized errors are due to capabilities
+			auth: false,
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		// Connect to WebSocket
+		let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+		// Specify a namespace and database
+		socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+		// Test operations that SHOULD NOT with the provided capabilities
+		let operations_ko = vec![
+			socket.send_request("info", json!([])),
+			socket.send_request("query", json!(["SELECT * FROM 1"])),
+		];
+		for operation in operations_ko {
+			let res = operation.await;
+			assert!(res.is_ok(), "result: {res:?}");
+			let res = res.unwrap();
+			assert!(res.is_object(), "result: {res:?}");
+			let res = res.as_object().unwrap();
+			assert_eq!(res["error"], json!({"code": -32000, "message": "Method not allowed"}));
+		}
+
+		// Test operations that SHOULD work with the provided capabilities
+		let operations_ok = vec![
+			socket.send_request("use", json!([NS, DB])),
+			socket.send_request("ping", json!([])),
+			socket.send_request("version", json!([])),
+			socket.send_request("let", json!(["let_var", "let_value",])),
+			socket.send_request("set", json!(["set_var", "set_value",])),
+			socket.send_request("select", json!(["tester",])),
+			socket.send_request(
+				"insert",
+				json!([
+					"tester",
+					{
+						"name": "foo",
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"create",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"update",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"merge",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"patch",
+				json!([
+					"tester:id",
+					[
+						{
+							"op": "add",
+							"path": "value",
+							"value": "bar"
+						},
+						{
+							"op": "remove",
+							"path": "name",
+						}
+					]
+				]),
+			),
+			socket.send_request("delete", json!(["tester"])),
+			socket.send_request("invalidate", json!([])),
+		];
+		for operation in operations_ok {
+			let res = operation.await;
+			assert!(res.is_ok(), "result: {res:?}");
+			let res = res.unwrap();
+			assert!(res.is_object(), "result: {res:?}");
+			let res = res.as_object().unwrap();
+			// Verify response contains no error
+			assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {res:?}");
+		}
+
+		// Test passed
+		server.finish().unwrap();
+	}
+	// Deny all
+	{
+		// Start server disallowing all RPC methods except for version and use
+		let (addr, mut server) = common::start_server(StartServerArguments {
+			// Deny all routes except for RPC
+			args: "--deny-rpc --allow-rpc version,use".to_string(),
+			// Auth disabled to ensure unauthorized errors are due to capabilities
+			auth: false,
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		// Connect to WebSocket
+		let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+		// Specify a namespace and database
+		socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+		// Test operations that SHOULD NOT with the provided capabilities
+		let operations_ko = vec![
+			socket.send_request("query", json!(["SELECT * FROM 1"])),
+			socket.send_request("ping", json!([])),
+			socket.send_request("info", json!([])),
+			socket.send_request("let", json!(["let_var", "let_value",])),
+			socket.send_request("set", json!(["set_var", "set_value",])),
+			socket.send_request("select", json!(["tester",])),
+			socket.send_request(
+				"insert",
+				json!([
+					"tester",
+					{
+						"name": "foo",
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"create",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"update",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"merge",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+			socket.send_request(
+				"patch",
+				json!([
+					"tester:id",
+					[
+						{
+							"op": "add",
+							"path": "value",
+							"value": "bar"
+						},
+						{
+							"op": "remove",
+							"path": "name",
+						}
+					]
+				]),
+			),
+			socket.send_request("delete", json!(["tester"])),
+			socket.send_request("invalidate", json!([])),
+		];
+		for operation in operations_ko {
+			let res = operation.await;
+			assert!(res.is_ok(), "result: {res:?}");
+			let res = res.unwrap();
+			assert!(res.is_object(), "result: {res:?}");
+			let res = res.as_object().unwrap();
+			assert_eq!(res["error"], json!({"code": -32000, "message": "Method not allowed"}));
+		}
+
+		// Test operations that SHOULD work with the provided capabilities
+		let operations_ok = vec![
+			socket.send_request("version", json!([])),
+			socket.send_request("use", json!([NS, DB])),
+		];
+		for operation in operations_ok {
+			let res = operation.await;
+			assert!(res.is_ok(), "result: {res:?}");
+			let res = res.unwrap();
+			assert!(res.is_object(), "result: {res:?}");
+			let res = res.as_object().unwrap();
+			// Verify response contains no error
+			assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {res:?}");
+		}
+
+		// Test passed
+		server.finish().unwrap();
+	}
 }

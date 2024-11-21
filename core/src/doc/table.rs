@@ -47,7 +47,12 @@ struct FieldDataContext<'a> {
 }
 
 impl Document {
-	pub async fn table(
+	/// Processes any DEFINE TABLE AS clauses which
+	/// have been defined for the table which this
+	/// record belongs to. This functions loops
+	/// through the tables and processes them all
+	/// within the currently running transaction.
+	pub async fn process_table_views(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -78,7 +83,7 @@ impl Document {
 		// Don't run permissions
 		let opt = &opt.new_with_perms(false);
 		// Get the record id
-		let rid = self.id.as_ref().unwrap();
+		let rid = self.id()?;
 		// Get the query action
 		let act = if stm.is_delete() {
 			Action::Delete
@@ -388,29 +393,109 @@ impl Document {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						Some("count") => {
 							let val = f.compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
+							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
-						Some("math::sum") => {
+						Some(name) if name == "time::min" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
+							let val = match val {
+								val @ Value::Datetime(_) => val,
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a datetime but found {val}"
+										),
+									})
+								}
+							};
+							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						Some("math::min") | Some("time::min") => {
+						Some(name) if name == "time::max" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
+							let val = match val {
+								val @ Value::Datetime(_) => val,
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a datetime but found {val}"
+										),
+									})
+								}
+							};
+							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						Some("math::max") | Some("time::max") => {
+						Some(name) if name == "math::sum" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
+							let val = match val {
+								val @ Value::Number(_) => val,
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a number but found {val}"
+										),
+									})
+								}
+							};
+							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
-						Some("math::mean") => {
+						Some(name) if name == "math::min" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
+							let val = match val {
+								val @ Value::Number(_) => val,
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a number but found {val}"
+										),
+									})
+								}
+							};
+							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						_ => unreachable!(),
+						Some(name) if name == "math::max" => {
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = match val {
+								val @ Value::Number(_) => val,
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a number but found {val}"
+										),
+									})
+								}
+							};
+							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
+						}
+						Some(name) if name == "math::mean" => {
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = match val {
+								val @ Value::Number(_) => val.coerce_to_decimal()?.into(),
+								val => {
+									return Err(Error::InvalidAggregation {
+										name: name.to_string(),
+										table: fdc.ft.name.to_raw(),
+										message: format!(
+											"This function expects a number but found {val}"
+										),
+									})
+								}
+							};
+							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
+						}
+						f => return Err(fail!("Unexpected function {f:?} encountered")),
 					},
 					_ => {
 						let val = expr.compute(stk, ctx, opt, Some(fdc.doc)).await?;
-						self.set(&mut set_ops, idiom, val);
+						self.set(&mut set_ops, idiom, val)?;
 					}
 				}
 			}
@@ -419,11 +504,20 @@ impl Document {
 	}
 
 	/// Set the field in the foreign table
-	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) {
+	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) -> Result<(), Error> {
 		ops.push((key, Operator::Equal, val));
+		// Everything ok
+		Ok(())
 	}
 	/// Increment or decrement the field in the foreign table
-	fn chg(&self, set_ops: &mut Ops, del_ops: &mut Ops, act: &FieldAction, key: Idiom, val: Value) {
+	fn chg(
+		&self,
+		set_ops: &mut Ops,
+		del_ops: &mut Ops,
+		act: &FieldAction,
+		key: Idiom,
+		val: Value,
+	) -> Result<(), Error> {
 		match act {
 			FieldAction::Add => {
 				set_ops.push((key.clone(), Operator::Inc, val));
@@ -434,6 +528,8 @@ impl Document {
 				del_ops.push((key, Operator::Equal, Value::from(0)));
 			}
 		}
+		// Everything ok
+		Ok(())
 	}
 
 	/// Set the new minimum value for the field in the foreign table
@@ -445,7 +541,7 @@ impl Document {
 		field: &Field,
 		key: Idiom,
 		val: Value,
-	) {
+	) -> Result<(), Error> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -481,7 +577,7 @@ impl Document {
 				// If it is equal to the previous MIN value,
 				// as we can't know what was the previous MIN value,
 				// we have to recompute it
-				let subquery = Self::one_group_query(fdc, field, &key, val);
+				let subquery = Self::one_group_query(fdc, field, &key, val)?;
 				set_ops.push((key.clone(), Operator::Equal, subquery));
 				//  Decrement the number of values
 				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
@@ -489,6 +585,8 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
+		// Everything ok
+		Ok(())
 	}
 	/// Set the new maximum value for the field in the foreign table
 	fn max(
@@ -499,7 +597,7 @@ impl Document {
 		field: &Field,
 		key: Idiom,
 		val: Value,
-	) {
+	) -> Result<(), Error> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -536,7 +634,7 @@ impl Document {
 				// If it is equal to the previous MAX value,
 				// as we can't know what was the previous MAX value,
 				// we have to recompute the MAX
-				let subquery = Self::one_group_query(fdc, field, &key, val);
+				let subquery = Self::one_group_query(fdc, field, &key, val)?;
 				set_ops.push((key.clone(), Operator::Equal, subquery));
 				//  Decrement the number of values
 				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
@@ -544,75 +642,8 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
-	}
-
-	/// Recomputes the value for one group
-	fn one_group_query(fdc: &FieldDataContext, field: &Field, key: &Idiom, val: Value) -> Value {
-		// Build the condition merging the optional user provided condition and the group
-		let mut iter = fdc.groups.0.iter().enumerate();
-		let cond = if let Some((i, g)) = iter.next() {
-			let mut root = Value::Expression(Box::new(Expression::Binary {
-				l: Value::Idiom(g.0.clone()),
-				o: Operator::Equal,
-				r: fdc.group_ids[i].clone(),
-			}));
-			for (i, g) in iter {
-				let exp = Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(g.0.clone()),
-					o: Operator::Equal,
-					r: fdc.group_ids[i].clone(),
-				}));
-				root = Value::Expression(Box::new(Expression::Binary {
-					l: root,
-					o: Operator::And,
-					r: exp,
-				}));
-			}
-			if let Some(c) = &fdc.view.cond {
-				root = Value::Expression(Box::new(Expression::Binary {
-					l: root,
-					o: Operator::And,
-					r: c.0.clone(),
-				}));
-			}
-			Some(Cond(root))
-		} else {
-			fdc.view.cond.clone()
-		};
-
-		let group_select = Value::Subquery(Box::new(Subquery::Select(SelectStatement {
-			expr: Fields(vec![field.clone()], false),
-			cond,
-			what: (&fdc.view.what).into(),
-			group: Some(fdc.groups.clone()),
-			..SelectStatement::default()
-		})));
-		let array_first = Value::Function(Box::new(Function::Normal(
-			"array::first".to_string(),
-			vec![group_select],
-		)));
-		let ident = match field {
-			Field::Single {
-				alias: Some(alias),
-				..
-			} => match alias.0.first() {
-				Some(Part::Field(ident)) => ident.clone(),
-				_ => unreachable!(),
-			},
-			_ => unreachable!(),
-		};
-		let compute_query = Value::Idiom(Idiom(vec![Part::Start(array_first), Part::Field(ident)]));
-		Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
-			exprs: vec![(
-				Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(key.clone()),
-					o: Operator::Equal,
-					r: val.clone(),
-				})),
-				compute_query,
-			)],
-			close: Some(Value::Idiom(key.clone())),
-		})))
+		// Everything ok
+		Ok(())
 	}
 
 	/// Set the new average value for the field in the foreign table
@@ -623,7 +654,7 @@ impl Document {
 		act: &FieldAction,
 		key: Idiom,
 		val: Value,
-	) {
+	) -> Result<(), Error> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -690,5 +721,81 @@ impl Document {
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
+		// Everything ok
+		Ok(())
+	}
+
+	/// Recomputes the value for one group
+	fn one_group_query(
+		fdc: &FieldDataContext,
+		field: &Field,
+		key: &Idiom,
+		val: Value,
+	) -> Result<Value, Error> {
+		// Build the condition merging the optional user provided condition and the group
+		let mut iter = fdc.groups.0.iter().enumerate();
+		let cond = if let Some((i, g)) = iter.next() {
+			let mut root = Value::Expression(Box::new(Expression::Binary {
+				l: Value::Idiom(g.0.clone()),
+				o: Operator::Equal,
+				r: fdc.group_ids[i].clone(),
+			}));
+			for (i, g) in iter {
+				let exp = Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(g.0.clone()),
+					o: Operator::Equal,
+					r: fdc.group_ids[i].clone(),
+				}));
+				root = Value::Expression(Box::new(Expression::Binary {
+					l: root,
+					o: Operator::And,
+					r: exp,
+				}));
+			}
+			if let Some(c) = &fdc.view.cond {
+				root = Value::Expression(Box::new(Expression::Binary {
+					l: root,
+					o: Operator::And,
+					r: c.0.clone(),
+				}));
+			}
+			Some(Cond(root))
+		} else {
+			fdc.view.cond.clone()
+		};
+
+		let group_select = Value::Subquery(Box::new(Subquery::Select(SelectStatement {
+			expr: Fields(vec![field.clone()], false),
+			cond,
+			what: (&fdc.view.what).into(),
+			group: Some(fdc.groups.clone()),
+			..SelectStatement::default()
+		})));
+		let array_first = Value::Function(Box::new(Function::Normal(
+			"array::first".to_string(),
+			vec![group_select],
+		)));
+		let ident = match field {
+			Field::Single {
+				alias: Some(alias),
+				..
+			} => match alias.0.first() {
+				Some(Part::Field(ident)) => ident.clone(),
+				p => return Err(fail!("Unexpected ident type encountered: {p:?}")),
+			},
+			f => return Err(fail!("Unexpected field type encountered: {f:?}")),
+		};
+		let compute_query = Value::Idiom(Idiom(vec![Part::Start(array_first), Part::Field(ident)]));
+		Ok(Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+			exprs: vec![(
+				Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(key.clone()),
+					o: Operator::Equal,
+					r: val.clone(),
+				})),
+				compute_query,
+			)],
+			close: Some(Value::Idiom(key.clone())),
+		}))))
 	}
 }

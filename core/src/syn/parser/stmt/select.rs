@@ -2,18 +2,21 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		statements::SelectStatement, Explain, Field, Fields, Ident, Idioms, Limit, Order, Orders,
-		Split, Splits, Start, Values, Version, With,
+		order::{OrderList, Ordering},
+		statements::SelectStatement,
+		Explain, Field, Fields, Ident, Idioms, Limit, Order, Split, Splits, Start, Values, Version,
+		With,
 	},
 	syn::{
 		parser::{
-			error::MissingKind,
 			mac::{expected, unexpected},
 			ParseResult, Parser,
 		},
 		token::{t, Span},
 	},
 };
+
+use super::parts::MissingKind;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_select_stmt(
@@ -34,9 +37,9 @@ impl Parser<'_> {
 
 		let only = self.eat(t!("ONLY"));
 
-		let mut what = vec![stk.run(|ctx| self.parse_value(ctx)).await?];
+		let mut what = vec![stk.run(|ctx| self.parse_value_table(ctx)).await?];
 		while self.eat(t!(",")) {
-			what.push(stk.run(|ctx| self.parse_value(ctx)).await?);
+			what.push(stk.run(|ctx| self.parse_value_table(ctx)).await?);
 		}
 		let what = Values(what);
 
@@ -55,7 +58,7 @@ impl Parser<'_> {
 			(limit, start)
 		};
 		let fetch = self.try_parse_fetch(stk).await?;
-		let version = self.try_parse_version()?;
+		let version = self.try_parse_version(stk).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		let tempfiles = self.eat(t!("TEMPFILES"));
@@ -86,7 +89,8 @@ impl Parser<'_> {
 		if !self.eat(t!("WITH")) {
 			return Ok(None);
 		}
-		let with = match self.next().kind {
+		let next = self.next();
+		let with = match next.kind {
 			t!("NOINDEX") => With::NoIndex,
 			t!("NO") => {
 				expected!(self, t!("INDEX"));
@@ -99,7 +103,7 @@ impl Parser<'_> {
 				}
 				With::Index(index)
 			}
-			x => unexpected!(self, x, "`NO`, `NOINDEX` or `INDEX`"),
+			_ => unexpected!(self, next, "`NO`, `NOINDEX` or `INDEX`"),
 		};
 		Ok(Some(with))
 	}
@@ -143,7 +147,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
-	) -> ParseResult<Option<Orders>> {
+	) -> ParseResult<Option<Ordering>> {
 		if !self.eat(t!("ORDER")) {
 			return Ok(None);
 		}
@@ -154,13 +158,7 @@ impl Parser<'_> {
 			self.pop_peek();
 			let start = expected!(self, t!("(")).span;
 			self.expect_closing_delimiter(t!(")"), start)?;
-			return Ok(Some(Orders(vec![Order {
-				order: Default::default(),
-				random: true,
-				collate: false,
-				numeric: false,
-				direction: true,
-			}])));
+			return Ok(Some(Ordering::Random));
 		};
 
 		let has_all = fields.contains(&Field::All);
@@ -169,7 +167,7 @@ impl Parser<'_> {
 		let order = self.parse_order(ctx).await?;
 		let order_span = before.covers(self.last_span());
 		if !has_all {
-			Self::check_idiom(MissingKind::Order, fields, fields_span, &order, order_span)?;
+			Self::check_idiom(MissingKind::Order, fields, fields_span, &order.value, order_span)?;
 		}
 
 		let mut orders = vec![order];
@@ -178,12 +176,18 @@ impl Parser<'_> {
 			let order = self.parse_order(ctx).await?;
 			let order_span = before.covers(self.last_span());
 			if !has_all {
-				Self::check_idiom(MissingKind::Order, fields, fields_span, &order, order_span)?;
+				Self::check_idiom(
+					MissingKind::Order,
+					fields,
+					fields_span,
+					&order.value,
+					order_span,
+				)?;
 			}
 			orders.push(order)
 		}
 
-		Ok(Some(Orders(orders)))
+		Ok(Some(Ordering::Order(OrderList(orders))))
 	}
 
 	async fn parse_order(&mut self, ctx: &mut Stk) -> ParseResult<Order> {
@@ -202,8 +206,7 @@ impl Parser<'_> {
 			_ => true,
 		};
 		Ok(Order {
-			order: start,
-			random: false,
+			value: start,
 			collate,
 			numeric,
 			direction,
@@ -215,7 +218,7 @@ impl Parser<'_> {
 			return Ok(None);
 		}
 		self.eat(t!("BY"));
-		let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		Ok(Some(Limit(value)))
 	}
 
@@ -224,15 +227,18 @@ impl Parser<'_> {
 			return Ok(None);
 		}
 		self.eat(t!("AT"));
-		let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		Ok(Some(Start(value)))
 	}
 
-	pub(crate) fn try_parse_version(&mut self) -> ParseResult<Option<Version>> {
+	pub(crate) async fn try_parse_version(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<Option<Version>> {
 		if !self.eat(t!("VERSION")) {
 			return Ok(None);
 		}
-		let time = self.next_token_value()?;
+		let time = self.parse_value_inherit(ctx).await?;
 		Ok(Some(Version(time)))
 	}
 }

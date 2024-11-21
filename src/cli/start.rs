@@ -1,5 +1,4 @@
-use super::config;
-use super::config::Config;
+use super::config::{Config, CF};
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
 use crate::cnf::LOGO;
@@ -14,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
-use surrealdb::engine::tasks::start_tasks;
+use surrealdb::engine::tasks;
 use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
@@ -39,15 +38,37 @@ pub struct StartCommandArguments {
 	#[arg(value_parser = super::validator::key_valid)]
 	#[arg(hide = true)] // Not currently in use
 	key: Option<String>,
-
+	//
+	// Tasks
+	//
 	#[arg(
-		help = "The interval at which to run node agent tick (including garbage collection)",
+		help = "The interval at which to refresh node registration information",
 		help_heading = "Database"
 	)]
-	#[arg(env = "SURREAL_TICK_INTERVAL", long = "tick-interval", value_parser = super::validator::duration)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_REFRESH_INTERVAL", long = "node-membership-refresh-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "3s")]
+	node_membership_refresh_interval: Duration,
+	#[arg(
+		help = "The interval at which process and archive inactive nodes",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CHECK_INTERVAL", long = "node-membership-check-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "15s")]
+	node_membership_check_interval: Duration,
+	#[arg(
+		help = "The interval at which to process and cleanup archived nodes",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CLEANUP_INTERVAL", long = "node-membership-cleanup-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "300s")]
+	node_membership_cleanup_interval: Duration,
+	#[arg(
+		help = "The interval at which to perform changefeed garbage collection",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_CHANGEFEED_GC_INTERVAL", long = "changefeed-gc-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "10s")]
-	tick_interval: Duration,
-
+	changefeed_gc_interval: Duration,
 	//
 	// Authentication
 	//
@@ -75,14 +96,12 @@ pub struct StartCommandArguments {
 		requires = "username"
 	)]
 	password: Option<String>,
-
 	//
 	// Datastore connection
 	//
 	#[command(next_help_heading = "Datastore connection")]
 	#[command(flatten)]
 	kvs: Option<StartCommandRemoteTlsOptions>,
-
 	//
 	// HTTP Server
 	//
@@ -144,17 +163,17 @@ pub async fn init(
 		dbs,
 		web,
 		log,
-		tick_interval,
+		node_membership_refresh_interval,
+		node_membership_check_interval,
+		node_membership_cleanup_interval,
+		changefeed_gc_interval,
 		no_banner,
 		no_identification_headers,
 		..
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_filter(log).init();
-	// Start metrics subsystem
-	crate::telemetry::metrics::init().expect("failed to initialize metrics");
-
+	crate::telemetry::builder().with_filter(log).init()?;
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");
@@ -172,38 +191,42 @@ pub async fn init(
 	} else {
 		(None, None)
 	};
-	// Setup the command-line options
-	let _ = config::CF.set(Config {
+	// Configure the engine
+	let engine = EngineOptions::default()
+		.with_node_membership_refresh_interval(node_membership_refresh_interval)
+		.with_node_membership_check_interval(node_membership_check_interval)
+		.with_node_membership_cleanup_interval(node_membership_cleanup_interval)
+		.with_changefeed_gc_interval(changefeed_gc_interval);
+	// Configure the config
+	let config = Config {
 		bind: listen_addresses.first().cloned().unwrap(),
 		client_ip,
 		path,
 		user,
 		pass,
 		no_identification_headers,
-		engine: Some(EngineOptions::default().with_tick_interval(tick_interval)),
+		engine,
 		crt,
 		key,
-	});
-	// This is the cancellation token propagated down to
-	// all the async functions that needs to be stopped gracefully.
-	let ct = CancellationToken::new();
+	};
+	// Setup the command-line options
+	let _ = CF.set(config);
 	// Initiate environment
 	env::init().await?;
+	// Create a token to cancel tasks
+	let canceller = CancellationToken::new();
 	// Start the datastore
-	let ds = Arc::new(dbs::init(dbs).await?);
+	let datastore = Arc::new(dbs::init(dbs).await?);
 	// Start the node agent
-	let (tasks, task_chans) =
-		start_tasks(&config::CF.get().unwrap().engine.unwrap_or_default(), ds.clone());
+	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
 	// Start the web server
-	net::init(ds, ct.clone()).await?;
+	net::init(datastore.clone(), canceller.clone()).await?;
 	// Shutdown and stop closed tasks
-	task_chans.into_iter().for_each(|chan| {
-		if chan.send(()).is_err() {
-			error!("Failed to send shutdown signal to task");
-		}
-	});
-	ct.cancel();
-	tasks.resolve().await?;
+	canceller.cancel();
+	// Wait for background tasks to finish
+	nodetasks.resolve().await?;
+	// Shutdown the datastore
+	datastore.shutdown().await?;
 	// All ok
 	Ok(())
 }

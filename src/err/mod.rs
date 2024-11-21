@@ -2,9 +2,9 @@ use crate::cli::abstraction::auth::Error as SurrealAuthError;
 use axum::response::{IntoResponse, Response};
 use axum::Error as AxumError;
 use axum::Json;
-use axum_extra::typed_header::TypedHeaderRejection;
 use base64::DecodeError as Base64Error;
 use http::{HeaderName, StatusCode};
+use opentelemetry::global::Error as OpentelemetryError;
 use reqwest::Error as ReqwestError;
 use serde::Serialize;
 use std::io::Error as IoError;
@@ -38,7 +38,7 @@ pub enum Error {
 	OperationUnsupported,
 
 	#[error("There was a problem parsing the header {0}: {1}")]
-	InvalidHeader(HeaderName, TypedHeaderRejection),
+	InvalidHeader(HeaderName, String),
 
 	#[error("There was a problem with the database: {0}")]
 	Db(#[from] SurrealError),
@@ -64,12 +64,15 @@ pub enum Error {
 	#[error("There was an error with auth: {0}")]
 	Auth(#[from] SurrealAuthError),
 
-	#[error("There was an error with the node agent")]
-	NodeAgent,
+	#[error("There was an error with opentelemetry: {0}")]
+	Otel(#[from] OpentelemetryError),
 
 	/// Statement has been deprecated
 	#[error("{0}")]
 	Other(String),
+
+	#[error("The HTTP route '{0}' is forbidden")]
+	ForbiddenRoute(String),
 }
 
 impl From<Error> for String {
@@ -111,6 +114,24 @@ impl From<serde_pack::decode::Error> for Error {
 impl From<ciborium::value::Error> for Error {
 	fn from(e: ciborium::value::Error) -> Error {
 		Error::Cbor(format!("{e}"))
+	}
+}
+
+impl From<opentelemetry::logs::LogError> for Error {
+	fn from(e: opentelemetry::logs::LogError) -> Error {
+		Error::Otel(OpentelemetryError::Log(e))
+	}
+}
+
+impl From<opentelemetry::trace::TraceError> for Error {
+	fn from(e: opentelemetry::trace::TraceError) -> Error {
+		Error::Otel(OpentelemetryError::Trace(e))
+	}
+}
+
+impl From<opentelemetry::metrics::MetricsError> for Error {
+	fn from(e: opentelemetry::metrics::MetricsError) -> Error {
+		Error::Otel(OpentelemetryError::Metric(e))
 	}
 }
 
@@ -177,7 +198,7 @@ impl IntoResponse for Error {
 					information: Some(err.to_string()),
 				})
 			),
-			err @ Error::Db(SurrealError::Db(SurrealDbError::IamError(SurrealIamError::NotAllowed { .. }))) => (
+			err @ Error::ForbiddenRoute(_) | err @ Error::Db(SurrealError::Db(SurrealDbError::IamError(SurrealIamError::NotAllowed { .. }))) => (
 				StatusCode::FORBIDDEN,
 				Json(Message {
 					code: StatusCode::FORBIDDEN.as_u16(),

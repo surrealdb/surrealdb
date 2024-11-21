@@ -21,8 +21,9 @@ use crate::{
 
 impl Parser<'_> {
 	pub async fn parse_remove_stmt(&mut self, ctx: &mut Stk) -> ParseResult<RemoveStatement> {
-		let res = match self.next().kind {
-			t!("NAMESPACE") | t!("ns") => {
+		let next = self.next();
+		let res = match next.kind {
+			t!("NAMESPACE") => {
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -198,7 +199,8 @@ impl Parser<'_> {
 					if_exists,
 				})
 			}
-			x => unexpected!(self, x, "a remove statement keyword"),
+			// TODO(raphaeldarley): add Config here
+			_ => unexpected!(self, next, "a remove statement keyword"),
 		};
 		Ok(res)
 	}

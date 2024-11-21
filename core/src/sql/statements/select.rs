@@ -2,10 +2,11 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::QueryPlanner;
+use crate::idx::planner::{QueryPlanner, QueryPlannerParams};
 use crate::sql::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Id, Idioms, Limit, Orders, Splits, Start,
-	Timeout, Value, Values, Version, With,
+	order::{OldOrders, Order, OrderList, Ordering},
+	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
+	Values, Version, With,
 };
 use derive::Store;
 use reblessive::tree::Stk;
@@ -14,21 +15,26 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct SelectStatement {
+	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
 	pub omit: Option<Idioms>,
 	#[revision(start = 2)]
 	pub only: bool,
+	/// The baz part in SELECT foo,bar FROM baz.
 	pub what: Values,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
-	pub order: Option<Orders>,
+	#[revision(end = 4, convert_fn = "convert_old_orders")]
+	pub old_order: Option<OldOrders>,
+	#[revision(start = 4)]
+	pub order: Option<Ordering>,
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
@@ -41,6 +47,36 @@ pub struct SelectStatement {
 }
 
 impl SelectStatement {
+	fn convert_old_orders(
+		&mut self,
+		_rev: u16,
+		old_value: Option<OldOrders>,
+	) -> Result<(), revision::Error> {
+		let Some(x) = old_value else {
+			// nothing to do.
+			return Ok(());
+		};
+
+		if x.0.iter().any(|x| x.random) {
+			self.order = Some(Ordering::Random);
+			return Ok(());
+		}
+
+		let new_ord =
+			x.0.into_iter()
+				.map(|x| Order {
+					value: x.order,
+					collate: x.collate,
+					numeric: x.numeric,
+					direction: x.direction,
+				})
+				.collect();
+
+		self.order = Some(Ordering::Order(OrderList(new_ord)));
+
+		Ok(())
+	}
+
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		if self.expr.iter().any(|v| match v {
@@ -73,16 +109,11 @@ impl SelectStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
-		let version = self.version.as_ref().map(|v| v.to_u64());
-		let opt =
-			Arc::new(opt.new_with_futures(false).with_projections(true).with_version(version));
-		// Get a query planner
-		let mut planner = QueryPlanner::new(
-			opt.clone(),
-			self.with.as_ref().cloned().map(|w| w.into()),
-			self.cond.as_ref().cloned().map(|c| c.into()),
-			self.order.as_ref().cloned().map(|o| o.into()),
-		);
+		let version = match &self.version {
+			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
+			_ => None,
+		};
+		let opt = Arc::new(opt.new_with_futures(false).with_version(version));
 		// Extract the limit
 		let limit = i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Used for ONLY: is the limit 1?
@@ -94,53 +125,60 @@ impl SelectStatement {
 		if self.only && !limit_is_one_or_zero && self.what.0.len() > 1 {
 			return Err(Error::SingleOnlyOutput);
 		}
+		// Check if there is a timeout
+		let ctx = match self.timeout.as_ref() {
+			Some(timeout) => {
+				let mut ctx = MutableContext::new(ctx);
+				ctx.add_timeout(*timeout.0)?;
+				ctx.freeze()
+			}
+			None => ctx.clone(),
+		};
+		// Get a query planner
+		let mut planner = QueryPlanner::new();
+		let params: QueryPlannerParams<'_> = self.into();
+		let keys = params.is_keys_only();
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, ctx, &opt, doc).await?;
+			let v = w.compute(stk, &ctx, &opt, doc).await?;
 			match v {
-				Value::Table(t) => {
-					if self.only && !limit_is_one_or_zero {
-						return Err(Error::SingleOnlyOutput);
-					}
-					planner.add_iterables(stk, ctx, t, &mut i).await?;
-				}
-				Value::Thing(v) => match &v.id {
-					Id::Range(r) => i.ingest(Iterable::TableRange(v.tb, *r.to_owned())),
-					_ => i.ingest(Iterable::Thing(v)),
+				Value::Thing(v) => match v.is_range() {
+					true => i.prepare_range(&stm, v, keys)?,
+					false => i.prepare_thing(&stm, v)?,
 				},
 				Value::Edges(v) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-
-					i.ingest(Iterable::Edges(*v))
+					i.prepare_edges(&stm, *v)?;
 				}
 				Value::Mock(v) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-
-					for v in v {
-						i.ingest(Iterable::Thing(v));
+					i.prepare_mock(&stm, v)?;
+				}
+				Value::Table(t) => {
+					if self.only && !limit_is_one_or_zero {
+						return Err(Error::SingleOnlyOutput);
 					}
+					planner.add_iterables(stk, &ctx, &opt, t, &params, &mut i).await?;
 				}
 				Value::Array(v) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-
 					for v in v {
 						match v {
 							Value::Table(t) => {
-								planner.add_iterables(stk, ctx, t, &mut i).await?;
+								planner.add_iterables(stk, &ctx, &opt, t, &params, &mut i).await?;
 							}
-							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
-							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
-							Value::Mock(v) => {
-								for v in v {
-									i.ingest(Iterable::Thing(v));
-								}
-							}
+							Value::Mock(v) => i.prepare_mock(&stm, v)?,
+							Value::Edges(v) => i.prepare_edges(&stm, *v)?,
+							Value::Thing(v) => match v.is_range() {
+								true => i.prepare_range(&stm, v, keys)?,
+								false => i.prepare_thing(&stm, v)?,
+							},
 							_ => i.ingest(Iterable::Value(v)),
 						}
 					}
@@ -149,14 +187,20 @@ impl SelectStatement {
 			};
 		}
 		// Create a new context
-		let mut ctx = MutableContext::new(ctx);
+		let mut ctx = MutableContext::new(&ctx);
 		// Add query executors if any
 		if planner.has_executors() {
 			ctx.set_query_planner(planner);
 		}
 		let ctx = ctx.freeze();
+		// Process the statement
+		let res = i.output(stk, &ctx, &opt, &stm).await?;
+		// Catch statement timeout
+		if ctx.is_timedout() {
+			return Err(Error::QueryTimedout);
+		}
 		// Output the results
-		match i.output(stk, &ctx, &opt, &stm).await? {
+		match res {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There were no results

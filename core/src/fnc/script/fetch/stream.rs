@@ -1,19 +1,19 @@
 use std::{future::Future, pin::Pin};
 
-use channel::Receiver;
-use futures::{FutureExt, Stream, StreamExt};
+use async_channel::Receiver;
+use futures::{Stream, StreamExt};
 
 /// A newtype struct over receiver implementing the [`Stream`] trait.
 #[non_exhaustive]
-pub struct ChannelStream<R>(Receiver<R>);
+pub struct ChannelStream<R>(Pin<Box<Receiver<R>>>);
 
 impl<R> Stream for ChannelStream<R> {
 	type Item = R;
 	fn poll_next(
-		self: Pin<&mut Self>,
+		mut self: Pin<&mut Self>,
 		cx: &mut std::task::Context,
 	) -> std::task::Poll<Option<Self::Item>> {
-		self.0.recv().poll_unpin(cx).map(|x| x.ok())
+		self.0.poll_next_unpin(cx)
 	}
 }
 
@@ -39,9 +39,9 @@ impl<R: Clone + 'static + Send + Sync> ReadableStream<R> {
 
 		// Unbounded, otherwise when one channel gets awaited it might block forever because the
 		// other channel fills up.
-		let (send_a, recv_a) = channel::unbounded::<R>();
-		let (send_b, recv_b) = channel::unbounded::<R>();
-		let new_stream = Box::pin(ChannelStream(recv_a));
+		let (send_a, recv_a) = async_channel::unbounded::<R>();
+		let (send_b, recv_b) = async_channel::unbounded::<R>();
+		let new_stream = Box::pin(recv_a);
 		let mut old_stream = std::mem::replace(&mut self.0, new_stream);
 		let drive = async move {
 			while let Some(item) = old_stream.next().await {

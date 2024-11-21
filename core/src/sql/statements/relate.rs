@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -44,11 +44,20 @@ impl RelateStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_projections(false);
+		let opt = &opt.new_with_futures(false);
+		// Check if there is a timeout
+		let ctx = match self.timeout.as_ref() {
+			Some(timeout) => {
+				let mut ctx = MutableContext::new(ctx);
+				ctx.add_timeout(*timeout.0)?;
+				ctx.freeze()
+			}
+			None => ctx.clone(),
+		};
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();
-			match self.from.compute(stk, ctx, opt, doc).await? {
+			match self.from.compute(stk, &ctx, opt, doc).await? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -57,13 +66,13 @@ impl RelateStatement {
 							Value::Object(v) => match v.rid() {
 								Some(v) => out.push(v),
 								_ => {
-									return Err(Error::RelateStatementOut {
+									return Err(Error::RelateStatementIn {
 										value: v.to_string(),
 									})
 								}
 							},
 							v => {
-								return Err(Error::RelateStatementOut {
+								return Err(Error::RelateStatementIn {
 									value: v.to_string(),
 								})
 							}
@@ -73,13 +82,13 @@ impl RelateStatement {
 				Value::Object(v) => match v.rid() {
 					Some(v) => out.push(v),
 					None => {
-						return Err(Error::RelateStatementOut {
+						return Err(Error::RelateStatementIn {
 							value: v.to_string(),
 						})
 					}
 				},
 				v => {
-					return Err(Error::RelateStatementOut {
+					return Err(Error::RelateStatementIn {
 						value: v.to_string(),
 					})
 				}
@@ -90,7 +99,7 @@ impl RelateStatement {
 		// Loop over the with targets
 		let with = {
 			let mut out = Vec::new();
-			match self.with.compute(stk, ctx, opt, doc).await? {
+			match self.with.compute(stk, &ctx, opt, doc).await? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -133,14 +142,14 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				match &self.kind.compute(stk, ctx, opt, doc).await? {
+				match &self.kind.compute(stk, &ctx, opt, doc).await? {
 					// The relation has a specific record id
 					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w, None)),
 					// The relation does not have a specific record id
 					Value::Table(tb) => match &self.data {
 						// There is a data clause so check for a record id
 						Some(data) => {
-							let id = match data.rid(stk, ctx, opt).await? {
+							let id = match data.rid(stk, &ctx, opt).await? {
 								Some(id) => id.generate(tb, false)?,
 								None => tb.generate(),
 							};
@@ -160,8 +169,14 @@ impl RelateStatement {
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
+		// Process the statement
+		let res = i.output(stk, &ctx, opt, &stm).await?;
+		// Catch statement timeout
+		if ctx.is_timedout() {
+			return Err(Error::QueryTimedout);
+		}
 		// Output the results
-		match i.output(stk, ctx, opt, &stm).await? {
+		match res {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result

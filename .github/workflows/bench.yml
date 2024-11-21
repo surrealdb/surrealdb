@@ -31,15 +31,11 @@ defaults:
 jobs:
   common:
     name: Bench common
-    runs-on:
-      - self-hosted
-      - benches
+    runs-on: [runner-arm64-2xlarge]
     timeout-minutes: 60
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -94,9 +90,7 @@ jobs:
 
   engines:
     name: Benchmark engines
-    runs-on:
-      - self-hosted
-      - benches
+    runs-on: [runner-arm64-2xlarge]
     timeout-minutes: 60
     permissions:
       id-token: write
@@ -126,8 +120,6 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2

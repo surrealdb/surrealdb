@@ -108,7 +108,7 @@ impl Connection for Any {
 					);
 				}
 
-				EndpointKind::SurrealKV => {
+				EndpointKind::SurrealKv => {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::Backup);
@@ -120,6 +120,22 @@ impl Connection for Any {
 					#[cfg(not(feature = "kv-surrealkv"))]
 					return Err(DbError::Ds(
 						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+					)
+					.into());
+				}
+
+				EndpointKind::SurrealCs => {
+					#[cfg(feature = "kv-surrealcs")]
+					{
+						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
+						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
+						conn_rx.recv().await??
+					}
+
+					#[cfg(not(feature = "kv-surrealcs"))]
+					return Err(DbError::Ds(
+						"Cannot connect to the `surrealcs` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
 					)
 					.into());
 				}

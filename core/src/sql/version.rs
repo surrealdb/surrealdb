@@ -1,18 +1,43 @@
-use crate::sql::datetime::Datetime;
+use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::datetime::Datetime};
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 1)]
+use super::Value;
+
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Version(pub Datetime);
+pub struct Version(
+	#[revision(end = 2, convert_fn = "convert_version_datetime")] pub Datetime,
+	#[revision(start = 2)] pub Value,
+);
 
 impl Version {
-	/// Convert to nanosecond timestamp.
-	pub fn to_u64(&self) -> u64 {
-		self.0.timestamp_nanos_opt().unwrap_or_default() as u64
+	fn convert_version_datetime(
+		&mut self,
+		_revision: u16,
+		old: Datetime,
+	) -> Result<(), revision::Error> {
+		self.0 = Value::Datetime(old);
+		Ok(())
+	}
+
+	pub async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<u64, Error> {
+		match self.0.compute(stk, ctx, opt, doc).await? {
+			Value::Datetime(v) => Ok(v.to_u64()),
+			found => Err(Error::InvalidVersion {
+				found,
+			}),
+		}
 	}
 }
 

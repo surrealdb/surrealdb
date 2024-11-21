@@ -92,6 +92,7 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
+use super::opt::CreateResource;
 use super::opt::IntoResource;
 
 /// A alias for an often used type of future returned by async methods in this library.
@@ -107,6 +108,9 @@ pub struct Stats {
 
 /// Machine learning model marker type for import and export types
 pub struct Model;
+
+/// Marker type for configured exports
+pub struct ExportConfig;
 
 /// Live query marker type
 pub struct Live;
@@ -132,7 +136,7 @@ where
 	/// Using a static, compile-time scheme
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
@@ -140,7 +144,7 @@ where
 	/// use surrealdb::engine::remote::ws::Client;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Lazy<Surreal<Client>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -174,14 +178,14 @@ where
 	/// Using a dynamic, run-time scheme
 	///
 	/// ```no_run
-	/// use once_cell::sync::Lazy;
+	/// use std::sync::LazyLock;
 	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	/// use surrealdb::opt::auth::Root;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Lazy<Surreal<Any>> = Lazy::new(Surreal::init);
+	/// static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -380,7 +384,6 @@ where
 	///
 	/// ```no_run
 	/// use serde::Serialize;
-	/// use surrealdb::sql;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::opt::auth::Record;
 	///
@@ -405,12 +408,12 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Define the user record access
-	/// let sql = r#"
+	/// let surql = r#"
 	///     DEFINE ACCESS user_access ON DATABASE TYPE RECORD DURATION 24h
 	///     SIGNUP ( CREATE user SET email = $email, password = crypto::argon2::generate($password) )
 	///     SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(password, $password) )
 	/// "#;
-	/// db.query(sql).await?.check()?;
+	/// db.query(surql).await?.check()?;
 	///
 	/// // Sign a user up
 	/// db.signup(Record {
@@ -441,7 +444,6 @@ where
 	/// Namespace signin
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::opt::auth::Namespace;
 	///
@@ -460,8 +462,8 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Define the user
-	/// let sql = "DEFINE USER johndoe ON NAMESPACE PASSWORD 'password123'";
-	/// db.query(sql).await?.check()?;
+	/// let surql = "DEFINE USER johndoe ON NAMESPACE PASSWORD 'password123'";
+	/// db.query(surql).await?.check()?;
 	///
 	/// // Sign a user in
 	/// db.signin(Namespace {
@@ -477,7 +479,6 @@ where
 	/// Database signin
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::opt::auth::Database;
 	///
@@ -496,8 +497,8 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Define the user
-	/// let sql = "DEFINE USER johndoe ON DATABASE PASSWORD 'password123'";
-	/// db.query(sql).await?.check()?;
+	/// let surql = "DEFINE USER johndoe ON DATABASE PASSWORD 'password123'";
+	/// db.query(surql).await?.check()?;
 	///
 	/// // Sign a user in
 	/// db.signin(Database {
@@ -596,8 +597,6 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
-	///
 	/// # #[derive(serde::Deserialize)]
 	/// # struct Person;
 	/// # #[tokio::main]
@@ -733,7 +732,7 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Create a record with a random ID
-	/// let person: Vec<Person> = db.create("person").await?;
+	/// let person: Option<Person> = db.create("person").await?;
 	///
 	/// // Create a record with a specific ID
 	/// let record: Option<Person> = db.create(("person", "tobie"))
@@ -749,7 +748,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl IntoResource<R>) -> Create<C, R> {
+	pub fn create<R>(&self, resource: impl CreateResource<R>) -> Create<C, R> {
 		Create {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
@@ -763,7 +762,7 @@ where
 	///
 	/// ```no_run
 	/// use serde::{Serialize, Deserialize};
-	/// use surrealdb::sql;
+	/// use surrealdb::RecordId;
 	///
 	/// # #[derive(Deserialize)]
 	/// # struct Person;
@@ -821,7 +820,7 @@ where
 	/// // Insert multiple records with pre-defined IDs
 	/// #[derive(Serialize)]
 	/// struct UserWithId<'a> {
-	///     id: sql::Thing,
+	///     id: RecordId,
 	///     name: &'a str,
 	///     settings: Settings,
 	/// }
@@ -829,7 +828,7 @@ where
 	/// let people: Vec<Person> = db.insert("person")
 	///     .content(vec![
 	///         UserWithId {
-	///             id: sql::thing("person:tobie")?,
+	///             id: ("person", "tobie").into(),
 	///             name: "Tobie",
 	///             settings: Settings {
 	///                 active: true,
@@ -837,7 +836,7 @@ where
 	///             },
 	///         },
 	///         UserWithId {
-	///             id: sql::thing("person:jaime")?,
+	///             id: ("person", "jaime").into(),
 	///             name: "Jaime",
 	///             settings: Settings {
 	///                 active: true,
@@ -850,18 +849,18 @@ where
 	/// // Insert multiple records into different tables
 	/// #[derive(Serialize)]
 	/// struct WithId<'a> {
-	///     id: sql::Thing,
+	///     id: RecordId,
 	///     name: &'a str,
 	/// }
 	///
 	/// let people: Vec<Person> = db.insert(())
 	///     .content(vec![
 	///         WithId {
-	///             id: sql::thing("person:tobie")?,
+	///             id: ("person", "tobie").into(),
 	///             name: "Tobie",
 	///         },
 	///         WithId {
-	///             id: sql::thing("company:surrealdb")?,
+	///             id: ("company", "surrealdb").into(),
 	///             name: "SurrealDB",
 	///         },
 	///     ])
@@ -872,20 +871,20 @@ where
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Founded {
 	///     #[serde(rename = "in")]
-	///     founder: sql::Thing,
+	///     founder: RecordId,
 	///     #[serde(rename = "out")]
-	///     company: sql::Thing,
+	///     company: RecordId,
 	/// }
 	///
 	/// let founded: Vec<Founded> = db.insert("founded")
 	///     .relation(vec![
 	///         Founded {
-	///             founder: sql::thing("person:tobie")?,
-	///             company: sql::thing("company:surrealdb")?,
+	///             founder: ("person", "tobie").into(),
+	///             company: ("company", "surrealdb").into(),
 	///         },
 	///         Founded {
-	///             founder: sql::thing("person:jaime")?,
-	///             company: sql::thing("company:surrealdb")?,
+	///             founder: ("person", "jaime").into(),
+	///             company: ("company", "surrealdb").into(),
 	///         },
 	///     ])
 	///     .await?;
@@ -1370,6 +1369,7 @@ where
 			client: Cow::Borrowed(self),
 			target: target.into_export_destination(),
 			ml_config: None,
+			db_config: None,
 			response: PhantomData,
 			export_type: PhantomData,
 		}

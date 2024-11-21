@@ -1,4 +1,6 @@
 use rand::{thread_rng, Rng};
+use std::collections::btree_set::Iter;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -43,6 +45,7 @@ impl Child {
 		a.map(|_ok| self)
 	}
 
+	#[cfg(unix)]
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
 		nix::sys::signal::kill(
 			nix::unistd::Pid::from_raw(self.inner.as_ref().unwrap().id() as i32),
@@ -95,7 +98,11 @@ impl Drop for Child {
 	}
 }
 
-pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child {
+pub fn run_internal<P: AsRef<Path>>(
+	args: &str,
+	current_dir: Option<P>,
+	vars: Option<HashMap<String, String>>,
+) -> Child {
 	let mut path = std::env::current_exe().unwrap();
 	assert!(path.pop());
 	if path.ends_with("deps") {
@@ -118,6 +125,9 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());
 
 	cmd.env_clear();
+	if let Some(v) = vars {
+		cmd.envs(v);
+	}
 	cmd.stdin(Stdio::piped());
 	cmd.stdout(stdout);
 	cmd.stderr(stderr);
@@ -132,12 +142,12 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 
 /// Run the CLI with the given args
 pub fn run(args: &str) -> Child {
-	run_internal::<String>(args, None)
+	run_internal::<String>(args, None, None)
 }
 
 /// Run the CLI with the given args inside a temporary directory
 pub fn run_in_dir<P: AsRef<Path>>(args: &str, current_dir: P) -> Child {
-	run_internal(args, Some(current_dir))
+	run_internal(args, Some(current_dir), None)
 }
 
 pub fn tmp_file(name: &str) -> String {
@@ -150,9 +160,10 @@ pub struct StartServerArguments {
 	pub auth: bool,
 	pub tls: bool,
 	pub wait_is_ready: bool,
-	pub tick_interval: time::Duration,
 	pub temporary_directory: Option<String>,
+	pub import_file: Option<String>,
 	pub args: String,
+	pub vars: Option<HashMap<String, String>>,
 }
 
 impl Default for StartServerArguments {
@@ -162,9 +173,10 @@ impl Default for StartServerArguments {
 			auth: true,
 			tls: false,
 			wait_is_ready: true,
-			tick_interval: time::Duration::new(1, 0),
 			temporary_directory: None,
+			import_file: None,
 			args: "".to_string(),
+			vars: None,
 		}
 	}
 }
@@ -172,14 +184,6 @@ impl Default for StartServerArguments {
 pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		auth: false,
-		..Default::default()
-	})
-	.await
-}
-
-pub async fn start_server_with_functions() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments {
-		args: "--allow-funcs".to_string(),
 		..Default::default()
 	})
 	.await
@@ -207,15 +211,47 @@ pub async fn start_server_with_temporary_directory(
 	.await
 }
 
+pub async fn start_server_with_import_file(path: &str) -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		import_file: Some(path.to_string()),
+		..Default::default()
+	})
+	.await
+}
+
+pub async fn start_server_gql() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		vars: Some(HashMap::from([(
+			"SURREAL_EXPERIMENTAL_GRAPHQL".to_string(),
+			"true".to_string(),
+		)])),
+		..Default::default()
+	})
+	.await
+}
+
+pub async fn start_server_gql_without_auth() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		auth: false,
+		vars: Some(HashMap::from([(
+			"SURREAL_EXPERIMENTAL_GRAPHQL".to_string(),
+			"true".to_string(),
+		)])),
+		..Default::default()
+	})
+	.await
+}
+
 pub async fn start_server(
 	StartServerArguments {
 		path,
 		auth,
 		tls,
 		wait_is_ready,
-		tick_interval,
 		temporary_directory,
+		import_file,
 		args,
+		vars,
 	}: StartServerArguments,
 ) -> Result<(String, Child), Box<dyn Error>> {
 	let mut rng = thread_rng();
@@ -239,13 +275,12 @@ pub async fn start_server(
 		extra_args.push_str(" --unauthenticated");
 	}
 
-	if !tick_interval.is_zero() {
-		let sec = tick_interval.as_secs();
-		extra_args.push_str(format!(" --tick-interval {sec}s").as_str());
-	}
-
 	if let Some(path) = temporary_directory {
 		extra_args.push_str(format!(" --temporary-directory {path}").as_str());
+	}
+
+	if let Some(path) = import_file {
+		extra_args.push_str(format!(" --import-file {path}").as_str());
 	}
 
 	'retry: for _ in 0..3 {
@@ -257,7 +292,7 @@ pub async fn start_server(
 		info!("starting server with args: {start_args}");
 
 		// Configure where the logs go when running the test
-		let server = run_internal::<String>(&start_args, None);
+		let server = run_internal::<String>(&start_args, None, vars.clone());
 
 		if !wait_is_ready {
 			return Ok((addr, server));

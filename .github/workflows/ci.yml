@@ -21,6 +21,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  RUSTFLAGS: "--cfg surrealdb_unstable"
+
 jobs:
   format:
     name: Check format
@@ -29,7 +32,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: rustfmt
 
       - name: Checkout sources
@@ -52,8 +54,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -73,6 +73,37 @@ jobs:
       - name: Check workspace
         run: cargo make ci-check
 
+      - name: Check workspace release
+        run: cargo make ci-check-release
+
+  check-msrv:
+    name: Check workspace MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@1.80.1
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Check workspace on MSRV
+        run: cargo make ci-check
+
+      - name: Check workspace release on MSRV
+        run: cargo make ci-check-release
+
   check-fuzzing:
     name: Check fuzzing
     runs-on: ubuntu-latest
@@ -80,7 +111,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.80.1
           components: rustfmt
 
       - name: Checkout sources
@@ -109,7 +139,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Checkout sources
@@ -128,12 +157,11 @@ jobs:
 
   clippy:
     name: Check clippy
-    runs-on: ubuntu-latest
+    runs-on: [runner-arm64-large]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: clippy
 
       - name: Checkout sources
@@ -143,10 +171,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -160,8 +184,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -196,8 +218,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -223,8 +243,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -250,8 +268,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -273,12 +289,10 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ runner-arm64-2xlarge ]
+    runs-on: [runner-arm64-2xlarge]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -310,14 +324,37 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 5
 
+  graphql-integration:
+    name: GraphQL integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: run graphql integration test
+        run: cargo make ci-graphql-integration
+
   test-sdk-build:
     name: Test SDK build
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -345,8 +382,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -380,8 +415,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -415,8 +448,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -450,8 +481,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -481,8 +510,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -512,8 +539,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -543,8 +568,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -574,8 +597,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -616,8 +637,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -652,8 +671,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -688,8 +705,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4

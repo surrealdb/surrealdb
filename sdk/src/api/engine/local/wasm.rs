@@ -2,7 +2,6 @@ use crate::api::conn::Connection;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
-use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
@@ -10,7 +9,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
-use crate::engine::tasks::start_tasks;
+use crate::engine::tasks;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
@@ -29,6 +28,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
 use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Db {}
@@ -113,11 +113,24 @@ pub(crate) async fn run_router(
 	let mut live_queries = HashMap::new();
 	let mut session = Session::default().with_rt(true);
 
-	let mut opt = EngineOptions::default();
-	opt.tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
-	let (_tasks, task_chans) = start_tasks(&opt, kvs.clone());
+	let canceller = CancellationToken::new();
 
-	let mut notifications = kvs.notifications();
+	let mut opt = EngineOptions::default();
+	if let Some(interval) = address.config.node_membership_refresh_interval {
+		opt.node_membership_refresh_interval = interval;
+	}
+	if let Some(interval) = address.config.node_membership_check_interval {
+		opt.node_membership_check_interval = interval;
+	}
+	if let Some(interval) = address.config.node_membership_cleanup_interval {
+		opt.node_membership_cleanup_interval = interval;
+	}
+	if let Some(interval) = address.config.changefeed_gc_interval {
+		opt.changefeed_gc_interval = interval;
+	}
+	let tasks = tasks::init(kvs.clone(), canceller.clone(), &opt);
+
+	let mut notifications = kvs.notifications().map(Box::pin);
 	let mut notification_stream = poll_fn(move |cx| match &mut notifications {
 		Some(rx) => rx.poll_next_unpin(cx),
 		None => Poll::Pending,
@@ -177,11 +190,10 @@ pub(crate) async fn run_router(
 			}
 		}
 	}
-
-	// Stop maintenance tasks
-	for chan in task_chans {
-		if chan.send(()).is_err() {
-			error!("Error sending shutdown signal to maintenance task");
-		}
-	}
+	// Shutdown and stop closed tasks
+	canceller.cancel();
+	// Wait for background tasks to finish
+	let _ = tasks.resolve().await;
+	// Delete this node from the cluster
+	let _ = kvs.shutdown().await;
 }

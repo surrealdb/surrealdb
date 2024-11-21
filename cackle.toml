@@ -31,6 +31,11 @@ include = [
 ]
 exclude = ["hashbrown::map"]
 
+[api.process]
+include = [
+    "tokio::process",
+]
+
 #
 # Crates Linking to Libraries
 #
@@ -184,6 +189,9 @@ allow_proc_macro = true
 [pkg.axum-macros]
 allow_proc_macro = true
 
+[pkg.axum-extra]
+allow_apis = ["net"]
+
 [pkg.serde_with_macros]
 allow_proc_macro = true
 
@@ -230,9 +238,6 @@ allow_proc_macro = true
 allow_unsafe = true
 
 [pkg.rustyline-derive]
-allow_proc_macro = true
-
-[pkg.async-recursion]
 allow_proc_macro = true
 
 [pkg.proc-macro-error-attr]
@@ -437,6 +442,7 @@ allow_unsafe = true
 
 [pkg.futures-util]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.indexmap]
 allow_unsafe = true
@@ -459,7 +465,6 @@ allow_unsafe = true
 
 [pkg.tokio-util]
 allow_unsafe = true
-allow_apis = ["net"]
 
 [pkg.nom]
 allow_unsafe = true
@@ -547,7 +552,6 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.rustc_version]
-from.build.allow_apis = ["process"]
 
 [pkg.concurrent-queue]
 allow_unsafe = true
@@ -1069,14 +1073,8 @@ allow_unsafe = true
 [pkg.pprof]
 allow_unsafe = true
 
-[pkg.pest_derive]
-allow_proc_macro = true
-
 [pkg.pest]
 allow_unsafe = true
-
-[pkg.pest_generator]
-allow_apis = ["fs"]
 
 [pkg.async-graphql-derive]
 allow_proc_macro = true
@@ -1090,7 +1088,6 @@ allow_apis = ["fs", "net"]
 [pkg.multer]
 allow_apis = ["net"]
 
-# examples
 [pkg.pear_codegen]
 allow_proc_macro = true
 
@@ -1161,8 +1158,11 @@ allow_unsafe = true
 [pkg.static_assertions_next]
 allow_unsafe = true
 
-[pkg.surrealdb-async-graphql-axum]
+[pkg.async-graphql-axum]
 allow_apis = ["net"]
+
+[pkg.futures-timer]
+allow_unsafe = true
 
 [pkg.castaway]
 allow_unsafe = true
@@ -1181,3 +1181,47 @@ allow_unsafe = true
 
 [pkg.constant_time_eq]
 allow_unsafe = true
+
+[pkg.bitcode_derive]
+allow_proc_macro = true
+allow_unsafe = true
+
+[pkg.actix-utils]
+allow_unsafe = true
+
+[pkg.bytestring]
+allow_unsafe = true
+
+[pkg.language-tags]
+allow_unsafe = true
+
+[pkg.actix-server]
+allow_unsafe = true
+
+[pkg.actix-router]
+allow_apis = ["net"]
+
+[pkg.bitcode]
+allow_unsafe = true
+
+[pkg.actix-http]
+allow_unsafe = true
+
+[pkg.actix-web]
+allow_unsafe = true
+
+[pkg.nanoservices-utils]
+allow_unsafe = true
+
+[pkg.surrealcs-kernel]
+allow_apis = [
+    "net",
+]
+
+[pkg.surrealcs]
+allow_apis = [
+    "net",
+]
+
+[pkg.revision]
+allow_apis = ["fs"]

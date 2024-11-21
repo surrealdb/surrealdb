@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Resource;
-use surrealdb::sql::{Datetime, Id, Thing};
 use surrealdb::Surreal;
+use surrealdb::{Datetime, RecordId};
 
 // Dance classes table name
 const DANCE: &str = "dance";
@@ -12,29 +12,26 @@ const STUDENT: &str = "student";
 
 // Dance class table schema
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct DanceClass {
-	id: Thing,
+	id: RecordId,
 	name: String,
 	created_at: Datetime,
 }
 
 // Student table schema
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct Student {
-	id: Thing,
+	id: RecordId,
 	name: String,
-	classes: Vec<Thing>,
+	classes: Vec<RecordId>,
 	created_at: Datetime,
 }
 
 // Student model with full class details
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 struct StudentClasses {
-	id: Thing,
+	id: RecordId,
 	name: String,
 	classes: Vec<DanceClass>,
 	created_at: Datetime,
@@ -56,39 +53,39 @@ async fn main() -> surrealdb::Result<()> {
 	db.use_ns("namespace").use_db("database").await?;
 
 	// Create a dance class and store the result
-	let classes: Vec<DanceClass> = db
+	let classes: Option<DanceClass> = db
 		.create(DANCE)
 		.content(DanceClass {
-			id: Thing::from((DANCE, Id::rand())),
+			id: RecordId::from((DANCE, "dc101")),
 			name: "Introduction to Dancing".to_owned(),
 			created_at: Datetime::default(),
 		})
 		.await?;
 
-	// Create a student and assign them to the previous dance class
+	// Create a student and assign her to the previous dance class
 	// We don't care about the result here so we don't need to
 	// type-hint and store it. We use `Resource::from` to return
 	// a `sql::Value` instead and ignore it.
 	db.create(Resource::from(STUDENT))
 		.content(Student {
-			id: Thing::from((STUDENT, Id::rand())),
+			id: RecordId::from((STUDENT, "jane")),
 			name: "Jane Doe".to_owned(),
 			classes: classes.into_iter().map(|class| class.id).collect(),
 			created_at: Datetime::default(),
 		})
 		.await?;
 
-	// Prepare the SQL query to retrieve students and full class info
-	let sql = format!("SELECT * FROM {STUDENT} FETCH classes");
+	// Prepare the query to retrieve students and full class info
+	let q = format!("SELECT * FROM {STUDENT} FETCH classes");
 
 	// Run the query
-	let mut results = db.query(sql).await?;
+	let mut results = db.query(q).await?;
 
 	// Extract the first query statement result and deserialise it as a vector of students
 	let students: Vec<StudentClasses> = results.take(0)?;
 
 	// Use the result as you see fit. In this case we are simply pretty printing it.
-	dbg!(students);
+	println!("Students = {:?}", students);
 
 	Ok(())
 }

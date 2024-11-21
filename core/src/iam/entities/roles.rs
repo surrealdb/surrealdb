@@ -39,9 +39,10 @@ impl FromStr for Role {
 	}
 }
 
-impl std::convert::From<&Ident> for Role {
-	fn from(id: &Ident) -> Self {
-		Role::from_str(id).unwrap()
+impl std::convert::TryFrom<&Ident> for Role {
+	type Error = Error;
+	fn try_from(id: &Ident) -> Result<Self, Self::Error> {
+		Role::from_str(id)
 	}
 }
 

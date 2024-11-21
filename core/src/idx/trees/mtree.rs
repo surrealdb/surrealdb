@@ -87,7 +87,7 @@ impl MTreeIndex {
 		stk: &mut Stk,
 		txn: &Transaction,
 		rid: &Thing,
-		content: &Vec<Value>,
+		content: &[Value],
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let mut doc_ids = self.doc_ids.write().await;
@@ -96,7 +96,7 @@ impl MTreeIndex {
 		drop(doc_ids);
 		// Index the values
 		let mut mtree = self.mtree.write().await;
-		for v in content {
+		for v in content.iter().filter(|v| v.is_some()) {
 			// Extract the vector
 			let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 			vector.check_dimension(self.dim)?;
@@ -112,7 +112,7 @@ impl MTreeIndex {
 		stk: &mut Stk,
 		txn: &Transaction,
 		rid: &Thing,
-		content: &Vec<Value>,
+		content: &[Value],
 	) -> Result<(), Error> {
 		let mut doc_ids = self.doc_ids.write().await;
 		let doc_id = doc_ids.remove_doc(txn, rid.into()).await?;
@@ -120,7 +120,7 @@ impl MTreeIndex {
 		if let Some(doc_id) = doc_id {
 			// Lock the index
 			let mut mtree = self.mtree.write().await;
-			for v in content {
+			for v in content.iter().filter(|v| v.is_some()) {
 				// Extract the vector
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;
@@ -225,7 +225,7 @@ impl MTree {
 			{
 				debug!("Visit node id: {}", id);
 				if visited_nodes.insert(id, node.n.len()).is_some() {
-					return Err(Error::Unreachable("MTree::knn_search"));
+					return Err(fail!("MTree::knn_search"));
 				}
 			}
 			match node.n {
@@ -552,7 +552,7 @@ impl MTree {
 		if let Some((o, p)) = closest {
 			Ok((o, p))
 		} else {
-			Err(Error::Unreachable("MTree::find_closest"))
+			Err(fail!("MTree::find_closest"))
 		}
 	}
 
@@ -659,7 +659,7 @@ impl MTree {
 
 		#[cfg(debug_assertions)]
 		if p1.node == p2.node {
-			return Err(Error::Unreachable("MTree::split_node"));
+			return Err(fail!("MTree::split_node"));
 		}
 		Ok((o1, p1, o2, p2))
 	}
@@ -702,7 +702,7 @@ impl MTree {
 			assert_eq!(dist_cache.len(), n * n - n);
 		}
 		match promo {
-			None => Err(Error::Unreachable("MTree::compute_distances_and_promoted_objects")),
+			None => Err(fail!("MTree::compute_distances_and_promoted_objects")),
 			Some((p1, p2)) => Ok((DistanceCache(dist_cache), p1, p2)),
 		}
 	}
@@ -771,7 +771,7 @@ impl MTree {
 						}
 						1 => {
 							store.remove_node(sn.id, sn.key).await?;
-							let e = n.values().next().ok_or(Error::Unreachable("MTree::delete"))?;
+							let e = n.values().next().ok_or_else(|| fail!("MTree::delete"))?;
 							self.set_root(Some(e.node));
 							return Ok(deleted);
 						}
@@ -1217,13 +1217,13 @@ impl MTreeNode {
 	fn internal(self) -> Result<InternalNode, Error> {
 		match self {
 			MTreeNode::Internal(n) => Ok(n),
-			MTreeNode::Leaf(_) => Err(Error::Unreachable("MTreeNode::internal")),
+			MTreeNode::Leaf(_) => Err(fail!("MTreeNode::internal")),
 		}
 	}
 
 	fn leaf(self) -> Result<LeafNode, Error> {
 		match self {
-			MTreeNode::Internal(_) => Err(Error::Unreachable("MTreeNode::lead")),
+			MTreeNode::Internal(_) => Err(fail!("MTreeNode::lead")),
 			MTreeNode::Leaf(n) => Ok(n),
 		}
 	}
@@ -1238,7 +1238,7 @@ impl MTreeNode {
 				Self::merge_leaf(s, o);
 				Ok(())
 			}
-			(_, _) => Err(Error::Unreachable("MTreeNode::merge")),
+			(_, _) => Err(fail!("MTreeNode::merge")),
 		}
 	}
 
@@ -1309,7 +1309,7 @@ impl NodeVectors for LeafNode {
 		let mut r = 0f64;
 		for o in a {
 			let mut props =
-				self.remove(&o).ok_or(Error::Unreachable("NodeVectors/LeafNode::extract_node)"))?;
+				self.remove(&o).ok_or_else(|| fail!("NodeVectors/LeafNode::extract_node)"))?;
 			let dist = *distances.0.get(&(o.clone(), p.clone())).unwrap_or(&0f64);
 			if dist > r {
 				r = dist;
@@ -1343,9 +1343,8 @@ impl NodeVectors for InternalNode {
 		let mut n = InternalNode::new();
 		let mut max_r = 0f64;
 		for o in a {
-			let mut props = self
-				.remove(&o)
-				.ok_or(Error::Unreachable("NodeVectors/InternalNode::extract_node"))?;
+			let mut props =
+				self.remove(&o).ok_or_else(|| fail!("NodeVectors/InternalNode::extract_node"))?;
 			let dist = *distances.0.get(&(o.clone(), p.clone())).unwrap_or(&0f64);
 			let r = dist + props.radius;
 			if r > max_r {

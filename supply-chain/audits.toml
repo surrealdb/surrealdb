@@ -1,20 +1,41 @@
 
 # cargo-vet audits file
 
-[[audits.quick_cache]]
+[[audits.async-executor]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
-version = "0.5.1"
+delta = "1.9.1 -> 1.13.1"
 
-[[audits.rustls]]
-who = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
+[[audits.async-stream]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
-delta = "0.21.10 -> 0.21.11"
+delta = "0.3.5 -> 0.3.6"
 
-[[audits.rustls]]
-who = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
+[[audits.async-stream-impl]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
-delta = "0.22.3 -> 0.22.4"
+delta = "0.3.5 -> 0.3.6"
+
+[[audits.async-task]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "4.7.0 -> 4.7.1"
+
+[[audits.easy-parallel]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "3.3.1"
+notes = "A very simple one file library, no unsafe code."
+
+[[audits.futures-lite]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "2.3.0 -> 2.5.0"
+
+[[audits.libc]]
+who = "arriqaaq <farhan.khan@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.161 -> 0.2.162"
 
 [[trusted.addr]]
 criteria = "safe-to-deploy"
@@ -40,6 +61,18 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-07-23"
 end = "2025-08-06"
 
+[[trusted.bitcode]]
+criteria = "safe-to-deploy"
+user-id = 132446 # Finn Bear (finnbear)
+start = "2023-04-16"
+end = "2025-09-03"
+
+[[trusted.bitcode_derive]]
+criteria = "safe-to-deploy"
+user-id = 132446 # Finn Bear (finnbear)
+start = "2023-04-27"
+end = "2025-09-03"
+
 [[trusted.bstr]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
@@ -51,6 +84,18 @@ criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-06-09"
 end = "2025-08-31"
+
+[[trusted.bytes]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-03-06"
+end = "2025-09-03"
+
+[[trusted.bytes]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-01-11"
+end = "2025-09-03"
 
 [[trusted.dmp]]
 criteria = "safe-to-deploy"
@@ -106,6 +151,12 @@ user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-04-05"
 end = "2025-08-06"
 
+[[trusted.http-body]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-04-04"
+end = "2025-09-03"
+
 [[trusted.http-body-util]]
 criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
@@ -154,6 +205,24 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-03-26"
 end = "2025-01-24"
 
+[[trusted.libc]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2020-03-17"
+end = "2025-11-14"
+
+[[trusted.loom]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-08-08"
+end = "2025-09-03"
+
+[[trusted.loom]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-04-12"
+end = "2025-09-03"
+
 [[trusted.memchr]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
@@ -165,6 +234,18 @@ criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-09-09"
 end = "2025-08-06"
+
+[[trusted.mio]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-05-15"
+end = "2025-09-03"
+
+[[trusted.nanoservices-utils]]
+criteria = "safe-to-deploy"
+user-id = 262632 # Maxwell Flitton (maxwellflitton)
+start = "2024-03-30"
+end = "2025-09-03"
 
 [[trusted.num_cpus]]
 criteria = "safe-to-deploy"
@@ -280,6 +361,12 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-08-20"
 end = "2025-08-06"
 
+[[trusted.slab]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-10-13"
+end = "2025-09-03"
+
 [[trusted.snap]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
@@ -291,6 +378,18 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-03-16"
 end = "2025-01-24"
+
+[[trusted.surrealcs]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2024-09-03"
+end = "2025-09-03"
+
+[[trusted.surrealcs-kernel]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2024-09-03"
+end = "2025-09-03"
 
 [[trusted.surrealdb]]
 criteria = "safe-to-deploy"
@@ -346,6 +445,54 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-03-01"
 end = "2025-08-06"
 
+[[trusted.tokio]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-03-02"
+end = "2025-09-03"
+
+[[trusted.tokio]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2020-12-25"
+end = "2025-09-03"
+
+[[trusted.tokio-macros]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-04-24"
+end = "2025-09-03"
+
+[[trusted.tokio-macros]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2020-10-26"
+end = "2025-09-03"
+
+[[trusted.tokio-util]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-11-26"
+end = "2025-09-03"
+
+[[trusted.tokio-util]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-01-12"
+end = "2025-09-03"
+
+[[trusted.tower]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-04-27"
+end = "2025-09-03"
+
+[[trusted.tower-layer]]
+criteria = "safe-to-deploy"
+user-id = 10
+start = "2019-04-27"
+end = "2025-09-03"
+
 [[trusted.trice]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -381,3 +528,81 @@ criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2020-01-11"
 end = "2025-08-31"
+
+[[trusted.windows-core]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-15"
+end = "2025-09-03"
+
+[[trusted.windows-registry]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2024-02-15"
+end = "2025-09-03"
+
+[[trusted.windows-result]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2024-02-02"
+end = "2025-09-03"
+
+[[trusted.windows-strings]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2024-02-02"
+end = "2025-09-03"
+
+[[trusted.windows-targets]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-09"
+end = "2025-09-03"
+
+[[trusted.windows_aarch64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2025-09-03"
+
+[[trusted.windows_aarch64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-05"
+end = "2025-09-03"
+
+[[trusted.windows_i686_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2025-09-03"
+
+[[trusted.windows_i686_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2024-04-02"
+end = "2025-09-03"
+
+[[trusted.windows_i686_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2025-09-03"
+
+[[trusted.windows_x86_64_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2025-09-03"
+
+[[trusted.windows_x86_64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2025-09-03"
+
+[[trusted.windows_x86_64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2025-09-03"

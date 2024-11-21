@@ -1,3 +1,4 @@
+use crate::err::Error;
 use crate::sql::duration::Duration;
 use crate::sql::strand::Strand;
 use crate::syn;
@@ -11,6 +12,7 @@ use std::str;
 use std::str::FromStr;
 
 use super::escape::quote_str;
+use super::value::TrySub;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
@@ -19,6 +21,11 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 #[serde(rename = "$surrealdb::private::sql::Datetime")]
 #[non_exhaustive]
 pub struct Datetime(pub DateTime<Utc>);
+
+impl Datetime {
+	pub const MIN_UTC: Self = Datetime(DateTime::<Utc>::MIN_UTC);
+	pub const MAX_UTC: Self = Datetime(DateTime::<Utc>::MAX_UTC);
+}
 
 impl Default for Datetime {
 	fn default() -> Self {
@@ -62,7 +69,7 @@ impl TryFrom<Strand> for Datetime {
 impl TryFrom<&str> for Datetime {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::datetime_raw(v) {
+		match syn::datetime(v) {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
@@ -91,6 +98,11 @@ impl Datetime {
 	pub fn to_raw(&self) -> String {
 		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 	}
+
+	/// Convert to nanosecond timestamp.
+	pub fn to_u64(&self) -> u64 {
+		self.0.timestamp_nanos_opt().unwrap_or_default() as u64
+	}
 }
 
 impl Display for Datetime {
@@ -106,5 +118,15 @@ impl ops::Sub<Self> for Datetime {
 			Ok(d) => Duration::from(d),
 			Err(_) => Duration::default(),
 		}
+	}
+}
+
+impl TrySub for Datetime {
+	type Output = Duration;
+	fn try_sub(self, other: Self) -> Result<Duration, Error> {
+		(self.0 - other.0)
+			.to_std()
+			.map_err(|_| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
+			.map(Duration::from)
 	}
 }

@@ -3,9 +3,7 @@ use super::tr::Check;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::batch::Batch;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::kvs::{batch::Batch, Key, Val, Version};
 use crate::vs::Versionstamp;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -50,7 +48,7 @@ pub trait Transaction {
 	async fn commit(&mut self) -> Result<(), Error>;
 
 	/// Check if a key exists in the datastore.
-	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
@@ -91,7 +89,12 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
-	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
@@ -104,6 +107,17 @@ pub trait Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug;
+
+	/// Retrieve all the versions for a specific range of keys from the datastore.
+	///
+	/// This function fetches all the versions for the full range of key-value pairs, in a single request to the underlying datastore.
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug;
 
@@ -146,14 +160,18 @@ pub trait Transaction {
 		// Continue with function logic
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
-		self.getr(beg..end).await
+		self.getr(beg..end, None).await
 	}
 
 	/// Retrieve a range of keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn getr<K>(&mut self, rng: Range<K>) -> Result<Vec<(Key, Val)>, Error>
+	async fn getr<K>(
+		&mut self,
+		rng: Range<K>,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -167,7 +185,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, true).await?;
+			let res = self.batch(rng, *NORMAL_FETCH_SIZE, true, version).await?;
 			next = res.next;
 			for v in res.values.into_iter() {
 				out.push(v);
@@ -219,7 +237,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false).await?;
+			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false, None).await?;
 			next = res.next;
 			for (k, _) in res.values.into_iter() {
 				self.del(k).await?;
@@ -232,7 +250,13 @@ pub trait Transaction {
 	///
 	/// This function fetches keys or key-value pairs, in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch<K>(&mut self, rng: Range<K>, batch: u32, values: bool) -> Result<Batch, Error>
+	async fn batch<K>(
+		&mut self,
+		rng: Range<K>,
+		batch: u32,
+		values: bool,
+		version: Option<u64>,
+	) -> Result<Batch, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -245,9 +269,9 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		// Scan for the next batch
 		let res = if values {
-			self.scan(beg..end.clone(), batch, None).await?
+			self.scan(beg..end.clone(), batch, version).await?
 		} else {
-			self.keys(beg..end.clone(), batch)
+			self.keys(beg..end.clone(), batch, version)
 				.await?
 				.into_iter()
 				.map(|k| (k, vec![]))
@@ -255,24 +279,20 @@ pub trait Transaction {
 		};
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
-			Ok(Batch {
-				next: None,
-				values: res,
-			})
+			Ok(Batch::new(None, res))
 		} else {
 			match res.last() {
-				Some((k, _)) => Ok(Batch {
-					next: Some(Range {
+				Some((k, _)) => Ok(Batch::new(
+					Some(Range {
 						start: k.clone().add(0x00),
 						end,
 					}),
-					values: res,
-				}),
-				// We have checked the length above,
-				// so there is guaranteed to always
-				// be a last item in the vector.
-				// This is therefore unreachable.
-				None => unreachable!(),
+					res,
+				)),
+				// We have checked the length above, so
+				// there should be a last item in the
+				// vector, so we shouldn't arrive here
+				None => Ok(Batch::new(None, res)),
 			}
 		}
 	}
@@ -339,5 +359,41 @@ pub trait Transaction {
 		k.append(&mut ts.to_vec());
 		k.append(&mut suffix.into());
 		self.set(k, val, None).await
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn batch_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Continue with function logic
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+
+		// Scan for the next batch
+		let res = self.scan_all_versions(beg..end.clone(), batch).await?;
+
+		// Check if range is consumed
+		if res.len() < batch as usize && batch > 0 {
+			Ok(Batch::new_versioned(None, res))
+		} else {
+			match res.last() {
+				Some((k, _, _, _)) => Ok(Batch::new_versioned(
+					Some(Range {
+						start: k.clone().add(0x00),
+						end,
+					}),
+					res,
+				)),
+				// We have checked the length above, so
+				// there should be a last item in the
+				// vector, so we shouldn't arrive here
+				None => Ok(Batch::new_versioned(None, res)),
+			}
+		}
 	}
 }

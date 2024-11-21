@@ -14,18 +14,61 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
+use crate::sql::statements::SelectStatement;
 use crate::sql::with::With;
-use crate::sql::{Cond, Orders, Table};
+use crate::sql::{order::Ordering, Cond, Fields, Groups, Table};
 use reblessive::tree::Stk;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{self, AtomicU8};
+
+pub(crate) struct QueryPlannerParams<'a> {
+	fields: &'a Fields,
+	with: Option<&'a With>,
+	order: Option<&'a Ordering>,
+	cond: Option<&'a Cond>,
+	group: Option<&'a Groups>,
+}
+
+impl<'a> QueryPlannerParams<'a> {
+	pub(crate) fn is_keys_only(&self) -> bool {
+		if !self.fields.is_count_all_only() {
+			return false;
+		}
+		if self.cond.is_some() {
+			return false;
+		}
+		if let Some(g) = self.group {
+			if !g.is_empty() {
+				return false;
+			}
+		}
+		if let Some(p) = self.order {
+			match p {
+				Ordering::Random => {}
+				Ordering::Order(x) => {
+					if !x.0.is_empty() {
+						return false;
+					}
+				}
+			}
+		}
+		true
+	}
+}
+
+impl<'a> From<&'a SelectStatement> for QueryPlannerParams<'a> {
+	fn from(stmt: &'a SelectStatement) -> Self {
+		QueryPlannerParams {
+			fields: &stmt.expr,
+			with: stmt.with.as_ref(),
+			order: stmt.order.as_ref(),
+			cond: stmt.cond.as_ref(),
+			group: stmt.group.as_ref(),
+		}
+	}
+}
 
 pub(crate) struct QueryPlanner {
-	opt: Arc<Options>,
-	with: Option<Arc<With>>,
-	cond: Option<Arc<Cond>>,
-	order: Option<Arc<Orders>>,
 	/// There is one executor per table
 	executors: HashMap<String, QueryExecutor>,
 	requires_distinct: bool,
@@ -36,17 +79,8 @@ pub(crate) struct QueryPlanner {
 }
 
 impl QueryPlanner {
-	pub(crate) fn new(
-		opt: Arc<Options>,
-		with: Option<Arc<With>>,
-		cond: Option<Arc<Cond>>,
-		order: Option<Arc<Orders>>,
-	) -> Self {
+	pub(crate) fn new() -> Self {
 		Self {
-			opt,
-			with,
-			cond,
-			order,
 			executors: HashMap::default(),
 			requires_distinct: false,
 			fallbacks: vec![],
@@ -60,27 +94,22 @@ impl QueryPlanner {
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
+		opt: &Options,
 		t: Table,
+		params: &QueryPlannerParams<'_>,
 		it: &mut Iterator,
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
-		let mut tree = Tree::build(
-			stk,
-			ctx,
-			&self.opt,
-			&t,
-			self.cond.as_ref().map(|w| w.as_ref()),
-			self.with.as_ref().map(|c| c.as_ref()),
-			self.order.as_ref().map(|o| o.as_ref()),
-		)
-		.await?;
+
+		let mut tree =
+			Tree::build(stk, ctx, opt, &t, params.cond, params.with, params.order).await?;
 
 		let is_knn = !tree.knn_expressions.is_empty();
 		let order = tree.index_map.order_limit.take();
 		let mut exe = InnerQueryExecutor::new(
 			stk,
 			ctx,
-			&self.opt,
+			opt,
 			&t,
 			tree.index_map,
 			tree.knn_expressions,
@@ -90,9 +119,12 @@ impl QueryPlanner {
 		.await?;
 		match PlanBuilder::build(
 			tree.root,
-			self.with.as_ref().map(|w| w.as_ref()),
+			params,
 			tree.with_indexes,
 			order,
+			tree.all_and_groups,
+			tree.all_and,
+			tree.all_expressions_with_index,
 		)? {
 			Plan::SingleIndex(exp, io) => {
 				if io.require_distinct() {
@@ -123,12 +155,12 @@ impl QueryPlanner {
 				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
 				self.add(t.clone(), Some(ir), exe, it);
 			}
-			Plan::TableIterator(fallback) => {
-				if let Some(fallback) = fallback {
-					self.fallbacks.push(fallback);
+			Plan::TableIterator(reason, keys_only) => {
+				if let Some(reason) = reason {
+					self.fallbacks.push(reason);
 				}
 				self.add(t.clone(), None, exe, it);
-				it.ingest(Iterable::Table(t));
+				it.ingest(Iterable::Table(t, keys_only));
 				is_table_iterator = true;
 			}
 		}
@@ -168,12 +200,13 @@ impl QueryPlanner {
 		&self.fallbacks
 	}
 
+	#[cfg(not(target_arch = "wasm32"))]
 	pub(crate) fn is_order(&self, irf: &IteratorRef) -> bool {
 		self.orders.contains(irf)
 	}
 
 	pub(crate) async fn next_iteration_stage(&self) -> Option<IterationStage> {
-		let pos = self.iteration_index.fetch_add(1, Ordering::Relaxed);
+		let pos = self.iteration_index.fetch_add(1, atomic::Ordering::Relaxed);
 		match self.iteration_workflow.get(pos as usize) {
 			Some(IterationStage::BuildKnn) => {
 				Some(IterationStage::Iterate(Some(self.build_bruteforce_knn_results().await)))

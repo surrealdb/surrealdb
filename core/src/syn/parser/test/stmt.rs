@@ -2,17 +2,20 @@ use crate::{
 	sql::{
 		access::AccessDuration,
 		access_type::{
-			AccessType, JwtAccess, JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks,
-			JwtAccessVerifyKey, RecordAccess,
+			AccessType, BearerAccess, BearerAccessSubject, JwtAccess, JwtAccessIssue,
+			JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
 		},
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
 		index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType},
 		language::Language,
+		order::{OrderList, Ordering},
 		statements::{
-			access,
-			access::{AccessStatementGrant, AccessStatementList, AccessStatementRevoke},
+			access::{
+				self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
+				AccessStatementShow,
+			},
 			analyze::AnalyzeStatement,
 			show::{ShowSince, ShowStatement},
 			sleep::SleepStatement,
@@ -33,13 +36,17 @@ use crate::{
 		user::UserDuration,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Orders, Output, Param, Part,
+		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::parser::mac::test_parse,
 };
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
+
+fn ident_field(name: &str) -> Value {
+	Value::Idiom(Idiom(vec![Part::Field(Ident(name.to_string()))]))
+}
 
 #[test]
 pub fn parse_analyze() {
@@ -90,7 +97,7 @@ pub fn parse_continue() {
 fn parse_create() {
 	let res = test_parse!(
 		parse_stmt,
-		"CREATE ONLY foo SET bar = 3, foo +?= 4 RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL"
+		"CREATE ONLY foo SET bar = 3, foo +?= baz RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL"
 	)
 	.unwrap();
 	assert_eq!(
@@ -107,7 +114,7 @@ fn parse_create() {
 				(
 					Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
 					Operator::Ext,
-					Value::Number(Number::Int(4))
+					Value::Idiom(Idiom(vec![Part::Field(Ident("baz".to_owned()))]))
 				),
 			])),
 			output: Some(Output::Fields(Fields(
@@ -205,7 +212,7 @@ fn parse_define_function() {
 				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
 			],
 			block: Block(vec![Entry::Output(OutputStatement {
-				what: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_string()))])),
+				what: ident_field("a"),
 				fetch: None,
 			})]),
 			comment: Some(Strand("test".to_string())),
@@ -273,7 +280,7 @@ fn parse_define_user() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES foo, bar"#
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES editor, OWNER"#
 		)
 		.unwrap();
 
@@ -284,7 +291,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.hash, "hunter2".to_owned());
-		assert_eq!(stmt.roles, vec![Ident("foo".to_string()), Ident("bar".to_string())]);
+		assert_eq!(stmt.roles, vec![Ident("editor".to_string()), Ident("OWNER".to_string())]);
 		assert_eq!(
 			stmt.duration,
 			UserDuration {
@@ -350,6 +357,30 @@ fn parse_define_user() {
 		assert!(
 			res.is_err(),
 			"Unexpected successful parsing of user with none token duration: {:?}",
+			res
+		);
+	}
+	// With nonexistent role.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES foo"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of user with nonexistent role: {:?}",
+			res
+		);
+	}
+	// With existent and nonexistent roles.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES Viewer, foo"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of user with nonexistent role: {:?}",
 			res
 		);
 	}
@@ -1330,6 +1361,245 @@ fn parse_define_access_record_with_jwt() {
 }
 
 #[test]
+fn parse_define_access_bearer() {
+	// For user on database.
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER COMMENT "foo""#)
+				.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(stmt.authenticate, None);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::User);
+			}
+			_ => panic!(),
+		}
+	}
+	// For user on namespace.
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON NS TYPE BEARER FOR USER COMMENT "foo""#)
+				.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Ns);
+		assert_eq!(stmt.authenticate, None);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::User);
+			}
+			_ => panic!(),
+		}
+	}
+	// For user on root.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR USER COMMENT "foo""#
+		)
+		.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Root);
+		assert_eq!(stmt.authenticate, None);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::User);
+			}
+			_ => panic!(),
+		}
+	}
+	// For record on database.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD COMMENT "foo""#
+		)
+		.unwrap();
+
+		// Manually compare since DefineAccessStatement for bearer access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert_eq!(stmt.comment, Some(Strand("foo".to_string())));
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Bearer(ac) => {
+				assert_eq!(ac.subject, BearerAccessSubject::Record);
+			}
+			_ => panic!(),
+		}
+	}
+	// For record on namespace.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR RECORD COMMENT "foo""#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of bearer access for record at namespace level: {:?}",
+			res
+		);
+	}
+	// For record on root.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR RECORD COMMENT "foo""#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of bearer access for record at root level: {:?}",
+			res
+		);
+	}
+	// For user. Grant, session and token duration. With JWT.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Bearer(BearerAccess {
+					subject: BearerAccessSubject::User,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Hs384,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Hs384,
+							// Issuer key matches verification key by default in symmetric algorithms.
+							key: "foo".to_string(),
+						}),
+					},
+				}),
+				authenticate: None,
+				duration: AccessDuration {
+					grant: Some(Duration::from_days(90)),
+					token: Some(Duration::from_secs(10)),
+					session: Some(Duration::from_secs(900)),
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			})),
+		)
+	}
+	// For record. Grant, session and token duration. With JWT.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Bearer(BearerAccess {
+					subject: BearerAccessSubject::Record,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Hs384,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Hs384,
+							// Issuer key matches verification key by default in symmetric algorithms.
+							key: "foo".to_string(),
+						}),
+					},
+				}),
+				authenticate: None,
+				duration: AccessDuration {
+					grant: Some(Duration::from_days(90)),
+					token: Some(Duration::from_secs(10)),
+					session: Some(Duration::from_secs(900)),
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			})),
+		)
+	}
+}
+
+#[test]
 fn parse_define_param() {
 	let res =
 		test_parse!(parse_stmt, r#"DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null"#)
@@ -1358,7 +1628,7 @@ fn parse_define_param() {
 #[test]
 fn parse_define_table() {
 	let res =
-		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
+		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR DELETE FULL, FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
 			.unwrap();
 
 	assert_eq!(
@@ -1390,7 +1660,7 @@ fn parse_define_table() {
 				))),
 				create: Permission::None,
 				update: Permission::None,
-				delete: Permission::None,
+				delete: Permission::Full,
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
@@ -1426,41 +1696,76 @@ fn parse_define_event() {
 
 #[test]
 fn parse_define_field() {
-	let res = test_parse!(
-		parse_stmt,
-		r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true"#
-	).unwrap();
+	// General
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#
+		).unwrap();
 
-	assert_eq!(
-		res,
-		Statement::Define(DefineStatement::Field(DefineFieldStatement {
-			name: Idiom(vec![
-				Part::Field(Ident("foo".to_owned())),
-				Part::All,
-				Part::All,
-				Part::Flatten,
-			]),
-			what: Ident("bar".to_owned()),
-			flex: true,
-			kind: Some(Kind::Option(Box::new(Kind::Either(vec![
-				Kind::Number,
-				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
-			])))),
-			readonly: false,
-			value: Some(Value::Null),
-			assert: Some(Value::Bool(true)),
-			default: Some(Value::Bool(false)),
-			permissions: Permissions {
-				delete: Permission::None,
-				update: Permission::None,
-				create: Permission::Specific(Value::Bool(true)),
-				select: Permission::Full,
-			},
-			comment: None,
-			if_not_exists: false,
-			overwrite: false,
-		}))
-	)
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Field(DefineFieldStatement {
+				name: Idiom(vec![
+					Part::Field(Ident("foo".to_owned())),
+					Part::All,
+					Part::All,
+					Part::Flatten,
+				]),
+				what: Ident("bar".to_owned()),
+				flex: true,
+				kind: Some(Kind::Option(Box::new(Kind::Either(vec![
+					Kind::Number,
+					Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
+				])))),
+				readonly: false,
+				value: Some(Value::Null),
+				assert: Some(Value::Bool(true)),
+				default: Some(Value::Bool(false)),
+				permissions: Permissions {
+					delete: Permission::Full,
+					update: Permission::None,
+					create: Permission::Specific(Value::Bool(true)),
+					select: Permission::Full,
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			}))
+		)
+	}
+
+	// Invalid DELETE permission
+	{
+		// TODO(gguillemas): Providing the DELETE permission should return a parse error in 3.0.0.
+		// Currently, the DELETE permission is just ignored to maintain backward compatibility.
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#)
+				.unwrap();
+
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Field(DefineFieldStatement {
+				name: Idiom(vec![Part::Field(Ident("foo".to_owned())),]),
+				what: Ident("bar".to_owned()),
+				flex: false,
+				kind: None,
+				readonly: false,
+				value: None,
+				assert: None,
+				default: None,
+				permissions: Permissions {
+					delete: Permission::Full,
+					update: Permission::Full,
+					create: Permission::Full,
+					select: Permission::Full,
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			}))
+		)
+	}
 }
 
 #[test]
@@ -1709,16 +2014,10 @@ fn parse_if() {
 		res,
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("bar".to_owned()))]))
-				),
-				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Idiom(Idiom(vec![Part::Field(Ident("baz".to_owned()))]))
-				)
+				(ident_field("foo"), ident_field("bar")),
+				(ident_field("faz"), ident_field("baz")),
 			],
-			close: Some(Value::Idiom(Idiom(vec![Part::Field(Ident("baq".to_owned()))])))
+			close: Some(ident_field("baq"))
 		})
 	)
 }
@@ -1732,21 +2031,15 @@ fn parse_if_block() {
 		Statement::Ifelse(IfelseStatement {
 			exprs: vec![
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("bar".to_owned()))
-					])))]))),
+					ident_field("foo"),
+					Value::Block(Box::new(Block(vec![Entry::Value(ident_field("bar"))]))),
 				),
 				(
-					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
-					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
-						Part::Field(Ident("baz".to_owned()))
-					])))]))),
+					ident_field("faz"),
+					Value::Block(Box::new(Block(vec![Entry::Value(ident_field("baz"))]))),
 				)
 			],
-			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(
-				vec![Part::Field(Ident("baq".to_owned()))]
-			)))])))),
+			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(ident_field("baq"))])))),
 		})
 	)
 }
@@ -1766,7 +2059,7 @@ fn parse_info() {
 	assert_eq!(res, Statement::Info(InfoStatement::Ns(false)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR TABLE table").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::Tb(Ident("table".to_owned()), false)));
+	assert_eq!(res, Statement::Info(InfoStatement::Tb(Ident("table".to_owned()), false, None)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR USER user").unwrap();
 	assert_eq!(res, Statement::Info(InfoStatement::User(Ident("user".to_owned()), None, false)));
@@ -1846,13 +2139,12 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 				Group(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 				Group(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
 			])),
-			order: Some(Orders(vec![Order {
-				order: Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
-				random: false,
+			order: Some(Ordering::Order(OrderList(vec![Order {
+				value: Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
 				collate: true,
 				numeric: true,
 				direction: true,
-			}])),
+			}]))),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
 				id: Id::from("b"),
@@ -1863,7 +2155,7 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
 				"foo".to_owned()
 			))])))])),
-			version: Some(Version(Datetime(expected_datetime))),
+			version: Some(Version(Value::Datetime(Datetime(expected_datetime)))),
 			timeout: None,
 			parallel: false,
 			tempfiles: false,
@@ -2079,6 +2371,51 @@ fn parse_insert() {
 }
 
 #[test]
+fn parse_insert_select() {
+	let res = test_parse!(parse_stmt, r#"INSERT IGNORE INTO bar (select foo from baz)"#).unwrap();
+	assert_eq!(
+		res,
+		Statement::Insert(InsertStatement {
+			into: Some(Value::Table(Table("bar".to_owned()))),
+			data: Data::SingleExpression(Value::Subquery(Box::new(Subquery::Select(
+				SelectStatement {
+					expr: Fields(
+						vec![Field::Single {
+							expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_string()))])),
+							alias: None
+						}],
+						false
+					),
+					omit: None,
+					only: false,
+					what: Values(vec![Value::Table(Table("baz".to_string()))]),
+					with: None,
+					cond: None,
+					split: None,
+					group: None,
+					order: None,
+					limit: None,
+					start: None,
+					fetch: None,
+					version: None,
+					timeout: None,
+					parallel: false,
+					explain: None,
+					tempfiles: false
+				}
+			)))),
+			ignore: true,
+			update: None,
+			output: None,
+			version: None,
+			timeout: None,
+			parallel: false,
+			relation: false,
+		}),
+	)
+}
+
+#[test]
 fn parse_kill() {
 	let res = test_parse!(parse_stmt, r#"KILL $param"#).unwrap();
 	assert_eq!(
@@ -2154,10 +2491,8 @@ fn parse_return() {
 	assert_eq!(
 		res,
 		Statement::Output(OutputStatement {
-			what: Value::Idiom(Idiom(vec![Part::Field(Ident("RETRUN".to_owned()))])),
-			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(
-				Ident("RETURN".to_owned()).to_owned()
-			)])))])),
+			what: ident_field("RETRUN"),
+			fetch: Some(Fetchs(vec![Fetch(ident_field("RETURN"))]))
 		}),
 	)
 }
@@ -2416,38 +2751,212 @@ fn parse_upsert() {
 
 #[test]
 fn parse_access_grant() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Access(AccessStatement::Grant(AccessStatementGrant {
-			ac: Ident("a".to_string()),
-			base: Some(Base::Ns),
-			subject: Some(access::Subject::User(Ident("b".to_string()))),
-		}))
-	);
+	// User
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Grant(AccessStatementGrant {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Ns),
+				subject: access::Subject::User(Ident("b".to_string())),
+			}))
+		);
+	}
+	// Record
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR RECORD b:c"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Grant(AccessStatementGrant {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Ns),
+				subject: access::Subject::Record(Thing {
+					tb: "b".to_owned(),
+					id: Id::from("c"),
+				}),
+			}))
+		);
+	}
+}
+
+#[test]
+fn parse_access_show() {
+	// All
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW ALL"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: None,
+				cond: None,
+			}))
+		);
+	}
+	// Grant
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW GRANT b"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: Some(Ident("b".to_string())),
+				cond: None,
+			}))
+		);
+	}
+	// Condition
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW WHERE true"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Show(AccessStatementShow {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: None,
+				cond: Some(Cond(Value::Bool(true))),
+			}))
+		);
+	}
 }
 
 #[test]
 fn parse_access_revoke() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE b"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
-			ac: Ident("a".to_string()),
-			base: Some(Base::Db),
-			gr: Ident("b".to_string()),
-		}))
-	);
+	// All
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE ALL"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: None,
+				cond: None,
+			}))
+		);
+	}
+	// Grant
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE GRANT b"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: Some(Ident("b".to_string())),
+				cond: None,
+			}))
+		);
+	}
+	// Condition
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE WHERE true"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				gr: None,
+				cond: Some(Cond(Value::Bool(true))),
+			}))
+		);
+	}
 }
 
 #[test]
-fn parse_access_list() {
-	let res = test_parse!(parse_stmt, r#"ACCESS a LIST"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Access(AccessStatement::List(AccessStatementList {
-			ac: Ident("a".to_string()),
-			base: None,
-		}))
-	);
+fn parse_access_purge() {
+	// All
+	{
+		let res =
+			test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED, REVOKED"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: true,
+				grace: Duration::from_millis(0),
+			}))
+		);
+	}
+	// Expired
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: false,
+				grace: Duration::from_millis(0),
+			}))
+		);
+	}
+	// Revoked
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: false,
+				revoked: true,
+				grace: Duration::from_millis(0),
+			}))
+		);
+	}
+	// Expired for 90 days
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED FOR 90d"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: false,
+				grace: Duration::from_days(90),
+			}))
+		);
+	}
+	// Revoked for 90 days
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED FOR 90d"#).unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: false,
+				revoked: true,
+				grace: Duration::from_days(90),
+			}))
+		);
+	}
+	// Invalid for 90 days
+	{
+		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED, EXPIRED FOR 90d"#)
+			.unwrap();
+		assert_eq!(
+			res,
+			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
+				ac: Ident("a".to_string()),
+				base: Some(Base::Db),
+				expired: true,
+				revoked: true,
+				grace: Duration::from_days(90),
+			}))
+		);
+	}
+}
+
+#[test]
+fn parse_like_operator() {
+	test_parse!(parse_stmt, r#"SELECT * FROM "a" ~ "b"; "#).unwrap();
 }

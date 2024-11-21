@@ -6,13 +6,13 @@ use jsonwebtoken::jwk::{
 	AlgorithmParameters::*, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
 };
 use jsonwebtoken::{Algorithm::*, DecodingKey, Validation};
-use once_cell::sync::Lazy;
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use tokio::sync::RwLock;
 
 pub(crate) type JwksCache = HashMap<String, JwksCacheEntry>;
@@ -23,10 +23,10 @@ pub(crate) struct JwksCacheEntry {
 }
 
 #[cfg(test)]
-static CACHE_EXPIRATION: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(1));
+static CACHE_EXPIRATION: LazyLock<chrono::Duration> = LazyLock::new(|| Duration::seconds(1));
 #[cfg(not(test))]
-static CACHE_EXPIRATION: Lazy<chrono::Duration> =
-	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_EXPIRATION_SECONDS") {
+static CACHE_EXPIRATION: LazyLock<chrono::Duration> =
+	LazyLock::new(|| match std::env::var("SURREAL_JWKS_CACHE_EXPIRATION_SECONDS") {
 		Ok(seconds_str) => {
 			let seconds = seconds_str.parse::<u64>().expect(
 				"Expected a valid number of seconds for SURREAL_JWKS_CACHE_EXPIRATION_SECONDS",
@@ -39,10 +39,10 @@ static CACHE_EXPIRATION: Lazy<chrono::Duration> =
 	});
 
 #[cfg(test)]
-static CACHE_COOLDOWN: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(300));
+static CACHE_COOLDOWN: LazyLock<chrono::Duration> = LazyLock::new(|| Duration::seconds(300));
 #[cfg(not(test))]
-static CACHE_COOLDOWN: Lazy<chrono::Duration> =
-	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_COOLDOWN_SECONDS") {
+static CACHE_COOLDOWN: LazyLock<chrono::Duration> =
+	LazyLock::new(|| match std::env::var("SURREAL_JWKS_CACHE_COOLDOWN_SECONDS") {
 		Ok(seconds_str) => {
 			let seconds = seconds_str.parse::<u64>().expect(
 				"Expected a valid number of seconds for SURREAL_JWKS_CACHE_COOLDOWN_SECONDS",
@@ -55,8 +55,8 @@ static CACHE_COOLDOWN: Lazy<chrono::Duration> =
 	});
 
 #[cfg(not(target_arch = "wasm32"))]
-static REMOTE_TIMEOUT: Lazy<chrono::Duration> =
-	Lazy::new(|| match std::env::var("SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS") {
+static REMOTE_TIMEOUT: LazyLock<chrono::Duration> =
+	LazyLock::new(|| match std::env::var("SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS") {
 		Ok(milliseconds_str) => {
 			let milliseconds = milliseconds_str
 				.parse::<u64>()
@@ -279,8 +279,10 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<(), Error> {
 		}
 	};
 	if !kvs.allows_network_target(&target) {
+		warn!("Capabilities denied outgoing network connection attempt, target: '{target}'");
 		return Err(Error::InvalidUrl(url.to_string()));
 	}
+	trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 
 	Ok(())
 }
@@ -365,7 +367,7 @@ mod tests {
 		rng.sample_iter(&Alphanumeric).take(8).map(char::from).collect()
 	}
 
-	static DEFAULT_JWKS: Lazy<JwkSet> = Lazy::new(|| {
+	static DEFAULT_JWKS: LazyLock<JwkSet> = LazyLock::new(|| {
 		JwkSet{
 		keys: vec![Jwk{
 			common: jsonwebtoken::jwk::CommonParameters {

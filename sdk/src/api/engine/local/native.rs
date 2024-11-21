@@ -6,7 +6,7 @@ use crate::{
 		opt::{Endpoint, EndpointKind},
 		ExtraFeatures, OnceLockExt, Result, Surreal,
 	},
-	engine::tasks::start_tasks,
+	engine::tasks,
 	opt::{auth::Root, WaitFor},
 	value::Notification,
 	Action,
@@ -20,6 +20,7 @@ use std::{
 };
 use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
 use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 
 impl crate::api::Connection for Db {}
 
@@ -108,13 +109,7 @@ pub(crate) async fn run_router(
 		.with_transaction_timeout(address.config.transaction_timeout)
 		.with_capabilities(address.config.capabilities);
 
-	#[cfg(any(
-		feature = "kv-mem",
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-	))]
+	#[cfg(storage)]
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
@@ -122,17 +117,24 @@ pub(crate) async fn run_router(
 	let mut live_queries = HashMap::new();
 	let mut session = Session::default().with_rt(true);
 
-	let opt = {
-		let mut engine_options = EngineOptions::default();
-		engine_options.tick_interval = address
-			.config
-			.tick_interval
-			.unwrap_or(crate::api::engine::local::DEFAULT_TICK_INTERVAL);
-		engine_options
-	};
-	let (tasks, task_chans) = start_tasks(&opt, kvs.clone());
+	let canceller = CancellationToken::new();
 
-	let mut notifications = kvs.notifications();
+	let mut opt = EngineOptions::default();
+	if let Some(interval) = address.config.node_membership_refresh_interval {
+		opt.node_membership_refresh_interval = interval;
+	}
+	if let Some(interval) = address.config.node_membership_check_interval {
+		opt.node_membership_check_interval = interval;
+	}
+	if let Some(interval) = address.config.node_membership_cleanup_interval {
+		opt.node_membership_cleanup_interval = interval;
+	}
+	if let Some(interval) = address.config.changefeed_gc_interval {
+		opt.changefeed_gc_interval = interval;
+	}
+	let tasks = tasks::init(kvs.clone(), canceller.clone(), &opt);
+
+	let mut notifications = kvs.notifications().map(Box::pin);
 	let mut notification_stream = poll_fn(move |cx| match &mut notifications {
 		Some(rx) => rx.poll_next_unpin(cx),
 		// return poll pending so that this future is never woken up again and therefore not
@@ -185,12 +187,10 @@ pub(crate) async fn run_router(
 			}
 		}
 	}
-
-	// Stop maintenance tasks
-	for chan in task_chans {
-		if chan.send(()).is_err() {
-			error!("Error sending shutdown signal to task");
-		}
-	}
-	tasks.resolve().await.unwrap();
+	// Shutdown and stop closed tasks
+	canceller.cancel();
+	// Wait for background tasks to finish
+	let _ = tasks.resolve().await;
+	// Delete this node from the cluster
+	let _ = kvs.shutdown().await;
 }

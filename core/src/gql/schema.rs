@@ -5,11 +5,13 @@ use std::sync::Arc;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
+use crate::sql::order::{OrderList, Ordering};
+use crate::sql::statements::define::config::graphql::TablesConfig;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
-use crate::sql::Kind;
-use crate::sql::{self, Table};
+use crate::sql::{self, Ident, Order, Part, Table};
 use crate::sql::{Cond, Fields};
 use crate::sql::{Expression, Geometry};
+use crate::sql::{Idiom, Kind};
 use crate::sql::{Statement, Thing};
 use async_graphql::dynamic::{Enum, FieldValue, ResolverContext, Type, Union};
 use async_graphql::dynamic::{Field, Interface};
@@ -26,14 +28,20 @@ use serde_json::Number;
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
+#[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
-use crate::gql::ext::TryAsExt;
-use crate::gql::utils::{get_record, GqlValueUtils};
+use crate::gql::ext::{NamedContainer, TryAsExt};
+use crate::gql::utils::{GQLTx, GqlValueUtils};
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
-use crate::sql::Object as SqlObject;
 use crate::sql::Value as SqlValue;
+
+type ErasedRecord = (GQLTx, Thing);
+
+fn field_val_erase_owned(val: ErasedRecord) -> FieldValue<'static> {
+	FieldValue::owned_any(val)
+}
 
 macro_rules! limit_input {
 	() => {
@@ -53,20 +61,6 @@ macro_rules! id_input {
 	};
 }
 
-macro_rules! order {
-	(asc, $field:expr) => {{
-		let mut tmp = sql::Order::default();
-		tmp.order = $field.into();
-		tmp.direction = true;
-		tmp
-	}};
-	(desc, $field:expr) => {{
-		let mut tmp = sql::Order::default();
-		tmp.order = $field.into();
-		tmp
-	}};
-}
-
 fn filter_name_from_table(tb_name: impl Display) -> String {
 	format!("_filter_{tb_name}")
 }
@@ -75,11 +69,32 @@ pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
 	session: &Session,
 ) -> Result<Schema, GqlError> {
-	let kvs = datastore.as_ref();
+	let kvs = datastore;
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-	let ns = session.ns.as_ref().expect("missing ns should have been caught");
-	let db = session.db.as_ref().expect("missing db should have been caught");
-	let tbs = tx.all_tb(ns, db).await?;
+	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
+	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
+
+	let cg = tx.get_db_config(ns, db, "graphql").await.map_err(|e| match e {
+		crate::err::Error::CgNotFound {
+			..
+		} => GqlError::NotConfigured,
+		e => e.into(),
+	})?;
+	let config = cg.inner.clone().try_into_graphql()?;
+
+	let tbs = tx.all_tb(ns, db, None).await?;
+
+	let tbs = match config.tables {
+		TablesConfig::None => return Err(GqlError::NotConfigured),
+		TablesConfig::Auto => tbs,
+		TablesConfig::Include(inc) => {
+			tbs.iter().filter(|t| inc.contains_name(&t.name)).cloned().collect()
+		}
+		TablesConfig::Exclude(exc) => {
+			tbs.iter().filter(|t| !exc.contains_name(&t.name)).cloned().collect()
+		}
+	};
+
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
 
@@ -97,8 +112,16 @@ pub async fn generate_schema(
 
 		let table_orderable_name = format!("_orderable_{tb_name}");
 		let mut table_orderable = Enum::new(&table_orderable_name).item("id");
+		table_orderable = table_orderable.description(format!(
+			"Generated from `{}` the fields which a query can be ordered by",
+			tb.name
+		));
 		let table_order_name = format!("_order_{tb_name}");
 		let table_order = InputObject::new(&table_order_name)
+			.description(format!(
+				"Generated from `{}` an object representing a query ordering",
+				tb.name
+			))
 			.field(InputValue::new("asc", TypeRef::named(&table_orderable_name)))
 			.field(InputValue::new("desc", TypeRef::named(&table_orderable_name)))
 			.field(InputValue::new("then", TypeRef::named(&table_order_name)));
@@ -113,7 +136,7 @@ pub async fn generate_schema(
 		types.push(Type::InputObject(filter_id()));
 
 		let sess1 = session.to_owned();
-		let fds = tx.all_tb_fields(ns, db, &tb.name.0).await?;
+		let fds = tx.all_tb_fields(ns, db, &tb.name.0, None).await?;
 		let fds1 = fds.clone();
 		let kvs1 = datastore.clone();
 
@@ -127,7 +150,7 @@ pub async fn generate_schema(
 					let fds1 = fds1.clone();
 					let kvs1 = kvs1.clone();
 					FieldFuture::new(async move {
-						let kvs = kvs1.as_ref();
+						let gtx = GQLTx::new(&kvs1, &sess1).await?;
 
 						let args = ctx.args.as_index_map();
 						trace!("received request with args: {args:?}");
@@ -149,13 +172,20 @@ pub async fn generate_schema(
 									let desc = current.get("desc");
 									match (asc, desc) {
 										(Some(_), Some(_)) => {
-											return Err("Found both asc and desc in order".into());
+											return Err("Found both ASC and DESC in order".into());
 										}
 										(Some(GqlValue::Enum(a)), None) => {
-											orders.push(order!(asc, a.as_str()))
+											orders.push(Order{
+												direction: true,
+												value: Idiom(vec![Part::Field(Ident(a.to_string()))]),
+												..Default::default()
+											});
 										}
 										(None, Some(GqlValue::Enum(d))) => {
-											orders.push(order!(desc, d.as_str()))
+											orders.push(Order{
+												value: Idiom(vec![Part::Field(Ident(d.to_string()))]),
+												..Default::default()
+											});
 										}
 										(_, _) => {
 											break;
@@ -192,11 +222,19 @@ pub async fn generate_schema(
 
 						trace!("parsed filter: {cond:?}");
 
+						// SELECT VALUE id FROM ...
 						let ast = Statement::Select({
 							SelectStatement {
 								what: vec![SqlValue::Table(tb_name.intox())].into(),
-								expr: Fields::all(),
-								order: orders.map(IntoExt::intox),
+								expr: Fields(
+									vec![sql::Field::Single {
+										expr: SqlValue::Idiom(Idiom::from("id")),
+										alias: None,
+									}],
+									// this means the `value` keyword
+									true,
+								),
+								order: orders.map(|x| Ordering::Order(OrderList(x))),
 								cond,
 								limit,
 								start,
@@ -206,16 +244,7 @@ pub async fn generate_schema(
 
 						trace!("generated query ast: {ast:?}");
 
-						let query = ast.into();
-						trace!("generated query: {}", query);
-
-						let res = kvs.process(query, &sess1, Default::default()).await?;
-						debug_assert_eq!(res.len(), 1);
-						let res = res
-							.into_iter()
-							.next()
-							.expect("response vector should have exactly one value")
-							.result?;
+						let res = gtx.process_stmt(ast).await?;
 
 						let res_vec =
 							match res {
@@ -229,18 +258,24 @@ pub async fn generate_schema(
 						let out: Result<Vec<FieldValue>, SqlValue> = res_vec
 							.0
 							.into_iter()
-							.map(|v| v.try_as_object().map(FieldValue::owned_any))
+							.map(|v| {
+								v.try_as_thing().map(|t| {
+									let erased: ErasedRecord = (gtx.clone(), t);
+									field_val_erase_owned(erased)
+								})
+							})
 							.collect();
 
 						match out {
 							Ok(l) => Ok(Some(FieldValue::list(l))),
 							Err(v) => {
-								Err(internal_error(format!("expected object, found: {v:?}")).into())
+								Err(internal_error(format!("expected thing, found: {v:?}")).into())
 							}
 						}
 					})
 				},
 			)
+			.description(if let Some(ref c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
 			.argument(limit_input!())
 			.argument(start_input!())
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
@@ -249,51 +284,58 @@ pub async fn generate_schema(
 
 		let sess2 = session.to_owned();
 		let kvs2 = datastore.to_owned();
-		query = query.field(
-			Field::new(
-				format!("_get_{}", tb.name),
-				TypeRef::named(tb.name.to_string()),
-				move |ctx| {
-					let tb_name = second_tb_name.clone();
-					let kvs2 = kvs2.clone();
-					FieldFuture::new({
-						let sess2 = sess2.clone();
-						async move {
-							let kvs = kvs2.as_ref();
+		query =
+			query.field(
+				Field::new(
+					format!("_get_{}", tb.name),
+					TypeRef::named(tb.name.to_string()),
+					move |ctx| {
+						let tb_name = second_tb_name.clone();
+						let kvs2 = kvs2.clone();
+						FieldFuture::new({
+							let sess2 = sess2.clone();
+							async move {
+								let gtx = GQLTx::new(&kvs2, &sess2).await?;
 
-							let args = ctx.args.as_index_map();
-							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
-								Some(i) => i,
-								None => {
-									return Err(internal_error(
-										"Schema validation failed: No id found in _get_",
-									)
-									.into());
+								let args = ctx.args.as_index_map();
+								let id = match args.get("id").and_then(GqlValueUtils::as_string) {
+									Some(i) => i,
+									None => {
+										return Err(internal_error(
+											"Schema validation failed: No id found in _get_",
+										)
+										.into());
+									}
+								};
+								let thing = match id.clone().try_into() {
+									Ok(t) => t,
+									Err(_) => Thing::from((tb_name, id)),
+								};
+
+								match gtx.get_record_field(thing, "id").await? {
+									SqlValue::Thing(t) => {
+										let erased: ErasedRecord = (gtx, t);
+										Ok(Some(field_val_erase_owned(erased)))
+									}
+									_ => Ok(None),
 								}
-							};
-							let thing = match id.clone().try_into() {
-								Ok(t) => t,
-								Err(_) => Thing::from((tb_name, id)),
-							};
-
-							match get_record(kvs, &sess2, &thing).await? {
-								SqlValue::Object(o) => Ok(Some(FieldValue::owned_any(o))),
-								_ => Ok(None),
 							}
-						}
-					})
-				},
-			)
-			.argument(id_input!()),
-		);
+						})
+					},
+				)
+				.description(if let Some(ref c) = &tb.comment {
+					format!("{c}")
+				} else {
+					format!("Generated from table `{}`\nallows querying a single record in a table by ID", tb.name)
+				})
+				.argument(id_input!()),
+			);
 
 		let mut table_ty_obj = Object::new(tb.name.to_string())
 			.field(Field::new(
 				"id",
 				TypeRef::named_nn(TypeRef::ID),
 				make_table_field_resolver(
-					datastore,
-					session,
 					"id",
 					Some(Kind::Record(vec![Table::from(tb.name.to_string())])),
 				),
@@ -320,11 +362,17 @@ pub async fn generate_schema(
 			table_filter = table_filter
 				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
 
-			table_ty_obj = table_ty_obj.field(Field::new(
-				fd.name.to_string(),
-				fd_type,
-				make_table_field_resolver(datastore, session, fd_name.as_str(), fd.kind.clone()),
-			));
+			table_ty_obj = table_ty_obj
+				.field(Field::new(
+					fd.name.to_string(),
+					fd_type,
+					make_table_field_resolver(fd_name.as_str(), fd.kind.clone()),
+				))
+				.description(if let Some(ref c) = fd.comment {
+					format!("{c}")
+				} else {
+					"".to_string()
+				});
 		}
 
 		types.push(Type::Object(table_ty_obj));
@@ -337,11 +385,11 @@ pub async fn generate_schema(
 	let kvs3 = datastore.to_owned();
 	query = query.field(
 		Field::new("_get", TypeRef::named("record"), move |ctx| {
-			let kvs3 = kvs3.clone();
 			FieldFuture::new({
 				let sess3 = sess3.clone();
+				let kvs3 = kvs3.clone();
 				async move {
-					let kvs = kvs3.as_ref();
+					let gtx = GQLTx::new(&kvs3, &sess3).await?;
 
 					let args = ctx.args.as_index_map();
 					let id = match args.get("id").and_then(GqlValueUtils::as_string) {
@@ -359,10 +407,10 @@ pub async fn generate_schema(
 						Err(_) => return Err(resolver_error(format!("invalid id: {id}")).into()),
 					};
 
-					match get_record(kvs, &sess3, &thing).await? {
-						SqlValue::Object(o) => {
-							let out = FieldValue::owned_any(o).with_type(thing.tb.to_string());
-
+					match gtx.get_record_field(thing, "id").await? {
+						SqlValue::Thing(t) => {
+							let ty = t.tb.to_string();
+							let out = field_val_erase_owned((gtx, t)).with_type(ty);
 							Ok(Some(out))
 						}
 						_ => Ok(None),
@@ -370,6 +418,7 @@ pub async fn generate_schema(
 				}
 			})
 		})
+		.description("Allows fetching arbitrary records".to_string())
 		.argument(id_input!()),
 	);
 
@@ -424,7 +473,7 @@ pub async fn generate_schema(
 		schema,
 		"uuid",
 		Kind::Uuid,
-		"a string encoded uuid",
+		"String encoded UUID",
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
@@ -454,52 +503,37 @@ pub async fn generate_schema(
 }
 
 fn make_table_field_resolver(
-	kvs: &Arc<Datastore>,
-	sess: &Session,
 	fd_name: impl Into<String>,
 	kind: Option<Kind>,
 ) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
 	let fd_name = fd_name.into();
-	let sess_field = Arc::new(sess.to_owned());
-	let kvs_field = kvs.clone();
 	move |ctx: ResolverContext| {
-		let sess_field = sess_field.clone();
 		let fd_name = fd_name.clone();
-		let kvs_field = kvs_field.clone();
 		let field_kind = kind.clone();
 		FieldFuture::new({
-			let kvs_field = kvs_field.clone();
 			async move {
-				let kvs = kvs_field.as_ref();
-
-				let record: &SqlObject = ctx
+				let (ref gtx, ref rid) = ctx
 					.parent_value
-					.downcast_ref::<SqlObject>()
+					.downcast_ref::<ErasedRecord>()
 					.ok_or_else(|| internal_error("failed to downcast"))?;
 
-				let Some(val) = record.get(fd_name.as_str()) else {
-					return Ok(None);
-				};
+				let val = gtx.get_record_field(rid.clone(), fd_name.as_str()).await?;
 
 				let out = match val {
-					SqlValue::Thing(rid)if fd_name != "id" => match get_record(kvs, &sess_field, rid).await?
-						{
-							SqlValue::Object(o) => {
-							    let mut tmp = FieldValue::owned_any(o);
-
-								match field_kind {
-									Some(Kind::Record(ts)) if ts.len() != 1 => {tmp = tmp.with_type(rid.tb.clone())}
-									_ => {}
-								}
-
-								Ok(Some(tmp))
+					SqlValue::Thing(rid) if fd_name != "id" => {
+						let mut tmp = field_val_erase_owned((gtx.clone(), rid.clone()));
+						match field_kind {
+							Some(Kind::Record(ts)) if ts.len() != 1 => {
+								tmp = tmp.with_type(rid.tb.clone())
 							}
-							v => Err(resolver_error(format!("expected object, but found (referential integrity might be broken): {v:?}")).into()),
+							_ => {}
 						}
+						Ok(Some(tmp))
+					}
+					SqlValue::None | SqlValue::Null => Ok(None),
 					v => {
 						match field_kind {
-							Some(Kind::Either(ks)) if ks.len() != 1 => {
-							}
+							Some(Kind::Either(ks)) if ks.len() != 1 => {}
 							_ => {}
 						}
 						let out = sql_value_to_gql_value(v.to_owned())
@@ -595,7 +629,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 			let (ls, others): (Vec<Kind>, Vec<Kind>) =
 				ks.into_iter().partition(|k| matches!(k, Kind::Literal(Literal::String(_))));
 
-			let enum_ty = if ls.len() > 0 {
+			let enum_ty = if !ls.is_empty() {
 				let vals: Vec<String> = ls
 					.into_iter()
 					.map(|l| {
@@ -614,7 +648,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 				let enum_ty = tmp.type_name().to_string();
 
 				types.push(Type::Enum(tmp));
-				if others.len() == 0 {
+				if others.is_empty() {
 					return Ok(TypeRef::named(enum_ty));
 				}
 				Some(enum_ty)
@@ -923,7 +957,7 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Datetime => match val {
-			GqlValue::String(s) => match syn::datetime_raw(s) {
+			GqlValue::String(s) => match syn::datetime(s) {
 				Ok(dt) => Ok(dt.into()),
 				Err(_) => Err(type_error(kind, val)),
 			},
@@ -1026,7 +1060,7 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 				}
 			}
 			GqlValue::String(s) => match syn::value(s) {
-				Ok(SqlValue::Number(n)) => Ok(SqlValue::Number(n.clone())),
+				Ok(SqlValue::Number(n)) => Ok(SqlValue::Number(n)),
 				_ => Err(type_error(kind, val)),
 			},
 			_ => Err(type_error(kind, val)),

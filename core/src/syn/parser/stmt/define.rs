@@ -3,6 +3,9 @@ use reblessive::Stk;
 use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
+use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
+use crate::sql::statements::define::config::ConfigInner;
+use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::Value;
 use crate::{
 	sql::{
@@ -11,10 +14,10 @@ use crate::{
 		filter::Filter,
 		index::{Distance, VectorType},
 		statements::{
-			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DefineUserStatement,
+			define::config::graphql, DefineAccessStatement, DefineAnalyzerStatement,
+			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
+			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
+			DefineParamStatement, DefineStatement, DefineTableStatement, DefineUserStatement,
 		},
 		table_type,
 		tokenizer::Tokenizer,
@@ -31,11 +34,13 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_define_stmt(&mut self, ctx: &mut Stk) -> ParseResult<DefineStatement> {
-		match self.next().kind {
-			t!("NAMESPACE") | t!("ns") => {
-				self.parse_define_namespace().map(DefineStatement::Namespace)
-			}
+	pub(crate) async fn parse_define_stmt(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<DefineStatement> {
+		let next = self.next();
+		match next.kind {
+			t!("NAMESPACE") => self.parse_define_namespace().map(DefineStatement::Namespace),
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(ctx).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user().map(DefineStatement::User),
@@ -54,11 +59,12 @@ impl Parser<'_> {
 			}
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
-			x => unexpected!(self, x, "a define statement keyword"),
+			t!("CONFIG") => self.parse_define_config().map(DefineStatement::Config),
+			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
 
-	pub fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
+	pub(crate) fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
 		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -232,9 +238,23 @@ impl Parser<'_> {
 				}
 				t!("ROLES") => {
 					self.pop_peek();
-					res.roles = vec![self.next_token_value()?];
-					while self.eat(t!(",")) {
-						res.roles.push(self.next_token_value()?);
+					let mut roles = Vec::new();
+					loop {
+						let token = self.peek();
+						let role = self.next_token_value::<Ident>()?;
+						// NOTE(gguillemas): This hardcoded list is a temporary fix in order
+						// to avoid making breaking changes to the DefineUserStatement structure
+						// while still providing parsing feedback to users referencing unexistent roles.
+						// This list should be removed once arbitrary roles can be defined by users.
+						if !matches!(role.to_lowercase().as_str(), "viewer" | "editor" | "owner") {
+							unexpected!(self, token, "an existent role");
+						}
+						roles.push(role);
+
+						if !self.eat(t!(",")) {
+							res.roles = roles;
+							break;
+						}
 					}
 				}
 				t!("DURATION") => {
@@ -243,11 +263,12 @@ impl Parser<'_> {
 						match self.peek_kind() {
 							t!("TOKEN") => {
 								self.pop_peek();
-								match self.peek_kind() {
+								let peek = self.peek();
+								match peek.kind {
 									t!("NONE") => {
 										// Currently, SurrealDB does not accept tokens without expiration.
 										// For this reason, some token duration must be set.
-										unexpected!(self, t!("NONE"), "a token duration");
+										unexpected!(self, peek, "a token duration");
 									}
 									_ => res.set_token_duration(Some(self.next_token_value()?)),
 								}
@@ -308,20 +329,17 @@ impl Parser<'_> {
 				}
 				t!("TYPE") => {
 					self.pop_peek();
-					match self.peek_kind() {
+					let peek = self.peek();
+					match peek.kind {
 						t!("JWT") => {
 							self.pop_peek();
 							res.kind = AccessType::Jwt(self.parse_jwt()?);
 						}
 						t!("RECORD") => {
-							self.pop_peek();
+							let token = self.pop_peek();
 							// The record access type can only be defined at the database level
 							if !matches!(res.base, Base::Db) {
-								unexpected!(
-									self,
-									t!("RECORD"),
-									"a valid access type at this level"
-								);
+								unexpected!(self, token, "a valid access type at this level");
 							}
 							let mut ac = access_type::RecordAccess {
 								..Default::default()
@@ -331,12 +349,12 @@ impl Parser<'_> {
 									t!("SIGNUP") => {
 										self.pop_peek();
 										ac.signup =
-											Some(stk.run(|stk| self.parse_value(stk)).await?);
+											Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 									}
 									t!("SIGNIN") => {
 										self.pop_peek();
 										ac.signin =
-											Some(stk.run(|stk| self.parse_value(stk)).await?);
+											Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 									}
 									_ => break,
 								}
@@ -352,14 +370,34 @@ impl Parser<'_> {
 							if !*EXPERIMENTAL_BEARER_ACCESS {
 								unexpected!(
 									self,
-									t!("BEARER"),
+									peek,
 									"the experimental bearer access feature to be enabled"
 								);
 							}
+
 							self.pop_peek();
 							let mut ac = access_type::BearerAccess {
 								..Default::default()
 							};
+							expected!(self, t!("FOR"));
+							match self.peek_kind() {
+								t!("USER") => {
+									self.pop_peek();
+									ac.subject = access_type::BearerAccessSubject::User;
+								}
+								t!("RECORD") => {
+									match &res.base {
+										Base::Db => (),
+										_ => unexpected!(self, peek, "USER"),
+									}
+									self.pop_peek();
+									ac.subject = access_type::BearerAccessSubject::Record;
+								}
+								_ => match &res.base {
+									Base::Db => unexpected!(self, peek, "either USER or RECORD"),
+									_ => unexpected!(self, peek, "USER"),
+								},
+							}
 							if self.eat(t!("WITH")) {
 								expected!(self, t!("JWT"));
 								ac.jwt = self.parse_jwt()?;
@@ -371,7 +409,7 @@ impl Parser<'_> {
 				}
 				t!("AUTHENTICATE") => {
 					self.pop_peek();
-					res.authenticate = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					res.authenticate = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 				}
 				t!("DURATION") => {
 					self.pop_peek();
@@ -389,13 +427,14 @@ impl Parser<'_> {
 							}
 							t!("TOKEN") => {
 								self.pop_peek();
-								match self.peek_kind() {
+								let peek = self.peek();
+								match peek.kind {
 									t!("NONE") => {
 										// Currently, SurrealDB does not accept tokens without expiration.
 										// For this reason, some token duration must be set.
 										// In the future, allowing issuing tokens without expiration may be useful.
 										// Tokens issued by access methods can be consumed by third parties that support it.
-										unexpected!(self, t!("NONE"), "a token duration");
+										unexpected!(self, peek, "a token duration");
 									}
 									_ => res.duration.token = Some(self.next_token_value()?),
 								}
@@ -463,7 +502,8 @@ impl Parser<'_> {
 						// This matches the display format of the legacy statement
 						t!("TYPE") => {
 							self.pop_peek();
-							match self.next().kind {
+							let next = self.next();
+							match next.kind {
 								TokenKind::Algorithm(alg) => {
 									expected!(self, t!("VALUE"));
 									ac.jwt.verify = access_type::JwtAccessVerify::Key(
@@ -481,7 +521,7 @@ impl Parser<'_> {
 										},
 									);
 								}
-								x => unexpected!(self, x, "a token algorithm or 'JWKS'"),
+								_ => unexpected!(self, next, "a token algorithm or 'JWKS'"),
 							}
 						}
 						_ => break,
@@ -505,7 +545,8 @@ impl Parser<'_> {
 						// This matches the display format of the legacy statement
 						t!("TYPE") => {
 							self.pop_peek();
-							match self.next().kind {
+							let next = self.next();
+							match next.kind {
 								TokenKind::Algorithm(alg) => {
 									expected!(self, t!("VALUE"));
 									ac.verify = access_type::JwtAccessVerify::Key(
@@ -523,7 +564,7 @@ impl Parser<'_> {
 										},
 									);
 								}
-								x => unexpected!(self, x, "a token algorithm or 'JWKS'"),
+								_ => unexpected!(self, next, "a token algorithm or 'JWKS'"),
 							}
 						}
 						_ => break,
@@ -574,11 +615,11 @@ impl Parser<'_> {
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
-					ac.signup = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					ac.signup = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 				}
 				t!("SIGNIN") => {
 					self.pop_peek();
-					ac.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					ac.signin = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 				}
 				_ => break,
 			}
@@ -612,7 +653,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = ctx.run(|ctx| self.parse_value(ctx)).await?;
+					res.value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
@@ -661,7 +702,8 @@ impl Parser<'_> {
 				}
 				t!("TYPE") => {
 					self.pop_peek();
-					match self.peek_kind() {
+					let peek = self.peek();
+					match peek.kind {
 						t!("NORMAL") => {
 							self.pop_peek();
 							kind = Some(TableType::Normal);
@@ -674,7 +716,7 @@ impl Parser<'_> {
 							self.pop_peek();
 							kind = Some(TableType::Any);
 						}
-						x => unexpected!(self, x, "`NORMAL`, `RELATION`, or `ANY`"),
+						_ => unexpected!(self, peek, "`NORMAL`, `RELATION`, or `ANY`"),
 					}
 				}
 				t!("SCHEMALESS") => {
@@ -698,7 +740,8 @@ impl Parser<'_> {
 				}
 				t!("AS") => {
 					self.pop_peek();
-					match self.peek_kind() {
+					let peek = self.peek();
+					match peek.kind {
 						t!("(") => {
 							let open = self.pop_peek().span;
 							res.view = Some(self.parse_view(ctx).await?);
@@ -707,7 +750,7 @@ impl Parser<'_> {
 						t!("SELECT") => {
 							res.view = Some(self.parse_view(ctx).await?);
 						}
-						x => unexpected!(self, x, "`SELECT`"),
+						_ => unexpected!(self, peek, "`SELECT`"),
 					}
 				}
 				_ => break,
@@ -749,13 +792,13 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("WHEN") => {
 					self.pop_peek();
-					res.when = ctx.run(|ctx| self.parse_value(ctx)).await?;
+					res.when = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				}
 				t!("THEN") => {
 					self.pop_peek();
-					res.then = Values(vec![ctx.run(|ctx| self.parse_value(ctx)).await?]);
+					res.then = Values(vec![ctx.run(|ctx| self.parse_value_field(ctx)).await?]);
 					while self.eat(t!(",")) {
-						res.then.0.push(ctx.run(|ctx| self.parse_value(ctx)).await?)
+						res.then.0.push(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 					}
 				}
 				t!("COMMENT") => {
@@ -808,15 +851,15 @@ impl Parser<'_> {
 				}
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+					res.value = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("ASSERT") => {
 					self.pop_peek();
-					res.assert = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+					res.assert = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("DEFAULT") => {
 					self.pop_peek();
-					res.default = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
+					res.default = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -1124,7 +1167,8 @@ impl Parser<'_> {
 					self.pop_peek();
 					let mut filters = Vec::new();
 					loop {
-						match self.next().kind {
+						let next = self.next();
+						match next.kind {
 							t!("ASCII") => {
 								filters.push(Filter::Ascii);
 							}
@@ -1156,7 +1200,13 @@ impl Parser<'_> {
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Snowball(language))
 							}
-							x => unexpected!(self, x, "a filter"),
+							t!("MAPPER") => {
+								let open_span = expected!(self, t!("(")).span;
+								let path: Strand = self.next_token_value()?;
+								self.expect_closing_delimiter(t!(")"), open_span)?;
+								filters.push(Filter::Mapper(path.into()))
+							}
+							_ => unexpected!(self, next, "a filter"),
 						}
 						if !self.eat(t!(",")) {
 							break;
@@ -1169,12 +1219,13 @@ impl Parser<'_> {
 					let mut tokenizers = Vec::new();
 
 					loop {
-						let tokenizer = match self.next().kind {
+						let next = self.next();
+						let tokenizer = match next.kind {
 							t!("BLANK") => Tokenizer::Blank,
 							t!("CAMEL") => Tokenizer::Camel,
 							t!("CLASS") => Tokenizer::Class,
 							t!("PUNCT") => Tokenizer::Punct,
-							x => unexpected!(self, x, "a tokenizer"),
+							_ => unexpected!(self, next, "a tokenizer"),
 						};
 						tokenizers.push(tokenizer);
 						if !self.eat(t!(",")) {
@@ -1204,6 +1255,113 @@ impl Parser<'_> {
 			}
 		}
 		Ok(res)
+	}
+
+	pub fn parse_define_config(&mut self) -> ParseResult<DefineConfigStatement> {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
+		} else {
+			(false, false)
+		};
+
+		let next = self.next();
+		let inner = match next.kind {
+			t!("GRAPHQL") => self.parse_graphql_config().map(ConfigInner::GraphQL)?,
+			_ => unexpected!(self, next, "a type of config"),
+		};
+
+		Ok(DefineConfigStatement {
+			inner,
+			if_not_exists,
+			overwrite,
+		})
+	}
+
+	fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {
+		use graphql::{FunctionsConfig, TablesConfig};
+		let mut tmp_tables = Option::<TablesConfig>::None;
+		let mut tmp_fncs = Option::<FunctionsConfig>::None;
+		loop {
+			match self.peek_kind() {
+				t!("NONE") => {
+					self.pop_peek();
+					tmp_tables = Some(TablesConfig::None);
+					tmp_fncs = Some(FunctionsConfig::None);
+				}
+				t!("AUTO") => {
+					self.pop_peek();
+					tmp_tables = Some(TablesConfig::Auto);
+					tmp_fncs = Some(FunctionsConfig::Auto);
+				}
+				t!("TABLES") => {
+					self.pop_peek();
+
+					let next = self.next();
+					match next.kind {
+						t!("INCLUDE") => {
+							tmp_tables =
+								Some(TablesConfig::Include(self.parse_graphql_table_configs()?))
+						}
+						t!("EXCLUDE") => {
+							tmp_tables =
+								Some(TablesConfig::Include(self.parse_graphql_table_configs()?))
+						}
+						t!("NONE") => {
+							tmp_tables = Some(TablesConfig::None);
+						}
+						t!("AUTO") => {
+							tmp_tables = Some(TablesConfig::Auto);
+						}
+						_ => unexpected!(self, next, "`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"),
+					}
+				}
+				t!("FUNCTIONS") => {
+					self.pop_peek();
+
+					let next = self.next();
+					match next.kind {
+						t!("INCLUDE") => {}
+						t!("EXCLUDE") => {}
+						t!("NONE") => {
+							tmp_fncs = Some(FunctionsConfig::None);
+						}
+						t!("AUTO") => {
+							tmp_fncs = Some(FunctionsConfig::Auto);
+						}
+						_ => unexpected!(self, next, "`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"),
+					}
+				}
+				_ => break,
+			}
+		}
+
+		Ok(GraphQLConfig {
+			tables: tmp_tables.unwrap_or_default(),
+			functions: tmp_fncs.unwrap_or_default(),
+		})
+	}
+
+	fn parse_graphql_table_configs(&mut self) -> ParseResult<Vec<graphql::TableConfig>> {
+		let mut acc = vec![];
+		loop {
+			match self.peek_kind() {
+				x if Self::kind_is_identifier(x) => {
+					let name: Ident = self.next_token_value()?;
+					acc.push(TableConfig {
+						name: name.0,
+					});
+				}
+				_ => unexpected!(self, self.next(), "a table config"),
+			}
+			if !self.eat(t!(",")) {
+				break;
+			}
+		}
+		Ok(acc)
 	}
 
 	pub fn parse_relation_schema(&mut self) -> ParseResult<table_type::Relation> {
@@ -1252,35 +1410,40 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
-		match self.peek_kind() {
+		let peek = self.peek();
+		match peek.kind {
 			t!("ALGORITHM") => {
 				self.pop_peek();
-				match self.next().kind {
-					TokenKind::Algorithm(alg) => match self.next().kind {
-						t!("KEY") => {
-							let key = self.next_token_value::<Strand>()?.0;
-							res.verify = access_type::JwtAccessVerify::Key(
-								access_type::JwtAccessVerifyKey {
-									alg,
-									key: key.to_owned(),
-								},
-							);
+				let next = self.next();
+				match next.kind {
+					TokenKind::Algorithm(alg) => {
+						let next = self.next();
+						match next.kind {
+							t!("KEY") => {
+								let key = self.next_token_value::<Strand>()?.0;
+								res.verify = access_type::JwtAccessVerify::Key(
+									access_type::JwtAccessVerifyKey {
+										alg,
+										key: key.to_owned(),
+									},
+								);
 
-							// Currently, issuer and verifier must use the same algorithm.
-							iss.alg = alg;
+								// Currently, issuer and verifier must use the same algorithm.
+								iss.alg = alg;
 
-							// If the algorithm is symmetric, the issuer and verifier keys are the same.
-							// For asymmetric algorithms, the key needs to be explicitly defined.
-							if alg.is_symmetric() {
-								iss.key = key;
-								// Since all the issuer data is known, it can already be assigned.
-								// Cloning allows updating the original with any explicit issuer data.
-								res.issue = Some(iss.clone());
+								// If the algorithm is symmetric, the issuer and verifier keys are the same.
+								// For asymmetric algorithms, the key needs to be explicitly defined.
+								if alg.is_symmetric() {
+									iss.key = key;
+									// Since all the issuer data is known, it can already be assigned.
+									// Cloning allows updating the original with any explicit issuer data.
+									res.issue = Some(iss.clone());
+								}
 							}
+							_ => unexpected!(self, next, "a key"),
 						}
-						x => unexpected!(self, x, "a key"),
-					},
-					x => unexpected!(self, x, "a valid algorithm"),
+					}
+					_ => unexpected!(self, next, "a valid algorithm"),
 				}
 			}
 			t!("URL") => {
@@ -1290,30 +1453,32 @@ impl Parser<'_> {
 					url,
 				});
 			}
-			x => unexpected!(self, x, "`ALGORITHM`, or `URL`"),
+			_ => unexpected!(self, peek, "`ALGORITHM`, or `URL`"),
 		}
 
 		if self.eat(t!("WITH")) {
 			expected!(self, t!("ISSUER"));
 			loop {
-				match self.peek_kind() {
+				let peek = self.peek();
+				match peek.kind {
 					t!("ALGORITHM") => {
 						self.pop_peek();
-						match self.next().kind {
+						let next = self.next();
+						match next.kind {
 							TokenKind::Algorithm(alg) => {
 								// If an algorithm is already defined, a different value is not expected.
 								if let JwtAccessVerify::Key(ref ver) = res.verify {
 									if alg != ver.alg {
 										unexpected!(
 											self,
-											t!("ALGORITHM"),
+											next,
 											"a compatible algorithm or no algorithm"
 										);
 									}
 								}
 								iss.alg = alg;
 							}
-							x => unexpected!(self, x, "a valid algorithm"),
+							_ => unexpected!(self, next, "a valid algorithm"),
 						}
 					}
 					t!("KEY") => {
@@ -1322,7 +1487,7 @@ impl Parser<'_> {
 						// If the algorithm is symmetric and a key is already defined, a different key is not expected.
 						if let JwtAccessVerify::Key(ref ver) = res.verify {
 							if ver.alg.is_symmetric() && key != ver.key {
-								unexpected!(self, t!("KEY"), "a symmetric key or no key");
+								unexpected!(self, peek, "a symmetric key or no key");
 							}
 						}
 						iss.key = key;

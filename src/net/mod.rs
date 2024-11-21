@@ -8,6 +8,7 @@ mod health;
 mod import;
 mod input;
 mod key;
+mod ml;
 pub(crate) mod output;
 mod params;
 mod rpc;
@@ -18,9 +19,6 @@ mod sql;
 mod sync;
 mod tracer;
 mod version;
-
-#[cfg(feature = "ml")]
-mod ml;
 
 use crate::cli::CF;
 use crate::cnf::{self, GRAPHQL_ENABLE};
@@ -34,6 +32,7 @@ use axum::{middleware, Router};
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use http::header;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -173,7 +172,8 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.merge(sql::router())
 		.merge(signin::router())
 		.merge(signup::router())
-		.merge(key::router());
+		.merge(key::router())
+		.merge(ml::router());
 
 	let axum_app = if *GRAPHQL_ENABLE {
 		#[cfg(surrealdb_unstable)]
@@ -190,9 +190,6 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		axum_app
 	};
 
-	#[cfg(feature = "ml")]
-	let axum_app = axum_app.merge(ml::router());
-
 	let axum_app = axum_app.layer(service);
 
 	// Get a new server handler
@@ -207,10 +204,10 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 
 	// Spawn a task to handle notifications
 	tokio::spawn(async move { notifications(ds, rpc_state, ct.clone()).await });
-	// If a certificate and key are specified then setup TLS
-	if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
+	// If a certificate and key are specified, then setup TLS
+	let res = if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
 		// Configure certificate and private key used by https
-		let tls = RustlsConfig::from_pem_file(cert, key).await.unwrap();
+		let tls = RustlsConfig::from_pem_file(cert, key).await?;
 		// Setup the Axum server with TLS
 		let server = axum_server::bind_rustls(opt.bind, tls);
 		// Log the server startup to the CLI
@@ -219,7 +216,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		server
 			.handle(handle)
 			.serve(axum_app.into_make_service_with_connect_info::<SocketAddr>())
-			.await?;
+			.await
 	} else {
 		// Setup the Axum server
 		let server = axum_server::bind(opt.bind);
@@ -229,8 +226,17 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		server
 			.handle(handle)
 			.serve(axum_app.into_make_service_with_connect_info::<SocketAddr>())
-			.await?;
+			.await
 	};
+	// Catch the error and try to provide some guidance
+	if let Err(e) = res {
+		if opt.bind.port() < 1024 {
+			if let io::ErrorKind::PermissionDenied = e.kind() {
+				error!(target: LOG, "Binding to ports below 1024 requires privileged access or special permissions.");
+			}
+		}
+		return Err(e.into());
+	}
 	// Wait for the shutdown to finish
 	let _ = shutdown_handler.await;
 	// Log the server shutdown to the CLI

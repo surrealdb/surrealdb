@@ -1,10 +1,12 @@
+use std::collections::btree_map::Entry;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
+use crate::sql::Object;
 use reblessive::tree::Stk;
 
 impl Value {
@@ -19,162 +21,267 @@ impl Value {
 		path: &[Part],
 		val: Value,
 	) -> Result<(), Error> {
-		match path.first() {
-			// Get the current value at path
-			Some(p) => match self {
-				// Current value at path is an object
-				Value::Object(v) => match p {
-					Part::Graph(g) => match v.get_mut(g.to_raw().as_str()) {
-						Some(v) if v.is_some() => {
-							stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await
-						}
-						_ => {
-							let mut obj = Value::base();
-							stk.run(|stk| obj.set(stk, ctx, opt, path.next(), val)).await?;
-							v.insert(g.to_raw(), obj);
-							Ok(())
-						}
-					},
-					Part::Field(f) => match v.get_mut(f.as_str()) {
-						Some(v) if v.is_some() => {
-							stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await
-						}
-						_ => {
-							let mut obj = Value::base();
-							stk.run(|stk| obj.set(stk, ctx, opt, path.next(), val)).await?;
-							v.insert(f.to_raw(), obj);
-							Ok(())
-						}
-					},
-					Part::Index(i) => match v.get_mut(&i.to_string()) {
-						Some(v) if v.is_some() => {
-							stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await
-						}
-						_ => {
-							let mut obj = Value::base();
-							stk.run(|stk| obj.set(stk, ctx, opt, path.next(), val)).await?;
-							v.insert(i.to_string(), obj);
-							Ok(())
-						}
-					},
-					Part::Value(x) => match stk.run(|stk| x.compute(stk, ctx, opt, None)).await? {
-						Value::Strand(f) => match v.get_mut(f.as_str()) {
-							Some(v) if v.is_some() => {
-								stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await
-							}
-							_ => {
-								let mut obj = Value::base();
-								stk.run(|stk| obj.set(stk, ctx, opt, path.next(), val)).await?;
-								v.insert(f.to_raw(), obj);
-								Ok(())
-							}
-						},
-						_ => Ok(()),
-					},
-					_ => Ok(()),
-				},
-				// Current value at path is an array
-				Value::Array(v) => match p {
-					Part::All => {
-						let path = path.next();
-
-						stk.scope(|scope| {
-							let futs = v
-								.iter_mut()
-								.map(|v| scope.run(|stk| v.set(stk, ctx, opt, path, val.clone())));
-							try_join_all_buffered(futs)
-						})
-						.await?;
-						Ok(())
-					}
-					Part::First => match v.first_mut() {
-						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await,
-						None => Ok(()),
-					},
-					Part::Last => match v.last_mut() {
-						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await,
-						None => Ok(()),
-					},
-					Part::Index(i) => match v.get_mut(i.to_usize()) {
-						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await,
-						None => Ok(()),
-					},
-					Part::Where(w) => match path.next().first() {
-						Some(Part::Index(_)) => {
-							let mut a = Vec::new();
-							let mut p = Vec::new();
-							// Store the elements and positions to update
-							for (i, o) in v.iter_mut().enumerate() {
-								let cur = o.clone().into();
-								if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
-									a.push(o.clone());
-									p.push(i);
-								}
-							}
-							// Convert the matched elements array to a value
-							let mut a = Value::from(a);
-							// Set the new value on the matches elements
-							stk.run(|stk| a.set(stk, ctx, opt, path.next(), val.clone())).await?;
-							// Push the new values into the original array
-							for (i, p) in p.into_iter().enumerate() {
-								v[p] = a.pick(&[Part::Index(i.into())]);
-							}
-							Ok(())
-						}
-						_ => {
-							let path = path.next();
-							for v in v.iter_mut() {
-								let cur = v.clone().into();
-								if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
-									stk.run(|stk| v.set(stk, ctx, opt, path, val.clone())).await?;
-								}
-							}
-							Ok(())
-						}
-					},
-					Part::Value(x) => match x.compute(stk, ctx, opt, None).await? {
-						Value::Number(i) => match v.get_mut(i.to_usize()) {
-							Some(v) => stk.run(|stk| v.set(stk, ctx, opt, path.next(), val)).await,
-							None => Ok(()),
-						},
-						_ => Ok(()),
-					},
-					_ => {
-						stk.scope(|scope| {
-							let futs = v
-								.iter_mut()
-								.map(|v| scope.run(|stk| v.set(stk, ctx, opt, path, val.clone())));
-							try_join_all_buffered(futs)
-						})
-						.await?;
-
-						Ok(())
-					}
-				},
-				// Current value at path is a record
-				Value::Thing(_) => {
-					*self = Value::base();
-					stk.run(|stk| self.set(stk, ctx, opt, path, val)).await
-				}
-				// Current value at path is empty
-				Value::Null => {
-					*self = Value::base();
-					stk.run(|stk| self.set(stk, ctx, opt, path, val)).await
-				}
-				// Current value at path is empty
-				Value::None => {
-					*self = Value::base();
-					stk.run(|stk| self.set(stk, ctx, opt, path, val)).await
-				}
-				// Ignore everything else
-				_ => Ok(()),
-			},
-			// No more parts so set the value
-			None => {
-				*self = val;
-				Ok(())
-			}
+		if path.is_empty() {
+			*self = val;
+			return Ok(());
 		}
+
+		let mut iter = path.iter();
+		let mut place = self;
+		let mut prev = path;
+
+		// Index forward trying to find the location where to insert the value
+		// Whenever we hit an existing path in the value we update place to point to the new value.
+		// If we hit a dead end, we then assign the into that dead end. If any path is not yet
+		// matched we use that to create an object to assign.
+		while let Some(p) = iter.next() {
+			match place {
+				Value::Thing(_) | Value::Null | Value::None => {
+					// any index is guaranteed to fail so just assign to this place.
+					return Self::assign(stk, ctx, opt, place, val, prev).await;
+				}
+				_ => {}
+			}
+
+			match p {
+				Part::Graph(g) => {
+					match place {
+						Value::Object(obj) => match obj.entry(g.to_raw()) {
+							Entry::Vacant(x) => {
+								let v = x.insert(Value::None);
+								return Self::assign(stk, ctx, opt, v, val, iter.as_slice()).await;
+							}
+							Entry::Occupied(x) => {
+								place = x.into_mut();
+							}
+						},
+						Value::Array(arr) => {
+							// Apply to all entries of the array
+							stk.scope(|scope| {
+								let futs = arr.iter_mut().map(|v| {
+									scope.run(|stk| v.set(stk, ctx, opt, prev, val.clone()))
+								});
+								try_join_all_buffered(futs)
+							})
+							.await?;
+							return Ok(());
+						}
+						_ => return Ok(()),
+					};
+				}
+				Part::Field(f) => {
+					match place {
+						Value::Object(obj) => match obj.entry(f.0.clone()) {
+							Entry::Vacant(x) => {
+								let v = x.insert(Value::None);
+								return Self::assign(stk, ctx, opt, v, val, iter.as_slice()).await;
+							}
+							Entry::Occupied(x) => {
+								place = x.into_mut();
+							}
+						},
+						Value::Array(arr) => {
+							// Apply to all entries of the array
+							stk.scope(|scope| {
+								let futs = arr.iter_mut().map(|v| {
+									scope.run(|stk| v.set(stk, ctx, opt, prev, val.clone()))
+								});
+								try_join_all_buffered(futs)
+							})
+							.await?;
+							return Ok(());
+						}
+						_ => return Ok(()),
+					};
+				}
+				Part::Index(f) => match place {
+					Value::Object(obj) => match obj.entry(f.to_string()) {
+						Entry::Vacant(x) => {
+							let v = x.insert(Value::None);
+							return Self::assign(stk, ctx, opt, v, val, iter.as_slice()).await;
+						}
+						Entry::Occupied(x) => {
+							place = x.into_mut();
+						}
+					},
+					Value::Array(arr) => {
+						if let Some(x) = arr.get_mut(f.to_usize()) {
+							place = x
+						} else {
+							return Ok(());
+						}
+					}
+					_ => return Ok(()),
+				},
+				Part::Value(x) => {
+					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await?;
+
+					match place {
+						Value::Object(obj) => {
+							let v = match v {
+								Value::Strand(x) => x.0.clone(),
+								x => x.to_string(),
+							};
+
+							match obj.entry(v) {
+								Entry::Vacant(x) => {
+									let v = x.insert(Value::None);
+									return Self::assign(stk, ctx, opt, v, val, iter.as_slice())
+										.await;
+								}
+								Entry::Occupied(x) => {
+									place = x.into_mut();
+								}
+							}
+						}
+						Value::Array(arr) => match v {
+							Value::Range(x) => {
+								if let Some(v) = x.slice_mut(arr) {
+									let path = iter.as_slice();
+									stk.scope(|scope| {
+										let futs = v.iter_mut().map(|v| {
+											scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
+										});
+										try_join_all_buffered(futs)
+									})
+									.await?;
+									return Ok(());
+								} else {
+									return Ok(());
+								}
+							}
+							Value::Number(i) => {
+								if let Some(v) = arr.get_mut(i.to_usize()) {
+									place = v;
+								} else {
+									return Ok(());
+								}
+							}
+							_ => return Ok(()),
+						},
+						_ => return Ok(()),
+					}
+				}
+				Part::First => {
+					let Value::Array(arr) = place else {
+						return Ok(());
+					};
+					let Some(x) = arr.first_mut() else {
+						return Ok(());
+					};
+					place = x
+				}
+				Part::Last => {
+					let Value::Array(arr) = place else {
+						return Ok(());
+					};
+					let Some(x) = arr.last_mut() else {
+						return Ok(());
+					};
+					place = x
+				}
+				Part::All => {
+					let path = iter.as_slice();
+					match place {
+						Value::Array(v) => {
+							stk.scope(|scope| {
+								let futs = v.iter_mut().map(|v| {
+									scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
+								});
+								try_join_all_buffered(futs)
+							})
+							.await?;
+						}
+						Value::Object(v) => {
+							stk.scope(|scope| {
+								let futs = v.iter_mut().map(|(_, v)| {
+									scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
+								});
+								try_join_all_buffered(futs)
+							})
+							.await?;
+						}
+						_ => (),
+					};
+
+					return Ok(());
+				}
+				Part::Where(w) => {
+					let Value::Array(arr) = place else {
+						return Ok(());
+					};
+					if let Some(Part::Index(_)) = iter.as_slice().first() {
+						let mut a = Vec::new();
+						let mut p = Vec::new();
+						// Store the elements and positions to update
+						for (i, o) in arr.iter_mut().enumerate() {
+							let cur = o.clone().into();
+							if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
+								a.push(o.clone());
+								p.push(i);
+							}
+						}
+						// Convert the matched elements array to a value
+						let mut a = Value::from(a);
+						// Set the new value on the matches elements
+						stk.run(|stk| a.set(stk, ctx, opt, iter.as_slice(), val.clone())).await?;
+						// Push the new values into the original array
+						for (i, p) in p.into_iter().enumerate() {
+							arr[p] = a.pick(&[Part::Index(i.into())]);
+						}
+						return Ok(());
+					} else {
+						for v in arr.iter_mut() {
+							let cur = v.clone().into();
+							if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
+								stk.run(|stk| v.set(stk, ctx, opt, iter.as_slice(), val.clone()))
+									.await?;
+							}
+						}
+						return Ok(());
+					}
+				}
+				_ => return Ok(()),
+			}
+			prev = iter.as_slice();
+		}
+
+		*place = val;
+		Ok(())
+	}
+
+	async fn assign(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		place: &mut Value,
+		mut val: Value,
+		path: &[Part],
+	) -> Result<(), Error> {
+		for p in path.iter().rev() {
+			let name = match p {
+				Part::Graph(x) => x.to_raw(),
+				Part::Field(f) => f.0.clone(),
+				Part::Index(i) => i.to_string(),
+				Part::Value(x) => {
+					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await?;
+					match v {
+						Value::Strand(x) => x.0,
+						Value::Thing(x) => x.to_raw(),
+						Value::Number(x) => x.to_string(),
+						Value::Range(x) => x.to_string(),
+						_ => return Ok(()),
+					}
+				}
+				_ => return Ok(()),
+			};
+			let mut object = Object::default();
+			object.insert(name, val);
+			val = object.into();
+		}
+
+		*place = val;
+		Ok(())
 	}
 }
 
@@ -359,6 +466,53 @@ mod tests {
 		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 36 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(21))).finish().await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn set_object_with_new_nested_array_access_field() {
+		let (ctx, opt) = mock().await;
+		let idi = Idiom::parse("test.other['inner']");
+		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = Value::parse(
+			"{ test: { other: { inner: true }, something: [{ age: 34 }, { age: 36 }] } }",
+		);
+		let mut stack = reblessive::TreeStack::new();
+		stack
+			.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(true)))
+			.finish()
+			.await
+			.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn set_object_with_new_nested_array_access_field_in_array() {
+		let (ctx, opt) = mock().await;
+		let idi = Idiom::parse("test.something.other['inner']");
+		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = Value::parse("{ test: { something: [{ age: 34, other: { inner: true } }, { age: 36, other: { inner: true } }] } }");
+		let mut stack = reblessive::TreeStack::new();
+		stack
+			.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(true)))
+			.finish()
+			.await
+			.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn set_object_with_new_nested_array_access_field_in_array_with_thing() {
+		let (ctx, opt) = mock().await;
+		let idi = Idiom::parse("test.something.other[city:london]");
+		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = Value::parse("{ test: { something: [{ age: 34, other: { 'city:london': true } }, { age: 36, other: { 'city:london': true } }] } }");
+		let mut stack = reblessive::TreeStack::new();
+		stack
+			.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(true)))
+			.finish()
+			.await
+			.unwrap();
 		assert_eq!(res, val);
 	}
 }

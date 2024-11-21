@@ -1,7 +1,6 @@
 #[allow(unused_imports, dead_code)]
 mod api_integration {
 	use chrono::DateTime;
-	use once_cell::sync::Lazy;
 	use semver::Version;
 	use serde::Deserialize;
 	use serde::Serialize;
@@ -9,7 +8,9 @@ mod api_integration {
 	use serial_test::serial;
 	use std::borrow::Cow;
 	use std::ops::Bound;
+	use std::path::PathBuf;
 	use std::sync::Arc;
+	use std::sync::LazyLock;
 	use std::sync::Mutex;
 	use std::time::Duration;
 	use surrealdb::error::Api as ApiError;
@@ -27,6 +28,7 @@ mod api_integration {
 	use surrealdb::sql::statements::CommitStatement;
 	use surrealdb::sql::thing;
 	use surrealdb::{Error, RecordId, Surreal, Value};
+	use temp_dir::TempDir;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 	use tracing_subscriber::filter::EnvFilter;
@@ -38,7 +40,8 @@ mod api_integration {
 	const NS: &str = "test-ns";
 	const ROOT_USER: &str = "root";
 	const ROOT_PASS: &str = "root";
-	const TICK_INTERVAL: Duration = Duration::from_secs(1);
+	static TEMP_DIR: LazyLock<PathBuf> =
+		LazyLock::new(|| TempDir::new().unwrap().child("sdb-test"));
 
 	#[derive(Debug, Serialize)]
 	struct Record {
@@ -55,7 +58,7 @@ mod api_integration {
 		name: String,
 	}
 
-	#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+	#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 	struct RecordBuf {
 		id: RecordId,
 		name: String,
@@ -140,6 +143,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 	}
 
@@ -169,6 +173,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/backup.rs");
 	}
 
@@ -187,10 +192,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<Mem>(config).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -266,29 +268,26 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
 
 	#[cfg(feature = "kv-rocksdb")]
+	#[allow(deprecated)]
 	mod file {
 		use super::*;
 		use surrealdb::engine::local::Db;
-		#[allow(deprecated)]
 		use surrealdb::engine::local::File;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
-			let path = format!("/tmp/{}.db", Ulid::new());
+			let path = TEMP_DIR.join(Ulid::new().to_string());
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
-			#[allow(deprecated)]
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -296,13 +295,23 @@ mod api_integration {
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let path = format!("{}.db", Ulid::new());
-			surrealdb::engine::any::connect(format!("file://{path}")).await.unwrap();
-			surrealdb::engine::any::connect(format!("file:///tmp/{path}")).await.unwrap();
-			tokio::fs::remove_dir_all(path).await.unwrap();
+			let db_dir = Ulid::new().to_string();
+			// Create a database directory using an absolute path
+			surrealdb::engine::any::connect(format!(
+				"file://{}",
+				TEMP_DIR.join("absolute").join(&db_dir).display()
+			))
+			.await
+			.unwrap();
+			// Switch to the temporary directory, if possible, to test relative paths
+			if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+				// Create a database directory using a relative path
+				surrealdb::engine::any::connect(format!("file://relative/{db_dir}")).await.unwrap();
+			}
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -315,15 +324,12 @@ mod api_integration {
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
-			let path = format!("/tmp/{}.db", Ulid::new());
+			let path = TEMP_DIR.join(Ulid::new().to_string());
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -331,13 +337,25 @@ mod api_integration {
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let path = format!("{}.db", Ulid::new());
-			surrealdb::engine::any::connect(format!("rocksdb://{path}")).await.unwrap();
-			surrealdb::engine::any::connect(format!("rocksdb:///tmp/{path}")).await.unwrap();
-			tokio::fs::remove_dir_all(path).await.unwrap();
+			let db_dir = Ulid::new().to_string();
+			// Create a database directory using an absolute path
+			surrealdb::engine::any::connect(format!(
+				"rocksdb://{}",
+				TEMP_DIR.join("absolute").join(&db_dir).display()
+			))
+			.await
+			.unwrap();
+			// Switch to the temporary directory, if possible, to test relative paths
+			if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+				// Create a database directory using a relative path
+				surrealdb::engine::any::connect(format!("rocksdb://relative/{db_dir}"))
+					.await
+					.unwrap();
+			}
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -354,10 +372,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
@@ -371,6 +386,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -387,10 +403,7 @@ mod api_integration {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
+			let config = Config::new().user(root).capabilities(Capabilities::all());
 			let path = "/etc/foundationdb/fdb.cluster";
 			surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone()))
 				.await
@@ -401,6 +414,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
 		include!("api/backup.rs");
 	}
@@ -409,181 +423,46 @@ mod api_integration {
 	mod surrealkv {
 		use super::*;
 		use surrealdb::engine::local::Db;
-		use surrealdb::engine::local::SurrealKV;
+		use surrealdb::engine::local::SurrealKv;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
-			let path = format!("/tmp/{}.db", Ulid::new());
+			let path = TEMP_DIR.join(Ulid::new().to_string());
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			};
-			let config = Config::new()
-				.user(root)
-				.tick_interval(TICK_INTERVAL)
-				.capabilities(Capabilities::all());
-			let db = Surreal::new::<SurrealKV>((path, config)).await.unwrap();
+			let config = Config::new().user(root).capabilities(Capabilities::all());
+			let db = Surreal::new::<SurrealKv>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
 		}
 
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
-			let path = format!("{}.db", Ulid::new());
-			surrealdb::engine::any::connect(format!("surrealkv://{path}")).await.unwrap();
-			surrealdb::engine::any::connect(format!("surrealkv:///tmp/{path}")).await.unwrap();
-			tokio::fs::remove_dir_all(path).await.unwrap();
-		}
-
-		#[test_log::test(tokio::test)]
-		async fn select_with_version() {
-			let (permit, db) = new_db().await;
-			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-			drop(permit);
-
-			// Create the initial version and record its timestamp.
-			let _ =
-				db.query("CREATE user:john SET name = 'John v1'").await.unwrap().check().unwrap();
-			let create_ts = chrono::Utc::now();
-
-			// Create a new version by updating the record.
-			let _ =
-				db.query("UPDATE user:john SET name = 'John v2'").await.unwrap().check().unwrap();
-
-			// Without VERSION, SELECT should return the latest update.
-			let mut response = db.query("SELECT * FROM user").await.unwrap().check().unwrap();
-			let Some(name): Option<String> = response.take("name").unwrap() else {
-				panic!("query returned no record");
-			};
-			assert_eq!(name, "John v2");
-
-			// SELECT with VERSION of `create_ts` should return the initial record.
-			let version = create_ts.to_rfc3339();
-			let mut response = db
-				.query(format!("SELECT * FROM user VERSION d'{}'", version))
-				.await
-				.unwrap()
-				.check()
-				.unwrap();
-			let Some(name): Option<String> = response.take("name").unwrap() else {
-				panic!("query returned no record");
-			};
-			assert_eq!(name, "John v1");
-
-			let mut response = db
-				.query(format!("SELECT name FROM user VERSION d'{}'", version))
-				.await
-				.unwrap()
-				.check()
-				.unwrap();
-			let Some(name): Option<String> = response.take("name").unwrap() else {
-				panic!("query returned no record");
-			};
-			assert_eq!(name, "John v1");
-
-			let mut response = db
-				.query(format!("SELECT name FROM user:john VERSION d'{}'", version))
-				.await
-				.unwrap()
-				.check()
-				.unwrap();
-			let Some(name): Option<String> = response.take("name").unwrap() else {
-				panic!("query returned no record");
-			};
-			assert_eq!(name, "John v1");
-		}
-
-		#[test_log::test(tokio::test)]
-		async fn create_with_version() {
-			let (permit, db) = new_db().await;
-			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-			drop(permit);
-
-			// Create a record in the past.
-			let _ = db
-				.query("CREATE user:john SET name = 'John' VERSION d'2024-08-19T08:00:00Z'")
-				.await
-				.unwrap()
-				.check()
-				.unwrap();
-
-			// Without VERSION, SELECT should return the record.
-			let mut response = db.query("SELECT * FROM user:john").await.unwrap().check().unwrap();
-			let Some(name): Option<String> = response.take("name").unwrap() else {
-				panic!("query returned no record");
-			};
-			assert_eq!(name, "John");
-
-			// SELECT with the VERSION set to the creation timestamp or later should return the record.
-			let mut response = db
-				.query("SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z'")
-				.await
-				.unwrap()
-				.check()
-				.unwrap();
-			let Some(name): Option<String> = response.take("name").unwrap() else {
-				panic!("query returned no record");
-			};
-			assert_eq!(name, "John");
-
-			// SELECT with the VERSION set before the creation timestamp should return nothing.
-			let mut response = db
-				.query("SELECT * FROM user:john VERSION d'2024-08-19T07:00:00Z'")
-				.await
-				.unwrap()
-				.check()
-				.unwrap();
-			let response: Option<String> = response.take("name").unwrap();
-			assert!(response.is_none());
-		}
-
-		#[test_log::test(tokio::test)]
-		async fn insert_with_version() {
-			let (permit, db) = new_db().await;
-			db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-			drop(permit);
-
-			// Create a record in the past.
-			let _ = db
-				.query("INSERT INTO user { id: user:john, name: 'John' } VERSION d'2024-08-19T08:00:00Z'")
-				.await
-				.unwrap()
-				.check()
-				.unwrap();
-
-			// Without VERSION, SELECT should return the record.
-			let mut response = db.query("SELECT * FROM user:john").await.unwrap().check().unwrap();
-			let Some(name): Option<String> = response.take("name").unwrap() else {
-				panic!("query returned no record");
-			};
-			assert_eq!(name, "John");
-
-			// SELECT with the VERSION set to the creation timestamp or later should return the record.
-			let mut response = db
-				.query("SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z'")
-				.await
-				.unwrap()
-				.check()
-				.unwrap();
-			let Some(name): Option<String> = response.take("name").unwrap() else {
-				panic!("query returned no record");
-			};
-			assert_eq!(name, "John");
-
-			// SELECT with the VERSION set before the creation timestamp should return nothing.
-			let mut response = db
-				.query("SELECT * FROM user:john VERSION d'2024-08-19T07:00:00Z'")
-				.await
-				.unwrap()
-				.check()
-				.unwrap();
-			let response: Option<String> = response.take("name").unwrap();
-			assert!(response.is_none());
+			let db_dir = Ulid::new().to_string();
+			// Create a database directory using an absolute path
+			surrealdb::engine::any::connect(format!(
+				"surrealkv://{}",
+				TEMP_DIR.join("absolute").join(&db_dir).display()
+			))
+			.await
+			.unwrap();
+			// Switch to the temporary directory, if possible, to test relative paths
+			if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+				// Create a database directory using a relative path
+				surrealdb::engine::any::connect(format!("surrealkv://relative/{db_dir}"))
+					.await
+					.unwrap();
+			}
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/live.rs");
+		include!("api/version.rs");
 		include!("api/backup.rs");
+		include!("api/backup_version.rs");
 	}
 
 	#[cfg(feature = "protocol-http")]
@@ -604,6 +483,7 @@ mod api_integration {
 		}
 
 		include!("api/mod.rs");
+		include!("api/serialisation.rs");
 		include!("api/backup.rs");
 	}
 }

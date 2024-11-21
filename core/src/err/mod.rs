@@ -9,13 +9,7 @@ use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
@@ -54,7 +48,7 @@ pub enum Error {
 
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
-	Unreachable(&'static str),
+	Unreachable(String),
 
 	/// Statement has been deprecated
 	#[error("{0}")]
@@ -228,6 +222,14 @@ pub enum Error {
 	},
 
 	/// The wrong quantity or magnitude of arguments was given for the specified function
+	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	InvalidAggregation {
+		name: String,
+		table: String,
+		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified function
 	#[error("There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}")]
 	FunctionCheck {
 		name: String,
@@ -351,13 +353,7 @@ pub enum Error {
 		value: String,
 	},
 
-	// The cluster node already exists
-	#[error("The node '{value}' already exists")]
-	ClAlreadyExists {
-		value: String,
-	},
-
-	// The cluster node does not exist
+	/// The cluster node does not exist
 	#[error("The node '{value}' does not exist")]
 	NdNotFound {
 		value: String,
@@ -366,6 +362,12 @@ pub enum Error {
 	/// The requested param does not exist
 	#[error("The param '${value}' does not exist")]
 	PaNotFound {
+		value: String,
+	},
+
+	/// The requested config does not exist
+	#[error("The config for {value} does not exist")]
+	CgNotFound {
 		value: String,
 	},
 
@@ -558,7 +560,7 @@ pub enum Error {
 	/// A database entry for the specified record already exists
 	#[error("Database record `{thing}` already exists")]
 	RecordExists {
-		thing: String,
+		thing: Thing,
 	},
 
 	/// A database index entry for the specified record already exists
@@ -612,15 +614,58 @@ pub enum Error {
 		field: Idiom,
 	},
 
-	/// Found a record id for the record but we are creating a specific record
-	#[error("Found {value} for the id field, but a specific record has been specified")]
-	IdMismatch {
-		value: String,
+	/// The specified field on a SCHEMAFUL table was not defined
+	#[error("Found field '{field}', but no such field exists for table '{table}'")]
+	FieldUndefined {
+		table: String,
+		field: Idiom,
 	},
 
 	/// Found a record id for the record but this is not a valid id
 	#[error("Found {value} for the Record ID but this is not a valid id")]
 	IdInvalid {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `id` field, but a specific record has been specified")]
+	IdMismatch {
+		value: String,
+	},
+
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found {value} for the incoming relation, but this is not a valid Record ID")]
+	InInvalid {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `in` field, but the value does not match the `in` record id")]
+	InMismatch {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `in` field, which does not match the existing field value")]
+	InOverride {
+		value: String,
+	},
+
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found {value} for the outgoing relation, but this is not a valid Record ID")]
+	OutInvalid {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `out` field, but the value does not match the `out` record id")]
+	OutMismatch {
+		value: String,
+	},
+
+	/// Found a record id for the record but we are creating a specific record
+	#[error("Found {value} for the `out` field, which does not match the existing field value")]
+	OutOverride {
 		value: String,
 	},
 
@@ -816,8 +861,16 @@ pub enum Error {
 	InvalidPass,
 
 	/// There was an error with authentication
+	///
+	/// This error hides different kinds of errors directly related to authentication
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
+
+	/// There was an unexpected error while performing authentication
+	///
+	/// This error hides different kinds of unexpected errors that may affect authentication
+	#[error("There was an unexpected error while performing authentication")]
+	UnexpectedAuth,
 
 	/// There was an error with signing up
 	#[error("There was a problem with signing up")]
@@ -838,6 +891,12 @@ pub enum Error {
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
+
+	// The cluster node already exists
+	#[error("The node '{value}' already exists")]
+	ClAlreadyExists {
+		value: String,
+	},
 
 	/// The requested analyzer already exists
 	#[error("The analyzer '{value}' already exists")]
@@ -893,6 +952,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested config already exists
+	#[error("The config for {value} already exists")]
+	CgAlreadyExists {
+		value: String,
+	},
+
 	/// The requested table already exists
 	#[error("The table '{value}' already exists")]
 	TbAlreadyExists {
@@ -938,9 +1003,11 @@ pub enum Error {
 		index: String,
 	},
 
-	/// The session has expired either because the token used
-	/// to establish it has expired or because an expiration
-	/// was explicitly defined when establishing it
+	/// The token has expired
+	#[error("The token has expired")]
+	ExpiredToken,
+
+	/// The session has expired
 	#[error("The session has expired")]
 	ExpiredSession,
 
@@ -980,7 +1047,7 @@ pub enum Error {
 	},
 
 	/// The requested root access grant does not exist
-	#[error("The root access grant '{gr}' does not exist")]
+	#[error("The root access grant '{gr}' does not exist for '{ac}'")]
 	AccessGrantRootNotFound {
 		ac: String,
 		gr: String,
@@ -994,7 +1061,7 @@ pub enum Error {
 	},
 
 	/// The requested namespace access grant does not exist
-	#[error("The access grant '{gr}' does not exist in the namespace '{ns}'")]
+	#[error("The access grant '{gr}' does not exist for '{ac}' in the namespace '{ns}'")]
 	AccessGrantNsNotFound {
 		ac: String,
 		gr: String,
@@ -1010,7 +1077,7 @@ pub enum Error {
 	},
 
 	/// The requested database access grant does not exist
-	#[error("The access grant '{gr}' does not exist in the database '{db}'")]
+	#[error("The access grant '{gr}' does not exist for '{ac}' in the database '{db}'")]
 	AccessGrantDbNotFound {
 		ac: String,
 		gr: String,
@@ -1101,6 +1168,64 @@ pub enum Error {
 	/// There was an outdated storage version stored in the database
 	#[error("The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation")]
 	OutdatedStorageVersion,
+
+	#[error("Found a non-computed value where they are not allowed")]
+	NonComputed,
+
+	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
+	QueryTooLarge,
+
+	/// Represents a failure in timestamp arithmetic related to database internals
+	#[error("Failed to compute: \"{0}\", as the operation results in an arithmetic overflow.")]
+	ArithmeticOverflow(String),
+
+	/// Represents a negative value for a type that must be zero or positive
+	#[error("Failed to compute: \"{0}\", as the operation results in a negative value.")]
+	ArithmeticNegativeOverflow(String),
+
+	#[error("Failed to allocate space for \"{0}\"")]
+	InsufficientReserve(String),
+
+	#[error("Received error while streaming query: {0}.")]
+	QueryStream(String),
+
+	#[error("Error while ordering a result: {0}.")]
+	OrderingError(String),
+
+	#[error("Encountered an issue while processed export config: found {0}, but expected {1}.")]
+	InvalidExportConfig(Value, String),
+
+	/// Found an unexpected value in a range
+	#[error("Found {found} for bound but expected {expected}.")]
+	InvalidBound {
+		found: String,
+		expected: String,
+	},
+
+	/// Found an unexpected value in a range
+	#[error("Exceeded the idiom recursion limit of {limit}.")]
+	IdiomRecursionLimitExceeded {
+		limit: u32,
+	},
+
+	/// Found an unexpected value in a range
+	#[error("Tried to use a `@` repeat recurse symbol, while not recursing.")]
+	RepeatRecurseNotRecursing,
+
+	/// Found an unexpected value in a range
+	#[error("Tried to use a `{symbol}` recursion symbol, while already recursing.")]
+	IdiomRecursionAlreadyRecursing {
+		symbol: String,
+	},
+
+	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
+	#[error("Tried to use a `@` repeat recurse symbol in a position where it is not supported")]
+	UnsupportedRepeatRecurse,
+
+	#[error("Error while computing version: expected a datetime, but found {found}")]
+	InvalidVersion {
+		found: Value,
+	},
 }
 
 impl From<Error> for String {
@@ -1127,14 +1252,17 @@ impl From<regex::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-mem")]
-impl From<echodb::err::Error> for Error {
-	fn from(e: echodb::err::Error) -> Error {
-		match e {
-			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
-			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
-			_ => Error::Tx(e.to_string()),
-		}
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
+impl From<surrealkv::Error> for Error {
+	fn from(e: surrealkv::Error) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-rocksdb")]
+impl From<rocksdb::Error> for Error {
+	fn from(e: rocksdb::Error) -> Error {
+		Error::Tx(e.to_string())
 	}
 }
 
@@ -1161,20 +1289,6 @@ impl From<tikv::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-rocksdb")]
-impl From<rocksdb::Error> for Error {
-	fn from(e: rocksdb::Error) -> Error {
-		Error::Tx(e.to_string())
-	}
-}
-
-#[cfg(feature = "kv-surrealkv")]
-impl From<surrealkv::Error> for Error {
-	fn from(e: surrealkv::Error) -> Error {
-		Error::Tx(e.to_string())
-	}
-}
-
 #[cfg(feature = "kv-fdb")]
 impl From<foundationdb::FdbError> for Error {
 	fn from(e: foundationdb::FdbError) -> Error {
@@ -1189,14 +1303,14 @@ impl From<foundationdb::TransactionCommitError> for Error {
 	}
 }
 
-impl From<channel::RecvError> for Error {
-	fn from(e: channel::RecvError) -> Error {
+impl From<async_channel::RecvError> for Error {
+	fn from(e: async_channel::RecvError) -> Error {
 		Error::Channel(e.to_string())
 	}
 }
 
-impl<T> From<channel::SendError<T>> for Error {
-	fn from(e: channel::SendError<T>) -> Error {
+impl<T> From<async_channel::SendError<T>> for Error {
+	fn from(e: async_channel::SendError<T>) -> Error {
 		Error::Channel(e.to_string())
 	}
 }
@@ -1208,13 +1322,7 @@ impl From<reqwest::Error> for Error {
 	}
 }
 
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-))]
+#[cfg(storage)]
 impl<S, D, I> From<SortError<S, D, I>> for Error
 where
 	S: std::error::Error,
@@ -1235,6 +1343,18 @@ impl Serialize for Error {
 	}
 }
 impl Error {
+	/// Check if this error is related to schema checks
+	pub fn is_schema_related(&self) -> bool {
+		matches!(
+			self,
+			Error::FieldCheck { .. }
+				| Error::FieldValue { .. }
+				| Error::FieldReadonly { .. }
+				| Error::FieldUndefined { .. }
+		)
+	}
+
+	/// Convert CoerceTo errors in LET statements
 	pub fn set_check_from_coerce(self, name: String) -> Error {
 		match self {
 			Error::CoerceTo {
@@ -1249,6 +1369,7 @@ impl Error {
 		}
 	}
 
+	/// Convert CoerceTo errors in functions and closures
 	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
 		match self {
 			Error::CoerceTo {

@@ -7,6 +7,7 @@ use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::offsets::{Offset, OffsetRecords};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
+use crate::idx::trees::store::IndexStores;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::Value;
 use crate::sql::{Function, Strand};
@@ -17,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 mod filter;
+pub(in crate::idx) mod mapper;
 mod tokenizer;
 
 #[derive(Clone)]
@@ -49,11 +51,11 @@ impl TermsSet {
 }
 
 impl Analyzer {
-	pub(crate) fn new(az: Arc<DefineAnalyzerStatement>) -> Self {
-		Self {
-			filters: Arc::new(Filter::from(&az.filters)),
+	pub(crate) fn new(ixs: &IndexStores, az: Arc<DefineAnalyzerStatement>) -> Result<Self, Error> {
+		Ok(Self {
+			filters: Arc::new(Filter::try_from(ixs, &az.filters)?),
 			az,
-		}
+		})
 	}
 
 	pub(super) async fn extract_querying_terms(
@@ -278,13 +280,16 @@ impl Analyzer {
 				});
 			}
 		}
-		if let Some(t) = &self.az.tokenizers {
-			if !input.is_empty() {
-				let t = Tokenizer::tokenize(t, input);
-				return Filter::apply_filters(t, &self.filters, stage);
-			}
+		if input.is_empty() {
+			return Ok(Tokens::new(input));
 		}
-		Ok(Tokens::new(input))
+
+		let tokens = if let Some(t) = &self.az.tokenizers {
+			Tokenizer::tokenize(t, input)
+		} else {
+			Tokenizer::tokenize(&[], input)
+		};
+		Filter::apply_filters(tokens, &self.filters, stage)
 	}
 
 	/// Used for exposing the analyzer as the native function `search::analyze`
@@ -324,7 +329,7 @@ mod tests {
 		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {
 			panic!()
 		};
-		let a = Analyzer::new(Arc::new(az));
+		let a = Analyzer::new(ctx.get_index_stores(), Arc::new(az)).unwrap();
 
 		let mut stack = reblessive::TreeStack::new();
 
@@ -350,5 +355,10 @@ mod tests {
 	pub(super) async fn test_analyzer_tokens(def: &str, input: &str, expected: &[Token]) {
 		let tokens = get_analyzer_tokens(def, input).await;
 		assert_eq!(tokens.list(), expected);
+	}
+
+	#[tokio::test]
+	async fn test_no_tokenizer() {
+		test_analyzer("ANALYZER test FILTERS lowercase", "ab", &["ab"]).await;
 	}
 }

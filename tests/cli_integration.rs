@@ -6,12 +6,17 @@ mod cli_integration {
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use chrono::Duration as ChronoDuration;
 	use chrono::Utc;
+	#[cfg(unix)]
 	use common::Format;
+	#[cfg(unix)]
 	use common::Socket;
 	use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 	use serde::{Deserialize, Serialize};
+	#[cfg(unix)]
 	use serde_json::json;
 	use std::fs::File;
+	use std::io::Write;
+	#[cfg(unix)]
 	use std::time;
 	use std::time::Duration;
 	use surrealdb::fflags::FFLAGS;
@@ -21,10 +26,6 @@ mod cli_integration {
 	use ulid::Ulid;
 
 	use super::common::{self, StartServerArguments, PASS, USER};
-
-	/// This depends on the interval configuration that we cannot yet inject
-	const ONE_PERIOD: Duration = Duration::new(10, 0);
-	const TWO_PERIODS: Duration = Duration::new(20, 0);
 
 	#[test]
 	fn version_command() {
@@ -486,6 +487,21 @@ mod cli_integration {
 				"auth level database requires providing a namespace and database: {output:?}"
 			);
 		}
+
+		info!("* Pass auth level without providing credentials");
+		{
+			let args = format!("sql --conn http://{addr} --ns {ns} --auth-level database");
+			let output = common::run(&args)
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
+				.output();
+			assert!(
+				output
+					.clone()
+					.unwrap_err()
+					.contains("error: the following required arguments were not provided:\n  --password <PASSWORD>\n  --username <USERNAME>"),
+				"auth level database requires credentials: {output:?}"
+			);
+		}
 		server.finish().unwrap();
 	}
 
@@ -872,13 +888,124 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn with_import_file() {
+		let ns = Ulid::new();
+		let db = Ulid::new();
+
+		info!("* Import and reimport root-level file");
+		{
+			// Start the server with an import file containing the following query:
+			let query = r#"DEFINE ACCESS OVERWRITE admin ON ROOT TYPE JWT URL "https://www.surrealdb.com/jwks.json";"#;
+			let import_file = common::tmp_file("import.surql");
+			let mut file = File::create(&import_file).unwrap();
+			file.write_all(query.as_bytes()).unwrap();
+			let (addr, mut server) =
+				common::start_server_with_import_file(&import_file).await.unwrap();
+			// Define connection arguments.
+			let args = format!("sql --conn http://{addr} --user {USER} --pass {PASS}");
+			// Verify that the file has been imported correctly.
+			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
+			assert!(output.contains(
+				r#"DEFINE ACCESS admin ON ROOT TYPE JWT URL 'https://www.surrealdb.com/jwks.json'"#
+			));
+			// Modify the resource that was imported.
+			common::run(&args)
+				.input("DEFINE ACCESS OVERWRITE admin ON ROOT TYPE JWT URL 'https://www.example.com/jwks.json'")
+				.output()
+				.expect("success");
+			// Verify that the resource has been modified correctly.
+			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
+			assert!(output.contains(
+				r#"DEFINE ACCESS admin ON ROOT TYPE JWT URL 'https://www.example.com/jwks.json'"#
+			));
+			// Restart the server.
+			server.finish().unwrap();
+			let (addr, mut server) =
+				common::start_server_with_import_file(&import_file).await.unwrap();
+			// Verify that the resource has been recreated correctly.
+			let args = format!("sql --conn http://{addr} --user {USER} --pass {PASS}");
+			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
+			assert!(output.contains(
+				r#"DEFINE ACCESS admin ON ROOT TYPE JWT URL 'https://www.surrealdb.com/jwks.json'"#
+			));
+			server.finish().unwrap();
+		}
+
+		info!("* Multi-level import file");
+		{
+			// Start the server with an import file containing the following query:
+			let query = format!(
+				r#"
+				USE NS `{ns}`;
+				DEFINE USER test ON NAMESPACE PASSWORD "secret";
+				USE NS `{ns}` DB `{db}`;
+				CREATE user:1;
+			"#
+			);
+			let import_file = common::tmp_file("import.surql");
+			let mut file = File::create(&import_file).unwrap();
+			file.write_all(query.as_bytes()).unwrap();
+			let (addr, mut server) =
+				common::start_server_with_import_file(&import_file).await.unwrap();
+			// Verify that the file has been imported correctly.
+			let args =
+				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns}");
+			let output = common::run(&args).input("INFO FOR NAMESPACE").output().expect("success");
+			assert!(output.contains(r#"DEFINE USER test ON NAMESPACE PASSHASH"#));
+			let args =
+				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns} --database {db}");
+			let output = common::run(&args).input("SELECT * FROM user").output().expect("success");
+			assert!(output.contains(r#"{ id: user:1 }"#));
+			server.finish().unwrap();
+		}
+
+		info!("* Invalid import file");
+		{
+			// Start the server with an import file which contains invalid SurrealQL.
+			let query = r#"
+				DEFINE USER test ON ROOT PASSWORD "secret"; -- Valid
+				DEFINE USER ON ROOT test PASSWORD "secret"; -- Invalid
+			"#;
+			let import_file = common::tmp_file("import.surql");
+			let mut file = File::create(&import_file).unwrap();
+			file.write_all(query.as_bytes()).unwrap();
+			let res = common::start_server_with_import_file(&import_file).await;
+			match res {
+				Ok(_) => panic!("import file should contain parseable SurrealQL"),
+				Err(e) => {
+					assert!(e.to_string().contains("server failed to start"))
+				}
+			}
+			// Verify that no data has been created on the datastore.
+			let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+			let args =
+				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns}");
+			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
+			assert!(!output.contains(r#"DEFINE USER test ON ROOT PASSHASH"#));
+			server.finish().unwrap();
+		}
+
+		info!("* Nonexistent import file");
+		{
+			// Start the server with an import file which does not exist.
+			let import_file = common::tmp_file("import.surql");
+			let res = common::start_server_with_import_file(&import_file).await;
+			match res {
+				Ok(_) => panic!("import file should require an existent file"),
+				Err(e) => {
+					assert!(e.to_string().contains("server failed to start"))
+				}
+			}
+		}
+	}
+
+	#[test(tokio::test)]
 	async fn node() {
 		// Commands without credentials when auth is disabled, should succeed
 		let (addr, mut server) = common::start_server(StartServerArguments {
 			auth: false,
 			tls: false,
 			wait_is_ready: true,
-			tick_interval: ONE_PERIOD,
 			..Default::default()
 		})
 		.await
@@ -980,7 +1107,7 @@ mod cli_integration {
 			}
 		};
 
-		sleep(TWO_PERIODS).await;
+		sleep(Duration::from_secs(20)).await;
 
 		info!("* Show changes after GC");
 		{
@@ -1041,6 +1168,7 @@ mod cli_integration {
 		assert!(common::run_in_dir("validate", &temp_dir).output().is_err());
 	}
 
+	#[cfg(unix)]
 	#[test(tokio::test)]
 	async fn test_server_graceful_shutdown() {
 		let (_, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -1068,6 +1196,7 @@ mod cli_integration {
 		}
 	}
 
+	#[cfg(unix)]
 	#[test(tokio::test)]
 	async fn test_server_second_signal_handling() {
 		let (addr, mut server) = common::start_server_without_auth().await.unwrap();
@@ -1153,7 +1282,7 @@ mod cli_integration {
 			let query = "RETURN http::get('http://127.0.0.1/');\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Access to network target 'http://127.0.0.1/' is not allowed"),
+				output.contains("Access to network target '127.0.0.1:80' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
@@ -1250,10 +1379,259 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
-		info!("* When net is denied and function is enabled");
+		info!("* When capabilities are denied globally, but functions are allowed generally");
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
-				args: "--deny-net 127.0.0.1 --allow-funcs http::get".to_owned(),
+				args: "--deny-all --allow-funcs".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = "RETURN string::len('123');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("[3]"), "unexpected output: {output:?}");
+
+			server.finish().unwrap();
+		}
+
+		info!("* When capabilities are denied globally, but a function family is allowed specifically");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-all --allow-funcs string::len".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = "RETURN string::len('123');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("[3]"), "unexpected output: {output:?}");
+
+			server.finish().unwrap();
+		}
+
+		info!("* When capabilities are allowed globally, but functions are denied generally");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--allow-all --deny-funcs".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output.contains("Function 'string::lowercase' is not allowed"),
+				"unexpected output: {output:?}"
+			);
+
+			server.finish().unwrap();
+		}
+
+		info!("* When capabilities are allowed globally, but a function family is denied specifically");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--allow-all --deny-funcs string::lowercase".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output.contains("Function 'string::lowercase' is not allowed"),
+				"unexpected output: {output:?}"
+			);
+
+			let query = "RETURN string::len('123');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("[3]"), "unexpected output: {output:?}");
+
+			server.finish().unwrap();
+		}
+
+		info!("* When functions are denied generally, but allowed for a specific family");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-funcs --allow-funcs string::len".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output.contains("Function 'string::lowercase' is not allowed"),
+				"unexpected output: {output:?}"
+			);
+
+			let query = "RETURN string::len('123');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("[3]"), "unexpected output: {output:?}");
+
+			server.finish().unwrap();
+		}
+
+		info!("* When functions are allowed generally, but denied for a specific family");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--allow-funcs --deny-funcs string::lowercase".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output.contains("Function 'string::lowercase' is not allowed"),
+				"unexpected output: {output:?}"
+			);
+
+			let query = "RETURN string::len('123');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("[3]"), "unexpected output: {output:?}");
+
+			server.finish().unwrap();
+		}
+
+		info!("* When functions are both allowed and denied specifically but denies are more specific");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--allow-funcs string --deny-funcs string::lowercase".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output.contains("Function 'string::lowercase' is not allowed"),
+				"unexpected output: {output:?}"
+			);
+
+			let query = "RETURN string::len('123');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("[3]"), "unexpected output: {output:?}");
+
+			server.finish().unwrap();
+		}
+
+		info!("* When functions are both allowed and denied specifically but allows are more specific");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-funcs string --allow-funcs string::lowercase".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output.contains("Function 'string::lowercase' is not allowed"),
+				"unexpected output: {output:?}"
+			);
+
+			let query = "RETURN string::len('123');\n\n".to_string();
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output.contains("Function 'string::len' is not allowed"),
+				"unexpected output: {output:?}"
+			);
+
+			server.finish().unwrap();
+		}
+
+		info!("* When capabilities are denied globally, but net is allowed generally");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-all --allow-net --allow-funcs http::get".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
+			server.finish().unwrap();
+		}
+
+		info!("* When capabilities are denied globally, but net is allowed specifically");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-all --allow-net 127.0.0.1 --allow-funcs http::get".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
+			server.finish().unwrap();
+		}
+
+		info!("* When capabilities are allowed globally, but net is denied generally");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--allow-all --deny-net --allow-funcs http::get".to_owned(),
 				..Default::default()
 			})
 			.await
@@ -1267,16 +1645,82 @@ mod cli_integration {
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
-				output.contains(
-					format!("Access to network target 'http://{addr}/version' is not allowed")
-						.as_str()
-				),
+				output
+					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
 				"unexpected output: {output:?}"
 			);
 			server.finish().unwrap();
 		}
 
-		info!("* When net is enabled for an IP and also denied for a specific port that doesn't match");
+		info!("* When capabilities are allowed globally, but net is denied specifically");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--allow-all --deny-net 127.0.0.1 --allow-funcs http::get".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output
+					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
+				"unexpected output: {output:?}"
+			);
+			server.finish().unwrap();
+		}
+
+		info!("* When net is denied generally, but allowed for a specific address");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-net --allow-net 127.0.0.1 --allow-funcs http::get".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
+			server.finish().unwrap();
+		}
+
+		info!("* When net is allowed generally, but denied for a specific address");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--allow-net --deny-net 127.0.0.1 --allow-funcs http::get".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output
+					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
+				"unexpected output: {output:?}"
+			);
+			server.finish().unwrap();
+		}
+
+		info!("* When net is both allowed and denied specifically but denies are more specific");
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--allow-net 127.0.0.1 --deny-net 127.0.0.1:80 --allow-funcs http::get"
@@ -1297,10 +1741,11 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
-		info!("* When a function family is denied");
+		info!("* When net is both allowed and denied specifically but allows are more specific");
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
-				args: "--deny-funcs http".to_owned(),
+				args: "--deny-net 127.0.0.1 --allow-net 127.0.0.1:80 --allow-funcs http::get"
+					.to_owned(),
 				..Default::default()
 			})
 			.await
@@ -1311,10 +1756,35 @@ mod cli_integration {
 				throwaway = Ulid::new()
 			);
 
-			let query = "RETURN http::get('https://surrealdb.com');\n\n";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(
-				output.contains("Function 'http::get' is not allowed"),
+				output
+					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
+				"unexpected output: {output:?}"
+			);
+			server.finish().unwrap();
+		}
+
+		info!("* When net is denied specifically and functions are enabled specifically");
+		{
+			let (addr, mut server) = common::start_server(StartServerArguments {
+				args: "--deny-net 127.0.0.1 --allow-funcs http::get".to_owned(),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			let cmd = format!(
+				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+
+			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
+			let output = common::run(&cmd).input(&query).output().unwrap();
+			assert!(
+				output
+					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
 				"unexpected output: {output:?}"
 			);
 			server.finish().unwrap();
@@ -1473,7 +1943,7 @@ fn remove_debug_info(output: String) -> String {
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                     !!! THIS IS A DEVELOPMENT BUILD !!!                     │
 │     Development builds are not intended for production use and include      │
-│    tooling and features that may affect the performance of the database.    |
+│    tooling and features that may affect the performance of the database.    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ";
 	// The last line in the above is important

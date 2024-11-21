@@ -2,9 +2,11 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use crate::kvs::Version;
 use crate::vs::Versionstamp;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -34,6 +36,8 @@ pub struct Transaction {
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	db: Pin<Arc<tikv::TransactionClient>>,
+	/// The save point implementation
+	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
@@ -76,6 +80,11 @@ impl Datastore {
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
+	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		// Set whether this should be an optimistic or pessimistic transaction
@@ -84,6 +93,10 @@ impl Datastore {
 		} else {
 			TransactionOptions::new_optimistic()
 		};
+		// Use async commit to determine transaction state earlier
+		opt = opt.use_async_commit();
+		// Try to use one-phase commit if writing to only one region
+		opt = opt.try_one_pc();
 		// Set the behaviour when dropping an unfinished transaction
 		opt = opt.drop_check(CheckLevel::Warn);
 		// Set this transaction as read only if possible
@@ -103,6 +116,7 @@ impl Datastore {
 				write,
 				inner,
 				db: self.db.clone(),
+				save_points: Default::default(),
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
@@ -168,10 +182,14 @@ impl super::api::Transaction for Transaction {
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -188,11 +206,10 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// TiKV does not support verisoned queries.
+		// TiKV does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -210,11 +227,10 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// TiKV does not support verisoned queries.
+		// TiKV does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -223,8 +239,20 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Prepare the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Set).await?
+		} else {
+			None
+		};
 		// Set the key
-		self.inner.put(key.into(), val.into()).await?;
+		self.inner.put(key, val.into()).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -236,11 +264,10 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// TiKV does not support verisoned queries.
+		// TiKV does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -253,11 +280,28 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		// Get the val
 		let val = val.into();
-		// Set the key if empty
-		match self.inner.key_exists(key.clone()).await? {
-			false => self.inner.put(key, val).await?,
-			_ => return Err(Error::TxKeyAlreadyExists),
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, version, SaveOperation::Put).await?
+		} else {
+			None
 		};
+		// Get the existing value (if any)
+		let key_exists = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
+			sv.get_val().is_some()
+		} else {
+			self.inner.key_exists(key.clone()).await?
+		};
+		// If the key exists we return an error
+		if key_exists {
+			return Err(Error::TxKeyAlreadyExists);
+		}
+		// Set the key if empty
+		self.inner.put(key, val).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -283,12 +327,28 @@ impl super::api::Transaction for Transaction {
 		let val = val.into();
 		// Get the check
 		let chk = chk.map(Into::into);
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Put).await?
+		} else {
+			None
+		};
+		// Get the existing value (if any)
+		let current_val = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
+			sv.get_val().cloned()
+		} else {
+			self.inner.get(key.clone()).await?
+		};
 		// Delete the key
-		match (self.inner.get(key.clone()).await?, chk) {
+		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.put(key, val).await?,
 			(None, None) => self.inner.put(key, val).await?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -307,8 +367,20 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Extract the key
+		let key = key.into();
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
 		// Delete the key
-		self.inner.delete(key.into()).await?;
+		self.inner.delete(key).await?;
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -332,12 +404,28 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		// Get the check
 		let chk = chk.map(Into::into);
+		// Hydrate the savepoint if any
+		let prep = if self.save_points.is_some() {
+			self.save_point_prepare(&key, None, SaveOperation::Del).await?
+		} else {
+			None
+		};
+		// Get the existing value (if any)
+		let current_val = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
+			sv.get_val().cloned()
+		} else {
+			self.inner.get(key.clone()).await?
+		};
 		// Delete the key
-		match (self.inner.get(key.clone()).await?, chk) {
+		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.delete(key).await?,
 			(None, None) => self.inner.delete(key).await?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
+		// Confirm the save point
+		if let Some(prep) = prep {
+			self.save_points.save(prep);
+		}
 		// Return result
 		Ok(())
 	}
@@ -356,6 +444,8 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// TODO: Check if we need savepoint with ranges
+
 		// Delete the key range
 		self.db.unsafe_destroy_range(rng.start.into()..rng.end.into()).await?;
 		// Return result
@@ -364,10 +454,19 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a range of keys from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -398,7 +497,6 @@ impl super::api::Transaction for Transaction {
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -445,5 +543,29 @@ impl super::api::Transaction for Transaction {
 		self.set(key.as_slice(), verbytes.to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(verbytes)
+	}
+
+	/// Retrieve all the versions from a range of keys from the databases
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+
+		Err(Error::UnsupportedVersionedQueries)
+	}
+}
+
+impl SavePointImpl for Transaction {
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		&mut self.save_points
 	}
 }

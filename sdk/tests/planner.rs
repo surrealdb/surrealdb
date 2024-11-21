@@ -14,12 +14,12 @@ async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &three_multi_index_query("", ""), 12).await?;
 	skip_ok(&mut res, 8)?;
-	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
+	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
 	// OR results
-	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
+	check_result(&mut res, &three_multi_index_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
+	check_result(&mut res, &single_index_ft_explain(false))?;
 	Ok(())
 }
 
@@ -29,11 +29,11 @@ async fn select_where_iterate_three_multi_index_parallel() -> Result<(), Error> 
 	let mut res = execute_test(&dbs, &three_multi_index_query("", "PARALLEL"), 12).await?;
 	skip_ok(&mut res, 8)?;
 	// OR results
-	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
-	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
+	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
+	check_result(&mut res, &three_multi_index_explain(true))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
+	check_result(&mut res, &single_index_ft_explain(true))?;
 	Ok(())
 }
 
@@ -48,11 +48,11 @@ async fn select_where_iterate_three_multi_index_with_all_index() -> Result<(), E
 	.await?;
 	skip_ok(&mut res, 8)?;
 	// OR results
-	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
-	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
+	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
+	check_result(&mut res, &three_multi_index_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
+	check_result(&mut res, &single_index_ft_explain(false))?;
 	Ok(())
 }
 
@@ -65,10 +65,10 @@ async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()
 
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' } ]")?;
-	check_result(&mut res, THREE_TABLE_EXPLAIN)?;
+	check_result(&mut res, &three_table_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
+	check_result(&mut res, &single_index_ft_explain(false))?;
 	Ok(())
 }
 
@@ -81,10 +81,10 @@ async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), E
 
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' } ]")?;
-	check_result(&mut res, THREE_TABLE_EXPLAIN)?;
+	check_result(&mut res, &three_table_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_UNIQ_EXPLAIN)?;
+	check_result(&mut res, &single_index_uniq_explain(false))?;
 	Ok(())
 }
 
@@ -170,10 +170,10 @@ fn two_multi_index_query(with: &str, parallel: &str) -> String {
 		CREATE person:lizzie SET name = 'Lizzie', genre='f', company='SurrealDB';
 		DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE;
 		DEFINE INDEX idx_genre ON TABLE person COLUMNS genre;
-		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' {parallel} EXPLAIN FULL;
-		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' {parallel} EXPLAIN FULL;"
+		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' ORDER BY name {parallel};
+	    SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' ORDER BY name {parallel} EXPLAIN FULL;
+		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' ORDER BY name {parallel};
+	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' ORDER BY name {parallel} EXPLAIN FULL;"
 	)
 }
 
@@ -187,10 +187,10 @@ fn three_multi_index_query(with: &str, parallel: &str) -> String {
 		DEFINE INDEX ft_company ON person FIELDS company SEARCH ANALYZER simple BM25;
 		DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE;
 		DEFINE INDEX idx_genre ON TABLE person COLUMNS genre;
-		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' {parallel} EXPLAIN FULL;
-		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' {parallel} EXPLAIN FULL;")
+		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' ORDER BY name {parallel};
+		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' ORDER BY name {parallel} EXPLAIN FULL;
+		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' ORDER BY name {parallel};
+	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' ORDER BY name {parallel} EXPLAIN FULL;")
 }
 
 fn table_explain(fetch_count: usize) -> String {
@@ -204,7 +204,7 @@ fn table_explain(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				}},
 				operation: 'Collector'
 			}},
@@ -235,7 +235,7 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				}},
 				operation: 'Collector'
 			}},
@@ -249,126 +249,162 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 	)
 }
 
-const THREE_TABLE_EXPLAIN: &str = "[
-	{
-		detail: {
-			table: 'person'
-		},
-		operation: 'Iterate Table'
-	},
-	{
-		detail: {
-			type: 'Memory'
-		},
-		operation: 'Collector'
-	},
-	{
-		detail: {
-			count: 3
-		},
-		operation: 'Fetch'
-	}
-]";
+fn three_table_explain(parallel: bool) -> String {
+	let collector = if parallel {
+		"AsyncMemoryOrdered"
+	} else {
+		"MemoryOrdered"
+	};
+	format!(
+		"[
+			{{
+				detail: {{
+					table: 'person'
+				}},
+				operation: 'Iterate Table'
+			}},
+			{{
+				detail: {{
+					type: '{collector}'
+				}},
+				operation: 'Collector'
+			}},
+			{{
+				detail: {{
+					count: 3
+				}},
+				operation: 'Fetch'
+			}}
+		]"
+	)
+}
 
-const THREE_MULTI_INDEX_EXPLAIN: &str = "[
-				{
-					detail: {
-						plan: {
+fn three_multi_index_explain(parallel: bool) -> String {
+	let collector = if parallel {
+		"AsyncMemoryOrdered"
+	} else {
+		"MemoryOrdered"
+	};
+	format!(
+		"[
+				{{
+					detail: {{
+						plan: {{
 							index: 'uniq_name',
 							operator: '=',
 							value: 'Jaime'
-						},
+						}},
 						table: 'person',
-					},
+					}},
 					operation: 'Iterate Index'
-				},
-                {
-					detail: {
-						plan: {
+				}},
+                {{
+					detail: {{
+						plan: {{
 							index: 'idx_genre',
 							operator: '=',
 							value: 'm'
-						},
+						}},
 						table: 'person',
-					},
+					}},
 					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						plan: {
+				}},
+				{{
+					detail: {{
+						plan: {{
 							index: 'ft_company',
 							operator: '@@',
 							value: 'surrealdb'
-						},
+						}},
 						table: 'person',
-					},
+					}},
 					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
+				}},
+				{{
+					detail: {{
+						type: '{collector}'
+					}},
 					operation: 'Collector'
-				},
-				{
-					detail: {
+				}},
+				{{
+					detail: {{
 						count: 3
-					},
+					}},
 					operation: 'Fetch'
-				}
-			]";
+				}}
+			]"
+	)
+}
 
-const SINGLE_INDEX_FT_EXPLAIN: &str = "[
-				{
-					detail: {
-						plan: {
+fn single_index_ft_explain(parallel: bool) -> String {
+	let collector = if parallel {
+		"AsyncMemoryOrdered"
+	} else {
+		"MemoryOrdered"
+	};
+	format!(
+		"[
+				{{
+					detail: {{
+						plan: {{
 							index: 'ft_company',
 							operator: '@@',
 							value: 'surrealdb'
-						},
+						}},
 						table: 'person',
-					},
+					}},
 					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
+				}},
+				{{
+					detail: {{
+						type: '{collector}'
+					}},
 					operation: 'Collector'
-				},
-				{
-					detail: {
+				}},
+				{{
+					detail: {{
 						count: 1
-					},
+					}},
 					operation: 'Fetch'
-				}
-			]";
+				}}
+			]"
+	)
+}
 
-const SINGLE_INDEX_UNIQ_EXPLAIN: &str = "[
-				{
-					detail: {
-						plan: {
+fn single_index_uniq_explain(parallel: bool) -> String {
+	let collector = if parallel {
+		"AsyncMemoryOrdered"
+	} else {
+		"MemoryOrdered"
+	};
+	format!(
+		"[
+				{{
+					detail: {{
+						plan: {{
 							index: 'uniq_name',
 							operator: '=',
 							value: 'Jaime'
-						},
+						}},
 						table: 'person',
-					},
+					}},
 					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
+				}},
+				{{
+					detail: {{
+						type: '{collector}'
+					}},
 					operation: 'Collector'
-				},
-				{
-					detail: {
+				}},
+				{{
+					detail: {{
 						count: 1
-					},
+					}},
 					operation: 'Fetch'
-				}
-			]";
+				}}
+			]"
+	)
+}
 
 const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 	{
@@ -384,7 +420,7 @@ const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 	},
 	{
 		detail: {
-			type: 'Memory'
+			type: 'MemoryOrdered'
 		},
 		operation: 'Collector'
 	},
@@ -421,7 +457,7 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 				},
 				{
 						detail: {
-							type: 'Memory'
+							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
 				},
@@ -2602,7 +2638,6 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			{
 				detail: {
 					plan: {
-						ascending: true,
 						index: 'time',
 						operator: 'Order'
 					},
@@ -2612,7 +2647,7 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -2639,7 +2674,6 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			{
 				detail: {
 					plan: {
-						ascending: true,
 						index: 'time',
 						operator: 'Order'
 					},
@@ -2649,7 +2683,7 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -2709,7 +2743,6 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			{
 				detail: {
 					plan: {
-						ascending: true,
 						index: 'time',
 						operator: 'Order'
 					},
@@ -2719,7 +2752,7 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -2742,7 +2775,6 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			{
 				detail: {
 					plan: {
-						ascending: true,
 						index: 'time',
 						operator: 'Order'
 					},
@@ -2752,7 +2784,7 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Memory'
+					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
 			}
@@ -2777,5 +2809,438 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 		]",
 	])?;
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_from_standard_index_descending() -> Result<(), Error> {
+	//
+	let sql = "
+		DEFINE INDEX time ON TABLE session COLUMNS time;
+		CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
+		CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
+		CREATE session:3 SET other = 'test';
+		CREATE session:4 SET time = null;
+		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
+		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
+		SELECT * FROM session ORDER BY time DESC LIMIT 4 EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC LIMIT 4;
+		SELECT * FROM session ORDER BY time DESC EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(7)?;
+	//
+	t.expect_vals(&[
+		"[
+			{
+				detail: {
+					table: 'session'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'MemoryOrdered'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			}
+		]",
+		"[
+			{
+				detail: {
+					table: 'session'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'MemoryOrdered'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			},
+			{
+				id: session:4,
+				time: NULL
+			},
+			{
+				id: session:3,
+				other: 'test'
+			}
+		]",
+	])?;
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_from_unique_index_descending() -> Result<(), Error> {
+	//
+	let sql = "
+		DEFINE INDEX time ON TABLE session COLUMNS time UNIQUE;
+		CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
+		CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
+		CREATE session:3 SET other = 'test';
+		CREATE session:4 SET time = null;
+		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
+		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
+		SELECT * FROM session ORDER BY time DESC LIMIT 3 EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC LIMIT 3;
+		SELECT * FROM session ORDER BY time DESC EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(7)?;
+	//
+	t.expect_vals(&[
+		"[
+			{
+				detail: {
+					table: 'session'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'MemoryOrdered'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			}
+		]",
+		"[
+			{
+				detail: {
+					table: 'session'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'MemoryOrdered'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			},
+			{
+				id: session:4,
+				time: NULL
+			},
+			{
+				id: session:3,
+				other: 'test'
+			}
+		]",
+	])?;
+	//
+	Ok(())
+}
+
+async fn select_composite_index(unique: bool) -> Result<(), Error> {
+	//
+	let sql = format!(
+		"
+		DEFINE INDEX t_idx ON TABLE t COLUMNS on, value {};
+		CREATE t:1 SET on = true, value = 1;
+		CREATE t:2 SET on = false, value = 1;
+		CREATE t:3 SET on = true, value = 2;
+		CREATE t:4 SET on = false, value = 2;
+		SELECT * FROM t WHERE on = true EXPLAIN;
+		SELECT * FROM t WHERE on = true;
+		SELECT * FROM t WHERE on = false AND value = 2 EXPLAIN;
+		SELECT * FROM t WHERE on = false AND value = 2;
+	",
+		if unique {
+			"UNIQUE"
+		} else {
+			""
+		}
+	);
+	let mut t = Test::new(&sql).await?;
+	//
+	t.expect_size(9)?;
+	t.skip_ok(5)?;
+	//
+	t.expect_vals(&[
+		"[
+			{
+				detail: {
+					plan: {
+							index: 't_idx',
+							operator: '=',
+							value: true
+					},
+					table: 't'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: t:1,
+				on: true,
+				value: 1
+			},
+			{
+				id: t:3,
+				on: true,
+				value: 2
+			}
+		]",
+		"[
+			{
+				detail: {
+					plan: {
+						index: 't_idx',
+						operator: '=',
+						value: false
+					},
+					table: 't'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: t:4,
+				on: false,
+				value: 2
+			}
+		]",
+	])?;
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_composite_standard_index() -> Result<(), Error> {
+	select_composite_index(false).await
+}
+
+#[tokio::test]
+async fn select_composite_unique_index() -> Result<(), Error> {
+	select_composite_index(true).await
+}
+
+#[tokio::test]
+async fn select_where_index_boolean_behaviour() -> Result<(), Error> {
+	let sql = r"
+		DEFINE INDEX flagIndex ON TABLE test COLUMNS flag;
+		CREATE test:t CONTENT { flag:true };
+		CREATE test:f CONTENT { flag:false };
+		SELECT * FROM test;
+		SELECT * FROM test WITH NOINDEX WHERE (true OR flag=true);
+		SELECT * FROM test WITH NOINDEX WHERE (true OR flag==true);
+		SELECT * FROM test WHERE (true OR flag=true);
+		SELECT * FROM test WHERE (true OR flag==true);";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(8)?;
+	t.skip_ok(3)?;
+	for i in 0..5 {
+		t.expect_val_info(
+			"[
+					{
+						flag: false,
+						id: test:f
+					},
+					{
+						flag: true,
+						id: test:t
+					}
+				]",
+			i,
+		)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_memory_ordered_collector() -> Result<(), Error> {
+	let sql = r"
+		CREATE |i:1500| SET v = rand::guid() RETURN NONE;
+		SELECT v FROM i ORDER BY RAND() EXPLAIN;
+		SELECT v FROM i ORDER BY v EXPLAIN;
+		SELECT v FROM i ORDER BY RAND() PARALLEL EXPLAIN;
+		SELECT v FROM i ORDER BY v PARALLEL EXPLAIN;
+		SELECT v FROM i ORDER BY v;
+		SELECT v FROM i ORDER BY v PARALLEL;
+		SELECT v FROM i ORDER BY RAND();
+		SELECT v FROM i ORDER BY RAND() PARALLEL;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(9)?;
+	t.skip_ok(1)?;
+	// Check explain plans
+	t.expect_val(
+		"[
+				{
+					detail: {
+						table: 'i'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						type: 'MemoryRandom'
+					},
+					operation: 'Collector'
+				}
+			]",
+	)?;
+	t.expect_val(
+		"[
+				{
+					detail: {
+						table: 'i'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						type: 'MemoryOrdered'
+					},
+					operation: 'Collector'
+				}
+			]",
+	)?;
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+				{
+					detail: {
+						table: 'i'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						type: 'AsyncMemoryOrdered'
+					},
+					operation: 'Collector'
+				}
+			]",
+		)?;
+	}
+
+	// Extract the array from a value
+	let mut get_array = || {
+		let v = t.next_value()?;
+		if let Value::Array(a) = &v {
+			assert_eq!(a.len(), 1500);
+			Ok::<_, Error>(a.to_vec())
+		} else {
+			panic!("Expected a Value::Array but get: {v}");
+		}
+	};
+
+	// Check that the values are sorted `ORDER BY v`
+	for _ in 0..2 {
+		let a = get_array()?;
+		assert!(a.windows(2).all(|w| w[0] <= w[1]), "Values are not sorted: {a:?}");
+	}
+
+	// Check that the values are not sorted `ORDER BY RAND()`
+	for _ in 0..2 {
+		let a = get_array()?;
+		assert!(a.windows(2).any(|w| w[0] <= w[1]), "Values are not random: {a:?}");
+	}
+	// With an array of 1500, there is a probability of factorial 1500! that `ORDER BY RAND()` returns a sorted array
+	// At a rate of one test per minute, we're SURE that approximately 10^4,104.8 years from now a test WILL fail.
+	// For perspective, this time frame is far longer than the age of the universe,
+	// but well, my apologies if that even happen ¯\_(ツ)_/¯
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_limit_start_parallel() -> Result<(), Error> {
+	let sql = r"
+		CREATE |item:1000|;
+		SELECT * FROM item LIMIT 10 START 0 PARALLEL;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(2)?;
+	t.skip_ok(1)?;
+	let r = t.next()?.result?;
+	if let Value::Array(a) = r {
+		assert_eq!(a.len(), 10);
+	} else {
+		panic!("Unexpected value: {r:#}");
+	}
 	Ok(())
 }

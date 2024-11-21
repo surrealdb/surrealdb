@@ -282,6 +282,7 @@ async fn relate_enforced() -> Result<(), Error> {
 		"{
 	accesses: {},
 	analyzers: {},
+	configs: {},
 	functions: {},
 	models: {},
 	params: {},

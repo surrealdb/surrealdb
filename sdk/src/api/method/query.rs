@@ -237,8 +237,6 @@ where
 	/// Binding a key/value tuple
 	///
 	/// ```no_run
-	/// use surrealdb::sql;
-	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -253,7 +251,6 @@ where
 	///
 	/// ```no_run
 	/// use serde::Serialize;
-	/// use surrealdb::sql;
 	///
 	/// #[derive(Serialize)]
 	/// struct User<'a> {
@@ -914,6 +911,31 @@ mod tests {
 		};
 		let value: Value = response.take("title").unwrap();
 		assert_eq!(value.into_inner(), CoreValue::from(article.title));
+	}
+
+	#[test]
+	fn take_key_multi() {
+		let article = Article {
+			title: "Lorem Ipsum".to_owned(),
+			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
+		};
+		let value = to_value(article.clone()).unwrap();
+
+		let mut response = Response {
+			results: to_map(vec![Ok(value.clone().into_inner())]),
+			..Response::new()
+		};
+		let title: Vec<String> = response.take("title").unwrap();
+		assert_eq!(title, vec![article.title.clone()]);
+		let body: Vec<String> = response.take("body").unwrap();
+		assert_eq!(body, vec![article.body]);
+
+		let mut response = Response {
+			results: to_map(vec![Ok(value.clone().into_inner())]),
+			..Response::new()
+		};
+		let vec: Vec<String> = response.take("title").unwrap();
+		assert_eq!(vec, vec![article.title]);
 	}
 
 	#[test]

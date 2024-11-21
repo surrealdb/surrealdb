@@ -12,9 +12,10 @@ use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
 	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult,
-	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
-	UniqueRangeThingIterator, UniqueUnionThingIterator,
+	IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef, KnnIterator,
+	KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
+	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
+	UniqueUnionThingIterator, ValueType,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -28,7 +29,9 @@ use crate::kvs::{Key, TransactionType};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Cond, Expression, Idiom, Number, Object, Table, Thing, Value};
+use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
+use rust_decimal::Decimal;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -67,7 +70,7 @@ pub(super) struct InnerQueryExecutor {
 	mr_entries: HashMap<MatchRef, FtEntry>,
 	exp_entries: HashMap<Arc<Expression>, FtEntry>,
 	it_entries: Vec<IteratorEntry>,
-	index_definitions: Vec<DefineIndexStatement>,
+	index_definitions: Vec<Arc<DefineIndexStatement>>,
 	mt_entries: HashMap<Arc<Expression>, MtEntry>,
 	hnsw_entries: HashMap<Arc<Expression>, HnswEntry>,
 	knn_bruteforce_entries: HashMap<Arc<Expression>, KnnBruteForceEntry>,
@@ -85,7 +88,7 @@ pub(super) enum IteratorEntry {
 }
 
 impl IteratorEntry {
-	pub(super) fn explain(&self, ix_def: &[DefineIndexStatement]) -> Value {
+	pub(super) fn explain(&self, ix_def: &[Arc<DefineIndexStatement>]) -> Value {
 		match self {
 			Self::Single(_, io) => io.explain(ix_def),
 			Self::Range(_, ir, from, to) => {
@@ -292,11 +295,15 @@ impl QueryExecutor {
 			Ok(Value::Bool(false))
 		} else {
 			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
-				let v: Vec<Number> = id.compute(stk, ctx, opt, doc).await?.try_into()?;
-				let dist = dist.compute(&v, val.as_ref())?;
-				p.add(dist, thg).await;
+				let v = id.compute(stk, ctx, opt, doc).await?;
+				if let Ok(v) = v.try_into() {
+					if let Ok(dist) = dist.compute(&v, val.as_ref()) {
+						p.add(dist, thg).await;
+						return Ok(Value::Bool(true));
+					}
+				}
 			}
-			Ok(Value::Bool(true))
+			Ok(Value::Bool(false))
 		}
 	}
 
@@ -327,7 +334,7 @@ impl QueryExecutor {
 
 	pub(crate) fn explain(&self, itr: IteratorRef) -> Value {
 		match self.0.it_entries.get(itr as usize) {
-			Some(ie) => ie.explain(self.0.index_definitions.as_slice()),
+			Some(ie) => ie.explain(&self.0.index_definitions),
 			None => Value::None,
 		}
 	}
@@ -366,7 +373,7 @@ impl QueryExecutor {
 	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(ix) = self.get_index_def(io.ix_ref()) {
 			match ix.index {
-				Index::Idx => Ok(self.new_index_iterator(opt, irf, ix, io.clone()).await?),
+				Index::Idx => Ok(self.new_index_iterator(opt, irf, ix.clone(), io.clone()).await?),
 				Index::Uniq => Ok(self.new_unique_index_iterator(opt, irf, ix, io.clone()).await?),
 				Index::Search {
 					..
@@ -383,43 +390,281 @@ impl QueryExecutor {
 		&self,
 		opt: &Options,
 		irf: IteratorRef,
-		ix: &DefineIndexStatement,
+		ix: Arc<DefineIndexStatement>,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
 			IndexOperator::Equality(value) | IndexOperator::Exactness(value) => {
-				Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
-					irf,
-					opt.ns()?,
-					opt.db()?,
-					&ix.what,
-					&ix.name,
-					value,
-				)))
+				if let Value::Number(n) = value.as_ref() {
+					let values = Self::get_equal_number_variants(n);
+					if values.len() == 1 {
+						Some(Self::new_index_equal_iterator(irf, opt, &ix, &values[0])?)
+					} else {
+						Some(Self::new_multiple_index_equal_iterators(irf, opt, &ix, values)?)
+					}
+				} else {
+					Some(Self::new_index_equal_iterator(irf, opt, &ix, value)?)
+				}
 			}
 			IndexOperator::Union(value) => Some(ThingIterator::IndexUnion(
-				IndexUnionThingIterator::new(irf, opt.ns()?, opt.db()?, &ix.what, &ix.name, value),
+				IndexUnionThingIterator::new(irf, opt.ns()?, opt.db()?, &ix, value),
 			)),
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, irf, ios).await?;
 				let index_join = Box::new(IndexJoinThingIterator::new(irf, opt, ix, iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
-			IndexOperator::Order(asc) => {
-				if *asc {
-					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
-						irf,
-						opt.ns()?,
-						opt.db()?,
-						&ix.what,
-						&ix.name,
-					)))
-				} else {
-					None
-				}
-			}
+			IndexOperator::Order => Some(ThingIterator::IndexRange(
+				IndexRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, &ix.what, &ix.name),
+			)),
 			_ => None,
 		})
+	}
+
+	fn new_index_equal_iterator(
+		irf: IteratorRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		value: &Value,
+	) -> Result<ThingIterator, Error> {
+		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
+			irf,
+			opt.ns()?,
+			opt.db()?,
+			ix,
+			value,
+		)))
+	}
+
+	fn new_multiple_index_equal_iterators(
+		irf: IteratorRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		values: Vec<Value>,
+	) -> Result<ThingIterator, Error> {
+		let mut iterators = VecDeque::with_capacity(values.len());
+		for value in values {
+			iterators.push_back(Self::new_index_equal_iterator(irf, opt, ix, &value)?);
+		}
+		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
+	}
+
+	/// This function takes a reference to a `Number` enum and a conversion function `float_to_int`.
+	/// It returns a tuple containing the variants of the `Number` as `Option<i64>`, `Option<f64>`, and `Option<Decimal>`.
+	///
+	/// The `Number` enum can be one of the following:
+	/// - `Int(i64)`: Integer value.
+	/// - `Float(f64)`: Floating point value.
+	/// - `Decimal(Decimal)`: Decimal value.
+	///
+	/// The function performs the following conversions based on the type of the `Number`:
+	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the equivalent `Float` value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
+	/// - For `Float`, it uses the provided `float_to_int` function to convert the `Float` to `Option<i64>`, returns the original `Float` value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
+	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if representable as `i64`), returns the equivalent `Float` value as `Option<f64>` (if representable as `f64`), and the original `Decimal` value as `Option<Decimal>`.
+	///
+	/// # Parameters
+	/// - `n`: A reference to a `Number` enum.
+	/// - `float_to_int`: A function that converts a reference to `f64` to `Option<i64>`.
+	///
+	/// # Returns
+	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing the converted variants of the input `Number`.
+	fn get_number_variants<F>(
+		n: &Number,
+		float_to_int: F,
+	) -> (Option<i64>, Option<f64>, Option<Decimal>)
+	where
+		F: Fn(&f64) -> Option<i64>,
+	{
+		let oi;
+		let of;
+		let od;
+		match n {
+			Number::Int(i) => {
+				oi = Some(*i);
+				of = Some(*i as f64);
+				od = Decimal::from_i64(*i);
+			}
+			Number::Float(f) => {
+				oi = float_to_int(f);
+				of = Some(*f);
+				od = Decimal::from_f64(*f);
+			}
+			Number::Decimal(d) => {
+				oi = d.to_i64();
+				of = d.to_f64();
+				od = Some(*d);
+			}
+		};
+		(oi, of, od)
+	}
+	fn get_equal_number_variants(n: &Number) -> Vec<Value> {
+		let (oi, of, od) = Self::get_number_variants(n, |f| {
+			if f.trunc().eq(f) {
+				f.to_i64()
+			} else {
+				None
+			}
+		});
+		let mut values = Vec::with_capacity(3);
+		if let Some(i) = oi {
+			values.push(Number::Int(i).into());
+		}
+		if let Some(f) = of {
+			values.push(Number::Float(f).into());
+		}
+		if let Some(d) = od {
+			values.push(Number::Decimal(d).into());
+		}
+		values
+	}
+
+	fn get_range_number_from_variants(n: &Number) -> (Option<i64>, Option<f64>, Option<Decimal>) {
+		Self::get_number_variants(n, |f| f.floor().to_i64())
+	}
+
+	fn get_range_number_to_variants(n: &Number) -> (Option<i64>, Option<f64>, Option<Decimal>) {
+		Self::get_number_variants(n, |f| f.ceil().to_i64())
+	}
+
+	fn get_from_range_number_variants<'a>(from: &Number, from_inc: bool) -> Vec<IteratorRange<'a>> {
+		let (from_i, from_f, from_d) = Self::get_range_number_from_variants(from);
+		let mut vec = Vec::with_capacity(3);
+		if let Some(from) = from_i {
+			vec.push(IteratorRange::new(
+				ValueType::NumberInt,
+				RangeValue {
+					value: Number::Int(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Value::None,
+					inclusive: false,
+				},
+			));
+		}
+		if let Some(from) = from_f {
+			vec.push(IteratorRange::new(
+				ValueType::NumberFloat,
+				RangeValue {
+					value: Number::Float(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Value::None,
+					inclusive: false,
+				},
+			));
+		}
+		if let Some(from) = from_d {
+			vec.push(IteratorRange::new(
+				ValueType::NumberDecimal,
+				RangeValue {
+					value: Number::Decimal(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Value::None,
+					inclusive: false,
+				},
+			));
+		}
+		vec
+	}
+
+	fn get_to_range_number_variants<'a>(to: &Number, to_inc: bool) -> Vec<IteratorRange<'a>> {
+		let (from_i, from_f, from_d) = Self::get_range_number_to_variants(to);
+		let mut vec = Vec::with_capacity(3);
+		if let Some(to) = from_i {
+			vec.push(IteratorRange::new(
+				ValueType::NumberInt,
+				RangeValue {
+					value: Value::None,
+					inclusive: false,
+				},
+				RangeValue {
+					value: Number::Int(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
+		if let Some(to) = from_f {
+			vec.push(IteratorRange::new(
+				ValueType::NumberFloat,
+				RangeValue {
+					value: Value::None,
+					inclusive: false,
+				},
+				RangeValue {
+					value: Number::Float(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
+		if let Some(to) = from_d {
+			vec.push(IteratorRange::new(
+				ValueType::NumberDecimal,
+				RangeValue {
+					value: Value::None,
+					inclusive: false,
+				},
+				RangeValue {
+					value: Number::Decimal(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
+		vec
+	}
+
+	fn get_ranges_number_variants<'a>(
+		from: &Number,
+		from_inc: bool,
+		to: &Number,
+		to_inc: bool,
+	) -> Vec<IteratorRange<'a>> {
+		let (from_i, from_f, from_d) = Self::get_range_number_from_variants(from);
+		let (to_i, to_f, to_d) = Self::get_range_number_to_variants(to);
+		let mut vec = Vec::with_capacity(3);
+		if let (Some(from), Some(to)) = (from_i, to_i) {
+			vec.push(IteratorRange::new(
+				ValueType::NumberInt,
+				RangeValue {
+					value: Number::Int(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Number::Int(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
+		if let (Some(from), Some(to)) = (from_f, to_f) {
+			vec.push(IteratorRange::new(
+				ValueType::NumberFloat,
+				RangeValue {
+					value: Number::Float(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Number::Float(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
+		if let (Some(from), Some(to)) = (from_d, to_d) {
+			vec.push(IteratorRange::new(
+				ValueType::NumberDecimal,
+				RangeValue {
+					value: Number::Decimal(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Number::Decimal(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
+		vec
 	}
 
 	fn new_range_iterator(
@@ -432,26 +677,44 @@ impl QueryExecutor {
 		if let Some(ix) = self.get_index_def(ir) {
 			match ix.index {
 				Index::Idx => {
-					return Ok(Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
+					let ranges = Self::get_ranges_variants(from, to);
+					if let Some(ranges) = ranges {
+						if ranges.len() == 1 {
+							return Ok(Some(Self::new_index_range_iterator(
+								ir, opt, ix, &ranges[0],
+							)?));
+						} else {
+							return Ok(Some(Self::new_multiple_index_range_iterator(
+								ir, opt, ix, &ranges,
+							)?));
+						}
+					}
+					return Ok(Some(Self::new_index_range_iterator(
 						ir,
-						opt.ns()?,
-						opt.db()?,
-						&ix.what,
-						&ix.name,
-						from,
-						to,
-					))))
+						opt,
+						ix,
+						&IteratorRange::new_ref(ValueType::None, from, to),
+					)?));
 				}
 				Index::Uniq => {
-					return Ok(Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
+					let ranges = Self::get_ranges_variants(from, to);
+					if let Some(ranges) = ranges {
+						if ranges.len() == 1 {
+							return Ok(Some(Self::new_unique_range_iterator(
+								ir, opt, ix, &ranges[0],
+							)?));
+						} else {
+							return Ok(Some(Self::new_multiple_unique_range_iterator(
+								ir, opt, ix, &ranges,
+							)?));
+						}
+					}
+					return Ok(Some(Self::new_unique_range_iterator(
 						ir,
-						opt.ns()?,
-						opt.db()?,
-						&ix.what,
-						&ix.name,
-						from,
-						to,
-					))))
+						opt,
+						ix,
+						&IteratorRange::new_ref(ValueType::None, from, to),
+					)?));
 				}
 				_ => {}
 			}
@@ -459,47 +722,157 @@ impl QueryExecutor {
 		Ok(None)
 	}
 
+	fn get_ranges_variants<'a>(
+		from: &'a RangeValue,
+		to: &'a RangeValue,
+	) -> Option<Vec<IteratorRange<'a>>> {
+		match (&from.value, &to.value) {
+			(Value::Number(from_n), Value::Number(to_n)) => {
+				Some(Self::get_ranges_number_variants(from_n, from.inclusive, to_n, to.inclusive))
+			}
+			(Value::Number(from_n), Value::None) => {
+				Some(Self::get_from_range_number_variants(from_n, from.inclusive))
+			}
+			(Value::None, Value::Number(to_n)) => {
+				Some(Self::get_to_range_number_variants(to_n, to.inclusive))
+			}
+			_ => None,
+		}
+	}
+
+	fn new_index_range_iterator(
+		ir: IndexRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		range: &IteratorRange,
+	) -> Result<ThingIterator, Error> {
+		Ok(ThingIterator::IndexRange(IndexRangeThingIterator::new(
+			ir,
+			opt.ns()?,
+			opt.db()?,
+			&ix.what,
+			&ix.name,
+			range,
+		)))
+	}
+
+	fn new_unique_range_iterator(
+		ir: IndexRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		range: &IteratorRange<'_>,
+	) -> Result<ThingIterator, Error> {
+		Ok(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
+			ir,
+			opt.ns()?,
+			opt.db()?,
+			&ix.what,
+			&ix.name,
+			range,
+		)))
+	}
+
+	fn new_multiple_index_range_iterator(
+		ir: IndexRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		ranges: &[IteratorRange],
+	) -> Result<ThingIterator, Error> {
+		let mut iterators = VecDeque::with_capacity(ranges.len());
+		for range in ranges {
+			iterators.push_back(Self::new_index_range_iterator(ir, opt, ix, range)?);
+		}
+		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
+	}
+
+	fn new_multiple_unique_range_iterator(
+		ir: IndexRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		ranges: &[IteratorRange<'_>],
+	) -> Result<ThingIterator, Error> {
+		let mut iterators = VecDeque::with_capacity(ranges.len());
+		for range in ranges {
+			iterators.push_back(Self::new_unique_range_iterator(ir, opt, ix, range)?);
+		}
+		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
+	}
+
 	async fn new_unique_index_iterator(
 		&self,
 		opt: &Options,
 		irf: IteratorRef,
-		ix: &DefineIndexStatement,
+		ix: &Arc<DefineIndexStatement>,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
 			IndexOperator::Equality(value) | IndexOperator::Exactness(value) => {
-				Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
-					irf,
-					opt.ns()?,
-					opt.db()?,
-					&ix.what,
-					&ix.name,
-					value,
-				)))
+				if let Value::Number(n) = value.as_ref() {
+					let values = Self::get_equal_number_variants(n);
+					if values.len() == 1 {
+						Some(Self::new_unique_equal_iterator(irf, opt, ix, &values[0])?)
+					} else {
+						Some(Self::new_multiple_unique_equal_iterators(irf, opt, ix, values)?)
+					}
+				} else {
+					Some(Self::new_unique_equal_iterator(irf, opt, ix, value)?)
+				}
 			}
 			IndexOperator::Union(value) => Some(ThingIterator::UniqueUnion(
 				UniqueUnionThingIterator::new(irf, opt, ix, value)?,
 			)),
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, irf, ios).await?;
-				let unique_join = Box::new(UniqueJoinThingIterator::new(irf, opt, ix, iterators)?);
+				let unique_join =
+					Box::new(UniqueJoinThingIterator::new(irf, opt, ix.clone(), iterators)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
-			IndexOperator::Order(asc) => {
-				if *asc {
-					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
-						irf,
-						opt.ns()?,
-						opt.db()?,
-						&ix.what,
-						&ix.name,
-					)))
-				} else {
-					None
-				}
-			}
+			IndexOperator::Order => Some(ThingIterator::UniqueRange(
+				UniqueRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, ix),
+			)),
 			_ => None,
 		})
+	}
+
+	fn new_unique_equal_iterator(
+		irf: IteratorRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		value: &Value,
+	) -> Result<ThingIterator, Error> {
+		if ix.cols.len() > 1 {
+			// If the index is unique and the index is a composite index,
+			// then we have the opportunity to iterate on the first column of the index
+			// and consider it as a standard index (rather than a unique one)
+			Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
+				irf,
+				opt.ns()?,
+				opt.db()?,
+				ix,
+				value,
+			)))
+		} else {
+			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
+				irf,
+				opt.ns()?,
+				opt.db()?,
+				ix,
+				value,
+			)))
+		}
+	}
+
+	fn new_multiple_unique_equal_iterators(
+		irf: IteratorRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		values: Vec<Value>,
+	) -> Result<ThingIterator, Error> {
+		let mut iterators = VecDeque::with_capacity(values.len());
+		for value in values {
+			iterators.push_back(Self::new_unique_equal_iterator(irf, opt, ix, &value)?);
+		}
+		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
 	}
 
 	async fn new_search_index_iterator(
@@ -556,7 +929,7 @@ impl QueryExecutor {
 		Ok(iterators)
 	}
 
-	fn get_index_def(&self, ir: IndexRef) -> Option<&DefineIndexStatement> {
+	fn get_index_def(&self, ir: IndexRef) -> Option<&Arc<DefineIndexStatement>> {
 		self.0.index_definitions.get(ir as usize)
 	}
 

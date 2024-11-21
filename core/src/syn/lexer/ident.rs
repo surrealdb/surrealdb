@@ -3,22 +3,19 @@ use std::mem;
 use unicase::UniCase;
 
 use crate::syn::{
-	lexer::{keywords::KEYWORDS, Error, Lexer},
+	error::{syntax_error, SyntaxError},
+	lexer::{keywords::KEYWORDS, Lexer},
 	token::{Token, TokenKind},
 };
 
-use super::unicode::chars;
-
-fn is_identifier_continue(x: u8) -> bool {
-	matches!(x, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
-}
+use super::unicode::{chars, is_identifier_continue};
 
 impl<'a> Lexer<'a> {
 	/// Lex a parameter in the form of `$[a-zA-Z0-9_]*`
 	///
 	/// # Lexer State
 	/// Expected the lexer to have already eaten the param starting `$`
-	pub fn lex_param(&mut self) -> Token {
+	pub(super) fn lex_param(&mut self) -> Token {
 		debug_assert_eq!(self.scratch, "");
 		loop {
 			if let Some(x) = self.reader.peek() {
@@ -33,7 +30,7 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	pub fn lex_surrounded_param(&mut self, is_backtick: bool) -> Token {
+	pub(super) fn lex_surrounded_param(&mut self, is_backtick: bool) -> Token {
 		debug_assert_eq!(self.scratch, "");
 		match self.lex_surrounded_ident_err(is_backtick) {
 			Ok(_) => self.finish_token(TokenKind::Parameter),
@@ -50,7 +47,7 @@ impl<'a> Lexer<'a> {
 	///
 	/// When calling the caller should already know that the token can't be any other token covered
 	/// by `[a-zA-Z0-9_]*`.
-	pub fn lex_ident_from_next_byte(&mut self, start: u8) -> Token {
+	pub(super) fn lex_ident_from_next_byte(&mut self, start: u8) -> Token {
 		debug_assert!(matches!(start, b'a'..=b'z' | b'A'..=b'Z' | b'_'));
 		self.scratch.push(start as char);
 		self.lex_ident()
@@ -59,7 +56,7 @@ impl<'a> Lexer<'a> {
 	/// Lex a not surrounded identfier.
 	///
 	/// The scratch should contain only identifier valid chars.
-	pub fn lex_ident(&mut self) -> Token {
+	pub(super) fn lex_ident(&mut self) -> Token {
 		loop {
 			if let Some(x) = self.reader.peek() {
 				if is_identifier_continue(x) {
@@ -89,7 +86,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Lex an ident which is surround by delimiters.
-	pub fn lex_surrounded_ident(&mut self, is_backtick: bool) -> Token {
+	pub(super) fn lex_surrounded_ident(&mut self, is_backtick: bool) -> Token {
 		match self.lex_surrounded_ident_err(is_backtick) {
 			Ok(_) => self.finish_token(TokenKind::Identifier),
 			Err(e) => {
@@ -100,7 +97,10 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Lex an ident surrounded either by `⟨⟩` or `\`\``
-	pub fn lex_surrounded_ident_err(&mut self, is_backtick: bool) -> Result<(), Error> {
+	pub(super) fn lex_surrounded_ident_err(
+		&mut self,
+		is_backtick: bool,
+	) -> Result<(), SyntaxError> {
 		loop {
 			let Some(x) = self.reader.next() else {
 				let end_char = if is_backtick {
@@ -108,7 +108,8 @@ impl<'a> Lexer<'a> {
 				} else {
 					'⟩'
 				};
-				return Err(Error::ExpectedEnd(end_char));
+				let error = syntax_error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
+				return Err(error.with_data_pending());
 			};
 			if x.is_ascii() {
 				match x {
@@ -118,7 +119,8 @@ impl<'a> Lexer<'a> {
 					}
 					b'\0' => {
 						// null bytes not allowed
-						return Err(Error::UnexpectedCharacter('\0'));
+						let err = syntax_error!("Invalid null byte in source, null bytes are not valid SurrealQL characters",@self.current_span());
+						return Err(err);
 					}
 					b'\\' if is_backtick => {
 						// handle escape sequences.
@@ -130,7 +132,8 @@ impl<'a> Lexer<'a> {
 							} else {
 								'⟩'
 							};
-							return Err(Error::ExpectedEnd(end_char));
+							let error = syntax_error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
+							return Err(error.with_data_pending());
 						};
 						match next {
 							b'\\' => {
@@ -158,12 +161,16 @@ impl<'a> Lexer<'a> {
 								self.scratch.push(chars::TAB);
 							}
 							_ => {
-								let char = if x.is_ascii() {
-									x as char
+								let char = self.reader.convert_to_char(x)?;
+								let error = if !is_backtick {
+									if char == '⟩' {
+										self.scratch.push(char);
+									}
+									syntax_error!("Invalid escape character `{x}` for identifier, valid characters are `⟩`, `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
 								} else {
-									self.reader.complete_char(x)?
+									syntax_error!("Invalid escape character `{x}` for identifier, valid characters are `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
 								};
-								return Err(Error::InvalidEscapeCharacter(char));
+								return Err(error);
 							}
 						}
 					}

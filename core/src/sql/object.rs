@@ -232,8 +232,14 @@ impl Object {
 		Ok(Value::Object(Object(x)))
 	}
 
+	/// Checks whether all object values are static values
 	pub(crate) fn is_static(&self) -> bool {
 		self.values().all(Value::is_static)
+	}
+
+	/// Validate that a Object contains only computed Values
+	pub(crate) fn validate_computed(&self) -> Result<(), Error> {
+		self.values().try_for_each(|v| v.validate_computed())
 	}
 }
 

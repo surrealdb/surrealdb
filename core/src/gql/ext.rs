@@ -1,9 +1,8 @@
-use std::mem;
+use std::ops::Deref;
 
-use crate::sql::{
-	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
-};
-use async_graphql::dynamic::Scalar;
+use crate::sql::statements::define::config::graphql::TableConfig;
+use crate::sql::statements::DefineTableStatement;
+use crate::sql::{statements::UseStatement, Cond, Ident, Idiom, Limit, Part, Start, Table, Value};
 
 pub trait IntoExt<T> {
 	fn intox(self) -> T;
@@ -36,21 +35,6 @@ where
 {
 	fn from(value: V) -> Self {
 		Self(value.into())
-	}
-}
-
-impl<I> FromExt<(I, bool, bool, bool, bool)> for Order
-where
-	I: Into<Idiom>,
-{
-	fn from((order, random, collate, numeric, direction): (I, bool, bool, bool, bool)) -> Self {
-		Self {
-			order: order.into(),
-			random,
-			collate,
-			numeric,
-			direction,
-		}
 	}
 }
 
@@ -97,12 +81,6 @@ where
 	}
 }
 
-impl FromExt<Vec<Order>> for Orders {
-	fn from(value: Vec<Order>) -> Self {
-		Orders(value)
-	}
-}
-
 impl<S> FromExt<S> for Ident
 where
 	S: Into<String>,
@@ -121,6 +99,7 @@ where
 	}
 }
 
+#[cfg(debug_assertions)]
 pub trait ValidatorExt {
 	fn add_validator(
 		&mut self,
@@ -128,31 +107,64 @@ pub trait ValidatorExt {
 	) -> &mut Self;
 }
 
+#[cfg(debug_assertions)]
+use async_graphql::dynamic::Scalar;
+#[cfg(debug_assertions)]
 impl ValidatorExt for Scalar {
 	fn add_validator(
 		&mut self,
 		validator: impl Fn(&async_graphql::Value) -> bool + Send + Sync + 'static,
 	) -> &mut Self {
 		let mut tmp = Scalar::new("");
-		mem::swap(self, &mut tmp);
+		std::mem::swap(self, &mut tmp);
 		*self = tmp.validator(validator);
 		self
 	}
 }
 
-use crate::sql::Object as SqlObject;
+use crate::sql::Thing as SqlThing;
 use crate::sql::Value as SqlValue;
 
 pub trait TryAsExt {
-	fn try_as_object(self) -> Result<SqlObject, Self>
+	fn try_as_thing(self) -> Result<SqlThing, Self>
 	where
 		Self: Sized;
 }
 impl TryAsExt for SqlValue {
-	fn try_as_object(self) -> Result<SqlObject, Self> {
+	fn try_as_thing(self) -> Result<SqlThing, Self> {
 		match self {
-			SqlValue::Object(o) => Ok(o),
+			SqlValue::Thing(t) => Ok(t),
 			v => Err(v),
 		}
+	}
+}
+
+pub trait Named {
+	fn name(&self) -> &str;
+}
+
+impl Named for DefineTableStatement {
+	fn name(&self) -> &str {
+		&self.name
+	}
+}
+
+impl Named for TableConfig {
+	fn name(&self) -> &str {
+		&self.name
+	}
+}
+
+pub trait NamedContainer {
+	fn contains_name(&self, name: &str) -> bool;
+}
+
+impl<I, N> NamedContainer for I
+where
+	I: Deref<Target = [N]>,
+	N: Named,
+{
+	fn contains_name(&self, name: &str) -> bool {
+		self.iter().any(|n| n.name() == name)
 	}
 }

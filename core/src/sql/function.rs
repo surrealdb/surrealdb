@@ -79,7 +79,7 @@ impl Function {
 		}
 	}
 	/// Convert this function to an aggregate
-	pub fn aggregate(&self, val: Value) -> Self {
+	pub fn aggregate(&self, val: Value) -> Result<Self, Error> {
 		match self {
 			Self::Normal(n, a) => {
 				let mut a = a.to_owned();
@@ -90,9 +90,9 @@ impl Function {
 						a.insert(0, val);
 					}
 				}
-				Self::Normal(n.to_owned(), a)
+				Ok(Self::Normal(n.to_owned(), a))
 			}
-			_ => unreachable!(),
+			_ => Err(fail!("Encountered a non-aggregate function: {self:?}")),
 		}
 	}
 	/// Check if this function is a custom function
@@ -105,7 +105,7 @@ impl Function {
 		matches!(self, Self::Script(_, _))
 	}
 
-	/// Check if this function has static arguments
+	/// Check if all arguments are static values
 	pub fn is_static(&self) -> bool {
 		match self {
 			Self::Normal(_, a) => a.iter().all(Value::is_static),
@@ -179,6 +179,10 @@ impl Function {
 			Self::Normal(f, _) if f == "time::min" => OptimisedAggregate::TimeMin,
 			_ => OptimisedAggregate::None,
 		}
+	}
+
+	pub(crate) fn is_count_all(&self) -> bool {
+		matches!(self, Self::Normal(f, p) if f == "count" && p.is_empty() )
 	}
 }
 

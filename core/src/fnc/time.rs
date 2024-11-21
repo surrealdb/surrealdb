@@ -239,12 +239,25 @@ pub fn year((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	})
 }
 
+pub mod is {
+	use crate::err::Error;
+	use crate::sql::{Datetime, Value};
+
+	pub fn leap_year((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+		Ok(match val {
+			Some(v) => v.naive_utc().date().leap_year().into(),
+			None => Datetime::default().naive_utc().date().leap_year().into(),
+		})
+	}
+}
+
 pub mod from {
 
 	use crate::err::Error;
 	use crate::sql::datetime::Datetime;
-	use crate::sql::value::Value;
+	use crate::sql::{value::Value, Uuid};
 	use chrono::DateTime;
+	use ulid::Ulid;
 
 	pub fn nanos((val,): (i64,)) -> Result<Value, Error> {
 		const NANOS_PER_SEC: i64 = 1_000_000_000;
@@ -297,6 +310,34 @@ pub mod from {
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::unix"),
 				message: String::from("The first argument must be an in-bounds number of seconds relative to January 1, 1970 0:00:00 UTC."),
+			}),
+		}
+	}
+
+	pub fn ulid((val,): (String,)) -> Result<Value, Error> {
+		match Ulid::from_string(&val) {
+			Ok(v) => Ok(Datetime::from(DateTime::from(v.datetime())).into()),
+			_ => Err(Error::InvalidArguments {
+				name: String::from("time::from::ulid"),
+				message: String::from(
+					"The first argument must be a string, containing a valid ULID.",
+				),
+			}),
+		}
+	}
+
+	pub fn uuid((val,): (Uuid,)) -> Result<Value, Error> {
+		match val.0.get_timestamp() {
+			Some(v) => {
+				let (s, ns) = v.to_unix();
+				match Datetime::try_from((s as i64, ns)) {
+					Ok(v) => Ok(v.into()),
+					_ => Err(fail!("Failed to convert UUID Timestamp to Datetime.")),
+				}
+			}
+			None => Err(Error::InvalidArguments {
+				name: String::from("time::from::uuid"),
+				message: String::from("The first argument must be a v1, v6 or v7 UUID."),
 			}),
 		}
 	}

@@ -17,6 +17,23 @@ async fn check_test_is_error(sql: &str, expected_errors: &[&str]) -> Result<(), 
 	Ok(())
 }
 
+/// Macro from the [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#760) crate
+/// to assert equality of floats within a specifiable delta.
+macro_rules! assert_delta {
+	($x:expr, $y:expr) => {
+		assert_delta!($x, $y, 1e-5);
+	};
+	($x:expr, $y:expr, $d:expr) => {
+		if ($x - $y).abs() > $d {
+			panic!(
+				"assertion failed: actual: `{}`, expected: `{}`: \
+				actual not within < {} of expected",
+				$x, $y, $d
+			);
+		}
+	};
+}
+
 #[tokio::test]
 async fn error_on_invalid_function() -> Result<(), Error> {
 	let dbs = new_ds().await?;
@@ -599,10 +616,11 @@ async fn function_array_len() -> Result<(), Error> {
 #[tokio::test]
 async fn function_array_logical_and() -> Result<(), Error> {
 	test_queries(
-		r#"RETURN array::logical_and([true, false, true, false], [true, true, false, false]);
-RETURN array::logical_and([1, 0, 1, 0], ["true", "true", "false", "false"]);
-RETURN array::logical_and([0, 1], []);"#,
-		&["[true, false, false, false]", r#"[1, 0, "false", 0]"#, "[0, null]"],
+		r#"
+		RETURN array::logical_and([true, false, true, false], [true, true, false, false]);
+		RETURN array::logical_and([1, 0, 1, 0], [true, true, false, false]);
+		RETURN array::logical_and([0, 1], []);"#,
+		&["[true, false, false, false]", r#"[1, 0, false, 0]"#, "[0, null]"],
 	)
 	.await?;
 	Ok(())
@@ -611,10 +629,11 @@ RETURN array::logical_and([0, 1], []);"#,
 #[tokio::test]
 async fn function_array_logical_or() -> Result<(), Error> {
 	test_queries(
-		r#"RETURN array::logical_or([true, false, true, false], [true, true, false, false]);
-RETURN array::logical_or([1, 0, 1, 0], ["true", "true", "false", "false"]);
-RETURN array::logical_or([0, 1], []);"#,
-		&["[true, true, true, false]", r#"[1, "true", 1, 0]"#, "[0, 1]"],
+		r#"
+		RETURN array::logical_or([true, false, true, false], [true, true, false, false]);
+		RETURN array::logical_or([1, 0, 1, 0], [true, true, false, false]);
+		RETURN array::logical_or([0, 1], []);"#,
+		&["[true, true, true, false]", r#"[1, true, 1, 0]"#, "[0, 1]"],
 	)
 	.await?;
 	Ok(())
@@ -623,10 +642,11 @@ RETURN array::logical_or([0, 1], []);"#,
 #[tokio::test]
 async fn function_array_logical_xor() -> Result<(), Error> {
 	test_queries(
-		r#"RETURN array::logical_xor([true, false, true, false], [true, true, false, false]);
-RETURN array::logical_xor([1, 0, 1, 0], ["true", "true", "false", "false"]);
-RETURN array::logical_xor([0, 1], []);"#,
-		&["[false, true, true, false]", r#"[false, "true", 1, 0]"#, "[0, 1]"],
+		r#"
+		RETURN array::logical_xor([true, false, true, false], [true, true, false, false]);
+		RETURN array::logical_xor([1, 0, 1, 0], [true, true, false, false]);
+		RETURN array::logical_xor([0, 1], []);"#,
+		&["[false, true, true, false]", r#"[false, true, 1, 0]"#, "[0, 1]"],
 	)
 	.await?;
 	Ok(())
@@ -639,6 +659,83 @@ async fn function_array_map() -> Result<(), Error> {
 	"#;
 	//
 	Test::new(sql).await?.expect_val("[1, 3, 5]")?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_fold() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::fold([1,2,3,4,5], 0, |$n, $i| $n + $i);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("15")?;
+
+	let sql = r#"
+	"gnirts a tsuJ".split("").fold("", |$one, $two| $two + $one);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("'Just a string'")?;
+
+	// The index can also be accessed in the same way as array::map
+	let sql = r#"
+	[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].fold(0, |$one, $two, $three| $one + $two + $three);
+	"#;
+	Test::new(sql).await?.expect_val("100")?;
+
+	let sql = r#"
+	[].fold(10, |$x, $y| $x + $y);
+	"#;
+	Test::new(sql).await?.expect_val("10")?;
+
+	let sql = r#"
+	[9].fold(10, |$x, $y| $x + $y);
+	"#;
+	Test::new(sql).await?.expect_val("19")?;
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_reduce() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::reduce([1,2,3,4,5], |$n, $i| $n + $i);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("15")?;
+
+	//
+	let sql = r#"
+	"gnirts a tsuJ".split("").reduce(|$one, $two| $two + $one);
+	"#;
+	//
+	Test::new(sql).await?.expect_val("'Just a string'")?;
+
+	// The index can also be accessed in the same way as array::map
+	let sql = r#"
+	[10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0].reduce(|$one, $two, $three| $one + $two + $three);
+	"#;
+	Test::new(sql).await?.expect_val("100")?;
+
+	// No items in array: return NONE
+	let sql = r#"
+	[].reduce(|$x, $y, $z| $x + $y + $z);
+	"#;
+	Test::new(sql).await?.expect_val("NONE")?;
+
+	// 1 item in array: return single item
+	let sql = r#"
+	[9].reduce(|$x, $y, $z| $x + $y + $z);
+	"#;
+	Test::new(sql).await?.expect_val("9")?;
+
+	let sql = r#"
+	[1,2].reduce(|$x, $y, $idx| $idx)"#;
+	Test::new(sql).await?.expect_val("0")?;
+
+	let sql = r#"
+	[1,2,3].reduce(|$x, $y, $idx| $idx)"#;
+	Test::new(sql).await?.expect_val("1")?;
+
 	Ok(())
 }
 
@@ -1902,6 +1999,40 @@ async fn function_parse_geo_hash_decode() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn function_geo_is_valid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN geo::is::valid((-0.118092, 51.509865));
+		RETURN geo::is::valid((-181.0, 51.509865));
+		RETURN geo::is::valid((181.0, 51.509865));
+		RETURN geo::is::valid((-0.118092, -91.0));
+		RETURN geo::is::valid((-0.118092, 91.0));
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
 // --------------------------------------------------
 // math
 // --------------------------------------------------
@@ -2256,7 +2387,9 @@ async fn function_math_mean() -> Result<(), Error> {
 	let sql = r#"
 		RETURN math::mean([]);
 		RETURN math::mean([101, 213, 202]);
-		RETURN math::mean([101.5, 213.5, 202.5]);
+		RETURN math::mean([101, 213, 203]);
+		RETURN math::mean([101, 213, 203.4]);
+		RETURN math::mean([101.5, 213.5, 206.5]);
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
@@ -2268,7 +2401,15 @@ async fn function_math_mean() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::from(172.5);
+	let val = Value::from(172.33333333333334);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(172.46666666666667);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(173.83333333333334);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3843,6 +3984,25 @@ async fn function_string_is_url() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_string_is_ulid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::is::ulid("01J8G788MNX1VT3KE1TK40W350");
+		RETURN string::is::ulid("this is a test!");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_is_uuid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
@@ -4062,6 +4222,310 @@ async fn function_string_reverse() -> Result<(), Error> {
 	Ok(())
 }
 
+/// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#786)
+#[tokio::test]
+async fn function_string_distance_hamming() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::distance::hamming("", "");
+		RETURN string::distance::hamming("hamming", "hamming");
+		RETURN string::distance::hamming("hamming", "hammers");
+		RETURN string::distance::hamming("hamming", "h香mmüng");;
+		RETURN string::distance::hamming("Friedrich Nietzs", "Jean-Paul Sartre");
+	"#;
+	let mut test = Test::new(sql).await?;
+	// hamming_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0));
+	// hamming_same
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0));
+	// hamming_diff
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	// hamming_diff_multibyte
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(2));
+	// hamming_names
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(14));
+
+	check_test_is_error(
+		r#"RETURN string::distance::hamming("ham", "hamming");"#,
+		&[
+			"Incorrect arguments for function string::distance::hamming(). Strings must be of equal length."
+		]).await?;
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_distance_damerau() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::distance::damerau_levenshtein("", "");
+		RETURN string::distance::damerau_levenshtein("damerau", "damerau");
+		RETURN string::distance::damerau_levenshtein("", "damerau");
+		RETURN string::distance::damerau_levenshtein("damerau", "");
+		RETURN string::distance::damerau_levenshtein("ca", "abc");
+		RETURN string::distance::damerau_levenshtein("damerau", "aderua");
+		RETURN string::distance::damerau_levenshtein("aderua", "damerau");
+		RETURN string::distance::damerau_levenshtein("öঙ香", "abc");
+		RETURN string::distance::damerau_levenshtein("abc", "öঙ香");
+		RETURN string::distance::damerau_levenshtein("damerau", "aderuaxyz");
+		RETURN string::distance::damerau_levenshtein("aderuaxyz", "damerau");
+		RETURN string::distance::damerau_levenshtein("Stewart", "Colbert");
+		RETURN string::distance::damerau_levenshtein("abcdefghijkl", "bacedfgihjlk");
+		RETURN string::distance::damerau_levenshtein(
+			"The quick brown fox jumped over the angry dog.",
+			"Lehem ipsum dolor sit amet, dicta latine an eam."
+		);
+		RETURN string::distance::damerau_levenshtein("foobar", "ofobar");
+		RETURN string::distance::damerau_levenshtein("specter", "spectre");
+		RETURN string::distance::damerau_levenshtein("a cat", "an abct");
+	"#;
+	let mut test = Test::new(sql).await?;
+	// damerau_levenshtein_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0));
+	// damerau_levenshtein_same
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0));
+	// damerau_levenshtein_first_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(7));
+	// damerau_levenshtein_second_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(7));
+	// damerau_levenshtein_diff
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(2));
+	// damerau_levenshtein_diff_short
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	// damerau_levenshtein_diff_reversed
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	// damerau_levenshtein_diff_multibyte
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	// damerau_levenshtein_diff_unequal_length
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(6));
+	// damerau_levenshtein_diff_unequal_length_reversed
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(6));
+	// damerau_levenshtein_diff_comedians
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(5));
+	// damerau_levenshtein_many_transpositions
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(4));
+	// damerau_levenshtein_diff_longer
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(36));
+	// damerau_levenshtein_beginning_transposition
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(1));
+	// damerau_levenshtein_end_transposition
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(1));
+	// damerau_levenshtein_unrestricted_edit
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	//
+	Ok(())
+}
+
+/// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1223)
+#[tokio::test]
+async fn function_string_distance_normalized_damerau_levenshtein() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::distance::normalized_damerau_levenshtein("levenshtein", "löwenbräu");
+		RETURN string::distance::normalized_damerau_levenshtein("", "");
+		RETURN string::distance::normalized_damerau_levenshtein("", "flower");
+		RETURN string::distance::normalized_damerau_levenshtein("tree", "");
+		RETURN string::distance::normalized_damerau_levenshtein("sunglasses", "sunglasses");
+	"#;
+	let mut test = Test::new(sql).await?;
+	// normalized_damerau_levenshtein_diff_short
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.27272);
+	// normalized_damerau_levenshtein_for_empty_strings
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 1.0);
+	// normalized_damerau_levenshtein_first_empty
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.0);
+	// normalized_damerau_levenshtein_second_empty
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.0);
+	// normalized_damerau_levenshtein_identical_strings
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 1.0);
+	//
+	Ok(())
+}
+
+/// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#989)
+#[tokio::test]
+async fn function_string_distance_levenshtein() -> Result<(), Error> {
+	let sql = r#"
+    RETURN string::distance::levenshtein("", "");
+    RETURN string::distance::levenshtein("levenshtein", "levenshtein");
+    RETURN string::distance::levenshtein("kitten", "sitting");
+    RETURN string::distance::levenshtein("hello, world", "bye, world");
+    RETURN string::distance::levenshtein("öঙ香", "abc");
+    RETURN string::distance::levenshtein("abc", "öঙ香");
+    RETURN string::distance::levenshtein(
+        "The quick brown fox jumped over the angry dog.",
+        "Lorem ipsum dolor sit amet, dicta latine an eam."
+    );
+    RETURN string::distance::levenshtein("", "sitting");
+    RETURN string::distance::levenshtein("kitten", "");
+"#;
+	let mut test = Test::new(sql).await?;
+	// levenshtein_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0));
+	// levenshtein_same
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0));
+	// levenshtein_diff_short
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	// levenshtein_diff_with_space
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(5));
+	// levenshtein_diff_multibyte
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	// levenshtein_diff_longer
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(37));
+	// levenshtein_first_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(7));
+	// levenshtein_second_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(6));
+	//
+	Ok(())
+}
+
+/// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1032)
+#[tokio::test]
+async fn function_string_distance_normalized_levenshtein() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::distance::normalized_levenshtein("kitten", "sitting");
+		RETURN string::distance::normalized_levenshtein("", "");
+		RETURN string::distance::normalized_levenshtein("", "second");
+		RETURN string::distance::normalized_levenshtein("first", "");
+		RETURN string::distance::normalized_levenshtein("identical", "identical");
+	"#;
+	let mut test = Test::new(sql).await?;
+	// normalized_levenshtein_diff_short
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.57142);
+	// normalized_levenshtein_for_empty_strings
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 1.0);
+	// normalized_levenshtein_first_empty
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.0);
+	// normalized_levenshtein_second_empty
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.0);
+	// normalized_levenshtein_identical_strings
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 1.0);
+	//
+	Ok(())
+}
+
+/// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1057)
+/// which, in turn, are taken from [`aceakash/string-similarity`](https://github.com/aceakash/string-similarity/blob/f83ba3cd7bae874c20c429774e911ae8cff8bced/src/spec/index.spec.js#L11)
+#[tokio::test]
+async fn function_string_distance_osa_distance() -> Result<(), Error> {
+	let sql = r#"
+        RETURN string::distance::osa_distance("", "");
+        RETURN string::distance::osa_distance("damerau", "damerau");
+        RETURN string::distance::osa_distance("", "damerau");
+        RETURN string::distance::osa_distance("damerau", "");
+        RETURN string::distance::osa_distance("ca", "abc");
+        RETURN string::distance::osa_distance("damerau", "aderua");
+        RETURN string::distance::osa_distance("aderua", "damerau");
+        RETURN string::distance::osa_distance("öঙ香", "abc");
+        RETURN string::distance::osa_distance("abc", "öঙ香");
+        RETURN string::distance::osa_distance("damerau", "aderuaxyz");
+        RETURN string::distance::osa_distance("aderuaxyz", "damerau");
+        RETURN string::distance::osa_distance("Stewart", "Colbert");
+        RETURN string::distance::osa_distance("abcdefghijkl", "bacedfgihjlk");
+        RETURN string::distance::osa_distance(
+            "The quick brown fox jumped over the angry dog.",
+            "Lehem ipsum dolor sit amet, dicta latine an eam."
+        );
+        RETURN string::distance::osa_distance("foobar", "ofobar");
+        RETURN string::distance::osa_distance("specter", "spectre");
+        RETURN string::distance::osa_distance("a cat", "an abct");
+    "#;
+	let mut test = Test::new(sql).await?;
+	// osa_distance_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0));
+	// osa_distance_same
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0));
+	// osa_distance_first_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(7));
+	// osa_distance_second_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(7));
+	// osa_distance_diff
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	// osa_distance_diff_short
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	// osa_distance_diff_reversed
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	// osa_distance_diff_multibyte
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(3));
+	// osa_distance_diff_unequal_length
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(6));
+	// osa_distance_diff_unequal_length_reversed
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(6));
+	// osa_distance_diff_comedians
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(5));
+	// osa_distance_many_transpositions
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(4));
+	// osa_distance_diff_longer
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(36));
+	// osa_distance_beginning_transposition
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(1));
+	// osa_distance_end_transposition
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(1));
+	// osa_distance_restricted_edit
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(4));
+	//
+	Ok(())
+}
+
 #[tokio::test]
 async fn function_string_similarity_fuzzy() -> Result<(), Error> {
 	let sql = r#"
@@ -4116,6 +4580,244 @@ async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	assert_eq!(tmp, Value::from(174));
+	//
+	Ok(())
+}
+
+/// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#829)
+#[tokio::test]
+async fn function_string_similarity_jaro() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::similarity::jaro("", "");
+		RETURN string::similarity::jaro("", "jaro");
+		RETURN string::similarity::jaro("distance", "");
+		RETURN string::similarity::jaro("jaro", "jaro");
+		RETURN string::similarity::jaro("a", "b");
+		RETURN string::similarity::jaro("a", "a");
+
+		RETURN string::similarity::jaro("testabctest", "testöঙ香test");
+		RETURN string::similarity::jaro("testöঙ香test", "testabctest");
+		RETURN string::similarity::jaro("dixon", "dicksonx");
+		RETURN string::similarity::jaro("a", "ab");
+		RETURN string::similarity::jaro("ab", "a");
+		RETURN string::similarity::jaro("dwayne", "duane");
+		RETURN string::similarity::jaro("martha", "marhta");
+		RETURN string::similarity::jaro("a jke", "jane a k");
+		RETURN string::similarity::jaro("Friedrich Nietzsche", "Jean-Paul Sartre");
+	"#;
+	let mut test = Test::new(sql).await?;
+	// jaro_both_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(1.0));
+	// jaro_first_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0.0));
+	// jaro_second_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0.0));
+	// jaro_same
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(1.0));
+	// jaro_diff_one_character
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0.0));
+	// jaro_same_one_character
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(1.0));
+
+	// jaro_multibyte
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.818, 0.001);
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.818, 0.001);
+	// jaro_diff_short
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.767, 0.001);
+	// jaro_diff_one_and_two
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.83, 0.01);
+	// jaro_diff_two_and_one
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.83, 0.01);
+	// jaro_diff_no_transposition
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.822, 0.001);
+	// jaro_diff_with_transposition
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.944, 0.001);
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.6, 0.001);
+	// jaro_names
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.392, 0.001);
+	//
+	Ok(())
+}
+
+/// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#904)
+#[tokio::test]
+async fn function_string_similarity_jaro_winkler() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::similarity::jaro_winkler("", "");
+		RETURN string::similarity::jaro_winkler("", "jaro-winkler");
+		RETURN string::similarity::jaro_winkler("distance", "");
+		RETURN string::similarity::jaro_winkler("Jaro-Winkler", "Jaro-Winkler");
+		RETURN string::similarity::jaro_winkler("a", "b");
+		RETURN string::similarity::jaro_winkler("a", "a");
+
+		RETURN string::similarity::jaro_winkler("testabctest", "testöঙ香test");
+		RETURN string::similarity::jaro_winkler("testöঙ香test", "testabctest");
+		RETURN string::similarity::jaro_winkler("dixon", "dicksonx");
+		RETURN string::similarity::jaro_winkler("dicksonx", "dixon");
+		RETURN string::similarity::jaro_winkler("dwayne", "duane");
+		RETURN string::similarity::jaro_winkler("martha", "marhta");
+		RETURN string::similarity::jaro_winkler("a jke", "jane a k");
+		RETURN string::similarity::jaro_winkler("Friedrich Nietzsche", "Fran-Paul Sartre");
+		RETURN string::similarity::jaro_winkler("cheeseburger", "cheese fries");
+		RETURN string::similarity::jaro_winkler("Thorkel", "Thorgier");
+		RETURN string::similarity::jaro_winkler("Dinsdale", "D");
+		RETURN string::similarity::jaro_winkler("thequickbrownfoxjumpedoverx", "thequickbrownfoxjumpedovery");
+	"#;
+	let mut test = Test::new(sql).await?;
+	// jaro_winkler_both_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(1.0));
+	// jaro_winkler_first_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0.0));
+	// jaro_winkler_second_empty
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0.0));
+	// jaro_winkler_same
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(1.0));
+	// jaro_winkler_diff_one_character
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(0.0));
+	// jaro_winkler_same_one_character
+	let tmp = test.next()?.result?;
+	assert_eq!(tmp, Value::from(1.0));
+
+	// jaro_winkler_multibyte
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.89, 0.001);
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.89, 0.001);
+	// jaro_winkler_diff_short
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.813, 0.001);
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.813, 0.001);
+	// jaro_winkler_diff_no_transposition
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.84, 0.001);
+	// jaro_winkler_diff_with_transposition
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.961, 0.001);
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.6, 0.001);
+	// jaro_winkler_names
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.452, 0.001);
+	// jaro_winkler_long_prefix
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.866, 0.001);
+	// jaro_winkler_more_names
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.868, 0.001);
+	// jaro_winkler_length_of_one
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.738, 0.001);
+	// jaro_winkler_very_long_prefix
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.98519);
+	//
+	Ok(())
+}
+
+/// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1254)
+#[tokio::test]
+async fn function_string_similarity_sorensen_dice() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::similarity::sorensen_dice("a", "a");
+		RETURN string::similarity::sorensen_dice("a", "b");
+		RETURN string::similarity::sorensen_dice("", "");
+		RETURN string::similarity::sorensen_dice("a", "");
+		RETURN string::similarity::sorensen_dice("", "a");
+		RETURN string::similarity::sorensen_dice("apple event", "apple    event");
+		RETURN string::similarity::sorensen_dice("iphone", "iphone x");
+		RETURN string::similarity::sorensen_dice("french", "quebec");
+		RETURN string::similarity::sorensen_dice("france", "france");
+		RETURN string::similarity::sorensen_dice("fRaNce", "france");
+		RETURN string::similarity::sorensen_dice("healed", "sealed");
+		RETURN string::similarity::sorensen_dice("web applications", "applications of the web");
+		RETURN string::similarity::sorensen_dice("this will have a typo somewhere", "this will huve a typo somewhere");
+		RETURN string::similarity::sorensen_dice(
+			"Olive-green table for sale, in extremely good condition.",
+			"For sale: table in very good  condition, olive green in colour."
+		);
+		RETURN string::similarity::sorensen_dice(
+			"Olive-green table for sale, in extremely good condition.",
+			"For sale: green Subaru Impreza, 210,000 miles"
+		);
+		RETURN string::similarity::sorensen_dice(
+			"Olive-green table for sale, in extremely good condition.",
+			"Wanted: mountain bike with at least 21 gears."
+		);
+		RETURN string::similarity::sorensen_dice("this has one extra word", "this has one word");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 1.0);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.0);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 1.0);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.0);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.0);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 1.0);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.90909);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.0);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 1.0);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.2);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.8);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.78788);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.92);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.60606);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.25581);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.14118);
+	//
+	let tmp: f64 = test.next()?.result?.try_into()?;
+	assert_delta!(tmp, 0.77419);
 	//
 	Ok(())
 }
@@ -4429,6 +5131,34 @@ async fn function_time_hour() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	let val = Value::from(8);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_time_is_leap_year() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::is::leap_year();
+		RETURN time::is::leap_year(d"1987-06-22T08:30:45Z");
+		RETURN time::is::leap_year(d"1988-06-22T08:30:45Z");
+		RETURN d'2024-09-03T02:33:15.349397Z'.is_leap_year();
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	assert!(tmp.is_bool());
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(true);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4769,6 +5499,20 @@ async fn function_time_from_secs() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_time_from_ulid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::from::ulid("01J8G788MNX1VT3KE1TK40W350");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse("d'2024-09-23T19:55:34.933Z'");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_time_from_unix() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::from::unix(384053840);
@@ -4782,6 +5526,20 @@ async fn function_time_from_unix() -> Result<(), Error> {
 	//
 	let tmp = test.next()?.result?;
 	let val = Value::parse("d'2060-03-05T09:27:20Z'");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_time_from_uuid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::from::uuid(u'01922074-2295-7cf6-906f-bcd0810639b0');
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse("d'2024-09-23T19:55:34.933Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())

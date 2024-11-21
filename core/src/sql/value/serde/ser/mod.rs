@@ -4,6 +4,7 @@ mod r#struct;
 use crate::err::Error;
 use crate::sql;
 use crate::sql::value::Value;
+use crate::sql::Bytes;
 use castaway::match_type;
 use serde::ser::Serialize;
 use serde_content::Number;
@@ -92,8 +93,8 @@ impl TryFrom<Content> for Value {
 				Cow::Owned(v) => Ok(v.into()),
 			},
 			Content::Bytes(v) => match v {
-				Cow::Borrowed(v) => Ok(v.to_vec().into()),
-				Cow::Owned(v) => Ok(v.into()),
+				Cow::Borrowed(v) => Ok(Value::Bytes(Bytes(v.to_vec()))),
+				Cow::Owned(v) => Ok(Value::Bytes(Bytes(v))),
 			},
 			Content::Seq(v) => v.try_into(),
 			Content::Map(v) => v.try_into(),
@@ -220,19 +221,19 @@ mod tests {
 	#[test]
 	fn number() {
 		let number = Number::Int(Default::default());
-		let value = to_value(number.clone()).unwrap();
+		let value = to_value(number).unwrap();
 		let expected = Value::Number(number);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 
 		let number = Number::Float(Default::default());
-		let value = to_value(number.clone()).unwrap();
+		let value = to_value(number).unwrap();
 		let expected = Value::Number(number);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 
 		let number = Number::Decimal(Default::default());
-		let value = to_value(number.clone()).unwrap();
+		let value = to_value(number).unwrap();
 		let expected = Value::Number(number);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());

@@ -4,17 +4,17 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::Check;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::kvs::{Check, Key, Val, Version};
 use rocksdb::{
-	DBCompactionStyle, DBCompressionType, LogLevel, OptimisticTransactionDB,
+	DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
 	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
 };
 use std::fmt::Debug;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
+
+const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
 #[derive(Clone)]
 #[non_exhaustive]
@@ -39,6 +39,19 @@ pub struct Transaction {
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	_db: Pin<Arc<OptimisticTransactionDB>>,
+}
+
+impl Drop for Datastore {
+	fn drop(&mut self) {
+		// Create new flush options
+		let mut opts = FlushOptions::default();
+		// Wait for the sync to finish
+		opts.set_wait(true);
+		// Flush the WAL to storage
+		let _ = self.db.flush_wal(true);
+		// Flush the memtables to SST
+		let _ = self.db.flush_opt(&opts);
+	}
 }
 
 impl Drop for Transaction {
@@ -78,33 +91,61 @@ impl Datastore {
 		let mut opts = Options::default();
 		// Ensure we use fdatasync
 		opts.set_use_fsync(false);
-		// Only use warning log level
-		opts.set_log_level(LogLevel::Warn);
-		// Set the number of log files to keep
-		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		// Create database if missing
 		opts.create_if_missing(true);
 		// Create column families if missing
 		opts.create_missing_column_families(true);
-		// Set the datastore compaction style
-		opts.set_compaction_style(DBCompactionStyle::Level);
 		// Increase the background thread count
+		debug!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
 		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
+		// Specify the max concurrent background jobs
+		debug!(target: TARGET, "Maximum background jobs count: {}", *cnf::ROCKSDB_JOBS_COUNT);
+		opts.set_max_background_jobs(*cnf::ROCKSDB_JOBS_COUNT);
 		// Set the maximum number of write buffers
+		debug!(target: TARGET, "Maximum write buffers: {}", *cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
 		opts.set_max_write_buffer_number(*cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
+		// Set the number of log files to keep
+		debug!(target: TARGET, "Number of log files to keep: {}", *cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
+		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		// Set the amount of data to build up in memory
+		debug!(target: TARGET, "Write buffer size: {}", *cnf::ROCKSDB_WRITE_BUFFER_SIZE);
 		opts.set_write_buffer_size(*cnf::ROCKSDB_WRITE_BUFFER_SIZE);
 		// Set the target file size for compaction
+		debug!(target: TARGET, "Target file size for compaction: {}", *cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		opts.set_target_file_size_base(*cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		// Set minimum number of write buffers to merge
+		debug!(target: TARGET, "Minimum write buffers to merge: {}", *cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
 		opts.set_min_write_buffer_number_to_merge(*cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
 		// Use separate write thread queues
+		debug!(target: TARGET, "Use separate thread queues: {}", *cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		opts.set_enable_pipelined_write(*cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		// Enable separation of keys and values
+		debug!(target: TARGET, "Enable separation of keys and values: {}", *cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		opts.set_enable_blob_files(*cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		// Store 4KB values separate from keys
+		debug!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
+		// Set the delete compaction factory
+		debug!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
+			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
+			*cnf::ROCKSDB_DELETION_FACTORY_DELETE_COUNT,
+			*cnf::ROCKSDB_DELETION_FACTORY_RATIO,
+		);
+		opts.add_compact_on_deletion_collector_factory(
+			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
+			*cnf::ROCKSDB_DELETION_FACTORY_DELETE_COUNT,
+			*cnf::ROCKSDB_DELETION_FACTORY_RATIO,
+		);
+		// Set the datastore compaction style
+		debug!(target: TARGET, "Setting compaction style: {}", *cnf::ROCKSDB_COMPACTION_STYLE);
+		opts.set_compaction_style(
+			match cnf::ROCKSDB_COMPACTION_STYLE.to_ascii_lowercase().as_str() {
+				"universal" => DBCompactionStyle::Universal,
+				_ => DBCompactionStyle::Level,
+			},
+		);
 		// Set specific compression levels
+		debug!(target: TARGET, "Setting compression level");
 		opts.set_compression_per_level(&[
 			DBCompressionType::None,
 			DBCompressionType::None,
@@ -112,10 +153,27 @@ impl Datastore {
 			DBCompressionType::Lz4hc,
 			DBCompressionType::Lz4hc,
 		]);
+		// Set specific storage log level
+		debug!(target: TARGET, "Setting storage engine log level: {}", *cnf::ROCKSDB_STORAGE_LOG_LEVEL);
+		opts.set_log_level(match cnf::ROCKSDB_STORAGE_LOG_LEVEL.to_ascii_lowercase().as_str() {
+			"debug" => LogLevel::Debug,
+			"info" => LogLevel::Info,
+			"warn" => LogLevel::Warn,
+			"error" => LogLevel::Error,
+			"fatal" => LogLevel::Fatal,
+			l => {
+				return Err(Error::Ds(format!("Invalid storage engine log level specified: {l}")));
+			}
+		});
 		// Create the datastore
 		Ok(Datastore {
 			db: Arc::pin(OptimisticTransactionDB::open(&opts, path)?),
 		})
+	}
+	/// Shutdown the database
+	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Nothing to do here
+		Ok(())
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
@@ -139,6 +197,7 @@ impl Datastore {
 				rocksdb::Transaction<'static, OptimisticTransactionDB>,
 			>(inner)
 		};
+		// Set the read options
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
 		ro.set_async_io(true);
@@ -188,7 +247,7 @@ impl super::api::Transaction for Transaction {
 		// Cancel this transaction
 		match self.inner.as_ref() {
 			Some(inner) => inner.rollback()?,
-			None => unreachable!(),
+			None => return Err(fail!("Unable to cancel an already taken transaction")),
 		};
 		// Continue
 		Ok(())
@@ -210,7 +269,7 @@ impl super::api::Transaction for Transaction {
 		// Commit this transaction
 		match self.inner.take() {
 			Some(inner) => inner.commit()?,
-			None => unreachable!(),
+			None => return Err(fail!("Unable to commit an already taken transaction")),
 		};
 		// Continue
 		Ok(())
@@ -218,10 +277,14 @@ impl super::api::Transaction for Transaction {
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -238,11 +301,10 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// RocksDB does not support verisoned queries.
+		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -260,11 +322,10 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// RocksDB does not support verisoned queries.
+		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -286,11 +347,10 @@ impl super::api::Transaction for Transaction {
 		K: Into<Key> + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
-		// RocksDB does not support verisoned queries.
+		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -396,10 +456,19 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve a range of keys from the databases
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<Key>, Error>
+	async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -419,6 +488,8 @@ impl super::api::Transaction for Transaction {
 		// Set the ReadOptions with the snapshot
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
+		ro.set_iterate_lower_bound(beg);
+		ro.set_iterate_upper_bound(end);
 		ro.set_async_io(true);
 		ro.fill_cache(true);
 		// Create the iterator
@@ -454,11 +525,10 @@ impl super::api::Transaction for Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// RocksDB does not support verisoned queries.
+		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
 		}
-
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -478,6 +548,8 @@ impl super::api::Transaction for Transaction {
 		// Set the ReadOptions with the snapshot
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
+		ro.set_iterate_lower_bound(beg);
+		ro.set_iterate_upper_bound(end);
 		ro.set_async_io(true);
 		ro.fill_cache(true);
 		// Create the iterator
@@ -500,5 +572,45 @@ impl super::api::Transaction for Transaction {
 		}
 		// Return result
 		Ok(res)
+	}
+
+	/// Retrieve all the versions from a range of keys from the databases
+	/// This is a no-op for rocksdb database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		Err(Error::UnsupportedVersionedQueries)
+	}
+}
+
+impl Transaction {
+	pub(crate) fn new_save_point(&mut self) {
+		// Get the transaction
+		let inner = self.inner.as_ref().unwrap();
+		// Set the save point
+		inner.set_savepoint();
+	}
+
+	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+		// Get the transaction
+		let inner = self.inner.as_ref().unwrap();
+		// Rollback
+		inner.rollback_to_savepoint()?;
+		//
+		Ok(())
+	}
+
+	pub(crate) fn release_last_save_point(&mut self) -> Result<(), Error> {
+		Ok(())
 	}
 }
