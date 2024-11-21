@@ -69,10 +69,10 @@ jobs:
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.1.0-${version}\"#" core/Cargo.toml
 
           # Update dependency versions
-          sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" sdk/Cargo.toml
+          sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" sdk/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
