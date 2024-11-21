@@ -119,7 +119,7 @@ impl LiveStatement {
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
 				txn.put(key, stm, None).await?;
-				// Refresh the table cache
+				// Refresh the table cache for lives
 				let key = crate::key::database::tb::new(ns, db, &tb);
 				let tb = txn.get_tb(ns, db, &tb).await?;
 				txn.set(

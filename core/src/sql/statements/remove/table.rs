@@ -62,7 +62,7 @@ impl RemoveTableStatement {
 					// Save the view config
 					let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, ft, &self.name);
 					txn.del(key).await?;
-					// Refresh the table cache
+					// Refresh the table cache for foreign tables
 					let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, ft);
 					if let Ok(tb) = txn.get_tb(opt.ns()?, opt.db()?, ft).await {
 						txn.set(
