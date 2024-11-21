@@ -424,6 +424,21 @@ impl Transactor {
 		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values, version).await })
 	}
 
+	/// Retrieve a batched scan of all versions over a specific range of keys in the datastore.
+	///
+	/// This function fetches (key, value, version and deleted) pairs, in batches, with multiple requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn batch_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), "BatchVersions");
+		expand_inner!(&mut self.inner, v => { v.batch_versions(beg..end, batch).await })
+	}
+
 	/// Obtain a new change timestamp for a key
 	/// which is replaced with the current timestamp when the transaction is committed.
 	/// NOTE: This should be called when composing the change feed entries for this transaction,
@@ -686,20 +701,5 @@ impl Transactor {
 
 	pub(crate) async fn release_last_save_point(&mut self) -> Result<(), Error> {
 		expand_inner!(&mut self.inner, v => { v.release_last_save_point() })
-	}
-
-	/// Retrieve a batched scan of all versions over a specific range of keys in the datastore.
-	///
-	/// This function fetches (key, value, version and deleted) pairs, in batches, with multiple requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn batch_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
-	where
-		K: Into<Key> + Debug,
-	{
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
-		let rng = beg.as_slice()..end.as_slice();
-		trace!(target: TARGET, rng = rng.sprint(), "BatchVersions");
-		expand_inner!(&mut self.inner, v => { v.batch_versions(beg..end, batch).await })
 	}
 }

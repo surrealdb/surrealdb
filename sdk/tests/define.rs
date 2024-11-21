@@ -3114,9 +3114,13 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 	";
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
-	t.expect_val("{
+	t.expect_val(
+		"{
 			events: {},
-			fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<person> PERMISSIONS FULL' },
+			fields: {
+				in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL',
+				out: 'DEFINE FIELD out ON likes TYPE record<person> PERMISSIONS FULL'
+			},
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -3130,7 +3134,9 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			functions: {},
 			models: {},
 			params: {},
-			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person SCHEMALESS PERMISSIONS NONE' },
+			tables: {
+				likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person SCHEMALESS PERMISSIONS NONE'
+			},
 			users: {},
 		}",
 	)?;
@@ -3138,7 +3144,10 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 	t.expect_val(
 		"{
 			events: {},
-			fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<person | thing> PERMISSIONS FULL' },
+			fields: {
+				in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL',
+				out: 'DEFINE FIELD out ON likes TYPE record<person | thing> PERMISSIONS FULL'
+			},
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -3160,7 +3169,10 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 	t.expect_val(
 		"{
 			events: {},
-			fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<person | thing | other> PERMISSIONS FULL' },
+			fields: {
+				in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL',
+				out: 'DEFINE FIELD out ON likes TYPE record<person | thing | other> PERMISSIONS FULL'
+			},
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -3174,7 +3186,9 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			functions: {},
 			models: {},
 			params: {},
-			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person | thing | other SCHEMALESS PERMISSIONS NONE' },
+			tables: {
+				likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person | thing | other SCHEMALESS PERMISSIONS NONE'
+			},
 			users: {},
 		}",
 	)?;
