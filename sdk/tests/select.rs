@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::sql::Number;
 use surrealdb_core::dbs::Session;
@@ -1427,5 +1428,28 @@ async fn select_order_by_rand_large() -> Result<(), Error> {
 		assert!(x.contains(&i))
 	}
 
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_from_none() -> Result<(), Error> {
+	let sql: &str = "
+		SELECT * FROM NONE;
+		SELECT * FROM NULL;
+		SELECT 'A' FROM NONE;
+		SELECT 'A' FROM NULL;
+		SELECT '*' FROM NONE, NONE;
+		SELECT '*' FROM NULL, NULL;
+		SELECT 'A' FROM NONE, NONE;
+		SELECT 'A' FROM NULL, NULL;
+		SELECT '*' FROM [NONE, NONE];
+		SELECT '*' FROM [NULL, NULL];
+		SELECT 'A' FROM [NONE, NONE];
+		SELECT 'A' FROM [NULL, NULL];
+	";
+	let mut t = Test::new(sql).await?;
+	for i in 0..12 {
+		t.expect_val_info("[]", i)?;
+	}
 	Ok(())
 }

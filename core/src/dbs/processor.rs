@@ -414,7 +414,11 @@ pub(super) trait Collector {
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match iterable {
-				Iterable::Value(v) => self.collect(Collected::Value(v)).await?,
+				Iterable::Value(v) => {
+					if v.is_some() {
+						self.collect(Collected::Value(v)).await?
+					}
+				}
 				Iterable::Yield(v) => self.collect(Collected::Yield(v)).await?,
 				Iterable::Thing(v) => self.collect(Collected::Thing(v)).await?,
 				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
