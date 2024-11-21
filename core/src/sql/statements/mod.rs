@@ -24,7 +24,6 @@ pub(crate) mod select;
 pub(crate) mod set;
 pub(crate) mod show;
 pub(crate) mod sleep;
-mod tests;
 pub(crate) mod throw;
 pub(crate) mod update;
 pub(crate) mod upsert;
