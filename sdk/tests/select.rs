@@ -1,8 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
-use crate::helpers::Test;
-use helpers::new_ds;
+use helpers::{new_ds, Test};
 use surrealdb::sql::Number;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
