@@ -2551,6 +2551,7 @@ fn parse_remove() {
 		Statement::Remove(RemoveStatement::Namespace(RemoveNamespaceStatement {
 			name: Ident("ns".to_owned()),
 			if_exists: false,
+			expunge: false,
 		}))
 	);
 
@@ -2560,6 +2561,7 @@ fn parse_remove() {
 		Statement::Remove(RemoveStatement::Database(RemoveDatabaseStatement {
 			name: Ident("database".to_owned()),
 			if_exists: false,
+			expunge: false,
 		}))
 	);
 
@@ -2605,6 +2607,7 @@ fn parse_remove() {
 		Statement::Remove(RemoveStatement::Table(RemoveTableStatement {
 			name: Ident("foo".to_owned()),
 			if_exists: false,
+			expunge: false,
 		}))
 	);
 

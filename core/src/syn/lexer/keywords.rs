@@ -119,6 +119,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("EXISTS") => TokenKind::Keyword(Keyword::Exists),
 	UniCase::ascii("EXPIRED") => TokenKind::Keyword(Keyword::Expired),
 	UniCase::ascii("EXPLAIN") => TokenKind::Keyword(Keyword::Explain),
+	UniCase::ascii("EXPUNGE") => TokenKind::Keyword(Keyword::Expunge),
 	UniCase::ascii("EXTEND_CANDIDATES") => TokenKind::Keyword(Keyword::ExtendCandidates),
 	UniCase::ascii("false") => TokenKind::Keyword(Keyword::False),
 	UniCase::ascii("FETCH") => TokenKind::Keyword(Keyword::Fetch),

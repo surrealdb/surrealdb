@@ -8,7 +8,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -16,6 +16,8 @@ pub struct RemoveNamespaceStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
 	pub if_exists: bool,
+	#[revision(start = 3)]
+	pub expunge: bool,
 }
 
 impl RemoveNamespaceStatement {
