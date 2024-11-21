@@ -200,15 +200,11 @@ impl JwtAccess {
 	/// Redacts certain parts of the definition for security on export.
 	pub(crate) fn redacted(&self) -> JwtAccess {
 		let mut jwt = self.clone();
-		jwt.verify = match jwt.verify {
-			JwtAccessVerify::Key(mut key) => {
-				if key.alg.is_symmetric() {
-					key.key = "[REDACTED]".to_string();
-				}
-				JwtAccessVerify::Key(key)
+		if let JwtAccessVerify::Key(key) = &mut jwt.verify {
+			if key.alg.is_symmetric() {
+				key.key = "[REDACTED]".to_string();
 			}
-			JwtAccessVerify::Jwks(jwks) => JwtAccessVerify::Jwks(jwks),
-		};
+		}
 		jwt.issue = match jwt.issue {
 			Some(mut issue) => {
 				issue.key = "[REDACTED]".to_string();
