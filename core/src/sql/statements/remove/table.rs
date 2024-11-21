@@ -38,10 +38,16 @@ impl RemoveTableStatement {
 			let fts = txn.all_tb_views(opt.ns()?, opt.db()?, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.name);
-			txn.del(key).await?;
+			match self.expunge {
+				true => txn.clr(key).await?,
+				false => txn.del(key).await?,
+			};
 			// Remove the resource data
 			let key = crate::key::table::all::new(opt.ns()?, opt.db()?, &self.name);
-			txn.delp(key).await?;
+			match self.expunge {
+				true => txn.clrp(key).await?,
+				false => txn.delp(key).await?,
+			};
 			// Process each attached foreign table
 			for ft in fts.iter() {
 				// Refresh the table cache

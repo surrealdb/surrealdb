@@ -369,6 +369,57 @@ impl Transactor {
 		expand_inner!(&mut self.inner, v => { v.delp(key).await })
 	}
 
+	/// Delete all versions of a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn clr<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		let key = key.into();
+		trace!(target: TARGET, key = key.sprint(), "Clr");
+		expand_inner!(&mut self.inner, v => { v.clr(key).await })
+	}
+
+	/// Delete all versions of a key from the datastore if the current value matches a condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn clrc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
+	{
+		let key = key.into();
+		trace!(target: TARGET, key = key.sprint(), "ClrC");
+		expand_inner!(&mut self.inner, v => { v.clrc(key, chk).await })
+	}
+
+	/// Delete all versions of a range of keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn clrr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), "ClrR");
+		expand_inner!(&mut self.inner, v => { v.clrr(beg..end).await })
+	}
+
+	/// Delete all versions of a prefixed range of keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn clrp<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		let key: Key = key.into();
+		trace!(target: TARGET, key = key.sprint(), "ClrP");
+		expand_inner!(&mut self.inner, v => { v.clrp(key).await })
+	}
+
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
