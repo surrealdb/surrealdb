@@ -51,6 +51,9 @@ mod mem {
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("multireader.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_conflict.rs");
+	include!("timestamp_to_versionstamp.rs");
 	include!("timestamp_to_versionstamp.rs");
 }
 
