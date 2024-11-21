@@ -282,6 +282,18 @@ impl Transactor {
 		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })
 	}
 
+	/// Insert or replace a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
+	{
+		let key = key.into();
+		trace!(target: TARGET, key = key.sprint(), "Replace");
+		expand_inner!(&mut self.inner, v => { v.replace(key, val).await })
+	}
+
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
@@ -664,7 +676,7 @@ impl Transactor {
 				ts_key = crate::key::database::ts::new(ns, db, latest_ts + 1);
 			}
 		}
-		self.set(ts_key, vst, None).await?;
+		self.replace(ts_key, vst).await?;
 		Ok(vst)
 	}
 
