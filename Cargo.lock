@@ -6056,7 +6056,7 @@ dependencies = [
  "unicase",
  "url",
  "uuid",
- "vart",
+ "vart 0.7.0",
  "wasm-bindgen-futures",
  "wasmtimer",
  "wiremock",
@@ -6104,8 +6104,8 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.5.3"
-source = "git+https://github.com/surrealdb/surrealkv?branch=test/sdb-flaky-test#148d9bb8eac4b1d26dcf38f9869aae2b2c7323b0"
+version = "0.5.1"
+source = "git+https://github.com/surrealdb/surrealkv?branch=feat/improve-snapshot-isolation#daad71691b5b9495b92cee4b70f86102b37ca602"
 dependencies = [
  "ahash 0.8.11",
  "async-channel",
@@ -6113,13 +6113,12 @@ dependencies = [
  "chrono",
  "crc32fast",
  "futures",
- "getrandom 0.2.15",
  "lru",
  "parking_lot",
  "quick_cache 0.6.2",
  "revision",
  "tokio",
- "vart",
+ "vart 0.8.0",
 ]
 
 [[package]]
@@ -7056,6 +7055,11 @@ name = "vart"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c92195d375eb94995afddeedfd7f246796eb60b85f727c538e42222c4c9b2d3"
+
+[[package]]
+name = "vart"
+version = "0.8.0"
+source = "git+https://github.com/surrealdb/vart.git?branch=final-zero-byte#0566eb5ed0200031c3961a7497fab99366da6b60"
 
 [[package]]
 name = "vcpkg"
