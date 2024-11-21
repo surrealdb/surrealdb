@@ -83,8 +83,9 @@ impl InfoStructure for AccessType {
 			AccessType::Record(v) => Value::from(map! {
 				"kind".to_string() => "RECORD".into(),
 				"jwt".to_string() => v.jwt.structure(),
-				"signup".to_string(), if let Some(v) = v.signup => v.structure(),
-				"signin".to_string(), if let Some(v) = v.signin => v.structure(),
+			"signup".to_string() => if let Some(v) = v.signup { v.structure() } else { Value::Null },
+			"signin".to_string() => if let Some(v) = v.signin { v.structure() } else { Value::Null },
+
 			}),
 			AccessType::Bearer(ac) => Value::from(map! {
 					"kind".to_string() => "BEARER".into(),
@@ -201,13 +202,11 @@ impl JwtAccess {
 		let mut jwt = self.clone();
 		jwt.verify = match jwt.verify {
 			JwtAccessVerify::Key(mut key) => {
-				// If algorithm is symmetric, the verification key is a secret
 				if key.alg.is_symmetric() {
 					key.key = "[REDACTED]".to_string();
 				}
 				JwtAccessVerify::Key(key)
 			}
-			// No secrets in JWK
 			JwtAccessVerify::Jwks(jwks) => JwtAccessVerify::Jwks(jwks),
 		};
 		jwt.issue = match jwt.issue {
