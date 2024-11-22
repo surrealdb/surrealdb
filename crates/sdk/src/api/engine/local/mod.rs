@@ -365,6 +365,42 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct SurrealKv;
 
+/// SurrealKV database with versions enabled
+///
+/// # Examples
+///
+/// Instantiating a SurrealKV-backed instance with versions
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::SurrealKvVersioned;
+///
+/// let db = Surreal::new::<SurrealKvVersioned>("path/to/database-folder").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Instantiating a SurrealKV-backed strict instance with versions
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Config;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::SurrealKvVersioned;
+///
+/// let config = Config::default().strict();
+/// let db = Surreal::new::<SurrealKvVersioned>(("path/to/database-folder", config)).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "kv-surrealkv")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealkv")))]
+#[derive(Debug)]
+pub struct SurrealKvVersioned;
+
 /// SurrealKV database
 #[deprecated(note = "Incorrect case, use SurrealKv instead")]
 #[cfg(feature = "kv-surrealkv")]
