@@ -6039,13 +6039,13 @@ dependencies = [
  "subtle",
  "surrealcs",
  "surrealdb-derive",
- "surrealdb-tikv-client",
  "surrealkv",
  "surrealml-core",
  "temp-dir",
  "tempfile",
  "test-log",
  "thiserror",
+ "tikv-client",
  "time",
  "tokio",
  "tokio-tungstenite 0.21.0",
@@ -6071,35 +6071,6 @@ checksum = "aacdb4c58b9ebef0291310afcd63af0012d85610d361f3785952c61b6f1dddf4"
 dependencies = [
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "surrealdb-tikv-client"
-version = "0.3.0-surreal.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9e204e84239374e8ba2dfabb88f5ac20f69baa09599eee225958445fb7e0a14"
-dependencies = [
- "async-recursion 0.3.2",
- "async-trait",
- "derive-new",
- "either",
- "fail",
- "futures",
- "lazy_static",
- "log",
- "pin-project",
- "prometheus",
- "prost 0.12.3",
- "rand 0.8.5",
- "regex",
- "semver",
- "serde",
- "serde_derive",
- "serde_json",
- "take_mut",
- "thiserror",
- "tokio",
- "tonic 0.10.2",
 ]
 
 [[package]]
@@ -6360,6 +6331,34 @@ checksum = "8b9ef9bad013ada3808854ceac7b46812a6465ba368859a37e2100283d2d719c"
 dependencies = [
  "cfg-if",
  "once_cell",
+]
+
+[[package]]
+name = "tikv-client"
+version = "0.3.0"
+source = "git+https://github.com/BlueSialia/client-rust#3ff3c2d63eefed13d036aa7c2511543a76503186"
+dependencies = [
+ "async-recursion 0.3.2",
+ "async-trait",
+ "derive-new",
+ "either",
+ "fail",
+ "futures",
+ "lazy_static",
+ "log",
+ "pin-project",
+ "prometheus",
+ "prost 0.12.3",
+ "rand 0.8.5",
+ "regex",
+ "semver",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "take_mut",
+ "thiserror",
+ "tokio",
+ "tonic 0.10.2",
 ]
 
 [[package]]

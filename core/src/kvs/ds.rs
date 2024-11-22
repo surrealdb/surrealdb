@@ -56,6 +56,13 @@ const LQ_CHANNEL_SIZE: usize = 100;
 // The role assigned to the initial user created when starting the server with credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
 
+#[derive(Clone, Debug)]
+pub struct TLSOptions {
+	pub ca: PathBuf,
+	pub crt: PathBuf,
+	pub key: PathBuf,
+}
+
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 #[non_exhaustive]
@@ -247,8 +254,8 @@ impl Datastore {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub async fn new(path: &str) -> Result<Self, Error> {
-		Self::new_with_clock(path, None).await
+	pub async fn new(path: &str, tls: Option<TLSOptions>) -> Result<Self, Error> {
+		Self::new_with_clock(path, None, tls).await
 	}
 
 	#[cfg(debug_assertions)]
@@ -279,6 +286,7 @@ impl Datastore {
 	pub async fn new_with_clock(
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		tls: Option<TLSOptions>,
 	) -> Result<Datastore, Error> {
 		// Initiate the desired datastore
 		let (flavor, clock): (Result<DatastoreFlavor, Error>, Arc<SizedClock>) = match path {
@@ -380,7 +388,7 @@ impl Datastore {
 					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
-					let v = super::tikv::Datastore::new(s).await.map(DatastoreFlavor::TiKV);
+					let v = super::tikv::Datastore::new(s, tls).await.map(DatastoreFlavor::TiKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Connected to kvs store at {}", path);
 					Ok((v, c))
@@ -1262,7 +1270,8 @@ mod test {
 		}
 		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
 
-		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+		let dbs =
+			Datastore::new("memory", None).await.unwrap().with_capabilities(Capabilities::all());
 
 		let opt = Options::default()
 			.with_id(dbs.id)

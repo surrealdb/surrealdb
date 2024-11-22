@@ -413,7 +413,7 @@ pub async fn init(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new(&opt.path)
+	let dbs = Datastore::new(&opt.path, opt.kvs.clone())
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)
@@ -467,7 +467,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_setup_superuser() {
-		let ds = Datastore::new("memory").await.unwrap();
+		let ds = Datastore::new("memory", None).await.unwrap();
 		let creds = Root {
 			username: "root",
 			password: "root",
@@ -546,7 +546,7 @@ mod tests {
 			// Functions and Networking are allowed
 			//
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::new("memory", None).await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::All),
@@ -560,7 +560,7 @@ mod tests {
 			// Scripting is allowed
 			//
 			(
-				Datastore::new("memory")
+				Datastore::new("memory", None)
 					.await
 					.unwrap()
 					.with_capabilities(Capabilities::default().with_scripting(true)),
@@ -573,7 +573,7 @@ mod tests {
 			// Scripting is not allowed
 			//
 			(
-				Datastore::new("memory")
+				Datastore::new("memory", None)
 					.await
 					.unwrap()
 					.with_capabilities(Capabilities::default().with_scripting(false)),
@@ -586,7 +586,7 @@ mod tests {
 			// Anonymous actor when guest access is allowed and auth is enabled, succeeds
 			//
 			(
-				Datastore::new("memory")
+				Datastore::new("memory", None)
 					.await
 					.unwrap()
 					.with_auth_enabled(true)
@@ -600,7 +600,7 @@ mod tests {
 			// Anonymous actor when guest access is not allowed and auth is enabled, throws error
 			//
 			(
-				Datastore::new("memory")
+				Datastore::new("memory", None)
 					.await
 					.unwrap()
 					.with_auth_enabled(true)
@@ -614,7 +614,7 @@ mod tests {
 			// Anonymous actor when guest access is not allowed and auth is disabled, succeeds
 			//
 			(
-				Datastore::new("memory")
+				Datastore::new("memory", None)
 					.await
 					.unwrap()
 					.with_auth_enabled(false)
@@ -628,7 +628,7 @@ mod tests {
 			// Authenticated user when guest access is not allowed and auth is enabled, succeeds
 			//
 			(
-				Datastore::new("memory")
+				Datastore::new("memory", None)
 					.await
 					.unwrap()
 					.with_auth_enabled(true)
@@ -642,7 +642,7 @@ mod tests {
 			// Some functions are not allowed
 			//
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::new("memory", None).await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::*").unwrap()].into(),
@@ -657,7 +657,7 @@ mod tests {
 				"Function 'string::len' is not allowed".to_string(),
 			),
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::new("memory", None).await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::*").unwrap()].into(),
@@ -672,7 +672,7 @@ mod tests {
 				"a".to_string(),
 			),
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::new("memory", None).await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::Some(
 							[FuncTarget::from_str("string::*").unwrap()].into(),
@@ -690,7 +690,7 @@ mod tests {
 			// Some net targets are not allowed
 			//
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::new("memory", None).await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
@@ -710,7 +710,7 @@ mod tests {
 				format!("Access to network target '{}' is not allowed", server1.address()),
 			),
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::new("memory", None).await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
@@ -730,7 +730,7 @@ mod tests {
 				"Access to network target '1.1.1.1:80' is not allowed".to_string(),
 			),
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::new("memory", None).await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(

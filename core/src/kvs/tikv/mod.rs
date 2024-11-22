@@ -5,6 +5,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
 use crate::kvs::Check;
 use crate::kvs::Key;
+use crate::kvs::TLSOptions;
 use crate::kvs::Val;
 use crate::kvs::Version;
 use crate::vs::Versionstamp;
@@ -13,6 +14,7 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use tikv::CheckLevel;
+use tikv::Config;
 use tikv::TimestampExt;
 use tikv::TransactionOptions;
 
@@ -72,8 +74,18 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
-		match tikv::TransactionClient::new(vec![path]).await {
+	pub(crate) async fn new(path: &str, tls: Option<TLSOptions>) -> Result<Datastore, Error> {
+		println!("Connection path: {}", path);
+		match match tls {
+			None => tikv::TransactionClient::new(vec![path]).await,
+			Some(tls) => {
+				tikv::TransactionClient::new_with_config(
+					vec![path],
+					Config::default().with_security(tls.ca, tls.crt, tls.key),
+				)
+				.await
+			}
+		} {
 			Ok(db) => Ok(Datastore {
 				db: Arc::pin(db),
 			}),
