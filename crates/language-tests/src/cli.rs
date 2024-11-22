@@ -1,103 +1,99 @@
 use clap::{
-    arg,
-    builder::{EnumValueParser, PossibleValue},
-    command, value_parser, ArgMatches, Command, Subcommand, ValueEnum,
+	arg,
+	builder::{EnumValueParser, PossibleValue},
+	command, value_parser, ArgMatches, Command, Subcommand, ValueEnum,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum FailureMode {
-    Fail,
-    Accept,
-    Overwrite,
+	Fail,
+	Accept,
+	Overwrite,
 }
 
 impl ValueEnum for FailureMode {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[
-            FailureMode::Fail,
-            FailureMode::Accept,
-            FailureMode::Overwrite,
-        ]
-    }
+	fn value_variants<'a>() -> &'a [Self] {
+		&[FailureMode::Fail, FailureMode::Accept, FailureMode::Overwrite]
+	}
 
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        match self {
-            FailureMode::Fail => Some(PossibleValue::new("fail")),
-            FailureMode::Accept => Some(PossibleValue::new("accept")),
-            FailureMode::Overwrite => Some(PossibleValue::new("overwrite")),
-        }
-    }
+	fn to_possible_value(&self) -> Option<PossibleValue> {
+		match self {
+			FailureMode::Fail => Some(PossibleValue::new("fail")),
+			FailureMode::Accept => Some(PossibleValue::new("accept")),
+			FailureMode::Overwrite => Some(PossibleValue::new("overwrite")),
+		}
+	}
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Backends {
-    #[cfg(feature = "backend-mem")]
-    Mem,
-    #[cfg(feature = "backend-surrealkv")]
-    SurrealKv,
-    #[cfg(feature = "backend-rocksdb")]
-    RocksDb,
-    #[cfg(feature = "backend-foundation-7_1")]
-    Foundation7_1,
-    #[cfg(feature = "backend-foundation-7_3")]
-    Foundation7_3,
-    #[cfg(feature = "backend-tikv")]
-    TiKv,
-    #[cfg(feature = "backend-client-ws")]
-    ClientWs,
-    #[cfg(feature = "backend-client-http")]
-    ClientHttp,
-    All,
+	#[cfg(feature = "backend-mem")]
+	Mem,
+	#[cfg(feature = "backend-surrealkv")]
+	SurrealKv,
+	#[cfg(feature = "backend-rocksdb")]
+	RocksDb,
+	#[cfg(feature = "backend-foundation-7_1")]
+	Foundation7_1,
+	#[cfg(feature = "backend-foundation-7_3")]
+	Foundation7_3,
+	#[cfg(feature = "backend-tikv")]
+	TiKv,
+	#[cfg(feature = "backend-client-ws")]
+	ClientWs,
+	#[cfg(feature = "backend-client-http")]
+	ClientHttp,
+	All,
 }
 
 impl ValueEnum for Backends {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[
-            #[cfg(feature = "backend-mem")]
-            Self::Mem,
-            #[cfg(feature = "backend-surrealkv")]
-            Self::SurrealKv,
-            #[cfg(feature = "backend-rocksdb")]
-            Self::RocksDb,
-            #[cfg(feature = "backend-foundation-7_1")]
-            Self::Foundation7_1,
-            #[cfg(feature = "backend-foundation-7_3")]
-            Self::Foundation7_3,
-            #[cfg(feature = "backend-tikv")]
-            Self::TiKv,
-            #[cfg(feature = "backend-client-ws")]
-            Self::ClientWs,
-            #[cfg(feature = "backend-client-http")]
-            Self::ClientHttp,
-            Self::All,
-        ]
-    }
+	fn value_variants<'a>() -> &'a [Self] {
+		&[
+			#[cfg(feature = "backend-mem")]
+			Self::Mem,
+			#[cfg(feature = "backend-surrealkv")]
+			Self::SurrealKv,
+			#[cfg(feature = "backend-rocksdb")]
+			Self::RocksDb,
+			#[cfg(feature = "backend-foundation-7_1")]
+			Self::Foundation7_1,
+			#[cfg(feature = "backend-foundation-7_3")]
+			Self::Foundation7_3,
+			#[cfg(feature = "backend-tikv")]
+			Self::TiKv,
+			#[cfg(feature = "backend-client-ws")]
+			Self::ClientWs,
+			#[cfg(feature = "backend-client-http")]
+			Self::ClientHttp,
+			Self::All,
+		]
+	}
 
-    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
-        match self {
-            #[cfg(feature = "backend-mem")]
-            Self::Mem => Some(PossibleValue::new("mem")),
-            #[cfg(feature = "backend-surrealkv")]
-            Self::SurrealKv => Some(PossibleValue::new("skv")),
-            #[cfg(feature = "backend-rocksdb")]
-            Self::RocksDb => Some(PossibleValue::new("rocksb")),
-            #[cfg(feature = "backend-foundation-7_1")]
-            Self::Foundation7_1 => Some(PossibleValue::new("fdb7.1")),
-            #[cfg(feature = "backend-foundation-7_3")]
-            Self::Foundation7_3 => Some(PossibleValue::new("fdb7.3")),
-            #[cfg(feature = "backend-tikv")]
-            Self::TiKv => Some(PossibleValue::new("tikv")),
-            #[cfg(feature = "backend-client-ws")]
-            Self::ClientWs => Some(PossibleValue::new("ws")),
-            #[cfg(feature = "backend-client-http")]
-            Self::ClientHttp => Some(PossibleValue::new("http")),
-            Self::All => Some(PossibleValue::new("all")),
-        }
-    }
+	fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+		match self {
+			#[cfg(feature = "backend-mem")]
+			Self::Mem => Some(PossibleValue::new("mem")),
+			#[cfg(feature = "backend-surrealkv")]
+			Self::SurrealKv => Some(PossibleValue::new("skv")),
+			#[cfg(feature = "backend-rocksdb")]
+			Self::RocksDb => Some(PossibleValue::new("rocksb")),
+			#[cfg(feature = "backend-foundation-7_1")]
+			Self::Foundation7_1 => Some(PossibleValue::new("fdb7.1")),
+			#[cfg(feature = "backend-foundation-7_3")]
+			Self::Foundation7_3 => Some(PossibleValue::new("fdb7.3")),
+			#[cfg(feature = "backend-tikv")]
+			Self::TiKv => Some(PossibleValue::new("tikv")),
+			#[cfg(feature = "backend-client-ws")]
+			Self::ClientWs => Some(PossibleValue::new("ws")),
+			#[cfg(feature = "backend-client-http")]
+			Self::ClientHttp => Some(PossibleValue::new("http")),
+			Self::All => Some(PossibleValue::new("all")),
+		}
+	}
 }
 
 pub fn parse() -> ArgMatches {
-    let mut cmd = command!()
+	let mut cmd = command!()
         .subcommand(
             Command::new("run")
                 .about("Run surrealdb tests")
@@ -123,24 +119,24 @@ pub fn parse() -> ArgMatches {
                 ),
         );
 
-    #[cfg(feature = "fuzzing")]
-    {
-        cmd = cmd.subcommand(
-            Command::new("fuzz")
-                .about("Command for handling fuzzing input")
-                .subcommand(
-                    Command::new("fmt")
-                        .about("Debug format the query from a reproduction file")
-                        .arg(arg!(<INPUT> "The input file")),
-                )
-                .subcommand(
-                    Command::new("export")
-                        .about("Debug format the query from a reproduction file")
-                        .arg(arg!(<INPUT> "The input file")),
-                )
-                .subcommand_required(true),
-        );
-    }
+	#[cfg(feature = "fuzzing")]
+	{
+		cmd = cmd.subcommand(
+			Command::new("fuzz")
+				.about("Command for handling fuzzing input")
+				.subcommand(
+					Command::new("fmt")
+						.about("Debug format the query from a reproduction file")
+						.arg(arg!(<INPUT> "The input file")),
+				)
+				.subcommand(
+					Command::new("export")
+						.about("Debug format the query from a reproduction file")
+						.arg(arg!(<INPUT> "The input file")),
+				)
+				.subcommand_required(true),
+		);
+	}
 
-    cmd.subcommand_required(true).get_matches()
+	cmd.subcommand_required(true).get_matches()
 }
