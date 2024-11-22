@@ -694,9 +694,10 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Parse the function name argument
-		let name = match name {
-			Value::Strand(Strand(v)) => v,
-			_ => return Err(RpcError::InvalidParams),
+		let name = if let Value::Strand(Strand(v)) = name {
+			v
+		} else {
+			return Err(RpcError::InvalidParams);
 		};
 		// Parse any function version argument
 		let version = match version {

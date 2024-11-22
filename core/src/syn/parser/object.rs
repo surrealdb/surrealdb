@@ -17,7 +17,7 @@ use super::mac::unexpected;
 impl Parser<'_> {
 	/// Parse an production which starts with an `{`
 	///
-	/// Either a block statemnt, a object or geometry.
+	/// Either a block statemnt, an object or geometry.
 	pub(super) async fn parse_object_like(
 		&mut self,
 		ctx: &mut Stk,
