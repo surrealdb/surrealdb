@@ -140,7 +140,7 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"${major}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" sdk/Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" crates/sdk/Cargo.toml
 
             # Update Cargo.lock without updating dependency versions
             cargo check --no-default-features --features storage-mem
@@ -188,8 +188,8 @@ jobs:
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"2.1.0-${betaVersion}\"#" core/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.1.0-${betaVersion}\"#" crates/core/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -592,10 +592,10 @@ jobs:
 
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
           sed -i "s#surrealdb = { version = \"2\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -676,9 +676,9 @@ jobs:
           version=${major}.${minor}.$(($betaNum - 1))
 
           # Update crate version
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"2.1.0-${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.1.0-${version}\"#" crates/core/Cargo.toml
+          sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" crates/sdk/Cargo.toml
 
       - name: Patch alpha crate version
         if: ${{ inputs.environment == 'alpha' }}
@@ -688,9 +688,9 @@ jobs:
           version=2.1.$((${{ inputs.patch }} - 1))
 
           # Update the version to a nightly one
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
 
       - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
@@ -708,9 +708,9 @@ jobs:
           version=${major}.${minor}.${date}
 
           # Update the version to a nightly one
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment != 'stable' }}
@@ -718,15 +718,15 @@ jobs:
           set -x
 
           # Patch crate name
-          sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" sdk/Cargo.toml
-          sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" core/Cargo.toml
+          sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" crates/sdk/Cargo.toml
+          sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" crates/core/Cargo.toml
 
           # Patch sdk dependency
           sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" sdk/Cargo.toml
 
           # Patch the description
-          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" sdk/Cargo.toml
-          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb-core crate\"#" core/Cargo.toml
+          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
+          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
 
           # Temporarily commit patches
           # These should not be pushed back to the repo
