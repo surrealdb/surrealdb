@@ -24,31 +24,49 @@ impl Parser<'_> {
 		let next = self.next();
 		let res = match next.kind {
 			t!("NAMESPACE") => {
+				let expunge = if self.eat(t!("AND")) {
+					expected!(self, t!("EXPUNGE"));
+					true
+				} else {
+					false
+				};
+
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
 				} else {
 					false
 				};
+
 				let name = self.next_token_value()?;
 
 				RemoveStatement::Namespace(RemoveNamespaceStatement {
 					name,
 					if_exists,
+					expunge,
 				})
 			}
 			t!("DATABASE") => {
+				let expunge = if self.eat(t!("AND")) {
+					expected!(self, t!("EXPUNGE"));
+					true
+				} else {
+					false
+				};
+
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
 				} else {
 					false
 				};
+
 				let name = self.next_token_value()?;
 
 				RemoveStatement::Database(RemoveDatabaseStatement {
 					name,
 					if_exists,
+					expunge,
 				})
 			}
 			t!("FUNCTION") => {
@@ -101,17 +119,26 @@ impl Parser<'_> {
 				})
 			}
 			t!("TABLE") => {
+				let expunge = if self.eat(t!("AND")) {
+					expected!(self, t!("EXPUNGE"));
+					true
+				} else {
+					false
+				};
+
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
 				} else {
 					false
 				};
+
 				let name = self.next_token_value()?;
 
 				RemoveStatement::Table(crate::sql::statements::RemoveTableStatement {
 					name,
 					if_exists,
+					expunge,
 				})
 			}
 			t!("EVENT") => {

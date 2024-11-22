@@ -30,6 +30,15 @@ impl Value {
 							}
 						}
 					},
+					Part::All => match path.len() {
+						1 => {
+							v.clear();
+						}
+						_ => {
+							let path = path.next();
+							v.iter_mut().for_each(|(_, v)| v.cut(path));
+						}
+					},
 					_ => {}
 				},
 				// Current value at path is an array

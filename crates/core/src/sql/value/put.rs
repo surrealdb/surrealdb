@@ -34,6 +34,10 @@ impl Value {
 							v.insert(i.to_string(), obj);
 						}
 					},
+					Part::All => {
+						let path = path.next();
+						v.iter_mut().for_each(|(_, v)| v.put(path, val.clone()));
+					}
 					_ => (),
 				},
 				// Current value at path is an array

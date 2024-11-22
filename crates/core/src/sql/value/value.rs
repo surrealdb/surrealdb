@@ -2746,6 +2746,10 @@ impl Value {
 				Value::Geometry(w) => v.contains(w),
 				_ => false,
 			},
+			Value::Object(v) => match other {
+				Value::Strand(w) => v.0.contains_key(&w.0),
+				_ => false,
+			},
 			Value::Range(r) => {
 				let beg = match &r.beg {
 					Bound::Unbounded => true,

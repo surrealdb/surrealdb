@@ -3227,3 +3227,20 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 	// but well, my apologies if that even happen ¯\_(ツ)_/¯
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_limit_start_parallel() -> Result<(), Error> {
+	let sql = r"
+		CREATE |item:1000|;
+		SELECT * FROM item LIMIT 10 START 0 PARALLEL;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(2)?;
+	t.skip_ok(1)?;
+	let r = t.next()?.result?;
+	if let Value::Array(a) = r {
+		assert_eq!(a.len(), 10);
+	} else {
+		panic!("Unexpected value: {r:#}");
+	}
+	Ok(())
+}

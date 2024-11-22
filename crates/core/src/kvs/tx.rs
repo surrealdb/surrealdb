@@ -4,11 +4,10 @@ use super::Convert;
 use super::Key;
 use super::Val;
 use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::cnf::TRANSACTION_CACHE_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::kvs::cache::Entry;
-use crate::kvs::cache::EntryWeighter;
+use crate::kvs::cache;
+use crate::kvs::cache::tx::Cache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
 use crate::sql::statements::define::DefineConfigStatement;
@@ -32,7 +31,6 @@ use crate::sql::Value;
 use futures::lock::Mutex;
 use futures::lock::MutexGuard;
 use futures::stream::Stream;
-use quick_cache::sync::Cache;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
@@ -43,7 +41,7 @@ pub struct Transaction {
 	/// The underlying transactor
 	tx: Mutex<Transactor>,
 	/// The query cache for this store
-	cache: Cache<Key, Entry, EntryWeighter>,
+	cache: Cache,
 }
 
 impl Transaction {
@@ -51,11 +49,7 @@ impl Transaction {
 	pub fn new(tx: Transactor) -> Transaction {
 		Transaction {
 			tx: Mutex::new(tx),
-			cache: Cache::with_weighter(
-				*TRANSACTION_CACHE_SIZE,
-				*TRANSACTION_CACHE_SIZE as u64,
-				EntryWeighter,
-			),
+			cache: cache::tx::new(),
 		}
 	}
 
@@ -194,6 +188,47 @@ impl Transaction {
 		self.lock().await.delp(key).await
 	}
 
+	/// Delete all versions of a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn clr<K>(&self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.clr(key).await
+	}
+
+	/// Delete all versions of a key from the datastore if the current value matches a condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn clrc<K, V>(&self, key: K, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
+	{
+		self.lock().await.clrc(key, chk).await
+	}
+
+	/// Delete all versions of a range of keys from the datastore.
+	///
+	/// This function deletes entries from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn clrr<K>(&self, rng: Range<K>) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.clrr(rng).await
+	}
+
+	/// Delete all versions of a prefix of keys from the datastore.
+	///
+	/// This function deletes entries from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn clrp<K>(&self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.clrp(key).await
+	}
+
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn set<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
@@ -202,6 +237,16 @@ impl Transaction {
 		V: Into<Val> + Debug,
 	{
 		self.lock().await.set(key, val, version).await
+	}
+
+	/// Insert or replace a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn replace<K, V>(&self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
+	{
+		self.lock().await.replace(key, val).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -273,6 +318,17 @@ impl Transaction {
 		self.lock().await.batch(rng, batch, values, version).await
 	}
 
+	/// Retrieve a batched scan to scan all versions over a specific range of keys in the datastore.
+	///
+	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn batch_versions<K>(&self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.batch_versions(rng, batch).await
+	}
+
 	/// Retrieve a stream over a specific range of keys in the datastore.
 	///
 	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
@@ -341,16 +397,16 @@ impl Transaction {
 	/// Retrieve all nodes belonging to this cluster.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_nodes(&self) -> Result<Arc<[Node]>, Error> {
-		let key = crate::key::root::nd::prefix();
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Nds;
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::root::nd::prefix();
 				let end = crate::key::root::nd::suffix();
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Nds(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Nds(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -360,16 +416,16 @@ impl Transaction {
 	/// Retrieve all ROOT level users in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_root_users(&self) -> Result<Arc<[DefineUserStatement]>, Error> {
-		let key = crate::key::root::us::prefix();
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Rus;
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::root::us::prefix();
 				let end = crate::key::root::us::suffix();
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Rus(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Rus(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -379,16 +435,16 @@ impl Transaction {
 	/// Retrieve all ROOT level accesses in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_root_accesses(&self) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::root::ac::prefix();
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Ras;
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::root::ac::prefix();
 				let end = crate::key::root::ac::suffix();
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Ras(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Ras(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -398,16 +454,16 @@ impl Transaction {
 	/// Retrieve all root access grants in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrant]>, Error> {
-		let key = crate::key::root::access::gr::prefix(ra);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Rgs(ra);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::root::access::gr::prefix(ra);
 				let end = crate::key::root::access::gr::suffix(ra);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Rag(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Rag(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -417,16 +473,16 @@ impl Transaction {
 	/// Retrieve all namespace definitions in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns(&self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
-		let key = crate::key::root::ns::prefix();
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Nss;
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::root::ns::prefix();
 				let end = crate::key::root::ns::suffix();
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Nss(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Nss(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -436,16 +492,16 @@ impl Transaction {
 	/// Retrieve all namespace user definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_users(&self, ns: &str) -> Result<Arc<[DefineUserStatement]>, Error> {
-		let key = crate::key::namespace::us::prefix(ns);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Nus(ns);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::namespace::us::prefix(ns);
 				let end = crate::key::namespace::us::suffix(ns);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Nus(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Nus(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -455,16 +511,16 @@ impl Transaction {
 	/// Retrieve all namespace access definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_accesses(&self, ns: &str) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::namespace::ac::prefix(ns);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Nas(ns);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::namespace::ac::prefix(ns);
 				let end = crate::key::namespace::ac::suffix(ns);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Nas(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Nas(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -478,16 +534,16 @@ impl Transaction {
 		ns: &str,
 		na: &str,
 	) -> Result<Arc<[AccessGrant]>, Error> {
-		let key = crate::key::namespace::access::gr::prefix(ns, na);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Ngs(ns, na);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::namespace::access::gr::prefix(ns, na);
 				let end = crate::key::namespace::access::gr::suffix(ns, na);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Nag(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Nag(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -497,16 +553,16 @@ impl Transaction {
 	/// Retrieve all database definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db(&self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
-		let key = crate::key::namespace::db::prefix(ns);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Dbs(ns);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::namespace::db::prefix(ns);
 				let end = crate::key::namespace::db::suffix(ns);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Dbs(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Dbs(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -520,16 +576,16 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineUserStatement]>, Error> {
-		let key = crate::key::database::us::prefix(ns, db);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Dus(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::us::prefix(ns, db);
 				let end = crate::key::database::us::suffix(ns, db);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Dus(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Dus(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -543,16 +599,16 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let key = crate::key::database::ac::prefix(ns, db);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Das(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::ac::prefix(ns, db);
 				let end = crate::key::database::ac::suffix(ns, db);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Das(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Das(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -567,16 +623,16 @@ impl Transaction {
 		db: &str,
 		da: &str,
 	) -> Result<Arc<[AccessGrant]>, Error> {
-		let key = crate::key::database::access::gr::prefix(ns, db, da);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Dgs(ns, db, da);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::access::gr::prefix(ns, db, da);
 				let end = crate::key::database::access::gr::suffix(ns, db, da);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Dag(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Dag(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -590,16 +646,16 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAnalyzerStatement]>, Error> {
-		let key = crate::key::database::az::prefix(ns, db);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Azs(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::az::prefix(ns, db);
 				let end = crate::key::database::az::suffix(ns, db);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Azs(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Azs(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -613,16 +669,16 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineFunctionStatement]>, Error> {
-		let key = crate::key::database::fc::prefix(ns, db);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Fcs(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::fc::prefix(ns, db);
 				let end = crate::key::database::fc::suffix(ns, db);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Fcs(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Fcs(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -636,16 +692,16 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineParamStatement]>, Error> {
-		let key = crate::key::database::pa::prefix(ns, db);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Pas(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::pa::prefix(ns, db);
 				let end = crate::key::database::pa::suffix(ns, db);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Pas(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Pas(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -659,16 +715,16 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineModelStatement]>, Error> {
-		let key = crate::key::database::ml::prefix(ns, db);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Mls(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::ml::prefix(ns, db);
 				let end = crate::key::database::ml::suffix(ns, db);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Mls(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Mls(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -682,16 +738,16 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineConfigStatement]>, Error> {
-		let key = crate::key::database::cg::prefix(ns, db);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Cgs(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::cg::prefix(ns, db);
 				let end = crate::key::database::cg::suffix(ns, db);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Cgs(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Cgs(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -706,16 +762,16 @@ impl Transaction {
 		db: &str,
 		version: Option<u64>,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
-		let key = crate::key::database::tb::prefix(ns, db);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Tbs(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::tb::prefix(ns, db);
 				let end = crate::key::database::tb::suffix(ns, db);
-				let val = self.getr(key..end, version).await?;
+				let val = self.getr(beg..end, version).await?;
 				let val = val.convert().into();
-				let val = Entry::Tbs(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Tbs(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -730,16 +786,16 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
-		let key = crate::key::table::ev::prefix(ns, db, tb);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Evs(ns, db, tb);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::table::ev::prefix(ns, db, tb);
 				let end = crate::key::table::ev::suffix(ns, db, tb);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Evs(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Evs(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -755,16 +811,16 @@ impl Transaction {
 		tb: &str,
 		version: Option<u64>,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
-		let key = crate::key::table::fd::prefix(ns, db, tb);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Fds(ns, db, tb);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::table::fd::prefix(ns, db, tb);
 				let end = crate::key::table::fd::suffix(ns, db, tb);
-				let val = self.getr(key..end, version).await?;
+				let val = self.getr(beg..end, version).await?;
 				let val = val.convert().into();
-				let val = Entry::Fds(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Fds(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -779,16 +835,16 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
-		let key = crate::key::table::ix::prefix(ns, db, tb);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Ixs(ns, db, tb);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::table::ix::prefix(ns, db, tb);
 				let end = crate::key::table::ix::suffix(ns, db, tb);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Ixs(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Ixs(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -803,16 +859,16 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
-		let key = crate::key::table::ft::prefix(ns, db, tb);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Fts(ns, db, tb);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::table::ft::prefix(ns, db, tb);
 				let end = crate::key::table::ft::suffix(ns, db, tb);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Fts(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Fts(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -827,16 +883,16 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
-		let key = crate::key::table::lq::prefix(ns, db, tb);
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Lvs(ns, db, tb);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::table::lq::prefix(ns, db, tb);
 				let end = crate::key::table::lq::suffix(ns, db, tb);
-				let val = self.getr(key..end, None).await?;
+				let val = self.getr(beg..end, None).await?;
 				let val = val.convert().into();
-				let val = Entry::Lvs(Arc::clone(&val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Lvs(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -846,17 +902,17 @@ impl Transaction {
 	/// Retrieve a specific node in the cluster.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_node(&self, id: Uuid) -> Result<Arc<Node>, Error> {
-		let key = crate::key::root::nd::new(id).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Nd(id);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::root::nd::new(id).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::NdNotFound {
 					value: id.to_string(),
 				})?;
 				let val: Node = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -866,17 +922,17 @@ impl Transaction {
 	/// Retrieve a specific root user definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_root_user(&self, us: &str) -> Result<Arc<DefineUserStatement>, Error> {
-		let key = crate::key::root::us::new(us).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Ru(us);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::root::us::new(us).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::UserRootNotFound {
 					value: us.to_owned(),
 				})?;
 				let val: DefineUserStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -886,17 +942,17 @@ impl Transaction {
 	/// Retrieve a specific root access definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_root_access(&self, ra: &str) -> Result<Arc<DefineAccessStatement>, Error> {
-		let key = crate::key::root::ac::new(ra).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Ra(ra);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::root::ac::new(ra).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::AccessRootNotFound {
 					ac: ra.to_owned(),
 				})?;
 				let val: DefineAccessStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -910,19 +966,19 @@ impl Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Arc<AccessGrant>, Error> {
-		let key = crate::key::root::access::gr::new(ac, gr).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Rg(ac, gr);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::root::access::gr::new(ac, gr).encode()?;
 				let val =
 					self.get(key, None).await?.ok_or_else(|| Error::AccessGrantRootNotFound {
 						ac: ac.to_owned(),
 						gr: gr.to_owned(),
 					})?;
 				let val: AccessGrant = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -932,17 +988,17 @@ impl Transaction {
 	/// Retrieve a specific namespace definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_ns(&self, ns: &str) -> Result<Arc<DefineNamespaceStatement>, Error> {
-		let key = crate::key::root::ns::new(ns).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Ns(ns);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::root::ns::new(ns).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::NsNotFound {
 					value: ns.to_owned(),
 				})?;
 				let val: DefineNamespaceStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -952,18 +1008,18 @@ impl Transaction {
 	/// Retrieve a specific namespace user definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_ns_user(&self, ns: &str, us: &str) -> Result<Arc<DefineUserStatement>, Error> {
-		let key = crate::key::namespace::us::new(ns, us).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Nu(ns, us);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::namespace::us::new(ns, us).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::UserNsNotFound {
 					value: us.to_owned(),
 					ns: ns.to_owned(),
 				})?;
 				let val: DefineUserStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -977,18 +1033,18 @@ impl Transaction {
 		ns: &str,
 		na: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
-		let key = crate::key::namespace::ac::new(ns, na).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Na(ns, na);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::namespace::ac::new(ns, na).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::AccessNsNotFound {
 					ac: na.to_owned(),
 					ns: ns.to_owned(),
 				})?;
 				let val: DefineAccessStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1003,11 +1059,11 @@ impl Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Arc<AccessGrant>, Error> {
-		let key = crate::key::namespace::access::gr::new(ns, ac, gr).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Ng(ns, ac, gr);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::namespace::access::gr::new(ns, ac, gr).encode()?;
 				let val =
 					self.get(key, None).await?.ok_or_else(|| Error::AccessGrantNsNotFound {
 						ac: ac.to_owned(),
@@ -1015,8 +1071,8 @@ impl Transaction {
 						ns: ns.to_owned(),
 					})?;
 				let val: AccessGrant = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1026,17 +1082,17 @@ impl Transaction {
 	/// Retrieve a specific database definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db(&self, ns: &str, db: &str) -> Result<Arc<DefineDatabaseStatement>, Error> {
-		let key = crate::key::namespace::db::new(ns, db).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Db(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::namespace::db::new(ns, db).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::DbNotFound {
 					value: db.to_owned(),
 				})?;
 				let val: DefineDatabaseStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1051,19 +1107,19 @@ impl Transaction {
 		db: &str,
 		us: &str,
 	) -> Result<Arc<DefineUserStatement>, Error> {
-		let key = crate::key::database::us::new(ns, db, us).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Du(ns, db, us);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::us::new(ns, db, us).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::UserDbNotFound {
 					value: us.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
 				})?;
 				let val: DefineUserStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1078,19 +1134,19 @@ impl Transaction {
 		db: &str,
 		da: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
-		let key = crate::key::database::ac::new(ns, db, da).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Da(ns, db, da);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::ac::new(ns, db, da).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::AccessDbNotFound {
 					ac: da.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
 				})?;
 				let val: DefineAccessStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1106,11 +1162,11 @@ impl Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Arc<AccessGrant>, Error> {
-		let key = crate::key::database::access::gr::new(ns, db, ac, gr).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Dg(ns, db, ac, gr);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::access::gr::new(ns, db, ac, gr).encode()?;
 				let val =
 					self.get(key, None).await?.ok_or_else(|| Error::AccessGrantDbNotFound {
 						ac: ac.to_owned(),
@@ -1119,8 +1175,8 @@ impl Transaction {
 						db: db.to_owned(),
 					})?;
 				let val: AccessGrant = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1136,17 +1192,17 @@ impl Transaction {
 		ml: &str,
 		vn: &str,
 	) -> Result<Arc<DefineModelStatement>, Error> {
-		let key = crate::key::database::ml::new(ns, db, ml, vn).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Ml(ns, db, ml, vn);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::ml::new(ns, db, ml, vn).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::MlNotFound {
 					value: format!("{ml}<{vn}>"),
 				})?;
 				let val: DefineModelStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1161,17 +1217,17 @@ impl Transaction {
 		db: &str,
 		az: &str,
 	) -> Result<Arc<DefineAnalyzerStatement>, Error> {
-		let key = crate::key::database::az::new(ns, db, az).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Az(ns, db, az);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::az::new(ns, db, az).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::AzNotFound {
 					value: az.to_owned(),
 				})?;
 				let val: DefineAnalyzerStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1186,17 +1242,17 @@ impl Transaction {
 		db: &str,
 		fc: &str,
 	) -> Result<Arc<DefineFunctionStatement>, Error> {
-		let key = crate::key::database::fc::new(ns, db, fc).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Fc(ns, db, fc);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::fc::new(ns, db, fc).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::FcNotFound {
 					value: fc.to_owned(),
 				})?;
 				let val: DefineFunctionStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1211,17 +1267,17 @@ impl Transaction {
 		db: &str,
 		pa: &str,
 	) -> Result<Arc<DefineParamStatement>, Error> {
-		let key = crate::key::database::pa::new(ns, db, pa).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Pa(ns, db, pa);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::pa::new(ns, db, pa).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::PaNotFound {
 					value: pa.to_owned(),
 				})?;
 				let val: DefineParamStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1236,17 +1292,17 @@ impl Transaction {
 		db: &str,
 		cg: &str,
 	) -> Result<Arc<DefineConfigStatement>, Error> {
-		let key = crate::key::database::cg::new(ns, db, cg).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Cg(ns, db, cg);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::cg::new(ns, db, cg).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::CgNotFound {
 					value: cg.to_owned(),
 				})?;
 				let val: DefineConfigStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1261,17 +1317,17 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<DefineTableStatement>, Error> {
-		let key = crate::key::database::tb::new(ns, db, tb).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Tb(ns, db, tb);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::tb::new(ns, db, tb).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::TbNotFound {
 					value: tb.to_owned(),
 				})?;
 				let val: DefineTableStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1287,17 +1343,17 @@ impl Transaction {
 		tb: &str,
 		ev: &str,
 	) -> Result<Arc<DefineEventStatement>, Error> {
-		let key = crate::key::table::ev::new(ns, db, tb, ev).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Ev(ns, db, tb, ev);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::table::ev::new(ns, db, tb, ev).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::EvNotFound {
 					value: ev.to_owned(),
 				})?;
 				let val: DefineEventStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1313,17 +1369,17 @@ impl Transaction {
 		tb: &str,
 		fd: &str,
 	) -> Result<Arc<DefineFieldStatement>, Error> {
-		let key = crate::key::table::fd::new(ns, db, tb, fd).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Fd(ns, db, tb, fd);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::table::fd::new(ns, db, tb, fd).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::FdNotFound {
 					value: fd.to_owned(),
 				})?;
 				let val: DefineFieldStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1339,17 +1395,17 @@ impl Transaction {
 		tb: &str,
 		ix: &str,
 	) -> Result<Arc<DefineIndexStatement>, Error> {
-		let key = crate::key::table::ix::new(ns, db, tb, ix).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
-			Ok(val) => val,
-			Err(cache) => {
+		let qey = cache::tx::Lookup::Ix(ns, db, tb, ix);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::table::ix::new(ns, db, tb, ix).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::IxNotFound {
 					value: ix.to_owned(),
 				})?;
 				let val: DefineIndexStatement = val.into();
-				let val = Entry::Any(Arc::new(val));
-				let _ = cache.insert(val.clone());
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
 				val
 			}
 		}
@@ -1365,22 +1421,25 @@ impl Transaction {
 		tb: &str,
 		id: &Id,
 	) -> Result<Arc<Value>, Error> {
-		let key = crate::key::thing::new(ns, db, tb, id).encode()?;
-		let res = self.cache.get_value_or_guard_async(&key).await;
-		match res {
+		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+		match self.cache.get(&qey) {
 			// The entry is in the cache
-			Ok(val) => val.try_into_val(),
+			Some(val) => val.try_into_val(),
 			// The entry is not in the cache
-			Err(cache) => match self.get(key, None).await? {
-				// The value exists in the datastore
-				Some(val) => {
-					let val = Entry::Val(Arc::new(val.into()));
-					let _ = cache.insert(val.clone());
-					val.try_into_val()
+			None => {
+				// Fetch the record from the datastore
+				let key = crate::key::thing::new(ns, db, tb, id).encode()?;
+				match self.get(key, None).await? {
+					// The value exists in the datastore
+					Some(val) => {
+						let val = cache::tx::Entry::Val(Arc::new(val.into()));
+						self.cache.insert(qey.into(), val.clone());
+						val.try_into_val()
+					}
+					// The value is not in the datastore
+					None => Ok(Arc::new(Value::None)),
 				}
-				// The value is not in the datastore
-				None => Ok(Arc::new(Value::None)),
-			},
+			}
 		}
 	}
 
@@ -1393,12 +1452,12 @@ impl Transaction {
 		id: &Id,
 		val: Value,
 	) -> Result<(), Error> {
-		let key = crate::key::thing::new(ns, db, tb, id);
-		let enc = crate::key::thing::new(ns, db, tb, id).encode()?;
 		// Set the value in the datastore
+		let key = crate::key::thing::new(ns, db, tb, id);
 		self.set(&key, &val, None).await?;
 		// Set the value in the cache
-		self.cache.insert(enc, Entry::Val(Arc::new(val)));
+		let key = cache::tx::Lookup::Record(ns, db, tb, id);
+		self.cache.insert(key.into(), cache::tx::Entry::Val(Arc::new(val)));
 		// Return nothing
 		Ok(())
 	}
@@ -1525,15 +1584,14 @@ impl Transaction {
 		strict: bool,
 		_upwards: bool,
 	) -> Result<Arc<DefineNamespaceStatement>, Error> {
-		let key = crate::key::root::ns::new(ns);
-		let enc = crate::key::root::ns::new(ns).encode()?;
-		let res = self.cache.get_value_or_guard_async(&enc).await;
-		match res {
+		let qey = cache::tx::Lookup::Ns(ns);
+		match self.cache.get(&qey) {
 			// The entry is in the cache
-			Ok(val) => val,
+			Some(val) => val,
 			// The entry is not in the cache
-			Err(cache) => {
+			None => {
 				// Try to fetch the value from the datastore
+				let key = crate::key::root::ns::new(ns);
 				let res = self.get(&key, None).await?.ok_or_else(|| Error::NsNotFound {
 					value: ns.to_owned(),
 				});
@@ -1549,16 +1607,16 @@ impl Transaction {
 						};
 						let val = {
 							self.put(&key, &val, None).await?;
-							Entry::Any(Arc::new(val))
+							cache::tx::Entry::Any(Arc::new(val))
 						};
-						let _ = cache.insert(val.clone());
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Store the fetched value in the cache
 					Ok(val) => {
 						let val: DefineNamespaceStatement = val.into();
-						let val = Entry::Any(Arc::new(val));
-						let _ = cache.insert(val.clone());
+						let val = cache::tx::Entry::Any(Arc::new(val));
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Throw any received errors
@@ -1578,15 +1636,14 @@ impl Transaction {
 		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
-		let key = crate::key::namespace::db::new(ns, db);
-		let enc = crate::key::namespace::db::new(ns, db).encode()?;
-		let res = self.cache.get_value_or_guard_async(&enc).await;
-		match res {
+		let qey = cache::tx::Lookup::Db(ns, db);
+		match self.cache.get(&qey) {
 			// The entry is in the cache
-			Ok(val) => val,
+			Some(val) => val,
 			// The entry is not in the cache
-			Err(cache) => {
+			None => {
 				// Try to fetch the value from the datastore
+				let key = crate::key::namespace::db::new(ns, db);
 				let res = self.get(&key, None).await?.ok_or_else(|| Error::DbNotFound {
 					value: db.to_owned(),
 				});
@@ -1607,9 +1664,9 @@ impl Transaction {
 						};
 						let val = {
 							self.put(&key, &val, None).await?;
-							Entry::Any(Arc::new(val))
+							cache::tx::Entry::Any(Arc::new(val))
 						};
-						let _ = cache.insert(val.clone());
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Check to see that the hierarchy exists
@@ -1624,8 +1681,8 @@ impl Transaction {
 					// Store the fetched value in the cache
 					Ok(val) => {
 						let val: DefineDatabaseStatement = val.into();
-						let val = Entry::Any(Arc::new(val));
-						let _ = cache.insert(val.clone());
+						let val = cache::tx::Entry::Any(Arc::new(val));
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Throw any received errors
@@ -1646,15 +1703,14 @@ impl Transaction {
 		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<DefineTableStatement>, Error> {
-		let key = crate::key::database::tb::new(ns, db, tb);
-		let enc = crate::key::database::tb::new(ns, db, tb).encode()?;
-		let res = self.cache.get_value_or_guard_async(&enc).await;
-		match res {
+		let qey = cache::tx::Lookup::Tb(ns, db, tb);
+		match self.cache.get(&qey) {
 			// The entry is in the cache
-			Ok(val) => val,
+			Some(val) => val,
 			// The entry is not in the cache
-			Err(cache) => {
+			None => {
 				// Try to fetch the value from the datastore
+				let key = crate::key::database::tb::new(ns, db, tb);
 				let res = self.get(&key, None).await?.ok_or_else(|| Error::TbNotFound {
 					value: tb.to_owned(),
 				});
@@ -1676,9 +1732,9 @@ impl Transaction {
 						};
 						let val = {
 							self.put(&key, &val, None).await?;
-							Entry::Any(Arc::new(val))
+							cache::tx::Entry::Any(Arc::new(val))
 						};
-						let _ = cache.insert(val.clone());
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Check to see that the hierarchy exists
@@ -1694,8 +1750,8 @@ impl Transaction {
 					// Store the fetched value in the cache
 					Ok(val) => {
 						let val: DefineTableStatement = val.into();
-						let val = Entry::Any(Arc::new(val));
-						let _ = cache.insert(val.clone());
+						let val = cache::tx::Entry::Any(Arc::new(val));
+						self.cache.insert(qey.into(), val.clone());
 						val
 					}
 					// Throw any received errors
@@ -1704,16 +1760,5 @@ impl Transaction {
 			}
 		}
 		.try_into_type()
-	}
-
-	/// Retrieve a batched scan to scan all versions over a specific range of keys in the datastore.
-	///
-	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn batch_versions<K>(&self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
-	where
-		K: Into<Key> + Debug,
-	{
-		self.lock().await.batch_versions(rng, batch).await
 	}
 }

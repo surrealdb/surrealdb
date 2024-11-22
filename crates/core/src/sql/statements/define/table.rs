@@ -19,8 +19,9 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;
+use uuid::Uuid;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -37,8 +38,24 @@ pub struct DefineTableStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub kind: TableType,
+	/// Should we overwrite the field definition if it already exists
 	#[revision(start = 4)]
 	pub overwrite: bool,
+	/// The last time that a DEFINE FIELD was added to this table
+	#[revision(start = 5)]
+	pub cache_fields_ts: Uuid,
+	/// The last time that a DEFINE EVENT was added to this table
+	#[revision(start = 5)]
+	pub cache_events_ts: Uuid,
+	/// The last time that a DEFINE TABLE was added to this table
+	#[revision(start = 5)]
+	pub cache_tables_ts: Uuid,
+	/// The last time that a DEFINE INDEX was added to this table
+	#[revision(start = 5)]
+	pub cache_indexes_ts: Uuid,
+	/// The last time that a LIVE query was added to this table
+	#[revision(start = 5)]
+	pub cache_lives_ts: Uuid,
 }
 
 impl DefineTableStatement {
@@ -89,22 +106,33 @@ impl DefineTableStatement {
 		}
 		// Check if table is a view
 		if let Some(view) = &self.view {
+			// Force queries to run
+			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
 			// Remove the table data
 			let key = crate::key::table::all::new(opt.ns()?, opt.db()?, &self.name);
 			txn.delp(key).await?;
 			// Process each foreign table
-			for v in view.what.0.iter() {
+			for ft in view.what.0.iter() {
 				// Save the view config
-				let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, v, &self.name);
+				let key = crate::key::table::ft::new(opt.ns()?, opt.db()?, ft, &self.name);
 				txn.set(key, self, None).await?;
-			}
-			// Force queries to run
-			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
-			// Process each foreign table
-			for v in view.what.0.iter() {
+				// Refresh the table cache
+				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, ft);
+				let tb = txn.get_tb(opt.ns()?, opt.db()?, ft).await?;
+				txn.set(
+					key,
+					DefineTableStatement {
+						cache_tables_ts: Uuid::now_v7(),
+						..tb.as_ref().clone()
+					},
+					None,
+				)
+				.await?;
+				// Clear the cache
+				txn.clear();
 				// Process the view data
 				let stm = UpdateStatement {
-					what: Values(vec![Value::Table(v.clone())]),
+					what: Values(vec![Value::Table(ft.clone())]),
 					output: Some(Output::None),
 					..UpdateStatement::default()
 				};
@@ -162,6 +190,20 @@ impl DefineTableStatement {
 						what: self.name.to_owned(),
 						kind: Some(val),
 						..Default::default()
+					},
+					None,
+				)
+				.await?;
+			}
+			// Refresh the table cache for the fields
+			{
+				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.name);
+				let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.name).await?;
+				txn.set(
+					key,
+					DefineTableStatement {
+						cache_fields_ts: Uuid::now_v7(),
+						..tb.as_ref().clone()
 					},
 					None,
 				)

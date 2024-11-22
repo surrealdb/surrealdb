@@ -25,7 +25,7 @@ impl Version {
 		Ok(())
 	}
 
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
