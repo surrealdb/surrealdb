@@ -97,7 +97,6 @@ impl<R> Connect<Db, R> {
 			}
 		};
 		self.address = self.address.and_then(replace_scheme);
-		dbg!(&self.address);
 		self
 	}
 }
