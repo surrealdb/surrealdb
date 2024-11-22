@@ -98,7 +98,7 @@ impl Version {
 			let key = crate::key::version::new();
 			let val: Vec<u8> = Version::from(v + 1).into();
 			// Attempt to set the current version in storage
-			tx.set(key, val, None).await?;
+			tx.replace(key, val).await?;
 
 			// Commit the transaction
 			tx.commit().await?;

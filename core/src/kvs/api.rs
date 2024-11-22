@@ -121,6 +121,35 @@ pub trait Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug;
 
+	/// Insert or replace a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
+	{
+		self.set(key, val, None).await
+	}
+
+	/// Delete all versions of a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn clr<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		self.del(key).await
+	}
+
+	/// Delete all versions of a key from the datastore if the current value matches a condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn clrc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
+	{
+		self.delc(key, chk).await
+	}
+
 	/// Fetch many keys from the datastore.
 	///
 	/// This function fetches all matching keys pairs from the underlying datastore concurrently.
@@ -246,6 +275,58 @@ pub trait Transaction {
 		Ok(())
 	}
 
+	/// Delete all versions of a range of prefixed keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn clrp<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TxReadonly);
+		}
+		// Continue with function logic
+		let beg: Key = key.into();
+		let end: Key = beg.clone().add(0xff);
+		self.clrr(beg..end).await
+	}
+
+	/// Delete all versions of a range of keys from the datastore.
+	///
+	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn clrr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TxReadonly);
+		}
+		// Continue with function logic
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let mut next = Some(beg..end);
+		while let Some(rng) = next {
+			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false, None).await?;
+			next = res.next;
+			for (k, _) in res.values.into_iter() {
+				self.clr(k).await?;
+			}
+		}
+		Ok(())
+	}
+
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches keys or key-value pairs, in batches, with multiple requests to the underlying datastore.
@@ -293,6 +374,42 @@ pub trait Transaction {
 				// there should be a last item in the
 				// vector, so we shouldn't arrive here
 				None => Ok(Batch::new(None, res)),
+			}
+		}
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn batch_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Continue with function logic
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+
+		// Scan for the next batch
+		let res = self.scan_all_versions(beg..end.clone(), batch).await?;
+
+		// Check if range is consumed
+		if res.len() < batch as usize && batch > 0 {
+			Ok(Batch::new_versioned(None, res))
+		} else {
+			match res.last() {
+				Some((k, _, _, _)) => Ok(Batch::new_versioned(
+					Some(Range {
+						start: k.clone().add(0x00),
+						end,
+					}),
+					res,
+				)),
+				// We have checked the length above, so
+				// there should be a last item in the
+				// vector, so we shouldn't arrive here
+				None => Ok(Batch::new_versioned(None, res)),
 			}
 		}
 	}
@@ -359,41 +476,5 @@ pub trait Transaction {
 		k.append(&mut ts.to_vec());
 		k.append(&mut suffix.into());
 		self.set(k, val, None).await
-	}
-
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
-	where
-		K: Into<Key> + Sprintable + Debug,
-	{
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TxFinished);
-		}
-		// Continue with function logic
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
-
-		// Scan for the next batch
-		let res = self.scan_all_versions(beg..end.clone(), batch).await?;
-
-		// Check if range is consumed
-		if res.len() < batch as usize && batch > 0 {
-			Ok(Batch::new_versioned(None, res))
-		} else {
-			match res.last() {
-				Some((k, _, _, _)) => Ok(Batch::new_versioned(
-					Some(Range {
-						start: k.clone().add(0x00),
-						end,
-					}),
-					res,
-				)),
-				// We have checked the length above, so
-				// there should be a last item in the
-				// vector, so we shouldn't arrive here
-				None => Ok(Batch::new_versioned(None, res)),
-			}
-		}
 	}
 }

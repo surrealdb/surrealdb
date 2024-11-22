@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::idx::planner::iterators::IteratorRecord;
+use crate::kvs::cache;
 use crate::sql::permission::Permission;
 use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
@@ -38,7 +39,7 @@ pub(crate) struct Document {
 
 #[non_exhaustive]
 #[derive(Clone, Debug)]
-pub struct CursorDoc {
+pub(crate) struct CursorDoc {
 	pub(crate) rid: Option<Arc<Thing>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) doc: CursorValue,
@@ -393,10 +394,29 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
-		// Get the record id
-		let id = self.id()?;
-		// Get the table definitions
-		ctx.tx().all_tb_views(opt.ns()?, opt.db()?, &id.tb).await
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		// Get or update the cache entry
+		let key = cache::ds::Lookup::Fts(ns, db, &tb.name, tb.cache_tables_ts);
+		// Get the cache from the context
+		match ctx.get_cache() {
+			// A cache is present on the context
+			Some(cache) => match cache.get(&key) {
+				Some(val) => val,
+				None => {
+					let val = ctx.tx().all_tb_views(ns, db, &tb.name).await?;
+					let val = cache::ds::Entry::Fts(val.clone());
+					cache.insert(key.into(), val.clone());
+					val
+				}
+			}
+			.try_into_fts(),
+			// No cache is present on the context
+			None => ctx.tx().all_tb_views(ns, db, &tb.name).await,
+		}
 	}
 
 	/// Get the events for this document
@@ -405,10 +425,29 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
-		// Get the record id
-		let id = self.id()?;
-		// Get the event definitions
-		ctx.tx().all_tb_events(opt.ns()?, opt.db()?, &id.tb).await
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		// Get or update the cache entry
+		let key = cache::ds::Lookup::Evs(ns, db, &tb.name, tb.cache_events_ts);
+		// Get the cache from the context
+		match ctx.get_cache() {
+			// A cache is present on the context
+			Some(cache) => match cache.get(&key) {
+				Some(val) => val,
+				None => {
+					let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
+					let val = cache::ds::Entry::Evs(val.clone());
+					cache.insert(key.into(), val.clone());
+					val
+				}
+			}
+			.try_into_evs(),
+			// No cache is present on the context
+			None => ctx.tx().all_tb_events(ns, db, &tb.name).await,
+		}
 	}
 
 	/// Get the fields for this document
@@ -417,10 +456,29 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
-		// Get the record id
-		let id = self.id()?;
-		// Get the field definitions
-		ctx.tx().all_tb_fields(opt.ns()?, opt.db()?, &id.tb, None).await
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		// Get or update the cache entry
+		let key = cache::ds::Lookup::Fds(ns, db, &tb.name, tb.cache_fields_ts);
+		// Get the cache from the context
+		match ctx.get_cache() {
+			// A cache is present on the context
+			Some(cache) => match cache.get(&key) {
+				Some(val) => val,
+				None => {
+					let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
+					let val = cache::ds::Entry::Fds(val.clone());
+					cache.insert(key.into(), val.clone());
+					val
+				}
+			}
+			.try_into_fds(),
+			// No cache is present on the context
+			None => ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await,
+		}
 	}
 
 	/// Get the indexes for this document
@@ -429,17 +487,55 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
-		// Get the record id
-		let id = self.id()?;
-		// Get the index definitions
-		ctx.tx().all_tb_indexes(opt.ns()?, opt.db()?, &id.tb).await
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		// Get or update the cache entry
+		let key = cache::ds::Lookup::Ixs(ns, db, &tb.name, tb.cache_indexes_ts);
+		// Get the cache from the context
+		match ctx.get_cache() {
+			// A cache is present on the context
+			Some(cache) => match cache.get(&key) {
+				Some(val) => val,
+				None => {
+					let val = ctx.tx().all_tb_indexes(ns, db, &tb.name).await?;
+					let val = cache::ds::Entry::Ixs(val.clone());
+					cache.insert(key.into(), val.clone());
+					val
+				}
+			}
+			.try_into_ixs(),
+			// No cache is present on the context
+			None => ctx.tx().all_tb_indexes(ns, db, &tb.name).await,
+		}
 	}
 
 	// Get the lives for this document
 	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>, Error> {
-		// Get the record id
-		let id = self.id()?;
-		// Get the table definition
-		ctx.tx().all_tb_lives(opt.ns()?, opt.db()?, &id.tb).await
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		// Get or update the cache entry
+		let key = cache::ds::Lookup::Lvs(ns, db, &tb.name, tb.cache_lives_ts);
+		// Get the cache from the context
+		match ctx.get_cache() {
+			// A cache is present on the context
+			Some(cache) => match cache.get(&key) {
+				Some(val) => val,
+				None => {
+					let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
+					let val = cache::ds::Entry::Lvs(val.clone());
+					cache.insert(key.into(), val.clone());
+					val
+				}
+			}
+			.try_into_lvs(),
+			// No cache is present on the context
+			None => ctx.tx().all_tb_lives(ns, db, &tb.name).await,
+		}
 	}
 }

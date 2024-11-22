@@ -51,7 +51,7 @@ impl Datastore {
 		let key = crate::key::root::nd::new(id);
 		let now = self.clock_now().await;
 		let val = Node::new(id, now, false);
-		run!(txn, txn.set(key, val, None).await)
+		run!(txn, txn.replace(key, val).await)
 	}
 
 	/// Deletes a node from the cluster.
@@ -70,7 +70,7 @@ impl Datastore {
 		let key = crate::key::root::nd::new(id);
 		let val = catch!(txn, txn.get_node(id).await);
 		let val = val.as_ref().archive();
-		run!(txn, txn.set(key, val, None).await)
+		run!(txn, txn.replace(key, val).await)
 	}
 
 	/// Expires nodes which have timedout from the cluster.
@@ -114,7 +114,7 @@ impl Datastore {
 				// Get the key for the node entry
 				let key = crate::key::root::nd::new(nd.id);
 				// Update the node entry
-				catch!(txn, txn.set(key, val, None).await);
+				catch!(txn, txn.replace(key, val).await);
 			}
 			// Commit the changes
 			catch!(txn, txn.commit().await);

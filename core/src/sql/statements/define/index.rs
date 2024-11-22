@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::UpdateStatement;
 use crate::sql::{Base, Ident, Idioms, Index, Output, Part, Strand, Value, Values};
 use derive::Store;
@@ -12,6 +13,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -86,6 +88,18 @@ impl DefineIndexStatement {
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
+			},
+			None,
+		)
+		.await?;
+		// Refresh the table cache
+		let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
+		let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
+		txn.set(
+			key,
+			DefineTableStatement {
+				cache_indexes_ts: Uuid::now_v7(),
+				..tb.as_ref().clone()
 			},
 			None,
 		)

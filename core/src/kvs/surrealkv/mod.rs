@@ -215,6 +215,28 @@ impl super::api::Transaction for Transaction {
 		Ok(())
 	}
 
+	/// Insert or replace a key in the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		// Replace the key
+		self.inner.insert_or_replace(&key.into(), &val.into())?;
+
+		// Return result
+		Ok(())
+	}
+
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
@@ -317,6 +339,54 @@ impl super::api::Transaction for Transaction {
 		match (self.inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.soft_delete(&key)?,
 			(None, None) => self.inner.soft_delete(&key)?,
+			_ => return Err(Error::TxConditionNotMet),
+		};
+		// Return result
+		Ok(())
+	}
+
+	/// Deletes all versions of a key from the database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn clr<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		// Remove the key
+		self.inner.delete(&key.into())?;
+		// Return result
+		Ok(())
+	}
+
+	/// Delete all versions of a key if the current value matches a condition
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
+	async fn clrc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+		V: Into<Val> + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		// Get the arguments
+		let key = key.into();
+		let chk = chk.map(Into::into);
+		// Delete the key if valid
+		match (self.inner.get(&key)?, chk) {
+			(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
+			(None, None) => self.inner.delete(&key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
 		// Return result
