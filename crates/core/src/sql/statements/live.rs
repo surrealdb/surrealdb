@@ -49,6 +49,16 @@ impl LiveStatement {
 		}
 	}
 
+	pub fn new_from_what_expr(expr: Fields, what: Value) -> Self {
+		LiveStatement {
+			id: Uuid::new_v4(),
+			node: Uuid::new_v4(),
+			what,
+			expr,
+			..Default::default()
+		}
+	}
+
 	/// Creates a live statement from parts that can be set during a query.
 	pub(crate) fn from_source_parts(
 		expr: Fields,
