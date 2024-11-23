@@ -59,11 +59,11 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
+	pub(crate) async fn new(path: &str, enable_versions: bool) -> Result<Datastore, Error> {
 		// Create new configuration options
 		let mut opts = Options::new();
-		// Ensure versions are enabled
-		opts.enable_versions = true;
+		// Configure versions
+		opts.enable_versions = enable_versions;
 		// Ensure persistence is enabled
 		opts.disk_persistence = true;
 		// Set the data storage directory
@@ -74,6 +74,17 @@ impl Datastore {
 				db,
 			}),
 			Err(e) => Err(Error::Ds(e.to_string())),
+		}
+	}
+	pub(crate) fn parse_start_string(start: &str) -> Result<(&str, bool), Error> {
+		if start.starts_with("surrealkv+versioned://") {
+			let path = start.trim_start_matches("surrealkv+versioned://");
+			Ok((path, true))
+		} else if start.starts_with("surrealkv://") {
+			let path = start.trim_start_matches("surrealkv://");
+			Ok((path, false))
+		} else {
+			Err(Error::Ds("Invalid start string".into()))
 		}
 	}
 	/// Shutdown the database
