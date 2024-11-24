@@ -1,4 +1,3 @@
-use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::planner::executor::{
@@ -6,6 +5,7 @@ use crate::idx::planner::executor::{
 };
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
+use crate::idx::planner::StatementContext;
 use crate::kvs::Transaction;
 use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
@@ -38,15 +38,11 @@ impl Tree {
 	/// that can be resolved by an index.
 	pub(super) async fn build<'a>(
 		stk: &mut Stk,
-		ctx: &'a Context,
-		opt: &'a Options,
+		stm_ctx: &'a StatementContext<'a>,
 		table: &'a Table,
-		cond: Option<&Cond>,
-		with: Option<&With>,
-		order: Option<&Ordering>,
 	) -> Result<Self, Error> {
-		let mut b = TreeBuilder::new(ctx, opt, table, with, order);
-		if let Some(cond) = cond {
+		let mut b = TreeBuilder::new(stm_ctx, table);
+		if let Some(cond) = stm_ctx.cond {
 			b.eval_cond(stk, cond).await?;
 		}
 		b.eval_order().await?;
@@ -66,10 +62,8 @@ impl Tree {
 }
 
 struct TreeBuilder<'a> {
-	ctx: &'a Context,
-	opt: &'a Options,
+	ctx: &'a StatementContext<'a>,
 	table: &'a Table,
-	with: Option<&'a With>,
 	first_order: Option<&'a Order>,
 	schemas: HashMap<Table, SchemaCache>,
 	idioms_indexes: HashMap<Table, HashMap<Arc<Idiom>, LocalIndexRefs>>,
@@ -100,27 +94,19 @@ pub(super) type LocalIndexRefs = Vec<(IndexRef, IdiomCol)>;
 pub(super) type RemoteIndexRefs = Arc<Vec<(Arc<Idiom>, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
-	fn new(
-		ctx: &'a Context,
-		opt: &'a Options,
-		table: &'a Table,
-		with: Option<&'a With>,
-		orders: Option<&'a Ordering>,
-	) -> Self {
-		let with_indexes = match with {
+	fn new(ctx: &'a StatementContext<'a>, table: &'a Table) -> Self {
+		let with_indexes = match ctx.with {
 			Some(With::Index(ixs)) => Some(Vec::with_capacity(ixs.len())),
 			_ => None,
 		};
-		let first_order = if let Some(Ordering::Order(OrderList(o))) = orders {
+		let first_order = if let Some(Ordering::Order(OrderList(o))) = ctx.order {
 			o.first()
 		} else {
 			None
 		};
 		Self {
 			ctx,
-			opt,
 			table,
-			with,
 			first_order,
 			schemas: Default::default(),
 			idioms_indexes: Default::default(),
@@ -149,7 +135,7 @@ impl<'a> TreeBuilder<'a> {
 		if self.schemas.contains_key(table) {
 			return Ok(());
 		}
-		let l = SchemaCache::new(self.opt, table, tx).await?;
+		let l = SchemaCache::new(self.ctx.opt, table, tx).await?;
 		self.schemas.insert(table.clone(), l);
 		Ok(())
 	}
@@ -219,7 +205,7 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn compute(&self, stk: &mut Stk, v: &Value, n: Node) -> Result<Node, Error> {
 		Ok(if n == Node::Computable {
-			match v.compute(stk, self.ctx, self.opt, None).await {
+			match v.compute(stk, self.ctx.ctx, self.ctx.opt, None).await {
 				Ok(v) => Node::Computed(v.into()),
 				Err(_) => Node::Unsupported(format!("Unsupported value: {}", v)),
 			}
@@ -232,7 +218,7 @@ impl<'a> TreeBuilder<'a> {
 		self.leaf_nodes_count += 1;
 		let mut values = Vec::with_capacity(a.len());
 		for v in &a.0 {
-			values.push(stk.run(|stk| v.compute(stk, self.ctx, self.opt, None)).await?);
+			values.push(stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await?);
 		}
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
@@ -252,7 +238,7 @@ impl<'a> TreeBuilder<'a> {
 		// Compute the idiom value if it is a param
 		if let Some(Part::Start(x)) = i.0.first() {
 			if x.is_param() {
-				let v = stk.run(|stk| i.compute(stk, self.ctx, self.opt, None)).await?;
+				let v = stk.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await?;
 				return stk.run(|stk| self.eval_value(stk, group, &v)).await;
 			}
 		}
@@ -262,7 +248,7 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
-		let tx = self.ctx.tx();
+		let tx = self.ctx.ctx.tx();
 		self.lazy_load_schema_resolver(&tx, self.table).await?;
 		let i = Arc::new(i.clone());
 		// Try to detect if it matches an index
@@ -295,7 +281,7 @@ impl<'a> TreeBuilder<'a> {
 		for ix in schema.indexes.iter() {
 			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
 				let ixr = self.index_map.definitions.len() as IndexRef;
-				if let Some(With::Index(ixs)) = &self.with {
+				if let Some(With::Index(ixs)) = &self.ctx.with {
 					if ixs.contains(&ix.name.0) {
 						if let Some(wi) = &mut self.with_indexes {
 							wi.push(ixr);

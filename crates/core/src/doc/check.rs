@@ -304,7 +304,7 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check where condition
-		if let Some(cond) = stm.conds() {
+		if let Some(cond) = stm.cond() {
 			// Process the permitted documents
 			let current = match self.reduced(stk, ctx, opt, Current).await? {
 				true => &self.current_reduced,
@@ -382,15 +382,7 @@ impl Document {
 				// Get the table for this document
 				let table = self.tb(ctx, opt).await?;
 				// Get the permissions for this table
-				let perms = if stm.is_delete() {
-					&table.permissions.delete
-				} else if stm.is_select() {
-					&table.permissions.select
-				} else if self.is_new() {
-					&table.permissions.create
-				} else {
-					&table.permissions.update
-				};
+				let perms = stm.permissions(&table, self.is_new());
 				// Exit early if permissions are NONE
 				if perms.is_none() {
 					return Err(Error::Ignore);
@@ -434,15 +426,7 @@ impl Document {
 				// Get the table
 				let table = self.tb(ctx, opt).await?;
 				// Get the permission clause
-				let perms = if stm.is_delete() {
-					&table.permissions.delete
-				} else if stm.is_select() {
-					&table.permissions.select
-				} else if self.is_new() {
-					&table.permissions.create
-				} else {
-					&table.permissions.update
-				};
+				let perms = stm.permissions(&table, self.is_new());
 				// Process the table permissions
 				match perms {
 					Permission::None => return Err(Error::Ignore),

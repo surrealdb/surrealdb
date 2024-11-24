@@ -2,7 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::{QueryPlanner, QueryPlannerParams};
+use crate::idx::planner::{QueryPlanner, StatementContext};
 use crate::sql::{
 	order::{OldOrders, Order, OrderList, Ordering},
 	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
@@ -136,14 +136,17 @@ impl SelectStatement {
 		};
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
-		let params: QueryPlannerParams<'_> = self.into();
-		let keys = params.is_keys_only();
+		let mut stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, &opt, doc).await?;
 			match v {
 				Value::Thing(v) => match v.is_range() {
-					true => i.prepare_range(&stm, v, keys)?,
+					true => {
+						// Evaluate is we can only scan keys (rather than keys AND values)
+						let keys_only = stm_ctx.check_keys_only(&v.tb).await?;
+						i.prepare_range(&stm, v, keys_only)?
+					}
 					false => i.prepare_thing(&stm, v)?,
 				},
 				Value::Edges(v) => {
@@ -162,7 +165,7 @@ impl SelectStatement {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-					planner.add_iterables(stk, &ctx, &opt, t, &params, &mut i).await?;
+					planner.add_iterables(stk, &stm_ctx, t, &mut i).await?;
 				}
 				Value::Array(v) => {
 					if self.only && !limit_is_one_or_zero {
@@ -171,12 +174,16 @@ impl SelectStatement {
 					for v in v {
 						match v {
 							Value::Table(t) => {
-								planner.add_iterables(stk, &ctx, &opt, t, &params, &mut i).await?;
+								planner.add_iterables(stk, &stm_ctx, t, &mut i).await?;
 							}
 							Value::Mock(v) => i.prepare_mock(&stm, v)?,
 							Value::Edges(v) => i.prepare_edges(&stm, *v)?,
 							Value::Thing(v) => match v.is_range() {
-								true => i.prepare_range(&stm, v, keys)?,
+								true => {
+									// Evaluate is we can only scan keys (rather than keys AND values)
+									let keys_only = stm_ctx.check_keys_only(&v.tb).await?;
+									i.prepare_range(&stm, v, keys_only)?
+								}
 								false => i.prepare_thing(&stm, v)?,
 							},
 							_ => i.ingest(Iterable::Value(v)),

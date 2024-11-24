@@ -209,7 +209,7 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), Error> {
 		// Check where condition
-		if let Some(cond) = stm.conds() {
+		if let Some(cond) = stm.cond() {
 			// Check if the expression is truthy
 			if !cond.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
 				// Ignore this document

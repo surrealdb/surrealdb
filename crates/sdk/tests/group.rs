@@ -816,7 +816,11 @@ async fn select_count_group_all() -> Result<(), Error> {
 	Ok(())
 }
 
-async fn select_count_group_all_permissions(perm: &str, expect: &str) -> Result<(), Error> {
+async fn select_count_group_all_permissions(
+	perm: &str,
+	expect_keys_only: bool,
+	expect_result: &str,
+) -> Result<(), Error> {
 	// Define the permissions
 	let sql = format!(
 		r"
@@ -842,65 +846,75 @@ async fn select_count_group_all_permissions(perm: &str, expect: &str) -> Result<
 	.await?;
 	t.expect_size(4)?;
 	// The explain plan is still visible
-	t.expect_val(
+	let operation = if expect_keys_only {
+		"Iterate Table Keys"
+	} else {
+		"Iterate Table"
+	};
+	t.expect_val(&format!(
 		r"[
-					{
-						detail: {
+					{{
+						detail: {{
 							table: 'table'
-						},
-						operation: 'Iterate Table Keys'
-					},
-					{
-						detail: {
-							idioms: {
+						}},
+						operation: '{operation}'
+					}},
+					{{
+						detail: {{
+							idioms: {{
 								count: [
 									'count'
 								]
-							},
+							}},
 							type: 'Group'
-						},
+						}},
 						operation: 'Collector'
-					}
+					}}
 				]",
-	)?;
+	))?;
 	// Check what is returned
-	t.expect_val(expect)?;
+	t.expect_val(expect_result)?;
 	// The explain plan is still visible
-	t.expect_val(
+	let operation = if expect_keys_only {
+		"Iterate Range Keys"
+	} else {
+		"Iterate Range"
+	};
+	t.expect_val(&format!(
 		r"[
-					{
-						detail: {
+					{{
+						detail: {{
 							range: 'a'..'z',
 							table: 'table'
-						},
-						operation: 'Iterate Range Keys'
-					},
-					{
-						detail: {
+						}},
+						operation: '{operation}'
+					}},
+					{{
+						detail: {{
 							type: 'Memory'
-						},
+						}},
 						operation: 'Collector'
-					}
+					}}
 				]",
-	)?;
+	))?;
 	// Check what is returned
-	t.expect_val(expect)?;
+	t.expect_val(expect_result)?;
 	Ok(())
 }
 
 #[tokio::test]
 async fn select_count_group_all_permissions_select_none() -> Result<(), Error> {
-	select_count_group_all_permissions("FOR SELECT NONE", "[]").await
+	select_count_group_all_permissions("FOR SELECT NONE", true, "[]").await
 }
 
 #[tokio::test]
 async fn select_count_group_all_permissions_select_full() -> Result<(), Error> {
-	select_count_group_all_permissions("FOR SELECT FULL", "[{ count: 1}]").await
+	select_count_group_all_permissions("FOR SELECT FULL", true, "[{ count: 1}]").await
 }
 
 #[tokio::test]
 async fn select_count_group_all_permissions_select_where_false() -> Result<(), Error> {
-	select_count_group_all_permissions("FOR SELECT WHERE FALSE", "[]").await
+	select_count_group_all_permissions("FOR SELECT WHERE FALSE", false, "[]").await
 }
 
 #[tokio::test]
@@ -986,6 +1000,7 @@ async fn select_count_range_keys_only() -> Result<(), Error> {
 
 async fn select_count_range_keys_only_permissions(
 	perms: &str,
+	expect_keys_only: bool,
 	expect_group_all: &str,
 	expect_count: &str,
 ) -> Result<(), Error> {
@@ -1014,48 +1029,53 @@ async fn select_count_range_keys_only_permissions(
 	.await?;
 	t.expect_size(4)?;
 	// The explain plan is still accessible
-	t.expect_val(
+	let operation = if expect_keys_only {
+		"Iterate Range Keys"
+	} else {
+		"Iterate Range"
+	};
+	t.expect_val(&format!(
 		r"[
-				{
-					detail: {
+				{{
+					detail: {{
 						range: 'a'..'z',
 						table: 'table'
-					},
-					operation: 'Iterate Range Keys'
-				},
-				{
-					detail: {
-						idioms: {
+					}},
+					operation: '{operation}'
+				}},
+				{{
+					detail: {{
+						idioms: {{
 							count: [
 								'count'
 							]
-						},
+						}},
 						type: 'Group'
-					},
+					}},
 					operation: 'Collector'
-				}
-			]",
-	)?;
+				}}
+			]"
+	))?;
 	// Check what is returned
 	t.expect_val_info(expect_group_all, "GROUP ALL")?;
 	// The explain plan is still accessible
-	t.expect_val(
-		r#"[
-					{
-						detail: {
+	t.expect_val(&format!(
+		r"[
+					{{
+						detail: {{
 							range: 'a'..'z',
 							table: 'table'
-						},
-						operation: 'Iterate Range Keys'
-					},
-					{
-						detail: {
+						}},
+						operation: '{operation}'
+					}},
+					{{
+						detail: {{
 							type: 'Memory'
-						},
+						}},
 						operation: 'Collector'
-					}
-				]"#,
-	)?;
+					}}
+				]",
+	))?;
 	// Check what is returned
 	t.expect_val_info(expect_count, "COUNT")?;
 	Ok(())
@@ -1063,13 +1083,14 @@ async fn select_count_range_keys_only_permissions(
 
 #[tokio::test]
 async fn select_count_range_keys_only_permissions_select_none() -> Result<(), Error> {
-	select_count_range_keys_only_permissions("FOR SELECT NONE", "[]", "[]").await
+	select_count_range_keys_only_permissions("FOR SELECT NONE", true, "[]", "[]").await
 }
 
 #[tokio::test]
 async fn select_count_range_keys_only_permissions_select_full() -> Result<(), Error> {
 	select_count_range_keys_only_permissions(
 		"FOR SELECT FULL",
+		true,
 		"[{ count: 2 }]",
 		"[{ count: 1 }, { count: 1 }]",
 	)
@@ -1078,13 +1099,14 @@ async fn select_count_range_keys_only_permissions_select_full() -> Result<(), Er
 
 #[tokio::test]
 async fn select_count_range_keys_only_permissions_select_where_false() -> Result<(), Error> {
-	select_count_range_keys_only_permissions("FOR SELECT WHERE FALSE", "[]", "[]").await
+	select_count_range_keys_only_permissions("FOR SELECT WHERE FALSE", false, "[]", "[]").await
 }
 
 #[tokio::test]
-async fn select_count_range_keys_only_permissions_select_where_match() -> Result<(), Error> {
+async fn select_count_range_only_permissions_select_where_match() -> Result<(), Error> {
 	select_count_range_keys_only_permissions(
 		"FOR SELECT WHERE bar = 'hello'",
+		false,
 		"[{ count: 1 }]",
 		"[{ count: 1 }]",
 	)
