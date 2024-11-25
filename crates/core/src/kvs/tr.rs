@@ -597,7 +597,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v, None).await?;
+		self.replace(k, v).await?;
 		Ok(nid)
 	}
 
@@ -608,7 +608,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v, None).await?;
+		self.replace(k, v).await?;
 		Ok(nid)
 	}
 
@@ -619,7 +619,7 @@ impl Transactor {
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v, None).await?;
+		self.replace(k, v).await?;
 		Ok(nid)
 	}
 
@@ -631,7 +631,7 @@ impl Transactor {
 		seq.remove_id(ns);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v, None).await?;
+		self.replace(k, v).await?;
 		Ok(())
 	}
 
@@ -643,7 +643,7 @@ impl Transactor {
 		seq.remove_id(db);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v, None).await?;
+		self.replace(k, v).await?;
 		Ok(())
 	}
 
@@ -655,7 +655,7 @@ impl Transactor {
 		seq.remove_id(tb);
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
-		self.set(k, v, None).await?;
+		self.replace(k, v).await?;
 		Ok(())
 	}
 

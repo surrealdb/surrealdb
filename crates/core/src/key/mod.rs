@@ -4,7 +4,6 @@
 ///
 /// crate::key::root::all                /
 /// crate::key::root::ac                 /!ac{ac}
-/// crate::key::root::hb                 /!hb{ts}/{nd}
 /// crate::key::root::nd                 /!nd{nd}
 /// crate::key::root::ni                 /!ni
 /// crate::key::root::ns                 /!ns{ns}

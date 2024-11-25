@@ -125,10 +125,10 @@ impl LiveStatement {
 				txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, id);
-				txn.put(key, lq, None).await?;
+				txn.replace(key, lq).await?;
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
-				txn.put(key, stm, None).await?;
+				txn.replace(key, stm).await?;
 				// Refresh the table cache for lives
 				let key = crate::key::database::tb::new(ns, db, &tb);
 				let tb = txn.get_tb(ns, db, &tb).await?;

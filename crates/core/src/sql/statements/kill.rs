@@ -58,10 +58,10 @@ impl KillStatement {
 				let val: Live = val.into();
 				// Delete the node live query
 				let key = crate::key::node::lq::new(nid, lid);
-				txn.del(key).await?;
+				txn.clr(key).await?;
 				// Delete the table live query
 				let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
-				txn.del(key).await?;
+				txn.clr(key).await?;
 				// Refresh the table cache for lives
 				let key = crate::key::database::tb::new(&val.ns, &val.db, &val.tb);
 				let tb = txn.get_tb(&val.ns, &val.db, &val.tb).await?;
