@@ -41,10 +41,9 @@ impl DefineConfigStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Config(ConfigKind::GraphQL), &Base::Db)?;
-		// get transaction
+		// Fetch the transaction
 		let txn = ctx.tx();
-
-		// check if already defined
+		// Check if the definition exists
 		if txn.get_db_config(opt.ns()?, opt.db()?, "graphql").await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
@@ -54,12 +53,11 @@ impl DefineConfigStatement {
 				});
 			}
 		}
-
+		// Process the statement
 		let key = crate::key::database::cg::new(opt.ns()?, opt.db()?, "graphql");
 		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		txn.set(key, self.clone(), None).await?;
-
+		txn.replace(key, self.clone()).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

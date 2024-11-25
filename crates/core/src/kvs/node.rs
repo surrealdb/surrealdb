@@ -166,9 +166,9 @@ impl Datastore {
 							// Get the key for this table live query
 							let tlq = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, nlq.lq);
 							// Delete the table live query
-							catch!(txn, txn.del(tlq).await);
+							catch!(txn, txn.clr(tlq).await);
 							// Delete the node live query
-							catch!(txn, txn.del(nlq).await);
+							catch!(txn, txn.clr(nlq).await);
 						}
 					}
 				}
@@ -179,7 +179,7 @@ impl Datastore {
 				// Get the key for the node entry
 				let key = crate::key::root::nd::new(*id);
 				// Delete the cluster node entry
-				catch!(txn, txn.del(key).await);
+				catch!(txn, txn.clr(key).await);
 			}
 			// Commit the changes
 			catch!(txn, txn.commit().await);
@@ -256,9 +256,9 @@ impl Datastore {
 								// Get the key for this table live query
 								let nlq = crate::key::node::lq::new(nid, lid);
 								// Delete the node live query
-								catch!(txn, txn.del(nlq).await);
+								catch!(txn, txn.clr(nlq).await);
 								// Delete the table live query
-								catch!(txn, txn.del(tlq).await);
+								catch!(txn, txn.clr(tlq).await);
 							}
 						}
 					}
@@ -298,9 +298,9 @@ impl Datastore {
 				// Get the key for this table live query
 				let tlq = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, id);
 				// Delete the table live query
-				catch!(txn, txn.del(tlq).await);
+				catch!(txn, txn.clr(tlq).await);
 				// Delete the node live query
-				catch!(txn, txn.del(nlq).await);
+				catch!(txn, txn.clr(nlq).await);
 			}
 		}
 		// Commit the changes
