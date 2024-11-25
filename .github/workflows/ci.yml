@@ -10,6 +10,9 @@ on:
   pull_request:
   merge_group:
 
+env:
+  RUSTFLAGS: --forbid warnings
+
 concurrency:
   # Use github.run_id on main branch
   # Use github.event.pull_request.number on pull requests, so it's unique per pull request
