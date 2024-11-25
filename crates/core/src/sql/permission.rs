@@ -165,11 +165,15 @@ pub enum Permission {
 
 impl Permission {
 	pub fn is_none(&self) -> bool {
-		matches!(self, Permission::None)
+		matches!(self, Self::None)
 	}
 
 	pub fn is_full(&self) -> bool {
-		matches!(self, Permission::Full)
+		matches!(self, Self::Full)
+	}
+
+	pub fn is_specific(&self) -> bool {
+		matches!(self, Self::Specific(_))
 	}
 }
 

@@ -19,7 +19,8 @@ use crate::sql::statements::select::SelectStatement;
 use crate::sql::statements::show::ShowStatement;
 use crate::sql::statements::update::UpdateStatement;
 use crate::sql::statements::upsert::UpsertStatement;
-use crate::sql::Explain;
+use crate::sql::statements::DefineTableStatement;
+use crate::sql::{Explain, Permission, With};
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -289,7 +290,7 @@ impl<'a> Statement<'a> {
 	}
 
 	/// Returns any WHERE clause if specified
-	pub(crate) fn conds(&self) -> Option<&Cond> {
+	pub(crate) fn cond(&self) -> Option<&Cond> {
 		match self {
 			Statement::Live(v) => v.cond.as_ref(),
 			Statement::Select(v) => v.cond.as_ref(),
@@ -320,6 +321,14 @@ impl<'a> Statement<'a> {
 	pub(crate) fn order(&self) -> Option<&Ordering> {
 		match self {
 			Statement::Select(v) => v.order.as_ref(),
+			_ => None,
+		}
+	}
+
+	/// Returns any WITH clause if specified
+	pub(crate) fn with(&self) -> Option<&With> {
+		match self {
+			Statement::Select(v) => v.with.as_ref(),
 			_ => None,
 		}
 	}
@@ -390,6 +399,24 @@ impl<'a> Statement<'a> {
 		match self {
 			Statement::Select(v) => v.explain.as_ref(),
 			_ => None,
+		}
+	}
+
+	/// Returns a reference to the appropriate `Permission` field within the
+	/// `DefineTableStatement` structure based on the type of the statement.
+	pub(crate) fn permissions<'b>(
+		&self,
+		table: &'b DefineTableStatement,
+		doc_is_new: bool,
+	) -> &'b Permission {
+		if self.is_delete() {
+			&table.permissions.delete
+		} else if self.is_select() {
+			&table.permissions.select
+		} else if doc_is_new {
+			&table.permissions.create
+		} else {
+			&table.permissions.update
 		}
 	}
 }
