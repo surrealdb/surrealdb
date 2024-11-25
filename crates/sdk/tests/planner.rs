@@ -538,6 +538,64 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn select_with_compound_index() -> Result<(), Error> {
+	let sql = r"
+		DEFINE INDEX idxNameEvent ON event FIELDS name, event;
+		DEFINE INDEX idxNameEventPath ON event FIELDS name, event, path;
+		SELECT * FROM event WITH INDEX idxNameEvent WHERE name = 'someName' AND event = 'event' AND path= 'A/B/C' LIMIT 1 EXPLAIN;
+		SELECT * FROM event WITH INDEX idxNameEventPath WHERE name = 'someName' AND event = 'event' AND path= 'A/B/C' LIMIT 1 EXPLAIN;
+		SELECT * FROM event WHERE name = 'someName' AND event = 'event' AND path= 'A/B/C' LIMIT 1 EXPLAIN;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(2)?;
+	t.expect_val(
+		"[
+			{
+				detail: {
+					plan: {
+						index: 'idxNameEvent',
+						operator: '=',
+						value: 'someName'
+					},
+					table: 'event'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)?;
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+			{
+				detail: {
+					plan: {
+						index: 'idxNameEventPath',
+						operator: '=',
+						value: 'someName'
+					},
+					table: 'event'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+		)?;
+	}
+	Ok(())
+}
+
 fn range_test(unique: bool, from_incl: bool, to_incl: bool) -> String {
 	let from_op = if from_incl {
 		">="
