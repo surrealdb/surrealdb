@@ -104,6 +104,13 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
 		testset
 	};
 
+	// check for unused keys in tests
+	for t in testset.iter() {
+		for k in t.config.unused_keys() {
+			warn!("Test `{}` contained unused key `{k}` in config", t.path);
+		}
+	}
+
 	let num_jobs = matches
 		.get_one::<u32>("jobs")
 		.copied()

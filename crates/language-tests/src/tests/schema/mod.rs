@@ -11,6 +11,7 @@ use surrealdb_core::{
 	sql::Value as CoreValue,
 	syn,
 };
+use tracing_subscriber::fmt::format;
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -62,6 +63,20 @@ impl TestConfig {
 	pub fn can_use_reusable_ds(&self) -> bool {
 		self.env.as_ref().map(|x| !x.clean).unwrap_or(true)
 	}
+
+	pub fn unused_keys(&self) -> Vec<String> {
+		let mut res: Vec<_> = self._unused_keys.keys().map(|x| x.clone()).collect();
+
+		if let Some(x) = self.env {
+			res.append(&mut x.unused_keys())
+		}
+
+		if let Some(x) = self.test {
+			res.append(&mut x.unused_keys())
+		}
+
+		res
+	}
 }
 
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -108,6 +123,18 @@ impl TestEnv {
 	pub fn timeout(&self) -> Option<u64> {
 		self.timeout.map(|x| x.to_value(1000)).unwrap_or(Some(1000))
 	}
+
+	pub fn unused_keys(&self) -> Vec<String> {
+		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("env.{x}")).collect();
+
+		if let Some(x) = self.capabilities {
+			if let BoolOr::Value(x) = x {
+				res.append(&mut x.unused_keys());
+			}
+		}
+
+		res
+	}
 }
 
 pub enum TestResultFlat {
@@ -147,6 +174,10 @@ impl TestResult {
 #[serde(rename_all = "kebab-case")]
 pub struct ErrorTestResult {
 	pub error: BoolOr<String>,
+
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -154,6 +185,10 @@ pub struct ErrorTestResult {
 pub struct ValueTestResult {
 	pub value: SurrealValue,
 	pub rough: Option<bool>,
+
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
 /// A enum for when configuration which can be disabled, enabled or configured to have a specific
@@ -242,6 +277,39 @@ impl TestDetails {
 	pub fn issue(&self) -> Option<u64> {
 		self.issue
 	}
+
+	pub fn unused_keys(&self) -> Vec<String> {
+		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("test.{x}")).collect();
+
+		if let Some(results) = self.results {
+			match results {
+				TestDetailsResults::QueryResult(x) => {
+					for (idx, r) in x.iter().enumerate() {
+						match r {
+							TestResult::Plain(_) => {}
+							TestResult::Error(e) => {
+								e._unused_keys
+									.keys()
+									.map(|x| format!("test.results[{idx}].{x}"))
+									.collect_into(&mut res);
+							}
+							TestResult::Value(e) => {
+								e._unused_keys
+									.keys()
+									.map(|x| format!("test.results[{idx}].{x}"))
+									.collect_into(&mut res);
+							}
+						}
+					}
+				}
+				TestDetailsResults::ParserError(x) => x
+					._unused_keys
+					.keys()
+					.map(|x| format!("test.results.{x}"))
+					.collect_into(&mut res),
+			}
+		}
+	}
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -256,6 +324,9 @@ pub enum TestDetailsResults {
 #[serde(rename_all = "kebab-case")]
 pub struct ParsingTestResult {
 	pub parsing_error: BoolOr<String>,
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -301,6 +372,10 @@ pub struct Capabilities {
 
 	pub allow_http: Option<BoolOr<Vec<SchemaTarget<RouteTarget>>>>,
 	pub deny_http: Option<BoolOr<Vec<SchemaTarget<RouteTarget>>>>,
+
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -326,5 +401,11 @@ impl<T: fmt::Display> Serialize for SchemaTarget<T> {
 		S: serde::Serializer,
 	{
 		self.0.to_string().serialize(serializer)
+	}
+}
+
+impl Capabilities {
+	pub fn unused_keys(&self) -> Vec<String> {
+		self._unused_keys.keys().map(|x| format!("env.capabilities.{x}")).collect()
 	}
 }

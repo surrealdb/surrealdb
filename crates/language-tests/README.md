@@ -89,7 +89,7 @@ in toml and contains the following sections:
 	  parallel
 	- `clean` should the test be run in a completely clean database.
 	- `namespace` the namespace, if any, to run the test in
-	- `database` the namespace, if any, to run the test in
+	- `database` the database, if any, to run the test in
 	- `imports` a list of files to run before the test.
 	- `timeout` a duration in milliseconds that the test is allowed to take.
 	- `[capabilities]` a configuration of database capabilities in which the
@@ -156,7 +156,7 @@ allow specifying the expected number and value of the results. Generally
 specified test results will look like the following:
 ```toml
 [[test.results]]
-value = "[{ id: foo:bar, name: 'bar' }]
+value = "[{ id: foo:bar, name: 'bar' }]"
 
 [[test.results]]
 error = "Some error is happening here"
