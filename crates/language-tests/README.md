@@ -106,21 +106,22 @@ The `[test]` table specifies the information about the test itself.
 Sometimes you want to include a SurrealQL file into the testing suite but not
 actually care about it's results, for example when the file is intended for as
 an import for other test files. In this case you can disable running the file as
-a test by setting `[test.run]` to false.
+a test by setting `[test.run]` to false. Defaults to `true`
 
 #### `[test.wip]`
 Some tests can be test for a work in progress feature or a known issue or bug
-that we cannot fix right now. We can still test these these bugs and feature by
-including the setting `[test.wip]` to true. Doing this will turn errors in the
+that we cannot fix right now. We can still test these these bugs and features by
+setting `[test.wip]` to true. Doing so will turn errors in the
 tests results into warnings which prevents a test run which includes such a test
 from failing. Furthermore it will also exclude the tests from having it's
-results automatically be updated by the CI tool.
+results automatically be updated by the CI tool when running with 
+`--failure accept.` or `--failure overwrite`. Defaults to `false`
 
 #### `[test.reason]` and `[test.issue]`
 Information about the test it's reason to exist and the issue from which it
 originated. These are mostly just for documentation however when a test is
 `wip` and has an issue specified the CLI will then suggest closing the issue if
-the test succeeded. 
+the test succeeded. Both default to `None` i.e. have no value.
 
 
 #### `[test.results]`
@@ -155,7 +156,7 @@ allow specifying the expected number and value of the results. Generally
 specified test results will look like the following:
 ```toml
 [[test.results]]
-value = "[{ id: foo:bar, name: "bar" }]
+value = "[{ id: foo:bar, name: 'bar' }]
 
 [[test.results]]
 error = "Some error is happening here"
