@@ -99,7 +99,7 @@ impl<'a> StatementContext<'a> {
 		}
 		// Otherwise, we do the evaluation
 		let r = self.is_keys_only(tb).await?;
-		// And store the rsult in the cache
+		// And store the result in the cache
 		self.is_keys_only.insert(tb.to_string(), r);
 		Ok(r)
 	}
