@@ -15,4 +15,3 @@ DEFINE FUNCTION fn::test($first: string, $last: string) {
     RETURN "ERROR"
 };
 fn::test("a","b");
-count(1);
