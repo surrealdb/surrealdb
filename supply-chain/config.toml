@@ -2,7 +2,7 @@
 # cargo-vet config file
 
 [cargo-vet]
-version = "0.9"
+version = "0.10"
 
 [imports.bytecode-alliance]
 url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/main/supply-chain/audits.toml"
@@ -145,10 +145,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.argon2]]
 version = "0.5.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.arrayvec]]
-version = "0.7.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.ascii-canvas]]
@@ -756,7 +752,7 @@ version = "0.1.28"
 criteria = "safe-to-deploy"
 
 [[exemptions.js-sys]]
-version = "0.3.69"
+version = "0.3.72"
 criteria = "safe-to-deploy"
 
 [[exemptions.jsonwebtoken]]
@@ -1419,10 +1415,6 @@ criteria = "safe-to-deploy"
 version = "3.7.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.sha2]]
-version = "0.10.8"
-criteria = "safe-to-deploy"
-
 [[exemptions.shlex]]
 version = "1.3.0"
 criteria = "safe-to-deploy"
@@ -1740,19 +1732,27 @@ version = "0.11.0+wasi-snapshot-preview1"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen]]
-version = "0.2.92"
+version = "0.2.95"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-backend]]
-version = "0.2.92"
+version = "0.2.95"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-futures]]
-version = "0.4.42"
+version = "0.4.45"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-macro]]
-version = "0.2.92"
+version = "0.2.95"
+criteria = "safe-to-deploy"
+
+[[exemptions.wasm-bindgen-macro-support]]
+version = "0.2.95"
+criteria = "safe-to-deploy"
+
+[[exemptions.wasm-bindgen-shared]]
+version = "0.2.95"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-streams]]
