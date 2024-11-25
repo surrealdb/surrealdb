@@ -180,7 +180,7 @@ impl SelectStatement {
 							Value::Edges(v) => i.prepare_edges(&stm, *v)?,
 							Value::Thing(v) => match v.is_range() {
 								true => {
-									// Evaluate is we can only scan keys (rather than keys AND values)
+									// Evaluate if we can only scan keys (rather than keys AND values)
 									let keys_only = stm_ctx.check_keys_only(&v.tb).await?;
 									i.prepare_range(&stm, v, keys_only)?
 								}
