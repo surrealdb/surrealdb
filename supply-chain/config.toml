@@ -147,10 +147,6 @@ criteria = "safe-to-deploy"
 version = "0.5.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.arrayvec]]
-version = "0.7.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.ascii-canvas]]
 version = "3.0.0"
 criteria = "safe-to-deploy"
@@ -595,20 +591,32 @@ criteria = "safe-to-deploy"
 version = "0.1.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.futures-channel]]
+version = "0.3.31"
+criteria = "safe-to-deploy"
+
+[[exemptions.futures-core]]
+version = "0.3.31"
+criteria = "safe-to-deploy"
+
+[[exemptions.futures-io]]
+version = "0.3.31"
+criteria = "safe-to-deploy"
+
 [[exemptions.futures-lite]]
 version = "2.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-macro]]
-version = "0.3.30"
+version = "0.3.31"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-sink]]
-version = "0.3.30"
+version = "0.3.31"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-task]]
-version = "0.3.30"
+version = "0.3.31"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-timer]]
@@ -616,7 +624,7 @@ version = "3.0.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-util]]
-version = "0.3.30"
+version = "0.3.31"
 criteria = "safe-to-deploy"
 
 [[exemptions.fuzzy-matcher]]
@@ -1320,11 +1328,7 @@ version = "0.21.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls]]
-version = "0.22.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.rustls]]
-version = "0.23.12"
+version = "0.23.18"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-pemfile]]
@@ -1336,7 +1340,7 @@ version = "2.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-pki-types]]
-version = "1.7.0"
+version = "1.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
@@ -1344,7 +1348,7 @@ version = "0.101.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
-version = "0.102.6"
+version = "0.102.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustyline]]
@@ -1417,10 +1421,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.serde_with_macros]]
 version = "3.7.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sha2]]
-version = "0.10.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.shlex]]
@@ -1708,7 +1708,7 @@ version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ureq]]
-version = "2.9.6"
+version = "2.10.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.urlencoding]]
