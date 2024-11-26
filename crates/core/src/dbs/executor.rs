@@ -54,13 +54,10 @@ impl Executor {
 
 		if let Some(ns) = stmt.ns {
 			// Check that record authentication matches session
-			if self.opt.auth.is_record() {
-				let ns = self.opt.ns()?;
-				if self.opt.auth.level().ns() != Some(ns) {
-					return Err(Error::NsNotAllowed {
-						ns: ns.into(),
-					});
-				}
+			if self.opt.auth.is_record() && self.opt.auth.level().ns() != Some(&ns) {
+				return Err(Error::NsNotAllowed {
+					ns,
+				});
 			}
 
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
@@ -70,13 +67,10 @@ impl Executor {
 		}
 		if let Some(db) = stmt.db {
 			// Check that record authentication matches session
-			if self.opt.auth.is_record() {
-				let db = self.opt.db()?;
-				if self.opt.auth.level().db() != Some(db) {
-					return Err(Error::DbNotAllowed {
-						db: db.into(),
-					});
-				}
+			if self.opt.auth.is_record() && self.opt.auth.level().db() != Some(&db) {
+				return Err(Error::DbNotAllowed {
+					db,
+				});
 			}
 
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
@@ -561,6 +555,26 @@ impl Executor {
 	where
 		S: Stream<Item = Result<Statement, Error>>,
 	{
+		// Ensure that the initial namespace and database, if it exists, is valid for authentication
+		if opt.auth.is_record() {
+			if let Some(ns) = opt.ns().ok() {
+				if opt.auth.level().ns() != Some(ns) {
+					return Err(Error::NsNotAllowed {
+						ns: ns.into(),
+					});
+				}
+			}
+		}
+		if opt.auth.is_record() {
+			if let Some(db) = opt.db().ok() {
+				if opt.auth.level().db() != Some(db) {
+					return Err(Error::DbNotAllowed {
+						db: db.into(),
+					});
+				}
+			}
+		}
+
 		let mut this = Executor::new(ctx, opt);
 		let mut stream = pin!(stream);
 
