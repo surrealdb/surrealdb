@@ -557,7 +557,7 @@ impl Executor {
 	{
 		// Ensure that the initial namespace and database, if it exists, is valid for authentication
 		if opt.auth.is_record() {
-			if let Some(ns) = opt.ns().ok() {
+			if let Ok(ns) = opt.ns() {
 				if opt.auth.level().ns() != Some(ns) {
 					return Err(Error::NsNotAllowed {
 						ns: ns.into(),
@@ -566,7 +566,7 @@ impl Executor {
 			}
 		}
 		if opt.auth.is_record() {
-			if let Some(db) = opt.db().ok() {
+			if let Ok(db) = opt.db() {
 				if opt.auth.level().db() != Some(db) {
 					return Err(Error::DbNotAllowed {
 						db: db.into(),
