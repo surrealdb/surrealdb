@@ -272,7 +272,7 @@ async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await?;
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -282,15 +282,15 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	// Send LET command
 	socket.send_request("let", json!(["let_var", "let_value",])).await?;
 	// Verify the variable is set
-	let res = socket.send_message_query("SELECT * FROM $let_var").await?;
-	assert_eq!(res[0]["result"], json!(["let_value"]), "result: {res:?}");
+	let res = socket.send_message_query("RETURN $let_var").await?;
+	assert_eq!(res[0]["result"], json!("let_value"), "result: {res:?}");
 	// Send UNSET command
-	socket.send_request("unset", json!(["let_var",])).await?;
+	socket.send_request("unset", json!(["let_var"])).await?;
 	// Verify the variable is unset
-	let res = socket.send_message_query("SELECT * FROM $let_var").await?;
-	assert_eq!(res[0]["result"], json!([null]), "result: {res:?}");
+	let res = socket.send_message_query("RETURN $let_var").await?;
+	assert_eq!(res[0]["result"], json!(null), "result: {res:?}");
 	// Test passed
-	server.finish().unwrap();
+	server.finish()?;
 	Ok(())
 }
 
@@ -678,7 +678,78 @@ async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test(tokio::test)]
-async fn live() -> Result<(), Box<dyn std::error::Error>> {
+async fn live_query() -> Result<(), Box<dyn std::error::Error>> {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await?;
+	// Send LIVE command
+	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await?;
+	assert!(res.is_object(), "result: {res:?}");
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let res = res["result"].as_array().unwrap();
+	assert_eq!(res.len(), 1, "result: {res:?}");
+	assert!(res[0]["result"].is_string(), "result: {res:?}");
+	let live1 = res[0]["result"].as_str().unwrap();
+	// Send LIVE command
+	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await?;
+	assert!(res.is_object(), "result: {res:?}");
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let res = res["result"].as_array().unwrap();
+	assert_eq!(res.len(), 1, "result: {res:?}");
+	assert!(res[0]["result"].is_string(), "result: {res:?}");
+	let live2 = res[0]["result"].as_str().unwrap();
+	// Create a new test record
+	let res = socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
+	assert!(res.is_object(), "result: {res:?}");
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let res = res["result"].as_array().unwrap();
+	assert_eq!(res.len(), 1, "result: {res:?}");
+	// Wait some time for all messages to arrive, and then search for the notification message
+	let msgs: Result<_, Box<dyn std::error::Error>> =
+		tokio::time::timeout(Duration::from_secs(1), async {
+			Ok(vec![socket.receive_other_message().await?, socket.receive_other_message().await?])
+		})
+		.await?;
+	let msgs = msgs?;
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
+	// Check for first live query notifcation
+	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live1));
+	assert!(res.is_some(), "Expected to find a notification for LQ id {live1}: {msgs:?}");
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	let res = res.as_object().unwrap();
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert!(res["action"].is_string(), "result: {res:?}");
+	assert_eq!(res["action"], "CREATE", "result: {res:?}");
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["id"], "tester:id", "result: {res:?}");
+	// Check for second live query notifcation
+	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live2));
+	assert!(res.is_some(), "Expected to find a notification for LQ id {live2}: {msgs:?}");
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	let res = res.as_object().unwrap();
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["action"], "CREATE", "result: {res:?}");
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["id"], "tester:id", "result: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+	Ok(())
+}
+
+/// Same as live but uses the RPC for both methods.
+#[test(tokio::test)]
+async fn live_rpc() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
@@ -692,14 +763,13 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
 	let live1 = res["result"].as_str().unwrap();
-	// Send QUERY command
-	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await?;
+
+	// Send LIVE command
+	let res = socket.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {res:?}");
-	assert!(res["result"].is_array(), "result: {res:?}");
-	let res = res["result"].as_array().unwrap();
-	assert_eq!(res.len(), 1, "result: {res:?}");
-	assert!(res[0]["result"].is_string(), "result: {res:?}");
-	let live2 = res[0]["result"].as_str().unwrap();
+	assert!(res["result"].is_string(), "result: {res:?}");
+	let live2 = res["result"].as_str().unwrap();
+
 	// Create a new test record
 	let res = socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
 	assert!(res.is_object(), "result: {res:?}");

@@ -15,6 +15,7 @@ mod cli_integration {
 	#[cfg(unix)]
 	use serde_json::json;
 	use std::fs::File;
+	use std::io::Write;
 	#[cfg(unix)]
 	use std::time;
 	use std::time::Duration;
@@ -884,6 +885,118 @@ mod cli_integration {
 			);
 		}
 		server.finish().unwrap();
+	}
+
+	#[test(tokio::test)]
+	async fn with_import_file() {
+		let ns = Ulid::new();
+		let db = Ulid::new();
+
+		info!("* Import and reimport root-level file");
+		{
+			// Start the server with an import file containing the following query:
+			let query = r#"DEFINE ACCESS OVERWRITE admin ON ROOT TYPE JWT URL "https://www.surrealdb.com/jwks.json";"#;
+			let import_file = common::tmp_file("import.surql");
+			let mut file = File::create(&import_file).unwrap();
+			file.write_all(query.as_bytes()).unwrap();
+			let (addr, mut server) =
+				common::start_server_with_import_file(&import_file).await.unwrap();
+			// Define connection arguments.
+			let args = format!("sql --conn http://{addr} --user {USER} --pass {PASS}");
+			// Verify that the file has been imported correctly.
+			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
+			assert!(output.contains(
+				r#"DEFINE ACCESS admin ON ROOT TYPE JWT URL 'https://www.surrealdb.com/jwks.json'"#
+			));
+			// Modify the resource that was imported.
+			common::run(&args)
+				.input("DEFINE ACCESS OVERWRITE admin ON ROOT TYPE JWT URL 'https://www.example.com/jwks.json'")
+				.output()
+				.expect("success");
+			// Verify that the resource has been modified correctly.
+			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
+			assert!(output.contains(
+				r#"DEFINE ACCESS admin ON ROOT TYPE JWT URL 'https://www.example.com/jwks.json'"#
+			));
+			// Restart the server.
+			server.finish().unwrap();
+			let (addr, mut server) =
+				common::start_server_with_import_file(&import_file).await.unwrap();
+			// Verify that the resource has been recreated correctly.
+			let args = format!("sql --conn http://{addr} --user {USER} --pass {PASS}");
+			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
+			assert!(output.contains(
+				r#"DEFINE ACCESS admin ON ROOT TYPE JWT URL 'https://www.surrealdb.com/jwks.json'"#
+			));
+			server.finish().unwrap();
+		}
+
+		info!("* Multi-level import file");
+		{
+			// Start the server with an import file containing the following query:
+			let query = format!(
+				r#"
+				USE NS `{ns}`;
+				DEFINE USER test ON NAMESPACE PASSWORD "secret";
+				USE NS `{ns}` DB `{db}`;
+				CREATE user:1;
+			"#
+			);
+			let import_file = common::tmp_file("import.surql");
+			let mut file = File::create(&import_file).unwrap();
+			file.write_all(query.as_bytes()).unwrap();
+			let (addr, mut server) =
+				common::start_server_with_import_file(&import_file).await.unwrap();
+			// Verify that the file has been imported correctly.
+			let args =
+				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns}");
+			let output = common::run(&args).input("INFO FOR NAMESPACE").output().expect("success");
+			assert!(output.contains(r#"DEFINE USER test ON NAMESPACE PASSHASH"#));
+			let args =
+				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns} --database {db}");
+			let output = common::run(&args).input("SELECT * FROM user").output().expect("success");
+			assert!(output.contains(r#"{ id: user:1 }"#));
+			server.finish().unwrap();
+		}
+
+		info!("* Invalid import file");
+		{
+			// Start the server with an import file which contains invalid SurrealQL.
+			let query = r#"
+				DEFINE USER test ON ROOT PASSWORD "secret"; -- Valid
+				DEFINE USER ON ROOT test PASSWORD "secret"; -- Invalid
+			"#;
+			let import_file = common::tmp_file("import.surql");
+			let mut file = File::create(&import_file).unwrap();
+			file.write_all(query.as_bytes()).unwrap();
+			let res = common::start_server_with_import_file(&import_file).await;
+			match res {
+				Ok(_) => panic!("import file should contain parseable SurrealQL"),
+				Err(e) => {
+					assert!(e.to_string().contains("server failed to start"))
+				}
+			}
+			// Verify that no data has been created on the datastore.
+			let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+			let args =
+				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns}");
+			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
+			assert!(!output.contains(r#"DEFINE USER test ON ROOT PASSHASH"#));
+			server.finish().unwrap();
+		}
+
+		info!("* Nonexistent import file");
+		{
+			// Start the server with an import file which does not exist.
+			let import_file = common::tmp_file("import.surql");
+			let res = common::start_server_with_import_file(&import_file).await;
+			match res {
+				Ok(_) => panic!("import file should require an existent file"),
+				Err(e) => {
+					assert!(e.to_string().contains("server failed to start"))
+				}
+			}
+		}
 	}
 
 	#[test(tokio::test)]
