@@ -444,12 +444,8 @@ mod tests {
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();
-		let ixr = IndexReference {
-			ixs: Arc::new([]),
-			ixr: 1,
-		};
 		let io1 = IndexOption::new(
-			1,
+			IndexReference::new(Arc::new([]), 1),
 			Idiom::parse("test").into(),
 			0,
 			IdiomPosition::Right,
@@ -457,7 +453,7 @@ mod tests {
 		);
 
 		let io2 = IndexOption::new(
-			1,
+			IndexReference::new(Arc::new([]), 1),
 			Idiom::parse("test").into(),
 			0,
 			IdiomPosition::Right,
