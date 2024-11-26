@@ -53,12 +53,32 @@ impl Executor {
 			.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?;
 
 		if let Some(ns) = stmt.ns {
+			// Check that record authentication matches session
+			if self.opt.auth.is_record() {
+				let ns = self.opt.ns()?;
+				if self.opt.auth.level().ns() != Some(ns) {
+					return Err(Error::NsNotAllowed {
+						ns: ns.into(),
+					});
+				}
+			}
+
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
 			self.opt.set_ns(Some(ns.as_str().into()));
 			session.put(NS.as_ref(), ns.into());
 			ctx_ref.add_value("session", session.into());
 		}
 		if let Some(db) = stmt.db {
+			// Check that record authentication matches session
+			if self.opt.auth.is_record() {
+				let db = self.opt.db()?;
+				if self.opt.auth.level().db() != Some(db) {
+					return Err(Error::DbNotAllowed {
+						db: db.into(),
+					});
+				}
+			}
+
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
 			self.opt.set_db(Some(db.as_str().into()));
 			session.put(DB.as_ref(), db.into());
