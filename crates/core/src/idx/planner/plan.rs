@@ -1,8 +1,7 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::{GroupRef, IdiomCol, IdiomPosition, IndexRef, Node};
+use crate::idx::planner::tree::{GroupRef, IdiomCol, IdiomPosition, IndexReference, Node};
 use crate::idx::planner::StatementContext;
-use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
 use crate::sql::{Array, Expression, Idiom, Number, Object};
 use crate::sql::{Operator, Value};
@@ -18,7 +17,7 @@ pub(super) struct PlanBuilder {
 	/// List of expressions that are not ranges, backed by an index
 	non_range_indexes: Vec<(Arc<Expression>, IndexOption)>,
 	/// List of indexes allowed in this plan
-	with_indexes: Option<Vec<IndexRef>>,
+	with_indexes: Option<Vec<IndexReference>>,
 	/// Group each possible optimisations local to a SubQuery
 	groups: BTreeMap<GroupRef, Group>, // The order matters because we want the plan to be consistent across repeated queries.
 }
@@ -29,7 +28,7 @@ impl PlanBuilder {
 		tb: &str,
 		root: Option<Node>,
 		ctx: &StatementContext<'_>,
-		with_indexes: Option<Vec<IndexRef>>,
+		with_indexes: Option<Vec<IndexReference>>,
 		order: Option<IndexOption>,
 		all_and_groups: HashMap<GroupRef, bool>,
 		all_and: bool,
@@ -53,7 +52,7 @@ impl PlanBuilder {
 			}
 		}
 
-		// If every boolean operator are AND then we can use the single index plan
+		// If every boolean operator is AND then we can use the single index plan
 		if all_and {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
@@ -62,7 +61,7 @@ impl PlanBuilder {
 					return Ok(Plan::SingleIndexRange(ir, rq));
 				}
 			}
-			// Otherwise we take the first single index option
+			// Otherwise, we take the first single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				return Ok(Plan::SingleIndex(Some(e), i));
 			}
@@ -101,7 +100,7 @@ impl PlanBuilder {
 	fn filter_index_option(&self, io: Option<&IndexOption>) -> Option<IndexOption> {
 		if let Some(io) = io {
 			if let Some(wi) = &self.with_indexes {
-				if !wi.contains(&io.ix_ref()) {
+				if !wi.contains(io.ix_ref()) {
 					return None;
 				}
 			}
@@ -133,7 +132,7 @@ impl PlanBuilder {
 	fn add_index_option(&mut self, group_ref: GroupRef, exp: Arc<Expression>, io: IndexOption) {
 		if let IndexOperator::RangePart(_, _) = io.op() {
 			let level = self.groups.entry(group_ref).or_default();
-			match level.ranges.entry(io.ix_ref()) {
+			match level.ranges.entry(io.ixr.clone()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().push((exp, io));
 				}
@@ -154,15 +153,15 @@ pub(super) enum Plan {
 	/// Index scan filtered on records matching a given expression
 	SingleIndex(Option<Arc<Expression>>, IndexOption),
 	/// Union of filtered index scans
-	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
+	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexReference, UnionRangeQueryBuilder)>),
 	/// Index scan for record matching a given range
-	SingleIndexRange(IndexRef, UnionRangeQueryBuilder),
+	SingleIndexRange(IndexReference, UnionRangeQueryBuilder),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(super) struct IndexOption {
 	/// A reference to the index definition
-	ix_ref: IndexRef,
+	ixr: IndexReference,
 	/// The idiom matching this index
 	id: Arc<Idiom>,
 	/// The index of the idiom in the index columns
@@ -188,14 +187,14 @@ pub(super) enum IndexOperator {
 
 impl IndexOption {
 	pub(super) fn new(
-		ix_ref: IndexRef,
+		ixr: IndexReference,
 		id: Arc<Idiom>,
 		id_col: IdiomCol,
 		id_pos: IdiomPosition,
 		op: IndexOperator,
 	) -> Self {
 		Self {
-			ix_ref,
+			ixr,
 			id,
 			id_col,
 			id_pos,
@@ -207,8 +206,8 @@ impl IndexOption {
 		matches!(self.op.as_ref(), IndexOperator::Union(_))
 	}
 
-	pub(super) fn ix_ref(&self) -> IndexRef {
-		self.ix_ref
+	pub(super) fn ix_ref(&self) -> &IndexReference {
+		&self.ixr
 	}
 
 	pub(super) fn op(&self) -> &IndexOperator {
@@ -232,11 +231,9 @@ impl IndexOption {
 		v.clone()
 	}
 
-	pub(crate) fn explain(&self, ix_def: &[Arc<DefineIndexStatement>]) -> Value {
+	pub(crate) fn explain(&self) -> Value {
 		let mut e = HashMap::new();
-		if let Some(ix) = ix_def.get(self.ix_ref as usize) {
-			e.insert("index", Value::from(ix.name.0.to_owned()));
-		}
+		e.insert("index", Value::from(self.ix_ref().name.0.to_owned()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
@@ -254,7 +251,7 @@ impl IndexOption {
 				e.insert("operator", Value::from("join"));
 				let mut joins = Vec::with_capacity(ios.len());
 				for io in ios {
-					joins.push(io.explain(ix_def));
+					joins.push(io.explain());
 				}
 				let joins = Value::from(joins);
 				e.insert("joins", joins);
@@ -360,11 +357,11 @@ impl From<&RangeValue> for Value {
 
 #[derive(Default)]
 pub(super) struct Group {
-	ranges: HashMap<IndexRef, Vec<(Arc<Expression>, IndexOption)>>,
+	ranges: HashMap<IndexReference, Vec<(Arc<Expression>, IndexOption)>>,
 }
 
 impl Group {
-	fn take_first_range(self) -> Option<(IndexRef, UnionRangeQueryBuilder)> {
+	fn take_first_range(self) -> Option<(IndexReference, UnionRangeQueryBuilder)> {
 		if let Some((ir, ri)) = self.ranges.into_iter().take(1).next() {
 			UnionRangeQueryBuilder::new_aggregate(ri).map(|rb| (ir, rb))
 		} else {
@@ -372,7 +369,7 @@ impl Group {
 		}
 	}
 
-	fn take_union_ranges(self, r: &mut Vec<(IndexRef, UnionRangeQueryBuilder)>) {
+	fn take_union_ranges(self, r: &mut Vec<(IndexReference, UnionRangeQueryBuilder)>) {
 		for (ir, ri) in self.ranges {
 			if let Some(rb) = UnionRangeQueryBuilder::new_aggregate(ri) {
 				r.push((ir, rb));
@@ -380,11 +377,11 @@ impl Group {
 		}
 	}
 
-	fn take_intersect_ranges(self, r: &mut Vec<(IndexRef, UnionRangeQueryBuilder)>) {
+	fn take_intersect_ranges(self, r: &mut Vec<(IndexReference, UnionRangeQueryBuilder)>) {
 		for (ir, ri) in self.ranges {
 			for (exp, io) in ri {
 				if let Some(rb) = UnionRangeQueryBuilder::new(exp, io) {
-					r.push((ir, rb));
+					r.push((ir.clone(), rb));
 				}
 			}
 		}
@@ -437,15 +434,20 @@ impl UnionRangeQueryBuilder {
 #[cfg(test)]
 mod tests {
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
-	use crate::idx::planner::tree::IdiomPosition;
+	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 	use crate::sql::{Array, Idiom, Value};
 	use crate::syn::Parse;
 	use std::collections::HashSet;
+	use std::sync::Arc;
 
 	#[allow(clippy::mutable_key_type)]
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();
+		let ixr = IndexReference {
+			ixs: Arc::new([]),
+			ixr: 1,
+		};
 		let io1 = IndexOption::new(
 			1,
 			Idiom::parse("test").into(),

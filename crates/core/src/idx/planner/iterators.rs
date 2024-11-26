@@ -5,6 +5,7 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
+use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
 use crate::kvs::Key;
 use crate::kvs::Transaction;
@@ -16,7 +17,7 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-pub(crate) type IteratorRef = u16;
+pub(crate) type IteratorRef = usize;
 
 #[derive(Debug)]
 pub(crate) struct IteratorRecord {
@@ -349,12 +350,11 @@ impl IndexRangeThingIterator {
 		irf: IteratorRef,
 		ns: &str,
 		db: &str,
-		ix_what: &Ident,
-		ix_name: &Ident,
+		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
 	) -> Self {
-		let beg = Self::compute_beg(ns, db, ix_what, ix_name, &range.from, range.value_type);
-		let end = Self::compute_end(ns, db, ix_what, ix_name, &range.to, range.value_type);
+		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from, range.value_type);
+		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to, range.value_type);
 		Self {
 			irf,
 			r: RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive),
@@ -365,8 +365,7 @@ impl IndexRangeThingIterator {
 		irf: IteratorRef,
 		ns: &str,
 		db: &str,
-		ix_what: &Ident,
-		ix_name: &Ident,
+		ix: &DefineIndexStatement,
 	) -> Self {
 		let full_range = RangeValue {
 			value: Value::None,
@@ -377,7 +376,7 @@ impl IndexRangeThingIterator {
 			from: Cow::Borrowed(&full_range),
 			to: Cow::Borrowed(&full_range),
 		};
-		Self::new(irf, ns, db, ix_what, ix_name, &range)
+		Self::new(irf, ns, db, ix, &range)
 	}
 
 	fn compute_beg(
@@ -497,7 +496,7 @@ impl IndexUnionThingIterator {
 struct JoinThingIterator {
 	ns: String,
 	db: String,
-	ix: Arc<DefineIndexStatement>,
+	ix: IndexReference,
 	remote_iterators: VecDeque<ThingIterator>,
 	current_remote: Option<ThingIterator>,
 	current_remote_batch: VecDeque<CollectorRecord>,
@@ -508,7 +507,7 @@ struct JoinThingIterator {
 impl JoinThingIterator {
 	pub(super) fn new(
 		opt: &Options,
-		ix: Arc<DefineIndexStatement>,
+		ix: IndexReference,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Result<Self, Error> {
 		Ok(Self {
@@ -603,7 +602,7 @@ impl IndexJoinThingIterator {
 	pub(super) fn new(
 		irf: IteratorRef,
 		opt: &Options,
-		ix: Arc<DefineIndexStatement>,
+		ix: IndexReference,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Result<Self, Error> {
 		Ok(Self(irf, JoinThingIterator::new(opt, ix, remote_iterators)?))
@@ -826,7 +825,7 @@ impl UniqueJoinThingIterator {
 	pub(super) fn new(
 		irf: IteratorRef,
 		opt: &Options,
-		ix: Arc<DefineIndexStatement>,
+		ix: IndexReference,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Result<Self, Error> {
 		Ok(Self(irf, JoinThingIterator::new(opt, ix, remote_iterators)?))

@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{self, AtomicU8};
 
 /// The goal of this structure is to cache parameters so they can be easily passed
-/// from one function to the other, so we don't pass too much arguments.
+/// from one function to the other, so we don't pass too many arguments.
 /// It also caches evaluated fields (like is_keys_only)
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
