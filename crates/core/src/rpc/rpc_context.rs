@@ -283,14 +283,13 @@ pub trait RpcContext {
 		// Process the method arguments
 		let (what, diff) = params.needs_one_or_two()?;
 		// Specify the SQL query string
-		let sql = LiveStatement {
-			expr: match diff.is_true() {
+		let sql = LiveStatement::new_from_what_expr(
+			match diff.is_true() {
 				true => Fields::default(),
 				false => Fields::all(),
 			},
-			what: what.could_be_table(),
-			..Default::default()
-		}
+			what.could_be_table(),
+		)
 		.into();
 		// Specify the query parameters
 		let var = Some(self.vars().clone());

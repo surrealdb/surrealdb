@@ -7,39 +7,69 @@ pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
 use crate::ctx::Context;
-use crate::dbs::{Iterable, Iterator, Options};
+use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::err::Error;
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
 use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
-use crate::sql::statements::SelectStatement;
 use crate::sql::with::With;
 use crate::sql::{order::Ordering, Cond, Fields, Groups, Table};
 use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::sync::atomic::{self, AtomicU8};
 
-pub(crate) struct QueryPlannerParams<'a> {
-	fields: &'a Fields,
-	with: Option<&'a With>,
-	order: Option<&'a Ordering>,
-	cond: Option<&'a Cond>,
-	group: Option<&'a Groups>,
+/// The goal of this structure is to cache parameters so they can be easily passed
+/// from one function to the other, so we don't pass too much arguments.
+/// It also caches evaluated fields (like is_keys_only)
+pub(crate) struct StatementContext<'a> {
+	pub(crate) ctx: &'a Context,
+	pub(crate) opt: &'a Options,
+	pub(crate) ns: &'a str,
+	pub(crate) db: &'a str,
+	pub(crate) stm: &'a Statement<'a>,
+	pub(crate) fields: Option<&'a Fields>,
+	pub(crate) with: Option<&'a With>,
+	pub(crate) order: Option<&'a Ordering>,
+	pub(crate) cond: Option<&'a Cond>,
+	pub(crate) group: Option<&'a Groups>,
+	is_keys_only: HashMap<String, bool>,
 }
 
-impl QueryPlannerParams<'_> {
-	pub(crate) fn is_keys_only(&self) -> bool {
-		if !self.fields.is_count_all_only() {
-			return false;
+impl<'a> StatementContext<'a> {
+	pub(crate) fn new(
+		ctx: &'a Context,
+		opt: &'a Options,
+		stm: &'a Statement<'a>,
+	) -> Result<Self, Error> {
+		Ok(Self {
+			ctx,
+			opt,
+			ns: opt.ns()?,
+			db: opt.db()?,
+			stm,
+			fields: stm.expr(),
+			with: stm.with(),
+			order: stm.order(),
+			cond: stm.cond(),
+			group: stm.group(),
+			is_keys_only: HashMap::default(),
+		})
+	}
+
+	async fn is_keys_only(&self, tb: &str) -> Result<bool, Error> {
+		if let Some(fields) = self.fields {
+			if !fields.is_count_all_only() {
+				return Ok(false);
+			}
 		}
 		if self.cond.is_some() {
-			return false;
+			return Ok(false);
 		}
 		if let Some(g) = self.group {
 			if !g.is_empty() {
-				return false;
+				return Ok(false);
 			}
 		}
 		if let Some(p) = self.order {
@@ -47,24 +77,31 @@ impl QueryPlannerParams<'_> {
 				Ordering::Random => {}
 				Ordering::Order(x) => {
 					if !x.0.is_empty() {
-						return false;
+						return Ok(false);
 					}
 				}
 			}
 		}
-		true
-	}
-}
-
-impl<'a> From<&'a SelectStatement> for QueryPlannerParams<'a> {
-	fn from(stmt: &'a SelectStatement) -> Self {
-		QueryPlannerParams {
-			fields: &stmt.expr,
-			with: stmt.with.as_ref(),
-			order: stmt.order.as_ref(),
-			cond: stmt.cond.as_ref(),
-			group: stmt.group.as_ref(),
+		if self.opt.perms {
+			let table = self.ctx.tx().get_tb(self.ns, self.db, tb).await?;
+			let perms = self.stm.permissions(&table, false);
+			if perms.is_specific() {
+				return Ok(false);
+			}
 		}
+		Ok(true)
+	}
+
+	pub(crate) async fn check_keys_only(&mut self, tb: &str) -> Result<bool, Error> {
+		// If we already have evaluated it, we can just return the cached result
+		if let Some(keys) = self.is_keys_only.get(tb) {
+			return Ok(*keys);
+		}
+		// Otherwise, we do the evaluation
+		let r = self.is_keys_only(tb).await?;
+		// And store the result in the cache
+		self.is_keys_only.insert(tb.to_string(), r);
+		Ok(r)
 	}
 }
 
@@ -93,23 +130,20 @@ impl QueryPlanner {
 	pub(crate) async fn add_iterables(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
+		ctx: &StatementContext<'_>,
 		t: Table,
-		params: &QueryPlannerParams<'_>,
 		it: &mut Iterator,
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
 
-		let mut tree =
-			Tree::build(stk, ctx, opt, &t, params.cond, params.with, params.order).await?;
+		let mut tree = Tree::build(stk, ctx, &t).await?;
 
 		let is_knn = !tree.knn_expressions.is_empty();
 		let order = tree.index_map.order_limit.take();
 		let mut exe = InnerQueryExecutor::new(
 			stk,
-			ctx,
-			opt,
+			ctx.ctx,
+			ctx.opt,
 			&t,
 			tree.index_map,
 			tree.knn_expressions,
@@ -118,14 +152,17 @@ impl QueryPlanner {
 		)
 		.await?;
 		match PlanBuilder::build(
+			&t,
 			tree.root,
-			params,
+			ctx,
 			tree.with_indexes,
 			order,
 			tree.all_and_groups,
 			tree.all_and,
 			tree.all_expressions_with_index,
-		)? {
+		)
+		.await?
+		{
 			Plan::SingleIndex(exp, io) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;

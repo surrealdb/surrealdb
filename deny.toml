@@ -2,9 +2,10 @@
 # https://embarkstudios.github.io/cargo-deny/index.html
 
 # --------------------------------------------------
-# General
+# GRAPH
 # --------------------------------------------------
 
+[graph]
 # If true, metadata will be collected with `--all-features`
 all-features = true
 # If true, metadata will be collected with `--no-default-features`
@@ -46,20 +47,13 @@ allow-git = []
 # --------------------------------------------------
 
 [advisories]
+version = 2
 # The url(s) of the advisory databases to use.
 db-urls = ["https://github.com/rustsec/advisory-db"]
 # The path where the advisory database is cloned/fetched into.
 db-path = "~/.cargo/advisory-db"
-# The lint level for security vulnerabilities.
-vulnerability = "deny"
-# The lint level for crates which are unmaintained.
-unmaintained = "warn"
 # The lint level for crates that have been yanked.
 yanked = "warn"
-# The lint level for crates with security notices.
-notice = "warn"
-# Threshold for security vulnerabilities: None, Low, Medium, High, Critical.
-severity-threshold = "None"
 # A list of security advisory identifiers to ignore.
 ignore = []
 
@@ -68,12 +62,7 @@ ignore = []
 # --------------------------------------------------
 
 [licenses]
-# Deny licenses which are not listed here explicitly.
-default = "deny"
-# Lint level for licenses which are considered copyleft.
-copyleft = "warn"
-# Deny source code which does not have a license specified.
-unlicensed = "deny"
+version = 2
 # List of explicitly allowed licenses from https://spdx.org/licenses
 allow = [
 	"MIT",
@@ -86,7 +75,8 @@ allow = [
 	"BSD-2-Clause",
 	"BSD-3-Clause",
 	"Unlicense",
-    "Unicode-3.0",
+	"Unicode-3.0",
+	"CDDL-1.0",
 ]
 # The confidence threshold for detecting a license from license text.
 confidence-threshold = 0.95

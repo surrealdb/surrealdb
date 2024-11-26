@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{GroupRef, IdiomCol, IdiomPosition, IndexRef, Node};
-use crate::idx::planner::QueryPlannerParams;
+use crate::idx::planner::StatementContext;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
 use crate::sql::{Array, Expression, Idiom, Number, Object};
@@ -24,9 +24,11 @@ pub(super) struct PlanBuilder {
 }
 
 impl PlanBuilder {
-	pub(super) fn build(
+	#[allow(clippy::too_many_arguments)]
+	pub(super) async fn build(
+		tb: &str,
 		root: Option<Node>,
-		params: &QueryPlannerParams,
+		ctx: &StatementContext<'_>,
 		with_indexes: Option<Vec<IndexRef>>,
 		order: Option<IndexOption>,
 		all_and_groups: HashMap<GroupRef, bool>,
@@ -40,17 +42,14 @@ impl PlanBuilder {
 			with_indexes,
 		};
 
-		// If we only count and there are no conditions and no aggregations, then we can only scan keys
-		let keys_only = params.is_keys_only();
-
-		if let Some(With::NoIndex) = params.with {
-			return Ok(Self::table_iterator(Some("WITH NOINDEX"), keys_only));
+		if let Some(With::NoIndex) = ctx.with {
+			return Self::table_iterator(ctx, Some("WITH NOINDEX"), tb).await;
 		}
 
 		// Browse the AST and collect information
 		if let Some(root) = &root {
 			if let Err(e) = b.eval_node(root) {
-				return Ok(Self::table_iterator(Some(&e), keys_only));
+				return Self::table_iterator(ctx, Some(&e), tb).await;
 			}
 		}
 
@@ -84,12 +83,18 @@ impl PlanBuilder {
 			}
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges));
 		}
-		Ok(Self::table_iterator(None, keys_only))
+		Self::table_iterator(ctx, None, tb).await
 	}
 
-	fn table_iterator(reason: Option<&str>, keys_only: bool) -> Plan {
+	async fn table_iterator(
+		ctx: &StatementContext<'_>,
+		reason: Option<&str>,
+		tb: &str,
+	) -> Result<Plan, Error> {
+		// If we only count and there are no conditions and no aggregations, then we can only scan keys
+		let keys_only = ctx.is_keys_only(tb).await?;
 		let reason = reason.map(|s| s.to_string());
-		Plan::TableIterator(reason, keys_only)
+		Ok(Plan::TableIterator(reason, keys_only))
 	}
 
 	// Check if we have an explicit list of index we can use

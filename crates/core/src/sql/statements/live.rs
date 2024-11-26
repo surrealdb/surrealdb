@@ -49,6 +49,16 @@ impl LiveStatement {
 		}
 	}
 
+	pub fn new_from_what_expr(expr: Fields, what: Value) -> Self {
+		LiveStatement {
+			id: Uuid::new_v4(),
+			node: Uuid::new_v4(),
+			what,
+			expr,
+			..Default::default()
+		}
+	}
+
 	/// Creates a live statement from parts that can be set during a query.
 	pub(crate) fn from_source_parts(
 		expr: Fields,
@@ -115,10 +125,10 @@ impl LiveStatement {
 				txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, id);
-				txn.put(key, lq, None).await?;
+				txn.replace(key, lq).await?;
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
-				txn.put(key, stm, None).await?;
+				txn.replace(key, stm).await?;
 				// Refresh the table cache for lives
 				let key = crate::key::database::tb::new(ns, db, &tb);
 				let tb = txn.get_tb(ns, db, &tb).await?;

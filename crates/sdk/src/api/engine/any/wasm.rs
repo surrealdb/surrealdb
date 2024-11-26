@@ -91,7 +91,7 @@ impl Connection for Any {
 					.into());
 				}
 
-				EndpointKind::SurrealKv => {
+				EndpointKind::SurrealKv | EndpointKind::SurrealKvVersioned => {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
