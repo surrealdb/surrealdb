@@ -93,19 +93,20 @@ docker exec -it <container_name> /surreal sql -e http://localhost:8000 -u root -
 
 The Docker image can be used with the `docker compose` command.
 
-Here is an example of a basic `docker-compose.yml` file.
+Here is an example of a basic `docker-compose.yml` file for quickly getting started.
 
 ```yaml
 services:
   surrealdb:
     command: start 
-    image: surrealdb/surrealdb:v2
+    image: surrealdb/surrealdb:latest # Consider using a specific version
+    pull_policy: always # Remove this when not using "latest"
     ports:
       - 8000:8000
     environment:
-      - SURREAL_LOG=debug
+      - SURREAL_LOG=debug # Use "info" in production
       - SURREAL_USER=root
-      - SURREAL_PASS=root
+      - SURREAL_PASS=root # Change this in production!
 ```
 
 Most of the configuration of SurrealDB can be done through [environment variables](https://surrealdb.com/docs/surrealdb/cli/env).
@@ -123,7 +124,8 @@ Here is an example of running the container with a persistent volume as a non-ro
 ```yaml
 services:
   surrealdb:
-    image: surrealdb/surrealdb:v2
+    image: surrealdb/surrealdb:latest # Consider using a specific version
+    pull_policy: always # Remove this when not using "latest"
     command: start rocksdb:/mydata/mydatabase.db
     user: "1000"
     ports:
@@ -131,9 +133,9 @@ services:
     volumes:
       - ./mydata:/mydata
     environment:
-      - SURREAL_LOG=debug
+      - SURREAL_LOG=debug # Use "info" in production
       - SURREAL_USER=root
-      - SURREAL_PASS=root
+      - SURREAL_PASS=root # Change this in production!
 ```
 
 In this example, you should ensure that the user with UID `1000` exists in the host and that it has access (e.g. ownership) to read and write in the `./mydata` directory. You can find the UID of the active user in the host by running `id -u`. You can also provide a group for the container process to run as, such as for example `user: "1000:1000"`.
