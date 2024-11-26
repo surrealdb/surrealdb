@@ -17,7 +17,6 @@ mod batch;
 mod cf;
 mod clock;
 mod ds;
-#[doc(hidden)]
 pub mod export;
 mod live;
 mod node;

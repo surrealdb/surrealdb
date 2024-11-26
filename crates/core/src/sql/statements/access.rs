@@ -30,8 +30,6 @@ pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 pub static GRANT_BEARER_LENGTH: usize =
 	GRANT_BEARER_PREFIX.len() + 1 + GRANT_BEARER_ID_LENGTH + 1 + GRANT_BEARER_KEY_LENGTH;
 
-// TODO(gguillemas): Document once bearer access is no longer experimental.
-#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -43,8 +41,6 @@ pub enum AccessStatement {
 	Purge(AccessStatementPurge),   // Purge access grants.
 }
 
-// TODO(gguillemas): Document once bearer access is no longer experimental.
-#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -55,8 +51,6 @@ pub struct AccessStatementGrant {
 	pub subject: Subject,
 }
 
-// TODO(gguillemas): Document once bearer access is no longer experimental.
-#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -68,8 +62,6 @@ pub struct AccessStatementShow {
 	pub cond: Option<Cond>,
 }
 
-// TODO(gguillemas): Document once bearer access is no longer experimental.
-#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -81,8 +73,6 @@ pub struct AccessStatementRevoke {
 	pub cond: Option<Cond>,
 }
 
-// TODO(gguillemas): Document once bearer access is no longer experimental.
-#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -95,8 +85,6 @@ pub struct AccessStatementPurge {
 	pub grace: Duration,
 }
 
-// TODO(gguillemas): Document once bearer access is no longer experimental.
-#[doc(hidden)]
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -267,7 +255,6 @@ pub struct GrantBearer {
 }
 
 impl GrantBearer {
-	#[doc(hidden)]
 	pub fn new() -> Self {
 		let id = format!(
 			"{}{}",

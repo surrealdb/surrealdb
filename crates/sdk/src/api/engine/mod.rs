@@ -14,7 +14,6 @@ pub mod local;
 pub mod proto;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 pub mod remote;
-#[doc(hidden)]
 pub mod tasks;
 
 use futures::Stream;

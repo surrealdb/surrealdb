@@ -248,7 +248,6 @@ transparent_wrapper!(
 impl_serialize_wrapper!(Number);
 
 impl Number {
-	#[doc(hidden)]
 	pub fn cource_into_i64(self) -> Option<i64> {
 		match self.0 {
 			CoreNumber::Int(x) => Some(x),
