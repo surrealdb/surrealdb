@@ -733,7 +733,8 @@ async fn access_bearer_purge() {
 		// Wait for a second
 		std::thread::sleep(Duration::from_secs(1));
 		// Purge revoked bearer grants
-		let res = &mut dbs.execute(&"ACCESS srv PURGE REVOKED".to_string(), &ses, None).await.unwrap();
+		let res =
+			&mut dbs.execute(&"ACCESS srv PURGE REVOKED".to_string(), &ses, None).await.unwrap();
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok = Regex::new(&format!(
 			r"\[\{{ ac: 'srv', .*?, id: '{kid}', revocation: d'.*?', .*? \}}\]"
