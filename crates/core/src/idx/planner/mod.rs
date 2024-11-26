@@ -14,11 +14,13 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::with::With;
 use crate::sql::{order::Ordering, Cond, Fields, Groups, Table};
 use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::sync::atomic::{self, AtomicU8};
+use std::sync::Arc;
 
 /// The goal of this structure is to cache parameters so they can be easily passed
 /// from one function to the other, so we don't pass too much arguments.
@@ -83,10 +85,17 @@ impl<'a> StatementContext<'a> {
 			}
 		}
 		if self.opt.perms {
-			let table = self.ctx.tx().get_tb(self.ns, self.db, tb).await?;
-			let perms = self.stm.permissions(&table, false);
-			if perms.is_specific() {
-				return Ok(false);
+			match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
+				Ok(table) => {
+					let perms = self.stm.permissions(&table, false);
+					if perms.is_specific() {
+						return Ok(false);
+					}
+				}
+				Err(e) if matches!(e, Error::TbNotFound { .. }) => {
+					// We can safely ignore, there are no permissions defined
+				}
+				Err(e) => return Err(e),
 			}
 		}
 		Ok(true)
