@@ -254,6 +254,12 @@ pub struct GrantBearer {
 	pub key: Strand, // Key. Will be stored but afterwards returned redacted.
 }
 
+impl Default for GrantBearer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GrantBearer {
 	pub fn new() -> Self {
 		let id = format!(
