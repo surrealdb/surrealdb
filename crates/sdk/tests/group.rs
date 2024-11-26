@@ -1007,12 +1007,17 @@ async fn select_count_range_keys_only_permissions(
 	// Define the permissions and create some records
 	let sql = format!(
 		r"
+			SELECT COUNT() FROM table:a..z GROUP ALL;
+			SELECT COUNT() FROM table:a..z;
 			DEFINE TABLE table PERMISSIONS {perms};
 			CREATE table:me CONTENT {{ bar: 'hello', foo: 'world'}};
 			CREATE table:you CONTENT {{ bar: 'don\'t', foo: 'show up'}};
 		"
 	);
 	let mut t = Test::new(&sql).await?;
+	// The first select should be successful (and empty) when the table does not exist
+	t.expect_vals(&["[]", "[]"])?;
+	//
 	t.skip_ok(2)?;
 	// Create and select as a record user
 	let sql = r"

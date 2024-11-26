@@ -83,10 +83,19 @@ impl<'a> StatementContext<'a> {
 			}
 		}
 		if self.opt.perms {
-			let table = self.ctx.tx().get_tb(self.ns, self.db, tb).await?;
-			let perms = self.stm.permissions(&table, false);
-			if perms.is_specific() {
-				return Ok(false);
+			match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
+				Ok(table) => {
+					let perms = self.stm.permissions(&table, false);
+					if perms.is_specific() {
+						return Ok(false);
+					}
+				}
+				Err(Error::TbNotFound {
+					..
+				}) => {
+					// We can safely ignore this error, as it just means that there are no permissions defined
+				}
+				Err(e) => return Err(e),
 			}
 		}
 		Ok(true)
