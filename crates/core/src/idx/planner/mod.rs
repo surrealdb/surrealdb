@@ -14,13 +14,11 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
-use crate::sql::statements::DefineTableStatement;
 use crate::sql::with::With;
 use crate::sql::{order::Ordering, Cond, Fields, Groups, Table};
 use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::sync::atomic::{self, AtomicU8};
-use std::sync::Arc;
 
 /// The goal of this structure is to cache parameters so they can be easily passed
 /// from one function to the other, so we don't pass too much arguments.
@@ -92,8 +90,10 @@ impl<'a> StatementContext<'a> {
 						return Ok(false);
 					}
 				}
-				Err(e) if matches!(e, Error::TbNotFound { .. }) => {
-					// We can safely ignore, there are no permissions defined
+				Err(Error::TbNotFound {
+					..
+				}) => {
+					// We can safely ignore this error, as it just means that there are no permissions defined
 				}
 				Err(e) => return Err(e),
 			}
