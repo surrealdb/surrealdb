@@ -249,15 +249,10 @@ pub struct GrantRecord {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
+#[allow(clippy::new_without_default)]
 pub struct GrantBearer {
 	pub id: Ident,   // Key ID
 	pub key: Strand, // Key. Will be stored but afterwards returned redacted.
-}
-
-impl Default for GrantBearer {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl GrantBearer {
