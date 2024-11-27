@@ -43,7 +43,6 @@ mod run;
 mod select;
 mod set;
 mod signin;
-mod signinv2;
 mod signup;
 mod unset;
 mod update;

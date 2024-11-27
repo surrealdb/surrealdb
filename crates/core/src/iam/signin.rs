@@ -3,6 +3,7 @@ use super::verify::{
 };
 use super::{Actor, Level, Role};
 use crate::cnf::{EXPERIMENTAL_BEARER_ACCESS, INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use crate::ctx::MutableContext;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -10,19 +11,18 @@ use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::statements::{access, AccessGrant};
-use crate::sql::{access_type, AccessType};
 use crate::sql::Datetime;
 use crate::sql::Object;
 use crate::sql::Value;
+use crate::sql::{access_type, AccessType};
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
-use std::str::FromStr;
-use crate::ctx::Context;
-use serde::{Deserialize, Serialize};
-use revision::revisioned;
 
 #[doc(hidden)]
 #[revisioned(revision = 1)]
@@ -45,7 +45,11 @@ impl From<SigninData> for Value {
 	}
 }
 
-pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SigninData, Error> {
+pub async fn signin(
+	kvs: &Datastore,
+	session: &mut Session,
+	vars: Object,
+) -> Result<SigninData, Error> {
 	// Check vars contains only computed values
 	vars.validate_computed()?;
 	// Parse the specified variables
@@ -205,23 +209,60 @@ pub async fn db_access(
 
 											let refresh = match &at.bearer {
 												Some(_) => {
-													let grant = access::AccessStatementGrant{
+													let grant = access::AccessStatementGrant {
 														ac: av.name.clone(),
 														base: Some(av.base.clone()),
-														subject: access::Subject::Record(rid.clone()),
+														subject: access::Subject::Record(
+															rid.clone(),
+														),
 													};
-													// Create a new context.
-													let ctx = Context::default();
-													// Setup the system session for creating the grant.
 													let sess =
 														Session::owner().with_ns(&ns).with_db(&db);
-													// TODO(PR): Call intermediate function to get just the key.
-													let bearer = access::compute_grant(&grant, &ctx, &kvs.setup_options(&sess), None).await?;
-													Some(bearer.to_string())
-												},
+													// Create a new context with a writeable transaction
+													let mut ctx = MutableContext::background();
+													let tx = kvs
+														.transaction(Write, Optimistic)
+														.await?
+														.enclose();
+													ctx.set_transaction(tx.clone());
+													let ctx = ctx.freeze();
+													// Create a bearer grant to act as the refresh key
+													// TODO(PR): Handle errors without leaking information
+													let bearer = access::compute_grant(
+														&grant,
+														&ctx,
+														&kvs.setup_options(&sess),
+														None,
+													)
+													.await?;
+													tx.cancel().await?;
+													// Return the key from the bearer grant
+													match bearer {
+														Value::Object(bearer_obj) => {
+															match bearer_obj.get("grant") {
+																Some(Value::Object(grant_obj)) => {
+																	match grant_obj.get("key") {
+																		Some(key) => Some(
+																			key.to_raw_string(),
+																		),
+																		None => return Err(
+																			Error::UnexpectedAuth,
+																		),
+																	}
+																}
+																_ => {
+																	return Err(
+																		Error::UnexpectedAuth,
+																	)
+																}
+															}
+														}
+														_ => return Err(Error::UnexpectedAuth),
+													}
+												}
 												None => None,
 											};
-											 
+
 											// Log the authenticated access method info
 											trace!(
 												"Signing in to database with access method `{}`",
@@ -245,8 +286,10 @@ pub async fn db_access(
 											// Check the authentication token
 											match enc {
 												// The auth token was created successfully
-												// TODO(PR): Return additional refresh bearer grant.
-												Ok(token) => Ok(SigninData{token, refresh}),
+												Ok(token) => Ok(SigninData {
+													token,
+													refresh,
+												}),
 												_ => Err(Error::TokenMakingFailed),
 											}
 										}
@@ -357,11 +400,11 @@ pub async fn db_access(
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
 					}
-					
+
 					// TODO(PR): If the bearer grant is of refresh type, revoke it.
 					// TODO(PR): Generate new bearer grant of refresh type.
 					let refresh = None;
-					
+
 					// Log the authenticated access method information.
 					trace!("Signing in to database with bearer access method `{}`", ac);
 					// Create the authentication token.
@@ -393,7 +436,10 @@ pub async fn db_access(
 					match enc {
 						// The authentication token was created successfully.
 						// TODO(PR): Return additional refresh bearer grant, if refreshing.
-						Ok(token) => Ok(SigninData{token, refresh}),
+						Ok(token) => Ok(SigninData {
+							token,
+							refresh,
+						}),
 						_ => Err(Error::TokenMakingFailed),
 					}
 				}
@@ -441,7 +487,10 @@ pub async fn db_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData{token: tk, refresh: None}),
+				Ok(tk) => Ok(SigninData {
+					token: tk,
+					refresh: None,
+				}),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -576,7 +625,10 @@ pub async fn ns_access(
 					// Check the authentication token.
 					match enc {
 						// The authentication token was created successfully.
-						Ok(tk) => Ok(SigninData{token: tk, refresh: None}),
+						Ok(tk) => Ok(SigninData {
+							token: tk,
+							refresh: None,
+						}),
 						_ => Err(Error::TokenMakingFailed),
 					}
 				}
@@ -621,7 +673,10 @@ pub async fn ns_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData{token: tk, refresh: None}),
+				Ok(tk) => Ok(SigninData {
+					token: tk,
+					refresh: None,
+				}),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -666,7 +721,10 @@ pub async fn root_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData{token: tk, refresh: None}),
+				Ok(tk) => Ok(SigninData {
+					token: tk,
+					refresh: None,
+				}),
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
@@ -797,7 +855,10 @@ pub async fn root_access(
 					// Check the authentication token.
 					match enc {
 						// The authentication token was created successfully.
-						Ok(tk) => Ok(SigninData{token: tk, refresh: None}),
+						Ok(tk) => Ok(SigninData {
+							token: tk,
+							refresh: None,
+						}),
 						_ => Err(Error::TokenMakingFailed),
 					}
 				}
@@ -1331,14 +1392,16 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					// Check issued token
 					if let Ok(sd) = res {
 						// Decode token without validation
-						let token_data = decode::<Claims>(&sd.token, &DecodingKey::from_secret(&[]), &{
-							let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
-							validation.insecure_disable_signature_validation();
-							validation.validate_nbf = false;
-							validation.validate_exp = false;
-							validation
-						})
-						.unwrap();
+						let token_data =
+							decode::<Claims>(&sd.token, &DecodingKey::from_secret(&[]), &{
+								let mut validation =
+									Validation::new(jsonwebtoken::Algorithm::HS256);
+								validation.insecure_disable_signature_validation();
+								validation.validate_nbf = false;
+								validation.validate_exp = false;
+								validation
+							})
+							.unwrap();
 
 						// Check session expiration
 						if let Some(exp_duration) = case.token_expiration {

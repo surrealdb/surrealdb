@@ -370,7 +370,7 @@ pub async fn compute_grant(
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
 					txn.put(key, &gr, None).await
 				}
-				_ => return Err(Error::AccessLevelMismatch)
+				_ => return Err(Error::AccessLevelMismatch),
 			};
 
 			// Check if a collision was found in order to log a specific error on the server.
@@ -390,7 +390,7 @@ pub async fn compute_grant(
 			);
 
 			Ok(Value::Object(gr.into()))
-		},
+		}
 		AccessType::Bearer(at) => {
 			match &stmt.subject {
 				Subject::User(user) => {

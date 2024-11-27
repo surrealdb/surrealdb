@@ -2,8 +2,8 @@ use crate::{
 	sql::{
 		access::AccessDuration,
 		access_type::{
-			AccessType, BearerAccess, BearerAccessSubject, JwtAccess, JwtAccessIssue,
-			JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
+			AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess,
+			JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
 		},
 		block::Entry,
 		changefeed::ChangeFeed,
@@ -1200,6 +1200,7 @@ fn parse_define_access_record() {
 							key: "foo".to_string(),
 						}),
 					},
+					bearer: None,
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1238,6 +1239,7 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
+					bearer: None,
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1276,6 +1278,7 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
+					bearer: None,
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1345,6 +1348,7 @@ fn parse_define_access_record_with_jwt() {
 					}),
 					issue: None,
 				},
+				bearer: None,
 			}),
 			authenticate: None,
 			// Default durations.
@@ -1534,6 +1538,7 @@ fn parse_define_access_bearer() {
 				name: Ident("a".to_string()),
 				base: Base::Db,
 				kind: AccessType::Bearer(BearerAccess {
+					kind: BearerAccessType::Bearer,
 					subject: BearerAccessSubject::User,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
@@ -1572,6 +1577,7 @@ fn parse_define_access_bearer() {
 				name: Ident("a".to_string()),
 				base: Base::Db,
 				kind: AccessType::Bearer(BearerAccess {
+					kind: BearerAccessType::Bearer,
 					subject: BearerAccessSubject::Record,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {

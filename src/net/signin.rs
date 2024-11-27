@@ -14,21 +14,23 @@ use bytes::Bytes;
 use serde::Serialize;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
+use surrealdb::iam::signin::signin;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
-use surrealdb::iam::signin::{signin, SigninData};
 
 #[derive(Serialize)]
 struct Success {
 	code: u16,
 	details: String,
-	data: SigninData,
+	token: Option<String>,
+	refresh: Option<String>,
 }
 
 impl Success {
-	fn new(data: SigninData) -> Success {
+	fn new(token: String, refresh: Option<String>) -> Success {
 		Success {
-			data: data,
+			token: Some(token),
+			refresh,
 			code: 200,
 			details: String::from("Authentication succeeded"),
 		}
@@ -64,19 +66,26 @@ async fn handler(
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match signin(kvs, &mut session, vars).await.map_err(Error::from)
-			{
+			match signin(kvs, &mut session, vars).await.map_err(Error::from) {
 				// Authentication was successful
 				Ok(data) => match accept.as_deref() {
 					// Simple serialization
-					Some(Accept::ApplicationJson) => Ok(output::json(&Success::new(data))),
-					Some(Accept::ApplicationCbor) => Ok(output::cbor(&Success::new(data))),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&Success::new(data))),
+					Some(Accept::ApplicationJson) => {
+						Ok(output::json(&Success::new(data.token, data.refresh)))
+					}
+					Some(Accept::ApplicationCbor) => {
+						Ok(output::cbor(&Success::new(data.token, data.refresh)))
+					}
+					Some(Accept::ApplicationPack) => {
+						Ok(output::pack(&Success::new(data.token, data.refresh)))
+					}
 					// Text serialization
-					// TODO(PR): Find a way to support refresh tokens here.
+					// NOTE: Only the token is returned in a plain text response.
 					Some(Accept::TextPlain) => Ok(output::text(data.token)),
 					// Internal serialization
-					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(data))),
+					Some(Accept::Surrealdb) => {
+						Ok(output::full(&Success::new(data.token, data.refresh)))
+					}
 					// Return nothing
 					None => Ok(output::none()),
 					// An incorrect content-type was requested

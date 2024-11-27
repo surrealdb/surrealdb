@@ -26,7 +26,7 @@ pub struct AccessDuration {
 impl Default for AccessDuration {
 	fn default() -> Self {
 		Self {
-			// By default, access grants expire in 90 days. 
+			// By default, access grants expire in 90 days.
 			grant: Some(Duration::from_days(90)),
 			// By default, tokens expire after one hour
 			token: Some(Duration::from_hours(1)),

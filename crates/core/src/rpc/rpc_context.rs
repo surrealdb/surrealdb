@@ -187,7 +187,7 @@ pub trait RpcContext {
 		*self.session_mut() = tmp_session;
 		out.map(Into::into)
 	}
-	
+
 	// TODO(gguillemas): This should be made the default in 3.0.0.
 	// This method for signing in returns an object instead of a string, supporting additional values.
 	// The original motivation for this method was the introduction of refresh tokens.

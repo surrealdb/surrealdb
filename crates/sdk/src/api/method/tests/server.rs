@@ -1,4 +1,4 @@
-use super::types::{User, SigninData};
+use super::types::{SigninData, User};
 use crate::api::conn::{Command, DbResponse, Route};
 use crate::api::Response as QueryResponse;
 use crate::opt::Resource;
@@ -38,7 +38,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				| Command::Signin {
 					..
 				} => Ok(DbResponse::Other("jwt".to_owned().into())),
-				| Command::Signinv2 {
+				Command::Signinv2 {
 					..
 				} => Ok(DbResponse::Other(to_core_value(SigninData::default()).unwrap())),
 				Command::Set {

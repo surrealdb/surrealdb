@@ -221,6 +221,7 @@ fn statements() -> Vec<Statement> {
 					}),
 					issue: None,
 				},
+				bearer: None,
 			}),
 			authenticate: None,
 			// Default durations.

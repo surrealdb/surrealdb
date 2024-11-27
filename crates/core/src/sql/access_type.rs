@@ -1,4 +1,5 @@
 use super::Value;
+use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::{escape::quote_str, Algorithm};
@@ -8,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
-use crate::err::Error;
 
 /// The type of access methods available
 #[revisioned(revision = 2)]
@@ -383,11 +383,11 @@ pub enum BearerAccessType {
 
 impl BearerAccessType {
 	pub fn prefix(&self) -> &'static str {
-        match self {
-            Self::Bearer => "surreal-bearer",
-            Self::Refresh => "surreal-refresh",
-        }
-    }
+		match self {
+			Self::Bearer => "surreal-bearer",
+			Self::Refresh => "surreal-refresh",
+		}
+	}
 }
 
 impl FromStr for BearerAccessType {
