@@ -1,4 +1,5 @@
 mod cmp;
+mod progress;
 mod report;
 
 use core::str;
@@ -7,7 +8,7 @@ use std::{pin::pin, thread, time::Duration};
 use anyhow::{bail, Context, Result};
 use camino::Utf8Path;
 use clap::ArgMatches;
-use report::TestReport;
+use report::{TestGrade, TestReport};
 use surrealdb_core::{
 	dbs::{capabilities::Targets, Capabilities, Response, Session},
 	err::Error as CoreError,
@@ -105,9 +106,9 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
 	};
 
 	// check for unused keys in tests
-	for t in testset.iter() {
+	for t in subset.iter() {
 		for k in t.config.unused_keys() {
-			warn!("Test `{}` contained unused key `{k}` in config", t.path);
+			println!("Test `{}` contained unused key `{k}` in config", t.path);
 		}
 	}
 
@@ -121,34 +122,28 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
 	let mut schedular = Schedular::new(num_jobs);
 	let (mut coordinator, runner) = TestRunner::new(num_jobs as usize, subset);
 
-	info!("Running with {num_jobs} jobs");
+	println!("Running with {num_jobs} jobs");
 
 	runner
 		.fill_datastores(num_jobs as usize)
 		.instrument(info_span!("initialize_reused_stores"))
 		.await?;
 
-	info!("Found {} tests", runner.set.len());
+	println!("Found {} tests", runner.set.len());
 
 	let mut reports = Vec::new();
-
-	let mut handle_pending_results = |id, result| {
-		let report = TestReport::new(id, &runner.set, result);
-
-		report.short_display(&runner.set);
-
-		reports.push(report)
-	};
+	let mut progress = progress::Progress::from_stderr(runner.set.len());
 
 	// spawn all tests.
 	for (id, test) in runner.set.iter_ids() {
 		let config = test.config.clone();
 
+		progress.start_item(test.path.as_str()).unwrap();
+
 		if !config.should_run() {
+			progress.finish_item(runner.set[id].path.as_str(), TestGrade::Success).unwrap();
 			continue;
 		}
-
-		info!("running test '{}'", test.path);
 
 		let db = if config.can_use_reusable_ds() {
 			Some(coordinator.reusable_dbs.recv().await.unwrap())
@@ -174,7 +169,9 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
 		}
 
 		while let Ok((id, result)) = coordinator.results.try_recv() {
-			handle_pending_results(id, result);
+			let report = TestReport::new(id, &runner.set, result);
+			progress.finish_item(runner.set[id].path.as_str(), report.grade()).unwrap();
+			reports.push(report)
 		}
 	}
 
@@ -189,17 +186,21 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
 			x = coordinator.results.recv() => {
 				// handle results while tasks are finishing.
 				let (id,result) = x.unwrap();
-				handle_pending_results(id, result);
+
+				let report = TestReport::new(id, &runner.set, result);
+				progress.finish_item(runner.set[id].path.as_str(), report.grade()).unwrap();
+				reports.push(report)
+
 			}
 		}
 	}
 
 	// All tasks are finished. Process all final results.
 	while let Ok((id, result)) = coordinator.results.try_recv() {
-		handle_pending_results(id, result);
+		let report = TestReport::new(id, &runner.set, result);
+		progress.finish_item(runner.set[id].path.as_str(), report.grade()).unwrap();
+		reports.push(report)
 	}
-
-	info!("All tests finished.");
 
 	// all results handled, shutdown the remaining datasores.
 	coordinator.shutdown().await?;

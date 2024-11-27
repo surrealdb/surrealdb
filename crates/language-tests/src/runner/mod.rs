@@ -20,7 +20,7 @@ impl Schedular {
 		}
 	}
 
-	pub async fn spawn<F: Future>(&mut self, f: F)
+	pub async fn spawn<F>(&mut self, f: F)
 	where
 		F: Future<Output = ()> + Send + 'static,
 	{
@@ -33,7 +33,7 @@ impl Schedular {
 		});
 	}
 
-	pub async fn spawn_sequential<F: Future>(&mut self, f: F)
+	pub async fn spawn_sequential<F>(&mut self, f: F)
 	where
 		F: Future<Output = ()> + Send + 'static,
 	{

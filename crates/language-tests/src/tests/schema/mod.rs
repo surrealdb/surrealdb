@@ -67,11 +67,11 @@ impl TestConfig {
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| x.clone()).collect();
 
-		if let Some(x) = self.env {
+		if let Some(x) = self.env.as_ref() {
 			res.append(&mut x.unused_keys())
 		}
 
-		if let Some(x) = self.test {
+		if let Some(x) = self.test.as_ref() {
 			res.append(&mut x.unused_keys())
 		}
 
@@ -127,7 +127,7 @@ impl TestEnv {
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("env.{x}")).collect();
 
-		if let Some(x) = self.capabilities {
+		if let Some(x) = self.capabilities.as_ref() {
 			if let BoolOr::Value(x) = x {
 				res.append(&mut x.unused_keys());
 			}
@@ -281,34 +281,35 @@ impl TestDetails {
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("test.{x}")).collect();
 
-		if let Some(results) = self.results {
+		if let Some(results) = self.results.as_ref() {
 			match results {
 				TestDetailsResults::QueryResult(x) => {
 					for (idx, r) in x.iter().enumerate() {
 						match r {
 							TestResult::Plain(_) => {}
-							TestResult::Error(e) => {
-								e._unused_keys
+							TestResult::Error(e) => res.append(
+								&mut e
+									._unused_keys
 									.keys()
 									.map(|x| format!("test.results[{idx}].{x}"))
-									.collect_into(&mut res);
-							}
-							TestResult::Value(e) => {
-								e._unused_keys
+									.collect(),
+							),
+							TestResult::Value(e) => res.append(
+								&mut e
+									._unused_keys
 									.keys()
 									.map(|x| format!("test.results[{idx}].{x}"))
-									.collect_into(&mut res);
-							}
+									.collect(),
+							),
 						}
 					}
 				}
-				TestDetailsResults::ParserError(x) => x
-					._unused_keys
-					.keys()
-					.map(|x| format!("test.results.{x}"))
-					.collect_into(&mut res),
+				TestDetailsResults::ParserError(x) => res.append(
+					&mut x._unused_keys.keys().map(|x| format!("test.results.{x}")).collect(),
+				),
 			}
 		}
+		res
 	}
 }
 

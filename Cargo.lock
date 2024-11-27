@@ -6125,30 +6125,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "surrealdb-test"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arbitrary",
- "atty",
- "base64 0.21.7",
- "camino",
- "clap",
- "futures",
- "libfuzzer-sys",
- "reblessive",
- "rust_decimal",
- "serde",
- "similar",
- "surrealdb-core",
- "tokio",
- "toml",
- "toml_edit 0.22.22",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "surrealdb-tikv-client"
 version = "0.3.0-surreal.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6213,6 +6189,30 @@ dependencies = [
  "regex",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "surrealql-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arbitrary",
+ "atty",
+ "base64 0.21.7",
+ "camino",
+ "clap",
+ "futures",
+ "libfuzzer-sys",
+ "reblessive",
+ "rust_decimal",
+ "serde",
+ "similar",
+ "surrealdb-core",
+ "tokio",
+ "toml",
+ "toml_edit 0.22.22",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

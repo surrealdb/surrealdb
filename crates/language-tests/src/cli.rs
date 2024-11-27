@@ -56,8 +56,6 @@ pub fn parse() -> ArgMatches {
         .subcommand(
             Command::new("run")
                 .about("Run surrealdb tests")
-				.arg(arg!(--test-log "Set the log level for the tests").value_parser(EnumValueParser::<LogLevel>::new()).default_value("info"))
-				.arg(arg!(--no-capture-log "Disable the capturing of test logs"))
                 .arg(arg!([filter] "Filter the test by their path"))
                 .arg(arg!(--path <PATH> "The path to tests directory").default_value("./tests"))
                 .arg(

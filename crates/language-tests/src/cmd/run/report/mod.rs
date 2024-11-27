@@ -2,18 +2,23 @@ use std::time::{Duration, Instant};
 
 use super::cmp::RoughlyEq;
 use super::TestJobResult;
-use crate::tests::{
-	schema::{BoolOr, TestDetailsResults, TestResultFlat},
-	testset::TestId,
-	TestSet,
+use crate::{
+	format::ansi,
+	tests::{
+		schema::{BoolOr, TestDetailsResults, TestResultFlat},
+		testset::TestId,
+		TestSet,
+	},
 };
 use similar::{Algorithm, TextDiff};
 use surrealdb_core::sql::Value as SurValue;
 use tracing::{error, info, warn};
 
+mod display;
 mod update;
 
 /// Enum with the outcome of a test
+#[derive(Clone, Copy)]
 pub enum TestGrade {
 	/// Test succeeded
 	Success,
@@ -276,6 +281,10 @@ impl TestReport {
 		}
 	}
 
+	pub fn grade(&self) -> TestGrade {
+		self.grade
+	}
+
 	pub fn succeeded(&self) -> bool {
 		matches!(self.grade, TestGrade::Success)
 	}
@@ -298,286 +307,5 @@ impl TestReport {
 
 	pub fn is_wip(&self) -> bool {
 		self.is_wip
-	}
-
-	pub fn short_display(&self, tests: &TestSet) {
-		let name = &tests[self.id].path;
-		match self.grade {
-			TestGrade::Success => {
-				info!("Test `{name}` finished successfully.");
-				if self.is_wip {
-					let mut s = String::new();
-					println!();
-					swriteln!(&mut s,"Test `{name}` succeeded even though it is marked work in progress, the tested issue might be fixed!");
-					if let Some(issue) = tests[self.id].config.issue() {
-						swriteln!(&mut s,"\tIssue https://github.com/surrealdb/surrealdb/issues/{issue} can possibly be closed.");
-					}
-					warn!("{s}")
-				}
-			}
-			TestGrade::Failed => {
-				error!("Test `{name}` failed.")
-			}
-			TestGrade::Warning => {
-				warn!("Test `{name}` finished with warnings.")
-			}
-		}
-	}
-
-	pub fn display(&self, tests: &TestSet) {
-		let name = &tests[self.id].path;
-		if let TestGrade::Success = self.grade {
-			return;
-		}
-
-		let mut s = String::new();
-		if let Some(error) = self.error.as_ref() {
-			match error {
-				TestError::Timeout => {
-					swriteln!(&mut s, "Test `{name}` timed out.");
-				}
-				TestError::Running(x) => {
-					swriteln!(&mut s, "Test `{name}` failed to run:\n{x}");
-				}
-			}
-		} else if let Some(valid) = self.output_validity.as_ref() {
-			match valid {
-				TestOutputValidity::Unspecified => {
-					swriteln!(&mut s, "Test `{name}` does not specify any results");
-					swriteln!(&mut s, "\t- Got:");
-					match self.outputs.as_ref().unwrap() {
-						TestOutputs::Values(res) => {
-							for e in res {
-								match e {
-									Ok(x) => {
-										swriteln!(&mut s, "\t\t- Value: {}", x);
-									}
-									Err(e) => {
-										swriteln!(&mut s, "\t\t- Error: {e}");
-									}
-								}
-							}
-						}
-						TestOutputs::ParsingError(res) => {
-							swriteln!(&mut s, "Parsing error: {res}");
-						}
-					}
-				}
-				TestOutputValidity::UnexpectParsingError {
-					expected,
-				} => {
-					swriteln!(&mut s, "Test `{name}` returned an unexpected parsing error:");
-					swriteln!(&mut s, "\t- Got:");
-					let res = self.outputs.as_ref().and_then(|x| x.as_parsing_error()).unwrap();
-					swriteln!(&mut s, "Parsing error: {res}");
-					if let Some(e) = expected {
-						swriteln!(&mut s, "\t- Expected:");
-						for e in e {
-							match e {
-								TestResultFlat::Value(x) => {
-									swriteln!(&mut s, "\t\t- Value: {}", x.0);
-								}
-								TestResultFlat::Error(BoolOr::Bool(false)) => {
-									swriteln!(&mut s, "\t\t- Any value");
-								}
-								TestResultFlat::Error(BoolOr::Bool(true)) => {
-									swriteln!(&mut s, "\t\t- Any error");
-								}
-								TestResultFlat::Error(BoolOr::Value(e)) => {
-									swriteln!(&mut s, "\t\t- Error: {e}");
-								}
-							}
-						}
-					}
-				}
-				TestOutputValidity::UnexpectedValues {
-					expected,
-				} => {
-					swriteln!(
-						&mut s,
-						"Test `{name}` returned results where it expected a parsing error:"
-					);
-					swriteln!(&mut s, "\t- Got:");
-					let res = self.outputs.as_ref().and_then(|x| x.as_results()).unwrap();
-					for e in res {
-						match e {
-							Ok(x) => {
-								swriteln!(&mut s, "\t\t- Value: {}", x);
-							}
-							Err(e) => {
-								swriteln!(&mut s, "\t\t- Error: {e}");
-							}
-						}
-					}
-					if let Some(expected) = expected {
-						swriteln!(&mut s, "\t- Expected:");
-						swriteln!(&mut s, "Parsing error: {expected}");
-					}
-				}
-				TestOutputValidity::MismatchedParsingError {
-					expected,
-				} => {
-					swriteln!(&mut s, "Test `{name}` returned mismatched parsing errors:");
-					let res = self.outputs.as_ref().and_then(|x| x.as_parsing_error()).unwrap();
-					swriteln!(&mut s, "\t- Got:");
-					swriteln!(&mut s, "Parsing error: {res}");
-					swriteln!(&mut s, "\t- Expected:");
-					swriteln!(&mut s, "Parsing error: {expected}");
-				}
-				TestOutputValidity::MismatchedValues {
-					expected,
-					kind,
-				} => {
-					swriteln!(&mut s, "Test `{name}` returned mismatched results:");
-					let res = self.outputs.as_ref().and_then(|x| x.as_results()).unwrap();
-
-					match kind {
-						MismatchedValuesKind::ResultCount => {
-							swriteln!(
-								&mut s,
-								"Got {} result but expected {} results",
-								res.len(),
-								expected.len()
-							);
-							swriteln!(&mut s, "\t- Got:");
-							for e in res {
-								match e {
-									Ok(x) => {
-										swriteln!(&mut s, "\t\t- Value: {}", x);
-									}
-									Err(e) => {
-										swriteln!(&mut s, "\t\t- Error: {e}");
-									}
-								}
-							}
-							swriteln!(&mut s, "\t- Expected:");
-							for e in expected {
-								match e {
-									TestResultFlat::Value(x) => {
-										swriteln!(&mut s, "\t\t- Value: {}", x.0);
-									}
-									TestResultFlat::Error(BoolOr::Bool(false)) => {
-										swriteln!(&mut s, "\t\t- Any value");
-									}
-									TestResultFlat::Error(BoolOr::Bool(true)) => {
-										swriteln!(&mut s, "\t\t- Any error");
-									}
-									TestResultFlat::Error(BoolOr::Value(e)) => {
-										swriteln!(&mut s, "\t\t- Error: {e}");
-									}
-								}
-							}
-						}
-						MismatchedValuesKind::ValueMismatch(idx) => {
-							swriteln!(&mut s, "Value {idx} was of the proper type but didn't match expected value.",);
-							let got = match res[*idx] {
-								Ok(ref x) => x.to_string(),
-								Err(ref e) => e.to_string(),
-							};
-							let expected = match expected[*idx] {
-								TestResultFlat::Value(ref x) => x.0.to_string(),
-								TestResultFlat::Error(BoolOr::Value(ref e)) => e.clone(),
-								TestResultFlat::Error(BoolOr::Bool(_)) => {
-									unreachable!()
-								}
-							};
-							swriteln!(&mut s, "\t- Got:");
-							swriteln!(&mut s, "\t\t {got}");
-							swriteln!(&mut s, "\t- Expected:");
-							swriteln!(&mut s, "\t\t {expected}");
-
-							let diff = TextDiff::configure()
-								.algorithm(Algorithm::Myers)
-								.deadline(Instant::now() + Duration::from_millis(500))
-								.diff_words(got.as_str(), expected.as_str());
-
-							swriteln!(&mut s, "\t- Diff:");
-							for op in diff.ops() {
-								for change in diff.iter_changes(op) {
-									match change.tag() {
-										similar::ChangeTag::Equal => {}
-										similar::ChangeTag::Delete => {
-											swrite!(&mut s, "\x1b[0;31m");
-										}
-										similar::ChangeTag::Insert => {
-											swrite!(&mut s, "\x1b[0;32m");
-										}
-									}
-									swrite!(&mut s, "{}\x1b[0m", change.to_string_lossy());
-								}
-							}
-							swriteln!(&mut s, "");
-						}
-						MismatchedValuesKind::InvalidError(idx) => {
-							swriteln!(&mut s, "Value {idx} is an error when an value was expected",);
-							swriteln!(&mut s, "\t- Got:");
-							match res[*idx] {
-								Ok(ref x) => {
-									swriteln!(&mut s, "\t\t- Value: {}", x);
-								}
-								Err(ref e) => {
-									swriteln!(&mut s, "\t\t- Error: {e}");
-								}
-							}
-							swriteln!(&mut s, "\t- Expected:");
-							match expected[*idx] {
-								TestResultFlat::Value(ref x) => {
-									swriteln!(&mut s, "\t\t- Value: {}", x.0);
-								}
-								TestResultFlat::Error(BoolOr::Bool(false)) => {
-									swriteln!(&mut s, "\t\t- Any value");
-								}
-								TestResultFlat::Error(BoolOr::Bool(true)) => {
-									swriteln!(&mut s, "\t\t- Any error");
-								}
-								TestResultFlat::Error(BoolOr::Value(ref e)) => {
-									swriteln!(&mut s, "\t\t- Error: {e}");
-								}
-							}
-						}
-						MismatchedValuesKind::InvalidValue(idx) => {
-							swriteln!(&mut s, "Value {idx} is an value when an error was expected",);
-							swriteln!(&mut s, "\t- Got:");
-							match res[*idx] {
-								Ok(ref x) => {
-									swriteln!(&mut s, "\t\t- Value: {}", x);
-								}
-								Err(ref e) => {
-									swriteln!(&mut s, "\t\t- Error: {e}");
-								}
-							}
-							swriteln!(&mut s, "\t- Expected:");
-							match expected[*idx] {
-								TestResultFlat::Value(ref x) => {
-									swriteln!(&mut s, "\t\t- Value: {}", x.0);
-								}
-								TestResultFlat::Error(BoolOr::Bool(false)) => {
-									swriteln!(&mut s, "\t\t- Any value");
-								}
-								TestResultFlat::Error(BoolOr::Bool(true)) => {
-									swriteln!(&mut s, "\t\t- Any error");
-								}
-								TestResultFlat::Error(BoolOr::Value(ref e)) => {
-									swriteln!(&mut s, "\t\t- Error: {e}");
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
-		match self.grade {
-			TestGrade::Success => info!("{s}"),
-			TestGrade::Failed => error!("{s}"),
-			TestGrade::Warning => {
-				if self.is_wip {
-					warn!("{s}\n");
-					warn!("Test `{name}` produces warnings because the test is marked as work in progress.");
-				} else {
-					warn!("{s}")
-				}
-			}
-		}
 	}
 }
