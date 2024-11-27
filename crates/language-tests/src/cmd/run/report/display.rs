@@ -7,6 +7,7 @@ use std::{
 use similar::{Algorithm, DiffableStr, TextDiff};
 
 use crate::{
+	cli::ColorMode,
 	format::{self, ansi},
 	tests::{
 		schema::{BoolOr, TestResultFlat},
@@ -19,12 +20,16 @@ use super::{
 };
 
 impl TestReport {
-	pub fn display(&self, tests: &TestSet) {
-		self.display_inner(tests).unwrap()
+	pub fn display(&self, tests: &TestSet, color: ColorMode) {
+		self.display_inner(tests, color).unwrap()
 	}
 
-	fn display_inner(&self, tests: &TestSet) -> fmt::Result {
-		let use_ansi = atty::is(atty::Stream::Stdout);
+	fn display_inner(&self, tests: &TestSet, color: ColorMode) -> fmt::Result {
+		let use_color = match color {
+			ColorMode::Always => true,
+			ColorMode::Never => false,
+			ColorMode::Auto => atty::is(atty::Stream::Stdout),
+		};
 		let mut buffer = String::new();
 		let mut f = format::IndentFormatter::new(&mut buffer, 2);
 		f.increase_depth();
@@ -34,7 +39,7 @@ impl TestReport {
 		match self.grade {
 			TestGrade::Success => return Ok(()),
 			TestGrade::Failed => {
-				if use_ansi {
+				if use_color {
 					writeln!(
 						f,
 						ansi!(
@@ -56,7 +61,7 @@ impl TestReport {
 				f.increase_depth();
 			}
 			TestGrade::Warning => {
-				if use_ansi {
+				if use_color {
 					writeln!(
 						f,
 						ansi!(
@@ -273,21 +278,21 @@ impl TestReport {
 											match change.tag() {
 												similar::ChangeTag::Equal => {}
 												similar::ChangeTag::Delete => {
-													if use_ansi {
+													if use_color {
 														write!(f, ansi!(red))?;
 													} else {
 														write!(f, "-[")?;
 													}
 												}
 												similar::ChangeTag::Insert => {
-													if use_ansi {
+													if use_color {
 														write!(f, ansi!(green))?;
 													} else {
 														write!(f, "+[")?;
 													}
 												}
 											}
-											if use_ansi {
+											if use_color {
 												write!(
 													f,
 													ansi!("{}", reset_format),

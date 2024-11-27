@@ -12,7 +12,6 @@ use crate::{
 };
 use similar::{Algorithm, TextDiff};
 use surrealdb_core::sql::Value as SurValue;
-use tracing::{error, info, warn};
 
 mod display;
 mod update;

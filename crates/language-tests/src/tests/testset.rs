@@ -8,7 +8,6 @@ use std::{
 	sync::Arc,
 };
 use tokio::fs;
-use tracing::warn;
 
 use super::TestCase;
 
@@ -148,8 +147,8 @@ impl TestSet {
 				let case = match TestCase::from_source_path(p.clone(), text) {
 					Ok(x) => x,
 					Err(e) => {
-						warn!("{:?}", e.context(format!("Failed to load test at '{p}'")));
-						warn!("Skipping test!");
+						println!("{:?}", e.context(format!("Failed to load test at '{p}'")));
+						println!("Skipping test!");
 						continue;
 					}
 				};

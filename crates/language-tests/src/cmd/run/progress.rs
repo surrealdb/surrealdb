@@ -1,17 +1,14 @@
-use std::{
-	collections::{hash_map::Entry, HashMap},
-	io::{self, BufWriter, Stderr, StderrLock, Write},
-	time::Duration,
-};
+use std::io::{self, BufWriter, Stderr, Write};
 
 use atty::Stream;
 
-use crate::format::ansi;
+use crate::{cli::ColorMode, format::ansi};
 
 use super::report::TestGrade;
 
 pub struct Progress<W> {
 	items: Vec<String>,
+	color_mode: ColorMode,
 	use_ansii: bool,
 	writer: W,
 	finised: usize,
@@ -19,10 +16,11 @@ pub struct Progress<W> {
 }
 
 impl<W> Progress<W> {
-	pub fn from_writer(writer: W, use_ansii: bool, expected: usize) -> Self {
+	pub fn from_writer(writer: W, use_ansii: bool, color_mode: ColorMode, expected: usize) -> Self {
 		Progress {
 			items: Vec::new(),
 			use_ansii,
+			color_mode,
 			writer,
 			finised: 0,
 			expected,
@@ -31,12 +29,25 @@ impl<W> Progress<W> {
 }
 
 impl Progress<BufWriter<Stderr>> {
-	pub fn from_stderr(expected: usize) -> Self {
-		Self::from_writer(BufWriter::new(io::stderr()), atty::is(Stream::Stderr), expected)
+	pub fn from_stderr(expected: usize, color_mode: ColorMode) -> Self {
+		Self::from_writer(
+			BufWriter::new(io::stderr()),
+			atty::is(Stream::Stderr),
+			color_mode,
+			expected,
+		)
 	}
 }
 
 impl<W: Write> Progress<W> {
+	fn use_color(&self) -> bool {
+		match self.color_mode {
+			ColorMode::Always => true,
+			ColorMode::Never => false,
+			ColorMode::Auto => self.use_ansii,
+		}
+	}
+
 	fn write_bar(&mut self) -> Result<(), io::Error> {
 		const TOTAL_WIDTH: usize = 80;
 
@@ -64,24 +75,62 @@ impl<W: Write> Progress<W> {
 		self.writer.write_all(b"]")
 	}
 
+	fn write_running(&mut self, name: &str) -> Result<(), io::Error> {
+		if self.use_color() {
+			self.writer.write_fmt(format_args!(
+				ansi!(blue, "  Running", reset_format, " {:<80}", reset_format, "\n"),
+				name
+			))
+		} else {
+			self.writer.write_fmt(format_args!("Running {}\n", name))
+		}
+	}
+
+	fn write_finished(&mut self, name: &str, result: TestGrade) -> Result<(), io::Error> {
+		if self.use_color() {
+			let res = match result {
+				TestGrade::Success => {
+					ansi!(green, "Success ✓", reset_format)
+				}
+				TestGrade::Warning => {
+					ansi!(yellow, "Warning ⚠", reset_format)
+				}
+				TestGrade::Failed => {
+					ansi!(red, "Error ☓", reset_format)
+				}
+			};
+
+			self.writer.write_fmt(format_args!(
+				ansi!(blue, " Finished", reset_format, " {} {}\n"),
+				name, res
+			))
+		} else {
+			self.writer.write_fmt(format_args!("Finished {} ", name))?;
+			let res = match result {
+				TestGrade::Success => "Success ✓\n",
+				TestGrade::Warning => "Warning ⚠\n",
+				TestGrade::Failed => "Error ☓\n",
+			};
+			self.writer.write_all(res.as_bytes())
+		}
+	}
+
 	pub fn start_item(&mut self, name: &str) -> Result<(), io::Error> {
 		if self.items.iter().any(|x| x == name) {
 			return Ok(());
 		}
 
-		if !self.use_ansii {
-			self.writer.write_fmt(format_args!("Running {}\n", name))?;
-			return self.writer.flush();
+		if self.use_ansii {
+			self.writer.write_all(b"\r")?;
+			self.writer.write_all(ansi!(clear_line).as_bytes())?;
 		}
 
-		self.writer.write_all(ansi!("\r", clear_line).as_bytes())?;
-		self.writer.write_fmt(format_args!(
-			ansi!(blue, "  Running", reset_format, " {}", reset_format, "\n"),
-			name
-		))?;
+		self.write_running(name)?;
 		self.items.push(name.to_string());
-		self.write_bar()?;
-		return self.writer.flush();
+		if self.use_ansii {
+			self.write_bar()?;
+		}
+		self.writer.flush()
 	}
 
 	pub fn finish_item(&mut self, name: &str, result: TestGrade) -> Result<(), io::Error> {
@@ -89,51 +138,32 @@ impl<W: Write> Progress<W> {
 			return Ok(());
 		};
 
-		if !self.use_ansii {
-			self.items.remove(idx);
-			self.writer.write_fmt(format_args!("Finished {}", name))?;
-			let res = match result {
-				TestGrade::Success => "Success ✓\n",
-				TestGrade::Warning => "Warning ⚠\n",
-				TestGrade::Failed => "Error ☓\n",
-			};
-			self.writer.write_all(res.as_bytes())?;
-			return self.writer.flush();
-		}
-
 		let lines = self.items.len();
 		let item = self.items.remove(idx);
 
 		self.writer.write_all(b"\r")?;
-		for _ in 0..lines {
-			self.writer.write_all(ansi!(up).as_bytes())?;
+
+		if self.use_ansii {
+			for _ in 0..lines {
+				self.writer.write_all(ansi!(up).as_bytes())?;
+			}
+			self.writer.write_all(ansi!(clear_after).as_bytes())?;
 		}
 
-		self.writer.write_all(ansi!(clear_after).as_bytes())?;
+		self.write_finished(name, result)?;
 
-		let res = match result {
-			TestGrade::Success => {
-				ansi!(green, "Success ✓", reset_format)
+		if self.use_ansii {
+			for name in self.items.iter() {
+				self.writer.write_fmt(format_args!(
+					ansi!(blue, "  Running", reset_format, " {}\n"),
+					name
+				))?;
 			}
-			TestGrade::Warning => {
-				ansi!(yellow, "Warning ⚠", reset_format)
-			}
-			TestGrade::Failed => {
-				ansi!(red, "Error ☓", reset_format)
-			}
-		};
-
-		self.writer.write_fmt(format_args!(
-			ansi!(blue, " Finished", reset_format, " {} {}\n"),
-			item, res
-		))?;
-
-		for name in self.items.iter() {
-			self.writer
-				.write_fmt(format_args!(ansi!(blue, "  Running", reset_format, " {}\n"), name))?;
 		}
 		self.finised += 1;
-		self.write_bar()?;
+		if self.use_ansii {
+			self.write_bar()?;
+		}
 		self.writer.flush()
 	}
 }

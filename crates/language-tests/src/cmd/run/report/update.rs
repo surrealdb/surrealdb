@@ -8,19 +8,18 @@ use anyhow::Result;
 use surrealdb_core::sql::Value as SurValue;
 use tokio::{fs, io::AsyncWriteExt};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
-use tracing::{info, warn};
 
 use super::TestReport;
 
 impl TestReport {
 	pub async fn update_config_results(&self, set: &TestSet) -> Result<()> {
 		let Some(values) = self.outputs.as_ref() else {
-			warn!("tried to update test {} without results", set[self.id].path);
+			println!("tried to update test {} without results", set[self.id].path);
 			return Ok(());
 		};
 
 		let mut doc = set[self.id].toml.clone();
-		info!("Updating test `{}`", set[self.id].path);
+		println!("Updating test `{}`", set[self.id].path);
 
 		match values {
 			TestOutputs::Values(values) => apply_results(&mut doc, values),

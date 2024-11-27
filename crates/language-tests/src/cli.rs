@@ -1,3 +1,4 @@
+use atty::Stream;
 use clap::{
 	arg,
 	builder::{EnumValueParser, PossibleValue},
@@ -25,6 +26,7 @@ impl ValueEnum for FailureMode {
 	}
 }
 
+/*
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LogLevel {
 	Trace,
@@ -48,11 +50,32 @@ impl ValueEnum for LogLevel {
 			LogLevel::Error => Some(PossibleValue::new("error")),
 		}
 	}
+}*/
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ColorMode {
+	Always,
+	Never,
+	Auto,
+}
+
+impl ValueEnum for ColorMode {
+	fn value_variants<'a>() -> &'a [Self] {
+		&[ColorMode::Always, ColorMode::Never, ColorMode::Auto]
+	}
+
+	fn to_possible_value(&self) -> Option<PossibleValue> {
+		match self {
+			ColorMode::Always => Some(PossibleValue::new("always")),
+			ColorMode::Never => Some(PossibleValue::new("never")),
+			ColorMode::Auto => Some(PossibleValue::new("auto")),
+		}
+	}
 }
 
 pub fn parse() -> ArgMatches {
 	let mut cmd = command!()
-		.arg(arg!(--log "Set the log level for the test suite itself").value_parser(EnumValueParser::<LogLevel>::new()).default_value("info"))
+		.arg(arg!(--color <COLOR> "Set if the output should be colored").value_parser(EnumValueParser::<ColorMode>::new()).default_value("auto"))
         .subcommand(
             Command::new("run")
                 .about("Run surrealdb tests")

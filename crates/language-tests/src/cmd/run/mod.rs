@@ -21,10 +21,9 @@ use tokio::{
 	sync::mpsc::{self, Receiver, Sender},
 	time::{self},
 };
-use tracing::{debug, info, info_span, warn, Instrument};
 
 use crate::{
-	cli::FailureMode,
+	cli::{ColorMode, FailureMode},
 	runner::Schedular,
 	tests::{
 		schema::{BoolOr, SchemaTarget},
@@ -95,7 +94,7 @@ impl TestRunner {
 	}
 }
 
-pub async fn run(matches: &ArgMatches) -> Result<()> {
+pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let path: &String = matches.get_one("path").unwrap();
 	let testset = TestSet::collect_directory(Utf8Path::new(&path)).await?;
 
@@ -124,15 +123,12 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
 
 	println!("Running with {num_jobs} jobs");
 
-	runner
-		.fill_datastores(num_jobs as usize)
-		.instrument(info_span!("initialize_reused_stores"))
-		.await?;
+	runner.fill_datastores(num_jobs as usize).await?;
 
 	println!("Found {} tests", runner.set.len());
 
 	let mut reports = Vec::new();
-	let mut progress = progress::Progress::from_stderr(runner.set.len());
+	let mut progress = progress::Progress::from_stderr(runner.set.len(), color);
 
 	// spawn all tests.
 	for (id, test) in runner.set.iter_ids() {
@@ -154,11 +150,10 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
 		let runner_clone = runner.clone();
 		let name_clone = test.path.clone();
 		let future = async move {
-			let future = run_test(id, runner_clone, db)
-				.instrument(info_span!("test_run", test_name = name_clone.as_str()));
+			let future = run_test(id, runner_clone, db);
 
 			if let Err(e) = future.await {
-				warn!("{:?}", e.context(format!("Failed to run test '{name_clone}'")))
+				println!("Error: {:?}", e.context(format!("Failed to run test '{name_clone}'")))
 			}
 		};
 
@@ -208,13 +203,13 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
 	println!();
 
 	for v in reports.iter().filter(|x| x.has_warning()) {
-		v.display(&runner.set)
+		v.display(&runner.set, color)
 	}
 
 	println!();
 
 	for v in reports.iter().filter(|x| x.has_failed()) {
-		v.display(&runner.set)
+		v.display(&runner.set, color)
 	}
 
 	// possibly update test configs with acquired results.
@@ -349,7 +344,6 @@ async fn run_test_with_dbs(
 	}
 
 	for import in runner.set[id].config.imports() {
-		debug!("running import `{import}`");
 		let Some(test) = runner.set.find_all(import) else {
 			bail!("Could not find import import `{import}`");
 		};

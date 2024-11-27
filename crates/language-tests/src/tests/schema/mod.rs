@@ -11,7 +11,6 @@ use surrealdb_core::{
 	sql::Value as CoreValue,
 	syn,
 };
-use tracing_subscriber::fmt::format;
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]

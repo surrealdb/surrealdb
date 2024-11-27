@@ -1,26 +1,24 @@
-#[macro_use]
-mod mac;
-
 mod cli;
 mod cmd;
 mod format;
-mod log;
 mod runner;
 mod tests;
 
 use anyhow::Result;
-use tracing::Level;
+use cli::ColorMode;
 
 #[tokio::main]
 async fn main() -> Result<()> {
 	let matches = cli::parse();
+
+	let color: ColorMode = matches.get_one("color").copied().unwrap();
 
 	let (sub, args) = matches.subcommand().unwrap();
 
 	//log::init(Level::INFO);
 
 	match sub {
-		"run" => cmd::run::run(args).await,
+		"run" => cmd::run::run(color, args).await,
 		#[cfg(feature = "fuzzing")]
 		"fuzz" => cmd::fuzz::run(args).await,
 		#[cfg(not(feature = "fuzzing"))]

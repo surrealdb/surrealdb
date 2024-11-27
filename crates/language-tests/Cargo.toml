@@ -25,8 +25,8 @@ reblessive = { version = "*" }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 
 # Used for capturing logs from core
-tracing = "*"
-tracing-subscriber = { version = "*", features = ["fmt","ansi"] }
+#tracing = "*"
+#tracing-subscriber = { version = "*", features = ["fmt","ansi"] }
 
 # Simplified path handling, test doesn't care about non-utf8 paths.
 camino = { version = "1.1.9", features = ["serde1"] }
