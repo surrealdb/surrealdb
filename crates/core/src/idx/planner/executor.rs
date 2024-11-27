@@ -20,7 +20,7 @@ use crate::idx::planner::iterators::{
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
-use crate::idx::planner::tree::{IdiomPosition, IndexReference, IndexesMap};
+use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::planner::IterationStage;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
@@ -28,7 +28,7 @@ use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, TransactionType};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Cond, Expression, Idiom, Number, Object, Table, Thing, Value};
+use crate::sql::{Array, Cond, Expression, Idiom, Number, Object, Table, Thing, Value};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -108,7 +108,7 @@ impl InnerQueryExecutor {
 		ctx: &Context,
 		opt: &Options,
 		table: &Table,
-		im: IndexesMap,
+		ios: Vec<(Arc<Expression>, IndexOption)>,
 		knns: KnnExpressions,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
@@ -123,9 +123,9 @@ impl InnerQueryExecutor {
 		let mut knn_bruteforce_entries = HashMap::with_capacity(knns.len());
 		let knn_condition = knn_condition.map(Arc::new);
 
-		// Create all the instances of FtIndex
-		// Build the FtEntries and map them to Idioms and MatchRef
-		for (exp, io) in im.options {
+		// Create all the instances of index entries.
+		// Map them to Idioms and MatchRef
+		for (exp, io) in ios {
 			let ixr = io.ix_ref();
 			match &ixr.index {
 				Index::Search(p) => {
@@ -368,16 +368,12 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
-			IndexOperator::Equality(value) | IndexOperator::Exactness(value) => {
-				if let Value::Number(n) = value.as_ref() {
-					let values = Self::get_equal_number_variants(n);
-					if values.len() == 1 {
-						Some(Self::new_index_equal_iterator(ir, opt, ix, &values[0])?)
-					} else {
-						Some(Self::new_multiple_index_equal_iterators(ir, opt, ix, values)?)
-					}
+			IndexOperator::Equality(values) | IndexOperator::Exactness(values) => {
+				let arrays = Self::get_equal_variants(values);
+				if arrays.len() == 1 {
+					Some(Self::new_index_equal_iterator(ir, opt, ix, &arrays[0])?)
 				} else {
-					Some(Self::new_index_equal_iterator(ir, opt, ix, value)?)
+					Some(Self::new_multiple_index_equal_iterators(ir, opt, ix, arrays)?)
 				}
 			}
 			IndexOperator::Union(value) => Some(ThingIterator::IndexUnion(
@@ -396,18 +392,56 @@ impl QueryExecutor {
 		})
 	}
 
+	fn get_equal_variants(values: &[Arc<Value>]) -> Vec<Array> {
+		let col_count = values.len();
+		let mut cols_values = Vec::with_capacity(col_count);
+		let mut array_variants_count = 1;
+		for value in values {
+			let value_variants = if let Value::Number(n) = value.as_ref() {
+				Self::get_equal_number_variants(n)
+			} else {
+				vec![value.clone()]
+			};
+			array_variants_count *= value_variants.len();
+			cols_values.push(value_variants);
+		}
+		let mut variants = Vec::with_capacity(array_variants_count);
+		Self::generate_variant(0, vec![], &cols_values, &mut variants);
+		variants
+	}
+
+	fn generate_variant(
+		col: usize,
+		variant: Vec<Arc<Value>>,
+		cols_values: &[Vec<Arc<Value>>],
+		variants: &mut Vec<Array>,
+	) {
+		if let Some(values) = cols_values.get(col) {
+			let col = col + 1;
+			for value in values {
+				let mut current_variant = variant.clone();
+				current_variant.push(value.clone());
+				Self::generate_variant(col, current_variant, cols_values, variants);
+			}
+		} else {
+			println!("{variant:?}");
+			let variant = Array(variant.iter().map(|v| v.as_ref().clone()).collect());
+			variants.push(variant);
+		}
+	}
+
 	fn new_index_equal_iterator(
 		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		value: &Value,
+		array: &Array,
 	) -> Result<ThingIterator, Error> {
 		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
 			irf,
 			opt.ns()?,
 			opt.db()?,
 			ix,
-			value,
+			array,
 		)))
 	}
 
@@ -415,7 +449,7 @@ impl QueryExecutor {
 		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		values: Vec<Value>,
+		values: Vec<Array>,
 	) -> Result<ThingIterator, Error> {
 		let mut iterators = VecDeque::with_capacity(values.len());
 		for value in values {
@@ -472,7 +506,7 @@ impl QueryExecutor {
 		};
 		(oi, of, od)
 	}
-	fn get_equal_number_variants(n: &Number) -> Vec<Value> {
+	fn get_equal_number_variants(n: &Number) -> Vec<Arc<Value>> {
 		let (oi, of, od) = Self::get_number_variants(n, |f| {
 			if f.trunc().eq(f) {
 				f.to_i64()
@@ -482,13 +516,13 @@ impl QueryExecutor {
 		});
 		let mut values = Vec::with_capacity(3);
 		if let Some(i) = oi {
-			values.push(Number::Int(i).into());
+			values.push(Arc::new(Number::Int(i).into()));
 		}
 		if let Some(f) = of {
-			values.push(Number::Float(f).into());
+			values.push(Arc::new(Number::Float(f).into()));
 		}
 		if let Some(d) = od {
-			values.push(Number::Decimal(d).into());
+			values.push(Arc::new(Number::Decimal(d).into()));
 		}
 		values
 	}
@@ -775,16 +809,12 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
-			IndexOperator::Equality(value) | IndexOperator::Exactness(value) => {
-				if let Value::Number(n) = value.as_ref() {
-					let values = Self::get_equal_number_variants(n);
-					if values.len() == 1 {
-						Some(Self::new_unique_equal_iterator(irf, opt, ixr, &values[0])?)
-					} else {
-						Some(Self::new_multiple_unique_equal_iterators(irf, opt, ixr, values)?)
-					}
+			IndexOperator::Equality(values) | IndexOperator::Exactness(values) => {
+				let arrays = Self::get_equal_variants(values);
+				if arrays.len() == 1 {
+					Some(Self::new_unique_equal_iterator(irf, opt, ixr, &arrays[0])?)
 				} else {
-					Some(Self::new_unique_equal_iterator(irf, opt, ixr, value)?)
+					Some(Self::new_multiple_unique_equal_iterators(irf, opt, ixr, arrays)?)
 				}
 			}
 			IndexOperator::Union(value) => Some(ThingIterator::UniqueUnion(
@@ -807,7 +837,7 @@ impl QueryExecutor {
 		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		value: &Value,
+		array: &Array,
 	) -> Result<ThingIterator, Error> {
 		if ix.cols.len() > 1 {
 			// If the index is unique and the index is a composite index,
@@ -818,7 +848,7 @@ impl QueryExecutor {
 				opt.ns()?,
 				opt.db()?,
 				ix,
-				value,
+				array,
 			)))
 		} else {
 			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
@@ -826,7 +856,7 @@ impl QueryExecutor {
 				opt.ns()?,
 				opt.db()?,
 				ix,
-				value,
+				array,
 			)))
 		}
 	}
@@ -835,7 +865,7 @@ impl QueryExecutor {
 		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		values: Vec<Value>,
+		values: Vec<Array>,
 	) -> Result<ThingIterator, Error> {
 		let mut iterators = VecDeque::with_capacity(values.len());
 		for value in values {

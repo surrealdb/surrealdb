@@ -14,7 +14,6 @@ use crate::sql::{
 	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Part, Subquery, Table, Value,
 	With,
 };
-use bit_vec::BitVec;
 use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -146,7 +145,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn eval_order(&mut self) -> Result<(), Error> {
 		if let Some(o) = self.first_order {
 			if o.direction {
-				if let Node::IndexedField(id, irf) = self.resolve_idiom(None, &o.value).await? {
+				if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
 					for (ixr, id_col) in &irf {
 						if *id_col == 0 {
 							self.index_map.order_limit = Some(IndexOption::new(
@@ -241,21 +240,21 @@ impl<'a> TreeBuilder<'a> {
 			}
 		}
 
-		let n = self.resolve_idiom(Some(gr), i).await?;
+		let n = self.resolve_idiom(i).await?;
 		Ok(n)
 	}
 
-	async fn resolve_idiom(&mut self, gr: Option<GroupRef>, i: &Idiom) -> Result<Node, Error> {
+	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
 		let tx = self.ctx.ctx.tx();
 		self.lazy_load_schema_resolver(&tx, self.table).await?;
 		let i = Arc::new(i.clone());
 		// Try to detect if it matches an index
 		let n = if let Some(schema) = self.schemas.get(self.table).cloned() {
-			let irs = self.resolve_indexes(self.table, gr, &i, &schema);
+			let irs = self.resolve_indexes(self.table, &i, &schema);
 			if !irs.is_empty() {
 				Node::IndexedField(i.clone(), irs)
 			} else if let Some(ro) =
-				self.resolve_record_field(&tx, schema.fields.as_ref(), gr, &i).await?
+				self.resolve_record_field(&tx, schema.fields.as_ref(), &i).await?
 			{
 				// Try to detect an indexed record field
 				Node::RecordField(i.clone(), ro)
@@ -269,13 +268,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(n)
 	}
 
-	fn resolve_indexes(
-		&mut self,
-		t: &Table,
-		gr: Option<GroupRef>,
-		i: &Idiom,
-		schema: &SchemaCache,
-	) -> LocalIndexRefs {
+	fn resolve_indexes(&mut self, t: &Table, i: &Idiom, schema: &SchemaCache) -> LocalIndexRefs {
 		// Did we already resolve this idiom?
 		if let Some(m) = self.idioms_indexes.get(t) {
 			if let Some(irs) = m.get(i).cloned() {
@@ -296,7 +289,6 @@ impl<'a> TreeBuilder<'a> {
 						}
 					}
 				}
-				self.index_map.add_index_usage(ixr.clone(), gr, idiom_index);
 				irs.push((ixr, idiom_index));
 			}
 		}
@@ -313,7 +305,6 @@ impl<'a> TreeBuilder<'a> {
 		&mut self,
 		tx: &Transaction,
 		fields: &[DefineFieldStatement],
-		gr: Option<GroupRef>,
 		idiom: &Arc<Idiom>,
 	) -> Result<Option<RecordOptions>, Error> {
 		for field in fields.iter() {
@@ -327,7 +318,7 @@ impl<'a> TreeBuilder<'a> {
 					self.lazy_load_schema_resolver(tx, self.table).await?;
 					let locals;
 					if let Some(shema) = self.schemas.get(self.table).cloned() {
-						locals = self.resolve_indexes(self.table, gr, &local_field, &shema);
+						locals = self.resolve_indexes(self.table, &local_field, &shema);
 					} else {
 						return Ok(None);
 					}
@@ -337,8 +328,7 @@ impl<'a> TreeBuilder<'a> {
 					for table in tables {
 						self.lazy_load_schema_resolver(tx, table).await?;
 						if let Some(schema) = self.schemas.get(table).cloned() {
-							let remote_irs =
-								self.resolve_indexes(table, gr, &remote_field, &schema);
+							let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
 							remotes.push((remote_field.clone(), remote_irs));
 						} else {
 							return Ok(None);
@@ -598,13 +588,13 @@ impl<'a> TreeBuilder<'a> {
 	) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
 			match (op, v, p) {
-				(Operator::Equal, v, _) => return Some(IndexOperator::Equality(v)),
-				(Operator::Exact, v, _) => return Some(IndexOperator::Exactness(v)),
+				(Operator::Equal, v, _) => return Some(IndexOperator::Equality(vec![v])),
+				(Operator::Exact, v, _) => return Some(IndexOperator::Exactness(vec![v])),
 				(Operator::Contain, v, IdiomPosition::Left) => {
-					return Some(IndexOperator::Equality(v))
+					return Some(IndexOperator::Equality(vec![v]))
 				}
 				(Operator::Inside, v, IdiomPosition::Right) => {
-					return Some(IndexOperator::Equality(v))
+					return Some(IndexOperator::Equality(vec![v]))
 				}
 				(
 					Operator::ContainAny | Operator::ContainAll | Operator::Inside,
@@ -643,41 +633,43 @@ impl<'a> TreeBuilder<'a> {
 pub(super) struct IndexesMap {
 	pub(super) options: Vec<(Arc<Expression>, IndexOption)>,
 	/// For each index, tells if the columns are requested
-	pub(super) index_usage: HashMap<IndexReference, IndexUsage>,
+	pub(super) compound_indexes: HashMap<IndexReference, CompoundIndex>,
 	pub(super) order_limit: Option<IndexOption>,
 }
 
 impl IndexesMap {
-	pub(crate) fn add_index_usage(
+	pub(crate) fn add_node(
 		&mut self,
 		ixr: IndexReference,
 		gr: Option<GroupRef>,
 		idx: usize,
+		val: Node,
 	) {
 		let cols = ixr.cols.len();
-		let index_usage = self.index_usage.entry(ixr).or_insert(IndexUsage::new(cols));
-		index_usage.cols.insert(idx, true);
+		let val = Some(val);
+		let compound_indexes = self.compound_indexes.entry(ixr).or_insert(CompoundIndex::new(cols));
 		if let Some(gr) = gr {
-			let cols = index_usage.group_cols.entry(gr).or_insert(BitVec::with_capacity(cols));
-			cols.insert(idx, true);
+			let cols = compound_indexes.group_cols.entry(gr).or_insert(Vec::with_capacity(cols));
+			cols.insert(idx, val.clone());
 		}
+		compound_indexes.cols.insert(idx, val);
 	}
 }
 
-#[derive(Default)]
-pub(super) struct IndexUsage {
+#[derive(Default, Debug)]
+pub(super) struct CompoundIndex {
 	/// References every requested column for the whole condition
 	/// This allow for queries that only contains AND operators
-	cols: BitVec,
+	cols: Vec<Option<Node>>,
 	/// References every requested column in a group
 	/// This allows using a compound index in a multi-index strategy
-	group_cols: HashMap<GroupRef, BitVec>,
+	group_cols: HashMap<GroupRef, Vec<Option<Node>>>,
 }
 
-impl IndexUsage {
+impl CompoundIndex {
 	fn new(cols: usize) -> Self {
 		Self {
-			cols: BitVec::with_capacity(cols),
+			cols: Vec::with_capacity(cols),
 			group_cols: HashMap::new(),
 		}
 	}

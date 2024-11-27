@@ -156,18 +156,17 @@ impl IndexEqualThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-		v: &Value,
+		a: &Array,
 	) -> Self {
-		let a = Array::from(v.clone());
 		let (beg, end) = if ix.cols.len() == 1 {
 			(
-				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, &a),
-				Index::prefix_ids_end(ns, db, &ix.what, &ix.name, &a),
+				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, a),
+				Index::prefix_ids_end(ns, db, &ix.what, &ix.name, a),
 			)
 		} else {
 			(
-				Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, &a),
-				Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, &a),
+				Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, a),
+				Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, a),
 			)
 		};
 		Self {
@@ -615,7 +614,8 @@ impl IndexJoinThingIterator {
 		limit: u32,
 	) -> Result<B, Error> {
 		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
-			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &value);
+			let array = Array::from(value);
+			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array);
 			ThingIterator::IndexEqual(it)
 		};
 		self.1.next_batch(ctx, tx, limit, new_iter).await
@@ -633,10 +633,9 @@ impl UniqueEqualThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-		v: &Value,
+		a: &Array,
 	) -> Self {
-		let a = Array::from(v.to_owned());
-		let key = Index::new(ns, db, &ix.what, &ix.name, &a, None).into();
+		let key = Index::new(ns, db, &ix.what, &ix.name, a, None).into();
 		Self {
 			irf,
 			key: Some(key),
@@ -838,7 +837,8 @@ impl UniqueJoinThingIterator {
 		limit: u32,
 	) -> Result<B, Error> {
 		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
-			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &value);
+			let array = Array::from(value.clone());
+			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array);
 			ThingIterator::UniqueEqual(it)
 		};
 		self.1.next_batch(ctx, tx, limit, new_iter).await

@@ -52,7 +52,7 @@ impl PlanBuilder {
 			}
 		}
 
-		// If every boolean operator is AND then we can use the single index plan
+		// If all boolean operators are AND, we can use the single index plan
 		if all_and {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
@@ -61,7 +61,9 @@ impl PlanBuilder {
 					return Ok(Plan::SingleIndexRange(ir, rq));
 				}
 			}
-			// Otherwise, we take the first single index option
+
+			// Otherwise, we try to find the most interesting single index option
+
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				return Ok(Plan::SingleIndex(Some(e), i));
 			}
@@ -174,8 +176,8 @@ pub(super) struct IndexOption {
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
-	Equality(Arc<Value>),
-	Exactness(Arc<Value>),
+	Equality(Vec<Arc<Value>>),
+	Exactness(Vec<Arc<Value>>),
 	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
 	RangePart(Operator, Arc<Value>),
@@ -222,13 +224,16 @@ impl IndexOption {
 		self.id_pos
 	}
 
-	fn reduce_array(v: &Value) -> Value {
-		if let Value::Array(a) = v {
-			if a.len() == 1 {
-				return a[0].clone();
+	fn reduce_array(values: &[Arc<Value>]) -> Value {
+		if values.len() == 1 {
+			if let Value::Array(a) = values[0].as_ref() {
+				if a.len() == 1 {
+					return a[0].clone();
+				}
 			}
+			return values[0].as_ref().clone();
 		}
-		v.clone()
+		Value::from(Array(values.iter().map(|v| v.as_ref().clone()).collect()))
 	}
 
 	pub(crate) fn explain(&self) -> Value {
