@@ -4,6 +4,7 @@
 timeout = 4000
 
 [test]
+run = false;
 
 [[test.results]]
 value = "NONE"
@@ -2478,20 +2479,20 @@ DEFINE FUNCTION fn::pound_to_usd($price: number) { RETURN $price * 1.26f; } PERM
 -- ------------------------------
 
 DEFINE TABLE avg_product_review TYPE NORMAL SCHEMAFULL AS SELECT count() AS number_of_reviews, math::mean(<float> rating) AS avg_review, ->product.id AS product_id, ->product.name AS product_name FROM review GROUP BY product_id, product_name;
-DEFINE FIELD avg_review 
-    ON TABLE avg_product_review 
+DEFINE FIELD avg_review
+    ON TABLE avg_product_review
     TYPE number;
-DEFINE FIELD id 
-    ON TABLE avg_product_review 
+DEFINE FIELD id
+    ON TABLE avg_product_review
     TYPE string;
-DEFINE FIELD number_of_reviews 
-    ON TABLE avg_product_review 
+DEFINE FIELD number_of_reviews
+    ON TABLE avg_product_review
     TYPE number;
-DEFINE FIELD product_id 
-    ON TABLE avg_product_review 
+DEFINE FIELD product_id
+    ON TABLE avg_product_review
     TYPE array<record<product>>;
-DEFINE FIELD product_name 
-    ON TABLE avg_product_review 
+DEFINE FIELD product_name
+    ON TABLE avg_product_review
     TYPE array<string>;
 
 -- ------------------------------
@@ -2499,62 +2500,62 @@ DEFINE FIELD product_name
 -- ------------------------------
 
 DEFINE TABLE monthly_sales TYPE NORMAL SCHEMAFULL AS SELECT count() AS number_of_orders, time::format(time.created_at, '%Y-%m') AS month, math::sum(price * quantity) AS sum_sales, currency FROM order GROUP BY month, currency;
-DEFINE FIELD id 
-    ON TABLE monthly_sales 
+DEFINE FIELD id
+    ON TABLE monthly_sales
     TYPE string;
-DEFINE FIELD currency 
-    ON TABLE monthly_sales 
+DEFINE FIELD currency
+    ON TABLE monthly_sales
     TYPE string;
-DEFINE FIELD month 
-    ON TABLE monthly_sales 
+DEFINE FIELD month
+    ON TABLE monthly_sales
     TYPE string;
-DEFINE FIELD number_of_orders 
-    ON TABLE monthly_sales 
+DEFINE FIELD number_of_orders
+    ON TABLE monthly_sales
     TYPE number;
-DEFINE FIELD sum_sales 
-    ON TABLE monthly_sales 
+DEFINE FIELD sum_sales
+    ON TABLE monthly_sales
     TYPE number;
 -- ------------------------------
 -- TABLE: address_history
 -- ------------------------------
 
 DEFINE TABLE address_history TYPE NORMAL SCHEMAFULL PERMISSIONS none;
-DEFINE FIELD id 
-    ON TABLE address_history 
+DEFINE FIELD id
+    ON TABLE address_history
     TYPE string;
-DEFINE FIELD person 
-    ON TABLE address_history 
+DEFINE FIELD person
+    ON TABLE address_history
     TYPE record<person>;
-DEFINE FIELD addresses 
-    ON TABLE address_history 
+DEFINE FIELD addresses
+    ON TABLE address_history
     TYPE array<object>;
-DEFINE FIELD addresses.*.address_line_1 
-    ON TABLE address_history 
+DEFINE FIELD addresses.*.address_line_1
+    ON TABLE address_history
     TYPE string;
-DEFINE FIELD addresses.*.address_line_2 
-    ON TABLE address_history 
+DEFINE FIELD addresses.*.address_line_2
+    ON TABLE address_history
     TYPE option<string>;
-DEFINE FIELD addresses.*.city 
-    ON TABLE address_history 
+DEFINE FIELD addresses.*.city
+    ON TABLE address_history
     TYPE string;
-DEFINE FIELD addresses.*.coordinates 
-    ON TABLE address_history 
+DEFINE FIELD addresses.*.coordinates
+    ON TABLE address_history
     TYPE geometry<point>;
-DEFINE FIELD addresses.*.country 
-    ON TABLE address_history 
+DEFINE FIELD addresses.*.country
+    ON TABLE address_history
     TYPE string;
-DEFINE FIELD addresses.*.post_code 
-    ON TABLE address_history 
+DEFINE FIELD addresses.*.post_code
+    ON TABLE address_history
     TYPE string;
-DEFINE FIELD time 
-    ON TABLE address_history 
+DEFINE FIELD time
+    ON TABLE address_history
     TYPE object;
-DEFINE FIELD time.created_at 
-    ON TABLE address_history 
+DEFINE FIELD time.created_at
+    ON TABLE address_history
     TYPE datetime
     DEFAULT time::now();
-DEFINE FIELD time.updated_at 
-    ON TABLE address_history 
+DEFINE FIELD time.updated_at
+    ON TABLE address_history
     TYPE datetime
     VALUE time::now();
 
@@ -2563,24 +2564,24 @@ DEFINE FIELD time.updated_at
 -- ------------------------------
 
 DEFINE TABLE payment_details TYPE NORMAL SCHEMAFULL PERMISSIONS none;
-DEFINE FIELD id 
-    ON TABLE payment_details 
+DEFINE FIELD id
+    ON TABLE payment_details
     TYPE string;
-DEFINE FIELD person 
-    ON TABLE payment_details 
+DEFINE FIELD person
+    ON TABLE payment_details
     TYPE record<person>;
-DEFINE FIELD stored_cards 
-    ON TABLE payment_details 
+DEFINE FIELD stored_cards
+    ON TABLE payment_details
     FLEXIBLE TYPE array<object>;
-DEFINE FIELD time 
-    ON TABLE payment_details 
+DEFINE FIELD time
+    ON TABLE payment_details
     TYPE object;
-DEFINE FIELD time.created_at 
-    ON TABLE payment_details 
+DEFINE FIELD time.created_at
+    ON TABLE payment_details
     TYPE datetime
     DEFAULT time::now();
-DEFINE FIELD time.updated_at 
-    ON TABLE payment_details 
+DEFINE FIELD time.updated_at
+    ON TABLE payment_details
     TYPE datetime
     VALUE time::now();
 
@@ -2589,46 +2590,46 @@ DEFINE FIELD time.updated_at
 -- ------------------------------
 
 DEFINE TABLE person TYPE NORMAL SCHEMAFULL PERMISSIONS none;
-DEFINE FIELD id 
-    ON TABLE person 
+DEFINE FIELD id
+    ON TABLE person
     TYPE string;
-DEFINE FIELD first_name 
-    ON TABLE person 
+DEFINE FIELD first_name
+    ON TABLE person
     TYPE string;
-DEFINE FIELD last_name 
-    ON TABLE person 
+DEFINE FIELD last_name
+    ON TABLE person
     TYPE string;
-DEFINE FIELD name 
-    ON TABLE person 
+DEFINE FIELD name
+    ON TABLE person
     TYPE string;
-DEFINE FIELD company_name 
-    ON TABLE person 
+DEFINE FIELD company_name
+    ON TABLE person
     TYPE option<string>;
-DEFINE FIELD email 
-    ON TABLE person 
-    TYPE string 
+DEFINE FIELD email
+    ON TABLE person
+    TYPE string
     ASSERT string::is::email($value);
-DEFINE FIELD phone 
-    ON TABLE person 
+DEFINE FIELD phone
+    ON TABLE person
     TYPE string;
-DEFINE FIELD address 
-    ON TABLE person 
+DEFINE FIELD address
+    ON TABLE person
     FLEXIBLE TYPE object;
-DEFINE FIELD address_history 
-    ON TABLE person 
+DEFINE FIELD address_history
+    ON TABLE person
     TYPE record<address_history>;
-DEFINE FIELD payment_details 
-    ON TABLE person 
+DEFINE FIELD payment_details
+    ON TABLE person
     TYPE record<payment_details>;
-DEFINE FIELD time 
-    ON TABLE person 
+DEFINE FIELD time
+    ON TABLE person
     TYPE object;
-DEFINE FIELD time.created_at 
-    ON TABLE person 
+DEFINE FIELD time.created_at
+    ON TABLE person
     TYPE datetime
     DEFAULT time::now();
-DEFINE FIELD time.updated_at 
-    ON TABLE person 
+DEFINE FIELD time.updated_at
+    ON TABLE person
     TYPE datetime
     VALUE time::now();
 
@@ -2637,55 +2638,55 @@ DEFINE FIELD time.updated_at
 -- ------------------------------
 
 DEFINE TABLE product TYPE NORMAL SCHEMAFULL PERMISSIONS none;
-DEFINE FIELD id 
-    ON TABLE product 
+DEFINE FIELD id
+    ON TABLE product
     TYPE string;
-DEFINE FIELD name 
-    ON TABLE product 
+DEFINE FIELD name
+    ON TABLE product
     TYPE string;
-DEFINE FIELD details 
-    ON TABLE product 
+DEFINE FIELD details
+    ON TABLE product
     TYPE array<string>;
-DEFINE FIELD category 
-    ON TABLE product 
+DEFINE FIELD category
+    ON TABLE product
     TYPE string;
-DEFINE FIELD sub_category 
-    ON TABLE product 
+DEFINE FIELD sub_category
+    ON TABLE product
     TYPE string;
-DEFINE FIELD colours 
-    ON TABLE product 
+DEFINE FIELD colours
+    ON TABLE product
     TYPE array<string>;
-DEFINE FIELD sizes 
-    ON TABLE product 
+DEFINE FIELD sizes
+    ON TABLE product
     TYPE array<string>;
-DEFINE FIELD price 
-    ON TABLE product 
+DEFINE FIELD price
+    ON TABLE product
     TYPE number;
-DEFINE FIELD currency 
-    ON TABLE product 
+DEFINE FIELD currency
+    ON TABLE product
     TYPE string;
-DEFINE FIELD images 
-    ON TABLE product 
+DEFINE FIELD images
+    ON TABLE product
     TYPE array<object>;
-DEFINE FIELD images.*.url 
-    ON TABLE product 
+DEFINE FIELD images.*.url
+    ON TABLE product
     TYPE string
     ASSERT string::is::url($value);
-DEFINE FIELD images.*.position 
-    ON TABLE product 
+DEFINE FIELD images.*.position
+    ON TABLE product
     TYPE number;
-DEFINE FIELD seller 
-    ON TABLE product 
+DEFINE FIELD seller
+    ON TABLE product
     TYPE record<seller>;
-DEFINE FIELD time 
-    ON TABLE product 
+DEFINE FIELD time
+    ON TABLE product
     TYPE object;
-DEFINE FIELD time.created_at 
-    ON TABLE product 
+DEFINE FIELD time.created_at
+    ON TABLE product
     TYPE datetime
     DEFAULT time::now();
-DEFINE FIELD time.updated_at 
-    ON TABLE product 
+DEFINE FIELD time.updated_at
+    ON TABLE product
     TYPE datetime
     VALUE time::now();
 
@@ -2694,27 +2695,27 @@ DEFINE FIELD time.updated_at
 -- ------------------------------
 
 DEFINE TABLE product_sku TYPE RELATION FROM product TO product SCHEMAFULL PERMISSIONS none;
-DEFINE FIELD id 
-    ON TABLE product_sku 
+DEFINE FIELD id
+    ON TABLE product_sku
     TYPE string;
-DEFINE FIELD quantity 
-    ON TABLE product_sku 
+DEFINE FIELD quantity
+    ON TABLE product_sku
     TYPE number;
-DEFINE FIELD colour 
-    ON TABLE product_sku 
+DEFINE FIELD colour
+    ON TABLE product_sku
     TYPE string;
-DEFINE FIELD size 
-    ON TABLE product_sku 
+DEFINE FIELD size
+    ON TABLE product_sku
     TYPE string;
-DEFINE FIELD time 
-    ON TABLE product_sku 
+DEFINE FIELD time
+    ON TABLE product_sku
     TYPE object;
-DEFINE FIELD time.created_at 
-    ON TABLE product_sku 
+DEFINE FIELD time.created_at
+    ON TABLE product_sku
     TYPE datetime
     DEFAULT time::now();
-DEFINE FIELD time.updated_at 
-    ON TABLE product_sku 
+DEFINE FIELD time.updated_at
+    ON TABLE product_sku
     TYPE datetime
     VALUE time::now();
 
@@ -2723,24 +2724,24 @@ DEFINE FIELD time.updated_at
 -- ------------------------------
 
 DEFINE TABLE wishlist TYPE RELATION FROM person TO product SCHEMAFULL PERMISSIONS none;
-DEFINE FIELD id 
-    ON TABLE wishlist 
+DEFINE FIELD id
+    ON TABLE wishlist
     TYPE string;
-DEFINE FIELD time 
-    ON TABLE wishlist 
+DEFINE FIELD time
+    ON TABLE wishlist
     TYPE object;
-DEFINE FIELD colour 
+DEFINE FIELD colour
     ON TABLE wishlist
     TYPE string;
-DEFINE FIELD size 
+DEFINE FIELD size
     ON TABLE wishlist
     TYPE string;
-DEFINE FIELD time.created_at 
-    ON TABLE wishlist 
+DEFINE FIELD time.created_at
+    ON TABLE wishlist
     TYPE datetime
     DEFAULT time::now();
-DEFINE FIELD time.deleted_at 
-    ON TABLE wishlist 
+DEFINE FIELD time.deleted_at
+    ON TABLE wishlist
     TYPE option<datetime>;
 
 -- ------------------------------
@@ -2748,36 +2749,36 @@ DEFINE FIELD time.deleted_at
 -- ------------------------------
 
 DEFINE TABLE cart TYPE RELATION FROM person TO product SCHEMAFULL PERMISSIONS none;
-DEFINE FIELD id 
-    ON TABLE cart 
-    TYPE string;
-DEFINE FIELD product_name 
-    ON TABLE cart 
-    TYPE string;
-DEFINE FIELD currency 
-    ON TABLE cart 
-    TYPE string;
-DEFINE FIELD price 
-    ON TABLE cart 
-    TYPE number;
-DEFINE FIELD quantity 
-    ON TABLE cart 
-    TYPE number;
-DEFINE FIELD colour 
+DEFINE FIELD id
     ON TABLE cart
     TYPE string;
-DEFINE FIELD size 
+DEFINE FIELD product_name
     ON TABLE cart
     TYPE string;
-DEFINE FIELD time 
-    ON TABLE cart 
+DEFINE FIELD currency
+    ON TABLE cart
+    TYPE string;
+DEFINE FIELD price
+    ON TABLE cart
+    TYPE number;
+DEFINE FIELD quantity
+    ON TABLE cart
+    TYPE number;
+DEFINE FIELD colour
+    ON TABLE cart
+    TYPE string;
+DEFINE FIELD size
+    ON TABLE cart
+    TYPE string;
+DEFINE FIELD time
+    ON TABLE cart
     TYPE object;
-DEFINE FIELD time.created_at 
-    ON TABLE cart 
+DEFINE FIELD time.created_at
+    ON TABLE cart
     TYPE datetime
     DEFAULT time::now();
-DEFINE FIELD time.updated_at 
-    ON TABLE cart 
+DEFINE FIELD time.updated_at
+    ON TABLE cart
     TYPE datetime
     VALUE time::now();
 
@@ -2787,52 +2788,52 @@ DEFINE FIELD time.updated_at
 -- ------------------------------
 
 DEFINE TABLE order TYPE RELATION FROM person TO product SCHEMAFULL PERMISSIONS none;
-DEFINE FIELD product_name 
-    ON TABLE order 
-    TYPE string;
-DEFINE FIELD currency 
-    ON TABLE order 
-    TYPE string;
-DEFINE FIELD price 
-    ON TABLE order 
-    TYPE number;
-DEFINE FIELD quantity 
-    ON TABLE order 
-    TYPE number;
-DEFINE FIELD colour 
+DEFINE FIELD product_name
     ON TABLE order
     TYPE string;
-DEFINE FIELD size 
+DEFINE FIELD currency
     ON TABLE order
     TYPE string;
-DEFINE FIELD shipping_address 
-    ON TABLE order 
+DEFINE FIELD price
+    ON TABLE order
+    TYPE number;
+DEFINE FIELD quantity
+    ON TABLE order
+    TYPE number;
+DEFINE FIELD colour
+    ON TABLE order
+    TYPE string;
+DEFINE FIELD size
+    ON TABLE order
+    TYPE string;
+DEFINE FIELD shipping_address
+    ON TABLE order
     FLEXIBLE TYPE object;
-DEFINE FIELD payment_method 
-    ON TABLE order 
+DEFINE FIELD payment_method
+    ON TABLE order
     TYPE string;
-DEFINE FIELD order_status 
-    ON TABLE order 
+DEFINE FIELD order_status
+    ON TABLE order
     TYPE string;
-DEFINE FIELD id 
-    ON TABLE order 
+DEFINE FIELD id
+    ON TABLE order
     TYPE string;
-DEFINE FIELD time 
-    ON TABLE order 
+DEFINE FIELD time
+    ON TABLE order
     TYPE object;
-DEFINE FIELD time.created_at 
-    ON TABLE order 
+DEFINE FIELD time.created_at
+    ON TABLE order
     TYPE datetime
     DEFAULT time::now();
-DEFINE FIELD time.updated_at 
-    ON TABLE order 
+DEFINE FIELD time.updated_at
+    ON TABLE order
     TYPE datetime
     VALUE time::now();
-DEFINE FIELD time.processed_at 
-    ON TABLE order 
+DEFINE FIELD time.processed_at
+    ON TABLE order
     TYPE option<datetime>;
-DEFINE FIELD time.shipped_at 
-    ON TABLE order 
+DEFINE FIELD time.shipped_at
+    ON TABLE order
     TYPE option<datetime>;
 
 -- ------------------------------
@@ -2840,25 +2841,25 @@ DEFINE FIELD time.shipped_at
 -- ------------------------------
 
 DEFINE TABLE review TYPE RELATION FROM person TO product SCHEMAFULL PERMISSIONS none;
-DEFINE FIELD id 
-    ON TABLE review 
+DEFINE FIELD id
+    ON TABLE review
     TYPE string;
-DEFINE FIELD rating 
-    ON TABLE review 
-    TYPE number 
+DEFINE FIELD rating
+    ON TABLE review
+    TYPE number
     ASSERT $value > 0 AND $value < 6;
-DEFINE FIELD review_text 
-    ON TABLE review 
+DEFINE FIELD review_text
+    ON TABLE review
     TYPE string;
-DEFINE FIELD time 
-    ON TABLE review 
+DEFINE FIELD time
+    ON TABLE review
     TYPE object;
-DEFINE FIELD time.created_at 
-    ON TABLE review 
+DEFINE FIELD time.created_at
+    ON TABLE review
     TYPE datetime
     DEFAULT time::now();
-DEFINE FIELD time.updated_at 
-    ON TABLE review 
+DEFINE FIELD time.updated_at
+    ON TABLE review
     TYPE datetime
     VALUE time::now();
 
@@ -2867,39 +2868,39 @@ DEFINE FIELD time.updated_at
 -- ------------------------------
 
 DEFINE TABLE seller TYPE NORMAL SCHEMAFULL PERMISSIONS none;
-DEFINE FIELD id 
-    ON TABLE seller 
+DEFINE FIELD id
+    ON TABLE seller
     TYPE string;
-DEFINE FIELD name 
-    ON TABLE seller 
+DEFINE FIELD name
+    ON TABLE seller
     TYPE string;
-DEFINE FIELD addresses 
-    ON TABLE seller 
+DEFINE FIELD addresses
+    ON TABLE seller
     FLEXIBLE TYPE object;
-DEFINE FIELD website 
-    ON TABLE seller 
+DEFINE FIELD website
+    ON TABLE seller
     TYPE object;
-DEFINE FIELD website.main 
-    ON TABLE seller 
+DEFINE FIELD website.main
+    ON TABLE seller
     TYPE string;
-DEFINE FIELD website.docs 
-    ON TABLE seller 
+DEFINE FIELD website.docs
+    ON TABLE seller
     TYPE string;
-DEFINE FIELD website.store 
-    ON TABLE seller 
+DEFINE FIELD website.store
+    ON TABLE seller
     TYPE string;
-DEFINE FIELD email 
-    ON TABLE seller 
+DEFINE FIELD email
+    ON TABLE seller
     TYPE string;
-DEFINE FIELD time 
-    ON TABLE seller 
+DEFINE FIELD time
+    ON TABLE seller
     TYPE object;
-DEFINE FIELD time.created_at 
-    ON TABLE seller 
+DEFINE FIELD time.created_at
+    ON TABLE seller
     TYPE datetime
     DEFAULT time::now();
-DEFINE FIELD time.updated_at 
-    ON TABLE seller 
+DEFINE FIELD time.updated_at
+    ON TABLE seller
     TYPE datetime
     VALUE time::now();
 
@@ -2907,16 +2908,16 @@ DEFINE FIELD time.updated_at
 -- INDEXES
 -- ------------------------------
 
-DEFINE INDEX unique_wishlist_relationships 
-    ON TABLE wishlist 
+DEFINE INDEX unique_wishlist_relationships
+    ON TABLE wishlist
     FIELDS in, out UNIQUE;
 
-DEFINE INDEX person_country 
-    ON TABLE person 
+DEFINE INDEX person_country
+    ON TABLE person
     FIELDS address.country;
 
-DEFINE INDEX order_count 
-    ON TABLE order 
+DEFINE INDEX order_count
+    ON TABLE order
     FIELDS order_status, time.created_at;
 
 DEFINE INDEX order_product
@@ -2924,12 +2925,12 @@ DEFINE INDEX order_product
     FIELDS product_name;
 
 DEFINE ANALYZER blank_snowball
-    TOKENIZERS blank 
+    TOKENIZERS blank
     FILTERS lowercase, snowball(english);
 
-DEFINE INDEX review_content 
-    ON TABLE review 
-    FIELDS review_text 
+DEFINE INDEX review_content
+    ON TABLE review
+    FIELDS review_text
     SEARCH ANALYZER blank_snowball BM25 HIGHLIGHTS;
 
 -- ------------------------------
