@@ -35,7 +35,6 @@ pub(crate) enum Statement<'a> {
 	Delete(&'a DeleteStatement),
 	Insert(&'a InsertStatement),
 	// TODO(gguillemas): Document once bearer access is no longer experimental.
-	#[doc(hidden)]
 	Access(&'a AccessStatement),
 }
 
