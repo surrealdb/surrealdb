@@ -30,7 +30,6 @@ pub(crate) mod upsert;
 pub(crate) mod r#use;
 
 // TODO(gguillemas): Document once bearer access is no longer experimental.
-#[doc(hidden)]
 pub use self::access::{AccessGrant, AccessStatement};
 pub use self::analyze::AnalyzeStatement;
 pub use self::begin::BeginStatement;

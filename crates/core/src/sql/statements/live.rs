@@ -39,7 +39,6 @@ pub struct LiveStatement {
 }
 
 impl LiveStatement {
-	#[doc(hidden)]
 	pub fn new(expr: Fields) -> Self {
 		LiveStatement {
 			id: Uuid::new_v4(),
