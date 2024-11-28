@@ -9,9 +9,6 @@ value = "true"
 
 [[test.results]]
 value = "false"
-
-[[test.results]]
-value = "temp"
 */
 let $a = [1,2,3,4];
 1 in $a;
