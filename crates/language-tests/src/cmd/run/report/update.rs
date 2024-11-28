@@ -75,7 +75,7 @@ pub fn insert_slice(bytes: &mut Vec<u8>, at: Range<usize>, src: &[u8]) {
 			bytes[at.start..dest].copy_from_slice(src);
 			bytes.truncate(bytes.len() - diff);
 		}
-		Ordering::Equal => {
+		Ordering::Greater => {
 			let diff = src.len() - at.len();
 			let copy_range = at.end..bytes.len();
 
@@ -85,7 +85,7 @@ pub fn insert_slice(bytes: &mut Vec<u8>, at: Range<usize>, src: &[u8]) {
 			bytes.copy_within(copy_range, dest);
 			bytes[at.start..dest].copy_from_slice(src);
 		}
-		Ordering::Greater => {
+		Ordering::Equal => {
 			bytes[at].copy_from_slice(src);
 		}
 	}

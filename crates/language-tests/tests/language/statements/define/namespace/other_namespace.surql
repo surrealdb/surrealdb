@@ -2,6 +2,7 @@
 [env]
 namespace = "foo"
 database = "foo"
+clean = true
 
 [test]
 

@@ -14,7 +14,27 @@ value = "[{ id: test:1, num: 2 }]"
 value = "[]"
 
 [[test.results]]
-value = "[{ after: { id: test:1, num: 1 }, id: log:CREATE, this: { id: test:1, num: 1 }, value: { id: test:1, num: 1 } }, { before: { id: test:1, num: 2 }, id: log:DELETE, this: { id: test:1, num: 2 }, value: { id: test:1, num: 2 } }, { after: { id: test:1, num: 2 }, before: { id: test:1, num: 1 }, id: log:UPDATE, this: { id: test:1, num: 2 }, value: { id: test:1, num: 2 } }]"
+value = """[
+	{
+			after: { id: test:1, num: 1 },
+			id: log:CREATE,
+			this: { id: test:1, num: 1 },
+			value: { id: test:1, num: 1 }
+	},
+	{
+			before: { id: test:1, num: 2 },
+			id: log:DELETE,
+			this: { id: test:1, num: 2 },
+			value: { id: test:1, num: 2 }
+	},
+	{
+			after: { id: test:1, num: 2 },
+			before: { id: test:1, num: 1 },
+			id: log:UPDATE,
+			this: { id: test:1, num: 2 },
+			value: { id: test:1, num: 2 }
+	}
+]"""
 
 */
 

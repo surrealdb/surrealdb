@@ -20,6 +20,7 @@ value = "[{ id: test:float, number: 0f }, { id: test:int, number: 0 }]"
 value = "[{ id: test:float, number: 0f }, { id: test:int, number: 0 }]"
 
 */
+
 DEFINE INDEX index ON TABLE test COLUMNS number UNIQUE;
 CREATE test:int SET number = 0;
 CREATE test:float SET number = 0.0;

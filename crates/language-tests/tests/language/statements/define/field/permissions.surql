@@ -5,7 +5,14 @@
 value = "NONE"
 
 [[test.results]]
-value = "{ events: {  }, fields: { test: 'DEFINE FIELD test ON user PERMISSIONS FOR select, create, update WHERE true' }, indexes: {  }, lives: {  }, tables: {  } }"
+value = """
+{
+	events: {},
+	fields: { test: "DEFINE FIELD test ON user PERMISSIONS FOR select, create, update WHERE true" },
+	tables: {},
+	indexes: {},
+	lives: {},
+}"""
 
 */
 DEFINE FIELD test ON user PERMISSIONS FOR select, create, update, delete WHERE true;

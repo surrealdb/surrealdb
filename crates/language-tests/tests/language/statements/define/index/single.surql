@@ -20,6 +20,7 @@ value = "[{ email: 'test@surrealdb.com', id: user:1 }]"
 value = "[{ email: 'test@surrealdb.com', id: user:2 }]"
 
 */
+
 DEFINE INDEX test ON user FIELDS email;
 REMOVE INDEX test ON user;
 DEFINE INDEX test ON user COLUMNS email;
