@@ -236,9 +236,9 @@ impl<'a> KnnConditionRewriter<'a> {
 			Function::Script(s, args) => {
 				self.eval_values(args).map(|args| Function::Script(s.clone(), args))
 			}
-			Function::Anonymous(p, args) => {
-				self.eval_values(args).map(|args| Function::Anonymous(p.clone(), args))
-			}
+			Function::Anonymous(p, args, args_computed) => self
+				.eval_values(args)
+				.map(|args| Function::Anonymous(p.clone(), args, args_computed.to_owned())),
 		}
 	}
 

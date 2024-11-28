@@ -42,10 +42,10 @@ pub enum Function {
 
 impl Function {
 	fn convert_anonymous_arg_computation(
-		(v, a): OldAnonymousFields,
+		old: OldAnonymousFields,
 		_revision: u16,
 	) -> Result<Self, revision::Error> {
-		Ok(Function::Anonymous(v, a, false))
+		Ok(Function::Anonymous(old.0, old.1, false))
 	}
 }
 

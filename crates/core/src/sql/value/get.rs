@@ -18,6 +18,7 @@ use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use crate::sql::Function;
+use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
 use super::idiom_recursion::{compute_idiom_recursion, Recursion};
