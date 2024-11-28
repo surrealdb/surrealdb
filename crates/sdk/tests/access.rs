@@ -37,10 +37,6 @@ async fn access_bearer_operations() {
 		},
 	];
 
-	let ok1 =
-		Regex::new(&format!(
-			r"\{{ accesses: \{{ api: 'DEFINE ACCESS api ON {base} TYPE BEARER DURATION FOR GRANT NONE, FOR TOKEN 1h, FOR SESSION NONE' \}}, .* \}}"
-		)).unwrap();
 	let ok2 =
 		Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 				.unwrap();
@@ -92,6 +88,10 @@ async fn access_bearer_operations() {
 		res.remove(0).result.unwrap();
 		// Ensure the access method was created as expected
 		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok1 =
+		Regex::new(&format!(
+			r"\{{ accesses: \{{ api: 'DEFINE ACCESS api ON {base} TYPE BEARER DURATION FOR GRANT NONE, FOR TOKEN 1h, FOR SESSION NONE' \}}, .* \}}"
+		)).unwrap();
 		assert!(ok1.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok1);
 		//
 		let tmp = res.remove(0).result.unwrap().to_string();
@@ -497,11 +497,6 @@ async fn access_bearer_show() {
 					.unwrap();
 	let ok = Regex::new(r"\{ ac: 'srv', .*?, revocation: d'.*?', .*? \}").unwrap();
 
-	let ok1 = Regex::new(&format!(
-			r"\[\{{ ac: 'srv', .*?, grant: \{{ id: '{kid}', key: '\[REDACTED\]' \}}, id: '{kid}', revocation: d'.*?', subject: \{{ user: 'tobie' \}}, type: 'bearer' \}}\]",
-		))
-		.unwrap();
-
 	let ok2 = Regex::new(
 		r"\[\{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: 'jaime' \}, type: 'bearer' \}\]",
 	)
@@ -510,11 +505,6 @@ async fn access_bearer_show() {
 	let ok3 = Regex::new(
 			r"\[\{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}, \{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}\]",
 		)
-		.unwrap();
-
-	let ok4 = Regex::new(&format!(
-			r"\[\{{ ac: 'srv', .*?, grant: \{{ id: '{kid}', key: '\[REDACTED\]' \}}, id: '{kid}', revocation: d'.*?', subject: \{{ user: 'tobie' \}}, type: 'bearer' \}}\]",
-		))
 		.unwrap();
 
 	let ok5 = Regex::new(
@@ -570,6 +560,10 @@ async fn access_bearer_show() {
 			.await
 			.unwrap();
 		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok1 = Regex::new(&format!(
+			r"\[\{{ ac: 'srv', .*?, grant: \{{ id: '{kid}', key: '\[REDACTED\]' \}}, id: '{kid}', revocation: d'.*?', subject: \{{ user: 'tobie' \}}, type: 'bearer' \}}\]",
+		))
+		.unwrap();
 		assert!(ok1.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok1);
 		// Show all bearer grants for a specific user
 		let res = &mut dbs
@@ -595,6 +589,10 @@ async fn access_bearer_show() {
 			.await
 			.unwrap();
 		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok4 = Regex::new(&format!(
+			r"\[\{{ ac: 'srv', .*?, grant: \{{ id: '{kid}', key: '\[REDACTED\]' \}}, id: '{kid}', revocation: d'.*?', subject: \{{ user: 'tobie' \}}, type: 'bearer' \}}\]",
+		))
+		.unwrap();
 		assert!(ok4.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok4);
 		// Show all active bearer grants
 		let res = &mut dbs
