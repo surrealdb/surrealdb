@@ -2,7 +2,7 @@ use crate::cnf::ID_CHARS;
 use crate::err::Error;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
-use crate::sql::Datetime;
+use crate::sql::{Datetime, Number};
 use chrono::{TimeZone, Utc};
 use nanoid::nanoid;
 use rand::distributions::{Alphanumeric, DistString};
@@ -125,7 +125,21 @@ pub fn string((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> 
 	Ok(Alphanumeric.sample_string(&mut rand::thread_rng(), val).into())
 }
 
-pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
+pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
+	// Process the arguments
+	let range = match range {
+		None => None,
+		Some((Value::Number(Number::Int(min)), Value::Number(Number::Int(max)))) => Some((min, max)),
+		Some((Value::Datetime(min), Value::Datetime(max))) => {
+			let min = min.to_i64();
+			let max = max.to_i64();
+			Some((min, max))
+		},
+		_ => return Err(Error::InvalidArguments { 
+			name: String::from("rand::time"), 
+			message: String::from("Expected an optional pair of datetimes or pair of i64 numbers to be passed"),
+		}),
+	};
 	// Set the maximum valid seconds
 	const LIMIT: i64 = 8210298412799;
 	// Check the function input arguments
