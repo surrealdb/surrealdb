@@ -4,7 +4,6 @@ use std::time::Duration;
 ///
 /// The defaults are optimal so please only modify these if you know deliberately why you are modifying them.
 #[derive(Clone, Copy, Debug)]
-#[doc(hidden)]
 #[non_exhaustive]
 pub struct EngineOptions {
 	pub node_membership_refresh_interval: Duration,

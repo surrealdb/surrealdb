@@ -406,7 +406,7 @@ async fn export_import_retrieve_specific_versions() {
     // Verify that specific versions can be retrieved
     for (i, version) in versions.iter().enumerate() {
         let mut response = db
-            .query(&format!(
+            .query(format!(
                 "
                 SELECT name FROM user:user1 VERSION d'{version}'
                 "

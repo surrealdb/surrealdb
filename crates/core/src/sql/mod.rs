@@ -72,7 +72,6 @@ pub(crate) mod version;
 pub(crate) mod view;
 pub(crate) mod with;
 
-#[doc(hidden)]
 pub mod index;
 
 pub mod serde;
@@ -150,7 +149,6 @@ pub use self::thing::Thing;
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::uuid::Uuid;
-#[doc(hidden)]
 pub use self::value::serde::from_value;
 pub use self::value::serde::to_value;
 pub use self::value::Value;
@@ -160,7 +158,6 @@ pub use self::view::View;
 pub use self::with::With;
 
 // module reexporting parsing function to prevent a breaking change.
-#[doc(hidden)]
 mod parser {
 	pub use crate::syn::*;
 }

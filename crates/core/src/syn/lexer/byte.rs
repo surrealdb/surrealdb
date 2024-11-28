@@ -7,7 +7,7 @@ use crate::syn::{
 	token::{t, Token, TokenKind},
 };
 
-impl<'a> Lexer<'a> {
+impl Lexer<'_> {
 	/// Eats a single line comment.
 	pub(super) fn eat_single_line_comment(&mut self) {
 		loop {

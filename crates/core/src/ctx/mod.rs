@@ -6,6 +6,7 @@
 //! - we start with an SQL statement
 //! - the SQL statement is then parsed into an operation
 //! - we then go down to the key value store . . .
+//!
 //! Here we can see that the database request is handled by different layers. The `context` is the shared state.
 //! Each layer can clone the `context` but it must be noted that the values of the `context` are not cloned. A
 //! simple example of using the `context` is to keep track of the duration of the request, or if the process has
