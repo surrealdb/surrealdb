@@ -1,6 +1,7 @@
 mod cmp;
 mod progress;
 mod report;
+mod util;
 
 use core::str;
 use std::{pin::pin, thread, time::Duration};
@@ -21,6 +22,7 @@ use tokio::{
 	sync::mpsc::{self, Receiver, Sender},
 	time::{self},
 };
+use util::core_capabilities_from_test_config;
 
 use crate::{
 	cli::{ColorMode, FailureMode},
@@ -236,55 +238,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 pub async fn run_test(id: TestId, runner: TestRunner, dbs: Option<Datastore>) -> Result<()> {
 	let should_return;
 
-	/// Returns Targets::All if there is no value and deny is false,
-	/// Returns Targets::None if there is no value and deny is true ensuring the default behaviour
-	/// is to allow everything.
-	///
-	/// If there is a value it will return Targets::All on the value true, Targets::None on the
-	/// value false, and otherwise the returns the specified values.
-	fn extract_targets<T>(v: &Option<BoolOr<Vec<SchemaTarget<T>>>>, deny: bool) -> Targets<T>
-	where
-		T: std::cmp::Eq + std::hash::Hash + Clone,
-	{
-		v.as_ref()
-			.map(|x| match x {
-				BoolOr::Bool(true) => Targets::All,
-				BoolOr::Bool(false) => Targets::None,
-				BoolOr::Value(x) => Targets::Some(x.iter().map(|x| x.0.clone()).collect()),
-			})
-			.unwrap_or(if deny {
-				Targets::None
-			} else {
-				Targets::All
-			})
-	}
-
 	let config = &runner.set[id].config;
-	let capabilities = config
-		.env
-		.as_ref()
-		.and_then(|x| x.capabilities.as_ref())
-		.map(|x| {
-			let schema_cap = match x {
-				BoolOr::Bool(true) => return Capabilities::all(),
-				BoolOr::Bool(false) => return Capabilities::none(),
-				BoolOr::Value(x) => x,
-			};
-
-			Capabilities::all()
-				.with_scripting(schema_cap.scripting.unwrap_or(true))
-				.with_guest_access(schema_cap.quest_access.unwrap_or(true))
-				.with_live_query_notifications(schema_cap.live_query_notifications.unwrap_or(true))
-				.with_functions(extract_targets(&schema_cap.allow_functions, false))
-				.without_functions(extract_targets(&schema_cap.deny_functions, true))
-				.with_network_targets(extract_targets(&schema_cap.allow_net, false))
-				.without_network_targets(extract_targets(&schema_cap.deny_net, true))
-				.with_rpc_methods(extract_targets(&schema_cap.allow_rpc, false))
-				.without_rpc_methods(extract_targets(&schema_cap.deny_rpc, true))
-				.with_http_routes(extract_targets(&schema_cap.allow_http, false))
-				.without_http_routes(extract_targets(&schema_cap.deny_http, true))
-		})
-		.unwrap_or_else(Capabilities::all);
+	let capabilities = core_capabilities_from_test_config(config);
 
 	let dbs = if let Some(dbs) = dbs {
 		should_return = true;
@@ -372,8 +327,22 @@ async fn run_test_with_dbs(
 	let result = select! {
 		_ = timeout_future => {
 			did_timeout = true;
-			// still need to finish the future cause it might panic otherwise.
-			let _ = process_future.as_mut().await;
+
+
+			// Ideally still need to finish the future cause it might panic otherwise.
+			select!{
+				_ = time::sleep(Duration::from_secs(10)) => {
+					// Test doesn't want to quit. Time to force it with a bit of hack to avoid a
+					// panic
+					std::thread::scope(|scope|{
+						scope.spawn(move ||{
+							std::mem::drop(process_future)
+						});
+					});
+				}
+			   _ = process_future.as_mut() => {}
+			}
+
 			None
 		}
 		x = process_future.as_mut() => {

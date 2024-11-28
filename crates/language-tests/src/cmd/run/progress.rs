@@ -139,11 +139,10 @@ impl<W: Write> Progress<W> {
 		};
 
 		let lines = self.items.len();
-		let item = self.items.remove(idx);
-
-		self.writer.write_all(b"\r")?;
+		self.items.remove(idx);
 
 		if self.use_ansii {
+			self.writer.write_all(b"\r")?;
 			for _ in 0..lines {
 				self.writer.write_all(ansi!(up).as_bytes())?;
 			}

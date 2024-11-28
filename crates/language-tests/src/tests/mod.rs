@@ -108,54 +108,50 @@ impl TestCase {
 		'main: while let Some(n) = tokens.next() {
 			match n {
 				b'/' => {
-					if tokens.eat(b'/') {
-						if tokens.eat(b'!') {
-							if config_kind != ConfigKind::None {
-								bail!("Found two config comments in the same file!");
-							}
+					if tokens.eat(b'/') && tokens.eat(b'!') {
+						if config_kind != ConfigKind::None {
+							bail!("Found two config comments in the same file!");
+						}
 
-							if !next_should_be_config {
-								starts = tokens.offset() - 3;
-							}
+						if !next_should_be_config {
+							starts = tokens.offset() - 3;
+						}
 
-							while let Some(x) = tokens.next() {
-								if x == b'\n' {
-									res.push(b'\n');
-									next_should_be_config = true;
-									break;
-								}
-								if x == b'\r' {
-									tokens.eat(b'\n');
-									res.push(b'\n');
-									next_should_be_config = true;
-									break;
-								}
-								res.push(x);
+						while let Some(x) = tokens.next() {
+							if x == b'\n' {
+								res.push(b'\n');
+								next_should_be_config = true;
+								break;
 							}
+							if x == b'\r' {
+								tokens.eat(b'\n');
+								res.push(b'\n');
+								next_should_be_config = true;
+								break;
+							}
+							res.push(x);
 						}
 					}
 
-					if tokens.eat(b'*') {
-						if tokens.eat(b'*') {
-							if config_kind != ConfigKind::None {
-								bail!("Found two config comments in the same file!");
-							}
-
-							config_kind = ConfigKind::MultiLine;
-
-							starts = tokens.offset();
-
-							while let Some(x) = tokens.next() {
-								if x == b'*' {
-									if tokens.eat(b'/') {
-										continue 'main;
-									}
-								}
-								res.push(x);
-								end = tokens.offset();
-							}
-							bail!("Invalid test, multi-line-test comment wasn't closed");
+					if tokens.eat(b'*') && tokens.eat(b'*') {
+						if config_kind != ConfigKind::None {
+							bail!("Found two config comments in the same file!");
 						}
+
+						config_kind = ConfigKind::MultiLine;
+
+						starts = tokens.offset();
+
+						while let Some(x) = tokens.next() {
+							if x == b'*' {
+								if tokens.eat(b'/') {
+									continue 'main;
+								}
+							}
+							res.push(x);
+							end = tokens.offset();
+						}
+						bail!("Invalid test, multi-line-test comment wasn't closed");
 					}
 				}
 				_ => {

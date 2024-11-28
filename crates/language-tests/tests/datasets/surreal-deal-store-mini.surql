@@ -4,7 +4,7 @@
 timeout = 4000
 
 [test]
-run = false;
+run = false
 
 [[test.results]]
 value = "NONE"
