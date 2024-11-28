@@ -1,449 +1,0 @@
-warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /home/mees/Documents/programming/rust/surrealdb/crates/language-tests/Cargo.toml
-workspace: /home/mees/Documents/programming/rust/surrealdb/Cargo.toml
-warning: unused import: `atty::Stream`
- --> crates/language-tests/src/cli.rs:1:5
-  |
-1 | use atty::Stream;
-  |     ^^^^^^^^^^^^
-  |
-  = note: `#[warn(unused_imports)]` on by default
-
-warning: unused import: `Subcommand`
- --> crates/language-tests/src/cli.rs:5:46
-  |
-5 |     command, value_parser, ArgMatches, Command, Subcommand, ValueEnum,
-  |                                                 ^^^^^^^^^^
-
-warning: unused imports: `Duration` and `Instant`
- --> crates/language-tests/src/cmd/run/report/mod.rs:1:17
-  |
-1 | use std::time::{Duration, Instant};
-  |                 ^^^^^^^^  ^^^^^^^
-
-warning: unused import: `format::ansi`
- --> crates/language-tests/src/cmd/run/report/mod.rs:6:2
-  |
-6 |     format::ansi,
-  |     ^^^^^^^^^^^^
-
-warning: unused imports: `Algorithm` and `TextDiff`
-  --> crates/language-tests/src/cmd/run/report/mod.rs:13:15
-   |
-13 | use similar::{Algorithm, TextDiff};
-   |               ^^^^^^^^^  ^^^^^^^^
-
-warning: unused import: `str::Chars`
- --> crates/language-tests/src/tests/mod.rs:4:23
-  |
-4 | use std::{ops::Range, str::Chars};
-  |                       ^^^^^^^^^^
-  |
-help: if this is a test module, consider adding a `#[cfg(test)]` to the containing module
- --> crates/language-tests/src/main.rs:5:1
-  |
-5 | mod tests;
-  | ^^^^^^^^^^
-
-warning: unused import: `io::Write`
- --> crates/language-tests/src/cmd/run/report/display.rs:3:2
-  |
-3 |     io::Write as _,
-  |     ^^^^^^^^^
-
-warning: unused import: `DiffableStr`
- --> crates/language-tests/src/cmd/run/report/display.rs:7:26
-  |
-7 | use similar::{Algorithm, DiffableStr, TextDiff};
-  |                          ^^^^^^^^^^^
-
-warning: unused import: `similar::DiffableStr`
-  --> crates/language-tests/src/format.rs:45:5
-   |
-45 | use similar::DiffableStr;
-   |     ^^^^^^^^^^^^^^^^^^^^
-
-warning: unused variable: `item`
-   --> crates/language-tests/src/cmd/run/progress.rs:142:7
-    |
-142 |         let item = self.items.remove(idx);
-    |             ^^^^ help: if this is intentional, prefix it with an underscore: `_item`
-    |
-    = note: `#[warn(unused_variables)]` on by default
-
-warning: method `decrease_depth` is never used
-  --> crates/language-tests/src/format.rs:84:9
-   |
-55 | / impl<W> IndentFormatter<W>
-56 | | where
-57 | |     W: fmt::Write,
-   | |__________________- method in this implementation
-...
-84 |       pub fn decrease_depth(&mut self) {
-   |              ^^^^^^^^^^^^^^
-   |
-   = note: `#[warn(dead_code)]` on by default
-
-warning: method `issue` is never used
-  --> crates/language-tests/src/tests/schema/mod.rs:47:9
-   |
-26 | impl TestConfig {
-   | --------------- method in this implementation
-...
-47 |     pub fn issue(&self) -> Option<u64> {
-   |            ^^^^^
-
-warning: method `with_to_value` is never used
-   --> crates/language-tests/src/tests/schema/mod.rs:240:9
-    |
-213 | impl<T> BoolOr<T> {
-    | ----------------- method in this implementation
-...
-240 |     pub fn with_to_value<F: FnOnce() -> T>(self, default: F) -> Option<T> {
-    |            ^^^^^^^^^^^^^
-
-warning: method `issue` is never used
-   --> crates/language-tests/src/tests/schema/mod.rs:276:9
-    |
-264 | impl TestDetails {
-    | ---------------- method in this implementation
-...
-276 |     pub fn issue(&self) -> Option<u64> {
-    |            ^^^^^
-
-warning: methods `all_len`, `root`, and `find` are never used
-  --> crates/language-tests/src/tests/testset.rs:53:9
-   |
-48 | impl TestSet {
-   | ------------ methods in this implementation
-...
-53 |     pub fn all_len(&self) -> usize {
-   |            ^^^^^^^
-...
-57 |     pub fn root(&self) -> &Utf8Path {
-   |            ^^^^
-...
-79 |     pub fn find<S>(&self, name: &S) -> Option<TestId>
-   |            ^^^^
-
-warning: `surrealql-test` (bin "surrealql-test") generated 15 warnings (run `cargo fix --bin "surrealql-test"` to apply 6 suggestions)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
-     Running `/home/mees/Documents/programming/rust/surrealdb/target/debug/surrealql-test --color always run`
-Failed to load test at './tests/datasets/surreal-deal-store-mini.surql'
-
-Caused by:
-    0: Failed to parse test case config
-    1: TOML parse error at line 7, column 12
-         |
-       7 | run = false;
-         |            ^
-       expected newline, `#`
-       
-Skipping test!
-Running with 20 jobs
-Found 126 tests
-[34m  Running[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_arrays_example_1.surql   [0m
-[34m  Running[0m ./tests/language/statements/create/with_id.surql                                [0m
-[34m  Running[0m ./tests/self_tests/rough_eq_test.surql                                          [0m
-[34m  Running[0m ./tests/language/statements/define/function/basic.surql                         [0m
-[34m  Running[0m ./tests/language/statements/index/on_schemafull_without_permission.surql        [0m
-[34m  Running[0m ./tests/language/expression/operators/precedence.surql                          [0m
-[34m  Running[0m ./tests/language/statements/define/field/basic.surql                            [0m
-[34m  Running[0m ./tests/language/statements/return/subquery_only.surql                          [0m
-[34m  Running[0m ./tests/language/future/define_field/future_select.surql                        [0m
-[34m  Running[0m ./tests/self_tests/no_namespace.surql                                           [0m
-[34m  Running[0m ./tests/language/expression/operators/casting/cast_string_to_record_table.surql [0m
-[34m  Running[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_arrays_example_3.surql   [0m
-[34m  Running[0m ./tests/language/statements/define/namespace/twice.surql                        [0m
-[34m  Running[0m ./tests/language/closure/inline.surql                                           [0m
-[34m  Running[0m ./tests/language/statements/define/function/second_return.surql                 [0m
-[34m  Running[0m ./tests/self_tests/multi_line_invalid.surql                                     [0m
-[34m  Running[0m ./tests/language/statements/index/multiple_hnsw.surql                           [0m
-[34m  Running[0m ./tests/self_tests/multi_line.surql                                             [0m
-[34m  Running[0m ./tests/language/statements/define/field/type_value_assert.surql                [0m
-[34m  Running[0m ./tests/language/statements/define/event/event_when_logic.surql                 [0m
-[34m  Running[0m ./tests/language/future/define_field/future_expression.surql                    [0m
-[34m Finished[0m ./tests/self_tests/no_namespace.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/multiple.surql                                [0m
-[34m Finished[0m ./tests/language/closure/inline.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/self_tests/multi_line_invalid.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/self_tests/rough_eq_test.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/expression/operators/casting/cast_string_to_record_table.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/self_tests/multi_line.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/table/foreigntable.surql                     [0m
-[34m  Running[0m ./tests/language/statements/define/event/event_check_doc_always_populated.surql [0m
-[34m  Running[0m ./tests/language/expression/operators/casting/decimal.surql                     [0m
-[34m  Running[0m ./tests/language/expression/operators/in/basic_in.surql                         [0m
-[34m  Running[0m ./tests/language/primitive/object/object_numeric_keys.surql                     [0m
-[34m Finished[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_arrays_example_1.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_sets_example_2.surql     [0m
-[34m Finished[0m ./tests/language/primitive/object/object_numeric_keys.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/select/start_limit_fetch.surql                      [0m
-[34m Finished[0m ./tests/language/expression/operators/precedence.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/function/no_returns.surql                    [0m
-[34m Finished[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_arrays_example_3.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/define/function/second_return.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/parsing/strings/unicode_escape_sequence.surql                           [0m
-[34m  Running[0m ./tests/self_tests/default_ds_ns.surql                                          [0m
-[34m Finished[0m ./tests/language/statements/define/namespace/twice.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/mixed_numbers_range_unique_no_index.surql     [0m
-[34m Finished[0m ./tests/language/statements/index/on_schemafull_without_permission.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/parsing/strings/missing_character_escape_code.surql                     [0m
-[34m  Running[0m ./tests/language/statements/index/multiple_unique_existing_concurrently.surql   [0m
-[34m Finished[0m ./tests/language/expression/operators/casting/decimal.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/parsing/strings/missing_character_escape_code.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/alter/define_table.surql                            [0m
-[34m Finished[0m ./tests/language/expression/operators/in/basic_in.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/mixed_numbers_range_no_index.surql            [0m
-[34m Finished[0m ./tests/language/statements/define/function/basic.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/for/range_return.surql                              [0m
-[34m Finished[0m ./tests/parsing/strings/unicode_escape_sequence.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/field/permissions_none.surql                 [0m
-[34m Finished[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_sets_example_2.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/harness/assert.surql                                                    [0m
-[34m Finished[0m ./tests/harness/assert.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/event/no_when_clause.surql                   [0m
-[34m Finished[0m ./tests/language/statements/return/subquery_only.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/field/value.surql                            [0m
-[34m Finished[0m ./tests/language/future/define_field/future_expression.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/numbers.surql                                 [0m
-[34m Finished[0m ./tests/language/statements/define/function/no_returns.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/relate/invalid_type.surql                           [0m
-[34m Finished[0m ./tests/language/statements/define/field/basic.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/parsing/basic/multiple_empty_statement.surql                            [0m
-[34m Finished[0m ./tests/language/statements/for/range_return.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/param/define_proteced_param.surql                              [0m
-[34m Finished[0m ./tests/language/future/define_field/future_select.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/multiple_unique_embedded_multiple.surql       [0m
-[34m  Running[0m ./tests/language/statements/index/single_unique_embedded_multiple.surql         [0m
-[34m Finished[0m ./tests/language/statements/create/with_id.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/relate/invalid_type.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/variables/set_within_transaction.surql                         [0m
-[34m Finished[0m ./tests/language/statements/index/multiple.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/primitive/basic/decimal.surql                                  [0m
-[34m Finished[0m ./tests/parsing/basic/multiple_empty_statement.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/table/schemafull.surql                       [0m
-[34m Finished[0m ./tests/language/param/define_proteced_param.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/closure/basic.surql                                            [0m
-[34m Finished[0m ./tests/self_tests/default_ds_ns.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/select/start_limit_fetch.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/define/field/permissions_none.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/self_tests/no_database.surql                                            [0m
-[34m  Running[0m ./tests/language/statements/index/single_unique_existing.surql                  [0m
-[34m  Running[0m ./tests/language/expression/operators/casting/string_to_record.surql            [0m
-[34m Finished[0m ./tests/language/statements/define/event/event_check_doc_always_populated.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/self_tests/no_database.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_sets_example_1.surql     [0m
-[34m  Running[0m ./tests/language/primitive/regex/regex_equality.surql                           [0m
-[34m Finished[0m ./tests/language/statements/index/mixed_numbers_range_unique_no_index.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/index/numbers.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/self_tests/exact_eq_test.surql                                          [0m
-[34m Finished[0m ./tests/self_tests/exact_eq_test.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/table/schemaless.surql                       [0m
-[34m  Running[0m ./tests/language/primitive/regex/regex_non_string.surql                         [0m
-[34m Finished[0m ./tests/language/statements/define/event/event_when_logic.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/parsing/basic/comments.surql                                            [0m
-[34m Finished[0m ./tests/language/statements/define/event/no_when_clause.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/variables/set_within_transaction.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/select/where_field_type_record_id.surql             [0m
-[34m Finished[0m ./tests/language/primitive/basic/decimal.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/expression/operators/casting/string_to_record.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/expression/operators/casting/basic_literal_kind.surql          [0m
-[34m  Running[0m ./tests/language/future/define_field/future_number.surql                        [0m
-[34m  Running[0m ./tests/language/statements/define/field/type.surql                             [0m
-[34m Finished[0m ./tests/language/statements/alter/define_table.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/mixed_numbers_range.surql                     [0m
-[34m Finished[0m ./tests/language/closure/basic.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_sets_example_1.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/unique_index_numbers.surql                    [0m
-[34m  Running[0m ./tests/language/statements/define/field/permissions_full.surql                 [0m
-[34m Finished[0m ./tests/parsing/basic/comments.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_arrays_example_2.surql   [0m
-[34m Finished[0m ./tests/language/statements/define/table/foreigntable.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/field/readonly.surql                         [0m
-[34m Finished[0m ./tests/language/primitive/regex/regex_equality.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/index/multiple_hnsw.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/primitive/basic/integers.surql                                 [0m
-[34m  Running[0m ./tests/language/statements/define/table/drop.surql                             [0m
-[34m Finished[0m ./tests/language/statements/define/table/schemaless.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/multiple_unique.surql                         [0m
-[34m Finished[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_arrays_example_2.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/multiple_unique_existing.surql                [0m
-[34m Finished[0m ./tests/language/statements/define/field/type_value_assert.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/mixed_numbers_range_unique.surql              [0m
-[34m Finished[0m ./tests/language/expression/operators/casting/basic_literal_kind.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/index/multiple_unique_embedded_multiple.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_mapping_and_filtering_array_example_2.surql[0m
-[34m  Running[0m ./tests/language/primitive/graph/select_inout_graph.surql                       [0m
-[34m Finished[0m ./tests/language/primitive/basic/integers.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/table/event.surql                            [0m
-[34m Finished[0m ./tests/language/statements/index/single_unique_embedded_multiple.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/parsing/strings/escape_sequences.surql                                  [0m
-[34m  Running[0m ./tests/language/record_id/natural_order.surql                                  [0m
-[34m Finished[0m ./tests/language/statements/index/single_unique_existing.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/future/define_field/future_number.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/param/define_global_param.surql                                [0m
-[34m Finished[0m ./tests/language/statements/index/mixed_numbers_range_no_index.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/primitive/object/object_key_ordering.surql                     [0m
-[34m Finished[0m ./tests/language/primitive/graph/select_inout_graph.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_mapping_and_filtering_array_example_2.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/single_unique.surql                           [0m
-[34m  Running[0m ./tests/doc_examples/surrealql/datemodel/header_bytes.surql                     [0m
-[34m  Running[0m ./tests/language/statements/relate/with_complex_table.surql                     [0m
-[34m Finished[0m ./tests/language/statements/define/field/permissions_full.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/doc_examples/surrealql/datemodel/header_geometry.surql                  [0m
-[34m Finished[0m ./tests/language/statements/define/field/value.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/define/field/readonly.surql [33mWarning ⚠[0m
-[34m Finished[0m ./tests/language/statements/index/unique_index_numbers.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/expression/operators/casting/to_record_table.surql             [0m
-[34m  Running[0m ./tests/language/statements/relate/and_overwrite.surql                          [0m
-[34m  Running[0m ./tests/language/expression/operators/in/in_with_record_ids.surql               [0m
-[34m Finished[0m ./tests/parsing/strings/escape_sequences.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/define/field/type.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/expression/operators/equal/empty.surql                         [0m
-[34m Finished[0m ./tests/language/primitive/object/object_key_ordering.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/index/single.surql                                  [0m
-[34m Finished[0m ./tests/language/statements/define/table/schemafull.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/primitive/regex/regex_uuid_equality.surql                      [0m
-[34m Finished[0m ./tests/language/expression/operators/casting/to_record_table.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/alter/missing_table.surql                           [0m
-[34m Finished[0m ./tests/language/record_id/natural_order.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/primitive/datetimes/datetime_conversions.surql                 [0m
-[34m Finished[0m ./tests/language/expression/operators/equal/empty.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/param/define_global_param.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/relate/schemafull_fail.surql                        [0m
-[34m  Running[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_mapping_and_filtering_array_example_1.surql[0m
-[34m Finished[0m ./tests/language/statements/relate/with_complex_table.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/field/assert.surql                           [0m
-[34m Finished[0m ./tests/language/statements/index/multiple_unique.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/select/random_ordering_samples_uniform.surql        [0m
-[34m Finished[0m ./tests/language/primitive/regex/regex_non_string.surql [33mWarning ⚠[0m
-[34m  Running[0m ./tests/language/statements/index/concurrently.surql                            [0m
-[34m Finished[0m ./tests/language/statements/relate/and_overwrite.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/relate/with_param_or_subquery.surql                 [0m
-[34m Finished[0m ./tests/doc_examples/surrealql/datemodel/header_geometry.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/define/table/drop.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/parsing/basic/empty_statement.surql                                     [0m
-[34m  Running[0m ./tests/language/statements/alter/define_table_if_exists.surql                  [0m
-[34m Finished[0m ./tests/language/primitive/datetimes/datetime_conversions.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/expression/operators/casting/range_to_array.surql              [0m
-[34m Finished[0m ./tests/language/statements/define/table/event.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/primitive/basic/floats.surql                                   [0m
-[34m Finished[0m ./tests/language/primitive/regex/regex_uuid_equality.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_mapping_and_filtering_array_example_1.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/parsing/strings/missing_brace_unicode_escape.surql                      [0m
-[34m  Running[0m ./tests/language/primitive/basic/strand.surql                                   [0m
-[34m Finished[0m ./tests/parsing/strings/missing_brace_unicode_escape.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/harness/test_assert.surql                                               [0m
-[34m Finished[0m ./tests/language/statements/index/mixed_numbers_range_unique.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/doc_examples/surrealql/datemodel/header_bytes.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/control_flow/transaction/transaction_returns_no_value.surql    [0m
-[34m  Running[0m ./tests/parsing/basic/empty.surql                                               [0m
-[34m Finished[0m ./tests/language/statements/index/mixed_numbers_range.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/self_tests/single_line.surql                                            [0m
-[34m Finished[0m ./tests/language/expression/operators/casting/range_to_array.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/graph/select_graph_issue_4837.surql                            [0m
-[34m Finished[0m ./tests/language/primitive/basic/strand.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/event/this_parent.surql                      [0m
-[34m Finished[0m ./tests/language/statements/alter/missing_table.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/index/multiple_unique_existing.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/expression/operators/in/in_with_record_ids.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/namespace/other_namespace.surql              [0m
-[34m  Running[0m ./tests/language/param/select_parent.surql                                      [0m
-[34m  Running[0m ./tests/language/statements/define/field/permissions.surql                      [0m
-[34m Finished[0m ./tests/language/statements/relate/schemafull_fail.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/param/select_this.surql                                        [0m
-[34m Finished[0m ./tests/language/control_flow/transaction/transaction_returns_no_value.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/namespace/no_ns.surql                        [0m
-[34m Finished[0m ./tests/parsing/basic/empty_statement.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/parsing/strings/missing_trailing_surrogate.surql                        [0m
-[34m Finished[0m ./tests/language/statements/index/single_unique.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/table/foreigntable_removed.surql             [0m
-[34m Finished[0m ./tests/parsing/strings/missing_trailing_surrogate.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/field/recursive_types.surql                  [0m
-[34m Finished[0m ./tests/self_tests/single_line.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/relate/enforced.surql                               [0m
-[34m Finished[0m ./tests/parsing/basic/empty.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/expression/operators/casting/cast_string_to_record.surql       [0m
-[34m Finished[0m ./tests/language/statements/index/single.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/relate/with_parameters.surql                        [0m
-[34m Finished[0m ./tests/language/statements/define/namespace/no_ns.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_arrays_example_4.surql   [0m
-[34m Finished[0m ./tests/language/statements/relate/with_param_or_subquery.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/define/namespace/other_namespace.surql [32mSuccess ✓[0m
-[34m  Running[0m ./tests/language/statements/define/event/when_event.surql                       [0m
-[34m  Running[0m ./tests/language/statements/define/event/basic.surql                            [0m
-[34m Finished[0m ./tests/language/param/select_parent.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/define/field/permissions.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/primitive/basic/floats.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/param/select_this.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/expression/operators/casting/cast_string_to_record.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/alter/define_table_if_exists.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/harness/test_assert.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/relate/with_parameters.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/doc_examples/surrealql/datemodel/arrays/header_arrays_example_4.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/define/event/this_parent.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/define/field/assert.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/relate/enforced.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/define/table/foreigntable_removed.surql [33mWarning ⚠[0m
-[34m Finished[0m ./tests/language/statements/define/field/recursive_types.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/select/where_field_type_record_id.surql [33mWarning ⚠[0m
-[34m Finished[0m ./tests/language/statements/define/event/when_event.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/graph/select_graph_issue_4837.surql [33mWarning ⚠[0m
-[34m Finished[0m ./tests/language/statements/define/event/basic.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/index/multiple_unique_existing_concurrently.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/index/concurrently.surql [32mSuccess ✓[0m
-[34m Finished[0m ./tests/language/statements/select/random_ordering_samples_uniform.surql [32mSuccess ✓[0m
-
-   ==> [33mWarning[0m for [1m./tests/language/statements/define/field/readonly.surql[0m:
-    > Test does not specify any results
-      = Got:
-        - Value: NONE
-        - Value: NONE
-        - Value: [{ bar: 1, id: foo:1 }]
-
-   ==> [33mWarning[0m for [1m./tests/language/primitive/regex/regex_non_string.surql[0m:
-    ! Test produces warnings because the test is marked as work in progress.
-    > Test `./tests/language/primitive/regex/regex_non_string.surql` returned mismatched results:
-      > Value 8 was of the proper type but didn't match expected value.
-      = Got:
-        - true
-      = Expected:
-        - false
-      = Diff:
-        - [31mtrue[0m[32mfalse[0m
-
-   ==> [33mWarning[0m for [1m./tests/language/statements/define/table/foreigntable_removed.surql[0m:
-    ! Test produces warnings because the test is marked as work in progress.
-    > Test `./tests/language/statements/define/table/foreigntable_removed.surql` returned mismatched results:
-      > Value 4 was of the proper type but didn't match expected value.
-      = Got:
-        - [{ a: 1, id: test:knxsmb3x4vv4fsvtifkt }]
-      = Expected:
-        - [{ a: 1, id: test:crc7qde29bwmdde48eyo }]
-      = Diff:
-        - [{[0m [0ma:[0m [0m1,[0m [0mid:[0m [0m[31mtest:knxsmb3x4vv4fsvtifkt[0m[32mtest:crc7qde29bwmdde48eyo[0m [0m}][0m
-
-   ==> [33mWarning[0m for [1m./tests/language/statements/select/where_field_type_record_id.surql[0m:
-    ! Test produces warnings because the test is marked as work in progress.
-    > Test `./tests/language/statements/select/where_field_type_record_id.surql` returned mismatched results:
-      > Value 2 was of the proper type but didn't match expected value.
-      = Got:
-        - []
-      = Expected:
-        - [{ color: NONE }, { color: NONE }, { color: NONE }, { color: NONE }]
-      = Diff:
-        - [31m[][0m[32m[{[0m[32m [0m[32mcolor:[0m[32m [0m[32mNONE[0m[32m [0m[32m},[0m[32m [0m[32m{[0m[32m [0m[32mcolor:[0m[32m [0m[32mNONE[0m[32m [0m[32m},[0m[32m [0m[32m{[0m[32m [0m[32mcolor:[0m[32m [0m[32mNONE[0m[32m [0m[32m},[0m[32m [0m[32m{[0m[32m [0m[32mcolor:[0m[32m [0m[32mNONE[0m[32m [0m[32m}][0m
-
-   ==> [33mWarning[0m for [1m./tests/language/graph/select_graph_issue_4837.surql[0m:
-    ! Test produces warnings because the test is marked as work in progress.
-    > Test `./tests/language/graph/select_graph_issue_4837.surql` returned mismatched results:
-      > Value 2 was of the proper type but didn't match expected value.
-      = Got:
-        - [[flavour:Chocolate, flavour:Strawberries], [flavour:Vanilla]]
-      = Expected:
-        - [flavour:Strawberries, flavour:Chocolate, flavour:Vanilla]
-      = Diff:
-        - [31m[[flavour:Chocolate,[0m[32m[flavour:Strawberries,[0m [0m[31mflavour:Strawberries],[0m[32mflavour:Chocolate,[0m [0m[31m[flavour:Vanilla]][0m[32mflavour:Vanilla][0m
-
-
