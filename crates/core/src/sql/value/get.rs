@@ -127,10 +127,16 @@ impl Value {
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path)).await
 					}
 					Part::Method(name, args) => {
-						let v = stk
-							.run(|stk| {
-								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
+						let a = stk
+							.scope(|scope| {
+								try_join_all(
+									args.iter()
+										.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
+								)
 							})
+							.await?;
+						let v = stk
+							.run(|stk| idiom(stk, ctx, opt, doc, v.clone().into(), name, a))
 							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
@@ -231,6 +237,14 @@ impl Value {
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Method(name, args) => {
+						let a = stk
+							.scope(|scope| {
+								try_join_all(
+									args.iter()
+										.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
+								)
+							})
+							.await?;
 						let res = stk
 							.run(|stk| {
 								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
@@ -242,7 +256,7 @@ impl Value {
 								..
 							}) => match v.get(name) {
 								Some(v) => {
-									let fnc = Function::Anonymous(v.clone(), args.clone());
+									let fnc = Function::Anonymous(v.clone(), a, true);
 									match stk.run(|stk| fnc.compute(stk, ctx, opt, doc)).await {
 										Ok(v) => Ok(v),
 										Err(Error::InvalidFunction {
@@ -332,10 +346,16 @@ impl Value {
 						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
 					Part::Method(name, args) => {
-						let v = stk
-							.run(|stk| {
-								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
+						let a = stk
+							.scope(|scope| {
+								try_join_all(
+									args.iter()
+										.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
+								)
 							})
+							.await?;
+						let v = stk
+							.run(|stk| idiom(stk, ctx, opt, doc, v.clone().into(), name, a))
 							.await?;
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
@@ -445,18 +465,15 @@ impl Value {
 								}
 							}
 							Part::Method(name, args) => {
-								let v = stk
-									.run(|stk| {
-										idiom(
-											stk,
-											ctx,
-											opt,
-											doc,
-											v.clone().into(),
-											name,
-											args.clone(),
-										)
+								let a = stk
+									.scope(|scope| {
+										try_join_all(args.iter().map(|v| {
+											scope.run(|stk| v.compute(stk, ctx, opt, doc))
+										}))
 									})
+									.await?;
+								let v = stk
+									.run(|stk| idiom(stk, ctx, opt, doc, v.clone().into(), name, a))
 									.await?;
 								stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 							}
@@ -499,8 +516,17 @@ impl Value {
 							stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await
 						}
 						Part::Method(name, args) => {
+							let a = stk
+								.scope(|scope| {
+									try_join_all(
+										args.iter().map(|v| {
+											scope.run(|stk| v.compute(stk, ctx, opt, doc))
+										}),
+									)
+								})
+								.await?;
 							let v = stk
-								.run(|stk| idiom(stk, ctx, opt, doc, v.clone(), name, args.clone()))
+								.run(|stk| idiom(stk, ctx, opt, doc, v.clone(), name, a))
 								.await?;
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
