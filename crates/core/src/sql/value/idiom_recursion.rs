@@ -4,7 +4,7 @@ use crate::{
 	dbs::Options,
 	doc::CursorDoc,
 	err::Error,
-	sql::{part::RecursionPlan, Array, Part},
+	sql::{part::{RecurseInstruction, RecursionPlan}, Array, Part},
 };
 
 use super::Value;
@@ -18,6 +18,7 @@ pub struct Recursion<'a> {
 	pub current: &'a Value,
 	pub path: &'a [Part],
 	pub plan: Option<&'a RecursionPlan>,
+	pub instruction: Option<&'a RecurseInstruction>,
 }
 
 impl<'a> Recursion<'a> {
@@ -72,10 +73,11 @@ pub(crate) async fn compute_idiom_recursion(
 ) -> Result<Value, Error> {
 	// Find the recursion limit
 	let limit = *IDIOM_RECURSION_LIMIT as u32;
+	let marked_recursive = rec.plan.is_some() || rec.instruction.is_some();
 
 	// We recursed and found a final value, let's return
 	// it for the previous iteration to pick up on this
-	if rec.plan.is_some() && is_final(rec.current) {
+	if marked_recursive && is_final(rec.current) {
 		return Ok(get_final(rec.current));
 	}
 
@@ -83,7 +85,7 @@ pub(crate) async fn compute_idiom_recursion(
 	let mut i = rec.iterated.to_owned();
 	let mut current = rec.current.to_owned();
 
-	if rec.plan.is_some() {
+	if marked_recursive {
 		// If we have reached the maximum amount of iterations,
 		// we can return the current value and break the loop.
 		if let Some(max) = rec.max {
@@ -111,6 +113,12 @@ pub(crate) async fn compute_idiom_recursion(
 
 		// Clean up any dead ends when we encounter an array
 		let v = clean_iteration(v);
+
+		// Process any potential instruction
+		let v = match rec.instruction {
+			Some(instruction) => instruction.compute(stk, ctx, opt, doc, rec.with_iterated(i).with_current(&v)).await?,
+			_ => v,
+		};
 
 		// Process the value for this iteration
 		match v {
@@ -149,7 +157,7 @@ pub(crate) async fn compute_idiom_recursion(
 		// as the loop will continue on the whole value, and
 		// not on the potentially nested value which triggered
 		// the recurse, resulting in a potential infinite loop
-		if rec.plan.is_some() {
+		if marked_recursive {
 			return Ok(current);
 		}
 	}

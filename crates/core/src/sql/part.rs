@@ -5,7 +5,7 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	exe::try_join_all_buffered,
-	sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Value},
+	sql::{fmt::Fmt, strand::no_nul_bytes, Array, Graph, Ident, Idiom, Number, Value},
 };
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -19,7 +19,7 @@ use super::{
 	value::idiom_recursion::{clean_iteration, compute_idiom_recursion, is_final, Recursion},
 };
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -38,12 +38,27 @@ pub enum Part {
 	#[revision(start = 2)]
 	Destructure(Vec<DestructurePart>),
 	Optional,
-	#[revision(start = 3)]
+	#[revision(start = 3, end = 4, convert_fn = "convert_recurse_add_instruction", fields_name = "OldRecurseFields")]
 	Recurse(Recurse, Option<Idiom>),
+	#[revision(start = 4)]
+	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),
 	#[revision(start = 3)]
 	Doc,
 	#[revision(start = 3)]
 	RepeatRecurse,
+}
+
+impl Part {
+	fn convert_recurse_add_instruction(
+		fields: OldRecurseFields,
+		_revision: u16,
+	) -> Result<Self, revision::Error> {
+		Ok(Part::Recurse(
+			fields.0,
+			fields.1,
+			None,
+		))
+	}
 }
 
 impl From<i32> for Part {
@@ -194,8 +209,13 @@ impl fmt::Display for Part {
 				}
 			}
 			Part::Optional => write!(f, "?"),
-			Part::Recurse(v, nest) => {
-				write!(f, ".{{{v}}}")?;
+			Part::Recurse(v, nest, instruction) => {
+				write!(f, ".{{{v}")?;
+				if let Some(instruction) = instruction {
+					write!(f, "+{instruction}")?;
+				}
+				write!(f, "}}")?;
+
 				if let Some(nest) = nest {
 					write!(f, "({nest})")?;
 				}
@@ -507,3 +527,78 @@ impl fmt::Display for Recurse {
 		}
 	}
 }
+
+// ------------------------------
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum RecurseInstruction {
+	Path,
+}
+
+impl RecurseInstruction {
+	pub async fn compute(
+		&self, 
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		rec: Recursion<'_>,
+	) -> Result<Value, Error> {
+		match self {
+			Self::Path => {
+				async fn worker(
+					stk: &mut Stk,
+					ctx: &Context,
+					opt: &Options,
+					doc: Option<&CursorDoc>,
+					rec: Recursion<'_>,
+					value: &Value
+				) -> Result<Value, Error> {
+					let res = compute_idiom_recursion(stk, ctx, opt, doc, rec.with_current(value)).await?;
+					let arr = match res {
+						Value::Array(arr) => arr,
+						v => Array(vec![v]),
+						// v => Err(Error::Unreachable(format!("1requires an array, found {} from {}", v, value)))
+					};
+
+					let arr: Value = arr
+						.iter()
+						.map(|v| Value::from(vec![value.clone(), v.clone()]).flatten())
+						.collect::<Vec<Value>>()
+						.into();
+
+					Ok(arr)
+				}
+
+				match rec.current {
+					Value::Array(arr) => {
+						stk
+							.scope(|scope| {
+								let futs =
+									arr
+									.iter()
+									.map(|v| scope.run(|stk| worker(stk, ctx, opt, doc, rec, v)));
+
+								try_join_all_buffered(futs)
+							})
+							.await
+							.map(Into::into)
+					}
+					v => Err(Error::Unreachable(format!("2requires an array, found {}", v)))
+				}
+			}
+		}
+	}
+}
+
+impl fmt::Display for RecurseInstruction {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Path => write!(f, "path"),
+		}
+	}
+}
+

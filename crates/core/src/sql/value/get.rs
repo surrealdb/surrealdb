@@ -39,7 +39,7 @@ impl Value {
 		}
 		match path.first() {
 			// The knowledge of the current value is not relevant to Part::Recurse
-			Some(Part::Recurse(recurse, inner_path)) => {
+			Some(Part::Recurse(recurse, inner_path, instruction)) => {
 				// Find the path to recurse and what path to process after the recursion is finished
 				let (path, after) = match inner_path {
 					Some(p) => (p.0.as_slice(), path.next().to_vec()),
@@ -63,6 +63,11 @@ impl Value {
 					},
 				};
 
+				// We can not have a recursion plan when we have a collection instruction
+				if plan.is_some() && instruction.is_some() {
+					return Err(Error::Unreachable("Can not have a recursion plan when we have a collection instruction".into()));
+				}
+
 				// Collect the min & max for the recursion context
 				let (min, max) = recurse.to_owned().try_into()?;
 				// Construct the recursion context
@@ -73,6 +78,7 @@ impl Value {
 					current: self,
 					path,
 					plan: plan.as_ref(),
+					instruction: instruction.as_ref(),
 				};
 
 				// Compute the recursion

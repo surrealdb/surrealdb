@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		part::{DestructurePart, Recurse},
+		part::{DestructurePart, Recurse, RecurseInstruction},
 		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value,
 	},
 	syn::{
@@ -406,10 +406,27 @@ impl Parser<'_> {
 
 		Ok(Recurse::Range(min, max))
 	}
+	/// Parse a recursion instruction following the inner recurse part, if any
+	pub(super) fn parse_recurse_instruction(&mut self) -> ParseResult<Option<RecurseInstruction>> {
+		if self.eat(t!("+")) {
+			let kind = self.next_token_value::<Ident>()?;
+			let instruction = match kind.0.to_lowercase().as_str() {
+				"path" => RecurseInstruction::Path,
+				found => {
+					bail!("Unexpected instruction `{}` expected `path`", found, @self.last_span());
+				}
+			};
+
+			Ok(Some(instruction))
+		} else {
+			Ok(None)
+		}
+	}
 	/// Parse a recurse part, expects `.{` to already be parsed
 	pub(super) async fn parse_recurse_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
 		let recurse = self.parse_recurse_inner()?;
+		let instruction = self.parse_recurse_instruction()?;
 		self.expect_closing_delimiter(t!("}"), start)?;
 
 		let nest = if self.eat(t!("(")) {
@@ -421,7 +438,7 @@ impl Parser<'_> {
 			None
 		};
 
-		Ok(Part::Recurse(recurse, nest))
+		Ok(Part::Recurse(recurse, nest, instruction))
 	}
 	/// Parse the part after the `[` in a idiom
 	pub(super) async fn parse_bracket_part(

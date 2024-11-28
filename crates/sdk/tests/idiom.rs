@@ -330,9 +330,11 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 			{ id: city:victoria,		name: 'Victoria' },
 		];
 
+		planet:earth.{3+path}(.contains).name;
+
 		planet:earth.{1}(.contains).name;
 		planet:earth.{2}(.contains).name;
-		planet:earth.{3}(.contains).name;
+		planet:earth.{3+path}(.contains).name;
 		planet:earth.{4}(.contains).name;
 
 		planet:earth.{1}.contains.@;
