@@ -506,7 +506,6 @@ impl Datastore {
 
 	/// Does the datastore allow requesting an HTTP route?
 	/// This function needs to be public to allow access from the CLI crate.
-	#[doc(hidden)]
 	pub fn allows_http_route(&self, route_target: &RouteTarget) -> bool {
 		self.capabilities.allows_http_route(route_target)
 	}

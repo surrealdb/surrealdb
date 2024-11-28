@@ -154,7 +154,7 @@ async fn idiom_optional_after_value_should_pass_through() -> Result<(), Error> {
 		.expect_val("[]")?
 		.expect_val("{}")?
 		.expect_val("(89.0, 90.0)")?
-		.expect_bytes(&[104, 104, 101, 104, 101, 104, 101])?
+		.expect_bytes([104, 104, 101, 104, 101, 104, 101])?
 		.expect_val("person:aeon")?
 		.expect_val(
 			"{

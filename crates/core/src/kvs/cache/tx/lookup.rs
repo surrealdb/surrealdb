@@ -97,7 +97,7 @@ pub(crate) enum Lookup<'a> {
 	Record(&'a str, &'a str, &'a str, &'a Id),
 }
 
-impl<'a> Equivalent<Key> for Lookup<'a> {
+impl Equivalent<Key> for Lookup<'_> {
 	#[rustfmt::skip]
 	fn equivalent(&self, key: &Key) -> bool {
 		match (self, key) {
