@@ -1072,3 +1072,32 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 		)?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn idiom_function_argument_computation() -> Result<(), Error> {
+	let sql = r#"
+		LET $str = "abc";
+		"abcdef".starts_with($str);
+
+		LET $obj = { 
+			a: |$a: int| $a,
+			b: |$b: function| $b()
+		};
+
+		LET $num = 123;
+		LET $fnc = || 123;
+
+		$obj.a($num);
+		$obj.b($fnc);
+	"#;
+	Test::new(sql)
+		.await?
+		.expect_val("NONE")?
+		.expect_val("true")?
+		.expect_val("NONE")?
+		.expect_val("NONE")?
+		.expect_val("NONE")?
+		.expect_val("true")?
+		.expect_val("true")?;
+	Ok(())
+}
