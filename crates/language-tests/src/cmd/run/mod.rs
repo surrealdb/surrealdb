@@ -11,7 +11,7 @@ use camino::Utf8Path;
 use clap::ArgMatches;
 use report::{TestGrade, TestReport};
 use surrealdb_core::{
-	dbs::{capabilities::Targets, Capabilities, Response, Session},
+	dbs::{Capabilities, Response, Session},
 	err::Error as CoreError,
 	kvs::Datastore,
 	syn,
@@ -27,11 +27,7 @@ use util::core_capabilities_from_test_config;
 use crate::{
 	cli::{ColorMode, FailureMode},
 	runner::Schedular,
-	tests::{
-		schema::{BoolOr, SchemaTarget},
-		testset::TestId,
-		TestSet,
-	},
+	tests::{testset::TestId, TestSet},
 };
 
 #[derive(Debug)]
@@ -204,13 +200,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	println!();
 
-	for v in reports.iter().filter(|x| x.has_warning()) {
-		v.display(&runner.set, color)
-	}
-
-	println!();
-
-	for v in reports.iter().filter(|x| x.has_failed()) {
+	for v in reports.iter() {
 		v.display(&runner.set, color)
 	}
 

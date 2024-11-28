@@ -1,7 +1,7 @@
 pub mod schema;
 pub mod testset;
 use std::sync::Arc;
-use std::{ops::Range, str::Chars};
+use std::ops::Range;
 
 use anyhow::{bail, Context, Result};
 use camino::Utf8PathBuf;
@@ -143,11 +143,9 @@ impl TestCase {
 						starts = tokens.offset();
 
 						while let Some(x) = tokens.next() {
-							if x == b'*' {
-								if tokens.eat(b'/') {
-									continue 'main;
-								}
-							}
+							if x == b'*' && tokens.eat(b'/') {
+       									continue 'main;
+       								}
 							res.push(x);
 							end = tokens.offset();
 						}

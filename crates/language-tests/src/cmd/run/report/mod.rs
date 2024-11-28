@@ -1,16 +1,10 @@
-use std::time::{Duration, Instant};
-
 use super::cmp::RoughlyEq;
 use super::TestJobResult;
-use crate::{
-	format::ansi,
-	tests::{
-		schema::{BoolOr, TestDetailsResults, TestResultFlat},
-		testset::TestId,
-		TestSet,
-	},
+use crate::tests::{
+	schema::{BoolOr, TestDetailsResults, TestResultFlat},
+	testset::TestId,
+	TestSet,
 };
-use similar::{Algorithm, TextDiff};
 use surrealdb_core::sql::Value as SurValue;
 
 mod display;
@@ -148,7 +142,7 @@ impl TestReport {
 							});
 						}
 						BoolOr::Value(ref e) => {
-							if e.to_string() == results.to_string() {
+							if *e == results.to_string() {
 								return;
 							}
 
@@ -220,16 +214,14 @@ impl TestReport {
 												});
 											return;
 										}
-									} else {
-										if *r != e.0 {
-											self.grade = TestGrade::Failed;
-											self.output_validity =
-												Some(TestOutputValidity::MismatchedValues {
-													expected,
-													kind: MismatchedValuesKind::ValueMismatch(idx),
-												});
-											return;
-										}
+									} else if *r != e.0 {
+										self.grade = TestGrade::Failed;
+										self.output_validity =
+											Some(TestOutputValidity::MismatchedValues {
+												expected,
+												kind: MismatchedValuesKind::ValueMismatch(idx),
+											});
+										return;
 									}
 								}
 								(
@@ -286,10 +278,6 @@ impl TestReport {
 
 	pub fn succeeded(&self) -> bool {
 		matches!(self.grade, TestGrade::Success)
-	}
-
-	pub fn has_warning(&self) -> bool {
-		matches!(self.grade, TestGrade::Warning)
 	}
 
 	pub fn has_failed(&self) -> bool {

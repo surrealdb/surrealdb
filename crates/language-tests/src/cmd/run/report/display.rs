@@ -1,10 +1,9 @@
 use std::{
 	fmt::{self, Write as _},
-	io::Write as _,
 	time::{Duration, Instant},
 };
 
-use similar::{Algorithm, DiffableStr, TextDiff};
+use similar::{Algorithm, TextDiff};
 
 use crate::{
 	cli::ColorMode,
@@ -37,7 +36,48 @@ impl TestReport {
 		let name = &tests[self.id].path;
 
 		match self.grade {
-			TestGrade::Success => return Ok(()),
+			TestGrade::Success => {
+				if let Some(issue) = tests[self.id].config.issue() {
+					if tests[self.id].config.is_wip() {
+						if use_color {
+							writeln!(
+								f,
+								ansi!(
+									" ==> ",
+									green,
+									"Success",
+									reset_format,
+									" for ",
+									bold,
+									"{}",
+									reset_format,
+									":"
+								),
+								name
+							)?;
+						} else {
+							writeln!(f, " ==> Success for {name}:")?;
+						}
+						f.indent(|f| {
+							writeln!(
+								f,
+								"> Tests succeeded even though it is marked Work in Progress"
+							)?;
+							writeln!(f, "> Issue {issue} could maybe be closed.")?;
+							f.indent(|f| {
+								writeln!(
+									f,
+									"- https://github.com/surrealdb/surrealdb/issues/{issue}."
+								)
+							})
+						})?;
+					} else {
+						return Ok(());
+					}
+				} else {
+					return Ok(());
+				}
+			}
 			TestGrade::Failed => {
 				if use_color {
 					writeln!(
@@ -374,6 +414,6 @@ impl TestReport {
 		}
 		f.finish()?;
 		println!("{buffer}");
-		return Ok(());
+		Ok(())
 	}
 }

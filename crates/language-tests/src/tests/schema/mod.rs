@@ -64,7 +64,7 @@ impl TestConfig {
 	}
 
 	pub fn unused_keys(&self) -> Vec<String> {
-		let mut res: Vec<_> = self._unused_keys.keys().map(|x| x.clone()).collect();
+		let mut res: Vec<_> = self._unused_keys.keys().cloned().collect();
 
 		if let Some(x) = self.env.as_ref() {
 			res.append(&mut x.unused_keys())
@@ -102,7 +102,7 @@ impl TestEnv {
 	/// Defaults to "test"
 	pub fn namespace(&self) -> Option<&str> {
 		if let Some(x) = &self.namespace {
-			x.as_ref().map(|x| x.as_str()).to_value("test")
+			x.as_ref().map(|x| x.as_str()).into_value("test")
 		} else {
 			Some("test")
 		}
@@ -113,23 +113,21 @@ impl TestEnv {
 	/// Defaults to "test"
 	pub fn database(&self) -> Option<&str> {
 		if let Some(x) = &self.database {
-			x.as_ref().map(|x| x.as_str()).to_value("test")
+			x.as_ref().map(|x| x.as_str()).into_value("test")
 		} else {
 			Some("test")
 		}
 	}
 
 	pub fn timeout(&self) -> Option<u64> {
-		self.timeout.map(|x| x.to_value(1000)).unwrap_or(Some(1000))
+		self.timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
 	}
 
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("env.{x}")).collect();
 
-		if let Some(x) = self.capabilities.as_ref() {
-			if let BoolOr::Value(x) = x {
-				res.append(&mut x.unused_keys());
-			}
+		if let Some(BoolOr::Value(x)) = self.capabilities.as_ref() {
+			res.append(&mut x.unused_keys());
 		}
 
 		res
@@ -227,20 +225,10 @@ impl<T> BoolOr<T> {
 
 	/// Returns the value of this bool/or returning the default in case of BoolOr::Bool(true), the value in
 	/// case of BoolOr::Value(_) or None in case of BoolOr::Bool(false)
-	pub fn to_value(self, default: T) -> Option<T> {
+	pub fn into_value(self, default: T) -> Option<T> {
 		match self {
 			BoolOr::Bool(false) => None,
 			BoolOr::Bool(true) => Some(default),
-			BoolOr::Value(x) => Some(x),
-		}
-	}
-
-	/// Returns the value of this bool/or returning the default in case of BoolOr::Bool(true), the value in
-	/// case of BoolOr::Value(_) or None in case of BoolOr::Bool(false)
-	pub fn with_to_value<F: FnOnce() -> T>(self, default: F) -> Option<T> {
-		match self {
-			BoolOr::Bool(false) => None,
-			BoolOr::Bool(true) => Some(default()),
 			BoolOr::Value(x) => Some(x),
 		}
 	}
@@ -348,7 +336,7 @@ impl<'de> Deserialize<'de> for SurrealValue {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let mut v = syn::value(&source).map_err(|x| <D::Error as serde::de::Error>::custom(x))?;
+		let mut v = syn::value(&source).map_err(<D::Error as serde::de::Error>::custom)?;
 		bytes_hack::compute_bytes_inplace(&mut v);
 		Ok(SurrealValue(v))
 	}
@@ -391,7 +379,7 @@ where
 		D: serde::Deserializer<'de>,
 	{
 		let v = String::deserialize(deserializer)?;
-		v.parse().map(SchemaTarget).map_err(|x| <D::Error as serde::de::Error>::custom(x))
+		v.parse().map(SchemaTarget).map_err(<D::Error as serde::de::Error>::custom)
 	}
 }
 

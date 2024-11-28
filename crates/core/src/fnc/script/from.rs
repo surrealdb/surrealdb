@@ -53,7 +53,7 @@ fn try_object_to_geom(object: &Object) -> Option<Geometry> {
 			.and_then(Geometry::array_to_multiline)
 			.map(Geometry::MultiLine),
 		"MultiPolygon" => {
-			return object
+			object
 				.get("coordinates")
 				.and_then(Geometry::array_to_multipolygon)
 				.map(Geometry::MultiPolygon)

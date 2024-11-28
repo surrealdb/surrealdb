@@ -42,7 +42,6 @@ macro_rules! ansi {
 use std::fmt;
 
 pub(crate) use ansi;
-use similar::DiffableStr;
 
 /// A wrapper around a type implementing std::fmt::Write for indenting lines.
 pub struct IndentFormatter<W> {
@@ -79,10 +78,6 @@ where
 
 	pub fn increase_depth(&mut self) {
 		self.depth += 1;
-	}
-
-	pub fn decrease_depth(&mut self) {
-		self.depth -= 1;
 	}
 
 	pub fn indent<F>(&mut self, f: F) -> fmt::Result

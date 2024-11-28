@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{cmp::Ordering, fmt::Write, ops::Range};
 
 use crate::{
 	cmd::run::report::TestOutputs,
@@ -31,7 +31,10 @@ impl TestReport {
 		match set[self.id].config_kind {
 			ConfigKind::SingleLine => {
 				let doc: String =
-					doc.to_string().trim_end().lines().map(|x| format!("//! {x}\n")).collect();
+					doc.to_string().trim_end().lines().fold(String::new(), |mut acc, x| {
+						writeln!(&mut acc, "//! {x}").unwrap();
+						acc
+					});
 				insert_slice(&mut existing, set[self.id].config_slice.clone(), doc.as_bytes());
 			}
 			ConfigKind::MultiLine => {
@@ -64,23 +67,27 @@ impl TestReport {
 }
 
 pub fn insert_slice(bytes: &mut Vec<u8>, at: Range<usize>, src: &[u8]) {
-	if src.len() < at.len() {
-		let diff = at.len() - src.len();
-		let dest = at.start + src.len();
-		bytes.copy_within(at.end.., dest);
-		bytes[at.start..dest].copy_from_slice(src);
-		bytes.truncate(bytes.len() - diff);
-	} else if src.len() > at.len() {
-		let diff = src.len() - at.len();
-		let copy_range = at.end..bytes.len();
+	match src.len().cmp(&at.len()) {
+		Ordering::Less => {
+			let diff = at.len() - src.len();
+			let dest = at.start + src.len();
+			bytes.copy_within(at.end.., dest);
+			bytes[at.start..dest].copy_from_slice(src);
+			bytes.truncate(bytes.len() - diff);
+		}
+		Ordering::Equal => {
+			let diff = src.len() - at.len();
+			let copy_range = at.end..bytes.len();
 
-		bytes.resize(bytes.len() + diff, 0);
+			bytes.resize(bytes.len() + diff, 0);
 
-		let dest = at.start + src.len();
-		bytes.copy_within(copy_range, dest);
-		bytes[at.start..dest].copy_from_slice(src);
-	} else {
-		bytes[at].copy_from_slice(src);
+			let dest = at.start + src.len();
+			bytes.copy_within(copy_range, dest);
+			bytes[at.start..dest].copy_from_slice(src);
+		}
+		Ordering::Greater => {
+			bytes[at].copy_from_slice(src);
+		}
 	}
 }
 

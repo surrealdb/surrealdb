@@ -1,8 +1,7 @@
-use atty::Stream;
 use clap::{
 	arg,
 	builder::{EnumValueParser, PossibleValue},
-	command, value_parser, ArgMatches, Command, Subcommand, ValueEnum,
+	command, value_parser, ArgMatches, Command, ValueEnum,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]

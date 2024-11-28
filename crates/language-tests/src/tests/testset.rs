@@ -50,15 +50,7 @@ impl TestSet {
 		self.map.len()
 	}
 
-	pub fn all_len(&self) -> usize {
-		self.all.len()
-	}
-
-	pub fn root(&self) -> &Utf8Path {
-		self.root.as_path()
-	}
-
-	pub fn filter<'a, P: Pattern>(&'a self, pattern: &P) -> TestSet {
+	pub fn filter<P: Pattern>(&self, pattern: &P) -> TestSet {
 		let map = self
 			.map
 			.iter()
@@ -74,14 +66,6 @@ impl TestSet {
 			map,
 			all: self.all.clone(),
 		}
-	}
-
-	pub fn find<S>(&self, name: &S) -> Option<TestId>
-	where
-		S: AsRef<str>,
-	{
-		let name = name.as_ref();
-		self.map.get(name).cloned()
 	}
 
 	pub fn find_all<S>(&self, name: &S) -> Option<TestId>
