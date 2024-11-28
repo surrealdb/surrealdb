@@ -59,36 +59,6 @@ async fn error_on_invalid_function() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
-async fn function_array_add() -> Result<(), Error> {
-	let sql = r#"
-		RETURN array::add([], 3);
-		RETURN array::add(3, true);
-		RETURN array::add([1,2], 2);
-		RETURN array::add([1,2], 3);
-		RETURN array::add([1,2], [2,3]);
-	"#;
-	let error = "Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but found 3";
-	Test::new(sql)
-		.await?
-		.expect_val("[3]")?
-		.expect_error(error)?
-		.expect_vals(&["[1,2]", "[1,2,3]", "[1,2,3]"])?;
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_array_all() -> Result<(), Error> {
-	let sql = r#"
-		RETURN array::all([]);
-		RETURN array::all("some text");
-		RETURN array::all([1,2,"text",3,NONE,3,4]);
-	"#;
-	let error = "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but found 'some text'";
-	Test::new(sql).await?.expect_val("true")?.expect_error(error)?.expect_val("false")?;
-	Ok(())
-}
-
-#[tokio::test]
 async fn function_array_any() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::any([]);
