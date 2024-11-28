@@ -34,7 +34,7 @@ pub(crate) struct HttpTraceLayerHooks;
 impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 	fn make_span(&mut self, req: &Request<B>) -> Span {
 		// The fields follow the OTEL semantic conventions: https://github.com/open-telemetry/opentelemetry-specification/blob/v1.23.0/specification/trace/semantic_conventions/http.md
-		let span = tracing::debug_span!(
+		let span = debug_span!(
 			"request",
 			otel.name = field::Empty,
 			otel.kind = "server",
@@ -61,62 +61,64 @@ impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 			error = field::Empty,
 			error_message = field::Empty,
 		);
-
+		// Record the basic request query information
 		req.uri().query().map(|v| span.record("url.query", v));
 		req.uri().scheme().map(|v| span.record("url.scheme", v.as_str()));
 		req.uri().host().map(|v| span.record("server.address", v));
 		req.uri().port_u16().map(|v| span.record("server.port", v));
-
+		// Fetch and record the total input body length
 		req.headers()
 			.get(header::CONTENT_LENGTH)
 			.map(|v| v.to_str().map(|v| span.record("http.request.body.size", v)));
+		// Fetch and record the specified user agent
 		req.headers()
 			.get(header::USER_AGENT)
 			.map(|v| v.to_str().map(|v| span.record("user_agent.original", v)));
-
+		// Fetch and record the request method and path
 		if let Some(path) = req.extensions().get::<MatchedPath>() {
 			span.record("otel.name", format!("{} {}", req.method(), path.as_str()));
 			span.record("http.route", path.as_str());
 		} else {
 			span.record("otel.name", format!("{} -", req.method()));
 		};
-
+		// Extract and record the client request id
 		if let Some(req_id) = req.extensions().get::<RequestId>() {
 			match req_id.header_value().to_str() {
-				Err(err) => tracing::error!(error = %err, "failed to parse request id"),
+				Err(err) => error!(error = %err, "failed to parse request id"),
 				Ok(request_id) => {
 					span.record("http.request.id", request_id);
 				}
 			}
 		}
-
+		// Extract and record the client ip address
 		if let Some(client_ip) = req.extensions().get::<ExtractClientIP>() {
 			if let Some(ref client_ip) = client_ip.0 {
 				span.record("client.address", client_ip);
 			}
 		}
-
+		// Return the span
 		span
 	}
 }
 
 impl<B> OnRequest<B> for HttpTraceLayerHooks {
 	fn on_request(&mut self, _: &Request<B>, _: &Span) {
-		tracing::event!(Level::DEBUG, "started processing request");
+		event!(Level::DEBUG, "Started processing request");
 	}
 }
 
 impl<B> OnResponse<B> for HttpTraceLayerHooks {
 	fn on_response(self, response: &Response<B>, latency: Duration, span: &Span) {
+		// Record the returned response status code
+		span.record("http.response.status_code", response.status().as_u16());
+		// Record the response body size if specified
 		if let Some(size) = response.headers().get(header::CONTENT_LENGTH) {
 			span.record("http.response.body.size", size.to_str().unwrap());
 		}
-		span.record("http.response.status_code", response.status().as_u16());
-
-		// Server errors are handled by the OnFailure hook
+		// Server errors are handled by the on_failure hook
 		if !response.status().is_server_error() {
 			span.record("http.latency.ms", latency.as_millis());
-			tracing::event!(Level::DEBUG, "finished processing request");
+			event!(Level::DEBUG, "Finished processing request");
 		}
 	}
 }
@@ -128,6 +130,6 @@ where
 	fn on_failure(&mut self, error: FailureClass, latency: Duration, span: &Span) {
 		span.record("error_message", error.to_string());
 		span.record("http.latency.ms", latency.as_millis());
-		tracing::event!(Level::ERROR, error = error.to_string(), "response failed");
+		event!(Level::ERROR, error = error.to_string(), "Response failed");
 	}
 }

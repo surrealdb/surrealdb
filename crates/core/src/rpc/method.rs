@@ -99,25 +99,21 @@ impl Method {
 }
 
 impl Method {
+	/// Checks if the provided method is a valid and supported RPC method
 	pub fn is_valid(&self) -> bool {
 		!matches!(self, Self::Unknown)
 	}
-
-	pub fn needs_mut(&self) -> bool {
-		!self.can_be_immut()
-	}
-
-	// should be the same as execute_immut
-	pub fn can_be_immut(&self) -> bool {
-		matches!(
+	/// Checks if this method needs mutable access to the RPC session
+	pub fn needs_mutability(&self) -> bool {
+		!matches!(
 			self,
 			Method::Ping
 				| Method::Info
 				| Method::Select
 				| Method::Insert
 				| Method::Create
-				| Method::Update
 				| Method::Upsert
+				| Method::Update
 				| Method::Merge
 				| Method::Patch
 				| Method::Delete

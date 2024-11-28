@@ -360,61 +360,75 @@ impl Connection {
 		method: &str,
 		params: Array,
 	) -> Result<Data, Failure> {
-		debug!("Process RPC request");
+		debug!(method = %method, "Process RPC request");
+		// Parse the request RPC method type
 		let method = Method::parse(method);
+		// Check that the method is a valid method
 		if !method.is_valid() {
 			return Err(Failure::METHOD_NOT_FOUND);
 		}
-
-		// if the write lock is a bottleneck then execute could be refactored into execute_mut and execute
-		// rpc.write().await.execute(method, params).await.map_err(Into::into)
-		match method.needs_mut() {
-			true => rpc.write().await.execute(method, params).await.map_err(Into::into),
-			false => rpc.read().await.execute_immut(method, params).await.map_err(Into::into),
+		// Execute the specified method
+		match method.needs_mutability() {
+			true => rpc.write().await.execute_mutable(method, params).await.map_err(Into::into),
+			false => rpc.read().await.execute_immutable(method, params).await.map_err(Into::into),
 		}
 	}
 }
 
 impl RpcContext for Connection {
+	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore {
 		&self.datastore
 	}
-
+	/// The current session for this RPC context
 	fn session(&self) -> &Session {
 		&self.session
 	}
-
+	/// Mutable access to the current session for this RPC context
 	fn session_mut(&mut self) -> &mut Session {
 		&mut self.session
 	}
-
+	/// The current parameters stored on this RPC context
 	fn vars(&self) -> &BTreeMap<String, Value> {
 		&self.vars
 	}
-
+	/// Mutable access to the current parameters stored on this RPC context
 	fn vars_mut(&mut self) -> &mut BTreeMap<String, Value> {
 		&mut self.vars
 	}
-
+	/// The version information for this RPC context
 	fn version_data(&self) -> Data {
 		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
 	}
 
+	// ------------------------------
+	// Realtime
+	// ------------------------------
+
+	/// Live queries are enabled on WebSockets
 	const LQ_SUPPORT: bool = true;
 
+	/// Handles the execution of a LIVE statement
 	async fn handle_live(&self, lqid: &Uuid) {
 		self.state.live_queries.write().await.insert(*lqid, self.id);
 		trace!("Registered live query {} on websocket {}", lqid, self.id);
 	}
 
+	/// Handles the execution of a KILL statement
 	async fn handle_kill(&self, lqid: &Uuid) {
 		if let Some(id) = self.state.live_queries.write().await.remove(lqid) {
 			trace!("Unregistered live query {} on websocket {}", lqid, id);
 		}
 	}
 
+	// ------------------------------
+	// GraphQL
+	// ------------------------------
+
+	/// GraphQL queries are enabled on WebSockets
 	#[cfg(surrealdb_unstable)]
 	const GQL_SUPPORT: bool = true;
+
 	#[cfg(surrealdb_unstable)]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema

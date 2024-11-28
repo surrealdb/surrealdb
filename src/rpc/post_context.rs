@@ -34,45 +34,61 @@ impl PostRpcContext {
 }
 
 impl RpcContext for PostRpcContext {
+	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore {
 		&self.kvs
 	}
-
+	/// The current session for this RPC context
 	fn session(&self) -> &Session {
 		&self.session
 	}
-
+	/// Mutable access to the current session for this RPC context
 	fn session_mut(&mut self) -> &mut Session {
 		&mut self.session
 	}
-
+	/// The current parameters stored on this RPC context
 	fn vars(&self) -> &BTreeMap<String, Value> {
 		&self.vars
 	}
-
+	/// Mutable access to the current parameters stored on this RPC context
 	fn vars_mut(&mut self) -> &mut BTreeMap<String, Value> {
 		&mut self.vars
 	}
-
+	/// The version information for this RPC context
 	fn version_data(&self) -> Data {
-		Value::from(format!("{PKG_NAME}-{}", *PKG_VERSION)).into()
+		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
 	}
 
+	// ------------------------------
+	// Realtime
+	// ------------------------------
+
+	/// Live queries are disabled on HTTP
+	const LQ_SUPPORT: bool = false;
+
+	// ------------------------------
+	// GraphQL
+	// ------------------------------
+
+	/// GraphQL queries are enabled on HTTP
 	#[cfg(surrealdb_unstable)]
 	const GQL_SUPPORT: bool = true;
+
 	#[cfg(surrealdb_unstable)]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema
 	}
 
-	// disable:
+	// ------------------------------
+	// Overrides
+	// ------------------------------
 
-	// doesn't do anything so shouldn't be supported
+	/// Parameters can't be set or unset on HTTP RPC context
 	async fn set(&mut self, _params: Array) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
-	// doesn't do anything so shouldn't be supported
+	/// Parameters can't be set or unset on HTTP RPC context
 	async fn unset(&mut self, _params: Array) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
