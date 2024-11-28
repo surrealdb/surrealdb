@@ -721,6 +721,7 @@ jobs:
         # Allow breaking changes until v2 stabilises
         continue-on-error: true
         run: cargo make ci-database-upgrade
+
   lang-tests:
     name: Run SurrealQL language tests.
     runs-on: ubuntu-latest
@@ -736,7 +737,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Test upgrade
-        # Allow breaking changes until v2 stabilises
-        continue-on-error: true
-        run: cargo run --package surrealql-test -- --color always run --path ./crates/language-tests/tests
+      - name: Build Suite
+        run: cargo build --package surrealql-test
+
+      - name: Run Suite
+        run: ./target/debug/surrealql-test --color always run --path ./crates/language-tests/tests
