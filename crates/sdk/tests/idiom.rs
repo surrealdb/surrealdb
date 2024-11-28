@@ -1085,7 +1085,7 @@ async fn idiom_function_argument_computation() -> Result<(), Error> {
 		};
 
 		LET $num = 123;
-		LET $fnc = || 123;
+		LET $fnc = || 456;
 
 		$obj.a($num);
 		$obj.b($fnc);
@@ -1097,7 +1097,7 @@ async fn idiom_function_argument_computation() -> Result<(), Error> {
 		.expect_val("NONE")?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
-		.expect_val("true")?
-		.expect_val("true")?;
+		.expect_val("123")?
+		.expect_val("456")?;
 	Ok(())
 }
