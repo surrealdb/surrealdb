@@ -428,6 +428,7 @@
 "type::is::object("
 "type::is::point("
 "type::is::polygon("
+"type::is::range("
 "type::is::record("
 "type::is::string("
 "type::is::uuid("

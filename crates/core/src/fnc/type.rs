@@ -253,6 +253,10 @@ pub mod is {
 		Ok(matches!(arg, Value::Geometry(Geometry::Polygon(_))).into())
 	}
 
+	pub fn range((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_range().into())
+	}
+
 	pub fn record((arg, table): (Value, Option<String>)) -> Result<Value, Error> {
 		Ok(match table {
 			Some(tb) => arg.is_record_type(&[Table(tb)]).into(),
