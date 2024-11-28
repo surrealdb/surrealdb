@@ -3256,7 +3256,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	assert!(res.remove(0).result.is_ok());
 	// Obtain the initial uuids
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-	let initial = txn.get_tb(&"test", &"test", &"test").await?;
+	let initial = txn.get_tb("test", "test", "test").await?;
 	drop(txn);
 
 	// Define some resources to refresh the UUIDs
@@ -3278,7 +3278,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	assert!(matches!(lqid, Value::Uuid(_)));
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-	let after_define = txn.get_tb(&"test", &"test", &"test").await?;
+	let after_define = txn.get_tb("test", "test", "test").await?;
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
@@ -3306,7 +3306,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	assert!(res.remove(0).result.is_ok());
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-	let after_remove = txn.get_tb(&"test", &"test", &"test").await?;
+	let after_remove = txn.get_tb("test", "test", "test").await?;
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);

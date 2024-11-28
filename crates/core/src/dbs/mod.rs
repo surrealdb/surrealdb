@@ -30,7 +30,6 @@ pub use self::session::*;
 pub(crate) use self::statement::*;
 pub(crate) use self::variables::*;
 
-#[doc(hidden)]
 pub mod fuzzy_eq;
 #[cfg(test)]
 pub(crate) mod test;

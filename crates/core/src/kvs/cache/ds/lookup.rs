@@ -16,7 +16,7 @@ pub(crate) enum Lookup<'a> {
 	Lvs(&'a str, &'a str, &'a str, Uuid),
 }
 
-impl<'a> Equivalent<Key> for Lookup<'a> {
+impl Equivalent<Key> for Lookup<'_> {
 	#[rustfmt::skip]
 	fn equivalent(&self, key: &Key) -> bool {
 		match (self, key) {

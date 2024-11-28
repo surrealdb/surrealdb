@@ -101,6 +101,9 @@ impl Datastore {
 		// Specify the max concurrent background jobs
 		debug!(target: TARGET, "Maximum background jobs count: {}", *cnf::ROCKSDB_JOBS_COUNT);
 		opts.set_max_background_jobs(*cnf::ROCKSDB_JOBS_COUNT);
+		// Set the maximum number of open files that can be used by the database
+		debug!(target: TARGET, "Maximum number of open files: {}", *cnf::ROCKSDB_MAX_OPEN_FILES);
+		opts.set_max_open_files(*cnf::ROCKSDB_MAX_OPEN_FILES);
 		// Set the maximum number of write buffers
 		debug!(target: TARGET, "Maximum write buffers: {}", *cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
 		opts.set_max_write_buffer_number(*cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);

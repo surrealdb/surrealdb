@@ -176,13 +176,13 @@ impl<'a> Iterator for Iter<'a> {
 
 impl FusedIterator for Iter<'_> {}
 
-impl<'a> DoubleEndedIterator for Iter<'a> {
+impl DoubleEndedIterator for Iter<'_> {
 	fn next_back(&mut self) -> Option<Self::Item> {
 		self.iter.next_back().map(|(a, b)| (a, Value::from_inner_ref(b)))
 	}
 }
 
-impl<'a> ExactSizeIterator for Iter<'a> {
+impl ExactSizeIterator for Iter<'_> {
 	fn len(&self) -> usize {
 		self.iter.len()
 	}
@@ -231,13 +231,13 @@ impl<'a> Iterator for IterMut<'a> {
 
 impl FusedIterator for IterMut<'_> {}
 
-impl<'a> DoubleEndedIterator for IterMut<'a> {
+impl DoubleEndedIterator for IterMut<'_> {
 	fn next_back(&mut self) -> Option<Self::Item> {
 		self.iter.next_back().map(|(a, b)| (a, Value::from_inner_mut(b)))
 	}
 }
 
-impl<'a> ExactSizeIterator for IterMut<'a> {
+impl ExactSizeIterator for IterMut<'_> {
 	fn len(&self) -> usize {
 		self.iter.len()
 	}
