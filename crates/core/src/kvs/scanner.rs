@@ -51,7 +51,7 @@ impl<'a, I> Scanner<'a, I> {
 	}
 }
 
-impl<'a> Stream for Scanner<'a, (Key, Val)> {
+impl Stream for Scanner<'_, (Key, Val)> {
 	type Item = Result<(Key, Val), Error>;
 	fn poll_next(
 		mut self: Pin<&mut Self>,
@@ -121,7 +121,7 @@ impl<'a> Stream for Scanner<'a, (Key, Val)> {
 	}
 }
 
-impl<'a> Stream for Scanner<'a, Key> {
+impl Stream for Scanner<'_, Key> {
 	type Item = Result<Key, Error>;
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<Key, Error>>> {
 		// If we have results, return the first one

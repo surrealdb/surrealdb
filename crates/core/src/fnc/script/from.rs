@@ -52,12 +52,10 @@ fn try_object_to_geom(object: &Object) -> Option<Geometry> {
 			.get("coordinates")
 			.and_then(Geometry::array_to_multiline)
 			.map(Geometry::MultiLine),
-		"MultiPolygon" => {
-			return object
-				.get("coordinates")
-				.and_then(Geometry::array_to_multipolygon)
-				.map(Geometry::MultiPolygon)
-		}
+		"MultiPolygon" => object
+			.get("coordinates")
+			.and_then(Geometry::array_to_multipolygon)
+			.map(Geometry::MultiPolygon),
 		"GeometryCollection" => {
 			let Some(Value::Array(x)) = object.get("geometries") else {
 				return None;
