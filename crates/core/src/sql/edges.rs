@@ -19,7 +19,6 @@ pub struct Edges {
 }
 
 impl Edges {
-	#[doc(hidden)]
 	pub fn new(dir: Dir, from: Thing, what: Tables) -> Self {
 		Edges {
 			dir,

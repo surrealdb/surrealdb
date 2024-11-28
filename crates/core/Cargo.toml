@@ -2,9 +2,9 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.1.0"
+version = "2.1.2"
 rust-version = "1.80.1"
-readme = "../sdk/CARGO.md"
+readme = "README.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
@@ -149,7 +149,7 @@ storekey = "0.5.0"
 strsim = "0.11.1"
 subtle = "2.6"
 surrealcs = { version = "0.4.4", optional = true }
-surrealkv = { version = "0.5.4", optional = true }
+surrealkv = { version = "0.6.1", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.63"

@@ -2,7 +2,6 @@
 /// Non detereministic values include:
 /// - Timestamps
 /// - UUIDs
-#[doc(hidden)]
 pub trait FuzzyEq<Rhs: ?Sized = Self> {
 	/// Use this when comparing objects that you do not want to compare properties that are
 	/// non-deterministic

@@ -22,20 +22,17 @@ pub use self::conv::*;
 
 /// Generate S-tuples of valid, sequenced versionstamps within range.
 /// The limit is used, because these are combinatorics - without an upper bound, combinations aren't possible.
-#[doc(hidden)]
 pub fn generate_versionstamp_sequences(start: Versionstamp) -> VersionstampSequence {
 	VersionstampSequence {
 		next_state: Some(start),
 	}
 }
 
-#[doc(hidden)]
 #[non_exhaustive]
 pub struct VersionstampSequence {
 	next_state: Option<Versionstamp>,
 }
 
-#[doc(hidden)]
 impl Iterator for VersionstampSequence {
 	type Item = Versionstamp;
 

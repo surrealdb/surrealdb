@@ -94,7 +94,6 @@ pub enum Statement {
 	#[revision(start = 4)]
 	Alter(AlterStatement),
 	// TODO(gguillemas): Document once bearer access is no longer experimental.
-	#[doc(hidden)]
 	#[revision(start = 5)]
 	Access(AccessStatement),
 }

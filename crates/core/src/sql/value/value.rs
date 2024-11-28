@@ -1397,7 +1397,6 @@ impl Value {
 	}
 
 	/// Try to coerce this value to an `i64`
-	#[doc(hidden)]
 	pub fn coerce_to_i64(self) -> Result<i64, Error> {
 		match self {
 			// Allow any int number
@@ -2169,7 +2168,6 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `String`
-	#[doc(hidden)]
 	pub fn convert_to_string(self) -> Result<String, Error> {
 		match self {
 			// Bytes can't convert to strings

@@ -460,6 +460,50 @@ mod api_integration {
 		include!("api/mod.rs");
 		include!("api/serialisation.rs");
 		include!("api/live.rs");
+		include!("api/backup.rs");
+	}
+
+	#[cfg(feature = "kv-surrealkv")]
+	mod surrealkv_versioned {
+		use super::*;
+		use surrealdb::engine::local::Db;
+		use surrealdb::engine::local::SurrealKv;
+
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+			let permit = PERMITS.acquire().await.unwrap();
+			let path = TEMP_DIR.join(Ulid::new().to_string());
+			let root = Root {
+				username: ROOT_USER,
+				password: ROOT_PASS,
+			};
+			let config = Config::new().user(root).capabilities(Capabilities::all());
+			let db = Surreal::new::<SurrealKv>((path, config)).versioned().await.unwrap();
+			db.signin(root).await.unwrap();
+			(permit, db)
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn any_engine_can_connect() {
+			let db_dir = Ulid::new().to_string();
+			// Create a database directory using an absolute path
+			surrealdb::engine::any::connect(format!(
+				"surrealkv+versioned://{}",
+				TEMP_DIR.join("absolute").join(&db_dir).display()
+			))
+			.await
+			.unwrap();
+			// Switch to the temporary directory, if possible, to test relative paths
+			if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+				// Create a database directory using a relative path
+				surrealdb::engine::any::connect(format!("surrealkv+versioned://relative/{db_dir}"))
+					.await
+					.unwrap();
+			}
+		}
+
+		include!("api/mod.rs");
+		include!("api/serialisation.rs");
+		include!("api/live.rs");
 		include!("api/version.rs");
 		include!("api/backup.rs");
 		include!("api/backup_version.rs");

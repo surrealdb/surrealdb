@@ -327,16 +327,17 @@ impl Datastore {
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a SurrealKV datastore
-			s if s.starts_with("surrealkv:") => {
+			s if s.starts_with("surrealkv") => {
 				#[cfg(feature = "kv-surrealkv")]
 				{
-					info!(target: TARGET, "Starting kvs store at {}", path);
-					let s = s.trim_start_matches("surrealkv://");
-					let s = s.trim_start_matches("surrealkv:");
-					let v =
-						super::surrealkv::Datastore::new(s).await.map(DatastoreFlavor::SurrealKV);
+					info!(target: TARGET, "Starting kvs store at {}", s);
+					let (path, enable_versions) =
+						super::surrealkv::Datastore::parse_start_string(s)?;
+					let v = super::surrealkv::Datastore::new(path, enable_versions)
+						.await
+						.map(DatastoreFlavor::SurrealKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at {} with versions {}", path, if enable_versions { "enabled" } else { "disabled" });
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
@@ -505,7 +506,6 @@ impl Datastore {
 
 	/// Does the datastore allow requesting an HTTP route?
 	/// This function needs to be public to allow access from the CLI crate.
-	#[doc(hidden)]
 	pub fn allows_http_route(&self, route_target: &RouteTarget) -> bool {
 		self.capabilities.allows_http_route(route_target)
 	}
@@ -555,14 +555,14 @@ impl Datastore {
 					// There was en error getting the version
 					Err(err) => {
 						// We didn't write anything, so just rollback
-						txn.cancel().await?;
+						catch!(txn, txn.cancel().await);
 						// Return the error
 						return Err(err);
 					}
 					// We could decode the version correctly
 					Ok(val) => {
 						// We didn't write anything, so just rollback
-						txn.cancel().await?;
+						catch!(txn, txn.cancel().await);
 						// Return the current version
 						val
 					}
