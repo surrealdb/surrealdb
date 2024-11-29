@@ -291,12 +291,11 @@ fn random_string(length: usize, pool: &[u8]) -> String {
 }
 
 #[doc(hidden)]
-pub async fn compute_grant(
+pub async fn create_grant(
 	stmt: &AccessStatementGrant,
 	ctx: &Context,
 	opt: &Options,
-	_doc: Option<&CursorDoc>,
-) -> Result<Value, Error> {
+) -> Result<AccessGrant, Error> {
 	let base = match &stmt.base {
 		Some(base) => base.clone(),
 		None => opt.selected_base()?,
@@ -389,7 +388,7 @@ pub async fn compute_grant(
 				opt.auth.id()
 			);
 
-			Ok(Value::Object(gr.into()))
+			Ok(gr)
 		}
 		AccessType::Bearer(at) => {
 			match &stmt.subject {
@@ -482,9 +481,19 @@ pub async fn compute_grant(
 				opt.auth.id()
 			);
 
-			Ok(Value::Object(gr.into()))
+			Ok(gr)
 		}
 	}
+}
+
+async fn compute_grant(
+	stmt: &AccessStatementGrant,
+	ctx: &Context,
+	opt: &Options,
+	_doc: Option<&CursorDoc>,
+) -> Result<Value, Error> {
+	let grant = create_grant(stmt, ctx, opt).await?;
+	Ok(Value::Object(grant.into()))
 }
 
 async fn compute_show(
@@ -583,12 +592,12 @@ async fn compute_show(
 	}
 }
 
-async fn compute_revoke(
+#[doc(hidden)]
+pub async fn revoke_grant(
 	stmt: &AccessStatementRevoke,
 	stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
-	_doc: Option<&CursorDoc>,
 ) -> Result<Value, Error> {
 	let base = match &stmt.base {
 		Some(base) => base.clone(),
@@ -614,9 +623,10 @@ async fn compute_revoke(
 	};
 
 	// Get the grants to revoke.
+	let mut revoked = Vec::new();
 	match &stmt.gr {
 		Some(gr) => {
-			let mut revoked = match base {
+			let mut revoke = match base {
 				Base::Root => (*txn.get_root_access_grant(&stmt.ac, gr).await?).clone(),
 				Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, gr).await?).clone(),
 				Base::Db => {
@@ -629,28 +639,28 @@ async fn compute_revoke(
 					))
 				}
 			};
-			if revoked.revocation.is_some() {
+			if revoke.revocation.is_some() {
 				return Err(Error::AccessGrantRevoked);
 			}
-			revoked.revocation = Some(Datetime::default());
+			revoke.revocation = Some(Datetime::default());
 
 			// Revoke the grant.
 			match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&stmt.ac, gr);
-					txn.set(key, &revoked, None).await?;
+					txn.set(key, &revoke, None).await?;
 				}
 				Base::Ns => {
 					let key = crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.set(key, &revoked, None).await?;
+					txn.set(key, &revoke, None).await?;
 				}
 				Base::Db => {
 					let key =
 						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.set(key, &revoked, None).await?;
+					txn.set(key, &revoke, None).await?;
 				}
 				_ => {
 					return Err(Error::Unimplemented(
@@ -662,14 +672,14 @@ async fn compute_revoke(
 
 			info!(
 				"Access method '{}' was used to revoke grant '{}' of type '{}' for '{}' by '{}'",
-				revoked.ac,
-				revoked.id,
-				revoked.grant.variant(),
-				revoked.subject.id(),
+				revoke.ac,
+				revoke.id,
+				revoke.grant.variant(),
+				revoke.subject.id(),
 				opt.auth.id()
 			);
 
-			Ok(Value::Object(revoked.redacted().into()))
+			revoked.push(Value::Object(revoke.redacted().into()));
 		}
 		None => {
 			// Get all grants.
@@ -684,7 +694,6 @@ async fn compute_revoke(
 					)),
 				};
 
-			let mut revoked = Vec::new();
 			for gr in grs.iter() {
 				// If the grant is already revoked, it cannot be revoked again.
 				if gr.revocation.is_some() {
@@ -756,13 +765,25 @@ async fn compute_revoke(
 				);
 
 				// Store revoked version of the redacted grant.
-				revoked.push(Value::Object(gr.redacted().to_owned().into()));
+				revoked.push(Value::Object(gr.redacted().into()));
 			}
-
-			// Return revoked grants.
-			Ok(Value::Array(revoked.into()))
 		}
 	}
+
+	// Return revoked grants.
+	Ok(Value::Array(revoked.into()))
+}
+
+#[doc(hidden)]
+async fn compute_revoke(
+	stmt: &AccessStatementRevoke,
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	_doc: Option<&CursorDoc>,
+) -> Result<Value, Error> {
+	let revoked = revoke_grant(stmt, stk, ctx, opt).await?;
+	Ok(Value::Array(revoked.into()))
 }
 
 async fn compute_purge(

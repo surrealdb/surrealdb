@@ -11,12 +11,10 @@ use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::statements::{access, AccessGrant};
-use crate::sql::Datetime;
-use crate::sql::Object;
-use crate::sql::Value;
-use crate::sql::{access_type, AccessType};
+use crate::sql::{access_type, AccessType, Base, Datetime, Ident, Object, Thing, Value};
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -206,63 +204,20 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
-
+											// Create refresh key if defined for the record access method
 											let refresh = match &at.bearer {
-												Some(_) => {
-													let grant = access::AccessStatementGrant {
-														ac: av.name.clone(),
-														base: Some(av.base.clone()),
-														subject: access::Subject::Record(
-															rid.clone(),
-														),
-													};
-													let sess =
-														Session::owner().with_ns(&ns).with_db(&db);
-													// Create a new context with a writeable transaction
-													let mut ctx = MutableContext::background();
-													let tx = kvs
-														.transaction(Write, Optimistic)
-														.await?
-														.enclose();
-													ctx.set_transaction(tx.clone());
-													let ctx = ctx.freeze();
-													// Create a bearer grant to act as the refresh key
-													// TODO(PR): Handle errors without leaking information
-													let bearer = access::compute_grant(
-														&grant,
-														&ctx,
-														&kvs.setup_options(&sess),
-														None,
+												Some(_) => Some(
+													create_refresh_key_record(
+														kvs,
+														av.name.clone(),
+														&ns,
+														&db,
+														rid.clone(),
 													)
-													.await?;
-													tx.cancel().await?;
-													// Return the key from the bearer grant
-													match bearer {
-														Value::Object(bearer_obj) => {
-															match bearer_obj.get("grant") {
-																Some(Value::Object(grant_obj)) => {
-																	match grant_obj.get("key") {
-																		Some(key) => Some(
-																			key.to_raw_string(),
-																		),
-																		None => return Err(
-																			Error::UnexpectedAuth,
-																		),
-																	}
-																}
-																_ => {
-																	return Err(
-																		Error::UnexpectedAuth,
-																	)
-																}
-															}
-														}
-														_ => return Err(Error::UnexpectedAuth),
-													}
-												}
+													.await?,
+												),
 												None => None,
 											};
-
 											// Log the authenticated access method info
 											trace!(
 												"Signing in to database with access method `{}`",
@@ -329,6 +284,13 @@ pub async fn db_access(
 						);
 						return Err(Error::InvalidAuth);
 					}
+					// If the bearer grant is a refresh key
+					// Refresh keys are not implemented for system users
+					if matches!(at.kind, access_type::BearerAccessType::Refresh) {
+						return Err(Error::FeatureNotYetImplemented {
+							feature: "Refresh keys for system users".to_string(),
+						});
+					};
 					// Check if the bearer access method supports issuing tokens.
 					let iss = match &at.jwt.issue {
 						Some(iss) => iss.clone(),
@@ -400,11 +362,41 @@ pub async fn db_access(
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
 					}
-
-					// TODO(PR): If the bearer grant is of refresh type, revoke it.
-					// TODO(PR): Generate new bearer grant of refresh type.
-					let refresh = None;
-
+					// If the bearer grant is a refresh key
+					let refresh = match at.kind {
+						access_type::BearerAccessType::Refresh => {
+							match &gr.subject {
+								access::Subject::Record(rid) => {
+									// Revoke the used refresh key
+									revoke_refresh_key_record(
+										kvs,
+										gr.id.clone(),
+										gr.ac.clone(),
+										&ns,
+										&db,
+									)
+									.await?;
+									// Create a new refresh key to replace it
+									Some(
+										create_refresh_key_record(
+											kvs,
+											gr.ac.clone(),
+											&ns,
+											&db,
+											rid.clone(),
+										)
+										.await?,
+									)
+								}
+								access::Subject::User(_) => {
+									return Err(Error::FeatureNotYetImplemented {
+										feature: "Refresh keys for system users".to_string(),
+									})
+								}
+							}
+						}
+						_ => None,
+					};
 					// Log the authenticated access method information.
 					trace!("Signing in to database with bearer access method `{}`", ac);
 					// Create the authentication token.
@@ -529,6 +521,13 @@ pub async fn ns_access(
 						);
 						return Err(Error::InvalidAuth);
 					}
+					// If the bearer grant is a refresh key
+					// Refresh keys are not implemented for system users
+					if matches!(at.kind, access_type::BearerAccessType::Refresh) {
+						return Err(Error::FeatureNotYetImplemented {
+							feature: "Refresh keys for system users".to_string(),
+						});
+					};
 					// Check if the bearer access method supports issuing tokens.
 					let iss = match &at.jwt.issue {
 						Some(iss) => iss.clone(),
@@ -762,6 +761,13 @@ pub async fn root_access(
 						);
 						return Err(Error::InvalidAuth);
 					}
+					// If the bearer grant is a refresh key
+					// Refresh keys are not implemented for system users
+					if matches!(at.kind, access_type::BearerAccessType::Refresh) {
+						return Err(Error::FeatureNotYetImplemented {
+							feature: "Refresh keys for system users".to_string(),
+						});
+					};
 					// Check if the bearer access method supports issuing tokens.
 					let iss = match &at.jwt.issue {
 						Some(iss) => iss.clone(),
@@ -891,7 +897,10 @@ pub fn validate_grant_bearer(vars: Object) -> Result<(String, String), Error> {
 	Ok((kid.to_string(), key))
 }
 
-pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<(), Error> {
+pub fn verify_grant_bearer(
+	gr: &Arc<AccessGrant>,
+	key: String,
+) -> Result<&access::GrantBearer, Error> {
 	// Check if the grant is revoked or expired.
 	match (&gr.expiration, &gr.revocation) {
 		(None, None) => {}
@@ -909,16 +918,82 @@ pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<(), Err
 	}
 	// Check if the provided key matches the bearer key in the grant.
 	// We use time-constant comparison to prevent timing attacks.
-	if let access::Grant::Bearer(grant) = &gr.grant {
-		let grant_key_bytes: &[u8] = grant.key.as_bytes();
-		let signin_key_bytes: &[u8] = key.as_bytes();
-		let ok: bool = grant_key_bytes.ct_eq(signin_key_bytes).into();
-		if !ok {
-			debug!("Bearer access grant `{}` for method `{}` is invalid", gr.id, gr.ac);
-			return Err(Error::InvalidAuth);
+	match &gr.grant {
+		access::Grant::Bearer(bearer) => {
+			let bearer_key_bytes: &[u8] = bearer.key.as_bytes();
+			let signin_key_bytes: &[u8] = key.as_bytes();
+			let ok: bool = bearer_key_bytes.ct_eq(signin_key_bytes).into();
+			if ok {
+				Ok(bearer)
+			} else {
+				debug!("Bearer access grant `{}` for method `{}` is invalid", gr.id, gr.ac);
+				Err(Error::InvalidAuth)
+			}
 		}
-	};
+		_ => Err(Error::AccessMethodMismatch),
+	}
+}
 
+pub async fn create_refresh_key_record(
+	kvs: &Datastore,
+	ac: Ident,
+	ns: &str,
+	db: &str,
+	rid: Thing,
+) -> Result<String, Error> {
+	let stmt = access::AccessStatementGrant {
+		ac,
+		base: Some(Base::Db),
+		subject: access::Subject::Record(rid),
+	};
+	let sess = Session::owner().with_ns(ns).with_db(db);
+	let opt = kvs.setup_options(&sess);
+	// Create a new context with a writeable transaction
+	let mut ctx = MutableContext::background();
+	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
+	ctx.set_transaction(tx.clone());
+	let ctx = ctx.freeze();
+	// Create a bearer grant to act as the refresh key
+	let grant = access::create_grant(&stmt, &ctx, &opt).await.map_err(|e| {
+		warn!("Unexpected error when attempting to create a refresh key: {e}");
+		Error::UnexpectedAuth
+	})?;
+	tx.cancel().await?;
+	// Return the key string from the bearer grant
+	match grant.grant {
+		access::Grant::Bearer(bearer) => Ok(bearer.key.as_string()),
+		_ => Err(Error::AccessMethodMismatch),
+	}
+}
+
+pub async fn revoke_refresh_key_record(
+	kvs: &Datastore,
+	gr: Ident,
+	ac: Ident,
+	ns: &str,
+	db: &str,
+) -> Result<(), Error> {
+	let stmt = access::AccessStatementRevoke {
+		ac,
+		base: Some(Base::Db),
+		gr: Some(gr),
+		cond: None,
+	};
+	let sess = Session::owner().with_ns(ns).with_db(db);
+	let opt = kvs.setup_options(&sess);
+	// Create a new context with a writeable transaction
+	let mut ctx = MutableContext::background();
+	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
+	ctx.set_transaction(tx.clone());
+	let ctx = ctx.freeze();
+	// Create a bearer grant to act as the refresh key
+	Stk::enter_scope(|stk| stk.run(|stk| access::revoke_grant(&stmt, stk, &ctx, &opt)))
+		.await
+		.map_err(|e| {
+			warn!("Unexpected error when attempting to revoke a refresh key: {e}");
+			Error::UnexpectedAuth
+		})?;
+	tx.cancel().await?;
 	Ok(())
 }
 
