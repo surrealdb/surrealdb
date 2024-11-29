@@ -26,7 +26,7 @@ where
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
-		.route("/sql", options(|| async {}).get(ws_handler).post(post_handler))
+		.route("/sql", options(|| async {}).get(get_handler).post(post_handler))
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SQL_BODY_SIZE))
 }
@@ -64,7 +64,7 @@ async fn post_handler(
 	}
 }
 
-async fn ws_handler(
+async fn get_handler(
 	ws: WebSocketUpgrade,
 	Extension(state): Extension<AppState>,
 	Extension(sess): Extension<Session>,

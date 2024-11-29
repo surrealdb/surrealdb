@@ -7,8 +7,9 @@ pub enum Method {
 	Use,
 	Signup,
 	Signin,
-	Invalidate,
 	Authenticate,
+	Invalidate,
+	Reset,
 	Kill,
 	Live,
 	Set,
@@ -40,8 +41,9 @@ impl Method {
 			"use" => Self::Use,
 			"signup" => Self::Signup,
 			"signin" => Self::Signin,
-			"invalidate" => Self::Invalidate,
 			"authenticate" => Self::Authenticate,
+			"invalidate" => Self::Invalidate,
+			"reset" => Self::Reset,
 			"kill" => Self::Kill,
 			"live" => Self::Live,
 			"let" | "set" => Self::Set,
@@ -74,8 +76,9 @@ impl Method {
 			Self::Use => "use",
 			Self::Signup => "signup",
 			Self::Signin => "signin",
-			Self::Invalidate => "invalidate",
 			Self::Authenticate => "authenticate",
+			Self::Invalidate => "invalidate",
+			Self::Reset => "reset",
 			Self::Kill => "kill",
 			Self::Live => "live",
 			Self::Set => "set",
@@ -99,25 +102,21 @@ impl Method {
 }
 
 impl Method {
+	/// Checks if the provided method is a valid and supported RPC method
 	pub fn is_valid(&self) -> bool {
 		!matches!(self, Self::Unknown)
 	}
-
-	pub fn needs_mut(&self) -> bool {
-		!self.can_be_immut()
-	}
-
-	// should be the same as execute_immut
-	pub fn can_be_immut(&self) -> bool {
-		matches!(
+	/// Checks if this method needs mutable access to the RPC session
+	pub fn needs_mutability(&self) -> bool {
+		!matches!(
 			self,
 			Method::Ping
 				| Method::Info
 				| Method::Select
 				| Method::Insert
 				| Method::Create
-				| Method::Update
 				| Method::Upsert
+				| Method::Update
 				| Method::Merge
 				| Method::Patch
 				| Method::Delete
