@@ -91,8 +91,9 @@ pub trait RpcContext {
 			Method::Use => self.yuse(params).await,
 			Method::Signup => self.signup(params).await,
 			Method::Signin => self.signin(params).await,
-			Method::Invalidate => self.invalidate().await,
 			Method::Authenticate => self.authenticate(params).await,
+			Method::Invalidate => self.invalidate().await,
+			Method::Reset => self.reset().await,
 			Method::Kill => self.kill(params).await,
 			Method::Live => self.live(params).await,
 			Method::Set => self.set(params).await,
@@ -235,6 +236,22 @@ pub trait RpcContext {
 	async fn invalidate(&mut self) -> Result<Data, RpcError> {
 		// Clear the current session
 		crate::iam::clear::clear(self.session_mut())?;
+		// Return nothing on success
+		Ok(Value::None.into())
+	}
+
+	async fn reset(&mut self) -> Result<Data, RpcError> {
+		// Take ownership over the current session
+		let mut session = mem::take(self.session_mut());
+		// Clear the current session completely
+		crate::iam::clear::clear(&mut session)?;
+		// Clear the namespace and database
+		self.session_mut().ns = None;
+		self.session_mut().db = None;
+		// Clear all connection parameters
+		self.vars_mut().clear();
+		// Cleanup live queries
+		self.cleanup_lqs().await;
 		// Return nothing on success
 		Ok(Value::None.into())
 	}
