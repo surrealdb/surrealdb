@@ -53,12 +53,26 @@ impl Executor {
 			.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?;
 
 		if let Some(ns) = stmt.ns {
+			// Check that record authentication matches session
+			if self.opt.auth.is_record() && self.opt.auth.level().ns() != Some(&ns) {
+				return Err(Error::NsNotAllowed {
+					ns,
+				});
+			}
+
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
 			self.opt.set_ns(Some(ns.as_str().into()));
 			session.put(NS.as_ref(), ns.into());
 			ctx_ref.add_value("session", session.into());
 		}
 		if let Some(db) = stmt.db {
+			// Check that record authentication matches session
+			if self.opt.auth.is_record() && self.opt.auth.level().db() != Some(&db) {
+				return Err(Error::DbNotAllowed {
+					db,
+				});
+			}
+
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
 			self.opt.set_db(Some(db.as_str().into()));
 			session.put(DB.as_ref(), db.into());
@@ -541,6 +555,26 @@ impl Executor {
 	where
 		S: Stream<Item = Result<Statement, Error>>,
 	{
+		// Ensure that the initial namespace and database, if it exists, is valid for authentication
+		if opt.auth.is_record() {
+			if let Ok(ns) = opt.ns() {
+				if opt.auth.level().ns() != Some(ns) {
+					return Err(Error::NsNotAllowed {
+						ns: ns.into(),
+					});
+				}
+			}
+		}
+		if opt.auth.is_record() {
+			if let Ok(db) = opt.db() {
+				if opt.auth.level().db() != Some(db) {
+					return Err(Error::DbNotAllowed {
+						db: db.into(),
+					});
+				}
+			}
+		}
+
 		let mut this = Executor::new(ctx, opt);
 		let mut stream = pin!(stream);
 
