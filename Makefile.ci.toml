@@ -20,7 +20,7 @@ args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-w
 [tasks.ci-clippy]
 category = "CI - CHECK"
 command = "cargo"
-args = ["clippy", "--all-targets", "--features", "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,storage-fdb-7_1", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,storage-fdb-7_1", "--tests", "--benches", "--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
