@@ -52,6 +52,10 @@ pub trait RpcContext {
 	fn handle_kill(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
 		async { unimplemented!("handle_kill function must be implemented if LQ_SUPPORT = true") }
 	}
+	/// Handles the cleanup of live queries
+	fn cleanup_lqs(&self) -> impl std::future::Future<Output = ()> + Send {
+		async { unimplemented!("cleanup_lqs function must be implemented if LQ_SUPPORT = true") }
+	}
 
 	// ------------------------------
 	// GraphQL
