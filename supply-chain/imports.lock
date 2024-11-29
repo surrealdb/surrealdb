@@ -253,13 +253,6 @@ user-id = 51017
 user-login = "JohnTitor"
 user-name = "Yuki Okushi"
 
-[[publisher.loom]]
-version = "0.5.6"
-when = "2022-05-19"
-user-id = 6741
-user-login = "Darksonn"
-user-name = "Alice Ryhl"
-
 [[publisher.memchr]]
 version = "2.7.2"
 when = "2024-03-27"
@@ -464,15 +457,15 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "2.1.0"
-when = "2024-11-21"
+version = "2.1.2"
+when = "2024-11-26"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "2.1.0"
-when = "2024-11-21"
+version = "2.1.2"
+when = "2024-11-26"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -492,8 +485,8 @@ user-login = "mumoshu"
 user-name = "Yusuke Kuoka"
 
 [[publisher.surrealkv]]
-version = "0.6.0"
-when = "2024-11-23"
+version = "0.6.1"
+when = "2024-11-25"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1157,23 +1150,11 @@ criteria = "safe-to-deploy"
 version = "1.0.0"
 notes = "No unsafe usage or ambient capabilities"
 
-[[audits.embark-studios.audits.convert_case]]
-who = "Johan Andersson <opensource@embark-studios.com>"
-criteria = "safe-to-deploy"
-version = "0.4.0"
-notes = "No unsafe usage or ambient capabilities"
-
 [[audits.embark-studios.audits.derive-new]]
 who = "Johan Andersson <opensource@embark-studios.com>"
 criteria = "safe-to-deploy"
 version = "0.5.9"
 notes = "Proc macro. No unsafe usage or ambient capabilities"
-
-[[audits.embark-studios.audits.derive_more]]
-who = "Johan Andersson <opensource@embark-studios.com>"
-criteria = "safe-to-deploy"
-version = "0.99.17"
-notes = "No unsafe usage or ambient capabilities"
 
 [[audits.embark-studios.audits.ident_case]]
 who = "Johan Andersson <opensource@embark-studios.com>"
