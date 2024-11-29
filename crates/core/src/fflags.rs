@@ -1,7 +1,6 @@
 //! Feature flags for SurrealDB
 //! This is a public scope module that is not for external use
 //! It is public for API access
-
 /// FeatureFlags set for the project
 /// Use this while implementing features
 #[allow(dead_code)]

@@ -6081,6 +6081,25 @@ async fn function_type_is_polygon() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_type_is_range() -> Result<(), Error> {
+	let sql = r#"
+		RETURN type::is::range(1..5);
+		RETURN type::is::range("123");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_type_is_record() -> Result<(), Error> {
 	let sql = r#"
 		RETURN type::is::record(person:john);

@@ -264,7 +264,7 @@ docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:
 For just getting started with a development server running in memory, you can pass the container a basic initialization to set the user and password as root and enable logging.
 
 ```bash
-docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --log trace --user root --pass root memory
+docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --log info --user root --pass root memory
 ``` 
 
 <h2><img height="20" src="./img/features.svg">&nbsp;&nbsp;Quick look</h2>
