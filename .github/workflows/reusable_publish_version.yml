@@ -664,7 +664,7 @@ jobs:
 
           [[package]]
           name = "surreal"
-          release = false
+          publish = false
           EOF
 
       - name: Patch beta crate version
