@@ -12,6 +12,15 @@ macro_rules! bytes {
 	};
 }
 
+/// Pauses and yields execution to the tokio runtime
+macro_rules! pause {
+	() => {
+		if tokio::runtime::Handle::try_current().is_ok() {
+			tokio::task::yield_now().await;
+		}
+	};
+}
+
 /// Creates a new b-tree map of key-value pairs
 macro_rules! map {
     ($($k:expr $(, if let $grant:pat = $check:expr)? $(, if $guard:expr)? => $v:expr),* $(,)? $( => $x:expr )?) => {{

@@ -117,7 +117,7 @@ pub(crate) struct Processed {
 pub(crate) struct Iterator {
 	/// Iterator status
 	run: Canceller,
-	/// The total documents processed
+	/// Total documents processed
 	count: u64,
 	/// Iterator limit value
 	limit: Option<u32>,
@@ -740,9 +740,7 @@ impl Iterator {
 		self.count += 1;
 		// Periodically yield
 		if self.count % 100 == 0 {
-			if tokio::runtime::Handle::try_current().is_ok() {
-				tokio::task::yield_now().await;
-			}
+			pause!();
 		}
 		// Process the result
 		match res {
