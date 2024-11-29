@@ -1,5 +1,6 @@
 /**
 [test]
+wip = true
 
 [[test.results]]
 value = "NONE"
@@ -14,7 +15,7 @@ value = "NONE"
 value = "[{ id: person:1, test: 1 }, { id: person:4, test: 4 }, { id: person:6, test: 6 }]"
 
 [[test.results]]
-value = "NONE"
+error = "This is an error"
 
 [[test.results]]
 value = "[{ id: person:1, test: 1 }, { id: person:4, test: 4 }, { id: person:6, test: 6 }]"

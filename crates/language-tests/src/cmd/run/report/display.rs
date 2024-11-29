@@ -37,32 +37,35 @@ impl TestReport {
 
 		match self.grade {
 			TestGrade::Success => {
-				if let Some(issue) = tests[self.id].config.issue() {
-					if tests[self.id].config.is_wip() {
-						if use_color {
-							writeln!(
-								f,
-								ansi!(
-									" ==> ",
-									green,
-									"Success",
-									reset_format,
-									" for ",
-									bold,
-									"{}",
-									reset_format,
-									":"
-								),
-								name
-							)?;
-						} else {
-							writeln!(f, " ==> Success for {name}:")?;
-						}
-						f.indent(|f| {
-							writeln!(
-								f,
-								"> Tests succeeded even though it is marked Work in Progress"
-							)?;
+				if tests[self.id].config.is_wip() {
+					if use_color {
+						writeln!(
+							f,
+							ansi!(
+								" ==> ",
+								green,
+								"Success",
+								reset_format,
+								" for ",
+								bold,
+								"{}",
+								reset_format,
+								":"
+							),
+							name
+						)?;
+					} else {
+						writeln!(f, " ==> Success for {name}:")?;
+					}
+					f.indent(|f| {
+						writeln!(
+							f,
+							"> Tests succeeded even though it is marked Work in Progress"
+						)
+					})?;
+
+					if let Some(issue) = tests[self.id].config.issue() {
+						f.indent(|f|{
 							writeln!(f, "> Issue {issue} could maybe be closed.")?;
 							f.indent(|f| {
 								writeln!(
@@ -71,11 +74,9 @@ impl TestReport {
 								)
 							})
 						})?;
-					} else {
-						return Ok(());
 					}
-				} else {
-					return Ok(());
+				}else{
+					return Ok(())
 				}
 			}
 			TestGrade::Failed => {
