@@ -661,6 +661,10 @@ jobs:
           git_release_enable = false
           semver_check = false
           git_tag_enable = false
+
+          [[package]]
+          name = "surreal"
+          release = false
           EOF
 
       - name: Patch beta crate version
