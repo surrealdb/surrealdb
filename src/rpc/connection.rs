@@ -36,15 +36,27 @@ use uuid::Uuid;
 use super::RpcState;
 
 pub struct Connection {
+	/// The unique id of this WebSocket connection
 	pub(crate) id: Uuid,
+	/// The request and response format for messages
 	pub(crate) format: Format,
+	/// The persistent session for this WebSocket connection
 	pub(crate) session: Session,
-	pub(crate) vars: BTreeMap<String, Value>,
-	pub(crate) limiter: Arc<Semaphore>,
-	pub(crate) canceller: CancellationToken,
-	pub(crate) channels: (Sender<Message>, Receiver<Message>),
+	/// The system state for all RPC WebSocket connections
 	pub(crate) state: Arc<RpcState>,
+	/// The datastore accessible to all RPC WebSocket connections
 	pub(crate) datastore: Arc<Datastore>,
+	/// The persistent parameters for this WebSocket connection
+	pub(crate) vars: BTreeMap<String, Value>,
+	/// A cancellation token called when shutting down the server
+	pub(crate) shutdown: CancellationToken,
+	/// A cancellation token for cancelling all spawned tasks
+	pub(crate) canceller: CancellationToken,
+	/// A semaphore for limiting the number of concurrent calls
+	pub(crate) semaphore: Arc<Semaphore>,
+	/// The channels used to send and receive WebSocket messages
+	pub(crate) channel: (Sender<Message>, Receiver<Message>),
+	/// The GraphQL schema cache stored in advance
 	#[cfg(surrealdb_unstable)]
 	pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
@@ -63,13 +75,14 @@ impl Connection {
 		// Create and store the RPC connection
 		Arc::new(RwLock::new(Connection {
 			id,
+			state,
 			format,
 			session,
 			vars: BTreeMap::new(),
-			limiter: Arc::new(Semaphore::new(*WEBSOCKET_MAX_CONCURRENT_REQUESTS)),
+			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
-			channels: channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS),
-			state,
+			semaphore: Arc::new(Semaphore::new(*WEBSOCKET_MAX_CONCURRENT_REQUESTS)),
+			channel: channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS),
 			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
@@ -84,60 +97,41 @@ impl Connection {
 		let id = rpc_lock.id;
 		// Get the WebSocket state
 		let state = rpc_lock.state.clone();
-		// Get the Datastore
-		let ds = rpc_lock.datastore.clone();
 		// Log the succesful WebSocket connection
 		trace!("WebSocket {} connected", id);
 		// Split the socket into sending and receiving streams
 		let (sender, receiver) = ws.split();
 		// Create an internal channel for sending and receiving
-		let internal_sender = rpc_lock.channels.0.clone();
-		let internal_receiver = rpc_lock.channels.1.clone();
+		let internal_sender = rpc_lock.channel.0.clone();
+		let internal_receiver = rpc_lock.channel.1.clone();
 		// Drop the lock early so rpc is free to be written to.
 		std::mem::drop(rpc_lock);
-
+		// Add this WebSocket to the list
+		state.web_sockets.write().await.insert(id, rpc.clone());
+		// Start telemetry metrics for this connection
 		if let Err(err) = telemetry::metrics::ws::on_connect() {
 			error!("Error running metrics::ws::on_connect hook: {}", err);
 		}
-
-		// Add this WebSocket to the list
-		state.web_sockets.write().await.insert(id, rpc.clone());
-
 		// Spawn async tasks for the WebSocket
 		let mut tasks = JoinSet::new();
 		tasks.spawn(Self::ping(rpc.clone(), internal_sender.clone()));
 		tasks.spawn(Self::read(rpc.clone(), receiver, internal_sender.clone()));
 		tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver.clone()));
-
-		// Wait until all tasks finish
+		// Wait for all tasks to finish
 		while let Some(res) = tasks.join_next().await {
 			if let Err(err) = res {
 				error!("Error handling RPC connection: {}", err);
 			}
 		}
-
+		// Close the internal response channel
 		internal_sender.close();
-
+		// Log the WebSocket disconnection
 		trace!("WebSocket {} disconnected", id);
-
+		// Cleanup the live queries for this WebSocket
+		rpc.read().await.cleanup_lqs().await;
 		// Remove this WebSocket from the list
 		state.web_sockets.write().await.remove(&id);
-
-		// Remove all live queries
-		let mut gc = Vec::new();
-		state.live_queries.write().await.retain(|key, value| {
-			if value == &id {
-				trace!("Removing live query: {}", key);
-				gc.push(*key);
-				return false;
-			}
-			true
-		});
-
-		if let Err(err) = ds.delete_queries(gc).await {
-			error!("Error handling RPC connection: {}", err);
-		}
-
+		// Stop telemetry metrics for this connection
 		if let Err(err) = telemetry::metrics::ws::on_disconnect() {
 			error!("Error running metrics::ws::on_disconnect hook: {}", err);
 		}
@@ -154,7 +148,7 @@ impl Connection {
 			tokio::select! {
 				//
 				biased;
-				// Check if this has shutdown
+				// Check if this has cancelled
 				_ = canceller.cancelled() => break,
 				// Send a regular ping message
 				_ = interval.tick() => {
@@ -178,15 +172,16 @@ impl Connection {
 		mut sender: SplitSink<WebSocket, Message>,
 		internal_receiver: Receiver<Message>,
 	) {
+		// Pin the internal receiving channel
+		let mut internal_receiver = Box::pin(internal_receiver);
 		// Clone the WebSocket cancellation token
 		let canceller = rpc.read().await.canceller.clone();
-		let mut internal_receiver = Box::pin(internal_receiver);
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
 				//
 				biased;
-				// Check if this has shutdown
+				// Check if this has cancelled
 				_ = canceller.cancelled() => break,
 				// Wait for the next message to send
 				Some(res) = internal_receiver.next() => {
@@ -212,15 +207,26 @@ impl Connection {
 		mut receiver: SplitStream<WebSocket>,
 		internal_sender: Sender<Message>,
 	) {
+		// Get all required values
+		let (shutdown, canceller) = {
+			// Read the connection state
+			let rpc = rpc.read().await;
+			// Clone the WebSocket shutdown token
+			let shutdown = rpc.shutdown.clone();
+			// Clone the WebSocket cancellation token
+			let canceller = rpc.canceller.clone();
+			// Return the required values
+			(shutdown, canceller)
+		};
 		// Store spawned tasks so we can wait for them
 		let mut tasks = JoinSet::new();
-		// Clone the WebSocket cancellation token
-		let canceller = rpc.read().await.canceller.clone();
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
 				//
 				biased;
+				// Check if this has shutdown
+				_ = shutdown.cancelled(), if tasks.is_empty() => break,
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
 				// Remove any completed tasks
@@ -242,10 +248,10 @@ impl Connection {
 					// We've received a message from the client
 					Ok(msg) => match msg {
 						Message::Text(_) => {
-							tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
+							tasks.spawn(Self::handle_message(rpc.clone(), msg, internal_sender.clone()));
 						}
 						Message::Binary(_) => {
-							tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
+							tasks.spawn(Self::handle_message(rpc.clone(), msg, internal_sender.clone()));
 						}
 						Message::Close(_) => {
 							// Respond with a close message
@@ -279,18 +285,31 @@ impl Connection {
 				trace!("WebSocket request error: {:?}", err);
 			}
 		}
+		// Cancel the WebSocket tasks
+		rpc.read().await.canceller.cancel();
 		// Abort all tasks
 		tasks.shutdown().await;
 	}
 
 	/// Handle individual WebSocket messages
 	async fn handle_message(rpc: Arc<RwLock<Connection>>, msg: Message, chn: Sender<Message>) {
-		// Get the current output format
-		let mut fmt = rpc.read().await.format;
-		// Prepare Span and Otel context
-		let span = span_for_request(&rpc.read().await.id);
-		// Acquire concurrent request rate limiter
-		let permit = rpc.read().await.limiter.clone().acquire_owned().await.unwrap();
+		// Get all required values
+		let (id, mut fmt, shutdown, canceller, semaphore) = {
+			// Read the connection state
+			let rpc = rpc.read().await;
+			// Fetch the connection id
+			let id = rpc.id;
+			// Fetch the connection output format
+			let format = rpc.format;
+			// Clone the WebSocket cancellation token
+			let shutdown = rpc.shutdown.clone();
+			// Clone the WebSocket cancellation token
+			let canceller = rpc.canceller.clone();
+			// Clone the request limiter
+			let semaphore = rpc.semaphore.clone();
+			// Return the required values
+			(id, format, shutdown, canceller, semaphore)
+		};
 		// Calculate the length of the message
 		let len = match msg {
 			Message::Text(ref msg) => {
@@ -313,6 +332,8 @@ impl Connection {
 			}
 			_ => unreachable!(),
 		};
+		// Prepare span and otel context
+		let span = span_for_request(&id);
 		// Parse the request
 		async move {
 			let span = Span::current();
@@ -331,14 +352,53 @@ impl Connection {
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(&req.method).with_size(len),
 					));
+					// Parse the request RPC method type
+					let method = Method::parse(&req.method);
 					// Process the message
-					let res =
-						Connection::process_message(rpc.clone(), &req.method, req.params).await;
-					// Process the response
-					res.into_response(req.id)
-						.send(otel_cx.clone(), fmt, &chn)
-						.with_context(otel_cx.as_ref().clone())
-						.await
+					tokio::select! {
+						//
+						biased;
+						// Check if this has shutdown
+						_ = canceller.cancelled() => (),
+						// Wait for the message to be processed
+						_ = async move {
+							// Ping messages should be responded to immediately
+							if method == Method::Ping {
+								// Process ping messages immediately
+								let res = Self::process_message(rpc.clone(), method, req.params).await;
+								// Process the response
+								res.into_response(req.id)
+									.send(otel_cx.clone(), fmt, &chn)
+									.with_context(otel_cx.as_ref().clone())
+									.await;
+							}
+							// All other message types should be throttled
+							else {
+								// Don't start processing if we are gracefully shutting down
+								if shutdown.is_cancelled() {
+									// Process the response
+									failure(req.id, Failure::custom("Server is shutting down"))
+										.send(otel_cx.clone(), fmt, &chn)
+										.with_context(otel_cx.as_ref().clone())
+										.await;
+								}
+								// Otherwise process the request message
+								else {
+									// Acquire concurrent request rate limiter
+									let permit = semaphore.acquire_owned().await.unwrap();
+									// Process the message when the semaphore is acquired
+									let res = Self::process_message(rpc.clone(), method, req.params).await;
+									// Process the response
+									res.into_response(req.id)
+										.send(otel_cx.clone(), fmt, &chn)
+										.with_context(otel_cx.as_ref().clone())
+										.await;
+									// Drop the rate limiter permit
+									drop(permit);
+								}
+							}
+						} => (),
+					}
 				}
 				Err(err) => {
 					// Process the response
@@ -351,70 +411,98 @@ impl Connection {
 		}
 		.instrument(span)
 		.await;
-		// Drop the rate limiter permit
-		drop(permit);
 	}
 
 	pub async fn process_message(
 		rpc: Arc<RwLock<Connection>>,
-		method: &str,
+		method: Method,
 		params: Array,
 	) -> Result<Data, Failure> {
 		debug!("Process RPC request");
-		let method = Method::parse(method);
+		// Check that the method is a valid method
 		if !method.is_valid() {
 			return Err(Failure::METHOD_NOT_FOUND);
 		}
-
-		// if the write lock is a bottleneck then execute could be refactored into execute_mut and execute
-		// rpc.write().await.execute(method, params).await.map_err(Into::into)
-		match method.needs_mut() {
-			true => rpc.write().await.execute(method, params).await.map_err(Into::into),
-			false => rpc.read().await.execute_immut(method, params).await.map_err(Into::into),
+		// Execute the specified method
+		match method.needs_mutability() {
+			true => rpc.write().await.execute_mutable(method, params).await.map_err(Into::into),
+			false => rpc.read().await.execute_immutable(method, params).await.map_err(Into::into),
 		}
 	}
 }
 
 impl RpcContext for Connection {
+	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore {
 		&self.datastore
 	}
-
+	/// The current session for this RPC context
 	fn session(&self) -> &Session {
 		&self.session
 	}
-
+	/// Mutable access to the current session for this RPC context
 	fn session_mut(&mut self) -> &mut Session {
 		&mut self.session
 	}
-
+	/// The current parameters stored on this RPC context
 	fn vars(&self) -> &BTreeMap<String, Value> {
 		&self.vars
 	}
-
+	/// Mutable access to the current parameters stored on this RPC context
 	fn vars_mut(&mut self) -> &mut BTreeMap<String, Value> {
 		&mut self.vars
 	}
-
+	/// The version information for this RPC context
 	fn version_data(&self) -> Data {
 		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
 	}
 
+	// ------------------------------
+	// Realtime
+	// ------------------------------
+
+	/// Live queries are enabled on WebSockets
 	const LQ_SUPPORT: bool = true;
 
+	/// Handles the execution of a LIVE statement
 	async fn handle_live(&self, lqid: &Uuid) {
 		self.state.live_queries.write().await.insert(*lqid, self.id);
 		trace!("Registered live query {} on websocket {}", lqid, self.id);
 	}
 
+	/// Handles the execution of a KILL statement
 	async fn handle_kill(&self, lqid: &Uuid) {
 		if let Some(id) = self.state.live_queries.write().await.remove(lqid) {
 			trace!("Unregistered live query {} on websocket {}", lqid, id);
 		}
 	}
 
+	/// Handles the cleanup of live queries
+	async fn cleanup_lqs(&self) {
+		let mut gc = Vec::new();
+		// Find all live queries for to this connection
+		self.state.live_queries.write().await.retain(|key, value| {
+			if value == &self.id {
+				trace!("Removing live query: {}", key);
+				gc.push(*key);
+				return false;
+			}
+			true
+		});
+		// Garbage collect the live queries on this connection
+		if let Err(err) = self.kvs().delete_queries(gc).await {
+			error!("Error handling RPC connection: {}", err);
+		}
+	}
+
+	// ------------------------------
+	// GraphQL
+	// ------------------------------
+
+	/// GraphQL queries are enabled on WebSockets
 	#[cfg(surrealdb_unstable)]
 	const GQL_SUPPORT: bool = true;
+
 	#[cfg(surrealdb_unstable)]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema
