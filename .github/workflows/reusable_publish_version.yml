@@ -718,6 +718,7 @@ jobs:
           set -x
 
           # Patch crate name
+          sed -i "s/surrealdb =/surrealdb-${{ inputs.environment }} =/" Cargo.toml
           sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" crates/sdk/Cargo.toml
           sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" crates/core/Cargo.toml
 
