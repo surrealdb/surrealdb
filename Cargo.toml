@@ -82,6 +82,7 @@ http = "1.1.0"
 http-body = "1.0.0"
 http-body-util = "0.1.1"
 hyper = "1.4.1"
+num_cpus = "1.16.0"
 opentelemetry = { version = "0.24" }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
