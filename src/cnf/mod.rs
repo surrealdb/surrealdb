@@ -71,6 +71,12 @@ pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS", usize, 24);
 
+/// What is the runtime thread memory stack size (defaults to the number of CPU cores)
+pub static RUNTIME_WORKER_THREADS: LazyLock<usize> =
+	lazy_env_parse_or_else!("SURREAL_RUNTIME_WORKER_THREADS", usize, |_| {
+		std::cmp::min(4, num_cpus::get())
+	});
+
 /// What is the runtime thread memory stack size (defaults to 10MiB)
 pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
 	lazy_env_parse_or_else!("SURREAL_RUNTIME_STACK_SIZE", usize, |_| {
