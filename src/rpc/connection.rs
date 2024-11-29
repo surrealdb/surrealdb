@@ -48,10 +48,12 @@ pub struct Connection {
 	pub(crate) datastore: Arc<Datastore>,
 	/// The persistent parameters for this WebSocket connection
 	pub(crate) vars: BTreeMap<String, Value>,
-	/// A semaphore for limiting the number of concurrent calls
-	pub(crate) semaphore: Arc<Semaphore>,
+	/// A cancellation token called when shutting down the server
+	pub(crate) shutdown: CancellationToken,
 	/// A cancellation token for cancelling all spawned tasks
 	pub(crate) canceller: CancellationToken,
+	/// A semaphore for limiting the number of concurrent calls
+	pub(crate) semaphore: Arc<Semaphore>,
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: (Sender<Message>, Receiver<Message>),
 	/// The GraphQL schema cache stored in advance
@@ -77,6 +79,7 @@ impl Connection {
 			format,
 			session,
 			vars: BTreeMap::new(),
+			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
 			semaphore: Arc::new(Semaphore::new(*WEBSOCKET_MAX_CONCURRENT_REQUESTS)),
 			channel: channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS),
@@ -145,7 +148,7 @@ impl Connection {
 			tokio::select! {
 				//
 				biased;
-				// Check if this has shutdown
+				// Check if this has cancelled
 				_ = canceller.cancelled() => break,
 				// Send a regular ping message
 				_ = interval.tick() => {
@@ -178,7 +181,7 @@ impl Connection {
 			tokio::select! {
 				//
 				biased;
-				// Check if this has shutdown
+				// Check if this has cancelled
 				_ = canceller.cancelled() => break,
 				// Wait for the next message to send
 				Some(res) = internal_receiver.next() => {
@@ -204,8 +207,17 @@ impl Connection {
 		mut receiver: SplitStream<WebSocket>,
 		internal_sender: Sender<Message>,
 	) {
-		// Clone the WebSocket cancellation token
-		let canceller = rpc.read().await.canceller.clone();
+		// Get all required values
+		let (shutdown, canceller) = {
+			// Read the connection state
+			let rpc = rpc.read().await;
+			// Clone the WebSocket shutdown token
+			let shutdown = rpc.shutdown.clone();
+			// Clone the WebSocket cancellation token
+			let canceller = rpc.canceller.clone();
+			// Return the required values
+			(shutdown, canceller)
+		};
 		// Store spawned tasks so we can wait for them
 		let mut tasks = JoinSet::new();
 		// Loop, and listen for messages to write
@@ -213,6 +225,8 @@ impl Connection {
 			tokio::select! {
 				//
 				biased;
+				// Check if this has shutdown
+				_ = shutdown.cancelled(), if tasks.is_empty() => break,
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
 				// Remove any completed tasks
@@ -234,10 +248,10 @@ impl Connection {
 					// We've received a message from the client
 					Ok(msg) => match msg {
 						Message::Text(_) => {
-							tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
+							tasks.spawn(Self::handle_message(rpc.clone(), msg, internal_sender.clone()));
 						}
 						Message::Binary(_) => {
-							tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
+							tasks.spawn(Self::handle_message(rpc.clone(), msg, internal_sender.clone()));
 						}
 						Message::Close(_) => {
 							// Respond with a close message
@@ -271,26 +285,30 @@ impl Connection {
 				trace!("WebSocket request error: {:?}", err);
 			}
 		}
+		// Cancel the WebSocket tasks
+		rpc.read().await.canceller.cancel();
 		// Abort all tasks
 		tasks.shutdown().await;
 	}
 
 	/// Handle individual WebSocket messages
 	async fn handle_message(rpc: Arc<RwLock<Connection>>, msg: Message, chn: Sender<Message>) {
-		// Get any required values
-		let (id, mut fmt, semaphore, canceller) = {
+		// Get all required values
+		let (id, mut fmt, shutdown, canceller, semaphore) = {
 			// Read the connection state
 			let rpc = rpc.read().await;
 			// Fetch the connection id
 			let id = rpc.id;
 			// Fetch the connection output format
 			let format = rpc.format;
-			// Clone the request limiter
-			let semaphore = rpc.semaphore.clone();
+			// Clone the WebSocket cancellation token
+			let shutdown = rpc.shutdown.clone();
 			// Clone the WebSocket cancellation token
 			let canceller = rpc.canceller.clone();
+			// Clone the request limiter
+			let semaphore = rpc.semaphore.clone();
 			// Return the required values
-			(id, format, semaphore, canceller)
+			(id, format, shutdown, canceller, semaphore)
 		};
 		// Calculate the length of the message
 		let len = match msg {
@@ -356,17 +374,28 @@ impl Connection {
 							}
 							// All other message types should be throttled
 							else {
-								// Acquire concurrent request rate limiter
-								let permit = semaphore.acquire_owned().await.unwrap();
-								// Process the message when the semaphore is acquired
-								let res = Self::process_message(rpc.clone(), method, req.params).await;
-								// Process the response
-								res.into_response(req.id)
-									.send(otel_cx.clone(), fmt, &chn)
-									.with_context(otel_cx.as_ref().clone())
-									.await;
-								// Drop the rate limiter permit
-								drop(permit);
+								// Don't start processing if we are gracefully shutting down
+								if shutdown.is_cancelled() {
+									// Process the response
+									failure(req.id, Failure::custom("Server is shutting down"))
+										.send(otel_cx.clone(), fmt, &chn)
+										.with_context(otel_cx.as_ref().clone())
+										.await;
+								}
+								// Otherwise process the request message
+								else {
+									// Acquire concurrent request rate limiter
+									let permit = semaphore.acquire_owned().await.unwrap();
+									// Process the message when the semaphore is acquired
+									let res = Self::process_message(rpc.clone(), method, req.params).await;
+									// Process the response
+									res.into_response(req.id)
+										.send(otel_cx.clone(), fmt, &chn)
+										.with_context(otel_cx.as_ref().clone())
+										.await;
+									// Drop the rate limiter permit
+									drop(permit);
+								}
 							}
 						} => (),
 					}

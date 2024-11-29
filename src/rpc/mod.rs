@@ -95,11 +95,11 @@ pub(crate) async fn notifications(
 pub(crate) async fn graceful_shutdown(state: Arc<RpcState>) {
 	// Close WebSocket connections, ensuring queued messages are processed
 	for (_, rpc) in state.web_sockets.read().await.iter() {
-		rpc.read().await.canceller.cancel();
+		rpc.read().await.shutdown.cancel();
 	}
 	// Wait for all existing WebSocket connections to finish sending
 	while state.web_sockets.read().await.len() > 0 {
-		tokio::time::sleep(Duration::from_millis(100)).await;
+		tokio::time::sleep(Duration::from_millis(250)).await;
 	}
 }
 
