@@ -718,9 +718,12 @@ jobs:
           set -x
 
           # Patch crate name
-          sed -i "s/surrealdb =/surrealdb-${{ inputs.environment }} =/" Cargo.toml
           sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" crates/sdk/Cargo.toml
           sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" crates/core/Cargo.toml
+
+          # Patch binary dependency
+          sed -i "s/surrealdb =/surrealdb-${{ inputs.environment }} =/" Cargo.toml
+          sed -i "s#\"surrealdb/#\"surrealdb_${{ inputs.environment }}/#" Cargo.toml
 
           # Patch sdk dependency
           sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" crates/sdk/Cargo.toml
