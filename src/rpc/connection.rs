@@ -150,8 +150,6 @@ impl Connection {
 				biased;
 				// Check if this has cancelled
 				_ = canceller.cancelled() => break,
-				// Yield back to other tasks
-				_ = tokio::task::yield_now() => (),
 				// Send a regular ping message
 				_ = interval.tick() => {
 					// Create a new ping message
@@ -185,8 +183,6 @@ impl Connection {
 				biased;
 				// Check if this has cancelled
 				_ = canceller.cancelled() => break,
-				// Yield back to other tasks
-				_ = tokio::task::yield_now() => (),
 				// Wait for the next message to send
 				Some(res) = internal_receiver.next() => {
 					// Send the message to the client
@@ -233,8 +229,6 @@ impl Connection {
 				_ = shutdown.cancelled(), if tasks.is_empty() => break,
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
-				// Yield back to other tasks
-				_ = tokio::task::yield_now() => (),
 				// Remove any completed tasks
 				Some(out) = tasks.join_next() => match out {
 					// The task completed successfully

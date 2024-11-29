@@ -69,8 +69,6 @@ fn spawn_task_node_membership_refresh(
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
-				// Yield back to other tasks
-				_ = tokio::task::yield_now(), if tokio::runtime::Handle::try_current().is_ok() => (),
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.node_membership_update().await {
@@ -102,8 +100,6 @@ fn spawn_task_node_membership_check(
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
-				// Yield back to other tasks
-				_ = tokio::task::yield_now(), if tokio::runtime::Handle::try_current().is_ok() => (),
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.node_membership_expire().await {
@@ -135,8 +131,6 @@ fn spawn_task_node_membership_cleanup(
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
-				// Yield back to other tasks
-				_ = tokio::task::yield_now(), if tokio::runtime::Handle::try_current().is_ok() => (),
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.node_membership_remove().await {
@@ -168,8 +162,6 @@ fn spawn_task_changefeed_cleanup(
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
-				// Yield back to other tasks
-				_ = tokio::task::yield_now(), if tokio::runtime::Handle::try_current().is_ok() => (),
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.changefeed_process().await {

@@ -55,8 +55,6 @@ pub(crate) async fn notifications(
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
-				// Yield back to other tasks
-				_ = tokio::task::yield_now() => (),
 				// Receive a notification on the channel
 				Ok(notification) = channel.recv() => {
 					// Find which WebSocket the notification belongs to
