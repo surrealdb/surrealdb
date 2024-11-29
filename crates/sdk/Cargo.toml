@@ -129,6 +129,7 @@ tokio = { version = "1.40.0", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 ulid = { version = "1.1.0", features = ["serde"] }
 wiremock = "0.6.0"
+divan = "0.1.16"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
@@ -167,50 +168,54 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 name = "surrealdb" # Needed for the nightly crate as we will be renaming it
 bench = false
 
-[[bench]]
-name = "executor"
-harness = false
+# [[bench]]
+# name = "executor"
+# harness = false
+
+# [[bench]]
+# name = "parser"
+# harness = false
+
+# [[bench]]
+# name = "processor"
+# harness = false
+
+# [[bench]]
+# name = "hash_trie_btree"
+# harness = false
+
+# [[bench]]
+# name = "index_btree"
+# harness = false
+
+# [[bench]]
+# name = "index_mtree"
+# harness = false
+
+# [[bench]]
+# name = "index_hnsw"
+# harness = false
+
+# [[bench]]
+# name = "move_vs_clone"
+# harness = false
+
+# [[bench]]
+# name = "sdb"
+# harness = false
+
+# [[bench]]
+# name = "hashset_vs_vector"
+# harness = false
+
+# [[bench]]
+# name = "with_or_without_index"
+# harness = false
+
+# [[bench]]
+# name = "order"
+# harness = false
 
 [[bench]]
-name = "parser"
-harness = false
-
-[[bench]]
-name = "processor"
-harness = false
-
-[[bench]]
-name = "hash_trie_btree"
-harness = false
-
-[[bench]]
-name = "index_btree"
-harness = false
-
-[[bench]]
-name = "index_mtree"
-harness = false
-
-[[bench]]
-name = "index_hnsw"
-harness = false
-
-[[bench]]
-name = "move_vs_clone"
-harness = false
-
-[[bench]]
-name = "sdb"
-harness = false
-
-[[bench]]
-name = "hashset_vs_vector"
-harness = false
-
-[[bench]]
-name = "with_or_without_index"
-harness = false
-
-[[bench]]
-name = "order"
+name = "mem_1mil"
 harness = false
