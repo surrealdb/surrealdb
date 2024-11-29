@@ -10,9 +10,6 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 members = [
     "crates/core",
     "crates/sdk",
-    "crates/sdk/examples/actix",
-    "crates/sdk/examples/axum",
-    "crates/sdk/examples/rocket",
 ]
 
 [features]
