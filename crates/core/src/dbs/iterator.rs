@@ -117,6 +117,8 @@ pub(crate) struct Processed {
 pub(crate) struct Iterator {
 	/// Iterator status
 	run: Canceller,
+	/// The total documents processed
+	count: u64,
 	/// Iterator limit value
 	limit: Option<u32>,
 	/// Iterator start value
@@ -137,6 +139,7 @@ impl Clone for Iterator {
 	fn clone(&self) -> Self {
 		Self {
 			run: self.run.clone(),
+			count: 0,
 			limit: self.limit,
 			start: self.start,
 			error: None,
@@ -733,6 +736,14 @@ impl Iterator {
 		stm: &Statement<'_>,
 		res: Result<Value, Error>,
 	) {
+		// Count the result
+		self.count += 1;
+		// Periodically yield
+		if self.count % 100 == 0 {
+			if tokio::runtime::Handle::try_current().is_ok() {
+				tokio::task::yield_now().await;
+			}
+		}
 		// Process the result
 		match res {
 			Err(Error::Ignore) => {
