@@ -9,7 +9,7 @@ value = "[{ id: person:raphael }, { id: person:tobie }]"
 
 [[test.results]]
 value = "[{ id: likes:gcnv21jr14dsvx8k2ghr, in: person:raphael, out: person:tobie }]"
-rough = true
+skip-record-id-key = true
 
 [[test.results]]
 error = "Found record: `likes:1` which is a relation, but expected a  RELATION"

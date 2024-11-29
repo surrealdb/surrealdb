@@ -25,7 +25,7 @@ value = "NONE"
 
 [[test.results]]
 value = "[{ id: likes:dxkha0qcosudw16pgszg, in: person:qn7qdiuw7er59ygnow8m, out: thing:c9ptwxoc3pppmwzkuk8y }]"
-rough = true
+skip-record-id-key = true
 
 [[test.results]]
 error = "Found other:s5dt338gm6thhtpy8h26 for field `out`, with record `likes:sp18gvk3av8bilialbhl`, but expected a record<person | thing>"
@@ -38,7 +38,7 @@ value = "NONE"
 
 [[test.results]]
 value = "[{ id: likes:wax0na23c4ueso3ymp9d, in: person:qn7qdiuw7er59ygnow8m, out: other:s5dt338gm6thhtpy8h26 }]"
-rough = true
+skip-record-id-key = true
 
 */
 

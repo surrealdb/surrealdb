@@ -151,13 +151,6 @@ pub enum TestResult {
 }
 
 impl TestResult {
-	pub fn rough_match(&self) -> bool {
-		match self {
-			TestResult::Value(x) => x.rough.unwrap_or(false),
-			_ => false,
-		}
-	}
-
 	pub fn flatten(self) -> TestResultFlat {
 		match self {
 			TestResult::Plain(x) => TestResultFlat::Value(x),
@@ -181,7 +174,9 @@ pub struct ErrorTestResult {
 #[serde(rename_all = "kebab-case")]
 pub struct ValueTestResult {
 	pub value: SurrealValue,
-	pub rough: Option<bool>,
+	pub skip_datetime: Option<bool>,
+	pub skip_record_id_key: Option<bool>,
+	pub skip_uuid: Option<bool>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]

@@ -16,15 +16,15 @@ value = "{ events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $aft
 
 [[test.results]]
 value = "[{ email: 'info@surrealdb.com', id: user:test, updated_at: d'2024-11-28T14:57:41.914308226Z' }]"
-skip_datetime = true
+skip-datetime = true
 
 [[test.results]]
 value = "[{ email: 'info@surrealdb.com', id: user:test, updated_at: d'2024-11-28T14:57:41.917521775Z' }]"
-skip_datetime = true
+skip-datetime = true
 
 [[test.results]]
 value = "[{ email: 'test@surrealdb.com', id: user:test, updated_at: d'2024-11-28T14:57:41.918618086Z' }]"
-skip_datetime = true
+skip-datetime = true
 
 [[test.results]]
 value = "[{ count: 2 }]"

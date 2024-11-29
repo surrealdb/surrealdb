@@ -3,7 +3,7 @@
 
 [[test.results]]
 value = "[{ id: foo:br3dl08jxxwqqfu8lwws }]"
-rough = true
+skip-record-id-key = true
 
 [[test.results]]
 value = "{ accesses: {  }, databases: { test: 'DEFINE DATABASE test' }, users: {  } }"

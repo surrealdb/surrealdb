@@ -6,7 +6,7 @@ value = "NONE"
 
 [[test.results]]
 value = '[{ id: foo:ve4sc2rmebi9bpa4ac4m, value: encoding::base64::decode("YmFy") }]'
-rough = true
+skip-record-id-key = true
 
 */
 -- Define a field with a single type

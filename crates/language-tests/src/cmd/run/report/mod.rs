@@ -1,4 +1,4 @@
-use super::cmp::RoughlyEq;
+use super::cmp::{RoughlyEq, RoughlyEqConfig};
 use super::TestJobResult;
 use crate::tests::{
 	schema::{BoolOr, TestDetailsResults, TestResultFlat},
@@ -176,7 +176,7 @@ impl TestReport {
 					TestDetailsResults::QueryResult(expected) => {
 						let (rough_match, expected): (Vec<_>, Vec<_>) = expected
 							.iter()
-							.map(|x| (x.rough_match(), x.clone().flatten()))
+							.map(|x| (RoughlyEqConfig::from_test_result(x), x.clone().flatten()))
 							.collect();
 
 						if expected.len() != outputs.len() {
@@ -204,17 +204,7 @@ impl TestReport {
 									return;
 								}
 								(Ok(r), TestResultFlat::Value(ref e)) => {
-									if rough_match[idx] {
-										if !r.roughly_equal(&e.0) {
-											self.grade = TestGrade::Failed;
-											self.output_validity =
-												Some(TestOutputValidity::MismatchedValues {
-													expected,
-													kind: MismatchedValuesKind::ValueMismatch(idx),
-												});
-											return;
-										}
-									} else if *r != e.0 {
+									if !r.roughly_equal(&e.0, &rough_match[idx]) {
 										self.grade = TestGrade::Failed;
 										self.output_validity =
 											Some(TestOutputValidity::MismatchedValues {

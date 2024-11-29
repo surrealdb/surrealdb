@@ -6,11 +6,11 @@ value = "NONE"
 
 [[test.results]]
 value = "[{ id: thing:x3gpqiodnza5kamixpj0 }]"
-rough = true
+skip-record-id-key = true
 
 [[test.results]]
 value = "[{ id: thing:l4e3zk9wqybljokmpsji, in: foo:one, out: foo:two }]"
-rough = true
+skip-record-id-key = true
 
 */
 

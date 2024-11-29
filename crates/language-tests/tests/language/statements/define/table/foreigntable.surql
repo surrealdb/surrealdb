@@ -18,11 +18,11 @@ value = "[]"
 
 [[test.results]]
 value = "[{ id: test:awx1vt2p5722v4siq2ny }]"
-rough = true
+skip-record-id-key = true
 
 [[test.results]]
 value = "[{ id: test:v4hybspn2cetvkgt0pl0 }]"
-rough = true
+skip-record-id-key = true
 
 [[test.results]]
 value = "[{ count: 2, id: view:[] }]"
