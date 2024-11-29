@@ -15,7 +15,7 @@ pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
 	// Loop over each namespace
 	for ns in nss.as_ref() {
 		// Pause execution
-		pause!();
+		yield_now!();
 		// Trace for debugging
 		trace!("Performing garbage collection on {} for timestamp {ts}", ns.name);
 		// Process the namespace
@@ -33,7 +33,7 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 	// Loop over each database
 	for db in dbs.as_ref() {
 		// Yield execution
-		pause!();
+		yield_now!();
 		// Trace for debugging
 		trace!("Performing garbage collection on {ns}:{} for timestamp {ts}", db.name);
 		// Fetch all tables

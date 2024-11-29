@@ -740,7 +740,7 @@ impl Iterator {
 		self.count += 1;
 		// Periodically yield
 		if self.count % 100 == 0 {
-			pause!();
+			yield_now!();
 		}
 		// Process the result
 		match res {

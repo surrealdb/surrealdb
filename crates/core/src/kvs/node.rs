@@ -155,7 +155,7 @@ impl Datastore {
 				let mut next = Some(beg..end);
 				while let Some(rng) = next {
 					// Pause and yield execution
-					pause!();
+					yield_now!();
 					// Fetch the next batch of keys and values
 					let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true, None).await);
 					next = res.next;
