@@ -741,7 +741,6 @@ jobs:
       - name: Publish the crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          GIT_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: release-plz release --config /tmp/release-plz.toml
 
       - name: Download artifacts
