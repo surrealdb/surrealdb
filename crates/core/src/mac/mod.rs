@@ -272,7 +272,7 @@ mod test {
 		let Error::Unreachable(msg) = fail!("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:263: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:272: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -280,6 +280,6 @@ mod test {
 		let Error::Unreachable(msg) = fail!("Found {} but expected {}", "test", "other") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:271: Found test but expected other", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:280: Found test but expected other", msg);
 	}
 }
