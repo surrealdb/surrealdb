@@ -5260,6 +5260,7 @@ dependencies = [
  "jsonwebtoken",
  "mimalloc",
  "nix 0.27.1",
+ "num_cpus",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry-proto",
