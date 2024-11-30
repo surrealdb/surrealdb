@@ -723,7 +723,7 @@ jobs:
 
           # Patch binary dependency
           sed -i "s/surrealdb =/surrealdb-${{ inputs.environment }} =/" Cargo.toml
-          sed -i "s#\"surrealdb/#\"surrealdb_${{ inputs.environment }}/#" Cargo.toml
+          sed -i "s#\"surrealdb/#\"surrealdb-${{ inputs.environment }}/#" Cargo.toml
 
           # Patch sdk dependency
           sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" crates/sdk/Cargo.toml
