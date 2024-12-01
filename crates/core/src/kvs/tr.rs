@@ -35,7 +35,7 @@ pub enum Check {
 	#[default]
 	None,
 	Warn,
-	Panic,
+	Error,
 }
 
 /// Specifies whether the transaction is read-only or writeable.
