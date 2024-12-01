@@ -31,13 +31,13 @@ pub struct Transaction {
 	check: Check,
 	/// The underlying datastore transaction
 	inner: tikv::Transaction,
+	/// The save point implementation
+	save_points: SavePoints,
 	// The above, supposedly 'static transaction
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	db: Pin<Arc<tikv::TransactionClient>>,
-	/// The save point implementation
-	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
