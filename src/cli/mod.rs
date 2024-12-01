@@ -33,6 +33,7 @@ use start::StartCommandArguments;
 use std::ops::Deref;
 use std::process::ExitCode;
 use std::time::Duration;
+use tracing_subscriber::{fmt, EnvFilter};
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
 use version::VersionCommandArguments;
@@ -58,7 +59,7 @@ struct Cli {
 	#[command(subcommand)]
 	command: Commands,
 	#[arg(help = "Whether to allow web check for client version upgrades at start")]
-	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
+	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", global = true, long, action = clap::ArgAction::Set)]
 	#[arg(default_value_t = true)]
 	online_version_check: bool,
 }
@@ -96,35 +97,51 @@ enum Commands {
 }
 
 pub async fn init() -> ExitCode {
-	// Start a new CPU profiler
-	#[cfg(feature = "performance-profiler")]
-	let guard = pprof::ProfilerGuardBuilder::default()
-		.frequency(1000)
-		.blocklist(&["libc", "libgcc", "pthread", "vdso"])
-		.build()
-		.unwrap();
-	// Parse the CLI arguments
 	let args = Cli::parse();
+	let subscriber = fmt::Subscriber::builder().with_env_filter(EnvFilter::new("warn")).finish();
 
-	#[cfg(debug_assertions)]
-	println!("{DEBUG_BUILD_WARNING}");
+	tracing::subscriber::with_default(subscriber, || {
+		// Start a new CPU profiler
+		#[cfg(feature = "performance-profiler")]
+		let guard = pprof::ProfilerGuardBuilder::default()
+			.frequency(1000)
+			.blocklist(&["libc", "libgcc", "pthread", "vdso"])
+			.build()
+			.unwrap();
+		// Parse the CLI arguments
 
-	// After parsing arguments, we check the version online
-	if args.online_version_check {
-		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
-		if let Err(opt_version) = check_upgrade(&client, PKG_VERSION.deref()).await {
-			match opt_version {
-				None => {
-					warn!("A new version of SurrealDB may be available.");
-				}
-				Some(new_version) => {
-					warn!("A new version of SurrealDB is available: {}", new_version);
-				}
-			}
-			// TODO ansi_term crate?
-			warn!("You can upgrade using the {} command", "surreal upgrade");
+		#[cfg(debug_assertions)]
+		println!("{DEBUG_BUILD_WARNING}");
+
+		// After parsing arguments, we check the version online
+		println!("Checking online version... {}", args.online_version_check);
+		if args.online_version_check {
+			println!("Online version check code reached");
+			let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
+			tokio::task::block_in_place(|| {
+				tokio::runtime::Handle::current().block_on(async {
+					if let Err(opt_version) = check_upgrade(&client, PKG_VERSION.deref()).await {
+						println!("Reached0 {:?}", opt_version);
+						match opt_version {
+							None => {
+								println!("Reached1");
+								warn!("A new version of SurrealDB may be available.");
+							}
+							Some(new_version) => {
+								println!("Reached2");
+								warn!("A new version of SurrealDB is available: {}", new_version);
+							}
+						}
+						// TODO ansi_term crate?
+						warn!("You can upgrade using the {} command", "surreal upgrade");
+					}
+				});
+			});
+			println!("Reached3");
+			warn!("Reached warning");
 		}
-	}
+	});
+
 	// After version warning we can run the respective command
 	let output = match args.command {
 		Commands::Start(args) => start::init(args).await,
@@ -154,6 +171,7 @@ pub async fn init() -> ExitCode {
 		profile.encode(&mut content).unwrap();
 		file.write_all(&content).unwrap();
 	};
+
 	// Error and exit the programme
 	if let Err(e) = output {
 		error!("{}", e);
@@ -170,6 +188,8 @@ async fn check_upgrade<C: VersionClient>(
 	client: &C,
 	pkg_version: &str,
 ) -> Result<(), Option<Version>> {
+	// Simulate old version
+	return Err(Some(Version::new(1,5,1)));
 	if let Ok(version) = client.fetch("latest").await {
 		// Request was successful, compare against current
 		let old_version = upgrade::parse_version(pkg_version).unwrap();

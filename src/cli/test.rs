@@ -21,3 +21,59 @@ pub async fn test_version_upgrade() {
 		.await
 		.expect("Expected the versions to be illogical, and not require and upgrade");
 }
+
+mod clap {
+	use crate::cli::Cli;
+	use clap::Parser;
+
+	#[test_log::test(tokio::test)]
+	pub async fn test_online_version_check() {
+		#[derive(Debug)]
+		struct Case {
+			expected_on: bool,
+			input: &'static [&'static str],
+		}
+		let cases = [
+			// Default case
+			Case {
+				expected_on: true,
+				input: &["surreal", "start"],
+			},
+
+			// Top level cases
+			Case {
+				expected_on: false,
+				input: &["surreal", "--online-version-check", "false", "start"],
+			},
+			Case {
+				expected_on: true,
+				input: &["surreal", "--online-version-check", "true", "start"],
+			},
+
+			// Subcommand cases
+			Case {
+				expected_on: false,
+				input: &["surreal", "start", "--online-version-check", "false"],
+			},
+			Case {
+				expected_on: true,
+				input: &["surreal", "start", "--online-version-check", "true"],
+			},
+		];
+
+		for (index, case) in cases.iter().enumerate() {
+			let cli = Cli::try_parse_from(case.input);
+			println!("Error: {:?}", cli);
+			assert!(
+				cli.is_ok(),
+				"There was a failure to parse for {index} - {case:?}:\n{}",
+				cli.err().unwrap()
+			);
+			let cli = cli.unwrap();
+			assert_eq!(
+				cli.online_version_check, case.expected_on,
+				"The expected values were incorrect for {index} - {case:?}"
+			);
+		}
+	}
+}
