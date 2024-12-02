@@ -36,6 +36,7 @@ pub mod idg;
 pub mod idx;
 pub mod key;
 pub mod kvs;
+pub mod mem;
 pub mod obs;
 pub mod options;
 pub mod rpc;
