@@ -259,8 +259,11 @@ impl Connection {
 						Message::Text(msg) => {
 							// If no format is specified, default to JSON
 							let fmt = if fmt.is_none() {
-								rpc.write().await.format = Format::Json;
-								Format::Json
+								let mut lock = 	rpc.write().await;
+								let fmt = Format::Json;
+								lock.format = fmt;
+								drop(lock);
+								fmt
 							} else {
 								fmt
 							};
@@ -285,8 +288,11 @@ impl Connection {
 						Message::Binary(msg) => {
 							// If no format is specified, default to Bincode
 							let fmt = if fmt.is_none() {
-								rpc.write().await.format = Format::Bincode;
-								Format::Bincode
+								let mut lock = 	rpc.write().await;
+								let fmt = Format::Bincode;
+								lock.format = fmt;
+								drop(lock);
+								fmt
 							} else {
 								fmt
 							};
