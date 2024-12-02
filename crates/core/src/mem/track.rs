@@ -22,7 +22,7 @@ static CURRENT: AtomicUsize = AtomicUsize::new(0);
 /// (m, mb, or mib), or gibibytes (g, gb, or gib).
 static MEMORY_THRESHOLD: LazyLock<usize> = std::sync::LazyLock::new(|| {
 	std::env::var("SURREAL_MEMORY_THRESHOLD")
-		.and_then(|input| {
+		.map(|input| {
 			// Trim the input of any spaces
 			let input = input.trim();
 			// Check if this contains a suffix
@@ -47,7 +47,7 @@ static MEMORY_THRESHOLD: LazyLock<usize> = std::sync::LazyLock::new(|| {
 			// Log the parsed memory threshold
 			debug!("Memory threshold guide: {input} ({bytes} bytes)");
 			// Return the total byte threshold
-			Ok(bytes)
+			bytes
 		})
 		.unwrap_or(0)
 });
