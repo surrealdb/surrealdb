@@ -52,14 +52,6 @@ impl Format {
 		matches!(self, Format::None)
 	}
 
-	/// Return this format, or a default format
-	pub fn or(self, fmt: Self) -> Self {
-		match self {
-			Format::None => fmt,
-			fmt => fmt,
-		}
-	}
-
 	/// Process a request using the specified format
 	pub fn req(&self, val: impl Into<Vec<u8>>) -> Result<Request, RpcError> {
 		let val = val.into();
