@@ -19,34 +19,31 @@ extern crate tracing;
 mod mac;
 
 mod cf;
-pub mod ctx;
 mod doc;
 mod exe;
 mod fnc;
 mod vs;
 
-pub mod sql;
-
 pub mod cnf;
+pub mod ctx;
 pub mod dbs;
 pub mod env;
 pub mod err;
 pub mod fflags;
-#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
 pub mod gql;
 pub mod iam;
 pub mod idg;
 pub mod idx;
 pub mod key;
 pub mod kvs;
+pub mod obs;
 pub mod options;
 pub mod rpc;
+pub mod sql;
 pub mod syn;
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;
-#[cfg(feature = "ml")]
-pub mod obs;
 
 pub mod test_helpers {
 	pub use crate::vs::conv::to_u128_be;
