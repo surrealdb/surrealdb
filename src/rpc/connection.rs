@@ -215,17 +215,15 @@ impl Connection {
 		internal_sender: Sender<Message>,
 	) {
 		// Get all required values
-		let (fmt, shutdown, canceller) = {
+		let (shutdown, canceller) = {
 			// Read the connection state
 			let rpc = rpc.read().await;
-			// Fetch the connection output format
-			let format = rpc.format;
 			// Clone the WebSocket shutdown token
 			let shutdown = rpc.shutdown.clone();
 			// Clone the WebSocket cancellation token
 			let canceller = rpc.canceller.clone();
 			// Return the required values
-			(format, shutdown, canceller)
+			(shutdown, canceller)
 		};
 		// Store spawned tasks so we can wait for them
 		let mut tasks = JoinSet::new();
@@ -256,17 +254,7 @@ impl Connection {
 				Some(msg) = receiver.next() => match msg {
 					// We've received a message from the client
 					Ok(msg) => match msg {
-						Message::Text(msg) => {
-							// If no format is specified, default to JSON
-							let fmt = if fmt.is_none() {
-								let mut lock = 	rpc.write().await;
-								let fmt = Format::Json;
-								lock.format = fmt;
-								drop(lock);
-								fmt
-							} else {
-								fmt
-							};
+						Message::Text(_) => {
 							// Clone the response sending channel
 							let chn = internal_sender.clone();
 							// Check to see whether we have available memory
@@ -278,24 +266,10 @@ impl Connection {
 								// Exit out of the loop
 								break;
 							}
-							// Calculate the message length
-							let len = msg.len();
-							// Recreate the message to process
-							let msg = Message::Text(msg);
 							// Otherwise spawn and handle the message
-							tasks.spawn(Self::handle_message(rpc.clone(), fmt, msg, len, chn));
+							tasks.spawn(Self::handle_message(rpc.clone(), msg, chn));
 						}
-						Message::Binary(msg) => {
-							// If no format is specified, default to Bincode
-							let fmt = if fmt.is_none() {
-								let mut lock = 	rpc.write().await;
-								let fmt = Format::Bincode;
-								lock.format = fmt;
-								drop(lock);
-								fmt
-							} else {
-								fmt
-							};
+						Message::Binary(_) => {
 							// Clone the response sending channel
 							let chn = internal_sender.clone();
 							// Check to see whether we have available memory
@@ -307,12 +281,8 @@ impl Connection {
 								// Exit out of the loop
 								break;
 							}
-							// Calculate the message length
-							let len = msg.len();
-							// Recreate the message to process
-							let msg = Message::Binary(msg);
 							// Otherwise spawn and handle the message
-							tasks.spawn(Self::handle_message(rpc.clone(), fmt, msg, len, chn));
+							tasks.spawn(Self::handle_message(rpc.clone(), msg, chn));
 						}
 						Message::Close(_) => {
 							// Respond with a close message
@@ -359,19 +329,15 @@ impl Connection {
 	}
 
 	/// Handle an individual WebSocket message
-	async fn handle_message(
-		rpc: Arc<RwLock<Connection>>,
-		fmt: Format,
-		msg: Message,
-		len: usize,
-		chn: Sender<Message>,
-	) {
+	async fn handle_message(rpc: Arc<RwLock<Connection>>, msg: Message, chn: Sender<Message>) {
 		// Get all required values
-		let (id, shutdown, canceller, semaphore) = {
+		let (id, fmt, shutdown, canceller, semaphore) = {
 			// Read the connection state
 			let rpc = rpc.read().await;
 			// Fetch the connection id
 			let id = rpc.id;
+			// Fetch the connection output format
+			let format = rpc.format;
 			// Clone the WebSocket cancellation token
 			let shutdown = rpc.shutdown.clone();
 			// Clone the WebSocket cancellation token
@@ -379,7 +345,25 @@ impl Connection {
 			// Clone the request limiter
 			let semaphore = rpc.semaphore.clone();
 			// Return the required values
-			(id, shutdown, canceller, semaphore)
+			(id, format, shutdown, canceller, semaphore)
+		};
+		// Calculate the message lenght and format
+		let (len, fmt) = match msg {
+			Message::Text(ref msg) => match fmt.is_none() {
+				true => {
+					rpc.write().await.format = Format::Json;
+					(msg.len(), Format::Json)
+				}
+				false => (msg.len(), fmt),
+			},
+			Message::Binary(ref msg) => match fmt.is_none() {
+				true => {
+					rpc.write().await.format = Format::Bincode;
+					(msg.len(), Format::Bincode)
+				}
+				false => (msg.len(), fmt),
+			},
+			_ => unreachable!(),
 		};
 		// Prepare span and otel context
 		let span = span_for_request(&id);
