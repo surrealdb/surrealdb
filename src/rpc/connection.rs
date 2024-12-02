@@ -258,13 +258,11 @@ impl Connection {
 					Ok(msg) => match msg {
 						Message::Text(msg) => {
 							// If no format is specified, default to JSON
-							let fmt = match fmt.is_none() {
-								true => {
-									let fmt = Format::Json;
-									rpc.write().await.format = fmt;
-									fmt
-								}
-								false => fmt,
+							let fmt = if fmt.is_none() {
+								rpc.write().await.format = Format::Json;
+								Format::Json
+							} else {
+								fmt
 							};
 							// Clone the response sending channel
 							let chn = internal_sender.clone();
@@ -286,13 +284,11 @@ impl Connection {
 						}
 						Message::Binary(msg) => {
 							// If no format is specified, default to Bincode
-							let fmt = match fmt.is_none() {
-								true => {
-									let fmt = Format::Bincode;
-									rpc.write().await.format = fmt;
-									fmt
-								}
-								false => fmt,
+							let fmt = if fmt.is_none() {
+								rpc.write().await.format = Format::Bincode;
+								Format::Bincode
+							} else {
+								fmt
 							};
 							// Clone the response sending channel
 							let chn = internal_sender.clone();
