@@ -23,7 +23,6 @@ mod env;
 mod err;
 #[cfg(surrealdb_unstable)]
 mod gql;
-mod mem;
 mod net;
 mod rpc;
 mod telemetry;
