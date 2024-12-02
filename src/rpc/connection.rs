@@ -8,7 +8,7 @@ use crate::rpc::CONN_CLOSED_ERR;
 use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{close_code::AGAIN, CloseFrame, Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
@@ -20,6 +20,7 @@ use surrealdb::dbs::Session;
 #[cfg(surrealdb_unstable)]
 use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
+use surrealdb::mem::ALLOC;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::method::Method;
 use surrealdb::rpc::Data;
@@ -32,6 +33,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
+
+/// An error string sent when the server is out of memory
+const SERVER_OVERLOADED: &str = "The server is unable to handle the request";
+
+/// An error string sent when the server is gracefully shutting down
+const SERVER_SHUTTING_DOWN: &str = "The server is gracefully shutting down";
 
 use super::RpcState;
 
@@ -110,7 +117,7 @@ impl Connection {
 		state.web_sockets.write().await.insert(id, rpc.clone());
 		// Start telemetry metrics for this connection
 		if let Err(err) = telemetry::metrics::ws::on_connect() {
-			error!("Error running metrics::ws::on_connect hook: {}", err);
+			error!("Error running metrics::ws::on_connect hook: {err}");
 		}
 		// Spawn async tasks for the WebSocket
 		let mut tasks = JoinSet::new();
@@ -120,7 +127,7 @@ impl Connection {
 		// Wait for all tasks to finish
 		while let Some(res) = tasks.join_next().await {
 			if let Err(err) = res {
-				error!("Error handling RPC connection: {}", err);
+				error!("Error handling RPC connection: {err}");
 			}
 		}
 		// Close the internal response channel
@@ -133,7 +140,7 @@ impl Connection {
 		state.web_sockets.write().await.remove(&id);
 		// Stop telemetry metrics for this connection
 		if let Err(err) = telemetry::metrics::ws::on_disconnect() {
-			error!("Error running metrics::ws::on_disconnect hook: {}", err);
+			error!("Error running metrics::ws::on_disconnect hook: {err}");
 		}
 	}
 
@@ -148,7 +155,7 @@ impl Connection {
 			tokio::select! {
 				//
 				biased;
-				// Check if this has cancelled
+				// Check if we should teardown
 				_ = canceller.cancelled() => break,
 				// Send a regular ping message
 				_ = interval.tick() => {
@@ -181,7 +188,7 @@ impl Connection {
 			tokio::select! {
 				//
 				biased;
-				// Check if this has cancelled
+				// Check if we should teardown
 				_ = canceller.cancelled() => break,
 				// Wait for the next message to send
 				Some(res) = internal_receiver.next() => {
@@ -189,7 +196,7 @@ impl Connection {
 					if let Err(err) = sender.send(res).await {
 						// Output any errors if not a close error
 						if err.to_string() != CONN_CLOSED_ERR {
-							debug!("WebSocket error: {:?}", err);
+							debug!("WebSocket error: {err:?}");
 						}
 						// Cancel the WebSocket tasks
 						rpc.read().await.canceller.cancel();
@@ -208,15 +215,17 @@ impl Connection {
 		internal_sender: Sender<Message>,
 	) {
 		// Get all required values
-		let (shutdown, canceller) = {
+		let (fmt, shutdown, canceller) = {
 			// Read the connection state
 			let rpc = rpc.read().await;
+			// Fetch the connection output format
+			let format = rpc.format;
 			// Clone the WebSocket shutdown token
 			let shutdown = rpc.shutdown.clone();
 			// Clone the WebSocket cancellation token
 			let canceller = rpc.canceller.clone();
 			// Return the required values
-			(shutdown, canceller)
+			(format, shutdown, canceller)
 		};
 		// Store spawned tasks so we can wait for them
 		let mut tasks = JoinSet::new();
@@ -225,51 +234,90 @@ impl Connection {
 			tokio::select! {
 				//
 				biased;
-				// Check if this has shutdown
+				// Check if we are shutting down
 				_ = shutdown.cancelled(), if tasks.is_empty() => break,
-				// Check if this has shutdown
+				// Check if we should teardown
 				_ = canceller.cancelled() => break,
 				// Remove any completed tasks
 				Some(out) = tasks.join_next() => match out {
-					// The task completed successfully
-					Ok(_) => continue,
 					// There was an uncaught panic in the task
-					Err(err) => {
+					Err(err) if err.is_panic() => {
 						// There was an error with the task
-						trace!("WebSocket request error: {:?}", err);
+						warn!("WebSocket request error: {err:?}");
 						// Cancel the WebSocket tasks
 						rpc.read().await.canceller.cancel();
 						// Exit out of the loop
 						break;
-					}
+					},
+					// The task completed successfully
+					_ => continue,
 				},
 				// Wait for the next received message
 				Some(msg) = receiver.next() => match msg {
 					// We've received a message from the client
 					Ok(msg) => match msg {
-						Message::Text(_) => {
-							tasks.spawn(Self::handle_message(rpc.clone(), msg, internal_sender.clone()));
+						Message::Text(msg) => {
+							// If no format is specified, default to JSON
+							let fmt = fmt.or(Format::Json);
+							// Clone the response sending channel
+							let chn = internal_sender.clone();
+							// Check to see whether we have available memory
+							if ALLOC.is_beyond_threshold().await {
+								// Reject the message
+								Self::close_socket(rpc.clone(), chn).await;
+								// Abort all tasks
+								tasks.abort_all();
+								// Exit out of the loop
+								break;
+							}
+							// Calculate the message length
+							let len = msg.len();
+							// Recreate the message to process
+							let msg = Message::Text(msg);
+							// Otherwise spawn and handle the message
+							tasks.spawn(Self::handle_message(rpc.clone(), fmt, msg, len, chn));
 						}
-						Message::Binary(_) => {
-							tasks.spawn(Self::handle_message(rpc.clone(), msg, internal_sender.clone()));
+						Message::Binary(msg) => {
+							// If no format is specified, default to Bincode
+							let fmt = fmt.or(Format::Bincode);
+							// Clone the response sending channel
+							let chn = internal_sender.clone();
+							// Check to see whether we have available memory
+							if ALLOC.is_beyond_threshold().await {
+								// Reject the message
+								Self::close_socket(rpc.clone(), chn).await;
+								// Abort all tasks
+								tasks.abort_all();
+								// Exit out of the loop
+								break;
+							}
+							// Calculate the message length
+							let len = msg.len();
+							// Recreate the message to process
+							let msg = Message::Binary(msg);
+							// Otherwise spawn and handle the message
+							tasks.spawn(Self::handle_message(rpc.clone(), fmt, msg, len, chn));
 						}
 						Message::Close(_) => {
 							// Respond with a close message
 							if let Err(err) = internal_sender.send(Message::Close(None)).await {
-								trace!("WebSocket error when replying to the Close frame: {:?}", err);
+								trace!("WebSocket error when replying to the close message: {err:?}");
 							};
 							// Cancel the WebSocket tasks
 							rpc.read().await.canceller.cancel();
 							// Exit out of the loop
 							break;
 						}
-						_ => {
-							// Ignore everything else
+						Message::Ping(_) => {
+							// Ping messages are responded to automatically
+						}
+						Message::Pong(_) => {
+							// Pong messages are handled automatically
 						}
 					},
 					Err(err) => {
 						// There was an error with the WebSocket
-						trace!("WebSocket error: {:?}", err);
+						trace!("WebSocket error: {err:?}");
 						// Cancel the WebSocket tasks
 						rpc.read().await.canceller.cancel();
 						// Exit out of the loop
@@ -280,27 +328,34 @@ impl Connection {
 		}
 		// Wait for all tasks to finish
 		while let Some(res) = tasks.join_next().await {
+			// There was an error with the task
 			if let Err(err) = res {
-				// There was an error with the task
-				trace!("WebSocket request error: {:?}", err);
+				// There was an uncaught panic in the task
+				if err.is_panic() {
+					warn!("WebSocket request error: {err:?}");
+				}
 			}
 		}
 		// Cancel the WebSocket tasks
 		rpc.read().await.canceller.cancel();
-		// Abort all tasks
+		// Ensure everything is aborted
 		tasks.shutdown().await;
 	}
 
-	/// Handle individual WebSocket messages
-	async fn handle_message(rpc: Arc<RwLock<Connection>>, msg: Message, chn: Sender<Message>) {
+	/// Handle an individual WebSocket message
+	async fn handle_message(
+		rpc: Arc<RwLock<Connection>>,
+		fmt: Format,
+		msg: Message,
+		len: usize,
+		chn: Sender<Message>,
+	) {
 		// Get all required values
-		let (id, mut fmt, shutdown, canceller, semaphore) = {
+		let (id, shutdown, canceller, semaphore) = {
 			// Read the connection state
 			let rpc = rpc.read().await;
 			// Fetch the connection id
 			let id = rpc.id;
-			// Fetch the connection output format
-			let format = rpc.format;
 			// Clone the WebSocket cancellation token
 			let shutdown = rpc.shutdown.clone();
 			// Clone the WebSocket cancellation token
@@ -308,29 +363,7 @@ impl Connection {
 			// Clone the request limiter
 			let semaphore = rpc.semaphore.clone();
 			// Return the required values
-			(id, format, shutdown, canceller, semaphore)
-		};
-		// Calculate the length of the message
-		let len = match msg {
-			Message::Text(ref msg) => {
-				// If no format was specified, default to JSON
-				if fmt.is_none() {
-					fmt = Format::Json;
-					rpc.write().await.format = fmt;
-				}
-				// Retrieve the length of the message
-				msg.len()
-			}
-			Message::Binary(ref msg) => {
-				// If no format was specified, default to Bincode
-				if fmt.is_none() {
-					fmt = Format::Bincode;
-					rpc.write().await.format = fmt;
-				}
-				// Retrieve the length of the message
-				msg.len()
-			}
-			_ => unreachable!(),
+			(id, shutdown, canceller, semaphore)
 		};
 		// Prepare span and otel context
 		let span = span_for_request(&id);
@@ -358,7 +391,7 @@ impl Connection {
 					tokio::select! {
 						//
 						biased;
-						// Check if this has shutdown
+						// Check if we should teardown
 						_ = canceller.cancelled() => (),
 						// Wait for the message to be processed
 						_ = async move {
@@ -377,7 +410,15 @@ impl Connection {
 								// Don't start processing if we are gracefully shutting down
 								if shutdown.is_cancelled() {
 									// Process the response
-									failure(req.id, Failure::custom("Server is shutting down"))
+									failure(req.id, Failure::custom(SERVER_SHUTTING_DOWN))
+										.send(otel_cx.clone(), fmt, &chn)
+										.with_context(otel_cx.as_ref().clone())
+										.await;
+								}
+								// Check to see whether we have available memory
+								else if ALLOC.is_beyond_threshold().await {
+									// Process the response
+									failure(req.id, Failure::custom(SERVER_OVERLOADED))
 										.send(otel_cx.clone(), fmt, &chn)
 										.with_context(otel_cx.as_ref().clone())
 										.await;
@@ -413,7 +454,8 @@ impl Connection {
 		.await;
 	}
 
-	pub async fn process_message(
+	/// Process a WebSocket message and generate a response
+	async fn process_message(
 		rpc: Arc<RwLock<Connection>>,
 		method: Method,
 		params: Array,
@@ -428,6 +470,23 @@ impl Connection {
 			true => rpc.write().await.execute_mutable(method, params).await.map_err(Into::into),
 			false => rpc.read().await.execute_immutable(method, params).await.map_err(Into::into),
 		}
+	}
+
+	/// Reject a WebSocket message due to server overloading
+	async fn close_socket(rpc: Arc<RwLock<Connection>>, chn: Sender<Message>) {
+		// Log the error as a warning
+		warn!("The server is overloaded and is unable to process a WebSocket request");
+		// Create a custom close frame
+		let frame = CloseFrame {
+			code: AGAIN,
+			reason: SERVER_OVERLOADED.into(),
+		};
+		// Respond with a close message
+		if let Err(err) = chn.send(Message::Close(Some(frame))).await {
+			trace!("WebSocket error when sending close message: {err:?}");
+		};
+		// Cancel the WebSocket tasks
+		rpc.read().await.canceller.cancel();
 	}
 }
 
