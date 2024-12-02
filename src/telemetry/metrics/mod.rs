@@ -1,7 +1,7 @@
 pub mod http;
 pub mod ws;
 
-use crate::cnf::TELEMETRY_PROVIDER;
+use crate::cnf::{TELEMETRY_PROVIDER, TELEMETRY_DISABLE_METRICS};
 use opentelemetry::metrics::MetricsError;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_sdk::metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector};
@@ -41,9 +41,14 @@ const HISTOGRAM_BUCKETS_BYTES: &[f64] = &[
 
 // Returns a metrics configuration based on the SURREAL_TELEMETRY_PROVIDER environment variable
 pub fn init() -> Result<Option<SdkMeterProvider>, MetricsError> {
+	let metrics_disabled = match TELEMETRY_DISABLE_METRICS.trim() {
+		"true" => true,
+		_ => false,
+	};
+
 	match TELEMETRY_PROVIDER.trim() {
 		// The OTLP telemetry provider has been specified
-		s if s.eq_ignore_ascii_case("otlp") => {
+		s if s.eq_ignore_ascii_case("otlp") && metrics_disabled => {
 			// Create a new metrics exporter using tonic
 			let exporter = MetricsExporterBuilder::from(opentelemetry_otlp::new_exporter().tonic())
 				.build_metrics_exporter(
