@@ -427,13 +427,21 @@ impl Connection {
 								else {
 									// Acquire concurrent request rate limiter
 									let permit = semaphore.acquire_owned().await.unwrap();
-									// Process the message when the semaphore is acquired
-									let res = Self::process_message(rpc.clone(), method, req.params).await;
-									// Process the response
-									res.into_response(req.id)
-										.send(otel_cx.clone(), fmt, &chn)
-										.with_context(otel_cx.as_ref().clone())
-										.await;
+									// Check to see whether we have available memory
+									if ALLOC.is_beyond_threshold().await {
+										// Process the response
+										failure(req.id, Failure::custom(SERVER_OVERLOADED))
+											.send(otel_cx.clone(), fmt, &chn)
+											.with_context(otel_cx.as_ref().clone())
+											.await;
+									} else {
+										// Process the message when the semaphore is acquired
+										Self::process_message(rpc.clone(), method, req.params).await
+											.into_response(req.id)
+											.send(otel_cx.clone(), fmt, &chn)
+											.with_context(otel_cx.as_ref().clone())
+											.await;
+									}
 									// Drop the rate limiter permit
 									drop(permit);
 								}
