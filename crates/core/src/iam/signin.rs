@@ -1,5 +1,5 @@
 use super::access::{
-	authenticate_generic, authenticate_record, create_refresh_key_record, revoke_refresh_key_record,
+	authenticate_generic, authenticate_record, create_refresh_token_record, revoke_refresh_token_record,
 };
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level, Role};
@@ -203,10 +203,10 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
-											// Create refresh key if defined for the record access method
+											// Create refresh token if defined for the record access method
 											let refresh = match &at.bearer {
 												Some(_) => Some(
-													create_refresh_key_record(
+													create_refresh_token_record(
 														kvs,
 														av.name.clone(),
 														&ns,
@@ -283,11 +283,11 @@ pub async fn db_access(
 						);
 						return Err(Error::InvalidAuth);
 					}
-					// If the bearer grant is a refresh key
-					// Refresh keys are not implemented for system users
+					// If the bearer grant is a refresh token
+					// refresh tokens are not implemented for system users
 					if matches!(at.kind, access_type::BearerAccessType::Refresh) {
 						return Err(Error::FeatureNotYetImplemented {
-							feature: "Refresh keys for system users".to_string(),
+							feature: "Refresh tokens for system users".to_string(),
 						});
 					};
 					// Check if the bearer access method supports issuing tokens.
@@ -361,13 +361,13 @@ pub async fn db_access(
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
 					}
-					// If the bearer grant is a refresh key
+					// If the bearer grant is a refresh token
 					let refresh = match at.kind {
 						access_type::BearerAccessType::Refresh => {
 							match &gr.subject {
 								access::Subject::Record(rid) => {
-									// Revoke the used refresh key
-									revoke_refresh_key_record(
+									// Revoke the used refresh token
+									revoke_refresh_token_record(
 										kvs,
 										gr.id.clone(),
 										gr.ac.clone(),
@@ -375,9 +375,9 @@ pub async fn db_access(
 										&db,
 									)
 									.await?;
-									// Create a new refresh key to replace it
+									// Create a new refresh token to replace it
 									Some(
-										create_refresh_key_record(
+										create_refresh_token_record(
 											kvs,
 											gr.ac.clone(),
 											&ns,
@@ -389,7 +389,7 @@ pub async fn db_access(
 								}
 								access::Subject::User(_) => {
 									return Err(Error::FeatureNotYetImplemented {
-										feature: "Refresh keys for system users".to_string(),
+										feature: "Refresh tokens for system users".to_string(),
 									})
 								}
 							}
@@ -520,11 +520,11 @@ pub async fn ns_access(
 						);
 						return Err(Error::InvalidAuth);
 					}
-					// If the bearer grant is a refresh key
-					// Refresh keys are not implemented for system users
+					// If the bearer grant is a refresh token
+					// refresh tokens are not implemented for system users
 					if matches!(at.kind, access_type::BearerAccessType::Refresh) {
 						return Err(Error::FeatureNotYetImplemented {
-							feature: "Refresh keys for system users".to_string(),
+							feature: "Refresh tokens for system users".to_string(),
 						});
 					};
 					// Check if the bearer access method supports issuing tokens.
@@ -760,11 +760,11 @@ pub async fn root_access(
 						);
 						return Err(Error::InvalidAuth);
 					}
-					// If the bearer grant is a refresh key
-					// Refresh keys are not implemented for system users
+					// If the bearer grant is a refresh token
+					// refresh tokens are not implemented for system users
 					if matches!(at.kind, access_type::BearerAccessType::Refresh) {
 						return Err(Error::FeatureNotYetImplemented {
-							feature: "Refresh keys for system users".to_string(),
+							feature: "Refresh tokens for system users".to_string(),
 						});
 					};
 					// Check if the bearer access method supports issuing tokens.

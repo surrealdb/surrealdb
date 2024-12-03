@@ -1,4 +1,4 @@
-use super::access::{authenticate_record, create_refresh_key_record};
+use super::access::{authenticate_record, create_refresh_token_record};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
@@ -134,10 +134,10 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
-											// Create refresh key if defined for the record access method
+											// Create refresh token if defined for the record access method
 											let refresh = match &at.bearer {
 												Some(_) => Some(
-													create_refresh_key_record(
+													create_refresh_token_record(
 														kvs,
 														av.name.clone(),
 														&ns,

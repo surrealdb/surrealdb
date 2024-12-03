@@ -7,7 +7,7 @@ use crate::sql::statements::access;
 use crate::sql::{Base, Ident, Thing, Value};
 use reblessive::tree::Stk;
 
-// Execute the AUTHENTICATE clause for a Record access method
+// Execute the AUTHENTICATE clause for a record access method
 pub async fn authenticate_record(
 	kvs: &Datastore,
 	session: &Session,
@@ -89,7 +89,9 @@ pub async fn authenticate_generic(
 	}
 }
 
-pub async fn create_refresh_key_record(
+
+// Create a bearer key to act as refresh token for a record user
+pub async fn create_refresh_token_record(
 	kvs: &Datastore,
 	ac: Ident,
 	ns: &str,
@@ -108,9 +110,9 @@ pub async fn create_refresh_key_record(
 	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();
-	// Create a bearer grant to act as the refresh key
+	// Create a bearer grant to act as the refresh token 
 	let grant = access::create_grant(&stmt, &ctx, &opt).await.map_err(|e| {
-		warn!("Unexpected error when attempting to create a refresh key: {e}");
+		warn!("Unexpected error when attempting to create a refresh token: {e}");
 		Error::UnexpectedAuth
 	})?;
 	tx.cancel().await?;
@@ -121,7 +123,8 @@ pub async fn create_refresh_key_record(
 	}
 }
 
-pub async fn revoke_refresh_key_record(
+// Revoke a bearer key that acted as a refresh token for a record user
+pub async fn revoke_refresh_token_record(
 	kvs: &Datastore,
 	gr: Ident,
 	ac: Ident,
@@ -141,11 +144,11 @@ pub async fn revoke_refresh_key_record(
 	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();
-	// Create a bearer grant to act as the refresh key
+	// Create a bearer grant to act as the refresh token 
 	Stk::enter_scope(|stk| stk.run(|stk| access::revoke_grant(&stmt, stk, &ctx, &opt)))
 		.await
 		.map_err(|e| {
-			warn!("Unexpected error when attempting to revoke a refresh key: {e}");
+			warn!("Unexpected error when attempting to revoke a refresh token: {e}");
 			Error::UnexpectedAuth
 		})?;
 	tx.cancel().await?;
