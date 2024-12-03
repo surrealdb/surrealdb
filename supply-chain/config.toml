@@ -704,7 +704,7 @@ version = "0.2.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.libmimalloc-sys]]
-version = "0.1.35"
+version = "0.1.39"
 criteria = "safe-to-deploy"
 
 [[exemptions.libredox]]
@@ -776,7 +776,7 @@ version = "5.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.mimalloc]]
-version = "0.1.39"
+version = "0.1.43"
 criteria = "safe-to-deploy"
 
 [[exemptions.mime_guess]]

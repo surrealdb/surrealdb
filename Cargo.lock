@@ -2740,7 +2740,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -2751,9 +2751,9 @@ checksum = "4ec2a862134d2a7d32d7983ddcdd1c4923530833c9f2ea1a44fc5fa473989058"
 
 [[package]]
 name = "libmimalloc-sys"
-version = "0.1.35"
+version = "0.1.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3979b5c37ece694f1f5e51e7ecc871fdb0f517ed04ee45f88d15d6d553cb9664"
+checksum = "23aa6811d3bd4deb8a84dde645f943476d13b248d818edcf8ce0b2f37f036b44"
 dependencies = [
  "cc",
  "libc",
@@ -2950,9 +2950,9 @@ dependencies = [
 
 [[package]]
 name = "mimalloc"
-version = "0.1.39"
+version = "0.1.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa01922b5ea280a911e323e4d2fd24b7fe5cc4042e0d2cda3c40775cdc4bdc9c"
+checksum = "68914350ae34959d83f732418d51e2427a794055d0b9529f48259ac07af65633"
 dependencies = [
  "libmimalloc-sys",
 ]
@@ -5256,9 +5256,7 @@ dependencies = [
  "http-body 1.0.0",
  "http-body-util",
  "hyper 1.4.1",
- "jemallocator",
  "jsonwebtoken",
- "mimalloc",
  "nix 0.27.1",
  "num_cpus",
  "opentelemetry",
@@ -5431,10 +5429,12 @@ dependencies = [
  "hex",
  "indxdb",
  "ipnet",
+ "jemallocator",
  "jsonwebtoken",
  "lexicmp",
  "linfa-linalg",
  "md-5",
+ "mimalloc",
  "nanoid",
  "ndarray",
  "ndarray-stats",

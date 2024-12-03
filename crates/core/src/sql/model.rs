@@ -12,17 +12,17 @@ use std::fmt;
 #[cfg(feature = "ml")]
 use crate::iam::Action;
 #[cfg(feature = "ml")]
-use crate::ml::errors::error::SurrealError;
-#[cfg(feature = "ml")]
-use crate::ml::execution::compute::ModelComputation;
-#[cfg(feature = "ml")]
-use crate::ml::storage::surml_file::SurMlFile;
-#[cfg(feature = "ml")]
 use crate::sql::Permission;
 #[cfg(feature = "ml")]
 use futures::future::try_join_all;
 #[cfg(feature = "ml")]
 use std::collections::HashMap;
+#[cfg(feature = "ml")]
+use surrealml::errors::error::SurrealError;
+#[cfg(feature = "ml")]
+use surrealml::execution::compute::ModelComputation;
+#[cfg(feature = "ml")]
+use surrealml::storage::surml_file::SurMlFile;
 
 #[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";

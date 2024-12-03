@@ -15,6 +15,7 @@ members = [
 [features]
 # Public features
 default = [
+    "allocator",
     "storage-mem",
     "storage-surrealkv",
     "storage-surrealcs",
@@ -22,6 +23,7 @@ default = [
     "scripting",
     "http",
 ]
+allocator = ["surrealdb/allocator"]
 storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-tikv = ["surrealdb/kv-tikv"]
@@ -37,7 +39,6 @@ performance-profiler = ["dep:pprof"]
 # Special features
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
 storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
-
 
 [profile.release]
 lto = true
@@ -57,22 +58,13 @@ argon2 = "0.5.2"
 async-graphql = { version = "7.0.9", default-features = false }
 async-graphql-axum = { version = "7.0.9" }
 axum = { version = "0.7.5", features = ["tracing", "ws"] }
-axum-extra = { version = "0.9.3", features = [
-    "query",
-    "typed-routing",
-    "typed-header",
-] }
+axum-extra = { version = "0.9.3", features = ["query", "typed-routing", "typed-header"] }
 axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
 chrono = "0.4.38"
 ciborium = "0.2.1"
-clap = { version = "4.4.11", features = [
-    "env",
-    "derive",
-    "wrap_help",
-    "unicode",
-] }
+clap = { version = "4.4.11", features = ["env", "derive", "wrap_help", "unicode"] }
 futures = "0.3.30"
 futures-util = "0.3.30"
 geo = "0.28.0"
@@ -87,24 +79,10 @@ opentelemetry = { version = "0.24" }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
 pin-project-lite = "0.2.13"
-pprof = { version = "0.13.0", features = [
-    "flamegraph",
-    "prost-codec",
-], optional = true }
+pprof = { version = "0.13.0", features = ["flamegraph", "prost-codec"], optional = true }
 rand = "0.8.5"
-reqwest = { version = "0.12.7", default-features = false, features = [
-    "blocking",
-    "gzip",
-    "http2",
-] }
-revision = { version = "0.10.0", features = [
-    "chrono",
-    "geo",
-    "roaring",
-    "regex",
-    "rust_decimal",
-    "uuid",
-] }
+reqwest = { version = "0.12.7", default-features = false, features = ["blocking", "gzip", "http2"] }
+revision = { version = "0.10.0", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
 rmpv = "1.0.1"
 rust_decimal = "1.36.0"
 rustyline = { version = "12.0.0", features = ["derive"] }
@@ -112,11 +90,7 @@ semver = "1.0.20"
 serde = { version = "1.0.209", features = ["derive"] }
 serde_json = "1.0.127"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
-surrealdb = { version = "2", path = "crates/sdk", features = [
-    "protocol-http",
-    "protocol-ws",
-    "rustls",
-] }
+surrealdb = { version = "2", path = "crates/sdk", features = ["protocol-http", "protocol-ws", "rustls"] }
 surrealdb-core = { version = "2", path = "crates/core" }
 tempfile = "3.8.1"
 thiserror = "1.0.63"
@@ -125,19 +99,7 @@ tokio-stream = "0.1"
 tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.11", features = ["io"] }
 tower = "0.4.13"
-tower-http = { version = "0.5.2", features = [
-    "trace",
-    "sensitive-headers",
-    "auth",
-    "request-id",
-    "util",
-    "catch-panic",
-    "cors",
-    "set-header",
-    "limit",
-    "add-extension",
-    "compression-full",
-] }
+tower-http = { version = "0.5.2", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension", "compression-full"] }
 tower-service = "0.3.3"
 tracing = "0.1"
 tracing-opentelemetry = "0.25.0"
@@ -151,22 +113,12 @@ nix = { version = "0.27.1", features = ["user"] }
 [target.'cfg(unix)'.dev-dependencies]
 nix = { version = "0.27.1", features = ["signal", "user"] }
 
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
-mimalloc = { version = "0.1.39", default-features = false }
-
-[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
-jemallocator = "0.5.4"
-
 [dev-dependencies]
 assert_fs = "1.0.13"
 chrono = "0.4.38"
 env_logger = "0.10.1"
 jsonwebtoken = "9.3.0"
-opentelemetry-proto = { version = "0.7.0", features = [
-    "gen-tonic",
-    "metrics",
-    "logs",
-] }
+opentelemetry-proto = { version = "0.7.0", features = ["gen-tonic", "metrics", "logs"] }
 rcgen = "0.11.3"
 serial_test = "2.0.0"
 temp-env = { version = "0.3.6", features = ["async_closure"] }
