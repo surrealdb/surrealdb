@@ -97,12 +97,12 @@ pub static TELEMETRY_PROVIDER: LazyLock<String> =
 	lazy_env_parse!("SURREAL_TELEMETRY_PROVIDER", String);
 
 /// If set to "true" then no traces are sent to the GRPC OTEL collector
-pub static TELEMETRY_DISABLE_TRACING: LazyLock<String> =
-	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_TRACING", String);
+pub static TELEMETRY_DISABLE_TRACING: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_TRACING", bool);
 
 /// If set to "true" then no metrics are sent to the GRPC OTEL collector
-pub static TELEMETRY_DISABLE_METRICS: LazyLock<String> =
-	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_METRICS", String);
+pub static TELEMETRY_DISABLE_METRICS: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_METRICS", bool);
 
 /// If set then use this as value for the namespace label when sending telemetry
 pub static TELEMETRY_NAMESPACE: LazyLock<String> =

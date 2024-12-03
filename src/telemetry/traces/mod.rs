@@ -1,7 +1,7 @@
 pub mod rpc;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::cnf::{TELEMETRY_PROVIDER, TELEMETRY_DISABLE_TRACING};
+use crate::cnf::{TELEMETRY_DISABLE_TRACING, TELEMETRY_PROVIDER};
 use crate::err::Error;
 use crate::telemetry::OTEL_DEFAULT_RESOURCE;
 use opentelemetry::trace::TracerProvider as _;
@@ -15,14 +15,9 @@ pub fn new<S>(filter: CustomEnvFilter) -> Result<Option<Box<dyn Layer<S> + Send 
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
-	let tracing_disabled = match TELEMETRY_DISABLE_TRACING.trim() {
-		"true" => true,
-		_ => false,
-	};
-
 	match TELEMETRY_PROVIDER.trim() {
 		// The OTLP telemetry provider has been specified
-		s if s.eq_ignore_ascii_case("otlp") && tracing_disabled => {
+		s if s.eq_ignore_ascii_case("otlp") && !*TELEMETRY_DISABLE_TRACING => {
 			// Create a new OTLP exporter using gRPC
 			let exporter = opentelemetry_otlp::new_exporter().tonic();
 			// Build a new span exporter which uses gRPC
