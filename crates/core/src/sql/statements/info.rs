@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
+use crate::mem::ALLOC;
 use crate::sql::{Base, Ident, Object, Value, Version};
 use derive::Store;
 use reblessive::tree::Stk;
@@ -91,6 +92,13 @@ impl InfoStatement {
 							}
 							out.into()
 						},
+						#[cfg(feature = "allocator")]
+						"memory".to_string() => {
+							let mut out = Object::default();
+							let mem = ALLOC.current_usage();
+							out.insert("allocated".to_string(),  mem.into());
+							out.into()
+						}
 					}),
 				})
 			}
