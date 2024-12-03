@@ -4,11 +4,6 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::LazyLock;
 
-/// This atomic counter monitors the maximum amount of
-/// memory (in bytes) that has been allocated for this
-/// process over the course of its life.
-static TOTAL: AtomicUsize = AtomicUsize::new(0);
-
 /// This atomic counter monitors the amount of memory
 /// (in bytes) that is currently allocated for this
 /// process at this time.
@@ -55,9 +50,8 @@ static MEMORY_THRESHOLD: LazyLock<usize> = std::sync::LazyLock::new(|| {
 /// This structure implements a wrapper around the
 /// system allocator, or around a user-specified
 /// allocator. It tracks the current memory which
-/// is allocated, and the total memory allocated
-/// across the duration of the programme. This
-/// memory use can then be checked at runtime.
+/// is allocated, allowing the memory use to be
+/// checked at runtime.
 #[derive(Debug)]
 pub struct TrackAlloc<Alloc = System> {
 	alloc: Alloc,
@@ -77,10 +71,6 @@ impl<A> TrackAlloc<A> {
 	pub fn current_usage(&self) -> usize {
 		CURRENT.load(Ordering::Relaxed)
 	}
-	/// Returns the total number of bytes allocated since startup
-	pub fn total_usage(&self) -> usize {
-		TOTAL.load(Ordering::Relaxed)
-	}
 	/// Returns the amount of memory (in KiB) that is currently allocated
 	pub fn current_usage_as_kb(&self) -> f32 {
 		Self::kb(self.current_usage())
@@ -92,18 +82,6 @@ impl<A> TrackAlloc<A> {
 	/// Returns the amount of memory (in GiB) that is currently allocated
 	pub fn current_usage_as_gb(&self) -> f32 {
 		Self::gb(self.current_usage())
-	}
-	/// Returns the total amount of memory (in KiB) allocated since startup
-	pub fn total_usage_as_kb(&self) -> f32 {
-		Self::kb(self.total_usage())
-	}
-	/// Returns the total amount of memory (in MiB) allocated since startup
-	pub fn total_usage_as_mb(&self) -> f32 {
-		Self::mb(self.total_usage())
-	}
-	/// Returns the total amount of memory (in GiB) allocated since startup
-	pub fn total_usage_as_gb(&self) -> f32 {
-		Self::gb(self.total_usage())
 	}
 	/// Checks whether the allocator is above the memory limit threshold
 	pub async fn is_beyond_threshold(&self) -> bool {
@@ -130,8 +108,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
 		let ret = self.alloc.alloc(layout);
 		if !ret.is_null() {
-			let prev = CURRENT.fetch_add(layout.size(), Ordering::Relaxed);
-			TOTAL.fetch_max(prev + layout.size(), Ordering::Relaxed);
+			CURRENT.fetch_add(layout.size(), Ordering::Relaxed);
 		}
 		ret
 	}
@@ -139,8 +116,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 	unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
 		let ret = self.alloc.alloc_zeroed(layout);
 		if !ret.is_null() {
-			let prev = CURRENT.fetch_add(layout.size(), Ordering::Relaxed);
-			TOTAL.fetch_max(prev + layout.size(), Ordering::Relaxed);
+			CURRENT.fetch_add(layout.size(), Ordering::Relaxed);
 		}
 		ret
 	}
