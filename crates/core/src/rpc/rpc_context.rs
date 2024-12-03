@@ -164,9 +164,8 @@ pub trait RpcContext {
 		let out: Result<Value, RpcError> =
 			crate::iam::signup::signup(self.kvs(), &mut tmp_session, v)
 				.await
-				.map(Into::into)
+				.map(|v| v.token.into())
 				.map_err(Into::into);
-
 		*self.session_mut() = tmp_session;
 		out.map(Into::into)
 	}
@@ -182,7 +181,7 @@ pub trait RpcContext {
 			crate::iam::signin::signin(self.kvs(), &mut tmp_session, v)
 				.await
 				// The default signin method just returns the token.
-				.map(|data| data.token.into())
+				.map(|v| v.token.into())
 				.map_err(Into::into);
 		*self.session_mut() = tmp_session;
 		out.map(Into::into)

@@ -1,9 +1,9 @@
-use super::verify::{
-	authenticate_generic, authenticate_record, verify_db_creds, verify_ns_creds, verify_root_creds,
+use super::access::{
+	authenticate_generic, authenticate_record, create_refresh_key_record, revoke_refresh_key_record,
 };
+use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level, Role};
 use crate::cnf::{EXPERIMENTAL_BEARER_ACCESS, INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
-use crate::ctx::MutableContext;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -11,10 +11,9 @@ use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::statements::{access, AccessGrant};
-use crate::sql::{access_type, AccessType, Base, Datetime, Ident, Object, Thing, Value};
+use crate::sql::{access_type, AccessType, Datetime, Object, Value};
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -932,69 +931,6 @@ pub fn verify_grant_bearer(
 		}
 		_ => Err(Error::AccessMethodMismatch),
 	}
-}
-
-pub async fn create_refresh_key_record(
-	kvs: &Datastore,
-	ac: Ident,
-	ns: &str,
-	db: &str,
-	rid: Thing,
-) -> Result<String, Error> {
-	let stmt = access::AccessStatementGrant {
-		ac,
-		base: Some(Base::Db),
-		subject: access::Subject::Record(rid),
-	};
-	let sess = Session::owner().with_ns(ns).with_db(db);
-	let opt = kvs.setup_options(&sess);
-	// Create a new context with a writeable transaction
-	let mut ctx = MutableContext::background();
-	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
-	ctx.set_transaction(tx.clone());
-	let ctx = ctx.freeze();
-	// Create a bearer grant to act as the refresh key
-	let grant = access::create_grant(&stmt, &ctx, &opt).await.map_err(|e| {
-		warn!("Unexpected error when attempting to create a refresh key: {e}");
-		Error::UnexpectedAuth
-	})?;
-	tx.cancel().await?;
-	// Return the key string from the bearer grant
-	match grant.grant {
-		access::Grant::Bearer(bearer) => Ok(bearer.key.as_string()),
-		_ => Err(Error::AccessMethodMismatch),
-	}
-}
-
-pub async fn revoke_refresh_key_record(
-	kvs: &Datastore,
-	gr: Ident,
-	ac: Ident,
-	ns: &str,
-	db: &str,
-) -> Result<(), Error> {
-	let stmt = access::AccessStatementRevoke {
-		ac,
-		base: Some(Base::Db),
-		gr: Some(gr),
-		cond: None,
-	};
-	let sess = Session::owner().with_ns(ns).with_db(db);
-	let opt = kvs.setup_options(&sess);
-	// Create a new context with a writeable transaction
-	let mut ctx = MutableContext::background();
-	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
-	ctx.set_transaction(tx.clone());
-	let ctx = ctx.freeze();
-	// Create a bearer grant to act as the refresh key
-	Stk::enter_scope(|stk| stk.run(|stk| access::revoke_grant(&stmt, stk, &ctx, &opt)))
-		.await
-		.map_err(|e| {
-			warn!("Unexpected error when attempting to revoke a refresh key: {e}");
-			Error::UnexpectedAuth
-		})?;
-	tx.cancel().await?;
-	Ok(())
 }
 
 #[cfg(test)]

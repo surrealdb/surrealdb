@@ -68,20 +68,20 @@ async fn handler(
 		Ok(Value::Object(vars)) => {
 			match signin(kvs, &mut session, vars).await.map_err(Error::from) {
 				// Authentication was successful
-				Ok(data) => match accept.as_deref() {
+				Ok(v) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => {
-						Ok(output::json(&Success::new(data.token, data.refresh)))
+						Ok(output::json(&Success::new(v.token, v.refresh)))
 					}
 					Some(Accept::ApplicationCbor) => {
-						Ok(output::cbor(&Success::new(data.token, data.refresh)))
+						Ok(output::cbor(&Success::new(v.token, v.refresh)))
 					}
 					Some(Accept::ApplicationPack) => {
-						Ok(output::pack(&Success::new(data.token, data.refresh)))
+						Ok(output::pack(&Success::new(v.token, v.refresh)))
 					}
 					// Text serialization
 					// NOTE: Only the token is returned in a plain text response.
-					Some(Accept::TextPlain) => Ok(output::text(data.token)),
+					Some(Accept::TextPlain) => Ok(output::text(v.token)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => {
 						Ok(output::full(&Success::new(data.token, data.refresh)))

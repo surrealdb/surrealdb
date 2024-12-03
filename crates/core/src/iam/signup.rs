@@ -1,4 +1,4 @@
-use super::verify::authenticate_record;
+use super::access::{authenticate_record, create_refresh_key_record};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
@@ -12,14 +12,39 @@ use crate::sql::Object;
 use crate::sql::Value;
 use chrono::Utc;
 use jsonwebtoken::{encode, Header};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
+
+#[doc(hidden)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct SignupData {
+	pub token: Option<String>,
+	pub refresh: Option<String>,
+}
+
+impl From<SignupData> for Value {
+	fn from(v: SignupData) -> Value {
+		let mut out = Object::default();
+		if let Some(token) = v.token {
+			out.insert("token".to_string(), token.into());
+		}
+		if let Some(refresh) = v.refresh {
+			out.insert("refresh".to_string(), refresh.into());
+		}
+		out.into()
+	}
+}
 
 pub async fn signup(
 	kvs: &Datastore,
 	session: &mut Session,
 	vars: Object,
-) -> Result<Option<String>, Error> {
+) -> Result<SignupData, Error> {
 	// Check vars contains only computed values
 	vars.validate_computed()?;
 	// Parse the specified variables
@@ -48,7 +73,7 @@ pub async fn db_access(
 	db: String,
 	ac: String,
 	vars: Object,
-) -> Result<Option<String>, Error> {
+) -> Result<SignupData, Error> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -109,6 +134,20 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
+											// Create refresh key if defined for the record access method
+											let refresh = match &at.bearer {
+												Some(_) => Some(
+													create_refresh_key_record(
+														kvs,
+														av.name.clone(),
+														&ns,
+														&db,
+														rid.clone(),
+													)
+													.await?,
+												),
+												None => None,
+											};
 											// Log the authenticated access method info
 											trace!("Signing up with access method `{}`", ac);
 											// Create the authentication token
@@ -129,7 +168,10 @@ pub async fn db_access(
 											// Check the authentication token
 											match enc {
 												// The auth token was created successfully
-												Ok(tk) => Ok(Some(tk)),
+												Ok(token) => Ok(SignupData {
+													token: Some(token),
+													refresh,
+												}),
 												_ => Err(Error::TokenMakingFailed),
 											}
 										}
@@ -407,7 +449,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(SignupData {
+				token: Some(tk),
+				..
+			}) = res
+			{
 				// Check that token can be verified with the defined algorithm
 				let val = Validation::new(Algorithm::RS256);
 				// Check that token can be verified with the defined public key
