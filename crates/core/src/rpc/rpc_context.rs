@@ -183,6 +183,7 @@ pub trait RpcContext {
 		Ok(Value::None.into())
 	}
 
+	// TODO(gguillemas): Remove this method in 3.0.0 and make `signupv2` the default
 	async fn signup(&mut self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
