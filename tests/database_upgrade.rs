@@ -60,35 +60,35 @@ mod database_upgrade {
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_2_0_0() {
-		upgrade_test_from_2_0("2.0.0").await;
+		upgrade_test_from_2_0("v2.0.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_2_0_1() {
-		upgrade_test_from_2_0("2.0.1").await;
+		upgrade_test_from_2_0("v2.0.1").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_2_0_2() {
-		upgrade_test_from_2_0("2.0.2").await;
+		upgrade_test_from_2_0("v2.0.2").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_2_0_3() {
-		upgrade_test_from_2_0("2.0.3").await;
+		upgrade_test_from_2_0("v2.0.3").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_from_2_0_4() {
-		upgrade_test_from_2_0("2.0.4").await;
+		upgrade_test_from_2_0("v2.0.4").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
