@@ -81,7 +81,7 @@ async fn handler(
 					}
 					// Text serialization
 					// NOTE: Only the token is returned in a plain text response.
-					Some(Accept::TextPlain) => Ok(output::text(v.token)),
+					Some(Accept::TextPlain) => Ok(output::text(v.token.unwrap_or_default())),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v.token, v.refresh))),
 					// Return nothing

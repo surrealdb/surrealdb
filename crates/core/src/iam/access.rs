@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::statements::access;
 use crate::sql::{Base, Ident, Thing, Value};
-use reblessive::tree::Stk;
+use reblessive;
 
 // Execute the AUTHENTICATE clause for a record access method
 pub async fn authenticate_record(
@@ -89,7 +89,6 @@ pub async fn authenticate_generic(
 	}
 }
 
-
 // Create a bearer key to act as refresh token for a record user
 pub async fn create_refresh_token_record(
 	kvs: &Datastore,
@@ -110,7 +109,7 @@ pub async fn create_refresh_token_record(
 	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();
-	// Create a bearer grant to act as the refresh token 
+	// Create a bearer grant to act as the refresh token
 	let grant = access::create_grant(&stmt, &ctx, &opt).await.map_err(|e| {
 		warn!("Unexpected error when attempting to create a refresh token: {e}");
 		Error::UnexpectedAuth
@@ -144,13 +143,17 @@ pub async fn revoke_refresh_token_record(
 	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();
-	// Create a bearer grant to act as the refresh token 
-	Stk::enter_scope(|stk| stk.run(|stk| access::revoke_grant(&stmt, stk, &ctx, &opt)))
-		.await
-		.map_err(|e| {
-			warn!("Unexpected error when attempting to revoke a refresh token: {e}");
-			Error::UnexpectedAuth
-		})?;
+	// Create a bearer grant to act as the refresh token
+	let mut stack = reblessive::tree::TreeStack::new();
+	stack
+		.enter(|stk| async {
+			access::revoke_grant(&stmt, stk, &ctx, &opt).await.map_err(|e| {
+				warn!("Unexpected error when attempting to revoke a refresh token: {e}");
+				Error::UnexpectedAuth
+			})
+		})
+		.finish()
+		.await?;
 	tx.cancel().await?;
 	Ok(())
 }

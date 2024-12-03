@@ -27,9 +27,7 @@ pub use param::DefineParamStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 
-#[doc(hidden)]
 pub use deprecated::scope::DefineScopeStatement;
-#[doc(hidden)]
 pub use deprecated::token::DefineTokenStatement;
 
 use crate::ctx::Context;

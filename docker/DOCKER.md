@@ -24,7 +24,7 @@
     &nbsp;
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/built_with-Rust-dca282.svg?style=flat-square"></a>
     &nbsp;
-	<a href="https://github.com/surrealdb/surrealdb/actions"><img src="https://img.shields.io/github/actions/status/surrealdb/surrealdb/ci.yml?style=flat-square&branch=main"></a>
+	<a href="https://github.com/surrealdb/surrealdb/actions"><img src="https://img.shields.io/github/actions/workflow/status/surrealdb/surrealdb/ci.yml?style=flat-square&branch=main"></a>
     &nbsp;
     <a href="https://status.surrealdb.com"><img src="https://img.shields.io/uptimerobot/ratio/7/m784409192-e472ca350bb615372ededed7?label=cloud%20uptime&style=flat-square"></a>
     &nbsp;
@@ -77,17 +77,13 @@ For guidance on installation, development, deployment, and administration, see o
 
 Docker can be used to manage and run SurrealDB database instances without the need to install any command-line tools. The SurrealDB docker container contains the full command-line tools for importing and exporting data from a running server, or for running a server itself.
 
-```bash
-docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start
-```
-
-For just getting started with a development server running in memory, you can pass the container a basic initialization to set the user and password as root and enable logging.
+For just getting started with a development server running in memory, you can start the container with basic initialization arguments to create a root user with "root" as username and password and enable debug logging.
 
 ```bash
-docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --log trace --user root --pass root memory
+docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --log debug --user root --pass root memory
 ``` 
 
-Access to the surrealdb CLI with:
+You can access the server using the same SurrealDB CLI provided in the image by using the `sql` command:
 
 ```bash
 docker exec -it <container_name> /surreal sql -e http://localhost:8000 -u root -p root --ns test --db test --pretty
@@ -95,38 +91,56 @@ docker exec -it <container_name> /surreal sql -e http://localhost:8000 -u root -
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/gettingstarted.svg?raw=true">&nbsp;&nbsp;Run using Docker Compose</h2>
 
+The Docker image can be used with the `docker compose` command.
 
-The Docker image can be used with the `docker-compose` tool.
-You can execute the following command to view the help of the `start` command to know the supported _environment variables_:
+Here is an example of a basic `docker-compose.yml` file for quickly getting started.
+
+```yaml
+services:
+  surrealdb:
+    command: start 
+    image: surrealdb/surrealdb:latest # Consider using a specific version
+    pull_policy: always # Remove this when not using "latest"
+    ports:
+      - 8000:8000
+    environment:
+      - SURREAL_LOG=debug # Use "info" in production
+      - SURREAL_USER=root
+      - SURREAL_PASS=root # Change this in production!
+```
+
+Most of the configuration of SurrealDB can be done through [environment variables](https://surrealdb.com/docs/surrealdb/cli/env).
+
+You can find a comprehensive list of all the available environment variables in the help message of the `start` subcommand:
 
 ```shell
 docker run --rm surrealdb/surrealdb:latest start --help
 ```
 
-Here is an example of `docker-compose.yml` file.
+SurrealDB can be executed as a non-root user for added security. This ensures that exploiting certain vulnerabilities in the SurrealDB process does not immediately result in privileged access to the container. When doing this, ensure that any files required by SurrealDB are mounted to the container in a volume and that are accessible to that non-root user through their ownership and permissions.
+
+Here is an example of running the container with a persistent volume as a non-root user with Docker Compose:
 
 ```yaml
-version: '3'
-
 services:
   surrealdb:
-    env_file:
-      - .env
-    command: start 
-    image: surrealdb/surrealdb:latest
+    image: surrealdb/surrealdb:latest # Consider using a specific version
+    pull_policy: always # Remove this when not using "latest"
+    command: start rocksdb:/mydata/mydatabase.db
+    user: "1000"
     ports:
       - 8000:8000
+    volumes:
+      - ./mydata:/mydata
+    environment:
+      - SURREAL_LOG=debug # Use "info" in production
+      - SURREAL_USER=root
+      - SURREAL_PASS=root # Change this in production!
 ```
 
-Here is an example of `.env` file.
+In this example, you should ensure that the user with UID `1000` exists in the host and that it has access (e.g. ownership) to read and write in the `./mydata` directory. You can find the UID of the active user in the host by running `id -u`. You can also provide a group for the container process to run as, such as for example `user: "1000:1000"`.
 
-```dotenv
-SURREAL_LOG=trace
-SURREAL_USER=root
-SURREAL_PASS=root
-SURREAL_CAPS_ALLOW_ALL=true
-```
-
+The same behavior can be acomplished without Docker Compose by providing the `-u` or `--user` argument to [`docker run`](https://docs.docker.com/reference/cli/docker/container/run/). Similar mechanisms exist in other container management tools such as [Podman](https://docs.podman.io/en/latest/markdown/podman-run.1.html#user-u-user-group) or container orchestration systems such as [Kubernetes](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod).
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/community.svg?raw=true">&nbsp;&nbsp;Community</h2>
 

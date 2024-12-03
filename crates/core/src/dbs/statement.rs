@@ -35,7 +35,6 @@ pub(crate) enum Statement<'a> {
 	Delete(&'a DeleteStatement),
 	Insert(&'a InsertStatement),
 	// TODO(gguillemas): Document once bearer access is no longer experimental.
-	#[doc(hidden)]
 	Access(&'a AccessStatement),
 }
 
@@ -99,7 +98,7 @@ impl<'a> From<&'a AccessStatement> for Statement<'a> {
 	}
 }
 
-impl<'a> fmt::Display for Statement<'a> {
+impl fmt::Display for Statement<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Statement::Live(v) => write!(f, "{v}"),
@@ -116,7 +115,7 @@ impl<'a> fmt::Display for Statement<'a> {
 	}
 }
 
-impl<'a> Statement<'a> {
+impl Statement<'_> {
 	/// Check if this is a SELECT statement
 	pub(crate) fn is_select(&self) -> bool {
 		matches!(self, Statement::Select(_))
@@ -371,7 +370,6 @@ impl<'a> Statement<'a> {
 	}
 
 	/// Returns any PARALLEL clause if specified
-	#[cfg(not(target_arch = "wasm32"))]
 	pub(crate) fn parallel(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.parallel,

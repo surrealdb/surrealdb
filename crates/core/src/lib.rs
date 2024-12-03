@@ -1,3 +1,17 @@
+//! # Surrealdb Core
+//!
+//! This crate is the internal core library of SurrealDB.
+//! It contains most of the database functionality on top of which the surreal binary is
+//! implemented.
+//!
+//! <section class="warning">
+//! <h3>Unstable!</h3>
+//! This crate is <b>SurrealDB internal API</b>. It does not adhere to semver and it's API is free to
+//! change and break code even between patch versions. If you are looking for a stable interface
+//! to the Surrealdb library please have a look at <a href="https://crates.io/crates/surrealdb">the rust SDK</a>
+//! </section>
+//!
+
 #[macro_use]
 extern crate tracing;
 
@@ -5,59 +19,38 @@ extern crate tracing;
 mod mac;
 
 mod cf;
-#[doc(hidden)]
-pub mod ctx;
 mod doc;
 mod exe;
 mod fnc;
 mod vs;
 
-pub mod sql;
-
-#[doc(hidden)]
 pub mod cnf;
-#[doc(hidden)]
+pub mod ctx;
 pub mod dbs;
-#[doc(hidden)]
 pub mod env;
-#[doc(hidden)]
 pub mod err;
-#[doc(hidden)]
 pub mod fflags;
-#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
-#[doc(hidden)]
 pub mod gql;
-#[doc(hidden)]
 pub mod iam;
-#[doc(hidden)]
 pub mod idg;
-#[doc(hidden)]
 pub mod idx;
-#[doc(hidden)]
 pub mod key;
-#[doc(hidden)]
 pub mod kvs;
-#[doc(hidden)]
+pub mod mem;
+pub mod obs;
 pub mod options;
-#[doc(hidden)]
 pub mod rpc;
-#[doc(hidden)]
+pub mod sql;
 pub mod syn;
 
 #[cfg(feature = "ml")]
-#[doc(hidden)]
 pub use surrealml as ml;
-#[cfg(feature = "ml")]
-#[doc(hidden)]
-pub mod obs;
 
-#[doc(hidden)]
 pub mod test_helpers {
 	pub use crate::vs::conv::to_u128_be;
 	pub use crate::vs::generate_versionstamp_sequences;
 }
 
-#[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
 	pub use async_channel::bounded;

@@ -640,7 +640,7 @@ jobs:
 
       - name: Install release-plz
         run: |
-          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
+          curl -L https://github.com/release-plz/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
           sudo chmod +x /usr/bin/release-plz
 
       - name: Install a TOML parser
@@ -720,6 +720,13 @@ jobs:
           # Patch crate name
           sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" crates/sdk/Cargo.toml
           sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" crates/core/Cargo.toml
+
+          # Patch binary dependency
+          sed -i "s/surrealdb =/surrealdb-${{ inputs.environment }} =/" Cargo.toml
+          sed -i "s/surrealdb-core =/surrealdb-core-${{ inputs.environment }} =/" Cargo.toml
+
+          # Patch features
+          sed -i "s#\"surrealdb/#\"surrealdb-${{ inputs.environment }}/#" Cargo.toml
 
           # Patch sdk dependency
           sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" crates/sdk/Cargo.toml

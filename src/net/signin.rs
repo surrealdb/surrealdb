@@ -83,9 +83,7 @@ async fn handler(
 					// NOTE: Only the token is returned in a plain text response.
 					Some(Accept::TextPlain) => Ok(output::text(v.token)),
 					// Internal serialization
-					Some(Accept::Surrealdb) => {
-						Ok(output::full(&Success::new(data.token, data.refresh)))
-					}
+					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v.token, v.refresh))),
 					// Return nothing
 					None => Ok(output::none()),
 					// An incorrect content-type was requested

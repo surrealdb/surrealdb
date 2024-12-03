@@ -45,7 +45,6 @@ impl Response {
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-#[doc(hidden)]
 #[non_exhaustive]
 pub enum Status {
 	Ok,
@@ -75,7 +74,6 @@ impl Serialize for Response {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
-#[doc(hidden)]
 #[non_exhaustive]
 pub struct QueryMethodResponse {
 	pub time: String,
@@ -98,7 +96,6 @@ impl From<&Response> for QueryMethodResponse {
 	}
 }
 
-#[doc(hidden)]
 impl Revisioned for Response {
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(

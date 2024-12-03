@@ -26,6 +26,7 @@ use http::header::SEC_WEBSOCKET_PROTOCOL;
 use http::HeaderMap;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
+use surrealdb::mem::ALLOC;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
 use surrealdb::rpc::method::Method;
@@ -68,7 +69,6 @@ async fn get_handler(
 		warn!("Automatic inference of the protocol format is deprecated in SurrealDB 2.0 and will be removed in SurrealDB 3.0.");
 		warn!("Please upgrade any client to ensure that the connection format is specified.");
 	}
-
 	// Check if there is a connection id header specified
 	let id = match headers.get(SurrealId::name()) {
 		// Use the specific SurrealDB id header when provided
@@ -104,10 +104,8 @@ async fn get_handler(
 			},
 		},
 	};
-
 	// Store connection id in session
 	sess.id = Some(id.to_string());
-
 	// Check if a connection with this id already exists
 	if rpc_state.web_sockets.read().await.contains_key(&id) {
 		return Err(Error::Request);
@@ -140,7 +138,6 @@ async fn handle_socket(
 		// No protocol format was specified
 		_ => Format::None,
 	};
-	// Format::Unsupported is not in the PROTOCOLS list so cannot be the value of format here
 	// Create a new connection instance
 	let rpc = Connection::new(datastore, state, id, sess, format);
 	// Serve the socket connection requests
@@ -150,7 +147,7 @@ async fn handle_socket(
 async fn post_handler(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
-	output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	content_type: TypedHeader<ContentType>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
@@ -161,22 +158,34 @@ async fn post_handler(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Rpc);
 		return Err(Error::ForbiddenRoute(RouteTarget::Rpc.to_string()));
 	}
+	// Get the input format from the Content-Type header
 	let fmt: Format = content_type.deref().into();
-	let out_fmt: Option<Format> = output.as_deref().map(Into::into);
-	if let Some(out_fmt) = out_fmt {
-		if fmt != out_fmt {
+	// Check that the input format is a valid format
+	if matches!(fmt, Format::Unsupported | Format::None) {
+		return Err(Error::InvalidType);
+	}
+	// Get the output format from the Accept header
+	let out: Option<Format> = accept.as_deref().map(Into::into);
+	// Check that the input format and the output format match
+	if let Some(out) = out {
+		if fmt != out {
 			return Err(Error::InvalidType);
 		}
 	}
-	if fmt == Format::Unsupported || fmt == Format::None {
-		return Err(Error::InvalidType);
+	// Create a new HTTP instance
+	let mut rpc = PostRpcContext::new(&state.datastore, session, BTreeMap::new());
+	// Check to see available memory
+	if ALLOC.is_beyond_threshold().await {
+		return Err(Error::ServerOverloaded);
 	}
-
-	let mut rpc_ctx = PostRpcContext::new(&state.datastore, session, BTreeMap::new());
-
+	// Parse the HTTP request body
 	match fmt.req_http(body) {
 		Ok(req) => {
-			let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
+			// Parse the request RPC method type
+			let method = Method::parse(req.method);
+			// Execute the specified method
+			let res = rpc.execute_mutable(method, req.params).await;
+			// Return the HTTP response
 			fmt.res_http(res.into_response(None)).map_err(Error::from)
 		}
 		Err(err) => Err(Error::from(err)),

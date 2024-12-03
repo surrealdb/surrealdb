@@ -43,7 +43,6 @@ impl Default for Expression {
 
 impl Expression {
 	/// Create a new binary expression
-	#[doc(hidden)]
 	pub fn new(l: Value, o: Operator, r: Value) -> Self {
 		Self::Binary {
 			l,

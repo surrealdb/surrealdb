@@ -24,31 +24,59 @@ use super::{method::Method, response::Data, rpc_error::RpcError};
 
 #[allow(async_fn_in_trait)]
 pub trait RpcContext {
+	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore;
+	/// The current session for this RPC context
 	fn session(&self) -> &Session;
+	/// Mutable access to the current session for this RPC context
 	fn session_mut(&mut self) -> &mut Session;
+	/// The current parameters stored on this RPC context
 	fn vars(&self) -> &BTreeMap<String, Value>;
+	/// Mutable access to the current parameters stored on this RPC context
 	fn vars_mut(&mut self) -> &mut BTreeMap<String, Value>;
+	/// The version information for this RPC context
 	fn version_data(&self) -> Data;
 
+	// ------------------------------
+	// Realtime
+	// ------------------------------
+
+	/// Live queries are disabled by default
 	const LQ_SUPPORT: bool = false;
+
+	/// Handles the execution of a LIVE statement
 	fn handle_live(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
-		async { unimplemented!("handle functions must be redefined if LQ_SUPPORT = true") }
+		async { unimplemented!("handle_live function must be implemented if LQ_SUPPORT = true") }
 	}
+	/// Handles the execution of a KILL statement
 	fn handle_kill(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
-		async { unimplemented!("handle functions must be redefined if LQ_SUPPORT = true") }
+		async { unimplemented!("handle_kill function must be implemented if LQ_SUPPORT = true") }
+	}
+	/// Handles the cleanup of live queries
+	fn cleanup_lqs(&self) -> impl std::future::Future<Output = ()> + Send {
+		async { unimplemented!("cleanup_lqs function must be implemented if LQ_SUPPORT = true") }
 	}
 
+	// ------------------------------
+	// GraphQL
+	// ------------------------------
+
+	/// GraphQL queries are disabled by default
 	#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
 	const GQL_SUPPORT: bool = false;
 
+	/// Returns the GraphQL schema cache used in GraphQL queries
 	#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
-		unimplemented!("graphql_schema_cache must be implemented if GQL_SUPPORT = true")
+		unimplemented!("graphql_schema_cache function must be implemented if GQL_SUPPORT = true")
 	}
 
+	// ------------------------------
+	// Method execution
+	// ------------------------------
+
 	/// Executes any method on this RPC implementation
-	async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
+	async fn execute_mutable(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method,
@@ -63,8 +91,9 @@ pub trait RpcContext {
 			Method::Use => self.yuse(params).await,
 			Method::Signup => self.signup(params).await,
 			Method::Signin => self.signin(params).await,
-			Method::Invalidate => self.invalidate().await,
 			Method::Authenticate => self.authenticate(params).await,
+			Method::Invalidate => self.invalidate().await,
+			Method::Reset => self.reset().await,
 			Method::Kill => self.kill(params).await,
 			Method::Live => self.live(params).await,
 			Method::Set => self.set(params).await,
@@ -88,7 +117,7 @@ pub trait RpcContext {
 	}
 
 	/// Executes any immutable method on this RPC implementation
-	async fn execute_immut(&self, method: Method, params: Array) -> Result<Data, RpcError> {
+	async fn execute_immutable(&self, method: Method, params: Array) -> Result<Data, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method,
@@ -159,54 +188,53 @@ pub trait RpcContext {
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let mut tmp_session = mem::take(self.session_mut());
-
-		let out: Result<Value, RpcError> =
-			crate::iam::signup::signup(self.kvs(), &mut tmp_session, v)
-				.await
-				.map(|v| v.token.into())
-				.map_err(Into::into);
-		*self.session_mut() = tmp_session;
-		out.map(Into::into)
+		// Take ownership over the current session
+		let mut session = mem::take(self.session_mut());
+		// Attempt signup, storing information in the session
+		let out: Result<Value, Error> =
+			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(|v| v.token.into());
+		// Return ownership of the current session
+		*self.session_mut() = session;
+		// Return the signup result
+		out.map(Into::into).map_err(Into::into)
 	}
 
-	// TODO(gguillemas): Remove this method in 3.0.0 and make `signinv2` the default.
+	// TODO(gguillemas): Remove this method in 3.0.0 and make `signinv2` the default
 	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let mut tmp_session = mem::take(self.session_mut());
-		let out: Result<Value, RpcError> =
-			crate::iam::signin::signin(self.kvs(), &mut tmp_session, v)
-				.await
-				// The default signin method just returns the token.
-				.map(|v| v.token.into())
-				.map_err(Into::into);
-		*self.session_mut() = tmp_session;
-		out.map(Into::into)
+		// Take ownership over the current session
+		let mut session = mem::take(self.session_mut());
+		// Attempt signin, storing information in the session
+		let out: Result<Value, Error> = crate::iam::signin::signin(self.kvs(), &mut session, v)
+			.await
+			// The default `signin` method just returns the token
+			.map(|v| v.token.into());
+		// Return ownership of the current session
+		*self.session_mut() = session;
+		// Return the signin result
+		out.map(Into::into).map_err(Into::into)
 	}
 
-	// TODO(gguillemas): This should be made the default in 3.0.0.
-	// This method for signing in returns an object instead of a string, supporting additional values.
-	// The original motivation for this method was the introduction of refresh tokens.
+	// TODO(gguillemas): This should be made the default in 3.0.0
+	// This method for signing in returns an object instead of a string, supporting additional values
+	// The original motivation for this method was the introduction of refresh tokens
 	async fn signinv2(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let mut tmp_session = mem::take(self.session_mut());
-		let out: Result<Value, RpcError> =
-			crate::iam::signin::signin(self.kvs(), &mut tmp_session, v)
-				.await
-				.map(Into::into)
-				.map_err(Into::into);
-		*self.session_mut() = tmp_session;
-		out.map(Into::into)
-	}
-
-	async fn invalidate(&mut self) -> Result<Data, RpcError> {
-		crate::iam::clear::clear(self.session_mut())?;
-		Ok(Value::None.into())
+		// Take ownership over the current session
+		let mut session = mem::take(self.session_mut());
+		// Attempt signin, storing information in the session
+		let out: Result<Value, Error> =
+			crate::iam::signin::signin(self.kvs(), &mut session, v).await.map(Into::into);
+		// Return ownership of the current session
+		*self.session_mut() = session;
+		// Return the signin result
+		out.map(Into::into).map_err(Into::into)
 	}
 
 	async fn authenticate(&mut self, params: Array) -> Result<Data, RpcError> {
@@ -214,13 +242,40 @@ pub trait RpcContext {
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let mut tmp_session = mem::take(self.session_mut());
-		let out: Result<(), RpcError> =
-			crate::iam::verify::token(self.kvs(), &mut tmp_session, &token.0)
+		// Take ownership over the current session
+		let mut session = mem::take(self.session_mut());
+		// Attempt authentcation, storing information in the session
+		let out: Result<Value, Error> =
+			crate::iam::verify::token(self.kvs(), &mut session, &token.0)
 				.await
-				.map_err(Into::into);
-		*self.session_mut() = tmp_session;
-		out.map(|_| Value::None.into())
+				.map(|_| Value::None);
+		// Return ownership of the current session
+		*self.session_mut() = session;
+		// Return nothing on success
+		out.map_err(Into::into).map(Into::into)
+	}
+
+	async fn invalidate(&mut self) -> Result<Data, RpcError> {
+		// Clear the current session
+		crate::iam::clear::clear(self.session_mut())?;
+		// Return nothing on success
+		Ok(Value::None.into())
+	}
+
+	async fn reset(&mut self) -> Result<Data, RpcError> {
+		// Take ownership over the current session
+		let mut session = mem::take(self.session_mut());
+		// Clear the current session completely
+		crate::iam::clear::clear(&mut session)?;
+		// Clear the namespace and database
+		self.session_mut().ns = None;
+		self.session_mut().db = None;
+		// Clear all connection parameters
+		self.vars_mut().clear();
+		// Cleanup live queries
+		self.cleanup_lqs().await;
+		// Return nothing on success
+		Ok(Value::None.into())
 	}
 
 	// ------------------------------

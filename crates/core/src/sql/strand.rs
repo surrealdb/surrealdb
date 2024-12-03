@@ -112,7 +112,7 @@ pub(crate) mod no_nul_bytes {
 	{
 		struct NoNulBytesVisitor;
 
-		impl<'de> Visitor<'de> for NoNulBytesVisitor {
+		impl Visitor<'_> for NoNulBytesVisitor {
 			type Value = String;
 
 			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
