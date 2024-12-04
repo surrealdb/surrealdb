@@ -24,6 +24,7 @@ resolver = "2"
 [features]
 # Public features
 default = ["protocol-ws", "rustls"]
+allocator = ["surrealdb-core/allocator"]
 protocol-http = ["dep:reqwest"]
 protocol-ws = ["dep:tokio-tungstenite", "dep:trice", "tokio/time"]
 kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]

@@ -370,7 +370,6 @@ impl Statement<'_> {
 	}
 
 	/// Returns any PARALLEL clause if specified
-	#[cfg(not(target_arch = "wasm32"))]
 	pub(crate) fn parallel(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.parallel,

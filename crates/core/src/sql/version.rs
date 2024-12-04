@@ -33,7 +33,10 @@ impl Version {
 		doc: Option<&CursorDoc>,
 	) -> Result<u64, Error> {
 		match self.0.compute(stk, ctx, opt, doc).await? {
-			Value::Datetime(v) => Ok(v.to_u64()),
+			Value::Datetime(v) => match v.to_u64() {
+				Some(ts) => Ok(ts),
+				_ => Err(Error::Unreachable("Failed to convert datetime to timestamp".into())),
+			},
 			found => Err(Error::InvalidVersion {
 				found,
 			}),

@@ -22,12 +22,8 @@ use surrealcs::transactions::interface::interface::{
 	Any as AnyState, Transaction as SurrealCSTransaction,
 };
 
-/// The main struct that is used to interact with the database.
-#[derive(Clone)]
-#[non_exhaustive]
 pub struct Datastore {}
 
-#[non_exhaustive]
 pub struct Transaction {
 	/// Is the transaction complete?
 	done: bool,
@@ -46,11 +42,6 @@ pub struct Transaction {
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.done && self.write {
-			// Check if already panicking
-			if std::thread::panicking() {
-				return;
-			}
-			// Handle the behaviour
 			match self.check {
 				Check::None => {
 					trace!("A transaction was dropped without being committed or cancelled");
@@ -58,15 +49,8 @@ impl Drop for Transaction {
 				Check::Warn => {
 					warn!("A transaction was dropped without being committed or cancelled");
 				}
-				Check::Panic => {
-					#[cfg(debug_assertions)]
-					{
-						let backtrace = std::backtrace::Backtrace::force_capture();
-						if let std::backtrace::BacktraceStatus::Captured = backtrace.status() {
-							println!("{}", backtrace);
-						}
-					}
-					panic!("A transaction was dropped without being committed or cancelled");
+				Check::Error => {
+					error!("A transaction was dropped without being committed or cancelled");
 				}
 			}
 		}
@@ -96,12 +80,19 @@ impl Datastore {
 	/// # Returns
 	/// the transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+		// Create the underlying transaction
 		let transaction = SurrealCSTransaction::new().await;
 		let transaction = transaction.map_err(|e| Error::Tx(e.to_string()))?;
 		let transaction = transaction.into_any();
+		// Specify the check level
+		#[cfg(not(debug_assertions))]
+		let check = Check::Warn;
+		#[cfg(debug_assertions)]
+		let check = Check::Error;
+		// Create a new transaction
 		Ok(Transaction {
 			done: false,
-			check: Check::Warn,
+			check,
 			write,
 			started: false,
 			inner: Arc::new(Mutex::new(transaction)),

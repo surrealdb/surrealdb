@@ -154,6 +154,9 @@ impl Datastore {
 				let end = crate::key::node::lq::suffix(*id);
 				let mut next = Some(beg..end);
 				while let Some(rng) = next {
+					// Pause and yield execution
+					yield_now!();
+					// Fetch the next batch of keys and values
 					let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true, None).await);
 					next = res.next;
 					for (k, v) in res.values.iter() {
