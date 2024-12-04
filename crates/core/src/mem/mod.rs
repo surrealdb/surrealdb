@@ -19,7 +19,7 @@ pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "ios")]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<mimalloc::MiMalloc> =
+pub static ALLOC: track::TrackAlloc<mimalloc::Jemalloc> =
 	track::TrackAlloc::new(mimalloc::MiMalloc);
 
 #[cfg(feature = "allocator")]
@@ -31,8 +31,8 @@ pub static ALLOC: track::TrackAlloc<mimalloc::MiMalloc> =
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "macos")]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<mimalloc::MiMalloc> =
-	track::TrackAlloc::new(mimalloc::MiMalloc);
+pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
+	track::TrackAlloc::new(jemallocator::Jemalloc);
 
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "netbsd")]
