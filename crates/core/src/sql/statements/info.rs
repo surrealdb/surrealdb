@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
+#[cfg(feature = "allocator")]
 use crate::mem::ALLOC;
 use crate::sql::{Base, Ident, Object, Value, Version};
 use derive::Store;
