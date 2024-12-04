@@ -283,9 +283,7 @@ impl TestReport {
 			TestTaskResult::RunningError(_) => None,
 			TestTaskResult::Timeout => None,
 			TestTaskResult::Results(ref e) => Some(TestOutputs::Values(
-				e.iter()
-					.map(|x| x.result.as_ref().map_err(|e| e.to_string()).cloned())
-					.collect(),
+				e.iter().map(|x| x.result.as_ref().map_err(|e| e.to_string()).cloned()).collect(),
 			)),
 		};
 
