@@ -7,13 +7,11 @@ use surrealdb_core::sql::{
 	Subquery, Thing, Uuid, Value,
 };
 
-use crate::tests::schema::TestResult;
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RoughlyEqConfig {
-	record_id_keys: bool,
-	uuid: bool,
-	datetime: bool,
+	pub record_id_keys: bool,
+	pub uuid: bool,
+	pub datetime: bool,
 }
 
 impl RoughlyEqConfig {
@@ -22,18 +20,6 @@ impl RoughlyEqConfig {
 			record_id_keys: true,
 			uuid: true,
 			datetime: true,
-		}
-	}
-
-	pub fn from_test_result(res: &TestResult) -> Self {
-		match res {
-			TestResult::Plain(_) => RoughlyEqConfig::all(),
-			TestResult::Error(_) => RoughlyEqConfig::all(),
-			TestResult::Value(x) => RoughlyEqConfig {
-				uuid: x.skip_uuid.map(|x| !x).unwrap_or(true),
-				datetime: x.skip_datetime.map(|x| !x).unwrap_or(true),
-				record_id_keys: x.skip_record_id_key.map(|x| !x).unwrap_or(true),
-			},
 		}
 	}
 }

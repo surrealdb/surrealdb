@@ -44,8 +44,4 @@ impl Schedular {
 			f.await
 		});
 	}
-
-	pub async fn join(self) {
-		self.join.join_all().await;
-	}
 }

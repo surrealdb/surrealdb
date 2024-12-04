@@ -64,18 +64,6 @@ where
 		}
 	}
 
-	pub fn finish(&mut self) -> fmt::Result {
-		if self.line_buffer.is_empty() {
-			return Ok(());
-		}
-		for _ in 0..(self.indent_size * self.depth) {
-			self.w.write_char(' ')?;
-		}
-		self.w.write_str(&self.line_buffer)?;
-		self.line_buffer.clear();
-		Ok(())
-	}
-
 	pub fn increase_depth(&mut self) {
 		self.depth += 1;
 	}

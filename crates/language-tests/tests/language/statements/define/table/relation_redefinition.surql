@@ -1,6 +1,5 @@
 /**
 [test]
-wip = true
 
 [[test.results]]
 value = "NONE"
@@ -15,7 +14,8 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Found thing:c9ptwxoc3pppmwzkuk8y for field `out`, with record `likes:mkzqfia58locs300rbb9`, but expected a record<person>"
+match = "$error = /Found thing:[a-zA-Z0-9]* for field `out`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person>/"
+error = true
 
 [[test.results]]
 value = "NONE"
@@ -28,7 +28,8 @@ value = "[{ id: likes:dxkha0qcosudw16pgszg, in: person:qn7qdiuw7er59ygnow8m, out
 skip-record-id-key = true
 
 [[test.results]]
-error = "Found other:s5dt338gm6thhtpy8h26 for field `out`, with record `likes:sp18gvk3av8bilialbhl`, but expected a record<person | thing>"
+match = "$error = /Found other:[a-zA-Z0-9]* for field `out`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person | thing>/"
+error = true
 
 [[test.results]]
 value = "NONE"

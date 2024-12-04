@@ -3,9 +3,6 @@ name = "surrealql-test"
 version = "0.1.0"
 edition = "2021"
 
-[profile.release]
-debug = true
-
 [features]
 backend-mem = []
 backend-surrealkv = []

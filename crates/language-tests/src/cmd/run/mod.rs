@@ -4,11 +4,12 @@ mod report;
 mod util;
 
 use core::str;
-use std::{pin::pin, thread, time::Duration};
+use std::{io, mem, pin::pin, thread, time::Duration};
 
 use anyhow::{bail, Context, Result};
 use camino::Utf8Path;
 use clap::ArgMatches;
+use progress::Progress;
 use report::{TestGrade, TestReport};
 use surrealdb_core::{
 	dbs::{Capabilities, Response, Session},
@@ -19,7 +20,7 @@ use surrealdb_core::{
 use syn::error::RenderedError;
 use tokio::{
 	select,
-	sync::mpsc::{self, Receiver, Sender},
+	sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
 	time::{self},
 };
 use util::core_capabilities_from_test_config;
@@ -31,64 +32,45 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub enum TestJobResult {
+pub enum TestTaskResult {
 	ParserError(RenderedError),
 	RunningError(CoreError),
 	Timeout,
 	Results(Vec<Response>),
 }
 
-pub struct TestCoordinator {
-	reusable_dbs: Receiver<Datastore>,
-	results: Receiver<(TestId, TestJobResult)>,
+pub struct TestTaskContext {
+	pub id: TestId,
+	pub testset: TestSet,
+	pub ds: Option<(Datastore, Sender<Datastore>)>,
+	pub result: Sender<(TestId, TestTaskResult)>,
 }
 
-impl TestCoordinator {
-	pub async fn shutdown(mut self) -> Result<()> {
-		while let Ok(x) = self.reusable_dbs.try_recv() {
-			x.shutdown().await?;
-		}
-		Ok(())
+async fn fill_datastores(sender: &Sender<Datastore>, num_jobs: usize) -> Result<()> {
+	for _ in 0..num_jobs {
+		let db = Datastore::new("memory")
+			.await?
+			.with_capabilities(Capabilities::all())
+			.with_notifications();
+
+		db.bootstrap().await?;
+
+		sender.send(db).await.unwrap();
 	}
+	Ok(())
 }
 
-#[derive(Clone)]
-pub struct TestRunner {
-	set: TestSet,
-	dbs_sender: Sender<Datastore>,
-	result_sender: Sender<(TestId, TestJobResult)>,
-}
-
-impl TestRunner {
-	pub fn new(num_jobs: usize, set: TestSet) -> (TestCoordinator, TestRunner) {
-		let (send, recv) = mpsc::channel(num_jobs);
-		let (res_send, res_recv) = mpsc::channel(num_jobs * 2);
-
-		(
-			TestCoordinator {
-				reusable_dbs: recv,
-				results: res_recv,
-			},
-			TestRunner {
-				set,
-				dbs_sender: send,
-				result_sender: res_send,
-			},
-		)
-	}
-
-	pub async fn fill_datastores(&self, num_jobs: usize) -> Result<()> {
-		for _ in 0..num_jobs {
-			let db = Datastore::new("memory")
-				.await?
-				.with_capabilities(Capabilities::all())
-				.with_notifications();
-
-			db.bootstrap().await?;
-
-			self.dbs_sender.send(db).await.unwrap();
-		}
-		Ok(())
+fn try_collect_reports<W: io::Write>(
+	reports: &mut Vec<TestReport>,
+	testset: &TestSet,
+	channel: &mut UnboundedReceiver<TestReport>,
+	progress: &mut Progress<W>,
+) {
+	while let Some(x) = channel.try_recv().ok() {
+		let grade = x.grade();
+		let name = testset[x.test_id()].path.as_str();
+		progress.finish_item(name, grade).unwrap();
+		reports.push(x);
 	}
 }
 
@@ -116,42 +98,57 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let failure_mode = matches.get_one::<FailureMode>("failure").unwrap();
 
+	println!(" Running with {num_jobs} jobs");
 	let mut schedular = Schedular::new(num_jobs);
-	let (mut coordinator, runner) = TestRunner::new(num_jobs as usize, subset);
 
-	println!("Running with {num_jobs} jobs");
+	let (ds_send, mut ds_recv) = mpsc::channel(num_jobs as usize);
+	// give the result channel some slack to catch up to tasks.
+	let (res_send, res_recv) = mpsc::channel(num_jobs as usize * 4);
+	// all reports are collected into the channel before processing.
+	// So unbounded is required.
+	let (report_send, mut report_recv) = mpsc::unbounded_channel();
 
-	runner.fill_datastores(num_jobs as usize).await?;
+	fill_datastores(&ds_send, num_jobs as usize)
+		.await
+		.context("Failed to create datastores for running tests")?;
 
-	println!("Found {} tests", runner.set.len());
+	println!(" Found {} tests", subset.len());
+
+	tokio::spawn(grade_task(subset.clone(), res_recv, report_send));
 
 	let mut reports = Vec::new();
-	let mut progress = progress::Progress::from_stderr(runner.set.len(), color);
+	let mut progress = progress::Progress::from_stderr(subset.len(), color);
 
 	// spawn all tests.
-	for (id, test) in runner.set.iter_ids() {
+	for (id, test) in subset.iter_ids() {
 		let config = test.config.clone();
 
 		progress.start_item(test.path.as_str()).unwrap();
 
 		if !config.should_run() {
-			progress.finish_item(runner.set[id].path.as_str(), TestGrade::Success).unwrap();
+			progress.finish_item(subset[id].path.as_str(), TestGrade::Success).unwrap();
 			continue;
 		}
 
-		let db = if config.can_use_reusable_ds() {
-			Some(coordinator.reusable_dbs.recv().await.unwrap())
+		let ds = if config.can_use_reusable_ds() {
+			let ds = ds_recv.recv().await.context("datastore return channel closed early")?;
+			Some((ds, ds_send.clone()))
 		} else {
 			None
 		};
 
-		let runner_clone = runner.clone();
-		let name_clone = test.path.clone();
+		let context = TestTaskContext {
+			id,
+			testset: subset.clone(),
+			result: res_send.clone(),
+			ds,
+		};
 		let future = async move {
-			let future = run_test(id, runner_clone, db);
+			let name = context.testset[context.id].path.as_str().to_owned();
+			let future = test_task(context);
 
 			if let Err(e) = future.await {
-				println!("Error: {:?}", e.context(format!("Failed to run test '{name_clone}'")))
+				println!("Error: {:?}", e.context(format!("Failed to run test '{name}'")))
 			}
 		};
 
@@ -161,81 +158,88 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			schedular.spawn(future).await;
 		}
 
-		while let Ok((id, result)) = coordinator.results.try_recv() {
-			let report = TestReport::new(id, &runner.set, result);
-			progress.finish_item(runner.set[id].path.as_str(), report.grade()).unwrap();
-			reports.push(report)
-		}
+		// Try to collect reports to give quick feedback on test completion.
+		try_collect_reports(&mut reports, &subset, &mut report_recv, &mut progress);
 	}
 
 	// all test are running.
-	// Time to wait for all tasks to finish.
-	let mut join = pin!(schedular.join());
-	loop {
-		select! {
-			_ = futures::future::poll_fn(|ctx| {
-				join.as_mut().poll(ctx)
-			}) => { break }
-			x = coordinator.results.recv() => {
-				// handle results while tasks are finishing.
-				let (id,result) = x.unwrap();
+	// drop the result sender so that tasks properly quit when the channel does.
+	mem::drop(res_send);
+	mem::drop(ds_send);
 
-				let report = TestReport::new(id, &runner.set, result);
-				progress.finish_item(runner.set[id].path.as_str(), report.grade()).unwrap();
-				reports.push(report)
-
-			}
-		}
+	// when the report channel quits we can be sure we are done. since the report task has quit
+	// meaning the test tasks have all quit.
+	while let Some(x) = report_recv.recv().await {
+		let grade = x.grade();
+		let name = subset[x.test_id()].path.as_str();
+		progress.finish_item(name, grade).unwrap();
+		reports.push(x);
 	}
 
-	// All tasks are finished. Process all final results.
-	while let Ok((id, result)) = coordinator.results.try_recv() {
-		let report = TestReport::new(id, &runner.set, result);
-		progress.finish_item(runner.set[id].path.as_str(), report.grade()).unwrap();
-		reports.push(report)
+	while let Some(x) = ds_recv.recv().await {
+		x.shutdown().await.context("Datastore failed to shutdown properly")?;
 	}
-
-	// all results handled, shutdown the remaining datasores.
-	coordinator.shutdown().await?;
 
 	println!();
 
+	// done, report the results.
 	for v in reports.iter() {
-		v.display(&runner.set, color)
+		v.display(&subset, color)
 	}
 
 	// possibly update test configs with acquired results.
 	match failure_mode {
 		FailureMode::Fail => {}
 		FailureMode::Accept => {
-			for x in reports.iter().filter(|x| x.has_missing_results()) {
-				x.update_config_results(&runner.set).await?;
+			for report in reports.iter().filter(|x| x.is_unspecified_test() && !x.is_wip()) {
+				report.update_config_results(&subset).await?;
 			}
 		}
 		FailureMode::Overwrite => {
-			for x in reports.iter().filter(|x| !x.succeeded() && !x.has_error() && !x.is_wip()) {
-				x.update_config_results(&runner.set).await?;
+			for report in reports.iter().filter(|x| {
+				matches!(x.grade(), TestGrade::Failed | TestGrade::Warning) && !x.is_wip()
+			}) {
+				report.update_config_results(&subset).await?;
 			}
 		}
 	}
 
-	if reports.iter().any(|x| x.has_failed()) {
+	if reports.iter().any(|x| x.grade() == TestGrade::Failed) {
 		bail!("Not all tests where successfull")
 	}
 	Ok(())
 }
 
-pub async fn run_test(id: TestId, runner: TestRunner, dbs: Option<Datastore>) -> Result<()> {
-	let should_return;
+pub async fn grade_task(
+	set: TestSet,
+	mut results: Receiver<(TestId, TestTaskResult)>,
+	sender: UnboundedSender<TestReport>,
+) {
+	let ds = Datastore::new("memory")
+		.await
+		.expect("failed to create datastore for running matching expressions");
 
-	let config = &runner.set[id].config;
+	loop {
+		let Some((id, res)) = results.recv().await else {
+			break;
+		};
+
+		let report = TestReport::from_test_result(id, &set, res, &ds).await;
+		sender.send(report).expect("report channel quit early");
+	}
+}
+
+pub async fn test_task(context: TestTaskContext) -> Result<()> {
+	let return_channel;
+
+	let config = &context.testset[context.id].config;
 	let capabilities = core_capabilities_from_test_config(config);
 
-	let dbs = if let Some(dbs) = dbs {
-		should_return = true;
-		dbs.with_capabilities(capabilities)
+	let ds = if let Some((ds, channel)) = context.ds {
+		return_channel = Some(channel);
+		ds.with_capabilities(capabilities)
 	} else {
-		should_return = false;
+		return_channel = None;
 		let ds =
 			Datastore::new("memory").await?.with_capabilities(capabilities).with_notifications();
 
@@ -250,31 +254,31 @@ pub async fn run_test(id: TestId, runner: TestRunner, dbs: Option<Datastore>) ->
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
 
-	let mut dbs = dbs.with_query_timeout(Some(timeout_duration));
+	let mut ds = ds.with_query_timeout(Some(timeout_duration));
 
-	let res = run_test_with_dbs(id, &runner, &mut dbs).await;
+	let res = run_test_with_dbs(context.id, &context.testset, &mut ds).await;
 
-	if should_return {
-		runner.dbs_sender.send(dbs).await.unwrap();
+	if let Some(return_channel) = return_channel {
+		return_channel.send(ds).await.expect("datastore return channel quit early");
 	} else {
-		dbs.shutdown().await?;
+		ds.shutdown().await?;
 	}
 
 	let res = res?;
 
-	runner.result_sender.send((id, res)).await.unwrap();
+	context.result.send((context.id, res)).await.expect("result channel quit early");
 
 	Ok(())
 }
 
 async fn run_test_with_dbs(
 	id: TestId,
-	runner: &TestRunner,
+	set: &TestSet,
 	dbs: &mut Datastore,
-) -> Result<TestJobResult> {
+) -> Result<TestTaskResult> {
 	let mut session = Session::owner();
 
-	let config = &runner.set[id].config;
+	let config = &set[id].config;
 	let timeout_duration = config
 		.env
 		.as_ref()
@@ -288,12 +292,12 @@ async fn run_test_with_dbs(
 		session = session.with_db(db)
 	}
 
-	for import in runner.set[id].config.imports() {
-		let Some(test) = runner.set.find_all(import) else {
+	for import in set[id].config.imports() {
+		let Some(test) = set.find_all(import) else {
 			bail!("Could not find import import `{import}`");
 		};
 
-		let source = str::from_utf8(&runner.set[test].source)
+		let source = str::from_utf8(&set[test].source)
 			.with_context(|| format!("Import `{import}` was not valid utf8"))?;
 
 		if let Err(e) = dbs.execute(source, &session, None).await {
@@ -301,13 +305,13 @@ async fn run_test_with_dbs(
 		}
 	}
 
-	let source = &runner.set[id].source;
+	let source = &set[id].source;
 	let mut parser = syn::parser::Parser::new(source);
 	let mut stack = reblessive::Stack::new();
 
 	let query = match stack.enter(|stk| parser.parse_query(stk)).finish() {
 		Ok(x) => x,
-		Err(e) => return Ok(TestJobResult::ParserError(e.render_on_bytes(source))),
+		Err(e) => return Ok(TestTaskResult::ParserError(e.render_on_bytes(source))),
 	};
 
 	let mut process_future = pin!(dbs.process(query, &session, None));
@@ -341,7 +345,7 @@ async fn run_test_with_dbs(
 	};
 
 	if did_timeout {
-		return Ok(TestJobResult::Timeout);
+		return Ok(TestTaskResult::Timeout);
 	};
 
 	let Some(result) = result else {
@@ -365,7 +369,7 @@ async fn run_test_with_dbs(
 	}
 
 	match result {
-		Ok(x) => Ok(TestJobResult::Results(x)),
-		Err(e) => Ok(TestJobResult::RunningError(e)),
+		Ok(x) => Ok(TestTaskResult::Results(x)),
+		Err(e) => Ok(TestTaskResult::RunningError(e)),
 	}
 }

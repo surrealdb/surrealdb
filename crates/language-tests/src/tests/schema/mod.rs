@@ -63,6 +63,7 @@ impl TestConfig {
 		self.env.as_ref().map(|x| !x.clean).unwrap_or(true)
 	}
 
+	/// Returns a list of keys which are not in the schema but still define.
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().cloned().collect();
 
@@ -134,40 +135,27 @@ impl TestEnv {
 	}
 }
 
-pub enum TestResultFlat {
-	Value(SurrealValue),
-	Error(BoolOr<String>),
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
-pub enum TestResult {
+pub enum TestExpectation {
+	// NOTE! Ordering of variants here is important.
+	// Match must come before Error so that they are deserialized correctely.
+	// Swapping match with error causes the error variant to be chosen when
+	// match specifies if it expects an error.
 	/// The result is a nomral value
 	Plain(SurrealValue),
+	/// The result is a value but specified as a table.
+	Match(MatchTestResult),
 	/// The result should be an error.
 	Error(ErrorTestResult),
 	/// The result is a value but specified as a table.
 	Value(ValueTestResult),
 }
 
-impl TestResult {
-	pub fn flatten(self) -> TestResultFlat {
-		match self {
-			TestResult::Plain(x) => TestResultFlat::Value(x),
-			TestResult::Error(e) => TestResultFlat::Error(e.error),
-			TestResult::Value(x) => TestResultFlat::Value(x.value),
-		}
-	}
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ErrorTestResult {
 	pub error: BoolOr<String>,
-
-	#[serde(skip_serializing)]
-	#[serde(flatten)]
-	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -177,10 +165,14 @@ pub struct ValueTestResult {
 	pub skip_datetime: Option<bool>,
 	pub skip_record_id_key: Option<bool>,
 	pub skip_uuid: Option<bool>,
+}
 
-	#[serde(skip_serializing)]
-	#[serde(flatten)]
-	_unused_keys: BTreeMap<String, toml::Value>,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MatchTestResult {
+	#[serde(rename = "match")]
+	pub _match: SurrealValue,
+	pub error: Option<bool>,
 }
 
 /// A enum for when configuration which can be disabled, enabled or configured to have a specific
@@ -265,27 +257,7 @@ impl TestDetails {
 
 		if let Some(results) = self.results.as_ref() {
 			match results {
-				TestDetailsResults::QueryResult(x) => {
-					for (idx, r) in x.iter().enumerate() {
-						match r {
-							TestResult::Plain(_) => {}
-							TestResult::Error(e) => res.append(
-								&mut e
-									._unused_keys
-									.keys()
-									.map(|x| format!("test.results[{idx}].{x}"))
-									.collect(),
-							),
-							TestResult::Value(e) => res.append(
-								&mut e
-									._unused_keys
-									.keys()
-									.map(|x| format!("test.results[{idx}].{x}"))
-									.collect(),
-							),
-						}
-					}
-				}
+				TestDetailsResults::QueryResult(_) => {}
 				TestDetailsResults::ParserError(x) => res.append(
 					&mut x._unused_keys.keys().map(|x| format!("test.results.{x}")).collect(),
 				),
@@ -299,7 +271,7 @@ impl TestDetails {
 #[serde(untagged)]
 #[serde(rename_all = "kebab-case")]
 pub enum TestDetailsResults {
-	QueryResult(Vec<TestResult>),
+	QueryResult(Vec<TestExpectation>),
 	ParserError(ParsingTestResult),
 }
 
