@@ -1,5 +1,5 @@
 use super::access::{authenticate_record, create_refresh_token_record};
-use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use crate::cnf::{EXPERIMENTAL_BEARER_ACCESS, INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -136,16 +136,24 @@ pub async fn db_access(
 											}
 											// Create refresh token if defined for the record access method
 											let refresh = match &at.bearer {
-												Some(_) => Some(
-													create_refresh_token_record(
-														kvs,
-														av.name.clone(),
-														&ns,
-														&db,
-														rid.clone(),
-													)
-													.await?,
-												),
+												Some(_) => {
+													// TODO(gguillemas): Remove this once bearer access is no longer experimental
+													if !*EXPERIMENTAL_BEARER_ACCESS {
+														debug!("Will not create refresh token with disabled bearer access feature");
+														None
+													} else {
+														Some(
+															create_refresh_token_record(
+																kvs,
+																av.name.clone(),
+																&ns,
+																&db,
+																rid.clone(),
+															)
+															.await?,
+														)
+													}
+												}
 												None => None,
 											};
 											// Log the authenticated access method info

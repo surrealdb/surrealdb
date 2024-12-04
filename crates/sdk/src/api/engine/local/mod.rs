@@ -583,6 +583,12 @@ async fn router(
 		Command::Signup {
 			credentials,
 		} => {
+			let response = iam::signup::signup(kvs, session, credentials).await?.token;
+			Ok(DbResponse::Other(response.into()))
+		}
+		Command::Signupv2 {
+			credentials,
+		} => {
 			let response = iam::signup::signup(kvs, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
