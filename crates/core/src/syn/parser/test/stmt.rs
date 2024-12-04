@@ -409,7 +409,7 @@ fn parse_define_token() {
 			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			},
@@ -441,7 +441,7 @@ fn parse_define_token_on_scope() {
 		stmt.duration,
 		// Default durations.
 		AccessDuration {
-			grant: None,
+			grant: Some(Duration::from_days(30)),
 			token: Some(Duration::from_hours(1)),
 			session: None,
 		}
@@ -486,7 +486,7 @@ fn parse_define_token_jwks() {
 			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			},
@@ -518,7 +518,7 @@ fn parse_define_token_jwks_on_scope() {
 		stmt.duration,
 		// Default durations.
 		AccessDuration {
-			grant: None,
+			grant: Some(Duration::from_days(30)),
 			token: Some(Duration::from_hours(1)),
 			session: None,
 		}
@@ -562,7 +562,7 @@ fn parse_define_scope() {
 	assert_eq!(
 		stmt.duration,
 		AccessDuration {
-			grant: None,
+			grant: Some(Duration::from_days(30)),
 			token: Some(Duration::from_hours(1)),
 			session: Some(Duration::from_secs(1)),
 		}
@@ -613,7 +613,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -648,7 +648,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -683,7 +683,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: Some(Value::Bool(true)),
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -718,7 +718,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -752,7 +752,7 @@ fn parse_define_access_jwt_key() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: None,
 				},
@@ -787,7 +787,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -867,7 +867,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -899,7 +899,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -934,7 +934,7 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -968,7 +968,7 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -1001,7 +1001,7 @@ fn parse_define_access_jwt_jwks() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: None,
 				},
@@ -1035,7 +1035,7 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -1068,7 +1068,7 @@ fn parse_define_access_jwt_jwks() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: Some(Duration::from_days(2)),
 				},
@@ -1100,7 +1100,7 @@ fn parse_define_access_record() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			}
@@ -1147,7 +1147,7 @@ fn parse_define_access_record() {
 		assert_eq!(
 			stmt.duration,
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: Some(Duration::from_days(7)),
 			}
@@ -1204,7 +1204,7 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: Some(Duration::from_mins(15)),
 				},
@@ -1243,7 +1243,7 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: Some(Duration::from_mins(15)),
 				},
@@ -1282,7 +1282,7 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: Some(Duration::from_mins(15)),
 				},
@@ -1353,7 +1353,7 @@ fn parse_define_access_record_with_jwt() {
 			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			},
@@ -1385,7 +1385,7 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			}
@@ -1418,7 +1418,7 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			}
@@ -1453,7 +1453,7 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			}
@@ -1487,7 +1487,7 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			}

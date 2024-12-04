@@ -726,6 +726,12 @@ pub fn validate_grant_bearer(key: &str) -> Result<String, Error> {
 	if kid.len() != access::GRANT_BEARER_ID_LENGTH {
 		return Err(Error::AccessGrantBearerInvalid);
 	};
+	// Retrieve the key from the provided key.
+	let key = parts[3];
+	// Check the length of the key.
+	if key.len() != access::GRANT_BEARER_KEY_LENGTH {
+		return Err(Error::AccessGrantBearerInvalid);
+	};
 
 	Ok(kid.to_string())
 }
