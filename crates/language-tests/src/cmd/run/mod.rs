@@ -314,7 +314,7 @@ async fn run_test_with_dbs(
 		Err(e) => return Ok(TestTaskResult::ParserError(e.render_on_bytes(source))),
 	};
 
-	let mut process_future = pin!(dbs.process(query, &session, None));
+	let mut process_future = Box::pin(dbs.process(query, &session, None));
 	let timeout_future = time::sleep(timeout_duration);
 
 	let mut did_timeout = false;

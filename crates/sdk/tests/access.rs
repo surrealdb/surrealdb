@@ -210,6 +210,9 @@ async fn access_bearer_grant() {
 	let ok2 =
 			Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
 					.unwrap();
+	let ok3 =
+			Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
+					.unwrap();
 
 	for level in &test_levels {
 		let base = level.base.to_string();
@@ -313,10 +316,10 @@ async fn access_bearer_grant() {
 			assert!(ok2.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok2);
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
-			assert!(ok2.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok2);
+			assert!(ok3.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok3);
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
-			assert!(ok2.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok2);
+			assert!(ok3.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok3);
 			//
 			let tmp = res.remove(0).result.unwrap_err();
 			assert_eq!(tmp.to_string(), "This access grant has an invalid subject");
@@ -514,6 +517,9 @@ async fn access_bearer_show() {
 	let ok6 =
 				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
 						.unwrap();
+	let ok7 =
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
+						.unwrap();
 
 	for level in &test_levels {
 		let base = level.base.to_string();
@@ -625,7 +631,7 @@ async fn access_bearer_show() {
 			assert!(ok6.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok6);
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
-			assert!(ok6.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok6);
+			assert!(ok7.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok7);
 		}
 	}
 }

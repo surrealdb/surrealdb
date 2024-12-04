@@ -73,7 +73,7 @@ impl ValueEnum for ColorMode {
 }
 
 pub fn parse() -> ArgMatches {
-	let mut cmd = command!()
+	let cmd = command!()
 		.arg(arg!(--color <COLOR> "Set if the output should be colored").value_parser(EnumValueParser::<ColorMode>::new()).default_value("auto"))
         .subcommand(
             Command::new("run")
@@ -94,11 +94,9 @@ pub fn parse() -> ArgMatches {
                 .arg(
                     arg!(--path <PATH> "Set the path to tests directory").default_value("./tests"),
                 ),
-        );
-
-	#[cfg(feature = "fuzzing")]
-	{
-		cmd = cmd.subcommand(
+        )
+		.subcommand(
+			// Not yet used
 			Command::new("fuzz")
 				.about("Command for handling fuzzing input")
 				.subcommand(
@@ -113,7 +111,6 @@ pub fn parse() -> ArgMatches {
 				)
 				.subcommand_required(true),
 		);
-	}
 
 	cmd.subcommand_required(true).get_matches()
 }

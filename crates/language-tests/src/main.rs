@@ -19,8 +19,8 @@ async fn main() -> Result<()> {
 
 	match sub {
 		"run" => cmd::run::run(color, args).await,
-		#[cfg(feature = "fuzzing")]
-		"fuzz" => cmd::fuzz::run(args).await,
+		//#[cfg(feature = "fuzzing")]
+		//"fuzz" => cmd::fuzz::run(args).await,
 		#[cfg(not(feature = "fuzzing"))]
 		"fuzz" => {
 			anyhow::bail!(

@@ -4,16 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-backend-mem = []
-backend-surrealkv = []
-backend-rocksdb = []
-backend-foundation-7_1 = []
-backend-foundation-7_3 = []
-backend-tikv = []
-backend-client-ws = []
-backend-client-http = []
-default = ["backend-mem","fuzzing"]
-fuzzing = ["dep:libfuzzer-sys", "dep:arbitrary", "surrealdb-core/arbitrary"]
+#backend-mem = []
+#backend-surrealkv = []
+#backend-rocksdb = []
+#backend-foundation-7_1 = []
+#backend-foundation-7_3 = []
+#backend-tikv = []
+#backend-client-ws = []
+#backend-client-http = []
+#default = ["backend-mem"]
+#fuzzing = ["dep:libfuzzer-sys", "dep:arbitrary", "surrealdb-core/arbitrary"]
 
 [dependencies]
 # Crates for running surrealdb.
@@ -48,5 +48,5 @@ atty = "0.2.14"
 
 # For running fuzzing tests.
 # WIP feature.
-libfuzzer-sys = { version = "0.4.7", features = ["arbitrary-derive"], optional = true }
-arbitrary = { version = "1.3.2", optional = true }
+#libfuzzer-sys = { version = "0.4.7", features = ["arbitrary-derive"], optional = true }
+#arbitrary = { version = "1.3.2", optional = true }
