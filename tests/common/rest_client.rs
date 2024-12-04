@@ -1,4 +1,3 @@
-use crate::common::docker::DOCKER_EXPOSED_PORT;
 use crate::common::expected::Expected;
 use http::{header, HeaderMap, StatusCode};
 use reqwest::Client;
@@ -18,7 +17,7 @@ pub struct RestClient {
 }
 
 impl RestClient {
-	pub fn new(ns: &str, db: &str, user: &str, pass: &str) -> Self {
+	pub fn new(ns: &str, db: &str, user: &str, pass: &str, port: u16) -> Self {
 		let mut headers = HeaderMap::new();
 		headers.insert("NS", ns.parse().unwrap());
 		headers.insert("DB", db.parse().unwrap());
@@ -30,7 +29,7 @@ impl RestClient {
 			.expect("Client::builder()...build()");
 		Self {
 			client,
-			url: format!("http://127.0.0.1:{DOCKER_EXPOSED_PORT}/sql"),
+			url: format!("http://127.0.0.1:{port}/sql"),
 			user: user.to_string(),
 			pass: pass.to_string(),
 		}

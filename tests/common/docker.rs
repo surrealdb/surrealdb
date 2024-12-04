@@ -10,14 +10,11 @@ pub struct DockerContainer {
 	running: bool,
 }
 
-pub const DOCKER_EXPOSED_PORT: usize = 8000;
-
 impl DockerContainer {
-	pub fn start(version: &str, file_path: &str, user: &str, pass: &str) -> Self {
+	pub fn start(version: &str, file_path: &str, user: &str, pass: &str, port: u16) -> Self {
 		let docker_image = format!("surrealdb/surrealdb:{version}");
 		info!("Start Docker image {docker_image} with file {file_path}");
-		let mut args =
-			Arguments::new(["run", "-p", &format!("127.0.0.1:8000:{DOCKER_EXPOSED_PORT}"), "-d"]);
+		let mut args = Arguments::new(["run", "-p", &format!("127.0.0.1:{port}:8000"), "-d"]);
 		args.add([docker_image]);
 		args.add(["start", "--user", user, "--pass", pass]);
 		args.add([format!("file:{file_path}")]);
