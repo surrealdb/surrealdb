@@ -49,7 +49,12 @@ impl DockerContainer {
 		let output = command.args(args.0).output().unwrap();
 		let std_out = String::from_utf8(output.stdout).unwrap().trim().to_string();
 		if !output.stderr.is_empty() {
-			error!("{}", String::from_utf8(output.stderr).unwrap());
+			let message = String::from_utf8(output.stderr).unwrap();
+			if message.starts_with("Unable to find image") && message.ends_with("locally") {
+				info!("{message}");
+			} else {
+				error!("{message}");
+			}
 		}
 		assert_eq!(output.status.code(), Some(0), "Docker command failure: {command:?}");
 		std_out
