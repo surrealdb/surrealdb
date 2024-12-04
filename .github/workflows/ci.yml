@@ -728,17 +728,22 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        working-directory: crates/language-tests
 
       - name: Checkout sources
         uses: actions/checkout@v4
+        working-directory: crates/language-tests
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+        working-directory: crates/language-tests
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build Suite
-        run: cargo build --package surrealql-test
+        run: cargo build
+        working-directory: crates/language-tests
 
       - name: Run Suite
         run: ./target/debug/surrealql-test --color always run --path ./crates/language-tests/tests
+        working-directory: crates/language-tests
