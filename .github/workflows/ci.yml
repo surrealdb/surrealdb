@@ -736,7 +736,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          prefix-key: "lang-test"
           workspaces: crates/language-tests
 
       - name: Run Suite
