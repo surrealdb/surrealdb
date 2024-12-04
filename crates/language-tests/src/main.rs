@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
 		"run" => cmd::run::run(color, args).await,
 		//#[cfg(feature = "fuzzing")]
 		//"fuzz" => cmd::fuzz::run(args).await,
-		#[cfg(not(feature = "fuzzing"))]
+		//#[cfg(not(feature = "fuzzing"))]
 		"fuzz" => {
 			anyhow::bail!(
 				"Fuzzing subcommand is only implemented when the fuzzing feature is enabled"

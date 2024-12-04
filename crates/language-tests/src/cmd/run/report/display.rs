@@ -203,7 +203,7 @@ impl TestReport {
 						None => writeln!(f, "- Any parsing error"),
 					})?;
 					writeln!(f, "= Got:")?;
-					f.indent(|f| Self::display_value_list(&got, f))
+					f.indent(|f| Self::display_value_list(got, f))
 				})
 			}
 			TypeMismatchReport::ExpectedValues {

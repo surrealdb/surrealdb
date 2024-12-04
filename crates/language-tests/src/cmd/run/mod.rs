@@ -4,7 +4,7 @@ mod report;
 mod util;
 
 use core::str;
-use std::{io, mem, pin::pin, thread, time::Duration};
+use std::{io, mem, thread, time::Duration};
 
 use anyhow::{bail, Context, Result};
 use camino::Utf8Path;
@@ -66,7 +66,7 @@ fn try_collect_reports<W: io::Write>(
 	channel: &mut UnboundedReceiver<TestReport>,
 	progress: &mut Progress<W>,
 ) {
-	while let Some(x) = channel.try_recv().ok() {
+	while let Ok(x) = channel.try_recv() {
 		let grade = x.grade();
 		let name = testset[x.test_id()].path.as_str();
 		progress.finish_item(name, grade).unwrap();
