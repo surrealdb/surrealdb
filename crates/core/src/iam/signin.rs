@@ -167,11 +167,11 @@ pub async fn db_access(
 						// Check if a refresh token is being used to authenticate
 						if let Some(key) = vars.get("refresh") {
 							// Perform bearer access using the refresh token as the bearer key
-							return db_access_bearer(
+							return signin_bearer(
 								kvs,
 								session,
-								ns,
-								db,
+								Some(ns),
+								Some(db),
 								av,
 								bearer,
 								key.to_raw_string(),
@@ -299,156 +299,12 @@ pub async fn db_access(
 						None => return Err(Error::AccessBearerMissingKey),
 					};
 
-					db_access_bearer(kvs, session, ns, db, av, &at, key).await
+					signin_bearer(kvs, session, Some(ns), Some(db), av, &at, key).await
 				}
 				_ => Err(Error::AccessMethodMismatch),
 			}
 		}
 		_ => Err(Error::AccessNotFound),
-	}
-}
-
-pub async fn db_access_bearer(
-	kvs: &Datastore,
-	session: &mut Session,
-	ns: String,
-	db: String,
-	av: Arc<DefineAccessStatement>,
-	at: &access_type::BearerAccess,
-	key: String,
-) -> Result<SigninData, Error> {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	if !*EXPERIMENTAL_BEARER_ACCESS {
-		// Return opaque error to avoid leaking the existence of the feature.
-		debug!("Error attempting to authenticate with disabled bearer access feature");
-		return Err(Error::InvalidAuth);
-	}
-	// Check if the bearer access method supports issuing tokens.
-	let iss = match &at.jwt.issue {
-		Some(iss) => iss.clone(),
-		_ => return Err(Error::AccessMethodMismatch),
-	};
-	// Extract key identifier and key from the provided key.
-	let kid = validate_grant_bearer(&key)?;
-	// Create a new readonly transaction
-	let tx = kvs.transaction(Read, Optimistic).await?;
-	// Fetch the specified access grant from storage
-	let gr = match tx.get_db_access_grant(&ns, &db, &av.name, &kid).await {
-		Ok(gr) => gr,
-		// Return opaque error to avoid leaking existence of the grant.
-		Err(e) => {
-			debug!("Error retrieving bearer access grant: {e}");
-			return Err(Error::InvalidAuth);
-		}
-	};
-	// Ensure that the transaction is cancelled.
-	tx.cancel().await?;
-	// Authenticate bearer key against stored grant.
-	verify_grant_bearer(&gr, key)?;
-	// If the subject of the grant is a system user, get their roles.
-	let roles = if let access::Subject::User(user) = &gr.subject {
-		// Create a new readonly transaction.
-		let tx = kvs.transaction(Read, Optimistic).await?;
-		// Fetch the specified user from storage.
-		let user = tx.get_db_user(&ns, &db, user).await.map_err(|e| {
-			debug!("Error retrieving user for bearer access to database `{ns}/{db}`: {e}");
-			// Return opaque error to avoid leaking grant subject existence.
-			Error::InvalidAuth
-		})?;
-		// Ensure that the transaction is cancelled.
-		tx.cancel().await?;
-		user.roles.clone()
-	} else {
-		vec![]
-	};
-	// Create the authentication key.
-	let key = config(iss.alg, &iss.key)?;
-	// Create the authentication claim.
-	let claims = Claims {
-		iss: Some(SERVER_NAME.to_owned()),
-		iat: Some(Utc::now().timestamp()),
-		nbf: Some(Utc::now().timestamp()),
-		exp: expiration(av.duration.token)?,
-		jti: Some(Uuid::new_v4().to_string()),
-		ns: Some(ns.to_owned()),
-		db: Some(db.to_owned()),
-		ac: Some(av.name.to_string()),
-		id: match &gr.subject {
-			access::Subject::User(user) => Some(user.to_raw()),
-			access::Subject::Record(rid) => Some(rid.to_raw()),
-		},
-		roles: match &gr.subject {
-			access::Subject::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
-			access::Subject::Record(_) => Default::default(),
-		},
-		..Claims::default()
-	};
-	// AUTHENTICATE clause
-	if let Some(au) = &av.authenticate {
-		// Setup the system session for executing the clause.
-		let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-		sess.tk = Some((&claims).into());
-		sess.ip.clone_from(&session.ip);
-		sess.or.clone_from(&session.or);
-		authenticate_generic(kvs, &sess, au).await?;
-	}
-	// If the bearer grant is a refresh token.
-	let refresh = match at.kind {
-		access_type::BearerAccessType::Refresh => {
-			match &gr.subject {
-				access::Subject::Record(rid) => {
-					// Revoke the used refresh token
-					revoke_refresh_token_record(kvs, gr.id.clone(), gr.ac.clone(), &ns, &db)
-						.await?;
-					// Create a new refresh token to replace it.
-					Some(
-						create_refresh_token_record(kvs, gr.ac.clone(), &ns, &db, rid.clone())
-							.await?,
-					)
-				}
-				access::Subject::User(_) => {
-					return Err(Error::FeatureNotYetImplemented {
-						feature: "Refresh tokens for system users".to_string(),
-					})
-				}
-			}
-		}
-		_ => None,
-	};
-	// Log the authenticated access method information.
-	trace!("Signing in to database with bearer access method `{}`", av.name);
-	// Create the authentication token.
-	let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
-	// Set the authentication on the session.
-	session.tk = Some((&claims).into());
-	session.ns = Some(ns.to_owned());
-	session.db = Some(db.to_owned());
-	session.ac = Some(av.name.to_string());
-	session.exp = expiration(av.duration.session)?;
-	match &gr.subject {
-		access::Subject::User(user) => {
-			session.au = Arc::new(Auth::new(Actor::new(
-				user.to_string(),
-				roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
-				Level::Database(ns, db),
-			)));
-		}
-		access::Subject::Record(rid) => {
-			session.au = Arc::new(Auth::new(Actor::new(
-				rid.to_string(),
-				Default::default(),
-				Level::Record(ns, db, rid.to_string()),
-			)));
-			session.rd = Some(Value::from(rid.to_owned()));
-		}
-	};
-	// Return the authentication token.
-	match enc {
-		Ok(token) => Ok(SigninData {
-			token,
-			refresh,
-		}),
-		_ => Err(Error::TokenMakingFailed),
 	}
 }
 
@@ -521,129 +377,15 @@ pub async fn ns_access(
 	match access {
 		Ok(av) => {
 			// Check the access method type
-			match &av.kind {
+			match av.kind.clone() {
 				AccessType::Bearer(at) => {
-					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-					if !*EXPERIMENTAL_BEARER_ACCESS {
-						// Return opaque error to avoid leaking the existence of the feature.
-						debug!(
-							"Error attempting to authenticate with disabled bearer access feature"
-						);
-						return Err(Error::InvalidAuth);
-					}
-					// If the bearer grant is a refresh token
-					// Refresh tokens are not implemented for system users
-					if matches!(at.kind, access_type::BearerAccessType::Refresh) {
-						return Err(Error::FeatureNotYetImplemented {
-							feature: "Refresh tokens for system users".to_string(),
-						});
-					};
-					// Check if the bearer access method supports issuing tokens.
-					let iss = match &at.jwt.issue {
-						Some(iss) => iss.clone(),
-						_ => return Err(Error::AccessMethodMismatch),
-					};
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
 						Some(key) => key.to_raw_string(),
 						None => return Err(Error::AccessBearerMissingKey),
 					};
-					let kid = validate_grant_bearer(&key)?;
-					// Create a new readonly transaction
-					let tx = kvs.transaction(Read, Optimistic).await?;
-					// Fetch the specified access grant from storage
-					let gr = match tx.get_ns_access_grant(&ns, &ac, &kid).await {
-						Ok(gr) => gr,
-						// Return opaque error to avoid leaking existence of the grant.
-						Err(e) => {
-							debug!("Error retrieving bearer access grant: {e}");
-							return Err(Error::InvalidAuth);
-						}
-					};
-					// Ensure that the transaction is cancelled.
-					tx.cancel().await?;
-					// Authenticate bearer key against stored grant.
-					verify_grant_bearer(&gr, key)?;
-					// If the subject of the grant is a system user, get their roles.
-					let roles = if let access::Subject::User(user) = &gr.subject {
-						// Create a new readonly transaction.
-						let tx = kvs.transaction(Read, Optimistic).await?;
-						// Fetch the specified user from storage.
-						let user =
-							tx.get_ns_user(&ns, user).await.map_err(|e| {
-								debug!("Error retrieving user for bearer access to namespace `{ns}`: {e}");
-								// Return opaque error to avoid leaking grant subject existence.
-								Error::InvalidAuth
-							})?;
-						// Ensure that the transaction is cancelled.
-						tx.cancel().await?;
-						user.roles.clone()
-					} else {
-						vec![]
-					};
-					// Create the authentication key.
-					let key = config(iss.alg, &iss.key)?;
-					// Create the authentication claim.
-					let claims = Claims {
-						iss: Some(SERVER_NAME.to_owned()),
-						iat: Some(Utc::now().timestamp()),
-						nbf: Some(Utc::now().timestamp()),
-						exp: expiration(av.duration.token)?,
-						jti: Some(Uuid::new_v4().to_string()),
-						ns: Some(ns.to_owned()),
-						ac: Some(ac.to_owned()),
-						id: match &gr.subject {
-							access::Subject::User(user) => Some(user.to_raw()),
-							// Return opaque error as this code should not be reachable.
-							_ => return Err(Error::InvalidAuth),
-						},
-						roles: match &gr.subject {
-							access::Subject::User(_) => {
-								Some(roles.iter().map(|v| v.to_string()).collect())
-							}
-							// Return opaque error as this code should not be reachable.
-							_ => return Err(Error::InvalidAuth),
-						},
-						..Claims::default()
-					};
-					// AUTHENTICATE clause
-					if let Some(au) = &av.authenticate {
-						// Setup the system session for executing the clause
-						let mut sess = Session::editor().with_ns(&ns);
-						sess.tk = Some((&claims).into());
-						sess.ip.clone_from(&session.ip);
-						sess.or.clone_from(&session.or);
-						authenticate_generic(kvs, &sess, au).await?;
-					}
-					// Log the authenticated access method information.
-					trace!("Signing in to database with bearer access method `{}`", ac);
-					// Create the authentication token.
-					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
-					// Set the authentication on the session.
-					session.tk = Some((&claims).into());
-					session.ns = Some(ns.to_owned());
-					session.ac = Some(ac.to_owned());
-					session.exp = expiration(av.duration.session)?;
-					match &gr.subject {
-						access::Subject::User(user) => {
-							session.au = Arc::new(Auth::new(Actor::new(
-								user.to_string(),
-								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
-								Level::Namespace(ns),
-							)));
-						}
-						// Return opaque error as this code should not be reachable.
-						_ => return Err(Error::InvalidAuth),
-					};
-					// Check the authentication token.
-					match enc {
-						// The authentication token was created successfully.
-						Ok(tk) => Ok(SigninData {
-							token: tk,
-							refresh: None,
-						}),
-						_ => Err(Error::TokenMakingFailed),
-					}
+
+					signin_bearer(kvs, session, Some(ns), None, av, &at, key).await
 				}
 				_ => Err(Error::AccessMethodMismatch),
 			}
@@ -765,131 +507,201 @@ pub async fn root_access(
 	match access {
 		Ok(av) => {
 			// Check the access method type
-			match &av.kind {
+			match av.kind.clone() {
 				AccessType::Bearer(at) => {
-					// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-					if !*EXPERIMENTAL_BEARER_ACCESS {
-						// Return opaque error to avoid leaking the existence of the feature.
-						debug!(
-							"Error attempting to authenticate with disabled bearer access feature"
-						);
-						return Err(Error::InvalidAuth);
-					}
-					// If the bearer grant is a refresh token
-					// Refresh tokens are not implemented for system users
-					if matches!(at.kind, access_type::BearerAccessType::Refresh) {
-						return Err(Error::FeatureNotYetImplemented {
-							feature: "Refresh tokens for system users".to_string(),
-						});
-					};
-					// Check if the bearer access method supports issuing tokens.
-					let iss = match &at.jwt.issue {
-						Some(iss) => iss.clone(),
-						_ => return Err(Error::AccessMethodMismatch),
-					};
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
 						Some(key) => key.to_raw_string(),
 						None => return Err(Error::AccessBearerMissingKey),
 					};
-					let kid = validate_grant_bearer(&key)?;
-					// Create a new readonly transaction
-					let tx = kvs.transaction(Read, Optimistic).await?;
-					// Fetch the specified access grant from storage
-					let gr = match tx.get_root_access_grant(&ac, &kid).await {
-						Ok(gr) => gr,
-						// Return opaque error to avoid leaking existence of the grant.
-						Err(e) => {
-							debug!("Error retrieving bearer access grant: {e}");
-							return Err(Error::InvalidAuth);
-						}
-					};
-					// Ensure that the transaction is cancelled.
-					tx.cancel().await?;
-					// Authenticate bearer key against stored grant.
-					verify_grant_bearer(&gr, key)?;
-					// If the subject of the grant is a system user, get their roles.
-					let roles = if let access::Subject::User(user) = &gr.subject {
-						// Create a new readonly transaction.
-						let tx = kvs.transaction(Read, Optimistic).await?;
-						// Fetch the specified user from storage.
-						let user = tx.get_root_user(user).await.map_err(|e| {
-							debug!("Error retrieving user for bearer access to root: {e}");
-							// Return opaque error to avoid leaking grant subject existence.
-							Error::InvalidAuth
-						})?;
-						// Ensure that the transaction is cancelled.
-						tx.cancel().await?;
-						user.roles.clone()
-					} else {
-						vec![]
-					};
-					// Create the authentication key.
-					let key = config(iss.alg, &iss.key)?;
-					// Create the authentication claim.
-					let claims = Claims {
-						iss: Some(SERVER_NAME.to_owned()),
-						iat: Some(Utc::now().timestamp()),
-						nbf: Some(Utc::now().timestamp()),
-						exp: expiration(av.duration.token)?,
-						jti: Some(Uuid::new_v4().to_string()),
-						ac: Some(ac.to_owned()),
-						id: match &gr.subject {
-							access::Subject::User(user) => Some(user.to_raw()),
-							// Return opaque error as this code should not be reachable.
-							_ => return Err(Error::InvalidAuth),
-						},
-						roles: match &gr.subject {
-							access::Subject::User(_) => {
-								Some(roles.iter().map(|v| v.to_string()).collect())
-							}
-							// Return opaque error as this code should not be reachable.
-							_ => return Err(Error::InvalidAuth),
-						},
-						..Claims::default()
-					};
-					// AUTHENTICATE clause
-					if let Some(au) = &av.authenticate {
-						// Setup the system session for executing the clause
-						let mut sess = Session::editor();
-						sess.tk = Some((&claims).into());
-						sess.ip.clone_from(&session.ip);
-						sess.or.clone_from(&session.or);
-						authenticate_generic(kvs, &sess, au).await?;
-					}
-					// Log the authenticated access method information.
-					trace!("Signing in to database with bearer access method `{}`", ac);
-					// Create the authentication token.
-					let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
-					// Set the authentication on the session.
-					session.tk = Some(claims.into());
-					session.ac = Some(ac.to_owned());
-					session.exp = expiration(av.duration.session)?;
-					match &gr.subject {
-						access::Subject::User(user) => {
-							session.au = Arc::new(Auth::new(Actor::new(
-								user.to_string(),
-								roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
-								Level::Root,
-							)));
-						}
-						// Return opaque error as this code should not be reachable.
-						_ => return Err(Error::InvalidAuth),
-					};
-					// Check the authentication token.
-					match enc {
-						// The authentication token was created successfully.
-						Ok(tk) => Ok(SigninData {
-							token: tk,
-							refresh: None,
-						}),
-						_ => Err(Error::TokenMakingFailed),
-					}
+
+					signin_bearer(kvs, session, None, None, av, &at, key).await
 				}
 				_ => Err(Error::AccessMethodMismatch),
 			}
 		}
 		_ => Err(Error::AccessNotFound),
+	}
+}
+
+pub async fn signin_bearer(
+	kvs: &Datastore,
+	session: &mut Session,
+	ns: Option<String>,
+	db: Option<String>,
+	av: Arc<DefineAccessStatement>,
+	at: &access_type::BearerAccess,
+	key: String,
+) -> Result<SigninData, Error> {
+	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+	if !*EXPERIMENTAL_BEARER_ACCESS {
+		// Return opaque error to avoid leaking the existence of the feature.
+		debug!("Error attempting to authenticate with disabled bearer access feature");
+		return Err(Error::InvalidAuth);
+	}
+	// Check if the bearer access method supports issuing tokens.
+	let iss = match &at.jwt.issue {
+		Some(iss) => iss.clone(),
+		_ => return Err(Error::AccessMethodMismatch),
+	};
+	// Extract key identifier and key from the provided key.
+	let kid = validate_grant_bearer(&key)?;
+	// Create a new readonly transaction
+	let tx = kvs.transaction(Read, Optimistic).await?;
+	// Fetch the specified access grant from storage
+	let gr = match (&ns, &db) {
+		(Some(ns), Some(db)) => tx.get_db_access_grant(ns, db, &av.name, &kid).await,
+		(Some(ns), None) => tx.get_ns_access_grant(ns, &av.name, &kid).await,
+		(None, None) => tx.get_root_access_grant(&av.name, &kid).await,
+		(None, Some(_)) => return Err(Error::NsEmpty),
+	}
+	.map_err(|e| {
+		debug!("Error retrieving bearer access grant: {e}");
+		// Return opaque error to avoid leaking existence of the grant.
+		Error::InvalidAuth
+	})?;
+	// Ensure that the transaction is cancelled.
+	tx.cancel().await?;
+	// Authenticate bearer key against stored grant.
+	verify_grant_bearer(&gr, key)?;
+	// If the subject of the grant is a system user, get their roles.
+	let roles = if let access::Subject::User(user) = &gr.subject {
+		// Create a new readonly transaction.
+		let tx = kvs.transaction(Read, Optimistic).await?;
+		// Fetch the specified user from storage.
+		let user = match (&ns, &db) {
+			(Some(ns), Some(db)) => tx.get_db_user(ns, db, user).await.map_err(|e| {
+				debug!("Error retrieving user for bearer access to database `{ns}/{db}`: {e}");
+				// Return opaque error to avoid leaking grant subject existence.
+				Error::InvalidAuth
+			}),
+			(Some(ns), None) => tx.get_ns_user(ns, user).await.map_err(|e| {
+				debug!("Error retrieving user for bearer access to namespace `{ns}`: {e}");
+				// Return opaque error to avoid leaking grant subject existence.
+				Error::InvalidAuth
+			}),
+			(None, None) => tx.get_root_user(user).await.map_err(|e| {
+				debug!("Error retrieving user for bearer access to root: {e}");
+				// Return opaque error to avoid leaking grant subject existence.
+				Error::InvalidAuth
+			}),
+			(None, Some(_)) => return Err(Error::NsEmpty),
+		}?;
+		// Ensure that the transaction is cancelled.
+		tx.cancel().await?;
+		user.roles.clone()
+	} else {
+		vec![]
+	};
+	// Create the authentication key.
+	let key = config(iss.alg, &iss.key)?;
+	// Create the authentication claim.
+	let claims = Claims {
+		iss: Some(SERVER_NAME.to_owned()),
+		iat: Some(Utc::now().timestamp()),
+		nbf: Some(Utc::now().timestamp()),
+		exp: expiration(av.duration.token)?,
+		jti: Some(Uuid::new_v4().to_string()),
+		ns: ns.to_owned(),
+		db: db.to_owned(),
+		ac: Some(av.name.to_string()),
+		id: match &gr.subject {
+			access::Subject::User(user) => Some(user.to_raw()),
+			access::Subject::Record(rid) => Some(rid.to_raw()),
+		},
+		roles: match &gr.subject {
+			access::Subject::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
+			access::Subject::Record(_) => Default::default(),
+		},
+		..Claims::default()
+	};
+	// AUTHENTICATE clause
+	if let Some(au) = &av.authenticate {
+		// Setup the system session for executing the clause.
+		let mut sess = match (&ns, &db) {
+			(Some(ns), Some(db)) => Session::editor().with_ns(ns).with_db(db),
+			(Some(ns), None) => Session::editor().with_ns(ns),
+			(None, None) => Session::editor(),
+			(None, Some(_)) => return Err(Error::NsEmpty),
+		};
+		sess.tk = Some((&claims).into());
+		sess.ip.clone_from(&session.ip);
+		sess.or.clone_from(&session.or);
+		authenticate_generic(kvs, &sess, au).await?;
+	}
+	// If the bearer grant is a refresh token.
+	let refresh = match at.kind {
+		access_type::BearerAccessType::Refresh => {
+			match &gr.subject {
+				access::Subject::Record(rid) => {
+					if let (Some(ns), Some(db)) = (&ns, &db) {
+						// Revoke the used refresh token.
+						revoke_refresh_token_record(kvs, gr.id.clone(), gr.ac.clone(), ns, db)
+							.await?;
+						// Create a new refresh token to replace it.
+						let refresh =
+							create_refresh_token_record(kvs, gr.ac.clone(), ns, db, rid.clone())
+								.await?;
+						Some(refresh)
+					} else {
+						debug!("Invalid attempt to authenticate as a record without a namespace and database");
+						return Err(Error::InvalidAuth);
+					}
+				}
+				access::Subject::User(_) => {
+					debug!(
+						"Invalid attempt to authenticatea as a system user with a refresh token"
+					);
+					return Err(Error::InvalidAuth);
+				}
+			}
+		}
+		_ => None,
+	};
+	// Log the authenticated access method information.
+	trace!("Signing in to database with bearer access method `{}`", av.name);
+	// Create the authentication token.
+	let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
+	// Set the authentication on the session.
+	session.tk = Some((&claims).into());
+	session.ns = ns.to_owned();
+	session.db = db.to_owned();
+	session.ac = Some(av.name.to_string());
+	session.exp = expiration(av.duration.session)?;
+	match &gr.subject {
+		access::Subject::User(user) => {
+			session.au = Arc::new(Auth::new(Actor::new(
+				user.to_string(),
+				roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
+				match (ns, db) {
+					(Some(ns), Some(db)) => Level::Database(ns, db),
+					(Some(ns), None) => Level::Namespace(ns),
+					(None, None) => Level::Root,
+					(None, Some(_)) => return Err(Error::NsEmpty),
+				},
+			)));
+		}
+		access::Subject::Record(rid) => {
+			session.au = Arc::new(Auth::new(Actor::new(
+				rid.to_string(),
+				Default::default(),
+				if let (Some(ns), Some(db)) = (ns, db) {
+					Level::Record(ns, db, rid.to_string())
+				} else {
+					debug!("Invalid attempt to authenticate as a record without a namespace and database");
+					return Err(Error::InvalidAuth);
+				},
+			)));
+			session.rd = Some(Value::from(rid.to_owned()));
+		}
+	};
+	// Return the authentication token.
+	match enc {
+		Ok(token) => Ok(SigninData {
+			token,
+			refresh,
+		}),
+		_ => Err(Error::TokenMakingFailed),
 	}
 }
 

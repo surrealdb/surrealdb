@@ -61,6 +61,9 @@ impl Display for AccessType {
 				if let Some(ref v) = ac.signin {
 					write!(f, " SIGNIN {v}")?
 				}
+				if let Some(_) = ac.bearer {
+					write!(f, " WITH REFRESH")?
+				}
 				write!(f, " WITH JWT {}", ac.jwt)?;
 			}
 			AccessType::Bearer(ac) => {

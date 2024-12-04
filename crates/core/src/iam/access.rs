@@ -114,7 +114,7 @@ pub async fn create_refresh_token_record(
 		warn!("Unexpected error when attempting to create a refresh token: {e}");
 		Error::UnexpectedAuth
 	})?;
-	tx.cancel().await?;
+	tx.commit().await?;
 	// Return the key string from the bearer grant
 	match grant.grant {
 		access::Grant::Bearer(bearer) => Ok(bearer.key.as_string()),
@@ -154,6 +154,6 @@ pub async fn revoke_refresh_token_record(
 		})
 		.finish()
 		.await?;
-	tx.cancel().await?;
+	tx.commit().await?;
 	Ok(())
 }
