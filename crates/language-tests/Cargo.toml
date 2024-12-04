@@ -29,17 +29,17 @@ rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 camino = { version = "1.1.9", features = ["serde1"] }
 
 # Error handling
-anyhow = "1.0.89"
+anyhow = "1.0.81"
 
 # Async utility crates
-tokio = { version = "1.40.0", features = ["full"] }
+tokio = { version = "1.41.1", features = ["full"] }
 futures = "0.3.30"
 
 # Config and cli parsing
-clap = { version = "4.5.17", features = ["cargo"] }
-serde = { version = "1.0.210", features = ["derive"] }
+clap = { version = "4.4.11", features = ["cargo"] }
+serde = { version = "1.0.209", features = ["derive"] }
 toml = "0.8.19"
-toml_edit = { version = "0.22.21", features = ["serde"] }
+toml_edit = { version = "0.22", features = ["serde"] }
 
 # Used for formatting output
 base64 = "0.21.5"
