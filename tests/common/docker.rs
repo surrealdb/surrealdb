@@ -50,7 +50,8 @@ impl DockerContainer {
 		let std_out = String::from_utf8(output.stdout).unwrap().trim().to_string();
 		if !output.stderr.is_empty() {
 			let message = String::from_utf8(output.stderr).unwrap();
-			if message.starts_with("Unable to find image") && message.ends_with("locally") {
+			let first_line = message.lines().next().unwrap().trim();
+			if first_line.starts_with("Unable to find image") && first_line.ends_with("locally") {
 				info!("{message}");
 			} else {
 				error!("{message}");
