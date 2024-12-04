@@ -202,10 +202,10 @@ tokio = { version = "1.41.1", default-features = false, features = [
 tokio-tungstenite = { version = "0.21.0", optional = true }
 uuid = { version = "1.10.0", features = ["serde", "v4", "v7"] }
 
-[target.'cfg(any(target_os = "linux", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
 mimalloc = { version = "0.1.43", optional = true, default-features = false }
 
-[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "macos"))'.dependencies]
+[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 jemallocator = { version = "0.5.4", optional = true }
 
 [lints.rust]
