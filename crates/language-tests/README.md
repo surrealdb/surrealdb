@@ -188,6 +188,43 @@ To solve this problem in tests, you can have rough equality when matching a
 value. With rough equality the value of record-id keys are not tested, only if
 they are of the right type.
 
+##### Matching expressions
+When matching against a value is not possible you can also fall back to running
+a SurrealQL expression to match the output. Results which should be validated
+with a matching expression are created by setting the `match` field on
+`[[test.results]]`. The match expression must be a valid surrealql expression
+which should return a boolean true when the expression found the output to be
+valid. The matching expression can access the value with either the `$result`
+param or the `$error` param. The latter being defined when the output of the
+current matched statement was an error, being defined with the text of the error
+as a string. It is often the case that a matching expression should only match a
+value or an error but not both. In this case you can set the `error` field on
+the same `[[test.results]]` to either true or false depending on if an error was
+expected or not. See below for some examples of matching expressions:
+
+```toml
+
+# Tests if the statement output was either the string foo or an error: 'An error
+# occurred: foo'
+[[test.results]]
+match = "$result == 'foo' || $error == 'An error occurred: foo'"
+
+# Tests an error with a regex as some parts of the error are non-deterministic.
+[[test.results]]
+match = "$error = /Found record: `thing:.*` which is not a relation, but expected a  NORMAL/"
+# This matching should only match errors.
+error = true
+
+# Test whether the field of a result matched the regex
+[[test.results]]
+match = """
+$result.users.test = /DEFINE USER test ON ROOT PASSHASH '\\$argon2id\\$.*' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/
+"""
+error = false
+```
+
+
+
 ### `[env]`
 
 The `[env]` table specifies the environment in which the test must be run. 
