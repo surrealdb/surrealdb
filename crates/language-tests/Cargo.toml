@@ -17,7 +17,7 @@ fuzzing = ["dep:libfuzzer-sys", "dep:arbitrary", "surrealdb-core/arbitrary"]
 
 [dependencies]
 # Crates for running surrealdb.
-surrealdb-core = { path = "../core/" }
+surrealdb-core = { path = "../core/", features = ["scripting"] }
 reblessive = { version = "*" }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 
