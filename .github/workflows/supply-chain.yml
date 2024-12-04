@@ -85,7 +85,7 @@ jobs:
         run: cargo install --debug --locked cargo-vet
 
       - name: Check dependencies for untrusted sources
-        run: cargo vet check --filter-graph="exclude(name(surrealql-test))"
+        run: cargo vet check
 
       - name: Dependency check failure
         if: failure()
