@@ -12,7 +12,7 @@ pub async fn chain(
 	(value, worker): (Value, Closure),
 ) -> Result<Value, Error> {
 	if let Some(opt) = opt {
-		let fnc = Function::Anonymous(worker.into(), vec![value]);
+		let fnc = Function::Anonymous(worker.into(), vec![value], false);
 		fnc.compute(stk, ctx, opt, doc).await
 	} else {
 		Ok(Value::None)
