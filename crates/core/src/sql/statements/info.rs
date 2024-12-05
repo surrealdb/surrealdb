@@ -61,6 +61,7 @@ impl InfoStatement {
 						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
+						"system".to_string() => process(Arc::new([System::new()])),
 						"users".to_string() => process(txn.all_root_users().await?),
 					}),
 					false => Value::from(map! {
@@ -86,14 +87,7 @@ impl InfoStatement {
 							out.into()
 						},
 						"system".to_string() => {
-							let mut out = Object::default();
-							let parallelism = available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get());
-							out.insert("parallelism".to_string(), parallelism.into());
-							#[cfg(feature = "allocator")]
-							out.insert("memory_allocated".to_string(), crate::mem::ALLOC.current_usage().into());
-							#[cfg(not(feature = "allocator"))]
-							out.insert("memory_allocated".to_string(), 0.into());
-							out.into()
+							System::new().into()
 						},
 						"users".to_string() => {
 							let mut out = Object::default();
@@ -401,4 +395,43 @@ where
 	T: InfoStructure + Clone,
 {
 	Value::Array(a.iter().cloned().map(InfoStructure::structure).collect())
+}
+
+#[derive(Clone)]
+struct System {
+	memory_allocated: usize,
+	parallelism: usize,
+}
+
+impl System {
+	#[cfg(not(feature = "allocator"))]
+	fn new() -> Self {
+		Self {
+			memory_allocated: 0,
+			parallelism: available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get()),
+		}
+	}
+
+	#[cfg(feature = "allocator")]
+	fn new() -> Self {
+		Self {
+			memory_allocated: crate::mem::ALLOC.current_usage(),
+			parallelism: available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get()),
+		}
+	}
+}
+
+impl From<System> for Value {
+	fn from(s: System) -> Self {
+		Self::from(map! {
+			"parallelism".to_string() =>
+		s.parallelism.into(),
+			"memory_allocated".to_string() => s.memory_allocated.into()})
+	}
+}
+
+impl InfoStructure for System {
+	fn structure(self) -> Value {
+		self.into()
+	}
 }
