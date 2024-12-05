@@ -79,7 +79,7 @@ opentelemetry = { version = "0.24" }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
 pin-project-lite = "0.2.13"
-pprof = { version = "0.13.0", features = ["flamegraph", "prost-codec"], optional = true }
+pprof = { version = "0.14.0", features = ["flamegraph", "prost-codec"], optional = true }
 rand = "0.8.5"
 reqwest = { version = "0.12.7", default-features = false, features = ["blocking", "gzip", "http2"] }
 revision = { version = "0.10.0", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
