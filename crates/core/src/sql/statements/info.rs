@@ -9,9 +9,9 @@ use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
+use std::thread::available_parallelism;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -63,49 +63,44 @@ impl InfoStatement {
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"users".to_string() => process(txn.all_root_users().await?),
 					}),
-					false => {
-						let map: BTreeMap<String, Value> = map! {
-							"accesses".to_string() => {
-								let mut out = Object::default();
-								for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
-									out.insert(v.name.to_raw(), v.to_string().into());
-								}
-								out.into()
-							},
-							"namespaces".to_string() => {
-								let mut out = Object::default();
-								for v in txn.all_ns().await?.iter() {
-									out.insert(v.name.to_raw(), v.to_string().into());
-								}
-								out.into()
-							},
-							"nodes".to_string() => {
-								let mut out = Object::default();
-								for v in txn.all_nodes().await?.iter() {
-									out.insert(v.id.to_string(), v.to_string().into());
-								}
-								out.into()
-							},
-							"users".to_string() => {
-								let mut out = Object::default();
-								for v in txn.all_root_users().await?.iter() {
-									out.insert(v.name.to_raw(), v.to_string().into());
-								}
-								out.into()
-							}
-						};
-						#[cfg(feature = "allocator")]
-						{
-							let mut map = map;
+					false => Value::from(map! {
+						"accesses".to_string() => {
 							let mut out = Object::default();
-							let mem = crate::mem::ALLOC.current_usage();
-							out.insert("allocated".to_string(), mem.into());
-							map.insert("memory".to_string(), out.into());
-							Value::from(map)
+							for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"namespaces".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_ns().await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"nodes".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_nodes().await?.iter() {
+								out.insert(v.id.to_string(), v.to_string().into());
+							}
+							out.into()
+						},
+						"system".to_string() => {
+							let mut out = Object::default();
+							let parallelism = available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get());
+							out.insert("parallelism".to_string(), parallelism.into());
+							#[cfg(feature = "allocator")]
+							out.insert("memory_allocated".to_string(), crate::mem::ALLOC.current_usage().into());
+							out.into()
+						},
+						"users".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_root_users().await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
 						}
-						#[cfg(not(feature = "allocator"))]
-						Value::from(map)
-					}
+					}),
 				})
 			}
 			InfoStatement::Ns(structured) => {
