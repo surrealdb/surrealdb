@@ -125,4 +125,13 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 		CURRENT.fetch_sub(layout.size(), Ordering::Relaxed);
 		self.alloc.dealloc(ptr, layout);
 	}
+
+	unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+		let ret = self.alloc.realloc(ptr, layout, new_size);
+		if !ret.is_null() {
+			CURRENT.fetch_sub(layout.size(), Ordering::Relaxed);
+			CURRENT.fetch_add(new_size, Ordering::Relaxed);
+		}
+		ret
+	}
 }

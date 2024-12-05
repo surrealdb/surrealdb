@@ -11,6 +11,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
+use std::thread::available_parallelism;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -84,13 +85,23 @@ impl InfoStatement {
 							}
 							out.into()
 						},
+						"system".to_string() => {
+							let mut out = Object::default();
+							let parallelism = available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get());
+							out.insert("parallelism".to_string(), parallelism.into());
+							#[cfg(feature = "allocator")]
+							out.insert("memory_allocated".to_string(), crate::mem::ALLOC.current_usage().into());
+							#[cfg(not(feature = "allocator"))]
+							out.insert("memory_allocated".to_string(), 0.into());
+							out.into()
+						},
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_users().await?.iter() {
 								out.insert(v.name.to_raw(), v.to_string().into());
 							}
 							out.into()
-						},
+						}
 					}),
 				})
 			}
