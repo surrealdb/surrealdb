@@ -56,7 +56,10 @@ mod database_upgrade {
 
 	macro_rules! run {
 		($future:expr) => {
-			timeout(TIMEOUT_DURATION, $future).await.expect("test timed out")
+			if timeout(TIMEOUT_DURATION, $future).await.is_err() {
+				error!("test timed out");
+				panic!();
+			}
 		};
 	}
 
