@@ -1,21 +1,6 @@
 
 # cargo-vet audits file
 
-[[audits.aligned-vec]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.6.1"
-
-[[audits.aligned-vec]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.6.1"
-
-[[audits.aligned-vec]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.6.1"
-
 [[audits.async-executor]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
@@ -42,16 +27,6 @@ criteria = "safe-to-deploy"
 version = "3.3.1"
 notes = "A very simple one file library, no unsafe code."
 
-[[audits.equator]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.2.2"
-
-[[audits.equator-macro]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.2.1"
-
 [[audits.futures-lite]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
@@ -61,11 +36,6 @@ delta = "2.3.0 -> 2.5.0"
 who = "arriqaaq <farhan.khan@surrealdb.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.161 -> 0.2.162"
-
-[[audits.pprof]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-delta = "0.13.0 -> 0.14.0"
 
 [[trusted.addr]]
 criteria = "safe-to-deploy"
