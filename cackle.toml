@@ -1225,3 +1225,6 @@ allow_apis = [
 
 [pkg.revision]
 allow_apis = ["fs"]
+
+[pkg.equator-macro]
+allow_proc_macro = true
