@@ -278,7 +278,6 @@ fn random_string(length: usize, pool: &[u8]) -> String {
 	string
 }
 
-#[doc(hidden)]
 pub async fn create_grant(
 	stmt: &AccessStatementGrant,
 	ctx: &Context,
@@ -580,7 +579,6 @@ async fn compute_show(
 	}
 }
 
-#[doc(hidden)]
 pub async fn revoke_grant(
 	stmt: &AccessStatementRevoke,
 	stk: &mut Stk,
@@ -762,7 +760,6 @@ pub async fn revoke_grant(
 	Ok(Value::Array(revoked.into()))
 }
 
-#[doc(hidden)]
 async fn compute_revoke(
 	stmt: &AccessStatementRevoke,
 	stk: &mut Stk,
