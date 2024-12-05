@@ -6,6 +6,7 @@ mod helpers;
 use helpers::*;
 
 use std::collections::HashMap;
+use std::thread::available_parallelism;
 use std::time::{Duration, SystemTime};
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -32,14 +33,16 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
-			accesses: {},
-			namespaces: { test: 'DEFINE NAMESPACE test' },
-			nodes: {},
-			users: {},
-		}",
-	);
+	let parallelism = available_parallelism()?;
+	let val = Value::parse(&format!(
+		"{{
+			accesses: {{}},
+			namespaces: {{ test: 'DEFINE NAMESPACE test' }},
+			nodes: {{}},
+			system: {{ parallelism: {parallelism} }},
+			users: {{}},
+		}}"
+	));
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2036,10 +2039,10 @@ async fn permissions_checks_define_ns() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-		vec!["{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
-	];
+	let parallelism = available_parallelism().unwrap();
+	let access1 = format!("{{ accesses: {{  }}, namespaces: {{ NS: 'DEFINE NAMESPACE NS' }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{  }} }}");
+	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{  }} }}");
+	let check_results = [vec![access1.as_str()], vec![access2.as_str()]];
 
 	let test_cases = [
 		// Root level
@@ -2201,10 +2204,10 @@ async fn permissions_checks_define_access_root() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, nodes: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
-    ];
+	let parallelism = available_parallelism().unwrap();
+	let access1 = format!("{{ accesses: {{ access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{  }} }}");
+	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{  }} }}");
+	let check_results = [vec![access1.as_str()], vec![access2.as_str()]];
 
 	let test_cases = [
 		// Root level
@@ -2327,10 +2330,10 @@ async fn permissions_checks_define_user_root() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-        vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
-    ];
+	let parallelism = available_parallelism().unwrap();
+	let access1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{ user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" }} }}");
+	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{  }} }}");
+	let check_results = [vec![access1.as_str()], vec![access2.as_str()]];
 
 	let test_cases = [
 		// Root level
