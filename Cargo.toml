@@ -15,7 +15,6 @@ members = [
 [features]
 # Public features
 default = [
-    "allocator",
     "storage-mem",
     "storage-surrealkv",
     "storage-surrealcs",
