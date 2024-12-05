@@ -256,6 +256,9 @@ allow_proc_macro = true
 [pkg.darling_macro]
 allow_proc_macro = true
 
+[pkg.equator-macro]
+allow_proc_macro = true
+
 [pkg.pin-project-lite]
 allow_unsafe = true
 
