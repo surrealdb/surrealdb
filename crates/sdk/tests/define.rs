@@ -2331,9 +2331,9 @@ async fn permissions_checks_define_user_root() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let parallelism = available_parallelism().unwrap();
-	let access1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{ user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" }} }}");
-	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{  }} }}");
-	let check_results = [vec![access1.as_str()], vec![access2.as_str()]];
+	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{ user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" }} }}");
+	let check2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{  }} }}");
+	let check_results = [vec![check1.as_str()], vec![check2.as_str()]];
 
 	let test_cases = [
 		// Root level
