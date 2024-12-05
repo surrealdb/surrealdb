@@ -66,11 +66,12 @@ pub async fn iam_run_case(
 				);
 			}
 
-			let tmp = tmp.unwrap().to_string();
-			if tmp != check_expected_result[i] {
+			let tmp = tmp.unwrap();
+			let expected = value(check_expected_result[i])?;
+			if tmp != expected {
 				return Err(format!(
-					"Check statement failed for test: expected value '{}' doesn't match '{}'",
-					check_expected_result[i], tmp
+					"Check statement failed for test: expected value '{:#}' doesn't match '{:#}'",
+					expected, tmp
 				)
 				.into());
 			}
