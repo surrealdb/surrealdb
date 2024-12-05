@@ -4,13 +4,12 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-#[cfg(feature = "allocator")]
-use crate::mem::ALLOC;
 use crate::sql::{Base, Ident, Object, Value, Version};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -64,43 +63,49 @@ impl InfoStatement {
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"users".to_string() => process(txn.all_root_users().await?),
 					}),
-					false => Value::from(map! {
-						"accesses".to_string() => {
-							let mut out = Object::default();
-							for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.to_raw(), v.to_string().into());
+					false => {
+						let map: BTreeMap<String, Value> = map! {
+							"accesses".to_string() => {
+								let mut out = Object::default();
+								for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
+									out.insert(v.name.to_raw(), v.to_string().into());
+								}
+								out.into()
+							},
+							"namespaces".to_string() => {
+								let mut out = Object::default();
+								for v in txn.all_ns().await?.iter() {
+									out.insert(v.name.to_raw(), v.to_string().into());
+								}
+								out.into()
+							},
+							"nodes".to_string() => {
+								let mut out = Object::default();
+								for v in txn.all_nodes().await?.iter() {
+									out.insert(v.id.to_string(), v.to_string().into());
+								}
+								out.into()
+							},
+							"users".to_string() => {
+								let mut out = Object::default();
+								for v in txn.all_root_users().await?.iter() {
+									out.insert(v.name.to_raw(), v.to_string().into());
+								}
+								out.into()
 							}
-							out.into()
-						},
-						"namespaces".to_string() => {
-							let mut out = Object::default();
-							for v in txn.all_ns().await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
-							}
-							out.into()
-						},
-						"nodes".to_string() => {
-							let mut out = Object::default();
-							for v in txn.all_nodes().await?.iter() {
-								out.insert(v.id.to_string(), v.to_string().into());
-							}
-							out.into()
-						},
-						"users".to_string() => {
-							let mut out = Object::default();
-							for v in txn.all_root_users().await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
-							}
-							out.into()
-						},
+						};
 						#[cfg(feature = "allocator")]
-						"memory".to_string() => {
+						{
+							let mut map = map;
 							let mut out = Object::default();
-							let mem = ALLOC.current_usage();
-							out.insert("allocated".to_string(),  mem.into());
-							out.into()
+							let mem = crate::mem::ALLOC.current_usage();
+							out.insert("allocated".to_string(), mem.into());
+							map.insert("memory".to_string(), out.into());
+							Value::from(map)
 						}
-					}),
+						#[cfg(not(feature = "allocator"))]
+						Value::from(map)
+					}
 				})
 			}
 			InfoStatement::Ns(structured) => {
