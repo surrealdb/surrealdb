@@ -240,7 +240,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			accesses: {{ }},
 			namespaces: {{ test: 'DEFINE NAMESPACE test' }},
 			nodes: {{ }},
-			system: {{ parallelism: {parallelism} }},
+			system: {{ memory_allocated: 0, parallelism: {parallelism} }},
 			users: {{ }},
 		}}"
 	));

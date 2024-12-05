@@ -212,7 +212,7 @@ async fn permissions_checks_info_root() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let parallelism = available_parallelism().unwrap();
-	let check = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{  }} }}");
+	let check = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0,  parallelism: {parallelism}}}, users: {{  }} }}");
 	let check_results = [vec![check.as_str()], vec![check.as_str()]];
 
 	let test_cases = [

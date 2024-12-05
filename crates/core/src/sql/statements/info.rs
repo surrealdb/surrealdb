@@ -91,6 +91,8 @@ impl InfoStatement {
 							out.insert("parallelism".to_string(), parallelism.into());
 							#[cfg(feature = "allocator")]
 							out.insert("memory_allocated".to_string(), crate::mem::ALLOC.current_usage().into());
+							#[cfg(not(feature = "allocator"))]
+							out.insert("memory_allocated".to_string(), 0.into());
 							out.into()
 						},
 						"users".to_string() => {
