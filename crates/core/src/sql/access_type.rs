@@ -89,6 +89,7 @@ impl InfoStructure for AccessType {
 				"jwt".to_string() => v.jwt.structure(),
 				"signup".to_string(), if let Some(v) = v.signup => v.structure(),
 				"signin".to_string(), if let Some(v) = v.signin => v.structure(),
+				"refresh".to_string(), if v.bearer.is_some() => true.into(),
 			}),
 			AccessType::Bearer(ac) => Value::from(map! {
 					"kind".to_string() => "BEARER".into(),
