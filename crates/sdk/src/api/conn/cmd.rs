@@ -414,6 +414,25 @@ pub(crate) struct RouterRequest {
 	params: Option<CoreValue>,
 }
 
+fn stringify_queries(value: CoreValue) -> CoreValue {
+	match value {
+		CoreValue::Query(query) => CoreValue::Strand(query.to_string().into()),
+		CoreValue::Array(array) => CoreValue::Array(CoreArray::from(
+			array.0.into_iter().map(stringify_queries).collect::<Vec<_>>(),
+		)),
+		_ => value,
+	}
+}
+
+impl RouterRequest {
+	pub(crate) fn stringify_queries(self) -> Self {
+		Self {
+			params: self.params.map(stringify_queries),
+			..self
+		}
+	}
+}
+
 impl Serialize for RouterRequest {
 	fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
 	where
