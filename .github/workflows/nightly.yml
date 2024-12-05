@@ -29,6 +29,6 @@ jobs:
     with:
       environment: nightly
       extra-features: storage-surrealkv,ml
-      git-ref: main
+      git-ref: rushmore/allocator-feature
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
     secrets: inherit
