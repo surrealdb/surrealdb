@@ -149,6 +149,7 @@ keyword! {
 	PostingsCache => "POSTINGS_CACHE",
 	PostingsOrder => "POSTINGS_ORDER",
 	Punct => "PUNCT",
+	Jieba => "JIEBA",
 	Purge => "PURGE",
 	Range => "RANGE",
 	Readonly => "READONLY",
