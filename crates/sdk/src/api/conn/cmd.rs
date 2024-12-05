@@ -414,6 +414,7 @@ pub(crate) struct RouterRequest {
 	params: Option<CoreValue>,
 }
 
+#[cfg(feature = "protocol-ws")]
 fn stringify_queries(value: CoreValue) -> CoreValue {
 	match value {
 		CoreValue::Query(query) => CoreValue::Strand(query.to_string().into()),
@@ -425,6 +426,7 @@ fn stringify_queries(value: CoreValue) -> CoreValue {
 }
 
 impl RouterRequest {
+	#[cfg(feature = "protocol-ws")]
 	pub(crate) fn stringify_queries(self) -> Self {
 		Self {
 			params: self.params.map(stringify_queries),
