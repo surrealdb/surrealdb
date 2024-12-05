@@ -10,8 +10,10 @@ mod database_upgrade {
 	use surrealdb::{Connection, Surreal, Value};
 	use test_log::test;
 	use tokio::net::TcpListener;
+	use tokio::sync::Semaphore;
 	use tokio::time::sleep;
 	use tokio::time::timeout;
+	use tracing::error;
 	use tracing::info;
 	use ulid::Ulid;
 
@@ -20,11 +22,15 @@ mod database_upgrade {
 	const USER: &str = "root";
 	const PASS: &str = "root";
 
+	// Limit number of running containers at the time
+	static PERMITS: Semaphore = Semaphore::const_new(3);
+
 	const TIMEOUT_DURATION: Duration = Duration::from_secs(5);
 
 	// This test include a feature set that is supported since v2.0
 	async fn upgrade_test_from_2_0(version: &str) {
 		// Start the docker instance
+		let permit = PERMITS.acquire().await.unwrap();
 		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
@@ -39,6 +45,7 @@ mod database_upgrade {
 
 		// Stop the docker instance
 		docker.stop();
+		drop(permit);
 
 		// Extract the database directory
 		docker.extract_data_dir(&path);
