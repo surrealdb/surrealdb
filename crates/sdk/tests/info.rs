@@ -1,9 +1,9 @@
 mod helpers;
 use helpers::*;
 
-use std::collections::HashMap;
-
 use regex::Regex;
+use std::collections::HashMap;
+use std::thread::available_parallelism;
 use surrealdb::dbs::Session;
 use surrealdb::iam::Role;
 
@@ -211,10 +211,9 @@ async fn permissions_checks_info_root() {
 		HashMap::from([("prepare", ""), ("test", "INFO FOR ROOT"), ("check", "INFO FOR ROOT")]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
-	];
+	let parallelism = available_parallelism().unwrap();
+	let check = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ parallelism: {parallelism}}}, users: {{  }} }}");
+	let check_results = [vec![check.as_str()], vec![check.as_str()]];
 
 	let test_cases = [
 		// Root level

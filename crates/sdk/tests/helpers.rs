@@ -4,7 +4,6 @@ use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
 
-use crate::parse::Parse;
 use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -68,7 +67,7 @@ pub async fn iam_run_case(
 			}
 
 			let tmp = tmp.unwrap();
-			let expected = Value::parse(check_expected_result[i]);
+			let expected = value(check_expected_result[i])?;
 			if tmp != expected {
 				return Err(format!(
 					"Check statement failed for test: expected value '{:#}' doesn't match '{:#}'",

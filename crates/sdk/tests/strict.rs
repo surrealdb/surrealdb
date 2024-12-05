@@ -1,5 +1,7 @@
 mod parse;
+
 use parse::Parse;
+use std::thread::available_parallelism;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
@@ -230,15 +232,18 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let val = Value::parse("[{ id: test:tester, extra: true }]");
 	assert_eq!(tmp, val);
 	//
+	let parallelism = available_parallelism()?;
+	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
-			accesses: {},
-			namespaces: { test: 'DEFINE NAMESPACE test' },
-			nodes: {},
-			users: {},
-		}",
-	);
+	let val = Value::parse(&format!(
+		"{{
+			accesses: {{ }},
+			namespaces: {{ test: 'DEFINE NAMESPACE test' }},
+			nodes: {{ }},
+			system: {{ parallelism: {parallelism} }},
+			users: {{ }},
+		}}"
+	));
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
