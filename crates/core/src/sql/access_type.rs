@@ -109,8 +109,10 @@ impl AccessType {
 	#[allow(unreachable_patterns)]
 	pub fn can_issue_grants(&self) -> bool {
 		match self {
-			// The grants for JWT and record access methods are JWT
-			AccessType::Jwt(_) | AccessType::Record(_) => false,
+			// The JWT access method cannot issue stateful grants.
+			AccessType::Jwt(_) => false,
+			// The record access method can be used to issue grants if defined with bearer AKA refresh.
+			AccessType::Record(ac) => ac.bearer.is_some(),
 			AccessType::Bearer(_) => true,
 		}
 	}
