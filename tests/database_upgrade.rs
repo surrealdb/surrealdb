@@ -30,7 +30,6 @@ mod database_upgrade {
 	// This test include a feature set that is supported since v2.0
 	async fn upgrade_test_from_2_0(version: &str) {
 		// Start the docker instance
-		let permit = PERMITS.acquire().await.unwrap();
 		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
@@ -45,7 +44,6 @@ mod database_upgrade {
 
 		// Stop the docker instance
 		docker.stop();
-		drop(permit);
 
 		// Extract the database directory
 		docker.extract_data_dir(&path);
@@ -63,10 +61,13 @@ mod database_upgrade {
 
 	macro_rules! run {
 		($future:expr) => {
+			let permit = PERMITS.acquire().await.unwrap();
 			if timeout(TIMEOUT_DURATION, $future).await.is_err() {
+				drop(permit);
 				error!("test timed out");
 				panic!();
 			}
+			drop(permit);
 		};
 	}
 
