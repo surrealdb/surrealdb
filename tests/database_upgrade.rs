@@ -1,73 +1,30 @@
-#![allow(unused_imports)]
-#![allow(dead_code)]
-
 mod common;
 
 #[cfg(docker)]
 mod database_upgrade {
 	use super::common::docker::DockerContainer;
-	use super::common::expected::Expected;
-	use super::common::rest_client::RestClient;
-	use serde_json::Value as JsonValue;
-	use serial_test::serial;
+	use std::net::Ipv4Addr;
 	use std::time::Duration;
 	use surrealdb::engine::any::{connect, Any};
-	use surrealdb::{Connection, Surreal};
+	use surrealdb::opt::auth::Root;
+	use surrealdb::{Connection, Surreal, Value};
 	use test_log::test;
+	use tokio::net::TcpListener;
+	use tokio::time::sleep;
+	use tokio::time::timeout;
+	use tracing::error;
 	use tracing::info;
 	use ulid::Ulid;
 
-	const CNX_TIMEOUT: Duration = Duration::from_secs(180);
 	const NS: &str = "test";
 	const DB: &str = "test";
 	const USER: &str = "root";
 	const PASS: &str = "root";
 
-	// This test include a feature set that is supported since v1.0
-	async fn upgrade_test_from_1_0(version: &str) {
-		// Start the docker instance
-		let (path, mut docker, client) = start_docker(version).await;
+	const TIMEOUT_DURATION: Duration = Duration::from_secs(180);
 
-		// Create the data set
-		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
-		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
-
-		// Check the data set
-		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
-		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
-		check_data_on_docker(&client, "DB", &CHECK_DB).await;
-
-		// Stop the docker instance
-		docker.stop();
-
-		// Extract the database directory
-		docker.extract_data_dir(&path);
-
-		// Connect to a local instance
-		let db = new_local_instance(&path).await;
-
-		// Check that the data has properly migrated
-		check_migrated_data(&db, "IDX", &CHECK_IDX).await;
-		check_migrated_data(&db, "DB", &CHECK_DB).await;
-		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
-	}
-
-	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_0_0() {
-		upgrade_test_from_1_0("1.0.0").await;
-	}
-
-	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_0_1() {
-		upgrade_test_from_1_0("1.0.1").await;
-	}
-
-	// This test include a feature set that since v1.1
-	async fn upgrade_test_from_1_1(version: &str) {
+	// This test include a feature set that is supported since v2.0
+	async fn upgrade_test_from_2_0(version: &str) {
 		// Start the docker instance
 		let (path, mut docker, client) = start_docker(version).await;
 
@@ -80,53 +37,6 @@ mod database_upgrade {
 		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
 		check_data_on_docker(&client, "DB", &CHECK_DB).await;
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
-		check_data_on_docker(&client, "MTREE", &CHECK_MTREE_RPC).await;
-
-		// Stop the docker instance
-		docker.stop();
-
-		// Extract the database directory
-		docker.extract_data_dir(&path);
-
-		// Connect to a local instance
-		let db = new_local_instance(&path).await;
-
-		// Check that the data has properly migrated
-		check_migrated_data(&db, "IDX", &CHECK_IDX).await;
-		check_migrated_data(&db, "DB", &CHECK_DB).await;
-		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
-		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
-	}
-
-	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_1_0() {
-		upgrade_test_from_1_1("v1.1.0").await;
-	}
-
-	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_1_1() {
-		upgrade_test_from_1_1("v1.1.1").await;
-	}
-
-	// This test include a feature set that is supported since 1.2
-	async fn upgrade_test_from_1_2(version: &str) {
-		// Start the docker instance
-		let (path, mut docker, client) = start_docker(version).await;
-
-		// Create the data set
-		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
-		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
-		create_data_on_docker(&client, "MTREE", &DATA_MTREE).await;
-
-		// Check the data set
-		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
-		check_data_on_docker(&client, "DB", &CHECK_DB).await;
-		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
-		check_data_on_docker(&client, "MTREE", &CHECK_MTREE_RPC).await;
 
 		// Stop the docker instance
 		docker.stop();
@@ -145,74 +55,61 @@ mod database_upgrade {
 		check_migrated_data(&db, "KNN_BRUTEFORCE", &CHECK_KNN_BRUTEFORCE).await;
 	}
 
-	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_2_0() {
-		upgrade_test_from_1_2("v1.2.0").await;
+	macro_rules! run {
+		($future:expr) => {
+			if timeout(TIMEOUT_DURATION, $future).await.is_err() {
+				error!("test timed out");
+				panic!();
+			}
+		};
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_2_1() {
-		upgrade_test_from_1_2("v1.2.1").await;
+	async fn upgrade_test_from_2_0_0() {
+		run!(upgrade_test_from_2_0("v2.0.0"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_2_2() {
-		upgrade_test_from_1_2("v1.2.2").await;
+	async fn upgrade_test_from_2_0_1() {
+		run!(upgrade_test_from_2_0("v2.0.1"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_3_0() {
-		upgrade_test_from_1_2("v1.3.0").await;
+	async fn upgrade_test_from_2_0_2() {
+		run!(upgrade_test_from_2_0("v2.0.2"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_3_1() {
-		upgrade_test_from_1_2("v1.3.1").await;
+	async fn upgrade_test_from_2_0_3() {
+		run!(upgrade_test_from_2_0("v2.0.3"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_4_0() {
-		upgrade_test_from_1_2("v1.4.0").await;
+	async fn upgrade_test_from_2_0_4() {
+		run!(upgrade_test_from_2_0("v2.0.4"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_4_2() {
-		upgrade_test_from_1_2("v1.4.2").await;
+	async fn upgrade_test_from_2_1_0() {
+		run!(upgrade_test_from_2_0("v2.1.0"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_5_0() {
-		upgrade_test_from_1_2("v1.5.0").await;
+	async fn upgrade_test_from_2_1_1() {
+		run!(upgrade_test_from_2_0("v2.1.1"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_5_2() {
-		upgrade_test_from_1_2("v1.5.2").await;
-	}
-
-	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_from_1_5_3() {
-		upgrade_test_from_1_2("v1.5.3").await;
+	async fn upgrade_test_from_2_1_2() {
+		run!(upgrade_test_from_2_0("v2.1.2"));
 	}
 
 	// *******
@@ -231,11 +128,11 @@ mod database_upgrade {
 	const CHECK_IDX: [Check; 2] = [
 		(
 			"SELECT name FROM person WITH INDEX uniq_name WHERE name = 'Tobie'",
-			Expected::One("{\"name\":\"Tobie\"}"),
+			Some("[{ name: 'Tobie' }]"),
 		),
 		(
 			"SELECT name FROM person WITH INDEX idx_company WHERE company = 'SurrealDB'",
-			Expected::Two("{\"name\":\"Jaime\"}", "{\"name\":\"Tobie\"}"),
+			Some("[{ name: 'Jaime' }, { name: 'Tobie' }]"),
 		),
 	];
 
@@ -251,7 +148,7 @@ mod database_upgrade {
 	// Set of QUERY and RESULT to check for Full Text Search
 	const CHECK_FTS: [Check; 1] = [(
 		"SELECT search::highlight('<em>','</em>', 1) AS name FROM account WHERE name @1@ 'Tobie'",
-		Expected::One("{\"name\":\"<em>Tobie</em>\"}"),
+		Some("[{ name: '<em>Tobie</em>' }]"),
 	)];
 
 	// Set of DATA for VectorSearch and  Knn Operator checking
@@ -262,75 +159,112 @@ mod database_upgrade {
 		"DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4",
 	];
 
-	const CHECK_MTREE_RPC: [Check; 1] = [
-		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2> [2,3,4,5]",
-		 Expected::Two("{\"dist\": 2.0, \"id\": \"pts:1\"}", "{ \"dist\": 4.0, \"id\": \"pts:2\"}"))];
-
 	const CHECK_MTREE_DB: [Check; 1] = [
 		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <|2|> [2,3,4,5]",
-		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
+		Some("[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"))];
+
 	const CHECK_KNN_BRUTEFORCE: [Check; 1] = [
 		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> [2,3,4,5]",
-		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
+		 Some("[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"))];
 
-	type Check = (&'static str, Expected);
+	type Check = (&'static str, Option<&'static str>);
 
-	const CHECK_DB: [Check; 1] = [("INFO FOR DB", Expected::Any)];
+	const CHECK_DB: [Check; 1] = [("INFO FOR DB", None)];
 
 	// *******
 	// HELPERS
 	// *******
 
-	async fn start_docker(docker_version: &str) -> (String, DockerContainer, RestClient) {
+	async fn request_port() -> u16 {
+		let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+		listener.local_addr().unwrap().port()
+	}
+
+	async fn start_docker(docker_version: &str) -> (String, DockerContainer, Surreal<Any>) {
+		use surrealdb::opt::WaitFor::Connection;
 		// Location of the database files (RocksDB) in the Host
 		let file_path = format!("/tmp/{}.db", Ulid::new());
-		let docker = DockerContainer::start(docker_version, &file_path, USER, PASS);
-		let client = RestClient::new(NS, DB, USER, PASS)
-			.wait_for_connection(&CNX_TIMEOUT)
+		let port = request_port().await;
+		let docker = DockerContainer::start(docker_version, &file_path, USER, PASS, port);
+		let client = Surreal::<Any>::init();
+		let db = client.clone();
+		let localhost = Ipv4Addr::LOCALHOST;
+		let endpoint = format!("ws://{localhost}:{port}");
+		info!("Wait for the database to be ready; endpoint => {endpoint}");
+		tokio::spawn(async move {
+			loop {
+				if db.connect(&endpoint).await.is_ok() {
+					break;
+				}
+				sleep(Duration::from_millis(500)).await;
+			}
+		});
+		client.wait_for(Connection).await;
+		info!("Sign into the database");
+		client
+			.signin(Root {
+				username: USER,
+				password: PASS,
+			})
 			.await
-			.unwrap_or_else(|| {
-				docker.logs();
-				panic!("No connected client")
-			});
+			.unwrap();
+		info!("Select namespace and database");
+		client.use_ns(NS).use_db(DB).await.unwrap();
 		(file_path, docker, client)
 	}
 
-	async fn create_data_on_docker(client: &RestClient, info: &str, data: &[&str]) {
+	async fn create_data_on_docker(client: &Surreal<Any>, info: &str, data: &[&str]) {
 		info!("Create {info} data on Docker's instance");
 		for l in data {
-			client.checked_query(l, &Expected::Any).await;
+			info!("Run `{l}`");
+			client.query(*l).await.expect(l).check().expect(l);
 		}
 	}
 
-	async fn check_data_on_docker(client: &RestClient, info: &str, queries: &[Check]) {
+	async fn check_data_on_docker(client: &Surreal<Any>, info: &str, queries: &[Check]) {
 		info!("Check {info} data on Docker's instance");
 		for (query, expected) in queries {
-			client.checked_query(query, expected).await;
+			info!("Run `{query}`");
+			match expected {
+				Some(expected) => {
+					let response: Value =
+						client.query(*query).await.expect(query).take(0).expect(query);
+					assert_eq!(response.to_string(), *expected, "{query}");
+				}
+				None => {
+					client.query(*query).await.expect(query).check().expect(query);
+				}
+			}
 		}
 	}
 
 	async fn check_migrated_data(db: &Surreal<Any>, info: &str, queries: &[Check]) {
 		info!("Check migrated {info} data");
 		for (query, expected_results) in queries {
-			checked_query(db, query, expected_results).await;
+			info!("Run `{query}`");
+			checked_query(db, query, *expected_results).await;
 		}
 	}
 
 	// Executes the query and ensures to print out the query if it does not pass
-	async fn checked_query<C>(db: &Surreal<C>, q: &str, expected: &Expected)
+	async fn checked_query<C>(db: &Surreal<C>, q: &str, expected: Option<&str>)
 	where
 		C: Connection,
 	{
+		info!("Run `{q}`");
 		let mut res = db.query(q).await.expect(q).check().expect(q);
-		assert_eq!(res.num_statements(), 1, "Wrong number of result on query {q}");
-		let results: Vec<JsonValue> = res.take(0).unwrap();
-		expected.check_results(q, &results);
+		if let Some(expected) = expected {
+			let results: Value = res.take(0).unwrap();
+			assert_eq!(results.to_string(), expected, "{q}");
+		}
 	}
 
 	async fn new_local_instance(file_path: &String) -> Surreal<Any> {
-		let db = connect(format!("file:{file_path}")).await.unwrap();
-		db.use_ns(NS).await.unwrap();
-		db.use_db(DB).await.unwrap();
+		let endpoint = format!("rocksdb:{file_path}");
+		info!("Create a new local instance; endpoint => {endpoint}");
+		let db = connect(endpoint).await.unwrap();
+		info!("Select namespace and database");
+		db.use_ns(NS).use_db(DB).await.unwrap();
 		db
 	}
 }

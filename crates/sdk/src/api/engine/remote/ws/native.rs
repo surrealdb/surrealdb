@@ -236,7 +236,7 @@ async fn router_handle_route(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", request);
-		let payload = serialize(&request, true).unwrap();
+		let payload = serialize(&request.stringify_queries(), true).unwrap();
 		Message::Binary(payload)
 	};
 
