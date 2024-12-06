@@ -140,7 +140,8 @@ impl Parser<'_> {
 				}
 			}
 
-			let value = Value::Function(Box::new(Function::Anonymous(subject.clone(), args)));
+			let value =
+				Value::Function(Box::new(Function::Anonymous(subject.clone(), args, false)));
 			let value = ctx.run(|ctx| self.try_parse_inline(ctx, &value)).await?.unwrap_or(value);
 			Ok(Some(value))
 		} else {

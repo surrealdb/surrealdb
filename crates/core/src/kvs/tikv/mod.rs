@@ -16,12 +16,10 @@ use tikv::CheckLevel;
 use tikv::TimestampExt;
 use tikv::TransactionOptions;
 
-#[non_exhaustive]
 pub struct Datastore {
 	db: Pin<Arc<tikv::TransactionClient>>,
 }
 
-#[non_exhaustive]
 pub struct Transaction {
 	// Is the transaction complete?
 	done: bool,
@@ -31,23 +29,18 @@ pub struct Transaction {
 	check: Check,
 	/// The underlying datastore transaction
 	inner: tikv::Transaction,
+	/// The save point implementation
+	save_points: SavePoints,
 	// The above, supposedly 'static transaction
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	db: Pin<Arc<tikv::TransactionClient>>,
-	/// The save point implementation
-	save_points: SavePoints,
 }
 
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.done && self.write {
-			// Check if already panicking
-			if std::thread::panicking() {
-				return;
-			}
-			// Handle the behaviour
 			match self.check {
 				Check::None => {
 					trace!("A transaction was dropped without being committed or cancelled");
@@ -55,15 +48,8 @@ impl Drop for Transaction {
 				Check::Warn => {
 					warn!("A transaction was dropped without being committed or cancelled");
 				}
-				Check::Panic => {
-					#[cfg(debug_assertions)]
-					{
-						let backtrace = std::backtrace::Backtrace::force_capture();
-						if let std::backtrace::BacktraceStatus::Captured = backtrace.status() {
-							println!("{}", backtrace);
-						}
-					}
-					panic!("A transaction was dropped without being committed or cancelled");
+				Check::Error => {
+					error!("A transaction was dropped without being committed or cancelled");
 				}
 			}
 		}
@@ -107,7 +93,7 @@ impl Datastore {
 		#[cfg(not(debug_assertions))]
 		let check = Check::Warn;
 		#[cfg(debug_assertions)]
-		let check = Check::Panic;
+		let check = Check::Error;
 		// Create a new transaction
 		match self.db.begin_with_options(opt).await {
 			Ok(inner) => Ok(Transaction {

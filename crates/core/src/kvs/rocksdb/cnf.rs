@@ -6,6 +6,9 @@ pub static ROCKSDB_THREAD_COUNT: LazyLock<i32> =
 pub static ROCKSDB_JOBS_COUNT: LazyLock<i32> =
 	lazy_env_parse_or_else!("SURREAL_ROCKSDB_JOBS_COUNT", i32, |_| num_cpus::get() as i32 * 2);
 
+pub static ROCKSDB_MAX_OPEN_FILES: LazyLock<i32> =
+	lazy_env_parse!("SURREAL_ROCKSDB_MAX_OPEN_FILES", i32, 1024);
+
 pub static ROCKSDB_WRITE_BUFFER_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_ROCKSDB_WRITE_BUFFER_SIZE", usize, 256 * 1024 * 1024);
 
@@ -26,6 +29,9 @@ pub static ROCKSDB_ENABLE_BLOB_FILES: LazyLock<bool> =
 
 pub static ROCKSDB_MIN_BLOB_SIZE: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_MIN_BLOB_SIZE", u64, 4 * 1024);
+
+pub static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_ROCKSDB_BLOCK_CACHE_SIZE", usize, 256 * 1024 * 1024);
 
 pub static ROCKSDB_KEEP_LOG_FILE_NUM: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_ROCKSDB_KEEP_LOG_FILE_NUM", usize, 20);

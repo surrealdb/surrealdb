@@ -10,7 +10,7 @@ use crate::syn::{
 
 use super::unicode::{chars, is_identifier_continue};
 
-impl<'a> Lexer<'a> {
+impl Lexer<'_> {
 	/// Lex a parameter in the form of `$[a-zA-Z0-9_]*`
 	///
 	/// # Lexer State

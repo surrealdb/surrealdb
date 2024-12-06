@@ -378,9 +378,9 @@ impl Transaction {
 		self
 	}
 
-	/// Panic if this transaction is dropped without proper handling.
-	pub async fn rollback_with_panic(self) -> Self {
-		self.tx.lock().await.check_level(Check::Panic);
+	/// Error if this transaction is dropped without proper handling.
+	pub async fn rollback_with_error(self) -> Self {
+		self.tx.lock().await.check_level(Check::Error);
 		self
 	}
 

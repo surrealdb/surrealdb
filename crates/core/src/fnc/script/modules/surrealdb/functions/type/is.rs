@@ -27,6 +27,7 @@ impl_module_def!(
 	"object" => run,
 	"point" => run,
 	"polygon" => run,
+	"range" => run,
 	"record" => run,
 	"string" => run,
 	"uuid" => run

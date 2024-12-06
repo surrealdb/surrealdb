@@ -28,7 +28,7 @@ pub struct CompoundToken<T> {
 	pub span: Span,
 }
 
-impl<'a> Lexer<'a> {
+impl Lexer<'_> {
 	/// Lex a more complex token from the start token.
 	/// The start token should already be consumed.
 	pub fn lex_compound<F, R>(

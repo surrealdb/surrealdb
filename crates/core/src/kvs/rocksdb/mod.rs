@@ -6,8 +6,8 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::{Check, Key, Val, Version};
 use rocksdb::{
-	DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
-	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
+	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
 };
 use std::fmt::Debug;
 use std::ops::Range;
@@ -16,13 +16,10 @@ use std::sync::Arc;
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
-#[derive(Clone)]
-#[non_exhaustive]
 pub struct Datastore {
 	db: Pin<Arc<OptimisticTransactionDB>>,
 }
 
-#[non_exhaustive]
 pub struct Transaction {
 	/// Is the transaction complete?
 	done: bool,
@@ -57,11 +54,6 @@ impl Drop for Datastore {
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.done && self.write {
-			// Check if already panicking
-			if std::thread::panicking() {
-				return;
-			}
-			// Handle the behaviour
 			match self.check {
 				Check::None => {
 					trace!("A transaction was dropped without being committed or cancelled");
@@ -69,15 +61,8 @@ impl Drop for Transaction {
 				Check::Warn => {
 					warn!("A transaction was dropped without being committed or cancelled");
 				}
-				Check::Panic => {
-					#[cfg(debug_assertions)]
-					{
-						let backtrace = std::backtrace::Backtrace::force_capture();
-						if let std::backtrace::BacktraceStatus::Captured = backtrace.status() {
-							println!("{}", backtrace);
-						}
-					}
-					panic!("A transaction was dropped without being committed or cancelled");
+				Check::Error => {
+					error!("A transaction was dropped without being committed or cancelled");
 				}
 			}
 		}
@@ -101,6 +86,9 @@ impl Datastore {
 		// Specify the max concurrent background jobs
 		debug!(target: TARGET, "Maximum background jobs count: {}", *cnf::ROCKSDB_JOBS_COUNT);
 		opts.set_max_background_jobs(*cnf::ROCKSDB_JOBS_COUNT);
+		// Set the maximum number of open files that can be used by the database
+		debug!(target: TARGET, "Maximum number of open files: {}", *cnf::ROCKSDB_MAX_OPEN_FILES);
+		opts.set_max_open_files(*cnf::ROCKSDB_MAX_OPEN_FILES);
 		// Set the maximum number of write buffers
 		debug!(target: TARGET, "Maximum write buffers: {}", *cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
 		opts.set_max_write_buffer_number(*cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
@@ -124,6 +112,14 @@ impl Datastore {
 		opts.set_enable_blob_files(*cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		// Store 4KB values separate from keys
 		debug!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
+		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
+		// Set the block cache size
+		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
+		let mut block_opts = BlockBasedOptions::default();
+		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
+		block_opts.set_block_cache(&cache);
+		// Apply the block-based options to the main options
+		opts.set_block_based_table_factory(&block_opts);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
 		// Set the delete compaction factory
 		debug!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
@@ -206,7 +202,7 @@ impl Datastore {
 		#[cfg(not(debug_assertions))]
 		let check = Check::Warn;
 		#[cfg(debug_assertions)]
-		let check = Check::Panic;
+		let check = Check::Error;
 		// Create a new transaction
 		Ok(Transaction {
 			done: false,
@@ -576,16 +572,16 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve all the versions from a range of keys from the databases
 	/// This is a no-op for rocksdb database
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = _rng.sprint()))]
 	async fn scan_all_versions<K>(
 		&mut self,
-		rng: Range<K>,
-		limit: u32,
+		_rng: Range<K>,
+		_limit: u32,
 	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// Check to see if transaction is closed
+		// Check to see if the transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
