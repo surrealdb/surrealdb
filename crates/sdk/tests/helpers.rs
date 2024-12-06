@@ -342,7 +342,7 @@ impl Test {
 		if val.is_nan() {
 			assert!(tmp.is_nan(), "Expected NaN but got {info}: {tmp}");
 		} else {
-			assert_eq!(tmp, val, "{info} {tmp:#}");
+			assert_eq!(format!("{tmp:#}"), format!("{val:#}"), "{info}");
 		}
 		//
 		Ok(self)

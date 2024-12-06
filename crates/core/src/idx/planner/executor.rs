@@ -1037,11 +1037,11 @@ impl QueryExecutor {
 		doc: &Value,
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(hlp.match_ref()) {
-			let tx = ctx.tx();
-			let res = ft
-				.highlight(&tx, thg, &e.0.query_terms_list, hlp, e.0.index_option.id_ref(), doc)
-				.await;
-			return res;
+			if let Some(id) = e.0.index_option.id_ref() {
+				let tx = ctx.tx();
+				let res = ft.highlight(&tx, thg, &e.0.query_terms_list, hlp, id, doc).await;
+				return res;
+			}
 		}
 		Ok(Value::None)
 	}

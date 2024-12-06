@@ -1,6 +1,8 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::{GroupRef, IdiomCol, IdiomPosition, IndexReference, Node};
+use crate::idx::planner::tree::{
+	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
+};
 use crate::idx::planner::StatementContext;
 use crate::sql::with::With;
 use crate::sql::{Array, Expression, Idiom, Number, Object};
@@ -24,11 +26,13 @@ pub(super) struct PlanBuilder {
 
 impl PlanBuilder {
 	#[allow(clippy::too_many_arguments)]
+	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn build(
 		tb: &str,
 		root: Option<Node>,
 		ctx: &StatementContext<'_>,
 		with_indexes: Option<Vec<IndexReference>>,
+		compound_indexes: CompoundIndexes,
 		order: Option<IndexOption>,
 		all_and_groups: HashMap<GroupRef, bool>,
 		all_and: bool,
@@ -54,7 +58,22 @@ impl PlanBuilder {
 
 		// If all boolean operators are AND, we can use the single index plan
 		if all_and {
-			// TODO: This is currently pretty arbitrary
+			// We try first the largest compound indexed
+			let mut compound_index = None;
+			for (ixr, vals) in compound_indexes {
+				if let Some((cols, io)) = b.check_compound_index(ixr, vals) {
+					if let Some((c, _)) = &compound_index {
+						if cols <= *c {
+							continue;
+						}
+					}
+					compound_index = Some((cols, io));
+				}
+			}
+			if let Some((_, io)) = compound_index {
+				return Ok(Plan::SingleIndex(None, io));
+			}
+
 			// We take the "first" range query if one is available
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
@@ -62,8 +81,7 @@ impl PlanBuilder {
 				}
 			}
 
-			// Otherwise, we try to find the most interesting single index option
-
+			// Otherwise, we try to find the most interesting (todo: TBD) single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				return Ok(Plan::SingleIndex(Some(e), i));
 			}
@@ -98,16 +116,49 @@ impl PlanBuilder {
 		Ok(Plan::TableIterator(reason, keys_only))
 	}
 
-	// Check if we have an explicit list of index we can use
+	/// Check if we have an explicit list of index that we should use
 	fn filter_index_option(&self, io: Option<&IndexOption>) -> Option<IndexOption> {
 		if let Some(io) = io {
-			if let Some(wi) = &self.with_indexes {
-				if !wi.contains(io.ix_ref()) {
-					return None;
-				}
+			if !self.allowed_index(io.ix_ref()) {
+				return None;
 			}
 		}
 		io.cloned()
+	}
+
+	/// Check if an index is allowed to be used
+	fn allowed_index(&self, ixr: &IndexReference) -> bool {
+		if let Some(wi) = &self.with_indexes {
+			if !wi.contains(ixr) {
+				return false;
+			}
+		}
+		true
+	}
+
+	/// Check if a compound index can be used.
+	fn check_compound_index(
+		&self,
+		ixr: IndexReference,
+		vals: Vec<Arc<Value>>,
+	) -> Option<(IdiomCol, IndexOption)> {
+		if !self.allowed_index(&ixr) {
+			return None;
+		}
+		let mut cols = 0;
+		for val in &vals {
+			if val.is_none() {
+				break;
+			}
+			cols += 1;
+		}
+		if cols == 0 {
+			return None;
+		}
+		Some((
+			cols,
+			IndexOption::new(ixr, None, IdiomPosition::None, IndexOperator::Equality(vals)),
+		))
 	}
 
 	fn eval_node(&mut self, node: &Node) -> Result<(), String> {
@@ -164,10 +215,8 @@ pub(super) enum Plan {
 pub(super) struct IndexOption {
 	/// A reference to the index definition
 	ixr: IndexReference,
-	/// The idiom matching this index
-	id: Arc<Idiom>,
-	/// The index of the idiom in the index columns
-	id_col: IdiomCol,
+	/// The idiom matching this index and its index
+	id: Option<Arc<Idiom>>,
 	/// The position of the idiom in the expression (Left or Right)
 	id_pos: IdiomPosition,
 	/// The index operator
@@ -190,15 +239,13 @@ pub(super) enum IndexOperator {
 impl IndexOption {
 	pub(super) fn new(
 		ixr: IndexReference,
-		id: Arc<Idiom>,
-		id_col: IdiomCol,
+		id: Option<Arc<Idiom>>,
 		id_pos: IdiomPosition,
 		op: IndexOperator,
 	) -> Self {
 		Self {
 			ixr,
 			id,
-			id_col,
 			id_pos,
 			op: Arc::new(op),
 		}
@@ -216,8 +263,8 @@ impl IndexOption {
 		self.op.as_ref()
 	}
 
-	pub(super) fn id_ref(&self) -> &Idiom {
-		&self.id
+	pub(super) fn id_ref(&self) -> Option<&Idiom> {
+		self.id.as_ref().map(|id| id.as_ref())
 	}
 
 	pub(super) fn id_pos(&self) -> IdiomPosition {
@@ -451,16 +498,14 @@ mod tests {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Idiom::parse("test").into(),
-			0,
+			Some(Idiom::parse("test").into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Idiom::parse("test").into(),
-			0,
+			Some(Idiom::parse("test").into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);

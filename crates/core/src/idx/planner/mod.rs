@@ -164,6 +164,7 @@ impl QueryPlanner {
 			tree.root,
 			ctx,
 			tree.with_indexes,
+			tree.index_map.compound_indexes,
 			tree.index_map.order_limit,
 			tree.all_and_groups,
 			tree.all_and,

@@ -543,8 +543,8 @@ async fn select_with_compound_index() -> Result<(), Error> {
 	let sql = r"
 		DEFINE INDEX idxNameEvent ON event FIELDS name, event;
 		DEFINE INDEX idxNameEventPath ON event FIELDS name, event, path;
-		SELECT * FROM event WITH INDEX idxNameEvent WHERE name = 'someName' AND event = 'event' AND path= 'A/B/C' LIMIT 1 EXPLAIN;
-		SELECT * FROM event WITH INDEX idxNameEventPath WHERE name = 'someName' AND event = 'event' AND path= 'A/B/C' LIMIT 1 EXPLAIN;
+		SELECT * FROM event WITH INDEX idxNameEvent WHERE name = 'someName' AND event = 'event' AND path = 'A/B/C' LIMIT 1 EXPLAIN;
+		SELECT * FROM event WITH INDEX idxNameEventPath WHERE name = 'someName' AND event = 'event' AND path = 'A/B/C' LIMIT 1 EXPLAIN;
 		SELECT * FROM event WHERE name = 'someName' AND event = 'event' AND path= 'A/B/C' LIMIT 1 EXPLAIN;
 	";
 	let mut t = Test::new(sql).await?;
@@ -556,7 +556,7 @@ async fn select_with_compound_index() -> Result<(), Error> {
 					plan: {
 						index: 'idxNameEvent',
 						operator: '=',
-						value: 'someName'
+						value: ['someName', 'event']
 					},
 					table: 'event'
 				},
@@ -570,15 +570,15 @@ async fn select_with_compound_index() -> Result<(), Error> {
 			}
 		]",
 	)?;
-	for _ in 0..2 {
-		t.expect_val(
+	for i in 0..2 {
+		t.expect_val_info(
 			"[
 			{
 				detail: {
 					plan: {
 						index: 'idxNameEventPath',
 						operator: '=',
-						value: 'someName'
+						value: ['someName', 'event', 'A/B/C']
 					},
 					table: 'event'
 				},
@@ -591,6 +591,7 @@ async fn select_with_compound_index() -> Result<(), Error> {
 				operation: 'Collector'
 			}
 		]",
+			i,
 		)?;
 	}
 	Ok(())
