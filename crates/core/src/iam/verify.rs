@@ -1,12 +1,12 @@
-use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::iam::access::{authenticate_generic, authenticate_record};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
 use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::access_type::{AccessType, Jwt, JwtAccessVerify};
-use crate::sql::{statements::DefineUserStatement, Algorithm, Thing, Value};
+use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
@@ -648,88 +648,6 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
 		_ => Err(Error::InvalidPass),
-	}
-}
-
-// Execute the AUTHENTICATE clause for a Record access method
-pub async fn authenticate_record(
-	kvs: &Datastore,
-	session: &Session,
-	authenticate: &Value,
-) -> Result<Thing, Error> {
-	match kvs.evaluate(authenticate, session, None).await {
-		Ok(val) => match val.record() {
-			// If the AUTHENTICATE clause returns a record, authentication continues with that record
-			Some(id) => Ok(id),
-			// If the AUTHENTICATE clause returns anything else, authentication fails generically
-			_ => {
-				debug!("Authentication attempt as record user rejected by AUTHENTICATE clause");
-				Err(Error::InvalidAuth)
-			}
-		},
-		Err(e) => {
-			match e {
-				// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
-				Error::Thrown(_) => Err(e),
-				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
-				// This allows clients to handle these errors, which may be retryable
-				Error::Tx(_) | Error::TxFailure => {
-					debug!("Unexpected error found while executing AUTHENTICATE clause: {e}");
-					Err(Error::UnexpectedAuth)
-				}
-				// Otherwise, return a generic error unless it should be forwarded
-				e => {
-					debug!("Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}");
-					if *INSECURE_FORWARD_ACCESS_ERRORS {
-						Err(e)
-					} else {
-						Err(Error::InvalidAuth)
-					}
-				}
-			}
-		}
-	}
-}
-
-// Execute the AUTHENTICATE clause for any other access method
-pub async fn authenticate_generic(
-	kvs: &Datastore,
-	session: &Session,
-	authenticate: &Value,
-) -> Result<(), Error> {
-	match kvs.evaluate(authenticate, session, None).await {
-		Ok(val) => {
-			match val {
-				// If the AUTHENTICATE clause returns nothing, authentication continues
-				Value::None => Ok(()),
-				// If the AUTHENTICATE clause returns anything else, authentication fails generically
-				_ => {
-					debug!("Authentication attempt as system user rejected by AUTHENTICATE clause");
-					Err(Error::InvalidAuth)
-				}
-			}
-		}
-		Err(e) => {
-			match e {
-				// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
-				Error::Thrown(_) => Err(e),
-				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
-				// This allows clients to handle these errors, which may be retryable
-				Error::Tx(_) | Error::TxFailure => {
-					debug!("Unexpected error found while executing an AUTHENTICATE clause: {e}");
-					Err(Error::UnexpectedAuth)
-				}
-				// Otherwise, return a generic error unless it should be forwarded
-				e => {
-					debug!("Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}");
-					if *INSECURE_FORWARD_ACCESS_ERRORS {
-						Err(e)
-					} else {
-						Err(Error::InvalidAuth)
-					}
-				}
-			}
-		}
 	}
 }
 

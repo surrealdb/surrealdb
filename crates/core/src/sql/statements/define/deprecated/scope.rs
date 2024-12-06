@@ -43,6 +43,7 @@ impl From<DefineScopeStatement> for DefineAccessStatement {
 						key: sc.code,
 					}),
 				},
+				bearer: None,
 			}),
 			// unused fields
 			authenticate: None,

@@ -221,11 +221,12 @@ fn statements() -> Vec<Statement> {
 					}),
 					issue: None,
 				},
+				bearer: None,
 			}),
 			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			},

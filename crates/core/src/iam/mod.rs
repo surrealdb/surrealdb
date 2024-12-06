@@ -2,6 +2,7 @@ use cedar_policy::Context;
 pub use entities::Level;
 use thiserror::Error;
 
+pub mod access;
 pub mod auth;
 pub mod base;
 pub mod check;
