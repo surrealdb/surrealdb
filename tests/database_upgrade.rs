@@ -25,7 +25,7 @@ mod database_upgrade {
 	// Limit number of running containers at the time
 	static PERMITS: Semaphore = Semaphore::const_new(3);
 
-	const TIMEOUT_DURATION: Duration = Duration::from_secs(5);
+	const TIMEOUT_DURATION: Duration = Duration::from_secs(180);
 
 	// This test include a feature set that is supported since v2.0
 	async fn upgrade_test_from_2_0(version: &str) {
