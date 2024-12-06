@@ -17,38 +17,35 @@ use uuid::Uuid;
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct Options {
-	/// Current Node ID
+	/// The current Node ID of the datastore instance
 	id: Option<Uuid>,
-	/// Currently selected NS
+	/// The currently selected Namespace
 	ns: Option<Arc<str>>,
-	/// Currently selected DB
+	/// The currently selected Database
 	db: Option<Arc<str>>,
 	/// Approximately how large is the current call stack?
 	dive: u32,
 	/// Connection authentication data
-	pub auth: Arc<Auth>,
-	/// Is authentication enabled?
-	pub auth_enabled: bool,
-	/// Whether live queries are allowed?
-	pub live: bool,
+	pub(crate) auth: Arc<Auth>,
+	/// Is authentication enabled on this datastore?
+	pub(crate) auth_enabled: bool,
+	/// Whether live queries can be used?
+	pub(crate) live: bool,
 	/// Should we force tables/events to re-run?
-	pub force: Force,
+	pub(crate) force: Force,
 	/// Should we run permissions checks?
-	pub perms: bool,
+	pub(crate) perms: bool,
 	/// Should we error if tables don't exist?
-	pub strict: bool,
+	pub(crate) strict: bool,
 	/// Should we process field queries?
-	pub import: bool,
+	pub(crate) import: bool,
 	/// Should we process function futures?
-	pub futures: Futures,
-	/// Should we process variable field projections?
-	pub projections: bool,
+	pub(crate) futures: Futures,
+	/// The data version as nanosecond timestamp
+	pub(crate) version: Option<u64>,
 	/// The channel over which we send notifications
-	pub sender: Option<Sender<Notification>>,
-	/// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<u64>,
+	pub(crate) sender: Option<Sender<Notification>>,
 }
 
 #[derive(Clone, Debug)]
@@ -87,7 +84,6 @@ impl Options {
 			strict: false,
 			import: false,
 			futures: Futures::Disabled,
-			projections: false,
 			auth_enabled: true,
 			sender: None,
 			auth: Arc::new(Auth::default()),
