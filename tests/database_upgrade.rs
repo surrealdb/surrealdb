@@ -10,7 +10,6 @@ mod database_upgrade {
 	use surrealdb::{Connection, Surreal, Value};
 	use test_log::test;
 	use tokio::net::TcpListener;
-	use tokio::sync::Semaphore;
 	use tokio::time::sleep;
 	use tokio::time::timeout;
 	use tracing::error;
@@ -21,9 +20,6 @@ mod database_upgrade {
 	const DB: &str = "test";
 	const USER: &str = "root";
 	const PASS: &str = "root";
-
-	// Limit number of running containers at the time
-	static PERMITS: Semaphore = Semaphore::const_new(3);
 
 	const TIMEOUT_DURATION: Duration = Duration::from_secs(180);
 
@@ -61,13 +57,10 @@ mod database_upgrade {
 
 	macro_rules! run {
 		($future:expr) => {
-			let permit = PERMITS.acquire().await.unwrap();
 			if timeout(TIMEOUT_DURATION, $future).await.is_err() {
-				drop(permit);
 				error!("test timed out");
 				panic!();
 			}
-			drop(permit);
 		};
 	}
 
