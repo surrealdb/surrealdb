@@ -500,14 +500,14 @@ mod tests {
 			IndexReference::new(Arc::new([]), 1),
 			Some(Idiom::parse("test").into()),
 			IdiomPosition::Right,
-			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
+			IndexOperator::Equality(vec![Value::Array(Array::from(vec!["test"])).into()]),
 		);
 
 		let io2 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
 			Some(Idiom::parse("test").into()),
 			IdiomPosition::Right,
-			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
+			IndexOperator::Equality(vec![Value::Array(Array::from(vec!["test"])).into()]),
 		);
 
 		set.insert(io1);
