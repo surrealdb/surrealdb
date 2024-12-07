@@ -94,6 +94,10 @@ pub enum Error {
 	#[error("Record or value is too large")]
 	TxValueTooLarge,
 
+	/// There was a transaction error that can be retried
+	#[error("Failed to commit transaction due to a read or write conflict. This transaction can be retried")]
+	TxRetryable,
+
 	/// The transaction writes too much data for the KV store
 	#[error("Transaction is too large")]
 	TxTooLarge,
@@ -1255,14 +1259,21 @@ impl From<regex::Error> for Error {
 #[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
-		Error::Tx(e.to_string())
+		match e {
+			surrealkv::Error::TransactionReadConflict => Error::TxRetryable,
+			_ => Error::Tx(e.to_string()),
+		}
 	}
 }
 
 #[cfg(feature = "kv-rocksdb")]
 impl From<rocksdb::Error> for Error {
 	fn from(e: rocksdb::Error) -> Error {
-		Error::Tx(e.to_string())
+		match e.kind() {
+			rocksdb::ErrorKind::Busy => Error::TxRetryable,
+			rocksdb::ErrorKind::TryAgain => Error::TxRetryable,
+			_ => Error::Tx(e.to_string()),
+		}
 	}
 }
 
@@ -1282,6 +1293,7 @@ impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
+			tikv::Error::KeyError(ke) if ke.conflict.is_some() => Error::TxRetryable,
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
@@ -1292,6 +1304,12 @@ impl From<tikv::Error> for Error {
 #[cfg(feature = "kv-fdb")]
 impl From<foundationdb::FdbError> for Error {
 	fn from(e: foundationdb::FdbError) -> Error {
+		if e.is_retryable() {
+			return Error::TxRetryable;
+		}
+		if e.is_retryable_not_committed() {
+			return Error::TxRetryable;
+		}
 		Error::Ds(e.to_string())
 	}
 }
@@ -1299,6 +1317,12 @@ impl From<foundationdb::FdbError> for Error {
 #[cfg(feature = "kv-fdb")]
 impl From<foundationdb::TransactionCommitError> for Error {
 	fn from(e: foundationdb::TransactionCommitError) -> Error {
+		if e.is_retryable() {
+			return Error::TxRetryable;
+		}
+		if e.is_retryable_not_committed() {
+			return Error::TxRetryable;
+		}
 		Error::Tx(e.to_string())
 	}
 }
