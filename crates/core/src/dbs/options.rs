@@ -419,7 +419,7 @@ impl Options {
 			return Ok(false);
 		}
 		// Check if server auth is disabled
-		if !self.auth_enabled {
+		if !self.auth_enabled && self.auth.is_anon() {
 			return Ok(false);
 		}
 		// Check the action to determine if we need to check permissions
