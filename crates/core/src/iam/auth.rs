@@ -54,6 +54,16 @@ impl Auth {
 		matches!(self.level(), Level::Record(_, _, _))
 	}
 
+	/// Check if the current level is Namespace, and the namespace matches
+	pub fn is_ns_check(&self, ns: &str) -> bool {
+		matches!(self.level(), Level::Namespace(n) if n.eq(ns))
+	}
+
+	/// Check if the current level is Database, and the namespace and database match
+	pub fn is_db_check(&self, ns: &str, db: &str) -> bool {
+		matches!(self.level(), Level::Database(n, d) if n.eq(ns) && d.eq(db))
+	}
+
 	/// System Auth helpers
 	///
 	/// These are not stored in the database and are used for internal operations
@@ -84,8 +94,18 @@ impl Auth {
 	}
 
 	/// Checks if the current actor has a given role
-	pub fn has_role(&self, role: &Role) -> bool {
+	pub fn has_role(&self, role: Role) -> bool {
 		self.actor.has_role(role)
+	}
+
+	/// Checks if the current actor has a Editor role
+	pub fn has_editor_role(&self) -> bool {
+		self.actor.has_editor_role()
+	}
+
+	/// Checks if the current actor has a Viewer role
+	pub fn has_viewer_role(&self) -> bool {
+		self.actor.has_viewer_role()
 	}
 }
 

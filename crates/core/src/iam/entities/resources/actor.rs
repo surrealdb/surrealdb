@@ -57,8 +57,18 @@ impl Actor {
 	}
 
 	/// Checks if the actor has the given role.
-	pub fn has_role(&self, role: &Role) -> bool {
-		self.roles.contains(role)
+	pub fn has_role(&self, role: Role) -> bool {
+		self.roles.contains(&role)
+	}
+
+	/// Checks if the actor has the Editor role.
+	pub fn has_editor_role(&self) -> bool {
+		self.roles.iter().any(|r| r.eq(&Role::Owner) || r.eq(&Role::Editor))
+	}
+
+	/// Checks if the actor has the Viewer role.
+	pub fn has_viewer_role(&self) -> bool {
+		self.roles.iter().any(|r| r.eq(&Role::Owner) || r.eq(&Role::Editor) || r.eq(&Role::Viewer))
 	}
 
 	// Cedar policy helpers

@@ -1,10 +1,9 @@
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
-use crate::iam::{Action, Auth, ResourceKind, Role};
-use crate::sql::{
-	statements::define::DefineIndexStatement, statements::define::DefineTableStatement, Base,
-};
+use crate::iam::{Action, Auth, ResourceKind};
+use crate::sql::statements::define::{DefineIndexStatement, DefineTableStatement};
+use crate::sql::Base;
 use async_channel::Sender;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -18,38 +17,35 @@ use uuid::Uuid;
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct Options {
-	/// Current Node ID
+	/// The current Node ID of the datastore instance
 	id: Option<Uuid>,
-	/// Currently selected NS
+	/// The currently selected Namespace
 	ns: Option<Arc<str>>,
-	/// Currently selected DB
+	/// The currently selected Database
 	db: Option<Arc<str>>,
 	/// Approximately how large is the current call stack?
 	dive: u32,
 	/// Connection authentication data
-	pub auth: Arc<Auth>,
-	/// Is authentication enabled?
-	pub auth_enabled: bool,
-	/// Whether live queries are allowed?
-	pub live: bool,
+	pub(crate) auth: Arc<Auth>,
+	/// Is authentication enabled on this datastore?
+	pub(crate) auth_enabled: bool,
+	/// Whether live queries can be used?
+	pub(crate) live: bool,
 	/// Should we force tables/events to re-run?
-	pub force: Force,
+	pub(crate) force: Force,
 	/// Should we run permissions checks?
-	pub perms: bool,
+	pub(crate) perms: bool,
 	/// Should we error if tables don't exist?
-	pub strict: bool,
+	pub(crate) strict: bool,
 	/// Should we process field queries?
-	pub import: bool,
+	pub(crate) import: bool,
 	/// Should we process function futures?
-	pub futures: Futures,
-	/// Should we process variable field projections?
-	pub projections: bool,
+	pub(crate) futures: Futures,
+	/// The data version as nanosecond timestamp
+	pub(crate) version: Option<u64>,
 	/// The channel over which we send notifications
-	pub sender: Option<Sender<Notification>>,
-	/// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<u64>,
+	pub(crate) sender: Option<Sender<Notification>>,
 }
 
 #[derive(Clone, Debug)]
@@ -61,7 +57,7 @@ pub enum Force {
 	Index(Arc<[DefineIndexStatement]>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum Futures {
 	Disabled,
 	Enabled,
@@ -88,7 +84,6 @@ impl Options {
 			strict: false,
 			import: false,
 			futures: Futures::Disabled,
-			projections: false,
 			auth_enabled: true,
 			sender: None,
 			auth: Arc::new(Auth::default()),
@@ -111,24 +106,6 @@ impl Options {
 	}
 
 	// --------------------------------------------------
-
-	/// Set all the required options from a single point.
-	/// The system expects these values to always be set,
-	/// so this should be called for all instances when
-	/// there is doubt.
-	pub fn with_required(
-		mut self,
-		node_id: Uuid,
-		ns: Option<Arc<str>>,
-		db: Option<Arc<str>>,
-		auth: Arc<Auth>,
-	) -> Self {
-		self.id = Some(node_id);
-		self.ns = ns;
-		self.db = db;
-		self.auth = auth;
-		self
-	}
 
 	/// Set the maximum depth a computation can reach.
 	pub fn with_max_computation_depth(mut self, depth: u32) -> Self {
@@ -180,13 +157,8 @@ impl Options {
 
 	/// Specify wether tables/events should re-run
 	pub fn with_force(mut self, force: Force) -> Self {
-		self.set_force(force);
-		self
-	}
-
-	/// Specify wether tables/events should re-run
-	pub fn set_force(&mut self, force: Force) {
 		self.force = force;
+		self
 	}
 
 	/// Sepecify if we should error when a table does not exist
@@ -213,13 +185,12 @@ impl Options {
 	}
 
 	pub fn set_futures(&mut self, futures: bool) {
-		if matches!(self.futures, Futures::Never) {
-			return;
-		}
-
-		self.futures = match futures {
-			true => Futures::Enabled,
-			false => Futures::Disabled,
+		self.futures = match self.futures {
+			Futures::Never => Futures::Never,
+			_ => match futures {
+				true => Futures::Enabled,
+				false => Futures::Disabled,
+			},
 		};
 	}
 
@@ -256,7 +227,6 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			futures: self.futures.clone(),
 			perms,
 			..*self
 		}
@@ -269,7 +239,6 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
-			futures: self.futures.clone(),
 			force,
 			..*self
 		}
@@ -283,7 +252,6 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			futures: self.futures.clone(),
 			strict,
 			..*self
 		}
@@ -297,7 +265,6 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			futures: self.futures.clone(),
 			import,
 			..*self
 		}
@@ -329,7 +296,6 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			futures: self.futures.clone(),
 			sender: Some(sender),
 			..*self
 		}
@@ -359,7 +325,6 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			futures: self.futures.clone(),
 			dive: self.dive - cost as u32,
 			..*self
 		})
@@ -437,53 +402,67 @@ impl Options {
 		self.auth.is_allowed(action, &res).map_err(Error::IamError)
 	}
 
-	/// Whether or not to check table permissions
+	/// Checks the current server configuration, and
+	/// user authentication information to determine
+	/// whether we need to process table permissions
+	/// on each document.
 	///
-	/// TODO: This method is called a lot during data operations, so we decided to bypass the system's authorization mechanism.
-	/// This is a temporary solution, until we optimize the new authorization system.
+	/// This method is repeatedly called during the
+	/// document processing operations, and so the
+	/// performance of this function is important.
+	/// We decided to bypass the system cedar auth
+	/// system as a temporary solution until the
+	/// new authorization system is optimised.
 	pub fn check_perms(&self, action: Action) -> Result<bool, Error> {
-		// If permissions are disabled, don't check permissions
+		// Check if permissions are enabled for this sub-process
 		if !self.perms {
 			return Ok(false);
 		}
-
-		// If auth is disabled and actor is anonymous, don't check permissions
+		// Check if server auth is disabled
 		if !self.auth_enabled && self.auth.is_anon() {
 			return Ok(false);
 		}
-
-		// Is the actor allowed to view?
-		let can_view =
-			[Role::Viewer, Role::Editor, Role::Owner].iter().any(|r| self.auth.has_role(r));
-		// Is the actor allowed to edit?
-		let can_edit = [Role::Editor, Role::Owner].iter().any(|r| self.auth.has_role(r));
-		// Is the target database in the actor's level?
-		let db_in_actor_level = self.auth.is_root()
-			|| self.auth.is_ns() && self.auth.level().ns().unwrap() == self.ns()?
-			|| self.auth.is_db()
-				&& self.auth.level().ns().unwrap() == self.ns()?
-				&& self.auth.level().db().unwrap() == self.db()?;
-
-		// Is the actor allowed to do the action on the selected database?
-		let is_allowed = match action {
-			Action::View => {
-				// Today all users have at least View permissions, so if the target database belongs to the user's level, don't check permissions
-				can_view && db_in_actor_level
-			}
+		// Check the action to determine if we need to check permissions
+		match action {
+			// This is a request to edit a resource
 			Action::Edit => {
-				// Editor and Owner roles are allowed to edit, but only if the target database belongs to the user's level
-				can_edit && db_in_actor_level
+				// Check if the actor is allowed to edit
+				let allowed = self.auth.has_editor_role();
+				// Today all users have at least View
+				// permissions, so if the target database
+				// belongs to the user's level, we don't
+				// need to check any table permissions.
+				let db_in_actor_level = self.auth.is_root()
+					|| self.auth.is_ns_check(self.ns()?)
+					|| self.auth.is_db_check(self.ns()?, self.db()?);
+				// If either of the above checks are false
+				// then we need to check table permissions
+				Ok(!allowed || !db_in_actor_level)
 			}
-		};
-
-		// Check permissions if the author is not already allowed to do the action
-		Ok(!is_allowed)
+			// This is a request to view a resource
+			Action::View => {
+				// Check if the actor is allowed to view
+				let allowed = self.auth.has_viewer_role();
+				// Today, Owner and Editor roles have
+				// Edit permissions, so if the target
+				// database belongs to the user's level
+				// we don't need to check table permissions.
+				let db_in_actor_level = self.auth.is_root()
+					|| self.auth.is_ns_check(self.ns()?)
+					|| self.auth.is_db_check(self.ns()?, self.db()?);
+				// If either of the above checks are false
+				// then we need to check table permissions
+				Ok(!allowed || !db_in_actor_level)
+			}
+		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
+
 	use super::*;
+	use crate::iam::Role;
 
 	#[test]
 	fn is_allowed() {
