@@ -7,7 +7,7 @@ use crate::sql::value::Value;
 use reblessive::tree::Stk;
 
 impl Document {
-	pub async fn insert(
+	pub(super) async fn insert(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,

@@ -20,7 +20,7 @@ impl Document {
 	/// have a record id, because we are attempting
 	/// to create a new record, and are leaving the
 	/// id generation up to the document processor.
-	pub(crate) async fn generate_record_id(
+	pub(super) async fn generate_record_id(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -69,7 +69,7 @@ impl Document {
 	/// of the document within a `DELETE` statement.
 	/// This function only clears the document in
 	/// memory, and does not store this on disk.
-	pub async fn clear_record_data(
+	pub(super) async fn clear_record_data(
 		&mut self,
 		_ctx: &Context,
 		_opt: &Options,
@@ -84,7 +84,7 @@ impl Document {
 	/// hidden `edge` field are always present. This
 	/// ensures that any user modifications of these
 	/// fields are reset back to the original state.
-	pub async fn default_record_data(
+	pub(super) async fn default_record_data(
 		&mut self,
 		_ctx: &Context,
 		_opt: &Options,
@@ -149,7 +149,7 @@ impl Document {
 	/// function also ensures that standard default
 	/// fields are set and reset before and after the
 	/// document data is modified.
-	pub async fn process_merge_data(
+	pub(super) async fn process_merge_data(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -199,7 +199,7 @@ impl Document {
 	/// function also ensures that standard default
 	/// fields are set and reset before and after the
 	/// document data is modified.
-	pub async fn process_record_data(
+	pub(super) async fn process_record_data(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,

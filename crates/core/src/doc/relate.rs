@@ -7,7 +7,7 @@ use crate::sql::value::Value;
 use reblessive::tree::Stk;
 
 impl Document {
-	pub async fn relate(
+	pub(super) async fn relate(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,

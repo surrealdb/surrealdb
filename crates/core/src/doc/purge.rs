@@ -14,7 +14,7 @@ use crate::sql::value::{Value, Values};
 use reblessive::tree::Stk;
 
 impl Document {
-	pub async fn purge(
+	pub(super) async fn purge(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,

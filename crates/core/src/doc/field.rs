@@ -17,7 +17,7 @@ impl Document {
 	/// SCHEMAFULL table are cleaned up and removed.
 	/// If a field is defined as FLEX, then any
 	/// nested fields or array values are untouched.
-	pub async fn cleanup_table_fields(
+	pub(super) async fn cleanup_table_fields(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -93,7 +93,7 @@ impl Document {
 	/// have been defined on the table for this
 	/// record. These fields are executed for
 	/// every matching field in the input document.
-	pub async fn process_table_fields(
+	pub(super) async fn process_table_fields(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
