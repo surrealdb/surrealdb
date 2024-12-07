@@ -543,12 +543,16 @@ async fn select_with_compound_index() -> Result<(), Error> {
 	let sql = r"
 		DEFINE INDEX idxNameEvent ON event FIELDS name, event;
 		DEFINE INDEX idxNameEventPath ON event FIELDS name, event, path;
-		SELECT * FROM event WITH INDEX idxNameEvent WHERE name = 'someName' AND event = 'event' AND path = 'A/B/C' LIMIT 1 EXPLAIN;
-		SELECT * FROM event WITH INDEX idxNameEventPath WHERE name = 'someName' AND event = 'event' AND path = 'A/B/C' LIMIT 1 EXPLAIN;
-		SELECT * FROM event WHERE name = 'someName' AND event = 'event' AND path= 'A/B/C' LIMIT 1 EXPLAIN;
-	";
+		CREATE event:0 SET name = 'dummy', event = 'dummy', path = 'D/U/M';
+		CREATE event:1 SET name = 'someName', event = 'event', path = 'A/B/C';
+		SELECT * FROM event WITH INDEX idxNameEvent WHERE name = 'someName' AND event = 'event' AND path = 'A/B/C' EXPLAIN;
+		SELECT * FROM event WITH INDEX idxNameEventPath WHERE name = 'someName' AND event = 'event' AND path = 'A/B/C' EXPLAIN;
+		SELECT * FROM event WHERE name = 'someName' AND event = 'event' AND path= 'A/B/C' EXPLAIN;
+		SELECT * FROM event WITH INDEX idxNameEvent WHERE name = 'someName' AND event = 'event' AND path = 'A/B/C';
+		SELECT * FROM event WITH INDEX idxNameEventPath WHERE name = 'someName' AND event = 'event' AND path = 'A/B/C';
+		SELECT * FROM event WHERE name = 'someName' AND event = 'event' AND path= 'A/B/C';";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(2)?;
+	t.skip_ok(4)?;
 	t.expect_val(
 		"[
 			{
@@ -591,6 +595,19 @@ async fn select_with_compound_index() -> Result<(), Error> {
 				operation: 'Collector'
 			}
 		]",
+			i,
+		)?;
+	}
+	for i in 0..3 {
+		t.expect_val_info(
+			"[
+					{
+						event: 'event',
+						id: event:1,
+						name: 'someName',
+						path: 'A/B/C'
+					}
+				]",
 			i,
 		)?;
 	}
@@ -2543,7 +2560,7 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 					detail: {
 						plan: {
 							index: 'idx',
-							operator: '==',
+							operator: '=',
 							value: true
 						},
 						table: 't'
@@ -2580,7 +2597,7 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 					detail: {
 						plan: {
 							index: 'uniq',
-							operator: '==',
+							operator: '=',
 							value: 2
 						},
 						table: 't'
@@ -3124,7 +3141,7 @@ async fn select_composite_index(unique: bool) -> Result<(), Error> {
 					plan: {
 						index: 't_idx',
 						operator: '=',
-						value: false
+						value: [false, 2]
 					},
 					table: 't'
 				},

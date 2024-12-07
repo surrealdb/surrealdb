@@ -490,6 +490,7 @@ impl<'a> TreeBuilder<'a> {
 		e: &Arc<Expression>,
 		p: IdiomPosition,
 	) -> Result<Option<IndexOption>, Error> {
+		let mut res = None;
 		for (ixr, col) in irs.iter() {
 			let op = match &ixr.index {
 				Index::Idx => self.eval_index_operator(ixr, op, n, p, *col),
@@ -501,13 +502,15 @@ impl<'a> TreeBuilder<'a> {
 				Index::Hnsw(_) if *col == 0 => self.eval_hnsw_knn(e, op, n)?,
 				_ => None,
 			};
-			if let Some(op) = op {
-				let io = IndexOption::new(ixr.clone(), Some(id.clone()), p, op);
-				self.index_map.options.push((e.clone(), io.clone()));
-				return Ok(Some(io));
+			if res.is_none() {
+				if let Some(op) = op {
+					let io = IndexOption::new(ixr.clone(), Some(id.clone()), p, op);
+					self.index_map.options.push((e.clone(), io.clone()));
+					res = Some(io);
+				}
 			}
 		}
-		Ok(None)
+		Ok(res)
 	}
 
 	fn lookup_join_index_ref(&self, irs: &LocalIndexRefs) -> Option<(IndexReference, IdiomCol)> {
@@ -590,16 +593,10 @@ impl<'a> TreeBuilder<'a> {
 	) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
 			match (op, v, p) {
-				(Operator::Equal, v, _) => {
+				(Operator::Equal | Operator::Exact, v, _) => {
 					self.index_map.check_compound(ixr, col, &v);
 					if col == 0 {
 						return Some(IndexOperator::Equality(vec![v]));
-					}
-				}
-				(Operator::Exact, v, _) => {
-					self.index_map.check_compound(ixr, col, &v);
-					if col == 0 {
-						return Some(IndexOperator::Exactness(vec![v]));
 					}
 				}
 				(Operator::Contain, v, IdiomPosition::Left) => {
@@ -650,7 +647,7 @@ impl<'a> TreeBuilder<'a> {
 	}
 }
 
-pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Arc<Value>>>;
+pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Option<Arc<Value>>>>;
 
 /// For each expression a possible index option
 #[derive(Default)]
@@ -664,9 +661,8 @@ pub(super) struct IndexesMap {
 impl IndexesMap {
 	pub(crate) fn check_compound(&mut self, ixr: &IndexReference, col: usize, val: &Arc<Value>) {
 		let cols = ixr.cols.len();
-		let values =
-			self.compound_indexes.entry(ixr.clone()).or_insert(vec![Value::None.into(); cols]);
-		values[col] = val.clone();
+		let values = self.compound_indexes.entry(ixr.clone()).or_insert(vec![None; cols]);
+		values[col] = Some(val.clone());
 	}
 }
 

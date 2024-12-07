@@ -368,7 +368,7 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
-			IndexOperator::Equality(values) | IndexOperator::Exactness(values) => {
+			IndexOperator::Equality(values) => {
 				let arrays = Self::get_equal_variants(values);
 				if arrays.len() == 1 {
 					Some(Self::new_index_equal_iterator(ir, opt, ix, &arrays[0])?)
@@ -424,7 +424,6 @@ impl QueryExecutor {
 				Self::generate_variant(col, current_variant, cols_values, variants);
 			}
 		} else {
-			println!("{variant:?}");
 			let variant = Array(variant.iter().map(|v| v.as_ref().clone()).collect());
 			variants.push(variant);
 		}
@@ -809,7 +808,7 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
-			IndexOperator::Equality(values) | IndexOperator::Exactness(values) => {
+			IndexOperator::Equality(values) => {
 				let arrays = Self::get_equal_variants(values);
 				if arrays.len() == 1 {
 					Some(Self::new_unique_equal_iterator(irf, opt, ixr, &arrays[0])?)

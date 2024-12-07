@@ -67,7 +67,9 @@ impl PlanBuilder {
 							continue;
 						}
 					}
-					compound_index = Some((cols, io));
+					if cols > 1 {
+						compound_index = Some((cols, io));
+					}
 				}
 			}
 			if let Some((_, io)) = compound_index {
@@ -140,11 +142,13 @@ impl PlanBuilder {
 	fn check_compound_index(
 		&self,
 		ixr: IndexReference,
-		vals: Vec<Arc<Value>>,
+		mut vals: Vec<Option<Arc<Value>>>,
 	) -> Option<(IdiomCol, IndexOption)> {
+		// Check the index can be used
 		if !self.allowed_index(&ixr) {
 			return None;
 		}
+		// Count continues values (from the left)
 		let mut cols = 0;
 		for val in &vals {
 			if val.is_none() {
@@ -155,6 +159,7 @@ impl PlanBuilder {
 		if cols == 0 {
 			return None;
 		}
+		let vals = vals.drain(0..cols).map(|v| v.unwrap()).collect();
 		Some((
 			cols,
 			IndexOption::new(ixr, None, IdiomPosition::None, IndexOperator::Equality(vals)),
@@ -226,7 +231,6 @@ pub(super) struct IndexOption {
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Vec<Arc<Value>>),
-	Exactness(Vec<Arc<Value>>),
 	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
 	RangePart(Operator, Arc<Value>),
@@ -289,10 +293,6 @@ impl IndexOption {
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
-				e.insert("value", Self::reduce_array(v));
-			}
-			IndexOperator::Exactness(v) => {
-				e.insert("operator", Value::from(Operator::Exact.to_string()));
 				e.insert("value", Self::reduce_array(v));
 			}
 			IndexOperator::Union(v) => {
