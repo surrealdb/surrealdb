@@ -71,8 +71,7 @@ impl Document {
 						},
 					}
 				}
-
-				// NONE-values should never be stored
+				// NONE values should never be stored
 				if self.current.doc.pick(fd).is_none() {
 					self.current.doc.to_mut().del(stk, ctx, opt, fd).await?;
 				}
@@ -80,7 +79,7 @@ impl Document {
 		} else {
 			// Loop over every field in the document
 			for fd in self.current.doc.every(None, true, true).iter() {
-				// NONE-values should never be stored
+				// NONE values should never be stored
 				if self.current.doc.pick(fd).is_none() {
 					self.current.doc.to_mut().del(stk, ctx, opt, fd).await?;
 				}
@@ -146,11 +145,24 @@ impl Document {
 						continue;
 					}
 				}
-				// Check for READONLY clause
+				// If the field is READONLY then we
+				// will check that the field has not
+				// been modified. If it has just been
+				// omitted then we reset it, otherwise
+				// we throw a field readonly error.
 				if fd.readonly {
+					// Check if we are updating the
+					// document, and check if the new
+					// field value is now different to
+					// the old field value in any way.
 					if !self.is_new() && val.ne(&old) {
+						// Check the data clause type
 						match stm.data() {
 							Some(Data::ContentExpression(_)) => {
+							// If the field is NONE, we assume
+							// that the field was ommitted when
+							// using a CONTENT clause, and we
+							// revert the value to the old value.
 								self.current
 									.doc
 									.to_mut()
@@ -158,6 +170,10 @@ impl Document {
 									.await?;
 								continue;
 							}
+							// If the field has been modified
+							// and the user didn't use a CONTENT
+							// clause, then this should not be
+							// allowed, and we throw an error.
 							_ => {
 								return Err(Error::FieldReadonly {
 									field: fd.name.clone(),
@@ -165,7 +181,11 @@ impl Document {
 								});
 							}
 						}
-					} else if !self.is_new() {
+					}
+					// If this field was not modified then
+					// we can continue without needing to
+					// process the field in any other way.
+					else if !self.is_new() {
 						continue;
 					}
 				}
