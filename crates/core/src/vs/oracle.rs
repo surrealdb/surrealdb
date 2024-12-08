@@ -1,8 +1,7 @@
 //! System time based versionstamp.
 //! This module provides a kind of Hybrid Logical Clock (HLC) based on system time.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(target_arch = "wasm32")]
@@ -59,7 +58,7 @@ impl Oracle {
 	#[allow(unused)]
 	pub fn systime_counter() -> Self {
 		Oracle::SysTimeCounter(SysTimeCounter {
-			state: Mutex::new((0, 0)),
+			state: (AtomicU64::new(0), AtomicU16::new(0)),
 			stale: (0, 0),
 		})
 	}
@@ -85,7 +84,7 @@ impl Oracle {
 pub struct SysTimeCounter {
 	// The first element is the saved physical time of the last versionstamp.
 	// The second element is the in-memory counter that resets every second.
-	state: Mutex<(u64, u16)>,
+	state: (AtomicU64, AtomicU16),
 
 	stale: (u64, u16),
 }
@@ -96,23 +95,19 @@ impl SysTimeCounter {
 		// only if the current physical time is the same as the last physical time.
 		// Otherwise, reset the counter to 0 and get the current number as the logical time.
 		// This is to ensure that the logical time is always increasing.
-		let state = self.state.lock();
-		if let Ok(mut state) = state {
-			let (last_physical_time, counter) = *state;
-			let current_physical_time = secs_since_unix_epoch();
-			let current_logical_time = if last_physical_time == current_physical_time {
-				counter
+		let (last_physical_time, counter) = &self.state;
+		let current_physical_time = secs_since_unix_epoch();
+		let current_logical_time =
+			if last_physical_time.load(Ordering::SeqCst) == current_physical_time {
+				counter.load(Ordering::SeqCst)
 			} else {
-				state.1 = 0;
+				counter.store(0, Ordering::SeqCst);
 				0
 			};
-			state.0 = current_physical_time;
-			state.1 += 1;
-			self.stale = (current_physical_time, current_logical_time);
-			u64_u16_to_versionstamp(current_physical_time, current_logical_time)
-		} else {
-			u64_u16_to_versionstamp(self.stale.0, self.stale.1)
-		}
+		last_physical_time.store(current_physical_time, Ordering::SeqCst);
+		counter.fetch_add(1, Ordering::SeqCst);
+		self.stale = (current_physical_time, current_logical_time);
+		u64_u16_to_versionstamp(current_physical_time, current_logical_time)
 	}
 }
 
