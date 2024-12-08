@@ -1,9 +1,9 @@
+use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
-
 use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -66,11 +66,12 @@ pub async fn iam_run_case(
 				);
 			}
 
-			let tmp = tmp.unwrap().to_string();
-			if tmp != check_expected_result[i] {
+			let tmp = tmp.unwrap();
+			let expected = value(check_expected_result[i])?;
+			if tmp != expected {
 				return Err(format!(
-					"Check statement failed for test: expected value '{}' doesn't match '{}'",
-					check_expected_result[i], tmp
+					"Check statement failed for test: expected value '{:#}' doesn't match '{:#}'",
+					expected, tmp
 				)
 				.into());
 			}
@@ -344,6 +345,15 @@ impl Test {
 			assert_eq!(tmp, val, "{info} {tmp:#}");
 		}
 		//
+		Ok(self)
+	}
+
+	#[track_caller]
+	#[allow(dead_code)]
+	pub fn expect_regex(&mut self, regex: &str) -> Result<&mut Self, Error> {
+		let tmp = self.next_value()?.to_string();
+		let regex = Regex::new(regex)?;
+		assert!(regex.is_match(&tmp), "Output '{tmp}' doesn't match regex '{regex}'",);
 		Ok(self)
 	}
 

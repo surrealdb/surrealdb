@@ -1234,3 +1234,6 @@ build.allow_apis = ["fs"]
 
 [pkg.cedarwood]
 allow_unsafe = true
+
+[pkg.equator-macro]
+allow_proc_macro = true
