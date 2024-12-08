@@ -676,7 +676,7 @@ async fn select_where_matches_mixing_indexes() -> Result<(), Error> {
 					detail: {
 						plan: {
 							index: 'idxSecurityNumber',
-							operator: '==',
+							operator: '=',
 							value: '123456'
 						},
 						table: 'person'
