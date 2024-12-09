@@ -19,7 +19,6 @@ impl Document {
 	/// nested fields or array values are untouched.
 	pub(super) async fn cleanup_table_fields(
 		&mut self,
-		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
@@ -33,7 +32,7 @@ impl Document {
 			// Loop through all field statements
 			for fd in self.fd(ctx, opt).await?.iter() {
 				// Is this a schemaless field?
-				match fd.flex || fd.kind.as_ref().is_some_and(|k| k.is_literal_nested()) {
+				match fd.flex || fd.kind.as_ref().is_some_and(Kind::is_literal_nested) {
 					false => {
 						// Loop over this field in the document
 						for k in self.current.doc.each(&fd.name).into_iter() {
@@ -73,7 +72,7 @@ impl Document {
 				}
 				// NONE values should never be stored
 				if self.current.doc.pick(fd).is_none() {
-					self.current.doc.to_mut().del(stk, ctx, opt, fd).await?;
+					self.current.doc.to_mut().cut(fd);
 				}
 			}
 		} else {
@@ -81,7 +80,7 @@ impl Document {
 			for fd in self.current.doc.every(None, true, true).iter() {
 				// NONE values should never be stored
 				if self.current.doc.pick(fd).is_none() {
-					self.current.doc.to_mut().del(stk, ctx, opt, fd).await?;
+					self.current.doc.to_mut().cut(fd);
 				}
 			}
 		}

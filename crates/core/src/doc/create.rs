@@ -19,7 +19,7 @@ impl Document {
 		self.check_data_fields(stk, ctx, opt, stm).await?;
 		self.process_record_data(stk, ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
-		self.cleanup_table_fields(stk, ctx, opt, stm).await?;
+		self.cleanup_table_fields(ctx, opt, stm).await?;
 		self.default_record_data(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.store_record_data(ctx, opt, stm).await?;
