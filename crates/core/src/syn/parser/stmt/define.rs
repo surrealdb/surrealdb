@@ -360,8 +360,40 @@ impl Parser<'_> {
 								}
 							}
 							if self.eat(t!("WITH")) {
-								expected!(self, t!("JWT"));
-								ac.jwt = self.parse_jwt()?;
+								loop {
+									match self.peek_kind() {
+										t!("JWT") => {
+											self.pop_peek();
+											let jwt = self.parse_jwt()?;
+											ac.jwt = jwt.clone();
+											// Use same issuer for refreshed tokens.
+											if let Some(mut bearer) = ac.bearer {
+												bearer.jwt = jwt;
+												ac.bearer = Some(bearer);
+											}
+										}
+										t!("BEARER") | t!("REFRESH") => {
+											// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+											if !*EXPERIMENTAL_BEARER_ACCESS {
+												unexpected!(
+													self,
+													peek,
+													"the experimental bearer access feature to be enabled"
+												);
+											}
+
+											self.pop_peek();
+											ac.bearer = Some(access_type::BearerAccess {
+												kind: access_type::BearerAccessType::Refresh,
+												subject: access_type::BearerAccessSubject::Record,
+												// Use same issuer for refreshed tokens.
+												jwt: ac.jwt.clone(),
+											});
+										}
+										_ => break,
+									}
+									self.eat(t!(","));
+								}
 							}
 							res.kind = AccessType::Record(ac);
 						}

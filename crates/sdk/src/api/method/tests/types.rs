@@ -18,3 +18,9 @@ pub struct Root {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthParams {}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct SigninData {
+	pub token: String,
+	pub refresh: Option<String>,
+}

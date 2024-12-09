@@ -23,7 +23,13 @@ pub(crate) enum Command {
 	Signup {
 		credentials: CoreObject,
 	},
+	Signupv2 {
+		credentials: CoreObject,
+	},
 	Signin {
+		credentials: CoreObject,
+	},
+	Signinv2 {
 		credentials: CoreObject,
 	},
 	Authenticate {
@@ -133,11 +139,25 @@ impl Command {
 				method: "signup",
 				params: Some(vec![CoreValue::from(credentials)].into()),
 			},
+			Command::Signupv2 {
+				credentials,
+			} => RouterRequest {
+				id,
+				method: "signupv2",
+				params: Some(vec![CoreValue::from(credentials)].into()),
+			},
 			Command::Signin {
 				credentials,
 			} => RouterRequest {
 				id,
 				method: "signin",
+				params: Some(vec![CoreValue::from(credentials)].into()),
+			},
+			Command::Signinv2 {
+				credentials,
+			} => RouterRequest {
+				id,
+				method: "signinv2",
 				params: Some(vec![CoreValue::from(credentials)].into()),
 			},
 			Command::Authenticate {

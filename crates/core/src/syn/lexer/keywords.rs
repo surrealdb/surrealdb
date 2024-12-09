@@ -197,6 +197,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("RELATE") => TokenKind::Keyword(Keyword::Relate),
 	UniCase::ascii("RELATION") => TokenKind::Keyword(Keyword::Relation),
 	UniCase::ascii("REBUILD") => TokenKind::Keyword(Keyword::Rebuild),
+	UniCase::ascii("REFRESH") => TokenKind::Keyword(Keyword::Refresh),
 	UniCase::ascii("REMOVE") => TokenKind::Keyword(Keyword::Remove),
 	UniCase::ascii("REPLACE") => TokenKind::Keyword(Keyword::Replace),
 	UniCase::ascii("RETURN") => TokenKind::Keyword(Keyword::Return),
