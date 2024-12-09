@@ -338,7 +338,7 @@ pub(super) struct ConcurrentCollector<'a> {
 	ite: &'a mut Iterator,
 }
 
-impl<'a> Collector for ConcurrentCollector<'a> {
+impl Collector for ConcurrentCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
 		let pro = collected.process(self.opt, self.txn).await?;
 		self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await;
@@ -351,7 +351,7 @@ pub(super) struct ConcurrentDistinctCollector<'a> {
 	dis: &'a mut SyncDistinct,
 }
 
-impl<'a> Collector for ConcurrentDistinctCollector<'a> {
+impl Collector for ConcurrentDistinctCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
 		let pro = collected.process(self.coll.opt, self.coll.txn).await?;
 		if !self.dis.check_already_processed(&pro) {
