@@ -412,6 +412,38 @@ impl Response {
 		index.query_result(self)
 	}
 
+	/// Takes and returns the value returned by a statement.
+	///
+	/// In contrast to [`Self::take`], this method does not do any deserialization.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// #
+	/// use surrealdb::sql::Value;
+	/// let mut response = db
+	///     // Get `john`'s details
+	///     .query("SELECT * FROM user:john")
+	///     .await?;
+	///
+	/// // Get the first (and only) user from the first query
+	/// let value: Value = response.take_value(0)?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	///
+	/// The indices are stable. Taking one index doesn't affect the numbering
+	/// of the other indices, so you can take them in any order you see fit.
+	pub fn take_value(&mut self, index: usize) -> Result<CoreValue> {
+		self.results
+			.swap_remove(&index)
+			.ok_or_else(|| crate::Error::Api(crate::error::Api::QueryIndexOutOfBounds(index)))?
+			.1
+	}
+
 	/// Takes and streams records returned from a `LIVE SELECT` query
 	///
 	/// This is the counterpart to [Response::take] used to stream the results
