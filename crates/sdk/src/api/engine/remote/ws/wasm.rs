@@ -183,7 +183,7 @@ async fn router_handle_request(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", req);
-		let payload = serialize(&req, true).unwrap();
+		let payload = serialize(&req.stringify_queries(), true).unwrap();
 		Message::Binary(payload)
 	};
 
