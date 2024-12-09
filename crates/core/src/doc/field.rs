@@ -59,17 +59,6 @@ impl Document {
 						fd if fd.is_out() => continue,
 						fd if fd.is_meta() => continue,
 						// Custom fields
-						fd => match opt.strict {
-							// If strict, then throw an error on an undefined field
-							true => {
-								return Err(Error::FieldUndefined {
-									table: tb.name.to_raw(),
-									field: fd.to_owned(),
-								})
-							}
-							// Otherwise, delete the field silently and don't error
-							false => self.current.doc.to_mut().del(stk, ctx, opt, fd).await?,
-						},
 						fd => {
 							// Throw an error for fields not in the schema
 							return Err(Error::FieldUndefined {
