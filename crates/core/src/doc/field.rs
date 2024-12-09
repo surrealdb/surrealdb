@@ -203,11 +203,11 @@ impl Document {
 					// Process any DEFAULT clause
 					val = field.process_default_clause(val).await?;
 					// Process any TYPE clause
-					val = field.process_type_clause(val, true).await?;
+					val = field.process_type_clause(val).await?;
 					// Process any VALUE clause
 					val = field.process_value_clause(val).await?;
 					// Process any TYPE clause
-					val = field.process_type_clause(val, false).await?;
+					val = field.process_type_clause(val).await?;
 					// Process any ASSERT clause
 					val = field.process_assert_clause(val).await?;
 				}
@@ -255,11 +255,7 @@ struct FieldEditContext<'a> {
 
 impl<'a> FieldEditContext<'a> {
 	/// Process any TYPE clause for the field definition
-	async fn process_type_clause(&self, val: Value, initial: bool) -> Result<Value, Error> {
-		//
-		if initial && self.def.value.as_ref().is_some_and(Value::is_static) {
-			return Ok(val);
-		}
+	async fn process_type_clause(&self, val: Value) -> Result<Value, Error> {
 		// Check for a TYPE clause
 		if let Some(kind) = &self.def.kind {
 			// Check if this is the `id` field
@@ -324,15 +320,25 @@ impl<'a> FieldEditContext<'a> {
 	}
 	/// Process any DEFAULT clause for the field definition
 	async fn process_default_clause(&mut self, val: Value) -> Result<Value, Error> {
-		// If this document is not new, or if
-		// the field has a value specified
-		// then ignore the DEFAULT clause
-		// and return the original value.
-		if !val.is_none() || !self.doc.is_new() {
+		// This field has a value specified
+		if !val.is_none() {
 			return Ok(val);
 		}
+		// The document is not being created
+		if !self.doc.is_new() {
+			return Ok(val);
+		}
+		// Get the default value
+		let def = match &self.def.default {
+			Some(v) => Some(v),
+			_ => match &self.def.value {
+				// The VALUE clause doesn't
+				Some(v) if v.is_static() => Some(v),
+				_ => None,
+			},
+		};
 		// Check for a DEFAULT clause
-		if let Some(expr) = &self.def.default {
+		if let Some(expr) = def {
 			// Arc the current value
 			let now = Arc::new(val);
 			// Get the current document
