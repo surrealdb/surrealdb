@@ -17,7 +17,7 @@ use crate::sql::{Part, Thing, Value};
 use reblessive::tree::Stk;
 
 impl Document {
-	pub async fn store_index_data(
+	pub(super) async fn store_index_data(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,

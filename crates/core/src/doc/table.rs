@@ -52,7 +52,7 @@ impl Document {
 	/// record belongs to. This functions loops
 	/// through the tables and processes them all
 	/// within the currently running transaction.
-	pub async fn process_table_views(
+	pub(super) async fn process_table_views(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
