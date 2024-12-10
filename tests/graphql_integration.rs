@@ -422,4 +422,136 @@ mod graphql_integration {
 
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn optional_record_schema() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// add schema and data
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL auto;
+                    DEFINE TABLE foo SCHEMAFUL;
+                    DEFINE FIELD val ON foo TYPE option<record<bar>>;
+					DEFINE TABLE bar SCHEMAFUL;
+                    DEFINE FIELD val ON bar TYPE int;
+                    CREATE bar:1 set val = 42;
+                    CREATE foo:1 set val = bar:1;
+                    CREATE bar:2 set val = 43;
+                    CREATE foo:2 set val = bar:2;
+                "#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// fetch data via graphql
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query{foo(filter){id, val{val}}}"#}).to_string())
+				.send()
+				.await?;
+			// assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			let expected = json!({
+				"data": {
+					"foo": [
+						{
+							"id": "foo:1",
+							"val": 42
+						},
+						{
+							"id": "foo:2",
+							"val": 43
+						}
+					]
+				}
+			});
+			assert_eq!(expected.to_string(), body)
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn functions() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// add schema and data
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL auto;
+                    DEFINE TABLE foo SCHEMAFUL;
+                    DEFINE FIELD val ON foo TYPE int;
+                    CREATE foo:1 set val = bar:1;
+					DEFINE FUNCTION fn::num() -> int {return 42;};
+					DEFINE FUNCTION fn::double($x: int) -> int {return $x * 2};
+					DEFINE FUNCTION fn::foo() -> record<foo> {return foo:1}
+                "#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// fetch data via graphql
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query{foo(filter){id, val{val}}}"#}).to_string())
+				.send()
+				.await?;
+			// assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			let expected = json!({
+				"data": {
+					"foo": [
+						{
+							"id": "foo:1",
+							"val": 42
+						},
+						{
+							"id": "foo:2",
+							"val": 43
+						}
+					]
+				}
+			});
+			assert_eq!(expected.to_string(), body)
+		}
+		Ok(())
+	}
 }
