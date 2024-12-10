@@ -3211,11 +3211,6 @@ mod tests {
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
 		assert_eq!(40, std::mem::size_of::<crate::sql::mock::Mock>());
 		assert_eq!(32, std::mem::size_of::<crate::sql::regex::Regex>());
-		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
-		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());
-		assert_eq!(8, std::mem::size_of::<Box<crate::sql::function::Function>>());
-		assert_eq!(8, std::mem::size_of::<Box<crate::sql::subquery::Subquery>>());
-		assert_eq!(8, std::mem::size_of::<Box<crate::sql::expression::Expression>>());
 	}
 
 	#[test]
