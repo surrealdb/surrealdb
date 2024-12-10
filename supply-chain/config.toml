@@ -531,10 +531,6 @@ criteria = "safe-to-deploy"
 version = "0.3.31"
 criteria = "safe-to-deploy"
 
-[[exemptions.futures-core]]
-version = "0.3.31"
-criteria = "safe-to-deploy"
-
 [[exemptions.futures-io]]
 version = "0.3.31"
 criteria = "safe-to-deploy"
@@ -544,10 +540,6 @@ version = "2.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-macro]]
-version = "0.3.31"
-criteria = "safe-to-deploy"
-
-[[exemptions.futures-sink]]
 version = "0.3.31"
 criteria = "safe-to-deploy"
 
