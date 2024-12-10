@@ -1,16 +1,10 @@
 use std::ops::Deref;
 
-<<<<<<< HEAD:core/src/gql/ext.rs
 use crate::sql::statements::define::config::graphql::{FunctionsConfig, TableConfig};
 use crate::sql::statements::{DefineFunctionStatement, DefineTableStatement};
 use crate::sql::{
-	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Orders, Part, Start, Table, Value,
+	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Part, Start, Table, Value,
 };
-=======
-use crate::sql::statements::define::config::graphql::TableConfig;
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::{statements::UseStatement, Cond, Ident, Idiom, Limit, Part, Start, Table, Value};
->>>>>>> main:crates/core/src/gql/ext.rs
 
 pub trait IntoExt<T> {
 	fn intox(self) -> T;
