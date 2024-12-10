@@ -135,7 +135,7 @@ impl<'a> BytesReader<'a> {
 	}
 }
 
-impl<'a> Iterator for BytesReader<'a> {
+impl Iterator for BytesReader<'_> {
 	type Item = u8;
 
 	#[inline]
@@ -150,7 +150,7 @@ impl<'a> Iterator for BytesReader<'a> {
 	}
 }
 
-impl<'a> ExactSizeIterator for BytesReader<'a> {
+impl ExactSizeIterator for BytesReader<'_> {
 	fn len(&self) -> usize {
 		self.len()
 	}
