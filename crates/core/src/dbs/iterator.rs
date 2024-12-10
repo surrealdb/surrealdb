@@ -739,7 +739,7 @@ impl Iterator {
 		// Count the result
 		self.count += 1;
 		// Periodically yield
-		if self.count % 100 == 0 {
+		if !stm.parallel() && self.count % 100 == 0 {
 			yield_now!();
 		}
 		// Process the result
