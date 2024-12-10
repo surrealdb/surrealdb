@@ -13,7 +13,7 @@ use crate::sql::Relation;
 use crate::sql::TableType;
 
 impl Document {
-	pub async fn store_edges_data(
+	pub(super) async fn store_edges_data(
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
