@@ -67,7 +67,7 @@ where
 	}
 }
 
-impl<'r, C, R> Export<'r, C, R, Config>
+impl<C, R> Export<'_, C, R, Config>
 where
 	C: Connection,
 {

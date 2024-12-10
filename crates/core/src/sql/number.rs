@@ -888,9 +888,9 @@ impl ops::Add for Number {
 	}
 }
 
-impl<'a, 'b> ops::Add<&'b Number> for &'a Number {
+impl<'a> ops::Add<&'a Number> for &Number {
 	type Output = Number;
-	fn add(self, other: &'b Number) -> Number {
+	fn add(self, other: &'a Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v + w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v + w),
@@ -916,9 +916,9 @@ impl ops::Sub for Number {
 	}
 }
 
-impl<'a, 'b> ops::Sub<&'b Number> for &'a Number {
+impl<'a> ops::Sub<&'a Number> for &Number {
 	type Output = Number;
-	fn sub(self, other: &'b Number) -> Number {
+	fn sub(self, other: &'a Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v - w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v - w),
@@ -944,9 +944,9 @@ impl ops::Mul for Number {
 	}
 }
 
-impl<'a, 'b> ops::Mul<&'b Number> for &'a Number {
+impl<'a> ops::Mul<&'a Number> for &Number {
 	type Output = Number;
-	fn mul(self, other: &'b Number) -> Number {
+	fn mul(self, other: &'a Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
@@ -972,9 +972,9 @@ impl ops::Div for Number {
 	}
 }
 
-impl<'a, 'b> ops::Div<&'b Number> for &'a Number {
+impl<'a> ops::Div<&'a Number> for &Number {
 	type Output = Number;
-	fn div(self, other: &'b Number) -> Number {
+	fn div(self, other: &'a Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v / w),

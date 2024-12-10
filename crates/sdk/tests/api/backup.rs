@@ -46,7 +46,7 @@ async fn export_import() {
 	// Verify that all records exist post-import
 	for i in 0..10 {
 		let mut response =
-			db.query(&format!("SELECT name FROM user WHERE name = 'User {i}'")).await.unwrap();
+			db.query(format!("SELECT name FROM user WHERE name = 'User {i}'")).await.unwrap();
 		let Some(name): Option<String> = response.take("name").unwrap() else {
 			panic!("query returned no record");
 		};
@@ -103,14 +103,14 @@ async fn export_with_config() {
 	res.unwrap();
 
 	// Verify that no group records were imported
-	let mut response = db.query(&format!("SELECT id FROM group")).await.unwrap();
+	let mut response = db.query("SELECT id FROM group").await.unwrap();
 	let tmp: Option<Value> = response.take(0).unwrap();
 	assert_eq!(tmp, None);
 
 	// Verify that all user records exist post-import
 	for i in 0..10 {
 		let mut response =
-			db.query(&format!("SELECT name FROM user WHERE name = 'User {i}'")).await.unwrap();
+			db.query(format!("SELECT name FROM user WHERE name = 'User {i}'")).await.unwrap();
 		let Some(name): Option<String> = response.take("name").unwrap() else {
 			panic!("query returned no record");
 		};
