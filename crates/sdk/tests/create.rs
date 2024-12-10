@@ -1,6 +1,9 @@
 mod parse;
+
 use parse::Parse;
+
 mod helpers;
+use crate::helpers::ParallelTest;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -740,4 +743,26 @@ async fn check_permissions_auth_disabled() {
 
 		assert!(res.unwrap() != Value::parse("[]"), "{}", "anonymous user should be able to create a new record if the table exists and grants full permissions");
 	}
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_index_parallel() {
+	let sql = r"
+		DEFINE ANALYZER OVERWRITE simple_text TOKENIZERS blank,punct FILTERS ascii,lowercase;
+		DEFINE INDEX OVERWRITE title_search ON book FIELDS title SEARCH ANALYZER simple_text BM25 HIGHLIGHTS;
+	";
+	let t = ParallelTest::new(sql).await.unwrap();
+
+	let mut handles = Vec::new();
+	for _ in 0..2 {
+		let t = t.clone();
+		handles.push(tokio::spawn(async move {
+			t.execute("CREATE book SET title='hello world'").await.unwrap()
+		}));
+	}
+	for h in handles {
+		let r = h.await.unwrap();
+		t.write().await.append_responses(r);
+	}
+	t.write().await.skip_ok(4).unwrap();
 }
