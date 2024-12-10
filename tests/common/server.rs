@@ -45,6 +45,7 @@ impl Child {
 		a.map(|_ok| self)
 	}
 
+	#[cfg(unix)]
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
 		nix::sys::signal::kill(
 			nix::unistd::Pid::from_raw(self.inner.as_ref().unwrap().id() as i32),
@@ -160,6 +161,7 @@ pub struct StartServerArguments {
 	pub tls: bool,
 	pub wait_is_ready: bool,
 	pub temporary_directory: Option<String>,
+	pub import_file: Option<String>,
 	pub args: String,
 	pub vars: Option<HashMap<String, String>>,
 }
@@ -172,6 +174,7 @@ impl Default for StartServerArguments {
 			tls: false,
 			wait_is_ready: true,
 			temporary_directory: None,
+			import_file: None,
 			args: "".to_string(),
 			vars: None,
 		}
@@ -181,14 +184,6 @@ impl Default for StartServerArguments {
 pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		auth: false,
-		..Default::default()
-	})
-	.await
-}
-
-pub async fn start_server_with_functions() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments {
-		args: "--allow-funcs".to_string(),
 		..Default::default()
 	})
 	.await
@@ -211,6 +206,14 @@ pub async fn start_server_with_temporary_directory(
 ) -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		temporary_directory: Some(path.to_string()),
+		..Default::default()
+	})
+	.await
+}
+
+pub async fn start_server_with_import_file(path: &str) -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		import_file: Some(path.to_string()),
 		..Default::default()
 	})
 	.await
@@ -246,6 +249,7 @@ pub async fn start_server(
 		tls,
 		wait_is_ready,
 		temporary_directory,
+		import_file,
 		args,
 		vars,
 	}: StartServerArguments,
@@ -273,6 +277,10 @@ pub async fn start_server(
 
 	if let Some(path) = temporary_directory {
 		extra_args.push_str(format!(" --temporary-directory {path}").as_str());
+	}
+
+	if let Some(path) = import_file {
+		extra_args.push_str(format!(" --import-file {path}").as_str());
 	}
 
 	'retry: for _ in 0..3 {

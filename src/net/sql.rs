@@ -17,6 +17,7 @@ use axum::Router;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -25,7 +26,7 @@ where
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
-		.route("/sql", options(|| async {}).get(ws_handler).post(post_handler))
+		.route("/sql", options(|| async {}).get(get_handler).post(post_handler))
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SQL_BODY_SIZE))
 }
@@ -39,6 +40,11 @@ async fn post_handler(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
 	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Sql) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Sql);
+		return Err(Error::ForbiddenRoute(RouteTarget::Sql.to_string()));
+	}
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query
@@ -58,7 +64,7 @@ async fn post_handler(
 	}
 }
 
-async fn ws_handler(
+async fn get_handler(
 	ws: WebSocketUpgrade,
 	Extension(state): Extension<AppState>,
 	Extension(sess): Extension<Session>,

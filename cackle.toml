@@ -1199,9 +1199,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.actix-router]
-allow_apis = [
-    "net",
-]
+allow_apis = ["net"]
 
 [pkg.bitcode]
 allow_unsafe = true
@@ -1224,3 +1222,9 @@ allow_apis = [
 allow_apis = [
     "net",
 ]
+
+[pkg.revision]
+allow_apis = ["fs"]
+
+[pkg.equator-macro]
+allow_proc_macro = true

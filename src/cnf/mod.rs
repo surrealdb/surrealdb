@@ -71,6 +71,12 @@ pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS", usize, 24);
 
+/// What is the number of runtime worker threads to start (defaults to the number of CPU cores)
+pub static RUNTIME_WORKER_THREADS: LazyLock<usize> =
+	lazy_env_parse_or_else!("SURREAL_RUNTIME_WORKER_THREADS", usize, |_| {
+		std::cmp::max(4, num_cpus::get())
+	});
+
 /// What is the runtime thread memory stack size (defaults to 10MiB)
 pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
 	lazy_env_parse_or_else!("SURREAL_RUNTIME_STACK_SIZE", usize, |_| {
@@ -86,9 +92,21 @@ pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
 pub static RUNTIME_MAX_BLOCKING_THREADS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS", usize, 512);
 
-/// How many threads which can be started for blocking operations (defaults to 512)
+/// If set to "otlp" then telemetry is sent to the GRPC OTEL collector
 pub static TELEMETRY_PROVIDER: LazyLock<String> =
 	lazy_env_parse!("SURREAL_TELEMETRY_PROVIDER", String);
+
+/// If set to "true" then no traces are sent to the GRPC OTEL collector
+pub static TELEMETRY_DISABLE_TRACING: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_TRACING", bool);
+
+/// If set to "true" then no metrics are sent to the GRPC OTEL collector
+pub static TELEMETRY_DISABLE_METRICS: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_METRICS", bool);
+
+/// If set then use this as value for the namespace label when sending telemetry
+pub static TELEMETRY_NAMESPACE: LazyLock<String> =
+	lazy_env_parse!("SURREAL_TELEMETRY_NAMESPACE", String);
 
 /// The version identifier of this build
 pub static PKG_VERSION: LazyLock<String> =

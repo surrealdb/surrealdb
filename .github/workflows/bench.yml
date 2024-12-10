@@ -31,16 +31,14 @@ defaults:
 jobs:
   common:
     name: Bench common
-    runs-on:
-      - self-hosted
-      - benches
+    runs-on: [runner-arm64-2xlarge]
     timeout-minutes: 60
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@97834a484a5ab3c40fa9e2eb40fcf8041105a573
         with:
           aws-region: us-east-1
 
@@ -92,9 +90,7 @@ jobs:
 
   engines:
     name: Benchmark engines
-    runs-on:
-      - self-hosted
-      - benches
+    runs-on: [runner-arm64-2xlarge]
     timeout-minutes: 60
     permissions:
       id-token: write
@@ -131,7 +127,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@97834a484a5ab3c40fa9e2eb40fcf8041105a573
         with:
           aws-region: us-east-1
 

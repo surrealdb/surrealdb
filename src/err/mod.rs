@@ -16,6 +16,9 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
+	#[error("The server is unable to handle the request")]
+	ServerOverloaded,
+
 	#[error("The request body contains invalid data")]
 	Request,
 
@@ -70,6 +73,9 @@ pub enum Error {
 	/// Statement has been deprecated
 	#[error("{0}")]
 	Other(String),
+
+	#[error("The HTTP route '{0}' is forbidden")]
+	ForbiddenRoute(String),
 }
 
 impl From<Error> for String {
@@ -195,7 +201,7 @@ impl IntoResponse for Error {
 					information: Some(err.to_string()),
 				})
 			),
-			err @ Error::Db(SurrealError::Db(SurrealDbError::IamError(SurrealIamError::NotAllowed { .. }))) => (
+			err @ Error::ForbiddenRoute(_) | err @ Error::Db(SurrealError::Db(SurrealDbError::IamError(SurrealIamError::NotAllowed { .. }))) => (
 				StatusCode::FORBIDDEN,
 				Json(Message {
 					code: StatusCode::FORBIDDEN.as_u16(),

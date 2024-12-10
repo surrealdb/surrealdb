@@ -21,6 +21,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  RUSTFLAGS: "--cfg surrealdb_unstable"
+
 jobs:
   format:
     name: Check format
@@ -119,7 +122,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check fuzzers
-        run: cargo build --manifest-path sdk/fuzz/Cargo.toml
+        run: cargo build --manifest-path crates/fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
         uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
@@ -715,6 +718,4 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Test upgrade
-        # Allow breaking changes until v2 stabilises
-        continue-on-error: true
         run: cargo make ci-database-upgrade

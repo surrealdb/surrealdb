@@ -72,7 +72,7 @@ jobs:
       build-metadata: ${{ steps.outputs.outputs.build-metadata }}
     steps:
       - name: Checkout 2.x sources
-        if: ${{ inputs.git-ref == 'patches/2.0' }}
+        if: ${{ inputs.git-ref == 'patches/2.1' }}
         uses: actions/checkout@v4
         with:
           ref: main
@@ -84,11 +84,11 @@ jobs:
           ref: main
 
       - name: Create patch branch
-        if: ${{ inputs.git-ref == 'patches/2.0' }}
+        if: ${{ inputs.git-ref == 'patches/2.1' }}
         run: |
-          git push origin --delete patches/2.0 || true
-          git checkout -b patches/2.0
-          git push --set-upstream origin patches/2.0
+          git push origin --delete patches/2.1 || true
+          git checkout -b patches/2.1
+          git push --set-upstream origin patches/2.1
 
       - name: Create beta branch
         if: ${{ inputs.git-ref == 'releases/beta' }}
@@ -135,12 +135,12 @@ jobs:
 
             # Bump the crate version
             sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
-            sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
-            sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
+            sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+            sed -i "s#^version = \".*\"#version = \"2.1.0-${version}\"#" crates/core/Cargo.toml
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"${major}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" sdk/Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" crates/sdk/Cargo.toml
 
             # Update Cargo.lock without updating dependency versions
             cargo check --no-default-features --features storage-mem
@@ -174,7 +174,7 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${betaVersion}\"#" sdk/Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${betaVersion}\"#" crates/sdk/Cargo.toml
           else
             git checkout -b releases/beta
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
@@ -183,13 +183,13 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"${major}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${betaVersion}\"#" sdk/Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${betaVersion}\"#" crates/sdk/Cargo.toml
           fi
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"2.0.0-${betaVersion}\"#" core/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.1.0-${betaVersion}\"#" crates/core/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -249,8 +249,8 @@ jobs:
 
   test:
     name: Test
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest-16-cores
+    needs: [prepare-vars]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -294,8 +294,8 @@ jobs:
 
   lint:
     name: Lint
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
+    needs: [prepare-vars]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -327,7 +327,7 @@ jobs:
   docker-builder:
     name: Prepare docker builder
     runs-on: ubuntu-latest
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     outputs:
       name: ${{ steps.image.outputs.name }}
       tag: ${{ steps.image.outputs.tag }}
@@ -379,14 +379,14 @@ jobs:
 
   build:
     name: Build ${{ matrix.arch }} binary
-    needs: [ prepare-vars, docker-builder ]
+    needs: [prepare-vars, docker-builder]
     strategy:
       fail-fast: false
       matrix:
         include:
           # MacOS amd64
           - arch: x86_64-apple-darwin
-            runner: macos-latest-large
+            runner: macos-latest-xlarge
             file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
             build-step: |
               set -x
@@ -440,7 +440,7 @@ jobs:
 
           # Linux amd64
           - arch: x86_64-unknown-linux-gnu
-            runner: [ "self-hosted", "amd64", "builder" ]
+            runner: [runner-amd64-2xlarge]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
               # Build
@@ -476,7 +476,7 @@ jobs:
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
-            runner: [ "self-hosted", "arm64", "builder" ]
+            runner: [runner-arm64-2xlarge]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64
             build-step: |
               set -x
@@ -514,7 +514,7 @@ jobs:
 
           # Windows amd64
           - arch: x86_64-pc-windows-msvc
-            runner: windows-latest
+            runner: windows-latest-16-cores
             file: surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64
             build-step: |
               set -x
@@ -578,7 +578,7 @@ jobs:
         run: |
           set -x
 
-          version=2.0.0-${{ inputs.environment }}.${{ inputs.patch }}
+          version=2.1.0-${{ inputs.environment }}.${{ inputs.patch }}
 
           if [[ "${{ matrix.arch }}" == *apple-darwin ]]; then
             brew install gnu-sed
@@ -592,10 +592,10 @@ jobs:
 
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
           sed -i "s#surrealdb = { version = \"2\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -623,10 +623,10 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
-    needs: [ prepare-vars, test, lint, build ]
+    needs: [prepare-vars, test, lint, build]
     if: ${{ inputs.publish }}
     environment: ${{ inputs.environment }}
-    runs-on: ubuntu-latest
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -640,7 +640,7 @@ jobs:
 
       - name: Install release-plz
         run: |
-          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
+          curl -L https://github.com/release-plz/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
           sudo chmod +x /usr/bin/release-plz
 
       - name: Install a TOML parser
@@ -676,21 +676,21 @@ jobs:
           version=${major}.${minor}.$(($betaNum - 1))
 
           # Update crate version
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.0.0-${version}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.1.0-${version}\"#" crates/core/Cargo.toml
+          sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" crates/sdk/Cargo.toml
 
       - name: Patch alpha crate version
         if: ${{ inputs.environment == 'alpha' }}
         run: |
           set -x
 
-          version=2.0.$((${{ inputs.patch }} - 1))
+          version=2.1.$((${{ inputs.patch }} - 1))
 
           # Update the version to a nightly one
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
 
       - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
@@ -708,9 +708,9 @@ jobs:
           version=${major}.${minor}.${date}
 
           # Update the version to a nightly one
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment != 'stable' }}
@@ -718,15 +718,22 @@ jobs:
           set -x
 
           # Patch crate name
-          sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" sdk/Cargo.toml
-          sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" core/Cargo.toml
+          sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" crates/sdk/Cargo.toml
+          sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" crates/core/Cargo.toml
+
+          # Patch binary dependency
+          sed -i "s/surrealdb =/surrealdb-${{ inputs.environment }} =/" Cargo.toml
+          sed -i "s/surrealdb-core =/surrealdb-core-${{ inputs.environment }} =/" Cargo.toml
+
+          # Patch features
+          sed -i "s#\"surrealdb/#\"surrealdb-${{ inputs.environment }}/#" Cargo.toml
 
           # Patch sdk dependency
-          sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" sdk/Cargo.toml
+          sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" crates/sdk/Cargo.toml
 
           # Patch the description
-          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" sdk/Cargo.toml
-          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb-core crate\"#" core/Cargo.toml
+          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
+          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
 
           # Temporarily commit patches
           # These should not be pushed back to the repo
@@ -784,7 +791,7 @@ jobs:
 
   docker:
     name: Docker images
-    needs: [ prepare-vars, publish ]
+    needs: [prepare-vars, publish]
     uses: ./.github/workflows/reusable_docker.yml
     with:
       environment: ${{ inputs.environment }}
@@ -797,7 +804,7 @@ jobs:
 
   package-macos:
     name: Package and publish macOS universal binary
-    needs: [ prepare-vars, publish ]
+    needs: [prepare-vars, publish]
     runs-on: macos-latest
     env:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
@@ -837,7 +844,7 @@ jobs:
   propagate:
     name: Propagate binaries to all regions
     if: ${{ inputs.publish }}
-    needs: [ publish, package-macos ]
+    needs: [publish, package-macos]
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS

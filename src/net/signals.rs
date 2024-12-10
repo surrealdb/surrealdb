@@ -1,14 +1,10 @@
-use std::sync::Arc;
-
+use crate::err::Error;
+use crate::rpc::{self, RpcState};
+use crate::telemetry;
 use axum_server::Handle;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-
-use crate::{
-	err::Error,
-	rpc::{self, RpcState},
-	telemetry,
-};
 
 /// Start a graceful shutdown:
 /// * Signal the Axum Handle when a shutdown signal is received.
@@ -18,62 +14,88 @@ use crate::{
 /// A second signal will force an immediate shutdown.
 pub fn graceful_shutdown(
 	state: Arc<RpcState>,
-	ct: CancellationToken,
+	canceller: CancellationToken,
 	http_handle: Handle,
 ) -> JoinHandle<()> {
+	// Spawn a new background asynchronous task
 	tokio::spawn(async move {
-		let result = listen().await.expect("Failed to listen to shutdown signal");
-		info!(target: super::LOG, "{} received. Waiting for graceful shutdown... A second signal will force an immediate shutdown", result);
-
+		// Listen to the primary OS task signal
+		if let Ok(signal) = listen().await {
+			warn!(target: super::LOG, "{signal} received. Waiting for a graceful shutdown. A second signal will force an immediate shutdown.");
+		} else {
+			error!(target: super::LOG, "Failed to listen to shutdown signal. Terminating immediately.");
+			canceller.cancel();
+		}
+		// Spawn a task to gracefully shutdown
 		let shutdown = {
+			// Clone the state
 			let http_handle = http_handle.clone();
-			let ct = ct.clone();
-			let state_clone = state.clone();
-
+			let canceller = canceller.clone();
+			let state = state.clone();
+			// Spawn a background task
 			tokio::spawn(async move {
-				// Stop accepting new HTTP requests and wait until all connections are closed
+				// Stop accepting new HTTP connections
 				http_handle.graceful_shutdown(None);
+				// Wait for all connections to close
 				while http_handle.connection_count() > 0 {
 					tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 				}
-
-				rpc::graceful_shutdown(state_clone).await;
-
-				ct.cancel();
-
+				// Stop accepting new WebSocket connections
+				rpc::graceful_shutdown(state).await;
+				// Cancel the cancellation token
+				canceller.cancel();
 				// Flush all telemetry data
 				if let Err(err) = telemetry::shutdown() {
-					error!("Failed to flush telemetry data: {}", err);
+					error!("Failed to flush telemetry data: {err}");
 				}
 			})
 		};
-
+		// Wait for the primary or secondary signals to complete
 		tokio::select! {
+			// Check signals in order
+			biased;
 			// Start a normal graceful shutdown
 			_ = shutdown => (),
-			// Force an immediate shutdown if a second signal is received
-			_ = async {
-				if let Ok(signal) = listen().await {
-					warn!(target: super::LOG, "{} received during graceful shutdown. Terminate immediately...", signal);
-				} else {
-					error!(target: super::LOG, "Failed to listen to shutdown signal. Terminate immediately...");
-				}
-
-				// Force an immediate shutdown
+			// Check if this has shutdown
+			_ = canceller.cancelled() => {
+				// Close all HTTP connections immediately
 				http_handle.shutdown();
-
 				// Close all WebSocket connections immediately
 				rpc::shutdown(state);
-
-				// Cancel cancellation token
-				ct.cancel();
-			} => (),
+				// Cancel the cancellation token
+				canceller.cancel();
+				// Flush all telemetry data
+				if let Err(err) = telemetry::shutdown() {
+					error!("Failed to flush telemetry data: {err}");
+				}
+			}
+			// Listen for a secondary signal
+			res = listen() => {
+				// If we receive a secondary signal, force a shutdown
+				if let Ok(signal) = res {
+					warn!(target: super::LOG, "{signal} received during graceful shutdown. Terminating immediately.");
+				} else {
+					error!(target: super::LOG, "Failed to listen to shutdown signal. Terminating immediately.");
+				}
+				// Close all HTTP connections immediately
+				http_handle.shutdown();
+				// Close all WebSocket connections immediately
+				rpc::shutdown(state);
+				// Cancel the cancellation token
+				canceller.cancel();
+				// Flush all telemetry data
+				if let Err(err) = telemetry::shutdown() {
+					error!("Failed to flush telemetry data: {err}");
+				}
+			},
 		}
 	})
 }
 
 #[cfg(unix)]
 pub async fn listen() -> Result<String, Error> {
+	// Log informational message
+	info!(target: super::LOG, "Listening for a system shutdown signal.");
 	// Import the OS signals
 	use tokio::signal::unix::{signal, SignalKind};
 	// Get the operating system signal types
@@ -104,6 +126,8 @@ pub async fn listen() -> Result<String, Error> {
 
 #[cfg(windows)]
 pub async fn listen() -> Result<String, Error> {
+	// Log informational message
+	info!(target: super::LOG, "Listening for a system shutdown signal.");
 	// Import the OS signals
 	use tokio::signal::windows;
 	// Get the operating system signal types
