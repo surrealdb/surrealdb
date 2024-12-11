@@ -1244,3 +1244,6 @@ allow_proc_macro = true
 [pkg.displaydoc]
 allow_proc_macro = true
 
+[pkg.synstructure]
+allow_unsafe = true
+
