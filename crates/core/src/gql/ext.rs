@@ -1,6 +1,7 @@
 use std::ops::Deref;
 
-use crate::sql::statements::define::config::graphql::{FunctionsConfig, TableConfig};
+use crate::sql::order::{OrderList, Ordering};
+use crate::sql::statements::define::config::graphql::TableConfig;
 use crate::sql::statements::{DefineFunctionStatement, DefineTableStatement};
 use crate::sql::{
 	statements::UseStatement, Cond, Ident, Idiom, Limit, Order, Part, Start, Table, Value,
@@ -98,6 +99,12 @@ where
 {
 	fn from(value: P) -> Self {
 		Idiom(vec![value.into()])
+	}
+}
+
+impl FromExt<Vec<Order>> for Ordering {
+	fn from(value: Vec<Order>) -> Self {
+		Ordering::Order(OrderList(value))
 	}
 }
 

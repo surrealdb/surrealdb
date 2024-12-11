@@ -52,13 +52,13 @@ macro_rules! id_input {
 macro_rules! order {
 	(asc, $field:expr) => {{
 		let mut tmp = sql::Order::default();
-		tmp.order = $field.into();
+		tmp.value = $field.into();
 		tmp.direction = true;
 		tmp
 	}};
 	(desc, $field:expr) => {{
 		let mut tmp = sql::Order::default();
-		tmp.order = $field.into();
+		tmp.value = $field.into();
 		tmp
 	}};
 }
