@@ -1294,3 +1294,6 @@ allow_unsafe = true
 [pkg.utf16_iter]
 allow_unsafe = true
 
+[pkg.idna]
+allow_unsafe = true
+
