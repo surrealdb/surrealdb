@@ -1276,6 +1276,9 @@ allow_unsafe = true
 [pkg.icu_normalizer_data]
 allow_unsafe = true
 
+[pkg.icu_properties]
+allow_unsafe = true
+
 [pkg.icu_properties_data]
 allow_unsafe = true
 
