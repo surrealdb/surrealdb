@@ -1285,3 +1285,6 @@ allow_unsafe = true
 [pkg.utf8_iter]
 allow_unsafe = true
 
+[pkg.utf16_iter]
+allow_unsafe = true
+
