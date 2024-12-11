@@ -1247,3 +1247,6 @@ allow_proc_macro = true
 [pkg.synstructure]
 allow_unsafe = true
 
+[pkg.yoke-derive]
+allow_unsafe = true
+
