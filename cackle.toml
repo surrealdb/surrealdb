@@ -1258,3 +1258,6 @@ allow_unsafe = true
 [pkg.tinystr]
 allow_unsafe = true
 
+[pkg.writeable]
+allow_unsafe = true
+
