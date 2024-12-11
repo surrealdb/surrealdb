@@ -1273,6 +1273,9 @@ allow_unsafe = true
 [pkg.icu_locid_transform_data]
 allow_unsafe = true
 
+[pkg.icu_normalizer]
+allow_unsafe = true
+
 [pkg.icu_normalizer_data]
 allow_unsafe = true
 
