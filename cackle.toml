@@ -1255,3 +1255,6 @@ allow_unsafe = true
 [pkg.zerovec]
 allow_unsafe = true
 
+[pkg.tinystr]
+allow_unsafe = true
+
