@@ -306,7 +306,30 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let res = self.inner.as_ref().unwrap().get_opt(key.into(), &self.ro)?;
+
+		// Prepare the key, the read options and the rocksdb transaction
+		// to be moved for spawn_blocking.
+		let k = key.into();
+		// A copy of setting the read options from Self::transaction().
+		// This can be wrapped into an Option similar to the inner transaction,
+		// and taken and set back in the same way.
+		let mut ro = ReadOptions::default();
+		ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
+		ro.set_async_io(true);
+		ro.fill_cache(true);
+		// Move the inner rocksdb transaction object out for sending.
+		let rocksdb_tx = self.inner.take().unwrap();
+		// Run the get operation on the blocking thread pool.
+		let spawn_res = tokio::task::spawn_blocking(move || {
+			let res = rocksdb_tx.get_opt(k, &ro);
+			(res, rocksdb_tx)
+		})
+		.await
+		.unwrap();
+		// Restore the transaction object.
+		self.inner = Some(spawn_res.1);
+		// Get the actual result.
+		let res = spawn_res.0?;
 		// Return result
 		Ok(res)
 	}
