@@ -1234,6 +1234,7 @@ allow_proc_macro = true
 
 [pkg.yoke-derive]
 allow_proc_macro = true
+allow_unsafe = true
 
 [pkg.zerofrom-derive]
 allow_proc_macro = true
@@ -1245,8 +1246,5 @@ allow_proc_macro = true
 allow_proc_macro = true
 
 [pkg.synstructure]
-allow_unsafe = true
-
-[pkg.yoke-derive]
 allow_unsafe = true
 
