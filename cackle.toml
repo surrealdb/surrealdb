@@ -1261,6 +1261,9 @@ allow_unsafe = true
 [pkg.writeable]
 allow_unsafe = true
 
+[pkg.icu_collections]
+allow_unsafe = true
+
 [pkg.icu_locid]
 allow_unsafe = true
 
