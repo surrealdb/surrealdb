@@ -1231,6 +1231,7 @@ allow_proc_macro = true
 
 [pkg.zerovec-derive]
 allow_proc_macro = true
+allow_unsafe = true
 
 [pkg.yoke-derive]
 allow_proc_macro = true
