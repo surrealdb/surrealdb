@@ -95,6 +95,7 @@ impl DefineTableStatement {
 			overwrite: false,
 			..self.clone()
 		};
+		println!("{dt:#}");
 		txn.set(key, &dt, None).await?;
 		// Add table relational fields
 		self.add_in_out_fields(&txn, opt).await?;
