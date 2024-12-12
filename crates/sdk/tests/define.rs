@@ -2969,6 +2969,11 @@ async fn define_overwrite_tables() -> Result<(), Error> {
 		INFO FOR DB;
 		DEFINE TABLE OVERWRITE whatever SCHEMALESS TYPE RELATION FROM user TO test PERMISSIONS FULL;
 		INFO FOR DB;
+		CREATE person:one;
+		CREATE library:one;
+		RELATE person:one->works_at->library:one;
+		DEFINE TABLE OVERWRITE works_at TYPE RELATION IN person OUT library;
+		INFO FOR DB;
 	";
 	let mut t = Test::new(sql).await?;
 	t.skip_ok(1)?;
@@ -2997,6 +3002,24 @@ async fn define_overwrite_tables() -> Result<(), Error> {
 				params: {},
 				tables: {
 					whatever: 'DEFINE TABLE whatever TYPE RELATION IN user OUT test SCHEMALESS PERMISSIONS FULL'
+				},
+				users: {}
+			}",
+	)?;
+	t.skip_ok(4)?;
+	t.expect_val(
+		r"{
+				accesses: {},
+				analyzers: {},
+				configs: {},
+				functions: {},
+				models: {},
+				params: {},
+				tables: {
+					library: 'DEFINE TABLE library TYPE ANY SCHEMALESS PERMISSIONS NONE',
+					person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE',
+					whatever: 'DEFINE TABLE whatever TYPE RELATION IN user OUT test SCHEMALESS PERMISSIONS FULL',
+					works_at: 'DEFINE TABLE works_at TYPE RELATION IN person OUT library SCHEMALESS PERMISSIONS NONE'
 				},
 				users: {}
 			}",
