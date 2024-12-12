@@ -84,7 +84,7 @@ impl DefineTableStatement {
 		let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.name);
 		let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 		let db = txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		let dt = DefineTableStatement {
+		let mut dt = DefineTableStatement {
 			id: if self.id.is_none() && ns.id.is_some() && db.id.is_some() {
 				Some(txn.lock().await.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?)
 			} else {
@@ -95,10 +95,10 @@ impl DefineTableStatement {
 			overwrite: false,
 			..self.clone()
 		};
-		println!("{dt:#}");
-		txn.set(key, &dt, None).await?;
 		// Add table relational fields
-		self.add_in_out_fields(&txn, opt).await?;
+		Self::add_in_out_fields(&txn, &mut dt, opt).await?;
+		// Set the table definition
+		txn.set(key, &dt, None).await?;
 		// Clear the cache
 		txn.clear();
 		// Record definition change
@@ -161,18 +161,22 @@ impl DefineTableStatement {
 		matches!(self.kind, TableType::Normal | TableType::Any)
 	}
 	/// Used to add relational fields to existing table records
-	pub async fn add_in_out_fields(&self, txn: &Transaction, opt: &Options) -> Result<(), Error> {
+	pub async fn add_in_out_fields(
+		txn: &Transaction,
+		tb: &mut DefineTableStatement,
+		opt: &Options,
+	) -> Result<(), Error> {
 		// Add table relational fields
-		if let TableType::Relation(rel) = &self.kind {
+		if let TableType::Relation(rel) = &tb.kind {
 			// Set the `in` field as a DEFINE FIELD definition
 			{
-				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "in");
+				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &tb.name, "in");
 				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
 					key,
 					DefineFieldStatement {
 						name: Idiom::from(IN.to_vec()),
-						what: self.name.to_owned(),
+						what: tb.name.to_owned(),
 						kind: Some(val),
 						..Default::default()
 					},
@@ -182,13 +186,13 @@ impl DefineTableStatement {
 			}
 			// Set the `out` field as a DEFINE FIELD definition
 			{
-				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &self.name, "out");
+				let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &tb.name, "out");
 				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
 					key,
 					DefineFieldStatement {
 						name: Idiom::from(OUT.to_vec()),
-						what: self.name.to_owned(),
+						what: tb.name.to_owned(),
 						kind: Some(val),
 						..Default::default()
 					},
@@ -197,19 +201,7 @@ impl DefineTableStatement {
 				.await?;
 			}
 			// Refresh the table cache for the fields
-			{
-				let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.name);
-				let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.name).await?;
-				txn.set(
-					key,
-					DefineTableStatement {
-						cache_fields_ts: Uuid::now_v7(),
-						..tb.as_ref().clone()
-					},
-					None,
-				)
-				.await?;
-			}
+			tb.cache_fields_ts = Uuid::now_v7();
 		}
 		Ok(())
 	}
