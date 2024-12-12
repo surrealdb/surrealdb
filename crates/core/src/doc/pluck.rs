@@ -17,7 +17,7 @@ impl Document {
 	/// Evaluates a doc that has been modified so that it can be further computed into a result Value
 	/// This includes some permissions handling, output format handling (as specified in statement),
 	/// field handling (like params, links etc).
-	pub async fn pluck(
+	pub(super) async fn pluck(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
