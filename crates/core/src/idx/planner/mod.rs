@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{self, AtomicU8};
 
 /// The goal of this structure is to cache parameters so they can be easily passed
-/// from one function to the other, so we don't pass too much arguments.
+/// from one function to the other, so we don't pass too many arguments.
 /// It also caches evaluated fields (like is_keys_only)
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
@@ -145,16 +145,15 @@ impl QueryPlanner {
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
 
-		let mut tree = Tree::build(stk, ctx, &t).await?;
+		let tree = Tree::build(stk, ctx, &t).await?;
 
 		let is_knn = !tree.knn_expressions.is_empty();
-		let order = tree.index_map.order_limit.take();
 		let mut exe = InnerQueryExecutor::new(
 			stk,
 			ctx.ctx,
 			ctx.opt,
 			&t,
-			tree.index_map,
+			tree.index_map.options,
 			tree.knn_expressions,
 			tree.knn_brute_force_expressions,
 			tree.knn_condition,
@@ -165,7 +164,8 @@ impl QueryPlanner {
 			tree.root,
 			ctx,
 			tree.with_indexes,
-			order,
+			tree.index_map.compound_indexes,
+			tree.index_map.order_limit,
 			tree.all_and_groups,
 			tree.all_and,
 			tree.all_expressions_with_index,
