@@ -120,3 +120,12 @@ fn keyword() {
 		]
 	}
 }
+
+#[test]
+fn ident_angle_with_escape_char() {
+	test_case! {
+		r#"⟨⟨something\⟩⟩"# => [
+			TokenKind::Identifier,
+		]
+	}
+}
