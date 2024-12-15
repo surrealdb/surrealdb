@@ -15,6 +15,7 @@ use std::fmt::Write;
 use std::str;
 
 use super::{
+	array::Uniq,
 	fmt::{is_pretty, pretty_indent},
 	value::idiom_recursion::{clean_iteration, compute_idiom_recursion, is_final, Recursion},
 };
@@ -540,6 +541,10 @@ pub enum RecurseInstruction {
 		// Do we include the starting point in the paths?
 		inclusive: bool,
 	},
+	Collect {
+		// Do we include the starting point in the collection?
+		inclusive: bool,
+	},
 }
 
 impl RecurseInstruction {
@@ -566,8 +571,25 @@ impl RecurseInstruction {
 
 					Ok(res)
 				} else {
-					Ok(res.clone())
+					Ok(res)
 				}
+			}
+			Self::Collect {
+				inclusive,
+			} => {
+				// Find an array value so we can prefix
+				// all values with the initial value
+				let mut arr = match res {
+					Value::Array(arr) => arr,
+					v => Array(vec![v]),
+				};
+
+				// Is the collection inclusive?
+				if *inclusive {
+					arr.insert(0, rec.current.clone());
+				};
+
+				Ok(arr.uniq().into())
 			}
 		}
 	}
@@ -637,6 +659,17 @@ impl RecurseInstruction {
 				// Flatten the arrays of paths
 				Ok(res.flatten())
 			}
+			Self::Collect {
+				..
+			} => {
+				// Compute the recursion
+				let res = stk.run(|stk| compute_idiom_recursion(stk, ctx, opt, doc, rec)).await?;
+
+				// Flatten the result
+				let res = Value::from(vec![rec.current.clone(), res.flatten()]).flatten();
+
+				Ok(res)
+			}
 		}
 	}
 }
@@ -648,6 +681,17 @@ impl fmt::Display for RecurseInstruction {
 				inclusive,
 			} => {
 				write!(f, "path")?;
+
+				if *inclusive {
+					write!(f, "+inclusive")?;
+				}
+
+				Ok(())
+			}
+			Self::Collect {
+				inclusive,
+			} => {
+				write!(f, "collect")?;
 
 				if *inclusive {
 					write!(f, "+inclusive")?;

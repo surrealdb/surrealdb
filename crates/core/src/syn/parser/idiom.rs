@@ -427,6 +427,19 @@ impl Parser<'_> {
 
 				Some(RecurseInstruction::Path { inclusive })
 			},
+			"collect" => {
+				let mut inclusive = false;
+				loop {
+					parse_option!(
+						self,
+						"option",
+						"inclusive" => inclusive = true,
+						_ => break
+					);
+				};
+
+				Some(RecurseInstruction::Collect { inclusive })
+			},
 			_ => None
 		);
 

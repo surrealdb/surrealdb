@@ -339,6 +339,10 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 		planet:earth.{2+path}(.contains).name;
 		planet:earth.{2+path+inclusive}(.contains);
 
+		planet:earth.{2+collect}(.contains);
+		planet:earth.{2+collect}(.contains).name;
+		planet:earth.{2+collect+inclusive}(.contains);
+
 		planet:earth.{1}.contains.@;
 		planet:earth.{2}.contains.@;
 		planet:earth.{3}.contains.@;
@@ -415,6 +419,31 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 			[ planet:earth, country:us, state:texas ],
 			[ planet:earth, country:canada, province:ontario ],
 			[ planet:earth, country:canada, province:bc ],
+		]")?
+		.expect_val("[
+			country:us,
+			country:canada,
+			state:california,
+			state:texas,
+			province:ontario,
+			province:bc,
+		]")?
+		.expect_val("[
+			'United States',
+			'Canada',
+			'California',
+			'Texas',
+			'Ontario',
+			'British Columbia',
+		]")?
+		.expect_val("[
+			planet:earth,
+			country:us,
+			country:canada,
+			state:california,
+			state:texas,
+			province:ontario,
+			province:bc,
 		]")?
 		.expect_val("[
 			country:us,
