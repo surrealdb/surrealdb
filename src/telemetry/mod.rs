@@ -13,6 +13,7 @@ use opentelemetry_sdk::Resource;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tracing::{Level, Subscriber};
+use tracing_appender::non_blocking::NonBlockingBuilder;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::ParseError;
 use tracing_subscriber::prelude::*;
@@ -86,9 +87,15 @@ impl Builder {
 		&self,
 	) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, WorkerGuard, WorkerGuard), Error> {
 		// Create a non-blocking stdout log destination
-		let (stdout, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
+		let (stdout, stdout_guard) = NonBlockingBuilder::default()
+			.lossy(true)
+			.thread_name("surrealdb-logger-stdout")
+			.finish(std::io::stdout());
 		// Create a non-blocking stderr log destination
-		let (stderr, stderr_guard) = tracing_appender::non_blocking(std::io::stderr());
+		let (stderr, stderr_guard) = NonBlockingBuilder::default()
+			.lossy(true)
+			.thread_name("surrealdb-logger-stderr")
+			.finish(std::io::stderr());
 		// Create the logging destination layer
 		let log_layer = logs::new(self.filter.clone(), stdout, stderr)?;
 		// Create the trace destination layer
