@@ -26,7 +26,7 @@ pub async fn init(
 	}: FixCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_filter(log).init()?;
+	let (outg, errg) = crate::telemetry::builder().with_filter(log).init()?;
 	// Clean the path
 	let endpoint = path.into_endpoint()?;
 	let path = if endpoint.path.is_empty() {
@@ -36,6 +36,9 @@ pub async fn init(
 	};
 	// Fix the datastore, if applicable
 	dbs::fix(path).await?;
+	// Drop the log guards
+	drop(outg);
+	drop(errg);
 	// All ok
 	Ok(())
 }

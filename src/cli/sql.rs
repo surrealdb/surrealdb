@@ -62,7 +62,7 @@ pub async fn init(
 	}: SqlCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_log_level("warn").init()?;
+	let (outg, errg) = crate::telemetry::builder().with_log_level("warn").init()?;
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
@@ -261,6 +261,9 @@ pub async fn init(
 	}
 	// Save the inputs to the history
 	let _ = rl.save_history("history.txt");
+	// Drop the log guards
+	drop(outg);
+	drop(errg);
 	// Everything OK
 	Ok(())
 }

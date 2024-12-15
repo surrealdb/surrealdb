@@ -173,7 +173,7 @@ pub async fn init(
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_filter(log).init()?;
+	let (outg, errg) = crate::telemetry::builder().with_filter(log).init()?;
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");
@@ -227,6 +227,9 @@ pub async fn init(
 	nodetasks.resolve().await?;
 	// Shutdown the datastore
 	datastore.shutdown().await?;
+	// Drop the log guards
+	drop(outg);
+	drop(errg);
 	// All ok
 	Ok(())
 }
