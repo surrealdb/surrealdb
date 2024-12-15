@@ -55,21 +55,21 @@ impl Value {
 					// If we do not find a root-level repeat-recurse symbol, we
 					// can scan for a nested one. We only ever allow for a single
 					// repeat recurse symbol, hence the separate check.
-					_ => match path.find_recursion_plan() {
-						Some((path, plan, local_after)) => {
-							(path, Some(plan), [local_after, &after].concat())
+					_ => {
+						// If the user already specified a recursion instruction,
+						// we will not process any recursion plans.
+						if instruction.is_some() {
+							(path, None, after)
+						} else {
+							match path.find_recursion_plan() {
+								Some((path, plan, local_after)) => {
+									(path, Some(plan), [local_after, &after].concat())
+								}
+								_ => (path, None, after),
+							}
 						}
-						_ => (path, None, after),
-					},
+					}
 				};
-
-				// We can not have a recursion plan when we have a collection instruction
-				if plan.is_some() && instruction.is_some() {
-					return Err(Error::Unreachable(
-						"Can not have a recursion plan when we have a collection instruction"
-							.into(),
-					));
-				}
 
 				// Collect the min & max for the recursion context
 				let (min, max) = recurse.to_owned().try_into()?;
