@@ -666,7 +666,7 @@ impl RecurseInstruction {
 				let res = stk.run(|stk| compute_idiom_recursion(stk, ctx, opt, doc, rec)).await?;
 
 				// Flatten the result
-				let res = Value::from(vec![rec.current.clone(), res.flatten()]).flatten();
+				let res = Value::from(vec![rec.current.clone(), res]).flatten();
 
 				Ok(res)
 			}
