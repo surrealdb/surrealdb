@@ -113,14 +113,12 @@ impl Datastore {
 		// Store 4KB values separate from keys
 		debug!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
-		// Set the block cache size
+		// Set the block cache size in bytes
 		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		let mut block_opts = BlockBasedOptions::default();
 		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		block_opts.set_block_cache(&cache);
-		// Apply the block-based options to the main options
 		opts.set_block_based_table_factory(&block_opts);
-		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
 		// Set the delete compaction factory
 		debug!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
