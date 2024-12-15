@@ -154,7 +154,7 @@ pub trait Transaction {
 	///
 	/// This function fetches all matching keys pairs from the underlying datastore concurrently.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
-	async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Val>, Error>
+	async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Option<Val>>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -166,9 +166,9 @@ pub trait Transaction {
 		let mut out = Vec::with_capacity(keys.len());
 		for key in keys.into_iter() {
 			if let Some(val) = self.get(key, None).await? {
-				out.push(val);
+				out.push(Some(val));
 			} else {
-				out.push(vec![]);
+				out.push(None);
 			}
 		}
 		Ok(out)
