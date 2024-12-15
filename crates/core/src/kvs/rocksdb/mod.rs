@@ -4,7 +4,7 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::{Check, Key, Val, Version};
+use crate::kvs::{Check, Key, Val};
 use rocksdb::{
 	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
 	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
@@ -588,24 +588,6 @@ impl super::api::Transaction for Transaction {
 		}
 		// Return result
 		Ok(res)
-	}
-
-	/// Retrieve all the versions from a range of keys from the databases
-	/// This is a no-op for rocksdb database
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = _rng.sprint()))]
-	async fn scan_all_versions<K>(
-		&mut self,
-		_rng: Range<K>,
-		_limit: u32,
-	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
-	where
-		K: Into<Key> + Sprintable + Debug,
-	{
-		// Check to see if the transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		Err(Error::UnsupportedVersionedQueries)
 	}
 }
 
