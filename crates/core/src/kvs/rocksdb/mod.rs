@@ -311,6 +311,26 @@ impl super::api::Transaction for Transaction {
 		Ok(res)
 	}
 
+	/// Fetch many keys from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
+	async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Option<Val>>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Get the arguments
+		let keys: Vec<Key> = keys.into_iter().map(Into::into).collect();
+		// Get the keys
+		let res = self.inner.as_ref().unwrap().multi_get_opt(keys, &self.ro);
+		// Convert result
+		let res = res.into_iter().collect::<Result<_, _>>()?;
+		// Return result
+		Ok(res)
+	}
+
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
