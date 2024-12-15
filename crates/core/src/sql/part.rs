@@ -38,7 +38,12 @@ pub enum Part {
 	#[revision(start = 2)]
 	Destructure(Vec<DestructurePart>),
 	Optional,
-	#[revision(start = 3, end = 4, convert_fn = "convert_recurse_add_instruction", fields_name = "OldRecurseFields")]
+	#[revision(
+		start = 3,
+		end = 4,
+		convert_fn = "convert_recurse_add_instruction",
+		fields_name = "OldRecurseFields"
+	)]
 	Recurse(Recurse, Option<Idiom>),
 	#[revision(start = 4)]
 	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),
@@ -53,11 +58,7 @@ impl Part {
 		fields: OldRecurseFields,
 		_revision: u16,
 	) -> Result<Self, revision::Error> {
-		Ok(Part::Recurse(
-			fields.0,
-			fields.1,
-			None,
-		))
+		Ok(Part::Recurse(fields.0, fields.1, None))
 	}
 }
 
@@ -535,12 +536,44 @@ impl fmt::Display for Recurse {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum RecurseInstruction {
-	Path,
+	Path {
+		// Do we include the starting point in the paths?
+		inclusive: bool,
+	},
 }
 
 impl RecurseInstruction {
-	pub async fn compute(
-		&self, 
+	/// Once the recursion is computed, the output method
+	/// will be called with the initial recursion input
+	pub(crate) fn output(&self, rec: Recursion<'_>, res: Value) -> Result<Value, Error> {
+		match self {
+			Self::Path {
+				inclusive,
+			} => {
+				if *inclusive {
+					// Find an array value so we can prefix
+					// all values with the initial value
+					let arr = match res {
+						Value::Array(arr) => arr,
+						v => Array(vec![v]),
+					};
+
+					let res: Value = arr
+						.iter()
+						.map(|v| Value::from(vec![rec.current.clone(), v.to_owned()]).flatten())
+						.collect::<Vec<Value>>()
+						.into();
+
+					Ok(res)
+				} else {
+					Ok(res.clone())
+				}
+			}
+		}
+	}
+
+	pub(crate) async fn compute(
+		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -548,47 +581,61 @@ impl RecurseInstruction {
 		rec: Recursion<'_>,
 	) -> Result<Value, Error> {
 		match self {
-			Self::Path => {
-				async fn worker(
-					stk: &mut Stk,
-					ctx: &Context,
-					opt: &Options,
-					doc: Option<&CursorDoc>,
-					rec: Recursion<'_>,
-					value: &Value
-				) -> Result<Value, Error> {
-					let res = compute_idiom_recursion(stk, ctx, opt, doc, rec.with_current(value)).await?;
-					let arr = match res {
-						Value::Array(arr) => arr,
-						v => Array(vec![v]),
-						// v => Err(Error::Unreachable(format!("1requires an array, found {} from {}", v, value)))
-					};
+			Self::Path {
+				..
+			} => {
+				// Obtain an array value to iterate over
+				let arr = match rec.current {
+					Value::Array(arr) => arr,
+					v => &Array(vec![v.to_owned()]),
+				};
 
-					let arr: Value = arr
-						.iter()
-						.map(|v| Value::from(vec![value.clone(), v.clone()]).flatten())
-						.collect::<Vec<Value>>()
-						.into();
+				let res = stk
+					.scope(|scope| {
+						let futs = arr.iter().map(|value| {
+							scope.run(|stk| async move {
+								// Compute the recursion
+								let res = compute_idiom_recursion(
+									stk,
+									ctx,
+									opt,
+									doc,
+									rec.with_current(value),
+								)
+								.await?;
 
-					Ok(arr)
-				}
+								// If we encounter a final value, do not process it.
+								// The previous iteration is responsible for this
+								if is_final(&res) || &res == value {
+									return Result::<Value, Error>::Ok(res);
+								}
 
-				match rec.current {
-					Value::Array(arr) => {
-						stk
-							.scope(|scope| {
-								let futs =
-									arr
+								// Obtain an array value to iterate over
+								let arr = match res {
+									Value::Array(arr) => arr,
+									v => Array(vec![v]),
+								};
+
+								// Prefix all paths with the input of the current iteration
+								let res: Value = arr
 									.iter()
-									.map(|v| scope.run(|stk| worker(stk, ctx, opt, doc, rec, v)));
+									.map(|v| {
+										Value::from(vec![value.clone(), v.to_owned()]).flatten()
+									})
+									.collect::<Vec<Value>>()
+									.into();
 
-								try_join_all_buffered(futs)
+								Ok(res)
 							})
-							.await
-							.map(Into::into)
-					}
-					v => Err(Error::Unreachable(format!("2requires an array, found {}", v)))
-				}
+						});
+
+						try_join_all_buffered(futs)
+					})
+					.await
+					.map(Value::from)?;
+
+				// Flatten the arrays of paths
+				Ok(res.flatten())
 			}
 		}
 	}
@@ -597,8 +644,17 @@ impl RecurseInstruction {
 impl fmt::Display for RecurseInstruction {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Path => write!(f, "path"),
+			Self::Path {
+				inclusive,
+			} => {
+				write!(f, "path")?;
+
+				if *inclusive {
+					write!(f, "+inclusive")?;
+				}
+
+				Ok(())
+			}
 		}
 	}
 }
-

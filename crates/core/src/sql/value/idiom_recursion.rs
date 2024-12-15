@@ -4,7 +4,10 @@ use crate::{
 	dbs::Options,
 	doc::CursorDoc,
 	err::Error,
-	sql::{part::{RecurseInstruction, RecursionPlan}, Array, Part},
+	sql::{
+		part::{RecurseInstruction, RecursionPlan},
+		Array, Part,
+	},
 };
 
 use super::Value;
@@ -73,6 +76,7 @@ pub(crate) async fn compute_idiom_recursion(
 ) -> Result<Value, Error> {
 	// Find the recursion limit
 	let limit = *IDIOM_RECURSION_LIMIT as u32;
+	// Do we recursion instead of looping?
 	let marked_recursive = rec.plan.is_some() || rec.instruction.is_some();
 
 	// We recursed and found a final value, let's return
@@ -116,7 +120,11 @@ pub(crate) async fn compute_idiom_recursion(
 
 		// Process any potential instruction
 		let v = match rec.instruction {
-			Some(instruction) => instruction.compute(stk, ctx, opt, doc, rec.with_iterated(i).with_current(&v)).await?,
+			Some(instruction) => {
+				instruction
+					.compute(stk, ctx, opt, doc, rec.with_iterated(i).with_current(&v))
+					.await?
+			}
 			_ => v,
 		};
 

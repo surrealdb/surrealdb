@@ -11,7 +11,10 @@ use crate::{
 	},
 };
 
-use super::{mac::unexpected, ParseResult, Parser};
+use super::{
+	mac::{parse_option, unexpected},
+	ParseResult, Parser,
+};
 
 impl Parser<'_> {
 	pub(super) fn peek_continues_idiom(&mut self) -> bool {
@@ -408,19 +411,26 @@ impl Parser<'_> {
 	}
 	/// Parse a recursion instruction following the inner recurse part, if any
 	pub(super) fn parse_recurse_instruction(&mut self) -> ParseResult<Option<RecurseInstruction>> {
-		if self.eat(t!("+")) {
-			let kind = self.next_token_value::<Ident>()?;
-			let instruction = match kind.0.to_lowercase().as_str() {
-				"path" => RecurseInstruction::Path,
-				found => {
-					bail!("Unexpected instruction `{}` expected `path`", found, @self.last_span());
-				}
-			};
+		let instruction = parse_option!(
+			self,
+			"instruction",
+			"path" => {
+				let mut inclusive = false;
+				loop {
+					parse_option!(
+						self,
+						"option",
+						"inclusive" => inclusive = true,
+						_ => break
+					);
+				};
 
-			Ok(Some(instruction))
-		} else {
-			Ok(None)
-		}
+				Some(RecurseInstruction::Path { inclusive })
+			},
+			_ => None
+		);
+
+		Ok(instruction)
 	}
 	/// Parse a recurse part, expects `.{` to already be parsed
 	pub(super) async fn parse_recurse_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {

@@ -65,7 +65,10 @@ impl Value {
 
 				// We can not have a recursion plan when we have a collection instruction
 				if plan.is_some() && instruction.is_some() {
-					return Err(Error::Unreachable("Can not have a recursion plan when we have a collection instruction".into()));
+					return Err(Error::Unreachable(
+						"Can not have a recursion plan when we have a collection instruction"
+							.into(),
+					));
 				}
 
 				// Collect the min & max for the recursion context
@@ -83,6 +86,12 @@ impl Value {
 
 				// Compute the recursion
 				let v = compute_idiom_recursion(stk, ctx, opt, doc, rec).await?;
+
+				// Apply the recursion plan output if we have one
+				let v = match instruction {
+					Some(instruction) => instruction.output(rec, v)?,
+					_ => v,
+				};
 
 				// If we have a leftover path, process it
 				if !after.is_empty() {
