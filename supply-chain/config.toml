@@ -363,6 +363,10 @@ criteria = "safe-to-deploy"
 version = "0.5.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.crossbeam-channel]]
+version = "0.5.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.crossbeam-deque]]
 version = "0.8.5"
 criteria = "safe-to-deploy"
@@ -1517,6 +1521,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tracing]]
 version = "0.1.40"
+criteria = "safe-to-deploy"
+
+[[exemptions.tracing-appender]]
+version = "0.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-attributes]]
