@@ -65,6 +65,13 @@ impl Child {
 		std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file")
 	}
 
+	pub fn stdout_and_stderr(&self) -> String {
+		let mut output: String = String::new();
+		output.push_str(self.stdout().as_str());
+		output.push_str(self.stderr().as_str());
+		output
+	}
+
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
 	/// returns successfully, Err otherwise.
 	pub fn output(&mut self) -> Result<String, String> {
@@ -304,7 +311,7 @@ pub async fn start_server(
 		for _i in 0..10 {
 			interval.tick().await;
 
-			let out = server.stderr();
+			let out = server.stdout_and_stderr();
 			if out.contains("Address already in use") {
 				continue 'retry;
 			}
