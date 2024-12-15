@@ -284,7 +284,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.inner.as_ref().unwrap().get_opt(key.into(), &self.ro)?.is_some();
+		let res = self.inner.as_ref().unwrap().get_pinned_opt(key.into(), &self.ro)?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -379,7 +379,7 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		// Set the key if empty
-		match inner.get_opt(&key, &self.ro)? {
+		match inner.get_pinned_opt(&key, &self.ro)? {
 			None => inner.put(key, val)?,
 			_ => return Err(Error::TxKeyAlreadyExists),
 		};
@@ -409,8 +409,8 @@ impl super::api::Transaction for Transaction {
 		let val = val.into();
 		let chk = chk.map(Into::into);
 		// Set the key if valid
-		match (inner.get_opt(&key, &self.ro)?, chk) {
-			(Some(v), Some(w)) if v == w => inner.put(key, val)?,
+		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
+			(Some(v), Some(w)) if v.eq(&w) => inner.put(key, val)?,
 			(None, None) => inner.put(key, val)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
@@ -459,8 +459,8 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let chk = chk.map(Into::into);
 		// Delete the key if valid
-		match (inner.get_opt(&key, &self.ro)?, chk) {
-			(Some(v), Some(w)) if v == w => inner.delete(key)?,
+		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
+			(Some(v), Some(w)) if v.eq(&w) => inner.delete(key)?,
 			(None, None) => inner.delete(key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
