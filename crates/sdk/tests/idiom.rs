@@ -330,12 +330,14 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 			{ id: city:victoria,		name: 'Victoria' },
 		];
 
-		planet:earth.{3+path}(.contains).name;
-
 		planet:earth.{1}(.contains).name;
 		planet:earth.{2}(.contains).name;
-		planet:earth.{3+path}(.contains).name;
+		planet:earth.{3}(.contains).name;
 		planet:earth.{4}(.contains).name;
+
+		planet:earth.{2+path}(.contains);
+		planet:earth.{2+path}(.contains).name;
+		planet:earth.{2+path+inclusive}(.contains);
 
 		planet:earth.{1}.contains.@;
 		planet:earth.{2}.contains.@;
@@ -396,6 +398,24 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 			'Victoria'
 		]")?
 		.expect_val("[]")?
+		.expect_val("[
+			[ country:us, state:california ],
+			[ country:us, state:texas ],
+			[ country:canada, province:ontario ],
+			[ country:canada, province:bc ],
+		]")?
+		.expect_val("[
+			[ 'United States', 'California' ],
+			[ 'United States', 'Texas' ],
+			[ 'Canada', 'Ontario' ],
+			[ 'Canada', 'British Columbia' ],
+		]")?
+		.expect_val("[
+			[ planet:earth, country:us, state:california ],
+			[ planet:earth, country:us, state:texas ],
+			[ planet:earth, country:canada, province:ontario ],
+			[ planet:earth, country:canada, province:bc ],
+		]")?
 		.expect_val("[
 			country:us,
 			country:canada,
