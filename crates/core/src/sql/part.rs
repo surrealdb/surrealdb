@@ -5,7 +5,7 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	exe::try_join_all_buffered,
-	sql::{fmt::Fmt, strand::no_nul_bytes, Array, Graph, Ident, Idiom, Number, Value},
+	sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Value},
 };
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -552,6 +552,21 @@ pub enum RecurseInstruction {
 	},
 }
 
+macro_rules! to_vec_value {
+	(&$v: expr) => {
+		match $v {
+			Value::Array(v) => &v.0,
+			v => &vec![v.to_owned()],
+		}
+	};
+	($v: expr) => {
+		match $v {
+			Value::Array(v) => v.0,
+			v => vec![v],
+		}
+	};
+}
+
 macro_rules! walk_paths {
 	(
 		$stk: ident,
@@ -568,18 +583,12 @@ macro_rules! walk_paths {
 		let mut open: Vec<Value> = vec![];
 
 		// Obtain an array value to iterate over
-		let paths = match $rec.current {
-			Value::Array(v) => v,
-			v => &Array(vec![v.to_owned()]),
-		};
+		let paths = to_vec_value!(&$rec.current);
 
 		// Process all paths
 		for path in paths.iter() {
 			// Obtain an array value to iterate over
-			let path = match path {
-				Value::Array(v) => v,
-				v => &Array(vec![v.to_owned()]),
-			};
+			let path = to_vec_value!(&path);
 
 			// We always operate on the last value in the path
 			// If the path is empty, we skip it
@@ -608,10 +617,7 @@ macro_rules! walk_paths {
 			}
 
 			// Obtain an array value to iterate over
-			let steps = match res {
-				Value::Array(v) => v,
-				v => Array(vec![v]),
-			};
+			let steps = to_vec_value!(res);
 
 			// Did we reach the final iteration?
 			let reached_max = $rec.max.is_some_and(|max| $rec.iterated >= max);
@@ -621,9 +627,11 @@ macro_rules! walk_paths {
 				// If this is the first iteration, and in case we are not inclusive
 				// of the starting point, we only add the step to the open collection
 				let val = if $rec.iterated == 1 && !*$inclusive {
-					step.to_owned()
+					Value::from(vec![step.to_owned()])
 				} else {
-					Value::from(vec![Value::from(path.to_owned()), step.to_owned()]).flatten()
+					let mut path = path.to_owned();
+					path.push(step.to_owned());
+					Value::from(path)
 				};
 
 				// If we expect a certain value, let's check if we have reached it
@@ -631,10 +639,7 @@ macro_rules! walk_paths {
 				// We then return Value::None, indicating to the recursion loop that we are done
 				if let Some(expects) = $expects {
 					if step == expects {
-						let steps = match val {
-							Value::Array(v) => v.0,
-							v => vec![v],
-						};
+						let steps = to_vec_value!(val);
 
 						for step in steps {
 							$finished.push(step);
