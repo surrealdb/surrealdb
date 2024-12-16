@@ -371,7 +371,7 @@ impl Parser<'_> {
 											ac.bearer = Some(bearer);
 										}
 									}
-									t!("BEARER") | t!("REFRESH") => {
+									t!("REFRESH") => {
 										// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 										if !*EXPERIMENTAL_BEARER_ACCESS {
 											unexpected!(
