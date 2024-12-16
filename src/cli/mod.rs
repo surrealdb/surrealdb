@@ -104,6 +104,9 @@ enum Commands {
 }
 
 pub async fn init() -> ExitCode {
+	// Print debug mode warning
+	#[cfg(debug_assertions)]
+	println!("{DEBUG_BUILD_WARNING}");
 	// Start a new CPU profiler
 	#[cfg(feature = "performance-profiler")]
 	let guard = pprof::ProfilerGuardBuilder::default()
@@ -113,10 +116,6 @@ pub async fn init() -> ExitCode {
 		.unwrap();
 	// Parse the CLI arguments
 	let args = Cli::parse();
-
-	#[cfg(debug_assertions)]
-	println!("{DEBUG_BUILD_WARNING}");
-
 	// After parsing arguments, we check the version online
 	if args.online_version_check {
 		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
@@ -135,7 +134,7 @@ pub async fn init() -> ExitCode {
 	}
 	// Initialize opentelemetry and logging
 	let telemetry = crate::telemetry::builder().with_log_level("info").with_filter(args.log);
-	// Extract the telemtry log guards
+	// Extract the telemetry log guards
 	let (outg, errg) = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
