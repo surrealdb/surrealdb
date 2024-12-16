@@ -68,13 +68,10 @@ impl Document {
 						ctx.tx().lock().await.rollback_to_save_point().await?;
 					}
 					// Fetch the data from the store
-					let key = crate::key::thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-					let val = ctx.tx().get(key, None).await?;
-					// Parse the data from the store
-					let val = Arc::new(match val {
-						Some(v) => Value::from(v),
-						None => Value::None,
-					});
+					let val = ctx
+						.tx()
+						.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version)
+						.await?;
 					pro = Processed {
 						generate: None,
 						rid: Some(Arc::new(v)),

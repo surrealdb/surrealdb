@@ -18,6 +18,7 @@ use futures::StreamExt;
 use reblessive::tree::Stk;
 use std::borrow::Cow;
 use std::ops::Bound;
+use std::sync::Arc;
 use std::vec;
 
 impl Iterable {
@@ -134,14 +135,10 @@ impl Collected {
 		// Parse the data from the store
 		let gra: graph::Graph = graph::Graph::decode(&key)?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, gra.ft, &gra.fk);
-		let val = txn.get(key, None).await?;
+		let val = txn.get_record(opt.ns()?, opt.db()?, gra.ft, &gra.fk, None).await?;
 		let rid = Thing::from((gra.ft, gra.fk));
 		// Parse the data from the store
-		let val = Operable::Value(match val {
-			Some(v) => Value::from(v).into(),
-			None => Value::None.into(),
-		});
+		let val = Operable::Value(val);
 		// Process the record
 		Ok(Processed {
 			generate: None,
@@ -191,15 +188,9 @@ impl Collected {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = txn.get(key, None).await?;
-		// Parse the data from the store
-		let x = match val {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		};
+		let val = txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, None).await?;
 		// Create a new operable value
-		let val = Operable::Relate(f, x.into(), w, o.map(|v| v.into()));
+		let val = Operable::Relate(f, val.into(), w, o.map(|v| v.into()));
 		// Process the document record
 		let pro = Processed {
 			generate: None,
@@ -214,16 +205,9 @@ impl Collected {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = txn.get(key, opt.version).await?;
+		let val = txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version).await?;
 		// Parse the data from the store
-		let val = Operable::Value(
-			match val {
-				Some(v) => Value::from(v),
-				None => Value::None,
-			}
-			.into(),
-		);
+		let val = Operable::Value(val);
 		// Process the document record
 		let pro = Processed {
 			generate: None,
@@ -747,11 +731,9 @@ impl Iterable {
 		txn: &Transaction,
 		opt: &Options,
 		thg: &Thing,
-	) -> Result<Value, Error> {
-		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &thg.tb, &thg.id);
+	) -> Result<Arc<Value>, Error> {
 		// Fetch and parse the data from the store
-		let val = txn.get(key, None).await?.map(Value::from).unwrap_or(Value::None);
+		let val = txn.get_record(opt.ns()?, opt.db()?, &thg.tb, &thg.id, None).await?;
 		// Return the result
 		Ok(val)
 	}

@@ -1420,24 +1420,40 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		id: &Id,
+		version: Option<u64>,
 	) -> Result<Arc<Value>, Error> {
-		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		match self.cache.get(&qey) {
-			// The entry is in the cache
-			Some(val) => val.try_into_val(),
-			// The entry is not in the cache
-			None => {
-				// Fetch the record from the datastore
-				let key = crate::key::thing::new(ns, db, tb, id).encode()?;
-				match self.get(key, None).await? {
-					// The value exists in the datastore
-					Some(val) => {
-						let val = cache::tx::Entry::Val(Arc::new(val.into()));
-						self.cache.insert(qey.into(), val.clone());
-						val.try_into_val()
+		// Cache is not versioned
+		if version.is_some() {
+			// Fetch the record from the datastore
+			let key = crate::key::thing::new(ns, db, tb, id).encode()?;
+			match self.get(key, version).await? {
+				// The value exists in the datastore
+				Some(val) => {
+					let val = cache::tx::Entry::Val(Arc::new(val.into()));
+					val.try_into_val()
+				}
+				// The value is not in the datastore
+				None => Ok(Arc::new(Value::None)),
+			}
+		} else {
+			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+			match self.cache.get(&qey) {
+				// The entry is in the cache
+				Some(val) => val.try_into_val(),
+				// The entry is not in the cache
+				None => {
+					// Fetch the record from the datastore
+					let key = crate::key::thing::new(ns, db, tb, id).encode()?;
+					match self.get(key, None).await? {
+						// The value exists in the datastore
+						Some(val) => {
+							let val = cache::tx::Entry::Val(Arc::new(val.into()));
+							self.cache.insert(qey.into(), val.clone());
+							val.try_into_val()
+						}
+						// The value is not in the datastore
+						None => Ok(Arc::new(Value::None)),
 					}
-					// The value is not in the datastore
-					None => Ok(Arc::new(Value::None)),
 				}
 			}
 		}
@@ -1458,6 +1474,22 @@ impl Transaction {
 		// Set the value in the cache
 		let key = cache::tx::Lookup::Record(ns, db, tb, id);
 		self.cache.insert(key.into(), cache::tx::Entry::Val(Arc::new(val)));
+		// Return nothing
+		Ok(())
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub fn set_record_cache(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		id: &Id,
+		val: Arc<Value>,
+	) -> Result<(), Error> {
+		// Set the value in the cache
+		let key = cache::tx::Lookup::Record(ns, db, tb, id);
+		self.cache.insert(key.into(), cache::tx::Entry::Val(val));
 		// Return nothing
 		Ok(())
 	}
