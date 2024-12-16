@@ -1297,3 +1297,9 @@ allow_unsafe = true
 
 [pkg.idna]
 allow_unsafe = true
+
+[pkg.windows-implement]
+allow_proc_macro = true
+
+[pkg.windows-interface]
+allow_proc_macro = true
