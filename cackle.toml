@@ -1303,3 +1303,6 @@ allow_proc_macro = true
 
 [pkg.windows-interface]
 allow_proc_macro = true
+
+[pkg.sysinfo]
+allow_unsafe = true
