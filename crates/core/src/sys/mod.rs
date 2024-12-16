@@ -6,7 +6,7 @@ use sysinfo::System;
 /// The current system environment which is used to
 /// periodically fetch and compute the system metrics.
 pub static ENVIRONMENT: LazyLock<Mutex<Environment>> =
-	LazyLock::new(|| Mutex::new(Environment::new()));
+	LazyLock::new(|| Mutex::new(Environment::default()));
 
 /// The current system information which was acquired
 /// from the periodic environment process computation.
@@ -45,15 +45,16 @@ pub struct Environment {
 	pid: Pid,
 }
 
-impl Environment {
-	/// Create a new system environment
-	pub fn new() -> Self {
+impl Default for Environment {
+	fn default() -> Self {
 		Self {
 			sys: System::new_all(),
 			pid: Pid::from(std::process::id() as usize),
 		}
 	}
+}
 
+impl Environment {
 	/// Returns the system load average value.
 	/// This function returns three numbers,
 	/// representing the last 1 minute, 5
