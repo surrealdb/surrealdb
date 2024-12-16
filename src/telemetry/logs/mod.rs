@@ -6,6 +6,7 @@ use tracing_appender::non_blocking::NonBlocking;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::Layer;
+
 pub fn new<S>(
 	filter: CustomEnvFilter,
 	stdout: NonBlocking,
@@ -14,11 +15,9 @@ pub fn new<S>(
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
-	// Only log INFO, DEBUG, TRACE to stdout
-	let stdout = stdout.with_min_level(Level::INFO);
-	// Only log WARN, ERROR, FATAL to stderr
-	let stderr = stderr.with_max_level(Level::WARN);
-	// Configure
+	// Log INFO, DEBUG, TRACE to stdout, WARN, ERROR to stderr
+	let writer = stderr.with_max_level(Level::WARN).or_else(stdout);
+	// Configure the log tracer for production
 	#[cfg(not(debug_assertions))]
 	{
 		Ok(tracing_subscriber::fmt::layer()
@@ -30,10 +29,11 @@ where
 			.with_thread_ids(false)
 			.with_thread_names(false)
 			.with_span_events(FmtSpan::NONE)
-			.with_writer(stdout.and(stderr))
+			.with_writer(writer)
 			.with_filter(filter.0)
 			.boxed())
 	}
+	// Configure the log tracer for development
 	#[cfg(debug_assertions)]
 	{
 		Ok(tracing_subscriber::fmt::layer()
@@ -45,7 +45,7 @@ where
 			.with_thread_ids(false)
 			.with_thread_names(false)
 			.with_span_events(FmtSpan::NONE)
-			.with_writer(stdout.and(stderr))
+			.with_writer(writer)
 			.with_filter(filter.0)
 			.boxed())
 	}
