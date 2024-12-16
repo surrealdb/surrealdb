@@ -40,7 +40,7 @@ impl Child {
 		let a = self
 			.inner
 			.as_mut()
-			.map(|child| child.kill().map_err(|e| format!("failed to kill: {e}")))
+			.map(|child| child.kill().map_err(|e| format!("Failed to kill: {e}")))
 			.unwrap_or(Err("no inner".to_string()));
 		a.map(|_ok| self)
 	}
@@ -76,14 +76,11 @@ impl Child {
 	/// returns successfully, Err otherwise.
 	pub fn output(&mut self) -> Result<String, String> {
 		let status = self.inner.as_mut().map(|child| child.wait().unwrap()).unwrap();
-
-		let mut buf = self.stdout();
-		buf.push_str(&self.stderr());
-
+		let buffer = self.stdout_and_stderr();
 		if status.success() {
-			Ok(buf)
+			Ok(buffer)
 		} else {
-			Err(buf)
+			Err(buffer)
 		}
 	}
 }
@@ -91,15 +88,17 @@ impl Child {
 impl Drop for Child {
 	fn drop(&mut self) {
 		if let Some(inner) = self.inner.as_mut() {
-			println!("Server process dropped! Assuming error happend");
+			// Ensure the task is killed
 			let _ = inner.kill();
+			// Print out the stdout logs
 			let stdout =
 				std::fs::read_to_string(&self.stdout_path).expect("Failed to read the stdout file");
-			println!("Server STDOUT: \n{stdout}");
+			println!("Command STDOUT: \n{stdout}");
 			let stderr =
 				std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file");
-			println!("Server STDERR: \n{stderr}");
+			println!("Command STDERR: \n{stderr}");
 		}
+		// Remove the stdout and stderr files
 		let _ = std::fs::remove_file(&self.stdout_path);
 		let _ = std::fs::remove_file(&self.stderr_path);
 	}
@@ -125,8 +124,8 @@ pub fn run_internal<P: AsRef<Path>>(
 	}
 
 	// Use local files instead of pipes to avoid deadlocks. See https://github.com/rust-lang/rust/issues/45572
-	let stdout_path = tmp_file("server-stdout.log");
-	let stderr_path = tmp_file("server-stderr.log");
+	let stdout_path = tmp_file("stdout.log");
+	let stderr_path = tmp_file("stderr.log");
 	debug!("Redirecting output. args=`{args}` stdout={stdout_path} stderr={stderr_path})");
 	let stdout = Stdio::from(File::create(&stdout_path).unwrap());
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());

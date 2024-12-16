@@ -38,8 +38,6 @@ pub async fn init(
 		},
 	}: ImportCommandArguments,
 ) -> Result<(), Error> {
-	// Initialize opentelemetry and logging
-	let (outg, errg) = crate::telemetry::builder().with_log_level("info").init()?;
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
@@ -80,9 +78,6 @@ pub async fn init(
 	// Import the data into the database
 	client.import(file).await?;
 	info!("The SurrealQL file was imported successfully");
-	// Drop the log guards
-	drop(outg);
-	drop(errg);
-	// Everything OK
+	// All ok
 	Ok(())
 }

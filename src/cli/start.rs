@@ -1,6 +1,4 @@
 use super::config::{Config, CF};
-use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
 use crate::cnf::LOGO;
 use crate::dbs;
 use crate::dbs::StartCommandDbsOptions;
@@ -24,11 +22,6 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "memory")]
 	#[arg(value_parser = super::validator::path_valid)]
 	path: String,
-	#[arg(help = "The logging level for the database server")]
-	#[arg(env = "SURREAL_LOG", short = 'l', long = "log")]
-	#[arg(default_value = "info")]
-	#[arg(value_parser = CustomEnvFilterParser::new())]
-	log: CustomEnvFilter,
 	#[arg(help = "Whether to hide the startup banner")]
 	#[arg(env = "SURREAL_NO_BANNER", long)]
 	#[arg(default_value_t = false)]
@@ -162,7 +155,6 @@ pub async fn init(
 		listen_addresses,
 		dbs,
 		web,
-		log,
 		node_membership_refresh_interval,
 		node_membership_check_interval,
 		node_membership_cleanup_interval,
@@ -172,8 +164,6 @@ pub async fn init(
 		..
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
-	// Initialize opentelemetry and logging
-	let (outg, errg) = crate::telemetry::builder().with_filter(log).init()?;
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");
@@ -227,9 +217,6 @@ pub async fn init(
 	nodetasks.resolve().await?;
 	// Shutdown the datastore
 	datastore.shutdown().await?;
-	// Drop the log guards
-	drop(outg);
-	drop(errg);
 	// All ok
 	Ok(())
 }

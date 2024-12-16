@@ -16,15 +16,10 @@ pub async fn init(
 		},
 	}: IsReadyCommandArguments,
 ) -> Result<(), Error> {
-	// Initialize opentelemetry and logging
-	let (outg, errg) = crate::telemetry::builder().with_log_level("error").init()?;
 	// Connect to the database engine
 	connect(endpoint).await?;
 	// Log output ok
 	println!("OK");
-	// Drop the log guards
-	drop(outg);
-	drop(errg);
 	// All ok
 	Ok(())
 }
