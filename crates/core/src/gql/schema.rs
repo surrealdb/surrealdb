@@ -81,19 +81,6 @@ pub async fn generate_schema(
 		}
 	};
 
-	// if tbs.len() == 0 {
-	// 	return Err(schema_error("no tables found in database"));
-	// }
-
-	// match tbs {
-	// 	Some(tbs) => {
-	// 		query = process_tbs(tbs, query, &mut types, &tx, ns, db, session, datastore).await?;
-	// 	}
-	// 	None => return Err(schema_error("no tables found in database")),
-	// }
-
-	trace!("\n\n\n\ngoing to check\n\n\n\n");
-
 	match (&tbs, &fns) {
 		(None, None) => return Err(GqlError::NotConfigured),
 		(None, Some(fs)) if fs.len() == 0 => {
