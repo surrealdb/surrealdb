@@ -15,7 +15,6 @@ use std::fmt::Write;
 use std::str;
 
 use super::{
-	array::Uniq,
 	fmt::{is_pretty, pretty_indent},
 	value::idiom_recursion::{clean_iteration, compute_idiom_recursion, is_final, Recursion},
 };
@@ -552,45 +551,7 @@ impl RecurseInstruction {
 	/// will be called with the initial recursion input
 	pub(crate) fn output(&self, rec: Recursion<'_>, res: Value) -> Result<Value, Error> {
 		match self {
-			Self::Path {
-				inclusive,
-			} => {
-				if *inclusive {
-					// Find an array value so we can prefix
-					// all values with the initial value
-					let arr = match res {
-						Value::Array(arr) => arr,
-						v => Array(vec![v]),
-					};
-
-					let res: Value = arr
-						.iter()
-						.map(|v| Value::from(vec![rec.current.clone(), v.to_owned()]).flatten())
-						.collect::<Vec<Value>>()
-						.into();
-
-					Ok(res)
-				} else {
-					Ok(res)
-				}
-			}
-			Self::Collect {
-				inclusive,
-			} => {
-				// Find an array value so we can prefix
-				// all values with the initial value
-				let mut arr = match res {
-					Value::Array(arr) => arr,
-					v => Array(vec![v]),
-				};
-
-				// Is the collection inclusive?
-				if *inclusive {
-					arr.insert(0, rec.current.clone());
-				};
-
-				Ok(arr.uniq().into())
-			}
+			_ => Ok(res),
 		}
 	}
 
@@ -601,74 +562,101 @@ impl RecurseInstruction {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		rec: Recursion<'_>,
+		finished: &mut Vec<Value>,
 	) -> Result<Value, Error> {
 		match self {
 			Self::Path {
-				..
+				inclusive,
 			} => {
+				// Collection of paths we will continue processing
+				// in the next iteration
+				let mut open: Vec<Value> = vec![];
+
 				// Obtain an array value to iterate over
-				let arr = match rec.current {
-					Value::Array(arr) => arr,
+				let paths = match rec.current {
+					Value::Array(v) => v,
 					v => &Array(vec![v.to_owned()]),
 				};
 
-				let res = stk
-					.scope(|scope| {
-						let futs = arr.iter().map(|value| {
-							scope.run(|stk| async move {
-								// Compute the recursion
-								let res = compute_idiom_recursion(
-									stk,
-									ctx,
-									opt,
-									doc,
-									rec.with_current(value),
-								)
-								.await?;
+				// Process all paths
+				for path in paths.iter() {
+					// Obtain an array value to iterate over
+					let path = match path {
+						Value::Array(v) => v,
+						v => &Array(vec![v.to_owned()]),
+					};
 
-								// If we encounter a final value, do not process it.
-								// The previous iteration is responsible for this
-								if is_final(&res) || &res == value {
-									return Result::<Value, Error>::Ok(res);
-								}
+					// We always operate on the last value in the path
+					// If the path is empty, we skip it
+					let Some(last) = path.last() else {
+						continue;
+					};
 
-								// Obtain an array value to iterate over
-								let arr = match res {
-									Value::Array(arr) => arr,
-									v => Array(vec![v]),
-								};
+					// Apply the recursed path to the last value
+					let res = stk.run(|stk| last.get(stk, ctx, opt, doc, rec.path)).await?;
 
-								// Prefix all paths with the input of the current iteration
-								let res: Value = arr
-									.iter()
-									.map(|v| {
-										Value::from(vec![value.clone(), v.to_owned()]).flatten()
-									})
-									.collect::<Vec<Value>>()
-									.into();
+					// If we encounter a final value, we add it to the finished collection
+					// In case this is the first iteration, and paths are not inclusive of
+					// the starting point, we eliminate the it.
+					if is_final(&res) || &res == last {
+						if rec.iterated > 1 || *inclusive {
+							finished.push(path.to_owned().into());
+						}
 
-								Ok(res)
-							})
-						});
+						continue;
+					}
 
-						try_join_all_buffered(futs)
-					})
-					.await
-					.map(Value::from)?;
+					// Obtain an array value to iterate over
+					let steps = match res {
+						Value::Array(v) => v,
+						v => Array(vec![v]),
+					};
 
-				// Flatten the arrays of paths
-				Ok(res.flatten())
+					// For every step, prefix it with the current path
+					for step in steps.iter() {
+						// If this is the first iteration, and in case we are not inclusive
+						// of the starting point, we only add the step to the open collection
+						let val = if rec.iterated == 1 && !*inclusive {
+							step.to_owned()
+						} else {
+							Value::from(vec![Value::from(path.to_owned()), step.to_owned()])
+								.flatten()
+						};
+
+						open.push(val);
+					}
+				}
+
+				Ok(open.into())
 			}
 			Self::Collect {
-				..
+				inclusive,
 			} => {
-				// Compute the recursion
-				let res = stk.run(|stk| compute_idiom_recursion(stk, ctx, opt, doc, rec)).await?;
+				// If we are inclusive, we add the starting point to the collection
+				if rec.iterated > 1 || *inclusive {
+					match rec.current {
+						Value::Array(v) => {
+							for v in v.iter() {
+								// Add a unique value to the finished collection
+								if !finished.contains(v) {
+									finished.push(v.to_owned());
+								}
+							}
+						}
+						v => {
+							if !finished.contains(v) {
+								// Add a unique value to the finished collection
+								finished.push(v.to_owned());
+							}
+						}
+					};
+				}
 
-				// Flatten the result
-				let res = Value::from(vec![rec.current.clone(), res]).flatten();
+				// Apply the recursed path to the current values
+				let res = stk.run(|stk| rec.current.get(stk, ctx, opt, doc, rec.path)).await?;
 
-				Ok(res)
+				// Clean the iteration and continue
+				Ok(clean_iteration(res))
 			}
 		}
 	}

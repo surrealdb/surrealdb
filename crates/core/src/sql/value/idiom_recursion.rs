@@ -77,7 +77,7 @@ pub(crate) async fn compute_idiom_recursion(
 	// Find the recursion limit
 	let limit = *IDIOM_RECURSION_LIMIT as u32;
 	// Do we recursion instead of looping?
-	let marked_recursive = rec.plan.is_some() || rec.instruction.is_some();
+	let marked_recursive = rec.plan.is_some();
 
 	// We recursed and found a final value, let's return
 	// it for the previous iteration to pick up on this
@@ -88,6 +88,20 @@ pub(crate) async fn compute_idiom_recursion(
 	// Counter for the local loop and current value
 	let mut i = rec.iterated.to_owned();
 	let mut current = rec.current.to_owned();
+	let mut finished = vec![];
+
+	// Recurse instructions always collect their input
+	// into the finished collection. In this case, we
+	// ignore the current value and return the finished instead.
+	macro_rules! output {
+		() => {
+			if rec.instruction.is_some() {
+				Value::from(finished)
+			} else {
+				current
+			}
+		};
+	}
 
 	if marked_recursive {
 		// If we have reached the maximum amount of iterations,
@@ -108,7 +122,23 @@ pub(crate) async fn compute_idiom_recursion(
 		i += 1;
 
 		// Process the path, not accounting for any recursive plans
-		let v = stk.run(|stk| current.get(stk, ctx, opt, doc, rec.path)).await?;
+		let v = match rec.instruction {
+			Some(instruction) => {
+				instruction
+					.compute(
+						stk,
+						ctx,
+						opt,
+						doc,
+						rec.with_iterated(i).with_current(&current),
+						&mut finished,
+					)
+					.await?
+			}
+			_ => stk.run(|stk| current.get(stk, ctx, opt, doc, rec.path)).await?,
+		};
+
+		// Check for any recursion plans
 		let v = match rec.plan {
 			// We found a recursion plan, let's apply it
 			Some(p) => p.compute(stk, ctx, opt, doc, rec.with_iterated(i).with_current(&v)).await?,
@@ -116,16 +146,10 @@ pub(crate) async fn compute_idiom_recursion(
 		};
 
 		// Clean up any dead ends when we encounter an array
-		let v = clean_iteration(v);
-
-		// Process any potential instruction
-		let v = match rec.instruction {
-			Some(instruction) => {
-				instruction
-					.compute(stk, ctx, opt, doc, rec.with_iterated(i).with_current(&v))
-					.await?
-			}
-			_ => v,
+		let v = if rec.instruction.is_none() {
+			clean_iteration(v)
+		} else {
+			v
 		};
 
 		// Process the value for this iteration
@@ -139,7 +163,7 @@ pub(crate) async fn compute_idiom_recursion(
 
 					// If the value is final, and we reached the minimum
 					// amount of required iterations, we can return the value
-					false => current,
+					false => output!(),
 				});
 			}
 			v => {
@@ -153,7 +177,7 @@ pub(crate) async fn compute_idiom_recursion(
 		// we can return the current value and break the loop.
 		if let Some(max) = rec.max {
 			if i >= max {
-				return Ok(current);
+				return Ok(output!());
 			}
 		} else if i >= limit {
 			return Err(Error::IdiomRecursionLimitExceeded {
