@@ -590,9 +590,12 @@ macro_rules! collect_paths {
 			// Apply the recursed path to the last value
 			let res = $stk.run(|stk| last.get(stk, $ctx, $opt, $doc, $rec.path)).await?;
 
-			// If we encounter a final value, we add it to the finished collection
-			// In case this is the first iteration, and paths are not inclusive of
-			// the starting point, we eliminate the it.
+			// If we encounter a final value, we add it to the finished collection.
+			// - If expects is some, we are seeking for the shortest path, in which
+			//   case we eliminate the path.
+			// - In case this is the first iteration, and paths are not inclusive of
+			//   the starting point, we eliminate the it.
+			// - If we have not yet reached minimum depth, the path is eliminated aswell.
 			if is_final(&res) || &res == last {
 				if $expects.is_none()
 					&& ($rec.iterated > 1 || *$inclusive)
@@ -623,6 +626,9 @@ macro_rules! collect_paths {
 					Value::from(vec![Value::from(path.to_owned()), step.to_owned()]).flatten()
 				};
 
+				// If we expect a certain value, let's check if we have reached it
+				// If so, we iterate over the steps and assign them to the finished collection
+				// We then return Value::None, indicating to the recursion loop that we are done
 				if let Some(expects) = $expects {
 					if step == expects {
 						let steps = match val {
@@ -638,6 +644,8 @@ macro_rules! collect_paths {
 					}
 				}
 
+				// If we have reached the maximum amount of iterations, and are collecting
+				// individual paths, we assign them to the finished collection
 				if reached_max {
 					if $expects.is_none() {
 						$finished.push(val);
