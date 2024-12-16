@@ -1,4 +1,4 @@
-use super::types::{SigninData, User};
+use super::types::User;
 use crate::api::conn::{Command, DbResponse, Route};
 use crate::api::Response as QueryResponse;
 use crate::opt::Resource;
