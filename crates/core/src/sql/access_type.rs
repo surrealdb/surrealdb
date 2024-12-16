@@ -68,8 +68,9 @@ impl Display for AccessType {
 			}
 			AccessType::Bearer(ac) => {
 				write!(f, "BEARER")?;
-				if let BearerAccessSubject::Record = ac.subject {
-					write!(f, " FOR RECORD")?;
+				match ac.subject {
+					BearerAccessSubject::User => write!(f, " FOR USER")?,
+					BearerAccessSubject::Record => write!(f, " FOR RECORD")?,
 				}
 			}
 		}

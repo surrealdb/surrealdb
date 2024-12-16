@@ -895,6 +895,10 @@ impl Display for AccessStatement {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
+				match stmt.subject {
+					Subject::User(_) => write!(f, " FOR USER {}", stmt.subject.id())?,
+					Subject::Record(_) => write!(f, " FOR RECORD {}", stmt.subject.id())?,
+				}
 				Ok(())
 			}
 			Self::Show(stmt) => {
