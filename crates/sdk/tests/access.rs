@@ -78,7 +78,7 @@ async fn access_bearer_operations() {
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok =
 			Regex::new(&format!(
-				r"\{{ accesses: \{{ api: 'DEFINE ACCESS api ON {base} TYPE BEARER DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE' \}}, .* \}}"
+				r"\{{ accesses: \{{ api: 'DEFINE ACCESS api ON {base} TYPE BEARER FOR USER DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE' \}}, .* \}}"
 			)).unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		//
