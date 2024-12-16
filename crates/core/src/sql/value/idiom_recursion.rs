@@ -156,15 +156,24 @@ pub(crate) async fn compute_idiom_recursion(
 		match v {
 			// We reached a final value
 			v if is_final(&v) || v == current => {
-				return Ok(match i <= rec.min {
+				let res: Value = match rec.instruction {
+					// If we have a recurse instruction, and we have not yet
+					// reached the minimum amount of required iterations, we
+					// return an empty array.
+					Some(_) if i < rec.min => Array::new().into(),
+					// If we did reach minimum depth, the finished collection
+					// could have collected values. Let's return them.
+					Some(_) => Value::from(finished),
+
 					// If we have not yet reached the minimum amount of
 					// required iterations it's a dead end, and we return NONE
-					true => get_final(&v),
-
+					None if i <= rec.min => get_final(&v),
 					// If the value is final, and we reached the minimum
 					// amount of required iterations, we can return the value
-					false => output!(),
-				});
+					None => output!(),
+				};
+
+				return Ok(res);
 			}
 			v => {
 				// Otherwise we can update the value and

@@ -1152,3 +1152,45 @@ async fn idiom_function_argument_computation() -> Result<(), Error> {
 		.expect_val("456")?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn idiom_recursion_shortest_path() -> Result<(), Error> {
+	let sql = r#"
+		INSERT [
+			{ id: a:1, links: [a:2, a:4] },
+			{ id: a:2, links: [a:3] },
+			{ id: a:3, links: [a:5] },
+			{ id: a:4, links: [a:5] },
+			{ id: a:5 },
+		];
+
+		a:1.{..+shortest=a:5}.links;
+		a:1.{..+shortest=a:5+inclusive}.links;
+	"#;
+
+	Test::new(sql)
+		.await?
+		.expect_val(
+			"[
+			{ id: a:1, links: [a:2, a:4] },
+			{ id: a:2, links: [a:3] },
+			{ id: a:3, links: [a:5] },
+			{ id: a:4, links: [a:5] },
+			{ id: a:5 },
+		]",
+		)?
+		.expect_val(
+			"[
+			a:4,
+			a:5,
+		]",
+		)?
+		.expect_val(
+			"[
+			a:1,
+			a:4,
+			a:5,
+		]",
+		)?;
+	Ok(())
+}

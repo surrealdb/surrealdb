@@ -593,7 +593,7 @@ async fn collect_paths(
 		// In case this is the first iteration, and paths are not inclusive of
 		// the starting point, we eliminate the it.
 		if is_final(&res) || &res == last {
-			if expects.is_none() && (rec.iterated > 1 || inclusive) {
+			if expects.is_none() && (rec.iterated > 1 || inclusive) && rec.iterated >= rec.min {
 				finished.push(path.to_owned().into());
 			}
 
@@ -605,6 +605,9 @@ async fn collect_paths(
 			Value::Array(v) => v,
 			v => Array(vec![v]),
 		};
+
+		// Did we reach the final iteration?
+		let reached_max = rec.max.is_some_and(|max| rec.iterated >= max);
 
 		// For every step, prefix it with the current path
 		for step in steps.iter() {
@@ -631,9 +634,17 @@ async fn collect_paths(
 				}
 			}
 
-			open.push(val);
+			if reached_max {
+				if expects.is_none() {
+					finished.push(val);
+				}
+			} else {
+				open.push(val);
+			}
 		}
 	}
+
+	println!("open {}", Value::from(open.clone()));
 
 	Ok(open.into())
 }
@@ -659,31 +670,42 @@ impl RecurseInstruction {
 			Self::Collect {
 				inclusive,
 			} => {
-				// If we are inclusive, we add the starting point to the collection
-				if rec.iterated > 1 || *inclusive {
-					match rec.current {
-						Value::Array(v) => {
-							for v in v.iter() {
-								// Add a unique value to the finished collection
-								if !finished.contains(v) {
-									finished.push(v.to_owned());
+				macro_rules! persist {
+					($finished:ident, $subject:expr) => {
+						match $subject {
+							Value::Array(v) => {
+								for v in v.iter() {
+									// Add a unique value to the finished collection
+									if !$finished.contains(v) {
+										$finished.push(v.to_owned());
+									}
 								}
 							}
-						}
-						v => {
-							if !finished.contains(v) {
-								// Add a unique value to the finished collection
-								finished.push(v.to_owned());
+							v => {
+								if !$finished.contains(v) {
+									// Add a unique value to the finished collection
+									$finished.push(v.to_owned());
+								}
 							}
 						}
 					};
 				}
 
+				// If we are inclusive, we add the starting point to the collection
+				if rec.iterated == 1 && *inclusive {
+					persist!(finished, rec.current);
+				}
+
 				// Apply the recursed path to the current values
 				let res = stk.run(|stk| rec.current.get(stk, ctx, opt, doc, rec.path)).await?;
+				// Clean the iteration
+				let res = clean_iteration(res);
 
-				// Clean the iteration and continue
-				Ok(clean_iteration(res))
+				// Persist any new values from the result
+				persist!(finished, &res);
+
+				// Continue
+				Ok(res)
 			}
 		}
 	}
