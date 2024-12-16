@@ -49,7 +49,9 @@ use crate::iam::Error as IamError;
 use crate::kvs::Datastore;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
+use crate::sql;
 use crate::sql::part::Part;
+use crate::sql::Function;
 use crate::sql::Statement;
 use crate::sql::{Thing, Value as SqlValue};
 
@@ -103,6 +105,19 @@ impl GQLTx {
 		let mut stack = TreeStack::new();
 
 		let res = stack.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None)).finish().await?;
+
+		Ok(res)
+	}
+
+	pub async fn run_fn(&self, name: &str, args: Vec<SqlValue>) -> Result<SqlValue, GqlError> {
+		let mut stack = TreeStack::new();
+		let fun = sql::Value::Function(Box::new(Function::Custom(name.to_string(), args)));
+
+		let res = stack
+			// .enter(|stk| fnc::run(stk, &self.ctx, &self.opt, None, name, args))
+			.enter(|stk| fun.compute(stk, &self.ctx, &self.opt, None))
+			.finish()
+			.await?;
 
 		Ok(res)
 	}

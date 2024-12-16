@@ -34,6 +34,20 @@ fn field_val_erase_owned(val: ErasedRecord) -> FieldValue<'static> {
 	FieldValue::owned_any(val)
 }
 
+macro_rules! order {
+	(asc, $field:expr) => {{
+		let mut tmp = sql::Order::default();
+		tmp.value = $field.into();
+		tmp.direction = true;
+		tmp
+	}};
+	(desc, $field:expr) => {{
+		let mut tmp = sql::Order::default();
+		tmp.value = $field.into();
+		tmp
+	}};
+}
+
 macro_rules! limit_input {
 	() => {
 		InputValue::new("limit", TypeRef::named(TypeRef::INT))
@@ -125,44 +139,38 @@ pub async fn process_tbs(
 
                     let filter = args.get("filter");
 
-                    let orders = match order {
-                        Some(GqlValue::Object(o)) => {
-                            let mut orders = vec![];
-                            let mut current = o;
-                            loop {
-                                let asc = current.get("asc");
-                                let desc = current.get("desc");
-                                match (asc, desc) {
-                                    (Some(_), Some(_)) => {
-                                        return Err("Found both ASC and DESC in order".into());
-                                    }
-                                    (Some(GqlValue::Enum(a)), None) => {
-                                        orders.push(Order{
-                                            direction: true,
-                                            value: Idiom(vec![Part::Field(Ident(a.to_string()))]),
-                                            ..Default::default()
-                                        });
-                                    }
-                                    (None, Some(GqlValue::Enum(d))) => {
-                                        orders.push(Order{
-                                            value: Idiom(vec![Part::Field(Ident(d.to_string()))]),
-                                            ..Default::default()
-                                        });
-                                    }
-                                    (_, _) => {
-                                        break;
-                                    }
-                                }
-                                if let Some(GqlValue::Object(next)) = current.get("then") {
-                                    current = next;
-                                } else {
-                                    break;
-                                }
-                            }
-                            Some(orders)
-                        }
-                        _ => None,
-                    };
+					let orders = match order {
+						Some(GqlValue::Object(o)) => {
+							let mut orders = vec![];
+							let mut current = o;
+							loop {
+								let asc = current.get("asc");
+								let desc = current.get("desc");
+								match (asc, desc) {
+									(Some(_), Some(_)) => {
+										return Err("Found both ASC and DESC in order".into());
+									}
+									(Some(GqlValue::Enum(a)), None) => {
+										orders.push(order!(asc, a.as_str()))
+									}
+									(None, Some(GqlValue::Enum(d))) => {
+										orders.push(order!(desc, d.as_str()))
+									}
+									(_, _) => {
+										break;
+									}
+								}
+								if let Some(GqlValue::Object(next)) = current.get("then") {
+									current = next;
+								} else {
+									break;
+								}
+							}
+							Some(orders)
+						}
+						_ => None,
+					};
+
                     trace!("parsed orders: {orders:?}");
 
                     let cond = match filter {

@@ -66,7 +66,7 @@ mod graphql_integration {
 			let res = client.post(gql_url).body("").send().await?;
 			assert_eq!(res.status(), 400);
 			let body = res.text().await?;
-			assert!(body.contains("no tables found in database"), "body: {body}")
+			assert!(body.contains("no items found in database"), "body: {body}")
 		}
 
 		// add schema and data

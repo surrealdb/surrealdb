@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
-use std::fmt::Display;
 use std::sync::Arc;
 
 use crate::dbs::Session;
+use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
 use crate::sql::order::{OrderList, Ordering};
-use crate::sql::statements::define::config::graphql::TablesConfig;
+use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use crate::sql::statements::{DefineFieldStatement, SelectStatement};
 use crate::sql::{self, Ident, Order, Part, Table};
 use crate::sql::{Cond, Fields};
@@ -58,26 +58,71 @@ pub async fn generate_schema(
 	let tbs = tx.all_tb(ns, db, None).await?;
 
 	let tbs = match config.tables {
-		TablesConfig::None => return Err(GqlError::NotConfigured),
-		TablesConfig::Auto => tbs,
+		TablesConfig::None => None,
+		TablesConfig::Auto => Some(tbs),
 		TablesConfig::Include(inc) => {
-			tbs.iter().filter(|t| inc.contains_name(&t.name)).cloned().collect()
+			Some(tbs.iter().filter(|t| inc.contains_name(&t.name)).cloned().collect())
 		}
 		TablesConfig::Exclude(exc) => {
-			tbs.iter().filter(|t| !exc.contains_name(&t.name)).cloned().collect()
+			Some(tbs.iter().filter(|t| !exc.contains_name(&t.name)).cloned().collect())
 		}
 	};
+
+	let fns = tx.all_db_functions(ns, db).await?;
+
+	let fns = match config.functions {
+		FunctionsConfig::None => None,
+		FunctionsConfig::Auto => Some(fns),
+		FunctionsConfig::Include(inc) => {
+			Some(fns.iter().filter(|f| inc.contains(&f.name)).cloned().collect())
+		}
+		FunctionsConfig::Exclude(exc) => {
+			Some(fns.iter().filter(|f| !exc.contains(&f.name)).cloned().collect())
+		}
+	};
+
+	// if tbs.len() == 0 {
+	// 	return Err(schema_error("no tables found in database"));
+	// }
+
+	// match tbs {
+	// 	Some(tbs) => {
+	// 		query = process_tbs(tbs, query, &mut types, &tx, ns, db, session, datastore).await?;
+	// 	}
+	// 	None => return Err(schema_error("no tables found in database")),
+	// }
+
+	trace!("\n\n\n\ngoing to check\n\n\n\n");
+
+	match (&tbs, &fns) {
+		(None, None) => return Err(GqlError::NotConfigured),
+		(None, Some(fs)) if fs.len() == 0 => {
+			return Err(schema_error("no functions found in database"))
+		}
+		(Some(ts), None) if ts.len() == 0 => {
+			return Err(schema_error("no tables found in database"))
+		}
+		(Some(ts), Some(fs)) if ts.len() == 0 && fs.len() == 0 => {
+			return Err(schema_error("no items found in database"));
+		}
+		_ => {}
+	}
 
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
 
-	trace!(ns, db, ?tbs, "generating schema");
+	trace!(ns, db, ?tbs, ?fns, "generating schema");
 
-	if tbs.len() == 0 {
-		return Err(schema_error("no tables found in database"));
+	match tbs {
+		Some(tbs) if tbs.len() > 0 => {
+			query = process_tbs(tbs, query, &mut types, &tx, &ns, &db, session, datastore).await?;
+		}
+		_ => {}
 	}
 
-	query = process_tbs(tbs, query, &mut types, &tx, ns, db, session, datastore).await?;
+	if let Some(fns) = fns {
+		query = process_fns(fns, query, &mut types, session, datastore).await?;
+	}
 
 	trace!("current Query object for schema: {:?}", query);
 
