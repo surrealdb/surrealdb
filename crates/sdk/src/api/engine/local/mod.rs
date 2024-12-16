@@ -586,22 +586,10 @@ async fn router(
 			let response = iam::signup::signup(kvs, session, credentials).await?.token;
 			Ok(DbResponse::Other(response.into()))
 		}
-		Command::Signupv2 {
-			credentials,
-		} => {
-			let response = iam::signup::signup(kvs, session, credentials).await?;
-			Ok(DbResponse::Other(response.into()))
-		}
 		Command::Signin {
 			credentials,
 		} => {
 			let response = iam::signin::signin(kvs, session, credentials).await?.token;
-			Ok(DbResponse::Other(response.into()))
-		}
-		Command::Signinv2 {
-			credentials,
-		} => {
-			let response = iam::signin::signin(kvs, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Authenticate {

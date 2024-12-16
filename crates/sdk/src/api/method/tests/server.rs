@@ -38,12 +38,6 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				| Command::Signin {
 					..
 				} => Ok(DbResponse::Other("jwt".to_owned().into())),
-				Command::Signupv2 {
-					..
-				}
-				| Command::Signinv2 {
-					..
-				} => Ok(DbResponse::Other(to_core_value(SigninData::default()).unwrap())),
 				Command::Set {
 					..
 				} => Ok(DbResponse::Other(CoreValue::None)),

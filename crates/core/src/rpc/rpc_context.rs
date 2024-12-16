@@ -183,7 +183,8 @@ pub trait RpcContext {
 		Ok(Value::None.into())
 	}
 
-	// TODO(gguillemas): Remove this method in 3.0.0 and make `signupv2` the default
+	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
+	// This will allow returning refresh tokens as well as any additional credential resulting from signing up.
 	async fn signup(&mut self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
@@ -200,26 +201,8 @@ pub trait RpcContext {
 		out.map(Into::into).map_err(Into::into)
 	}
 
-	// TODO(gguillemas): This should be made the default in 3.0.0
-	// This method for signing up returns an object instead of a string, supporting additional values
-	// The original motivation for this method was the introduction of refresh tokens
-	async fn signupv2(&mut self, params: Array) -> Result<Data, RpcError> {
-		// Process the method arguments
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		// Take ownership over the current session
-		let mut session = mem::take(self.session_mut());
-		// Attempt signup, storing information in the session
-		let out: Result<Value, Error> =
-			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(Into::into);
-		// Return ownership of the current session
-		*self.session_mut() = session;
-		// Return the signup result
-		out.map(Into::into).map_err(Into::into)
-	}
-
-	// TODO(gguillemas): Remove this method in 3.0.0 and make `signinv2` the default
+	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
+	// This will allow returning refresh tokens as well as any additional credential resulting from signing in.
 	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
@@ -232,25 +215,6 @@ pub trait RpcContext {
 			.await
 			// The default `signin` method just returns the token
 			.map(|v| v.token.into());
-		// Return ownership of the current session
-		*self.session_mut() = session;
-		// Return the signin result
-		out.map(Into::into).map_err(Into::into)
-	}
-
-	// TODO(gguillemas): This should be made the default in 3.0.0
-	// This method for signing in returns an object instead of a string, supporting additional values
-	// The original motivation for this method was the introduction of refresh tokens
-	async fn signinv2(&mut self, params: Array) -> Result<Data, RpcError> {
-		// Process the method arguments
-		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
-		};
-		// Take ownership over the current session
-		let mut session = mem::take(self.session_mut());
-		// Attempt signin, storing information in the session
-		let out: Result<Value, Error> =
-			crate::iam::signin::signin(self.kvs(), &mut session, v).await.map(Into::into);
 		// Return ownership of the current session
 		*self.session_mut() = session;
 		// Return the signin result
