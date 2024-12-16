@@ -4,7 +4,7 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::{Check, Key, Val, Version};
+use crate::kvs::{Check, Key, Val};
 use rocksdb::{
 	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
 	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
@@ -113,14 +113,12 @@ impl Datastore {
 		// Store 4KB values separate from keys
 		debug!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
-		// Set the block cache size
+		// Set the block cache size in bytes
 		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		let mut block_opts = BlockBasedOptions::default();
 		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		block_opts.set_block_cache(&cache);
-		// Apply the block-based options to the main options
 		opts.set_block_based_table_factory(&block_opts);
-		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
 		// Set the delete compaction factory
 		debug!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
@@ -286,7 +284,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.inner.as_ref().unwrap().get_opt(key.into(), &self.ro)?.is_some();
+		let res = self.inner.as_ref().unwrap().get_pinned_opt(key.into(), &self.ro)?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -381,7 +379,7 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		// Set the key if empty
-		match inner.get_opt(&key, &self.ro)? {
+		match inner.get_pinned_opt(&key, &self.ro)? {
 			None => inner.put(key, val)?,
 			_ => return Err(Error::TxKeyAlreadyExists),
 		};
@@ -411,8 +409,8 @@ impl super::api::Transaction for Transaction {
 		let val = val.into();
 		let chk = chk.map(Into::into);
 		// Set the key if valid
-		match (inner.get_opt(&key, &self.ro)?, chk) {
-			(Some(v), Some(w)) if v == w => inner.put(key, val)?,
+		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
+			(Some(v), Some(w)) if v.eq(&w) => inner.put(key, val)?,
 			(None, None) => inner.put(key, val)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
@@ -461,8 +459,8 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let chk = chk.map(Into::into);
 		// Delete the key if valid
-		match (inner.get_opt(&key, &self.ro)?, chk) {
-			(Some(v), Some(w)) if v == w => inner.delete(key)?,
+		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
+			(Some(v), Some(w)) if v.eq(&w) => inner.delete(key)?,
 			(None, None) => inner.delete(key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
@@ -588,24 +586,6 @@ impl super::api::Transaction for Transaction {
 		}
 		// Return result
 		Ok(res)
-	}
-
-	/// Retrieve all the versions from a range of keys from the databases
-	/// This is a no-op for rocksdb database
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = _rng.sprint()))]
-	async fn scan_all_versions<K>(
-		&mut self,
-		_rng: Range<K>,
-		_limit: u32,
-	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
-	where
-		K: Into<Key> + Sprintable + Debug,
-	{
-		// Check to see if the transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		Err(Error::UnsupportedVersionedQueries)
 	}
 }
 
