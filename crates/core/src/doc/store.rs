@@ -5,7 +5,7 @@ use crate::doc::Document;
 use crate::err::Error;
 
 impl Document {
-	pub async fn store_record_data(
+	pub(super) async fn store_record_data(
 		&self,
 		ctx: &Context,
 		opt: &Options,

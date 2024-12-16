@@ -6,6 +6,7 @@ mod helpers;
 use helpers::*;
 
 use std::collections::HashMap;
+use std::thread::available_parallelism;
 use std::time::{Duration, SystemTime};
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -32,14 +33,16 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
-			accesses: {},
-			namespaces: { test: 'DEFINE NAMESPACE test' },
-			nodes: {},
-			users: {},
-		}",
-	);
+	let parallelism = available_parallelism()?;
+	let val = Value::parse(&format!(
+		"{{
+			accesses: {{}},
+			namespaces: {{ test: 'DEFINE NAMESPACE test' }},
+			nodes: {{}},
+			system: {{ memory_allocated: 0, parallelism: {parallelism} }},
+			users: {{}},
+		}}"
+	));
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2036,10 +2039,10 @@ async fn permissions_checks_define_ns() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-		vec!["{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
-	];
+	let parallelism = available_parallelism().unwrap();
+	let access1 = format!("{{ accesses: {{  }}, namespaces: {{ NS: 'DEFINE NAMESPACE NS' }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{  }} }}");
+	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{  }} }}");
+	let check_results = [vec![access1.as_str()], vec![access2.as_str()]];
 
 	let test_cases = [
 		// Root level
@@ -2201,10 +2204,10 @@ async fn permissions_checks_define_access_root() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, nodes: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
-    ];
+	let parallelism = available_parallelism().unwrap();
+	let access1 = format!("{{ accesses: {{ access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{  }} }}");
+	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{  }} }}");
+	let check_results = [vec![access1.as_str()], vec![access2.as_str()]];
 
 	let test_cases = [
 		// Root level
@@ -2327,10 +2330,10 @@ async fn permissions_checks_define_user_root() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-        vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"]
-    ];
+	let parallelism = available_parallelism().unwrap();
+	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{ user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" }} }}");
+	let check2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{  }} }}");
+	let check_results = [vec![check1.as_str()], vec![check2.as_str()]];
 
 	let test_cases = [
 		// Root level
@@ -2956,6 +2959,71 @@ async fn define_remove_tables() -> Result<(), Error> {
 	t.skip_ok(1)?;
 	t.expect_error("The table 'example' does not exist")?;
 	t.expect_val("None")?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_overwrite_tables() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE OVERWRITE whatever SCHEMALESS TYPE RELATION FROM user TO test PERMISSIONS NONE;
+		INFO FOR DB;
+		DEFINE TABLE OVERWRITE whatever SCHEMALESS TYPE RELATION FROM user TO test PERMISSIONS FULL;
+		INFO FOR DB;
+		CREATE person:one;
+		CREATE library:one;
+		RELATE person:one->works_at->library:one;
+		DEFINE TABLE OVERWRITE works_at TYPE RELATION IN person OUT library;
+		INFO FOR DB;
+	";
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val(
+		r"{
+				accesses: {},
+				analyzers: {},
+				configs: {},
+				functions: {},
+				models: {},
+				params: {},
+				tables: {
+					whatever: 'DEFINE TABLE whatever TYPE RELATION IN user OUT test SCHEMALESS PERMISSIONS NONE'
+				},
+				users: {}
+			}",
+	)?;
+	t.skip_ok(1)?;
+	t.expect_val(
+		r"{
+				accesses: {},
+				analyzers: {},
+				configs: {},
+				functions: {},
+				models: {},
+				params: {},
+				tables: {
+					whatever: 'DEFINE TABLE whatever TYPE RELATION IN user OUT test SCHEMALESS PERMISSIONS FULL'
+				},
+				users: {}
+			}",
+	)?;
+	t.skip_ok(4)?;
+	t.expect_val(
+		r"{
+				accesses: {},
+				analyzers: {},
+				configs: {},
+				functions: {},
+				models: {},
+				params: {},
+				tables: {
+					library: 'DEFINE TABLE library TYPE ANY SCHEMALESS PERMISSIONS NONE',
+					person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE',
+					whatever: 'DEFINE TABLE whatever TYPE RELATION IN user OUT test SCHEMALESS PERMISSIONS FULL',
+					works_at: 'DEFINE TABLE works_at TYPE RELATION IN person OUT library SCHEMALESS PERMISSIONS NONE'
+				},
+				users: {}
+			}",
+	)?;
 	Ok(())
 }
 

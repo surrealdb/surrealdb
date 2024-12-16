@@ -8,7 +8,7 @@ use helpers::*;
 mod util;
 
 use std::collections::HashMap;
-
+use std::thread::available_parallelism;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
@@ -583,10 +583,10 @@ async fn permissions_checks_remove_ns() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, users: {  } }"],
-	];
+	let parallelism = available_parallelism().unwrap();
+	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0,  memory_allocated: 0, parallelism: {parallelism}}}, users: {{  }} }}");
+	let check2 = format!("{{ accesses: {{  }}, namespaces: {{ NS: 'DEFINE NAMESPACE NS' }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{  }} }}");
+	let check_results = [vec![check1.as_str()], vec![check2.as_str()]];
 
 	let test_cases = [
 		// Root level
@@ -751,10 +751,10 @@ async fn permissions_checks_remove_root_access() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, namespaces: {  }, nodes: {  }, users: {  } }"],
-    ];
+	let parallelism = available_parallelism().unwrap();
+	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{  }} }}");
+	let check2 = format!("{{ accesses: {{ access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{  }} }}");
+	let check_results = [vec![check1.as_str()], vec![check2.as_str()]];
 
 	let test_cases = [
 		// Root level
@@ -877,10 +877,10 @@ async fn permissions_checks_remove_root_user() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
-    ];
+	let parallelism = available_parallelism().unwrap();
+	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{  }} }}");
+	let check2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ memory_allocated: 0, parallelism: {parallelism}}}, users: {{ user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" }} }}");
+	let check_results = [vec![check1.as_str()], vec![check2.as_str()]];
 
 	let test_cases = [
 		// Root level

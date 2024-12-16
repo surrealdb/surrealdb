@@ -793,9 +793,9 @@ mod tests {
 					}
 
 					// Check roles
-					for role in &AVAILABLE_ROLES {
+					for role in AVAILABLE_ROLES {
 						let has_role = sess.au.has_role(role);
-						let should_have_role = case.roles.contains(role);
+						let should_have_role = case.roles.contains(&role);
 						assert_eq!(has_role, should_have_role, "Role {:?} check failed", role);
 					}
 
@@ -1010,9 +1010,9 @@ mod tests {
 					assert_eq!(sess.au.id(), "token");
 
 					// Check roles
-					for role in &AVAILABLE_ROLES {
+					for role in AVAILABLE_ROLES {
 						let has_role = sess.au.has_role(role);
-						let should_have_role = case.expect_roles.contains(role);
+						let should_have_role = case.expect_roles.contains(&role);
 						assert_eq!(has_role, should_have_role, "Role {:?} check failed", role);
 					}
 
@@ -1172,7 +1172,7 @@ mod tests {
 					assert_eq!(sess.au.id(), *id);
 
 					// Ensure record users do not have roles
-					for role in &AVAILABLE_ROLES {
+					for role in AVAILABLE_ROLES {
 						assert!(
 							!sess.au.has_role(role),
 							"Auth user expected to not have role {:?} in case: {:?}",
@@ -1277,9 +1277,9 @@ mod tests {
 			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration has been set explicitly
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
@@ -1436,9 +1436,9 @@ mod tests {
 			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			assert_eq!(sess.exp, None, "Default session expiration is expected to be None");
 		}
 
@@ -1733,15 +1733,15 @@ mod tests {
 
 					// Check roles
 					assert!(
-						sess.au.has_role(&Role::Viewer),
+						sess.au.has_role(Role::Viewer),
 						"Auth user expected to have Viewer role"
 					);
 					assert!(
-						!sess.au.has_role(&Role::Editor),
+						!sess.au.has_role(Role::Editor),
 						"Auth user expected to not have Editor role"
 					);
 					assert!(
-						!sess.au.has_role(&Role::Owner),
+						!sess.au.has_role(Role::Owner),
 						"Auth user expected to not have Owner role"
 					);
 
@@ -1822,9 +1822,9 @@ mod tests {
 			assert_eq!(sess.au.level().db(), Some("test"));
 			assert_eq!(sess.au.level().id(), Some("user:2"));
 			// Record users should not have roles
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
@@ -1903,9 +1903,9 @@ mod tests {
 			assert_eq!(sess.au.level().db(), Some("test"));
 			assert_eq!(sess.au.level().id(), Some("user:1"));
 			// Record users should not have roles
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin

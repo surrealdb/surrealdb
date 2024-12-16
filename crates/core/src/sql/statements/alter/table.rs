@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::{changefeed::ChangeFeed, Base, Ident, Permissions, Strand, Value};
 use crate::sql::{Kind, TableType};
 use derive::Store;
@@ -69,11 +70,12 @@ impl AlterTableStatement {
 			dt.kind = kind.clone();
 		}
 
-		txn.set(key, &dt, None).await?;
 		// Add table relational fields
 		if matches!(self.kind, Some(TableType::Relation(_))) {
-			dt.add_in_out_fields(&txn, opt).await?;
+			DefineTableStatement::add_in_out_fields(&txn, &mut dt, opt).await?;
 		}
+		// Set the table definition
+		txn.set(key, &dt, None).await?;
 		// Record definition change
 		if self.changefeed.is_some() && dt.changefeed.is_some() {
 			txn.lock().await.record_table_change(opt.ns()?, opt.db()?, &self.name, &dt);

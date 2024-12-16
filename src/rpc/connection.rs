@@ -20,13 +20,13 @@ use surrealdb::dbs::Session;
 #[cfg(surrealdb_unstable)]
 use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
-use surrealdb::mem::ALLOC;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::method::Method;
 use surrealdb::rpc::Data;
 use surrealdb::rpc::RpcContext;
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
+use surrealdb::sys;
 use tokio::sync::{RwLock, Semaphore};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -258,7 +258,7 @@ impl Connection {
 							// Clone the response sending channel
 							let chn = internal_sender.clone();
 							// Check to see whether we have available memory
-							if ALLOC.is_beyond_threshold().await {
+							if sys::is_beyond_threshold().await {
 								// Reject the message
 								Self::close_socket(rpc.clone(), chn).await;
 								// Abort all tasks
@@ -273,7 +273,7 @@ impl Connection {
 							// Clone the response sending channel
 							let chn = internal_sender.clone();
 							// Check to see whether we have available memory
-							if ALLOC.is_beyond_threshold().await {
+							if sys::is_beyond_threshold().await {
 								// Reject the message
 								Self::close_socket(rpc.clone(), chn).await;
 								// Abort all tasks
@@ -416,7 +416,7 @@ impl Connection {
 										.await;
 								}
 								// Check to see whether we have available memory
-								else if ALLOC.is_beyond_threshold().await {
+								else if sys::is_beyond_threshold().await {
 									// Process the response
 									failure(req.id, Failure::custom(SERVER_OVERLOADED))
 										.send(otel_cx.clone(), fmt, &chn)
@@ -428,7 +428,7 @@ impl Connection {
 									// Acquire concurrent request rate limiter
 									let permit = semaphore.acquire_owned().await.unwrap();
 									// Check to see whether we have available memory
-									if ALLOC.is_beyond_threshold().await {
+									if sys::is_beyond_threshold().await {
 										// Process the response
 										failure(req.id, Failure::custom(SERVER_OVERLOADED))
 											.send(otel_cx.clone(), fmt, &chn)

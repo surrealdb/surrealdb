@@ -42,6 +42,7 @@ pub mod options;
 pub mod rpc;
 pub mod sql;
 pub mod syn;
+pub mod sys;
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;

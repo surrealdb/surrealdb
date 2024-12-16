@@ -110,17 +110,6 @@ pub trait Transaction {
 	where
 		K: Into<Key> + Sprintable + Debug;
 
-	/// Retrieve all the versions for a specific range of keys from the datastore.
-	///
-	/// This function fetches all the versions for the full range of key-value pairs, in a single request to the underlying datastore.
-	async fn scan_all_versions<K>(
-		&mut self,
-		rng: Range<K>,
-		limit: u32,
-	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
-	where
-		K: Into<Key> + Sprintable + Debug;
-
 	/// Insert or replace a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
@@ -154,7 +143,7 @@ pub trait Transaction {
 	///
 	/// This function fetches all matching keys pairs from the underlying datastore concurrently.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
-	async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Val>, Error>
+	async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Option<Val>>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -166,9 +155,9 @@ pub trait Transaction {
 		let mut out = Vec::with_capacity(keys.len());
 		for key in keys.into_iter() {
 			if let Some(val) = self.get(key, None).await? {
-				out.push(val);
+				out.push(Some(val));
 			} else {
-				out.push(vec![]);
+				out.push(None);
 			}
 		}
 		Ok(out)
@@ -325,6 +314,21 @@ pub trait Transaction {
 			}
 		}
 		Ok(())
+	}
+
+	/// Retrieve all the versions for a specific range of keys from the datastore.
+	///
+	/// This function fetches all the versions for the full range of key-value pairs, in a single request to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		Err(Error::UnsupportedVersionedQueries)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
