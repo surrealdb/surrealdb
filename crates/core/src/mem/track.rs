@@ -1,12 +1,13 @@
 #![cfg(feature = "allocator")]
 
 use std::alloc::{GlobalAlloc, Layout, System};
+#[cfg(feature = "allocation-tracking")]
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::LazyLock;
 
 /// This atomic counter monitors the amount of memory
 /// (in bytes) that is currently allocated for this
 /// process at this time.
+#[cfg(feature = "allocation-tracking")]
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
 
 /// This structure implements a wrapper around the
@@ -30,35 +31,31 @@ impl<A> TrackAlloc<A> {
 
 impl<A> TrackAlloc<A> {
 	/// Returns the number of bytes that are allocated to the process
+	#[cfg(feature = "allocation-tracking")]
 	pub fn current_usage(&self) -> usize {
 		CURRENT.load(Ordering::Relaxed)
 	}
-	/// Returns the amount of memory (in KiB) that is currently allocated
-	pub fn current_usage_as_kb(&self) -> f32 {
-		Self::kb(self.current_usage())
+	/// Returns the number of bytes that are allocated to the process
+	#[cfg(not(feature = "allocation-tracking"))]
+	pub fn current_usage(&self) -> usize {
+		0
 	}
-	/// Returns the amount of memory (in MiB) that is currently allocated
-	pub fn current_usage_as_mb(&self) -> f32 {
-		Self::mb(self.current_usage())
+	/// Checks whether the allocator is above the memory limit threshold
+	#[cfg(feature = "allocation-tracking")]
+	pub fn is_beyond_threshold(&self) -> bool {
+		match *crate::cnf::MEMORY_THRESHOLD {
+			0 => false,
+			v => self.current_usage() > v,
+		}
 	}
-	/// Returns the amount of memory (in GiB) that is currently allocated
-	pub fn current_usage_as_gb(&self) -> f32 {
-		Self::gb(self.current_usage())
-	}
-	/// Performs the bytes to kibibytes conversion
-	fn kb(x: usize) -> f32 {
-		x as f32 / 1024.0
-	}
-	/// Performs the bytes to mebibytes conversion
-	fn mb(x: usize) -> f32 {
-		x as f32 / (1024.0 * 1024.0)
-	}
-	/// Performs the bytes to gibibytes conversion
-	fn gb(x: usize) -> f32 {
-		x as f32 / (1024.0 * 1024.0 * 1024.0)
+	/// Checks whether the allocator is above the memory limit threshold
+	#[cfg(not(feature = "allocation-tracking"))]
+	pub fn is_beyond_threshold(&self) -> bool {
+		false
 	}
 }
 
+#[cfg(feature = "allocation-tracking")]
 unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
 		let ret = self.alloc.alloc(layout);
@@ -88,5 +85,24 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 			CURRENT.fetch_add(new_size, Ordering::Relaxed);
 		}
 		ret
+	}
+}
+
+#[cfg(not(feature = "allocation-tracking"))]
+unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
+	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+		self.alloc.alloc(layout)
+	}
+
+	unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+		self.alloc.alloc_zeroed(layout)
+	}
+
+	unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+		self.alloc.dealloc(ptr, layout);
+	}
+
+	unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+		self.alloc.realloc(ptr, layout, new_size)
 	}
 }
