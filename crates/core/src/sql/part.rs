@@ -552,7 +552,7 @@ pub enum RecurseInstruction {
 	},
 }
 
-macro_rules! collect_paths {
+macro_rules! walk_paths {
 	(
 		$stk: ident,
 		$ctx: ident,
@@ -674,12 +674,12 @@ impl RecurseInstruction {
 			Self::Path {
 				inclusive,
 			} => {
-				collect_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Option::<&Value>::None)
+				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Option::<&Value>::None)
 			}
 			Self::Shortest {
 				expects,
 				inclusive,
-			} => collect_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Some(expects)),
+			} => walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Some(expects)),
 			Self::Collect {
 				inclusive,
 			} => {
