@@ -544,17 +544,101 @@ pub enum RecurseInstruction {
 		// Do we include the starting point in the collection?
 		inclusive: bool,
 	},
+	Shortest {
+		// What ending node are we looking for?
+		expects: Value,
+		// Do we include the starting point in the collection?
+		inclusive: bool,
+	},
 }
 
-impl RecurseInstruction {
-	/// Once the recursion is computed, the output method
-	/// will be called with the initial recursion input
-	pub(crate) fn output(&self, rec: Recursion<'_>, res: Value) -> Result<Value, Error> {
-		match self {
-			_ => Ok(res),
+async fn collect_paths(
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+	rec: Recursion<'_>,
+	finished: &mut Vec<Value>,
+	inclusive: bool,
+	expects: Option<&Value>,
+) -> Result<Value, Error> {
+	// Collection of paths we will continue processing
+	// in the next iteration
+	let mut open: Vec<Value> = vec![];
+
+	// Obtain an array value to iterate over
+	let paths = match rec.current {
+		Value::Array(v) => v,
+		v => &Array(vec![v.to_owned()]),
+	};
+
+	// Process all paths
+	for path in paths.iter() {
+		// Obtain an array value to iterate over
+		let path = match path {
+			Value::Array(v) => v,
+			v => &Array(vec![v.to_owned()]),
+		};
+
+		// We always operate on the last value in the path
+		// If the path is empty, we skip it
+		let Some(last) = path.last() else {
+			continue;
+		};
+
+		// Apply the recursed path to the last value
+		let res = stk.run(|stk| last.get(stk, ctx, opt, doc, rec.path)).await?;
+
+		// If we encounter a final value, we add it to the finished collection
+		// In case this is the first iteration, and paths are not inclusive of
+		// the starting point, we eliminate the it.
+		if is_final(&res) || &res == last {
+			if expects.is_none() && (rec.iterated > 1 || inclusive) {
+				finished.push(path.to_owned().into());
+			}
+
+			continue;
+		}
+
+		// Obtain an array value to iterate over
+		let steps = match res {
+			Value::Array(v) => v,
+			v => Array(vec![v]),
+		};
+
+		// For every step, prefix it with the current path
+		for step in steps.iter() {
+			// If this is the first iteration, and in case we are not inclusive
+			// of the starting point, we only add the step to the open collection
+			let val = if rec.iterated == 1 && !inclusive {
+				step.to_owned()
+			} else {
+				Value::from(vec![Value::from(path.to_owned()), step.to_owned()]).flatten()
+			};
+
+			if let Some(expects) = expects {
+				if step == expects {
+					let steps = match val {
+						Value::Array(v) => v.0,
+						v => vec![v],
+					};
+
+					for step in steps {
+						finished.push(step);
+					}
+
+					return Ok(Value::None);
+				}
+			}
+
+			open.push(val);
 		}
 	}
 
+	Ok(open.into())
+}
+
+impl RecurseInstruction {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -567,68 +651,11 @@ impl RecurseInstruction {
 		match self {
 			Self::Path {
 				inclusive,
-			} => {
-				// Collection of paths we will continue processing
-				// in the next iteration
-				let mut open: Vec<Value> = vec![];
-
-				// Obtain an array value to iterate over
-				let paths = match rec.current {
-					Value::Array(v) => v,
-					v => &Array(vec![v.to_owned()]),
-				};
-
-				// Process all paths
-				for path in paths.iter() {
-					// Obtain an array value to iterate over
-					let path = match path {
-						Value::Array(v) => v,
-						v => &Array(vec![v.to_owned()]),
-					};
-
-					// We always operate on the last value in the path
-					// If the path is empty, we skip it
-					let Some(last) = path.last() else {
-						continue;
-					};
-
-					// Apply the recursed path to the last value
-					let res = stk.run(|stk| last.get(stk, ctx, opt, doc, rec.path)).await?;
-
-					// If we encounter a final value, we add it to the finished collection
-					// In case this is the first iteration, and paths are not inclusive of
-					// the starting point, we eliminate the it.
-					if is_final(&res) || &res == last {
-						if rec.iterated > 1 || *inclusive {
-							finished.push(path.to_owned().into());
-						}
-
-						continue;
-					}
-
-					// Obtain an array value to iterate over
-					let steps = match res {
-						Value::Array(v) => v,
-						v => Array(vec![v]),
-					};
-
-					// For every step, prefix it with the current path
-					for step in steps.iter() {
-						// If this is the first iteration, and in case we are not inclusive
-						// of the starting point, we only add the step to the open collection
-						let val = if rec.iterated == 1 && !*inclusive {
-							step.to_owned()
-						} else {
-							Value::from(vec![Value::from(path.to_owned()), step.to_owned()])
-								.flatten()
-						};
-
-						open.push(val);
-					}
-				}
-
-				Ok(open.into())
-			}
+			} => collect_paths(stk, ctx, opt, doc, rec, finished, *inclusive, None).await,
+			Self::Shortest {
+				expects,
+				inclusive,
+			} => collect_paths(stk, ctx, opt, doc, rec, finished, *inclusive, Some(expects)).await,
 			Self::Collect {
 				inclusive,
 			} => {
@@ -680,6 +707,18 @@ impl fmt::Display for RecurseInstruction {
 				inclusive,
 			} => {
 				write!(f, "collect")?;
+
+				if *inclusive {
+					write!(f, "+inclusive")?;
+				}
+
+				Ok(())
+			}
+			Self::Shortest {
+				expects,
+				inclusive,
+			} => {
+				write!(f, "shortest={expects}")?;
 
 				if *inclusive {
 					write!(f, "+inclusive")?;

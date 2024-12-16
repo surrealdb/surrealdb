@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-	mac::{parse_option, unexpected},
+	mac::{expected, parse_option, unexpected},
 	ParseResult, Parser,
 };
 
@@ -410,7 +410,10 @@ impl Parser<'_> {
 		Ok(Recurse::Range(min, max))
 	}
 	/// Parse a recursion instruction following the inner recurse part, if any
-	pub(super) fn parse_recurse_instruction(&mut self) -> ParseResult<Option<RecurseInstruction>> {
+	pub(super) async fn parse_recurse_instruction(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<Option<RecurseInstruction>> {
 		let instruction = parse_option!(
 			self,
 			"instruction",
@@ -440,6 +443,21 @@ impl Parser<'_> {
 
 				Some(RecurseInstruction::Collect { inclusive })
 			},
+			"shortest" => {
+				expected!(self, t!("="));
+				let expects = Value::from(self.parse_thing(ctx).await?);
+				let mut inclusive = false;
+				loop {
+					parse_option!(
+						self,
+						"option",
+						"inclusive" => inclusive = true,
+						_ => break
+					);
+				};
+
+				Some(RecurseInstruction::Shortest { expects, inclusive })
+			},
 			_ => None
 		);
 
@@ -449,7 +467,7 @@ impl Parser<'_> {
 	pub(super) async fn parse_recurse_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
 		let recurse = self.parse_recurse_inner()?;
-		let instruction = self.parse_recurse_instruction()?;
+		let instruction = self.parse_recurse_instruction(ctx).await?;
 		self.expect_closing_delimiter(t!("}"), start)?;
 
 		let nest = if self.eat(t!("(")) {

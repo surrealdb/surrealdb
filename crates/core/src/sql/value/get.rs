@@ -87,12 +87,6 @@ impl Value {
 				// Compute the recursion
 				let v = compute_idiom_recursion(stk, ctx, opt, doc, rec).await?;
 
-				// Apply the recursion plan output if we have one
-				let v = match instruction {
-					Some(instruction) => instruction.output(rec, v)?,
-					_ => v,
-				};
-
 				// If we have a leftover path, process it
 				if !after.is_empty() {
 					stk.run(|stk| v.get(stk, ctx, opt, doc, after.as_slice())).await
