@@ -1100,6 +1100,77 @@ mod tests {
 				Err(e) => panic!("Expected InvalidAuth, but got: {e}"),
 			}
 		}
+		// Test with expired refresh
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+					)
+					WITH REFRESH
+					DURATION FOR GRANT 1s, FOR SESSION 2h
+				;
+
+				CREATE user:test CONTENT {
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("user", "user".into());
+			vars.insert("pass", "pass".into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+			let refresh = match res {
+				Ok(data) => match data.refresh {
+					Some(refresh) => refresh,
+					None => panic!("Refresh token was not returned"),
+				},
+				Err(e) => panic!("Failed to signin with credentials: {e}"),
+			};
+			// Wait for the refresh token to expire
+			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
+			// Signin with the refresh token
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("refresh", refresh.clone().into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+			// Should fail due to the refresh token being expired
+			match res {
+				Ok(data) => panic!("Unexpected successful signin: {:?}", data),
+				Err(Error::InvalidAuth) => {} // ok
+				Err(e) => panic!("Expected InvalidAuth, but got: {e}"),
+			}
+		}
 	}
 
 	#[tokio::test]
