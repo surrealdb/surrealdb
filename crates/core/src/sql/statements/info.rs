@@ -404,18 +404,9 @@ struct System {
 }
 
 impl System {
-	#[cfg(not(feature = "allocator"))]
 	fn new() -> Self {
 		Self {
 			memory_allocated: 0,
-			parallelism: available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get()),
-		}
-	}
-
-	#[cfg(feature = "allocator")]
-	fn new() -> Self {
-		Self {
-			memory_allocated: crate::mem::ALLOC.current_usage(),
 			parallelism: available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get()),
 		}
 	}
@@ -424,9 +415,9 @@ impl System {
 impl From<System> for Value {
 	fn from(s: System) -> Self {
 		Self::from(map! {
-			"parallelism".to_string() =>
-		s.parallelism.into(),
-			"memory_allocated".to_string() => s.memory_allocated.into()})
+			"parallelism".to_string() => s.parallelism.into(),
+			"memory_allocated".to_string() => s.memory_allocated.into()
+		})
 	}
 }
 

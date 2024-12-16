@@ -1,9 +1,3 @@
-mod fake;
-mod track;
-
-#[cfg(not(feature = "allocator"))]
-pub static ALLOC: fake::FakeAlloc = fake::FakeAlloc::new();
-
 #[cfg(feature = "allocator")]
 #[cfg(not(any(
 	target_os = "android",
@@ -15,47 +9,39 @@ pub static ALLOC: fake::FakeAlloc = fake::FakeAlloc::new();
 	target_os = "openbsd"
 )))]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<std::alloc::System> =
-	track::TrackAlloc::new(std::alloc::System);
+pub static ALLOC: std::alloc::System = std::alloc::System;
 
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "android")]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
-	track::TrackAlloc::new(jemallocator::Jemalloc);
+pub static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "freebsd")]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
-	track::TrackAlloc::new(jemallocator::Jemalloc);
+pub static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "ios")]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<mimalloc::MiMalloc> =
-	track::TrackAlloc::new(mimalloc::MiMalloc);
+pub static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "linux")]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<mimalloc::MiMalloc> =
-	track::TrackAlloc::new(mimalloc::MiMalloc);
+pub static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "macos")]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<mimalloc::MiMalloc> =
-	track::TrackAlloc::new(mimalloc::MiMalloc);
+pub static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "netbsd")]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
-	track::TrackAlloc::new(jemallocator::Jemalloc);
+pub static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "openbsd")]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
-	track::TrackAlloc::new(jemallocator::Jemalloc);
+pub static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
