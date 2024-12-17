@@ -87,6 +87,10 @@ criteria = "safe-to-deploy"
 version = "0.8.11"
 criteria = "safe-to-deploy"
 
+[[exemptions.aligned-vec]]
+version = "0.6.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.alloc-no-stdlib]]
 version = "2.0.4"
 criteria = "safe-to-deploy"
@@ -530,6 +534,14 @@ criteria = "safe-to-run"
 [[exemptions.env_logger]]
 version = "0.11.3"
 criteria = "safe-to-run"
+
+[[exemptions.equator]]
+version = "0.2.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.equator-macro]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
 
 [[exemptions.error-code]]
 version = "2.3.1"
@@ -1097,6 +1109,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.pprof]]
 version = "0.13.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.pprof]]
+version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ppv-lite86]]
