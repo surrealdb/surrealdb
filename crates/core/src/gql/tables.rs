@@ -7,7 +7,7 @@ use crate::gql::schema::{kind_to_type, unwrap_type};
 use crate::kvs::{Datastore, Transaction};
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::{DefineFieldStatement, DefineTableStatement, SelectStatement};
-use crate::sql::{self, Ident, Order, Part, Table};
+use crate::sql::{self, Table};
 use crate::sql::{Cond, Fields};
 use crate::sql::{Expression, Value as SqlValue};
 use crate::sql::{Idiom, Kind};
