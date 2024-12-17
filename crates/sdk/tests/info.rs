@@ -436,6 +436,9 @@ async fn permissions_checks_info_user_db() {
 
 #[tokio::test]
 async fn access_info_redacted() {
+	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
+
 	// Symmetric
 	{
 		let sql = r#"
@@ -505,10 +508,36 @@ async fn access_info_redacted() {
 			"Output '{out_str}' doesn't match expected output '{out_expected}'",
 		);
 	}
+	// Record with refresh token
+	{
+		let sql = r#"
+			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
+			INFO FOR DB
+		"#;
+		let dbs = new_ds().await.unwrap();
+		let ses = Session::owner().with_ns("ns").with_db("test");
+
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+		assert_eq!(res.len(), 2);
+
+		let out = res.pop().unwrap().output();
+		assert!(out.is_ok(), "Unexpected error: {:?}", out);
+
+		let out_expected =
+			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH REFRESH WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"#.to_string();
+		let out_str = out.unwrap().to_string();
+		assert_eq!(
+			out_str, out_expected,
+			"Output '{out_str}' doesn't match expected output '{out_expected}'",
+		);
+	}
 }
 
 #[tokio::test]
 async fn access_info_redacted_structure() {
+	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
+	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
+
 	// Symmetric
 	{
 		let sql = r#"
@@ -572,6 +601,29 @@ async fn access_info_redacted_structure() {
 
 		let out_expected =
             r#"{ accesses: [{ base: 'DATABASE', duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD' }, name: 'access' }], analyzers: [], configs: [], functions: [], models: [], params: [], tables: [], users: [] }"#.to_string();
+		let out_str = out.unwrap().to_string();
+		assert_eq!(
+			out_str, out_expected,
+			"Output '{out_str}' doesn't match expected output '{out_expected}'",
+		);
+	}
+	// Record with refresh token
+	{
+		let sql = r#"
+			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR GRANT 1w, FOR TOKEN 15m, FOR SESSION 6h;
+			INFO FOR DB STRUCTURE
+		"#;
+		let dbs = new_ds().await.unwrap();
+		let ses = Session::owner().with_ns("ns").with_db("db");
+
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+		assert_eq!(res.len(), 2);
+
+		let out = res.pop().unwrap().output();
+		assert!(out.is_ok(), "Unexpected error: {:?}", out);
+
+		let out_expected =
+			r#"{ accesses: [{ base: 'DATABASE', duration: { grant: 1w, session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD', refresh: true }, name: 'access' }], analyzers: [], configs: [], functions: [], models: [], params: [], tables: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,

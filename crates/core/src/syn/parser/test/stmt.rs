@@ -2,8 +2,8 @@ use crate::{
 	sql::{
 		access::AccessDuration,
 		access_type::{
-			AccessType, BearerAccess, BearerAccessSubject, JwtAccess, JwtAccessIssue,
-			JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
+			AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess,
+			JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
 		},
 		block::Entry,
 		changefeed::ChangeFeed,
@@ -409,7 +409,7 @@ fn parse_define_token() {
 			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			},
@@ -441,7 +441,7 @@ fn parse_define_token_on_scope() {
 		stmt.duration,
 		// Default durations.
 		AccessDuration {
-			grant: None,
+			grant: Some(Duration::from_days(30)),
 			token: Some(Duration::from_hours(1)),
 			session: None,
 		}
@@ -486,7 +486,7 @@ fn parse_define_token_jwks() {
 			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			},
@@ -518,7 +518,7 @@ fn parse_define_token_jwks_on_scope() {
 		stmt.duration,
 		// Default durations.
 		AccessDuration {
-			grant: None,
+			grant: Some(Duration::from_days(30)),
 			token: Some(Duration::from_hours(1)),
 			session: None,
 		}
@@ -562,7 +562,7 @@ fn parse_define_scope() {
 	assert_eq!(
 		stmt.duration,
 		AccessDuration {
-			grant: None,
+			grant: Some(Duration::from_days(30)),
 			token: Some(Duration::from_hours(1)),
 			session: Some(Duration::from_secs(1)),
 		}
@@ -613,7 +613,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -648,7 +648,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -683,7 +683,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: Some(Value::Bool(true)),
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -718,7 +718,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -752,7 +752,7 @@ fn parse_define_access_jwt_key() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: None,
 				},
@@ -787,7 +787,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -867,7 +867,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -899,7 +899,7 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -934,7 +934,7 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -968,7 +968,7 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -1001,7 +1001,7 @@ fn parse_define_access_jwt_jwks() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: None,
 				},
@@ -1035,7 +1035,7 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_hours(1)),
 					session: None,
 				},
@@ -1068,7 +1068,7 @@ fn parse_define_access_jwt_jwks() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: Some(Duration::from_days(2)),
 				},
@@ -1100,7 +1100,7 @@ fn parse_define_access_record() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			}
@@ -1120,6 +1120,77 @@ fn parse_define_access_record() {
 				match ac.jwt.issue {
 					Some(iss) => {
 						assert_eq!(iss.alg, Algorithm::Hs512);
+					}
+					_ => panic!(),
+				}
+			}
+			_ => panic!(),
+		}
+	}
+	// With refresh token. Refresh token duration is set to 10 days.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH DURATION FOR GRANT 10d"#
+		)
+		.unwrap();
+
+		// Manually compare since DefineAccessStatement for record access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(stmt.authenticate, None);
+		assert_eq!(
+			stmt.duration,
+			// Default durations.
+			AccessDuration {
+				grant: Some(Duration::from_days(10)),
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+		assert!(!stmt.if_not_exists);
+		match stmt.kind {
+			AccessType::Record(ac) => {
+				assert_eq!(ac.signup, None);
+				assert_eq!(ac.signin, None);
+				let jwt_verify_key = match ac.jwt.verify {
+					JwtAccessVerify::Key(key) => {
+						assert_eq!(key.alg, Algorithm::Hs512);
+						key.key
+					}
+					_ => panic!(),
+				};
+				let jwt_issue_key = match ac.jwt.issue {
+					Some(iss) => {
+						assert_eq!(iss.alg, Algorithm::Hs512);
+						iss.key
+					}
+					_ => panic!(),
+				};
+				// The JWT parameters should be the same as record authentication.
+				match ac.bearer {
+					Some(bearer) => {
+						assert_eq!(bearer.kind, BearerAccessType::Refresh);
+						assert_eq!(bearer.subject, BearerAccessSubject::Record);
+						match bearer.jwt.verify {
+							JwtAccessVerify::Key(key) => {
+								assert_eq!(key.alg, Algorithm::Hs512);
+								assert_eq!(key.key, jwt_verify_key);
+							}
+							_ => panic!(),
+						}
+						match bearer.jwt.issue {
+							Some(iss) => {
+								assert_eq!(iss.alg, Algorithm::Hs512);
+								assert_eq!(iss.key, jwt_issue_key);
+							}
+							_ => panic!(),
+						}
 					}
 					_ => panic!(),
 				}
@@ -1147,7 +1218,7 @@ fn parse_define_access_record() {
 		assert_eq!(
 			stmt.duration,
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: Some(Duration::from_days(7)),
 			}
@@ -1200,10 +1271,11 @@ fn parse_define_access_record() {
 							key: "foo".to_string(),
 						}),
 					},
+					bearer: None,
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: Some(Duration::from_mins(15)),
 				},
@@ -1238,10 +1310,115 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
+					bearer: None,
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
+					token: Some(Duration::from_secs(10)),
+					session: Some(Duration::from_mins(15)),
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			})),
+		);
+	}
+	// Verification and issuing with JWT are explicitly defined with two different keys. Refresh specified before JWT.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Record(RecordAccess {
+					signup: None,
+					signin: None,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Ps512,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Ps512,
+							key: "bar".to_string(),
+						}),
+					},
+					bearer: Some(BearerAccess {
+						kind: BearerAccessType::Refresh,
+						subject: BearerAccessSubject::Record,
+						jwt: JwtAccess {
+							verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+								alg: Algorithm::Ps512,
+								key: "foo".to_string(),
+							}),
+							issue: Some(JwtAccessIssue {
+								alg: Algorithm::Ps512,
+								key: "bar".to_string(),
+							}),
+						},
+					}),
+				}),
+				authenticate: None,
+				duration: AccessDuration {
+					grant: Some(Duration::from_days(10)),
+					token: Some(Duration::from_secs(10)),
+					session: Some(Duration::from_mins(15)),
+				},
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+			})),
+		);
+	}
+	// Verification and issuing with JWT are explicitly defined with two different keys. Refresh specified after JWT.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" WITH REFRESH DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Record(RecordAccess {
+					signup: None,
+					signin: None,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Ps512,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Ps512,
+							key: "bar".to_string(),
+						}),
+					},
+					bearer: Some(BearerAccess {
+						kind: BearerAccessType::Refresh,
+						subject: BearerAccessSubject::Record,
+						jwt: JwtAccess {
+							verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+								alg: Algorithm::Ps512,
+								key: "foo".to_string(),
+							}),
+							issue: Some(JwtAccessIssue {
+								alg: Algorithm::Ps512,
+								key: "bar".to_string(),
+							}),
+						},
+					}),
+				}),
+				authenticate: None,
+				duration: AccessDuration {
+					grant: Some(Duration::from_days(10)),
 					token: Some(Duration::from_secs(10)),
 					session: Some(Duration::from_mins(15)),
 				},
@@ -1276,10 +1453,11 @@ fn parse_define_access_record() {
 							key: "bar".to_string(),
 						}),
 					},
+					bearer: None,
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: None,
+					grant: Some(Duration::from_days(30)),
 					token: Some(Duration::from_secs(10)),
 					session: Some(Duration::from_mins(15)),
 				},
@@ -1324,43 +1502,6 @@ fn parse_define_access_record() {
 }
 
 #[test]
-fn parse_define_access_record_with_jwt() {
-	let res = test_parse!(
-		parse_stmt,
-		r#"DEFINE ACCESS a ON DATABASE TYPE RECORD WITH JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
-	)
-	.unwrap();
-	assert_eq!(
-		res,
-		Statement::Define(DefineStatement::Access(DefineAccessStatement {
-			name: Ident("a".to_string()),
-			base: Base::Db,
-			kind: AccessType::Record(RecordAccess {
-				signup: None,
-				signin: None,
-				jwt: JwtAccess {
-					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
-						alg: Algorithm::EdDSA,
-						key: "foo".to_string(),
-					}),
-					issue: None,
-				},
-			}),
-			authenticate: None,
-			// Default durations.
-			duration: AccessDuration {
-				grant: None,
-				token: Some(Duration::from_hours(1)),
-				session: None,
-			},
-			comment: Some(Strand("bar".to_string())),
-			if_not_exists: false,
-			overwrite: false,
-		})),
-	)
-}
-
-#[test]
 fn parse_define_access_bearer() {
 	// For user on database.
 	{
@@ -1381,7 +1522,7 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			}
@@ -1414,7 +1555,7 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			}
@@ -1449,7 +1590,7 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			}
@@ -1483,7 +1624,7 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: None,
+				grant: Some(Duration::from_days(30)),
 				token: Some(Duration::from_hours(1)),
 				session: None,
 			}
@@ -1534,6 +1675,7 @@ fn parse_define_access_bearer() {
 				name: Ident("a".to_string()),
 				base: Base::Db,
 				kind: AccessType::Bearer(BearerAccess {
+					kind: BearerAccessType::Bearer,
 					subject: BearerAccessSubject::User,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
@@ -1572,6 +1714,7 @@ fn parse_define_access_bearer() {
 				name: Ident("a".to_string()),
 				base: Base::Db,
 				kind: AccessType::Bearer(BearerAccess {
+					kind: BearerAccessType::Bearer,
 					subject: BearerAccessSubject::Record,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {

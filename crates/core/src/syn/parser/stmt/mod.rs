@@ -486,7 +486,7 @@ impl Parser<'_> {
 					grace,
 				}))
 			}
-			_ => unexpected!(self, peek, "one of GRANT, LIST, REVOKE or PURGE"),
+			_ => unexpected!(self, peek, "one of GRANT, SHOW, REVOKE or PURGE"),
 		}
 	}
 

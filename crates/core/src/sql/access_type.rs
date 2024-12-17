@@ -1,4 +1,5 @@
 use super::Value;
+use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::{escape::quote_str, Algorithm};
@@ -7,6 +8,7 @@ use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
+use std::str::FromStr;
 
 /// The type of access methods available
 #[revisioned(revision = 2)]
@@ -59,12 +61,16 @@ impl Display for AccessType {
 				if let Some(ref v) = ac.signin {
 					write!(f, " SIGNIN {v}")?
 				}
+				if ac.bearer.is_some() {
+					write!(f, " WITH REFRESH")?
+				}
 				write!(f, " WITH JWT {}", ac.jwt)?;
 			}
 			AccessType::Bearer(ac) => {
 				write!(f, "BEARER")?;
-				if let BearerAccessSubject::Record = ac.subject {
-					write!(f, " FOR RECORD")?;
+				match ac.subject {
+					BearerAccessSubject::User => write!(f, " FOR USER")?,
+					BearerAccessSubject::Record => write!(f, " FOR RECORD")?,
 				}
 			}
 		}
@@ -84,6 +90,7 @@ impl InfoStructure for AccessType {
 				"jwt".to_string() => v.jwt.structure(),
 				"signup".to_string(), if let Some(v) = v.signup => v.structure(),
 				"signin".to_string(), if let Some(v) = v.signin => v.structure(),
+				"refresh".to_string(), if v.bearer.is_some() => true.into(),
 			}),
 			AccessType::Bearer(ac) => Value::from(map! {
 					"kind".to_string() => "BEARER".into(),
@@ -103,8 +110,10 @@ impl AccessType {
 	#[allow(unreachable_patterns)]
 	pub fn can_issue_grants(&self) -> bool {
 		match self {
-			// The grants for JWT and record access methods are JWT
-			AccessType::Jwt(_) | AccessType::Record(_) => false,
+			// The JWT access method cannot issue stateful grants.
+			AccessType::Jwt(_) => false,
+			// The record access method can be used to issue grants if defined with bearer AKA refresh.
+			AccessType::Record(ac) => ac.bearer.is_some(),
 			AccessType::Bearer(_) => true,
 		}
 	}
@@ -294,7 +303,7 @@ pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
@@ -303,6 +312,8 @@ pub struct RecordAccess {
 	pub jwt: JwtAccess,
 	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
 	pub authenticate: Option<Value>,
+	#[revision(start = 4)]
+	pub bearer: Option<BearerAccess>,
 }
 
 impl RecordAccess {
@@ -325,6 +336,7 @@ impl Default for RecordAccess {
 			jwt: JwtAccess {
 				..Default::default()
 			},
+			bearer: None,
 		}
 	}
 }
@@ -339,6 +351,7 @@ impl Jwt for RecordAccess {
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BearerAccess {
+	pub kind: BearerAccessType,
 	pub subject: BearerAccessSubject,
 	pub jwt: JwtAccess,
 }
@@ -346,6 +359,7 @@ pub struct BearerAccess {
 impl Default for BearerAccess {
 	fn default() -> Self {
 		Self {
+			kind: BearerAccessType::Bearer,
 			subject: BearerAccessSubject::User,
 			jwt: JwtAccess {
 				..Default::default()
@@ -357,6 +371,35 @@ impl Default for BearerAccess {
 impl Jwt for BearerAccess {
 	fn jwt(&self) -> &JwtAccess {
 		&self.jwt
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum BearerAccessType {
+	Bearer,
+	Refresh,
+}
+
+impl BearerAccessType {
+	pub fn prefix(&self) -> &'static str {
+		match self {
+			Self::Bearer => "surreal-bearer",
+			Self::Refresh => "surreal-refresh",
+		}
+	}
+}
+
+impl FromStr for BearerAccessType {
+	type Err = Error;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s.to_ascii_lowercase().as_str() {
+			"bearer" => Ok(Self::Bearer),
+			"refresh" => Ok(Self::Refresh),
+			_ => Err(Error::AccessGrantBearerInvalid),
+		}
 	}
 }
 
