@@ -156,6 +156,17 @@ jobs:
         run: cargo make ci-check-wasm
   
   check-revision-lock:
+    name: Check revision.lock
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install revision-lock
+        run: cargo install revision-lock
+      
+      - name: Check revision.lock
+        run: revision-lock --check
 
   clippy:
     name: Check clippy
