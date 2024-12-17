@@ -52,6 +52,7 @@ pub(crate) mod paths;
 pub(crate) mod permission;
 pub(crate) mod query;
 pub(crate) mod range;
+pub(crate) mod reference;
 pub(crate) mod regex;
 pub(crate) mod scoring;
 pub(crate) mod script;

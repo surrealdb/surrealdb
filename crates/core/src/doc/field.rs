@@ -214,6 +214,8 @@ impl Document {
 					val = field.process_type_clause(val).await?;
 					// Process any ASSERT clause
 					val = field.process_assert_clause(val).await?;
+					// Process any REFERENCE clause
+					field.process_reference_clause(&val).await?;
 				}
 				// Process any PERMISSIONS clause
 				val = field.process_permissions_clause(val).await?;
@@ -536,5 +538,26 @@ impl FieldEditContext<'_> {
 		}
 		// Return the original value
 		Ok(val)
+	}
+
+	async fn process_reference_clause(&mut self, val: &Value) -> Result<(), Error> {
+		if let Some(_) = self.def.reference {
+			if let Value::Thing(thing) = val {
+				let key = crate::key::r#ref::new(
+					self.opt.ns()?,
+					self.opt.db()?,
+					&thing.tb,
+					&thing.id,
+					&self.rid,
+					&self.def.name,
+				).encode().unwrap();
+
+				println!("set: {:?}", key);
+
+				self.ctx.tx().set(key, vec![], None).await?;
+			}
+		}
+
+		Ok(())
 	}
 }

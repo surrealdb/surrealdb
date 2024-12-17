@@ -899,6 +899,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
+				t!("REFERENCE") => {
+					self.pop_peek();
+					res.reference = Some(self.parse_reference()?);
+				}
 				_ => break,
 			}
 		}
