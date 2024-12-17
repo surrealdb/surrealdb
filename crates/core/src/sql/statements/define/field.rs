@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::sql::reference::Reference;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::Part;
@@ -15,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use uuid::Uuid;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -35,6 +36,8 @@ pub struct DefineFieldStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 4)]
 	pub overwrite: bool,
+	#[revision(start = 5)]
+	pub reference: Option<Reference>,
 }
 
 impl DefineFieldStatement {
