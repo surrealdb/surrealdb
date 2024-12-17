@@ -10,12 +10,10 @@ use crate::exe::try_join_all_buffered;
 use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
-use crate::sql::id::Id;
 use crate::sql::part::{FindRecursionPlan, Next, NextMethod, SplitByRepeatRecurse};
 use crate::sql::part::{Part, Skip};
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
-use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use crate::sql::Function;
 use futures::future::try_join_all;
@@ -166,27 +164,6 @@ impl Value {
 				}
 				// Current value at path is an object
 				Value::Object(v) => match p {
-					// If requesting an `id` field, check if it is a complex Record ID
-					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f.as_str()) {
-						Some(Value::Thing(Thing {
-							id: Id::Object(v),
-							..
-						})) => {
-							let v = Value::Object(v.clone());
-							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-						}
-						Some(Value::Thing(Thing {
-							id: Id::Array(v),
-							..
-						})) => {
-							let v = Value::Array(v.clone());
-							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-						}
-						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => {
-							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
-						}
-					},
 					Part::Graph(_) => match v.rid() {
 						Some(v) => {
 							let v = Value::Thing(v);
@@ -551,6 +528,7 @@ mod tests {
 	use super::*;
 	use crate::dbs::test::mock;
 	use crate::sql::idiom::Idiom;
+	use crate::sql::{Id, Thing};
 	use crate::syn::Parse;
 
 	#[tokio::test]

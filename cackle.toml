@@ -641,7 +641,6 @@ from.test.allow_apis = ["net"]
 [pkg.deranged]
 allow_unsafe = true
 
-
 [pkg.same-file]
 allow_unsafe = true
 allow_apis = ["fs"]
@@ -695,7 +694,6 @@ allow_unsafe = true
 
 [pkg.miette]
 allow_unsafe = true
-
 
 [pkg.glob]
 allow_apis = ["fs"]
@@ -830,6 +828,9 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.crossbeam-deque]
+allow_unsafe = true
+
+[pkg.crossbeam-channel]
 allow_unsafe = true
 
 [pkg.anstream]
@@ -977,7 +978,7 @@ build.allow_build_instructions = ["cargo::rustc-check-cfg=*"]
 
 [pkg.surrealdb-core]
 allow_unsafe = true
-allow_apis = ["net", "fs"]
+allow_apis = ["net", "fs", "process"]
 build.allow_build_instructions = [
     "cargo:rustc-cfg=*",
     "cargo::rustc-check-cfg=*",
@@ -1228,3 +1229,81 @@ allow_apis = ["fs"]
 
 [pkg.equator-macro]
 allow_proc_macro = true
+
+[pkg.zerovec-derive]
+allow_proc_macro = true
+allow_unsafe = true
+
+[pkg.yoke-derive]
+allow_proc_macro = true
+allow_unsafe = true
+
+[pkg.zerofrom-derive]
+allow_proc_macro = true
+
+[pkg.icu_provider_macros]
+allow_proc_macro = true
+
+[pkg.displaydoc]
+allow_proc_macro = true
+
+[pkg.synstructure]
+allow_unsafe = true
+
+[pkg.yoke]
+allow_unsafe = true
+
+[pkg.zerovec]
+allow_unsafe = true
+
+[pkg.tinystr]
+allow_unsafe = true
+
+[pkg.writeable]
+allow_unsafe = true
+
+[pkg.icu_collections]
+allow_unsafe = true
+
+[pkg.icu_locid]
+allow_unsafe = true
+
+[pkg.icu_locid_transform]
+allow_unsafe = true
+
+[pkg.icu_locid_transform_data]
+allow_unsafe = true
+
+[pkg.icu_normalizer]
+allow_unsafe = true
+
+[pkg.icu_normalizer_data]
+allow_unsafe = true
+
+[pkg.icu_properties]
+allow_unsafe = true
+
+[pkg.icu_properties_data]
+allow_unsafe = true
+
+[pkg.icu_provider]
+allow_unsafe = true
+
+[pkg.utf8_iter]
+allow_unsafe = true
+
+[pkg.utf16_iter]
+allow_unsafe = true
+
+[pkg.idna]
+allow_unsafe = true
+
+[pkg.windows-implement]
+allow_proc_macro = true
+
+[pkg.windows-interface]
+allow_proc_macro = true
+
+[pkg.sysinfo]
+allow_unsafe = true
+allow_apis = ["fs"]
