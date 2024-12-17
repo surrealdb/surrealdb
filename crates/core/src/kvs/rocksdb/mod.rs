@@ -6,8 +6,8 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::{Check, Key, Val, Version};
 use rocksdb::{
-	DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
-	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
+	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
 };
 use std::fmt::Debug;
 use std::ops::Range;
@@ -112,6 +112,14 @@ impl Datastore {
 		opts.set_enable_blob_files(*cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		// Store 4KB values separate from keys
 		debug!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
+		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
+		// Set the block cache size
+		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
+		let mut block_opts = BlockBasedOptions::default();
+		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
+		block_opts.set_block_cache(&cache);
+		// Apply the block-based options to the main options
+		opts.set_block_based_table_factory(&block_opts);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
 		// Set the delete compaction factory
 		debug!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
@@ -564,16 +572,16 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve all the versions from a range of keys from the databases
 	/// This is a no-op for rocksdb database
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = _rng.sprint()))]
 	async fn scan_all_versions<K>(
 		&mut self,
-		rng: Range<K>,
-		limit: u32,
+		_rng: Range<K>,
+		_limit: u32,
 	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
-		// Check to see if transaction is closed
+		// Check to see if the transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}

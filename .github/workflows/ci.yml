@@ -718,8 +718,6 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Test upgrade
-        # Allow breaking changes until v2 stabilises
-        continue-on-error: true
         run: cargo make ci-database-upgrade
 
   lang-tests:

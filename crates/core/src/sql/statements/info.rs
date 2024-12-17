@@ -11,6 +11,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
+use std::thread::available_parallelism;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -60,6 +61,7 @@ impl InfoStatement {
 						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
+						"system".to_string() => process(Arc::new([System::new()])),
 						"users".to_string() => process(txn.all_root_users().await?),
 					}),
 					false => Value::from(map! {
@@ -84,13 +86,16 @@ impl InfoStatement {
 							}
 							out.into()
 						},
+						"system".to_string() => {
+							System::new().into()
+						},
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_users().await?.iter() {
 								out.insert(v.name.to_raw(), v.to_string().into());
 							}
 							out.into()
-						},
+						}
 					}),
 				})
 			}
@@ -390,4 +395,43 @@ where
 	T: InfoStructure + Clone,
 {
 	Value::Array(a.iter().cloned().map(InfoStructure::structure).collect())
+}
+
+#[derive(Clone)]
+struct System {
+	memory_allocated: usize,
+	parallelism: usize,
+}
+
+impl System {
+	#[cfg(not(feature = "allocator"))]
+	fn new() -> Self {
+		Self {
+			memory_allocated: 0,
+			parallelism: available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get()),
+		}
+	}
+
+	#[cfg(feature = "allocator")]
+	fn new() -> Self {
+		Self {
+			memory_allocated: crate::mem::ALLOC.current_usage(),
+			parallelism: available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get()),
+		}
+	}
+}
+
+impl From<System> for Value {
+	fn from(s: System) -> Self {
+		Self::from(map! {
+			"parallelism".to_string() =>
+		s.parallelism.into(),
+			"memory_allocated".to_string() => s.memory_allocated.into()})
+	}
+}
+
+impl InfoStructure for System {
+	fn structure(self) -> Value {
+		self.into()
+	}
 }
