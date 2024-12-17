@@ -154,6 +154,8 @@ jobs:
 
       - name: Check wasm
         run: cargo make ci-check-wasm
+  
+  check-revision-lock:
 
   clippy:
     name: Check clippy
