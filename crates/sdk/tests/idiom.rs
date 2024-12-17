@@ -1228,3 +1228,15 @@ async fn idiom_recursion_invalid_instruction() -> Result<(), Error> {
 	);
 	Ok(())
 }
+
+#[tokio::test]
+async fn idiom_recursion_instruction_plan_conflict() -> Result<(), Error> {
+	let sql = r#"
+		a:1.{..+path}.{ id, links: links.@ };
+	"#;
+
+	Test::new(sql)
+		.await?
+		.expect_error("Can not construct a recursion plan when an instruction is provided")?;
+	Ok(())
+}

@@ -59,7 +59,10 @@ impl Value {
 						// If the user already specified a recursion instruction,
 						// we will not process any recursion plans.
 						if instruction.is_some() {
-							(path, None, after)
+							match path.find_recursion_plan() {
+								Some(_) => return Err(Error::RecursionInstructionPlanConflict),
+								_ => (path, None, after),
+							}
 						} else {
 							match path.find_recursion_plan() {
 								Some((path, plan, local_after)) => {
