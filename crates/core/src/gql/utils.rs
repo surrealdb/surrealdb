@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_graphql::dynamic::FieldValue;
 use async_graphql::{dynamic::indexmap::IndexMap, Name, Value as GqlValue};
 use reblessive::TreeStack;
 pub(crate) trait GqlValueUtils {
@@ -121,4 +122,10 @@ impl GQLTx {
 
 		Ok(res)
 	}
+}
+
+pub type ErasedRecord = (GQLTx, Thing);
+
+pub fn field_val_erase_owned(val: ErasedRecord) -> FieldValue<'static> {
+	FieldValue::owned_any(val)
 }

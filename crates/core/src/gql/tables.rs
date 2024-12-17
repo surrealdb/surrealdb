@@ -26,13 +26,7 @@ use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
 use super::schema::{self, gql_to_sql_kind, sql_value_to_gql_value};
 use crate::gql::error::internal_error;
-use crate::gql::utils::{GQLTx, GqlValueUtils};
-
-type ErasedRecord = (GQLTx, Thing);
-
-fn field_val_erase_owned(val: ErasedRecord) -> FieldValue<'static> {
-	FieldValue::owned_any(val)
-}
+use crate::gql::utils::{field_val_erase_owned, ErasedRecord, GQLTx, GqlValueUtils};
 
 macro_rules! order {
 	(asc, $field:expr) => {{
