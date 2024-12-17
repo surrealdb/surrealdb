@@ -190,7 +190,7 @@ impl Collected {
 		// Fetch the data from the store
 		let val = txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, None).await?;
 		// Create a new operable value
-		let val = Operable::Relate(f, val.into(), w, o.map(|v| v.into()));
+		let val = Operable::Relate(f, val, w, o.map(|v| v.into()));
 		// Process the document record
 		let pro = Processed {
 			generate: None,
@@ -301,7 +301,7 @@ impl Collected {
 			v
 		} else {
 			// Otherwise we have to fetch the record
-			Iterable::fetch_thing(txn, opt, &r.0).await?.into()
+			Iterable::fetch_thing(txn, opt, &r.0).await?
 		};
 		let pro = Processed {
 			generate: None,
