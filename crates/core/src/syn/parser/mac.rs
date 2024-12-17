@@ -151,10 +151,46 @@ macro_rules! enter_query_recursion {
 	}};
 }
 
+// This macro is used to parse an option in the format `+option`.
+macro_rules! parse_option {
+	($parser: ident, $what: expr, $( $string: expr => $result: expr, )+ _ => $fallback: expr) => {
+		if $parser.eat(t!("+")) {
+			let what = $what;
+			let kind = $parser.next_token_value::<Ident>()?;
+			match kind.0.as_str() {
+				$(
+					v if v.eq_ignore_ascii_case($string) => { $result },
+				)+
+				found => {
+					let expected = vec![$( $string ),+]
+						.into_iter()
+						.map(|v| format!("`{v}`"))
+						.collect::<Vec<String>>();
+
+					let expected = if expected.len() > 1 {
+						format!(
+							"{} or {}",
+							expected[..expected.len() - 1].join(", "),
+							expected.last().unwrap()
+						)
+					} else {
+						expected[0].clone()
+					};
+
+					bail!("Unexpected {what} `{}` expected {expected}", found, @$parser.last_span());
+				}
+			}
+		} else {
+			$fallback
+		}
+	};
+}
+
 pub(crate) use enter_object_recursion;
 pub(crate) use enter_query_recursion;
 pub(crate) use expected;
 pub(crate) use expected_whitespace;
+pub(crate) use parse_option;
 pub(crate) use pop_glued;
 pub(crate) use unexpected;
 
