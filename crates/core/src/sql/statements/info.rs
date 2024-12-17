@@ -404,5 +404,6 @@ async fn system() -> Value {
 		"memory_usage".to_string() => info.memory_usage.into(),
 		"physical_cores".to_string() => info.physical_cores.into(),
 		"memory_allocated".to_string() => info.memory_allocated.into(),
+		"threads".to_string() => info.threads.into(),
 	})
 }
