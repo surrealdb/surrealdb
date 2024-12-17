@@ -95,7 +95,7 @@ pub async fn generate_schema(
 
 	match tbs {
 		Some(tbs) if tbs.len() > 0 => {
-			query = process_tbs(tbs, query, &mut types, &tx, &ns, &db, session, datastore).await?;
+			query = process_tbs(tbs, query, &mut types, &tx, ns, db, session, datastore).await?;
 		}
 		_ => {}
 	}
