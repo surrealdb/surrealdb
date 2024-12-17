@@ -1,7 +1,7 @@
 mod helpers;
 mod parse;
 use helpers::Test;
-use surrealdb::err::Error;
+use surrealdb::{err::Error, syn::error::RenderedError};
 
 #[tokio::test]
 async fn idiom_chain_part_optional() -> Result<(), Error> {
@@ -1192,5 +1192,39 @@ async fn idiom_recursion_shortest_path() -> Result<(), Error> {
 			a:5,
 		]",
 		)?;
+	Ok(())
+}
+
+macro_rules! expect_parse_error {
+	($query:expr, $error:expr) => {{
+		let res = Test::new($query).await;
+		match res {
+			Err(Error::InvalidQuery(RenderedError {
+				errors,
+				..
+			})) => match errors.first() {
+				Some(err) => assert_eq!(err, $error),
+				None => panic!("Expected an error message"),
+			},
+			_ => panic!("Expected a parse error"),
+		}
+	}};
+}
+
+#[tokio::test]
+async fn idiom_recursion_invalid_instruction() -> Result<(), Error> {
+	expect_parse_error!(
+		"a:1.{..+invalid}",
+		"Unexpected instruction `invalid` expected `path`, `collect` or `shortest`"
+	);
+	expect_parse_error!(
+		"a:1.{..+path+invalid}",
+		"Unexpected option `invalid` expected `inclusive`"
+	);
+	expect_parse_error!("a:1.{..+shortest}", "Unexpected token `}`, expected =");
+	expect_parse_error!(
+		"a:1.{..+shortest=123}",
+		"Unexpected token `a number`, expected an identifier"
+	);
 	Ok(())
 }
