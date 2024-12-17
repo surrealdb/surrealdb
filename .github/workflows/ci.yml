@@ -732,3 +732,25 @@ jobs:
 
       - name: Test upgrade
         run: cargo make ci-database-upgrade
+
+  lang-tests:
+    name: Run SurrealQL language tests.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: crates/language-tests
+
+      - name: Run Suite
+        run: |
+          cd crates/language-tests
+          cargo build
+          ./target/debug/surrealql-test --color always run

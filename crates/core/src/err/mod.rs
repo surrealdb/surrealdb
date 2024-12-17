@@ -1230,6 +1230,10 @@ pub enum Error {
 	InvalidVersion {
 		found: Value,
 	},
+
+	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
+	#[error("Can not construct a recursion plan when an instruction is provided")]
+	RecursionInstructionPlanConflict,
 }
 
 impl From<Error> for String {
