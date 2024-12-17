@@ -64,6 +64,7 @@ fn filter_name_from_table(tb_name: impl Display) -> String {
 	format!("_filter_{tb_name}")
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn process_tbs(
 	tbs: Arc<[DefineTableStatement]>,
 	mut query: Object,
