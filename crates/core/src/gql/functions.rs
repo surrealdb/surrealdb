@@ -64,12 +64,13 @@ pub async fn process_fns(
 								}
 								_ => {}
 							}
-							tmp
+							Some(tmp)
 						}
-						_ => FieldValue::value(sql_value_to_gql_value(res)?),
+						SqlValue::None => None,
+						_ => Some(FieldValue::value(sql_value_to_gql_value(res)?)),
 					};
 
-					Ok(Some(gql_res))
+					Ok(gql_res)
 				})
 			},
 		);
