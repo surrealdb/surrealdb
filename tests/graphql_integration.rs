@@ -471,7 +471,7 @@ mod graphql_integration {
 				)
 				.send()
 				.await?;
-			// assert_eq!(res.status(), 200);
+			assert_eq!(res.status(), 200);
 			let body = res.text().await?;
 			let expected = json!({
 			  "data": {
@@ -494,7 +494,7 @@ mod graphql_integration {
 				.body(json!({"query": r#"query{fn_num, fn_double(x: 21)}"#}).to_string())
 				.send()
 				.await?;
-			// assert_eq!(res.status(), 200);
+			assert_eq!(res.status(), 200);
 			let body = res.text().await?;
 			let expected = json!({
 			  "data": {

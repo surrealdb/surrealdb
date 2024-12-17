@@ -55,8 +55,6 @@ pub async fn process_fns(
 
 					let res = gtx.run_fn(&fnd1.name, args).await?;
 
-					// let gql_res = sql_value_to_gql_value(res)?;
-
 					let gql_res = match res {
 						SqlValue::Thing(rid) => {
 							let mut tmp = field_val_erase_owned((gtx.clone(), rid.clone()));
