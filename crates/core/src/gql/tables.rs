@@ -24,7 +24,7 @@ use async_graphql::Value as GqlValue;
 
 use super::error::{resolver_error, GqlError};
 use super::ext::IntoExt;
-use super::schema::{self, gql_to_sql_kind, sql_value_to_gql_value};
+use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
 use crate::gql::error::internal_error;
 use crate::gql::utils::{field_val_erase_owned, ErasedRecord, GQLTx, GqlValueUtils};
 
