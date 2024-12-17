@@ -121,6 +121,7 @@ hashbrown = "0.14.5"
 pprof = { version = "0.14.0", features = ["flamegraph", "criterion"] }
 radix_trie = "0.2.1"
 rand = "0.8.5"
+rayon = "1.10.0"
 regex = "1.10.6"
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
@@ -214,4 +215,8 @@ harness = false
 
 [[bench]]
 name = "order"
+harness = false
+
+[[bench]]
+name = "allocator"
 harness = false

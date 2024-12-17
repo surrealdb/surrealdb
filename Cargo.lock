@@ -5553,6 +5553,7 @@ dependencies = [
  "pprof",
  "radix_trie",
  "rand 0.8.5",
+ "rayon",
  "reblessive",
  "regex",
  "reqwest",
