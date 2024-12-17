@@ -15,6 +15,8 @@ pub(crate) mod validator;
 mod version;
 mod version_client;
 
+use crate::cli::validator::parser::env_filter::CustomEnvFilter;
+use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
 use crate::cli::version_client::VersionClient;
 #[cfg(debug_assertions)]
 use crate::cnf::DEBUG_BUILD_WARNING;
@@ -57,6 +59,12 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 struct Cli {
 	#[command(subcommand)]
 	command: Commands,
+	#[arg(help = "The logging level for the command-line tool")]
+	#[arg(env = "SURREAL_LOG", short = 'l', long = "log")]
+	#[arg(global = true)]
+	#[arg(default_value = "info")]
+	#[arg(value_parser = CustomEnvFilterParser::new())]
+	log: CustomEnvFilter,
 	#[arg(help = "Whether to allow web check for client version upgrades at start")]
 	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
 	#[arg(default_value_t = true)]
@@ -96,6 +104,9 @@ enum Commands {
 }
 
 pub async fn init() -> ExitCode {
+	// Print debug mode warning
+	#[cfg(debug_assertions)]
+	println!("{DEBUG_BUILD_WARNING}");
 	// Start a new CPU profiler
 	#[cfg(feature = "performance-profiler")]
 	let guard = pprof::ProfilerGuardBuilder::default()
@@ -105,10 +116,6 @@ pub async fn init() -> ExitCode {
 		.unwrap();
 	// Parse the CLI arguments
 	let args = Cli::parse();
-
-	#[cfg(debug_assertions)]
-	println!("{DEBUG_BUILD_WARNING}");
-
 	// After parsing arguments, we check the version online
 	if args.online_version_check {
 		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
@@ -125,6 +132,10 @@ pub async fn init() -> ExitCode {
 			warn!("You can upgrade using the {} command", "surreal upgrade");
 		}
 	}
+	// Initialize opentelemetry and logging
+	let telemetry = crate::telemetry::builder().with_log_level("info").with_filter(args.log);
+	// Extract the telemetry log guards
+	let (outg, errg) = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
 		Commands::Start(args) => start::init(args).await,
@@ -156,9 +167,18 @@ pub async fn init() -> ExitCode {
 	};
 	// Error and exit the programme
 	if let Err(e) = output {
+		// Output any error
 		error!("{}", e);
+		// Drop the log guards
+		drop(outg);
+		drop(errg);
+		// Return failure
 		ExitCode::FAILURE
 	} else {
+		// Drop the log guards
+		drop(outg);
+		drop(errg);
+		// Return success
 		ExitCode::SUCCESS
 	}
 }

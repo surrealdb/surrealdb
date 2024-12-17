@@ -12,7 +12,7 @@ impl Document {
 	/// record belongs to. This functions loops
 	/// through the events and processes them all
 	/// within the currently running transaction.
-	pub async fn process_table_events(
+	pub(super) async fn process_table_events(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,

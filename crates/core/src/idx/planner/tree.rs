@@ -16,20 +16,22 @@ use crate::sql::{
 };
 use reblessive::tree::Stk;
 use std::collections::HashMap;
+use std::hash::Hash;
+use std::ops::Deref;
 use std::sync::Arc;
 
 pub(super) struct Tree {
 	pub(super) root: Option<Node>,
 	pub(super) index_map: IndexesMap,
-	pub(super) with_indexes: Option<Vec<IndexRef>>,
+	pub(super) with_indexes: Option<Vec<IndexReference>>,
 	pub(super) knn_expressions: KnnExpressions,
 	pub(super) knn_brute_force_expressions: KnnBruteForceExpressions,
 	pub(super) knn_condition: Option<Cond>,
 	/// Is every expression backed by an index?
 	pub(super) all_expressions_with_index: bool,
-	/// Does the whole query contains only AND relations?
+	/// Does the whole query contain only AND relations?
 	pub(super) all_and: bool,
-	/// Does a group contains only AND relations?
+	/// Does a group contain only AND relations?
 	pub(super) all_and_groups: HashMap<GroupRef, bool>,
 }
 
@@ -70,7 +72,7 @@ struct TreeBuilder<'a> {
 	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Node>,
 	index_map: IndexesMap,
-	with_indexes: Option<Vec<IndexRef>>,
+	with_indexes: Option<Vec<IndexReference>>,
 	knn_brute_force_expressions: HashMap<Arc<Expression>, KnnBruteForceExpression>,
 	knn_expressions: KnnExpressions,
 	idioms_record_options: HashMap<Arc<Idiom>, RecordOptions>,
@@ -90,7 +92,7 @@ pub(super) struct RecordOptions {
 }
 
 pub(super) type IdiomCol = usize;
-pub(super) type LocalIndexRefs = Vec<(IndexRef, IdiomCol)>;
+pub(super) type LocalIndexRefs = Vec<(IndexReference, IdiomCol)>;
 pub(super) type RemoteIndexRefs = Arc<Vec<(Arc<Idiom>, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
@@ -144,12 +146,11 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(o) = self.first_order {
 			if o.direction {
 				if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
-					for (ix_ref, id_col) in &irf {
+					for (ixr, id_col) in &irf {
 						if *id_col == 0 {
 							self.index_map.order_limit = Some(IndexOption::new(
-								*ix_ref,
-								id,
-								*id_col,
+								ixr.clone(),
+								Some(id),
 								IdiomPosition::None,
 								IndexOperator::Order,
 							));
@@ -223,12 +224,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
 
-	async fn eval_idiom(
-		&mut self,
-		stk: &mut Stk,
-		group: GroupRef,
-		i: &Idiom,
-	) -> Result<Node, Error> {
+	async fn eval_idiom(&mut self, stk: &mut Stk, gr: GroupRef, i: &Idiom) -> Result<Node, Error> {
 		self.leaf_nodes_count += 1;
 		// Check if the idiom has already been resolved
 		if let Some(node) = self.resolved_idioms.get(i).cloned() {
@@ -239,7 +235,7 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(Part::Start(x)) = i.0.first() {
 			if x.is_param() {
 				let v = stk.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await?;
-				return stk.run(|stk| self.eval_value(stk, group, &v)).await;
+				return stk.run(|stk| self.eval_value(stk, gr, &v)).await;
 			}
 		}
 
@@ -272,25 +268,26 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	fn resolve_indexes(&mut self, t: &Table, i: &Idiom, schema: &SchemaCache) -> LocalIndexRefs {
+		// Did we already resolve this idiom?
 		if let Some(m) = self.idioms_indexes.get(t) {
 			if let Some(irs) = m.get(i).cloned() {
 				return irs;
 			}
 		}
 		let mut irs = Vec::new();
-		for ix in schema.indexes.iter() {
+		for (idx, ix) in schema.indexes.iter().enumerate() {
 			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
-				let ixr = self.index_map.definitions.len() as IndexRef;
+				let ixr = schema.new_reference(idx);
+				// Check if the WITH clause allow the index to be used
 				if let Some(With::Index(ixs)) = &self.ctx.with {
 					if ixs.contains(&ix.name.0) {
 						if let Some(wi) = &mut self.with_indexes {
-							wi.push(ixr);
+							wi.push(ixr.clone());
 						} else {
-							self.with_indexes = Some(vec![ixr]);
+							self.with_indexes = Some(vec![ixr.clone()]);
 						}
 					}
 				}
-				self.index_map.definitions.push(ix.clone().into());
 				irs.push((ixr, idiom_index));
 			}
 		}
@@ -445,7 +442,7 @@ impl<'a> TreeBuilder<'a> {
 	fn check_leaf_node_with_index(&mut self, io: Option<&IndexOption>) {
 		if let Some(io) = io {
 			if let Some(wi) = &self.with_indexes {
-				if !wi.contains(&io.ix_ref()) {
+				if !wi.contains(io.ix_ref()) {
 					return;
 				}
 			}
@@ -473,9 +470,9 @@ impl<'a> TreeBuilder<'a> {
 					return Ok(None);
 				}
 			}
-			if let Some((irf, id_col)) = self.lookup_join_index_ref(local_irs) {
+			if let Some((irf, _)) = self.lookup_join_index_ref(local_irs) {
 				let io =
-					IndexOption::new(irf, id.clone(), id_col, p, IndexOperator::Join(remote_ios));
+					IndexOption::new(irf, Some(id.clone()), p, IndexOperator::Join(remote_ios));
 				return Ok(Some(io));
 			}
 			return Ok(None);
@@ -493,35 +490,35 @@ impl<'a> TreeBuilder<'a> {
 		e: &Arc<Expression>,
 		p: IdiomPosition,
 	) -> Result<Option<IndexOption>, Error> {
-		for (irf, id_col) in irs.iter().filter(|(_, id_col)| 0.eq(id_col)) {
-			if let Some(ix) = self.index_map.definitions.get(*irf as usize) {
-				let op = match &ix.index {
-					Index::Idx => self.eval_index_operator(op, n, p),
-					Index::Uniq => self.eval_index_operator(op, n, p),
-					Index::Search {
-						..
-					} => Self::eval_matches_operator(op, n),
-					Index::MTree(_) => self.eval_mtree_knn(e, op, n)?,
-					Index::Hnsw(_) => self.eval_hnsw_knn(e, op, n)?,
-				};
+		let mut res = None;
+		for (ixr, col) in irs.iter() {
+			let op = match &ixr.index {
+				Index::Idx => self.eval_index_operator(ixr, op, n, p, *col),
+				Index::Uniq => self.eval_index_operator(ixr, op, n, p, *col),
+				Index::Search {
+					..
+				} if *col == 0 => Self::eval_matches_operator(op, n),
+				Index::MTree(_) if *col == 0 => self.eval_mtree_knn(e, op, n)?,
+				Index::Hnsw(_) if *col == 0 => self.eval_hnsw_knn(e, op, n)?,
+				_ => None,
+			};
+			if res.is_none() {
 				if let Some(op) = op {
-					let io = IndexOption::new(*irf, id.clone(), *id_col, p, op);
+					let io = IndexOption::new(ixr.clone(), Some(id.clone()), p, op);
 					self.index_map.options.push((e.clone(), io.clone()));
-					return Ok(Some(io));
+					res = Some(io);
 				}
 			}
 		}
-		Ok(None)
+		Ok(res)
 	}
 
-	fn lookup_join_index_ref(&self, irs: &LocalIndexRefs) -> Option<(IndexRef, IdiomCol)> {
-		for (irf, id_col) in irs.iter().filter(|(_, id_col)| 0.eq(id_col)) {
-			if let Some(ix) = self.index_map.definitions.get(*irf as usize) {
-				match &ix.index {
-					Index::Idx | Index::Uniq => return Some((*irf, *id_col)),
-					_ => {}
-				};
-			}
+	fn lookup_join_index_ref(&self, irs: &LocalIndexRefs) -> Option<(IndexReference, IdiomCol)> {
+		for (ixr, id_col) in irs.iter().filter(|(_, id_col)| 0.eq(id_col)) {
+			match &ixr.index {
+				Index::Idx | Index::Uniq => return Some((ixr.clone(), *id_col)),
+				_ => {}
+			};
 		}
 		None
 	}
@@ -587,28 +584,40 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	fn eval_index_operator(
-		&self,
+		&mut self,
+		ixr: &IndexReference,
 		op: &Operator,
 		n: &Node,
 		p: IdiomPosition,
+		col: IdiomCol,
 	) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
 			match (op, v, p) {
-				(Operator::Equal, v, _) => return Some(IndexOperator::Equality(v)),
-				(Operator::Exact, v, _) => return Some(IndexOperator::Exactness(v)),
+				(Operator::Equal | Operator::Exact, v, _) => {
+					self.index_map.check_compound(ixr, col, &v);
+					if col == 0 {
+						return Some(IndexOperator::Equality(vec![v]));
+					}
+				}
 				(Operator::Contain, v, IdiomPosition::Left) => {
-					return Some(IndexOperator::Equality(v))
+					if col == 0 {
+						return Some(IndexOperator::Equality(vec![v]));
+					}
 				}
 				(Operator::Inside, v, IdiomPosition::Right) => {
-					return Some(IndexOperator::Equality(v))
+					if col == 0 {
+						return Some(IndexOperator::Equality(vec![v]));
+					}
 				}
 				(
 					Operator::ContainAny | Operator::ContainAll | Operator::Inside,
 					v,
 					IdiomPosition::Left,
 				) => {
-					if let Value::Array(_) = v.as_ref() {
-						return Some(IndexOperator::Union(v));
+					if col == 0 {
+						if let Value::Array(_) = v.as_ref() {
+							return Some(IndexOperator::Union(v));
+						}
 					}
 				}
 				(
@@ -618,7 +627,11 @@ impl<'a> TreeBuilder<'a> {
 					| Operator::MoreThanOrEqual,
 					v,
 					p,
-				) => return Some(IndexOperator::RangePart(p.transform(op), v)),
+				) => {
+					if col == 0 {
+						return Some(IndexOperator::RangePart(p.transform(op), v));
+					}
+				}
 				_ => {}
 			}
 		}
@@ -634,13 +647,60 @@ impl<'a> TreeBuilder<'a> {
 	}
 }
 
-pub(super) type IndexRef = u16;
+pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Option<Arc<Value>>>>;
+
 /// For each expression a possible index option
 #[derive(Default)]
 pub(super) struct IndexesMap {
 	pub(super) options: Vec<(Arc<Expression>, IndexOption)>,
-	pub(super) definitions: Vec<Arc<DefineIndexStatement>>,
+	/// For each index, tells if the columns are requested
+	pub(super) compound_indexes: CompoundIndexes,
 	pub(super) order_limit: Option<IndexOption>,
+}
+
+impl IndexesMap {
+	pub(crate) fn check_compound(&mut self, ixr: &IndexReference, col: usize, val: &Arc<Value>) {
+		let cols = ixr.cols.len();
+		let values = self.compound_indexes.entry(ixr.clone()).or_insert(vec![None; cols]);
+		values[col] = Some(val.clone());
+	}
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct IndexReference {
+	indexes: Arc<[DefineIndexStatement]>,
+	idx: usize,
+}
+
+impl IndexReference {
+	pub(super) fn new(indexes: Arc<[DefineIndexStatement]>, idx: usize) -> Self {
+		Self {
+			indexes,
+			idx,
+		}
+	}
+}
+
+impl Hash for IndexReference {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		state.write_usize(self.idx);
+	}
+}
+
+impl PartialEq for IndexReference {
+	fn eq(&self, other: &Self) -> bool {
+		self.idx == other.idx
+	}
+}
+
+impl Eq for IndexReference {}
+
+impl Deref for IndexReference {
+	type Target = DefineIndexStatement;
+
+	fn deref(&self) -> &Self::Target {
+		&self.indexes[self.idx]
+	}
 }
 
 #[derive(Clone)]
@@ -657,6 +717,10 @@ impl SchemaCache {
 			indexes,
 			fields,
 		})
+	}
+
+	fn new_reference(&self, idx: usize) -> IndexReference {
+		IndexReference::new(self.indexes.clone(), idx)
 	}
 }
 

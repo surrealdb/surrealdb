@@ -5,13 +5,13 @@ use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::{Base, Ident, Object, Value, Version};
+use crate::sys::INFORMATION;
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
-use std::thread::available_parallelism;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -61,7 +61,7 @@ impl InfoStatement {
 						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
-						"system".to_string() => process(Arc::new([System::new()])),
+						"system".to_string() => system().await,
 						"users".to_string() => process(txn.all_root_users().await?),
 					}),
 					false => Value::from(map! {
@@ -86,9 +86,7 @@ impl InfoStatement {
 							}
 							out.into()
 						},
-						"system".to_string() => {
-							System::new().into()
-						},
+						"system".to_string() => system().await,
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_users().await?.iter() {
@@ -397,41 +395,14 @@ where
 	Value::Array(a.iter().cloned().map(InfoStructure::structure).collect())
 }
 
-#[derive(Clone)]
-struct System {
-	memory_allocated: usize,
-	parallelism: usize,
-}
-
-impl System {
-	#[cfg(not(feature = "allocator"))]
-	fn new() -> Self {
-		Self {
-			memory_allocated: 0,
-			parallelism: available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get()),
-		}
-	}
-
-	#[cfg(feature = "allocator")]
-	fn new() -> Self {
-		Self {
-			memory_allocated: crate::mem::ALLOC.current_usage(),
-			parallelism: available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get()),
-		}
-	}
-}
-
-impl From<System> for Value {
-	fn from(s: System) -> Self {
-		Self::from(map! {
-			"parallelism".to_string() =>
-		s.parallelism.into(),
-			"memory_allocated".to_string() => s.memory_allocated.into()})
-	}
-}
-
-impl InfoStructure for System {
-	fn structure(self) -> Value {
-		self.into()
-	}
+async fn system() -> Value {
+	let info = INFORMATION.lock().await;
+	Value::from(map! {
+		"available_parallelism".to_string() => info.available_parallelism.into(),
+		"cpu_usage".to_string() => info.cpu_usage.into(),
+		"load_average".to_string() => info.load_average.to_vec().into(),
+		"memory_usage".to_string() => info.memory_usage.into(),
+		"physical_cores".to_string() => info.physical_cores.into(),
+		"memory_allocated".to_string() => info.memory_allocated.into(),
+	})
 }

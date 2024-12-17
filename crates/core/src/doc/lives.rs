@@ -21,7 +21,7 @@ impl Document {
 	/// record belongs to. This functions loops
 	/// through the live queries and processes them
 	/// all within the currently running transaction.
-	pub async fn process_table_lives(
+	pub(super) async fn process_table_lives(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,

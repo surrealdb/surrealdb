@@ -175,7 +175,7 @@ async fn post_handler(
 	// Create a new HTTP instance
 	let mut rpc = PostRpcContext::new(&state.datastore, session, BTreeMap::new());
 	// Check to see available memory
-	if ALLOC.is_beyond_threshold().await {
+	if ALLOC.is_beyond_threshold() {
 		return Err(Error::ServerOverloaded);
 	}
 	// Parse the HTTP request body
