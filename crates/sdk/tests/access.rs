@@ -744,6 +744,11 @@ async fn access_bearer_purge() {
 		let ok = Regex::new(r"\[\{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}\]")
 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		// Purge expired grants, of which there are none
+		let res = &mut dbs.execute("ACCESS srv PURGE EXPIRED", &ses, None).await.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok = Regex::new(r"\[\]").unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Wait for all grants to expire
 		std::thread::sleep(Duration::from_secs(2));
 		// Purge grants expired for 2 seconds
