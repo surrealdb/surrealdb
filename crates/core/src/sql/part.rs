@@ -19,7 +19,7 @@ use super::{
 	value::idiom_recursion::{clean_iteration, compute_idiom_recursion, is_final, Recursion},
 };
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -38,12 +38,28 @@ pub enum Part {
 	#[revision(start = 2)]
 	Destructure(Vec<DestructurePart>),
 	Optional,
-	#[revision(start = 3)]
+	#[revision(
+		start = 3,
+		end = 4,
+		convert_fn = "convert_recurse_add_instruction",
+		fields_name = "OldRecurseFields"
+	)]
 	Recurse(Recurse, Option<Idiom>),
+	#[revision(start = 4)]
+	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),
 	#[revision(start = 3)]
 	Doc,
 	#[revision(start = 3)]
 	RepeatRecurse,
+}
+
+impl Part {
+	fn convert_recurse_add_instruction(
+		fields: OldRecurseFields,
+		_revision: u16,
+	) -> Result<Self, revision::Error> {
+		Ok(Part::Recurse(fields.0, fields.1, None))
+	}
 }
 
 impl From<i32> for Part {
@@ -194,8 +210,13 @@ impl fmt::Display for Part {
 				}
 			}
 			Part::Optional => write!(f, "?"),
-			Part::Recurse(v, nest) => {
-				write!(f, ".{{{v}}}")?;
+			Part::Recurse(v, nest, instruction) => {
+				write!(f, ".{{{v}")?;
+				if let Some(instruction) = instruction {
+					write!(f, "+{instruction}")?;
+				}
+				write!(f, "}}")?;
+
 				if let Some(nest) = nest {
 					write!(f, "({nest})")?;
 				}
@@ -504,6 +525,247 @@ impl fmt::Display for Recurse {
 				(None, Some(end)) => write!(f, "..{end}"),
 				(Some(beg), Some(end)) => write!(f, "{beg}..{end}"),
 			},
+		}
+	}
+}
+
+// ------------------------------
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum RecurseInstruction {
+	Path {
+		// Do we include the starting point in the paths?
+		inclusive: bool,
+	},
+	Collect {
+		// Do we include the starting point in the collection?
+		inclusive: bool,
+	},
+	Shortest {
+		// What ending node are we looking for?
+		expects: Value,
+		// Do we include the starting point in the collection?
+		inclusive: bool,
+	},
+}
+
+macro_rules! to_vec_value {
+	(&$v: expr) => {
+		match $v {
+			Value::Array(v) => &v.0,
+			v => &vec![v.to_owned()],
+		}
+	};
+	($v: expr) => {
+		match $v {
+			Value::Array(v) => v.0,
+			v => vec![v],
+		}
+	};
+}
+
+macro_rules! walk_paths {
+	(
+		$stk: ident,
+		$ctx: ident,
+		$opt: ident,
+		$doc: ident,
+		$rec: ident,
+		$finished: ident,
+		$inclusive: ident,
+		$expects: expr
+	) => {{
+		// Collection of paths we will continue processing
+		// in the next iteration
+		let mut open: Vec<Value> = vec![];
+
+		// Obtain an array value to iterate over
+		let paths = to_vec_value!(&$rec.current);
+
+		// Process all paths
+		for path in paths.iter() {
+			// Obtain an array value to iterate over
+			let path = to_vec_value!(&path);
+
+			// We always operate on the last value in the path
+			// If the path is empty, we skip it
+			let Some(last) = path.last() else {
+				continue;
+			};
+
+			// Apply the recursed path to the last value
+			let res = $stk.run(|stk| last.get(stk, $ctx, $opt, $doc, $rec.path)).await?;
+
+			// If we encounter a final value, we add it to the finished collection.
+			// - If expects is some, we are seeking for the shortest path, in which
+			//   case we eliminate the path.
+			// - In case this is the first iteration, and paths are not inclusive of
+			//   the starting point, we eliminate the it.
+			// - If we have not yet reached minimum depth, the path is eliminated aswell.
+			if is_final(&res) || &res == last {
+				if $expects.is_none()
+					&& ($rec.iterated > 1 || *$inclusive)
+					&& $rec.iterated >= $rec.min
+				{
+					$finished.push(path.to_owned().into());
+				}
+
+				continue;
+			}
+
+			// Obtain an array value to iterate over
+			let steps = to_vec_value!(res);
+
+			// Did we reach the final iteration?
+			let reached_max = $rec.max.is_some_and(|max| $rec.iterated >= max);
+
+			// For every step, prefix it with the current path
+			for step in steps.iter() {
+				// If this is the first iteration, and in case we are not inclusive
+				// of the starting point, we only add the step to the open collection
+				let val = if $rec.iterated == 1 && !*$inclusive {
+					Value::from(vec![step.to_owned()])
+				} else {
+					let mut path = path.to_owned();
+					path.push(step.to_owned());
+					Value::from(path)
+				};
+
+				// If we expect a certain value, let's check if we have reached it
+				// If so, we iterate over the steps and assign them to the finished collection
+				// We then return Value::None, indicating to the recursion loop that we are done
+				if let Some(expects) = $expects {
+					if step == expects {
+						let steps = to_vec_value!(val);
+
+						for step in steps {
+							$finished.push(step);
+						}
+
+						return Ok(Value::None);
+					}
+				}
+
+				// If we have reached the maximum amount of iterations, and are collecting
+				// individual paths, we assign them to the finished collection
+				if reached_max {
+					if $expects.is_none() {
+						$finished.push(val);
+					}
+				} else {
+					open.push(val);
+				}
+			}
+		}
+
+		Ok(open.into())
+	}};
+}
+
+impl RecurseInstruction {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		rec: Recursion<'_>,
+		finished: &mut Vec<Value>,
+	) -> Result<Value, Error> {
+		match self {
+			Self::Path {
+				inclusive,
+			} => {
+				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Option::<&Value>::None)
+			}
+			Self::Shortest {
+				expects,
+				inclusive,
+			} => walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Some(expects)),
+			Self::Collect {
+				inclusive,
+			} => {
+				macro_rules! persist {
+					($finished:ident, $subject:expr) => {
+						match $subject {
+							Value::Array(v) => {
+								for v in v.iter() {
+									// Add a unique value to the finished collection
+									if !$finished.contains(v) {
+										$finished.push(v.to_owned());
+									}
+								}
+							}
+							v => {
+								if !$finished.contains(v) {
+									// Add a unique value to the finished collection
+									$finished.push(v.to_owned());
+								}
+							}
+						}
+					};
+				}
+
+				// If we are inclusive, we add the starting point to the collection
+				if rec.iterated == 1 && *inclusive {
+					persist!(finished, rec.current);
+				}
+
+				// Apply the recursed path to the current values
+				let res = stk.run(|stk| rec.current.get(stk, ctx, opt, doc, rec.path)).await?;
+				// Clean the iteration
+				let res = clean_iteration(res);
+
+				// Persist any new values from the result
+				persist!(finished, &res);
+
+				// Continue
+				Ok(res)
+			}
+		}
+	}
+}
+
+impl fmt::Display for RecurseInstruction {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Path {
+				inclusive,
+			} => {
+				write!(f, "path")?;
+
+				if *inclusive {
+					write!(f, "+inclusive")?;
+				}
+
+				Ok(())
+			}
+			Self::Collect {
+				inclusive,
+			} => {
+				write!(f, "collect")?;
+
+				if *inclusive {
+					write!(f, "+inclusive")?;
+				}
+
+				Ok(())
+			}
+			Self::Shortest {
+				expects,
+				inclusive,
+			} => {
+				write!(f, "shortest={expects}")?;
+
+				if *inclusive {
+					write!(f, "+inclusive")?;
+				}
+
+				Ok(())
+			}
 		}
 	}
 }

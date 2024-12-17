@@ -1,7 +1,7 @@
 mod helpers;
 mod parse;
 use helpers::Test;
-use surrealdb::err::Error;
+use surrealdb::{err::Error, syn::error::RenderedError};
 
 #[tokio::test]
 async fn idiom_chain_part_optional() -> Result<(), Error> {
@@ -335,6 +335,14 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 		planet:earth.{3}(.contains).name;
 		planet:earth.{4}(.contains).name;
 
+		planet:earth.{2+path}(.contains);
+		planet:earth.{2+path}(.contains).name;
+		planet:earth.{2+path+inclusive}(.contains);
+
+		planet:earth.{2+collect}(.contains);
+		planet:earth.{2+collect}(.contains).name;
+		planet:earth.{2+collect+inclusive}(.contains);
+
 		planet:earth.{1}.contains.@;
 		planet:earth.{2}.contains.@;
 		planet:earth.{3}.contains.@;
@@ -394,6 +402,49 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 			'Victoria'
 		]")?
 		.expect_val("[]")?
+		.expect_val("[
+			[ country:us, state:california ],
+			[ country:us, state:texas ],
+			[ country:canada, province:ontario ],
+			[ country:canada, province:bc ],
+		]")?
+		.expect_val("[
+			[ 'United States', 'California' ],
+			[ 'United States', 'Texas' ],
+			[ 'Canada', 'Ontario' ],
+			[ 'Canada', 'British Columbia' ],
+		]")?
+		.expect_val("[
+			[ planet:earth, country:us, state:california ],
+			[ planet:earth, country:us, state:texas ],
+			[ planet:earth, country:canada, province:ontario ],
+			[ planet:earth, country:canada, province:bc ],
+		]")?
+		.expect_val("[
+			country:us,
+			country:canada,
+			state:california,
+			state:texas,
+			province:ontario,
+			province:bc,
+		]")?
+		.expect_val("[
+			'United States',
+			'Canada',
+			'California',
+			'Texas',
+			'Ontario',
+			'British Columbia',
+		]")?
+		.expect_val("[
+			planet:earth,
+			country:us,
+			country:canada,
+			state:california,
+			state:texas,
+			province:ontario,
+			province:bc,
+		]")?
 		.expect_val("[
 			country:us,
 			country:canada,
@@ -1099,5 +1150,93 @@ async fn idiom_function_argument_computation() -> Result<(), Error> {
 		.expect_val("NONE")?
 		.expect_val("123")?
 		.expect_val("456")?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn idiom_recursion_shortest_path() -> Result<(), Error> {
+	let sql = r#"
+		INSERT [
+			{ id: a:1, links: [a:2, a:4] },
+			{ id: a:2, links: [a:3] },
+			{ id: a:3, links: [a:5] },
+			{ id: a:4, links: [a:5] },
+			{ id: a:5 },
+		];
+
+		a:1.{..+shortest=a:5}.links;
+		a:1.{..+shortest=a:5+inclusive}.links;
+	"#;
+
+	Test::new(sql)
+		.await?
+		.expect_val(
+			"[
+			{ id: a:1, links: [a:2, a:4] },
+			{ id: a:2, links: [a:3] },
+			{ id: a:3, links: [a:5] },
+			{ id: a:4, links: [a:5] },
+			{ id: a:5 },
+		]",
+		)?
+		.expect_val(
+			"[
+			a:4,
+			a:5,
+		]",
+		)?
+		.expect_val(
+			"[
+			a:1,
+			a:4,
+			a:5,
+		]",
+		)?;
+	Ok(())
+}
+
+macro_rules! expect_parse_error {
+	($query:expr, $error:expr) => {{
+		let res = Test::new($query).await;
+		match res {
+			Err(Error::InvalidQuery(RenderedError {
+				errors,
+				..
+			})) => match errors.first() {
+				Some(err) => assert_eq!(err, $error),
+				None => panic!("Expected an error message"),
+			},
+			_ => panic!("Expected a parse error"),
+		}
+	}};
+}
+
+#[tokio::test]
+async fn idiom_recursion_invalid_instruction() -> Result<(), Error> {
+	expect_parse_error!(
+		"a:1.{..+invalid}",
+		"Unexpected instruction `invalid` expected `path`, `collect` or `shortest`"
+	);
+	expect_parse_error!(
+		"a:1.{..+path+invalid}",
+		"Unexpected option `invalid` expected `inclusive`"
+	);
+	expect_parse_error!("a:1.{..+shortest}", "Unexpected token `}`, expected =");
+	expect_parse_error!(
+		"a:1.{..+shortest=123}",
+		"Unexpected token `a number`, expected an identifier"
+	);
+	Ok(())
+}
+
+#[tokio::test]
+async fn idiom_recursion_instruction_plan_conflict() -> Result<(), Error> {
+	let sql = r#"
+		a:1.{..+path}.{ id, links: links.@ };
+	"#;
+
+	Test::new(sql)
+		.await?
+		.expect_error("Can not construct a recursion plan when an instruction is provided")?;
 	Ok(())
 }

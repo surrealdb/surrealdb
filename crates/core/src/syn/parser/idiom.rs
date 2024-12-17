@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		part::{DestructurePart, Recurse},
+		part::{DestructurePart, Recurse, RecurseInstruction},
 		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value,
 	},
 	syn::{
@@ -11,7 +11,10 @@ use crate::{
 	},
 };
 
-use super::{mac::unexpected, ParseResult, Parser};
+use super::{
+	mac::{expected, parse_option, unexpected},
+	ParseResult, Parser,
+};
 
 impl Parser<'_> {
 	pub(super) fn peek_continues_idiom(&mut self) -> bool {
@@ -406,10 +409,65 @@ impl Parser<'_> {
 
 		Ok(Recurse::Range(min, max))
 	}
+	/// Parse a recursion instruction following the inner recurse part, if any
+	pub(super) async fn parse_recurse_instruction(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<Option<RecurseInstruction>> {
+		let instruction = parse_option!(
+			self,
+			"instruction",
+			"path" => {
+				let mut inclusive = false;
+				loop {
+					parse_option!(
+						self,
+						"option",
+						"inclusive" => inclusive = true,
+						_ => break
+					);
+				};
+
+				Some(RecurseInstruction::Path { inclusive })
+			},
+			"collect" => {
+				let mut inclusive = false;
+				loop {
+					parse_option!(
+						self,
+						"option",
+						"inclusive" => inclusive = true,
+						_ => break
+					);
+				};
+
+				Some(RecurseInstruction::Collect { inclusive })
+			},
+			"shortest" => {
+				expected!(self, t!("="));
+				let expects = Value::from(self.parse_thing(ctx).await?);
+				let mut inclusive = false;
+				loop {
+					parse_option!(
+						self,
+						"option",
+						"inclusive" => inclusive = true,
+						_ => break
+					);
+				};
+
+				Some(RecurseInstruction::Shortest { expects, inclusive })
+			},
+			_ => None
+		);
+
+		Ok(instruction)
+	}
 	/// Parse a recurse part, expects `.{` to already be parsed
 	pub(super) async fn parse_recurse_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
 		let recurse = self.parse_recurse_inner()?;
+		let instruction = self.parse_recurse_instruction(ctx).await?;
 		self.expect_closing_delimiter(t!("}"), start)?;
 
 		let nest = if self.eat(t!("(")) {
@@ -421,7 +479,7 @@ impl Parser<'_> {
 			None
 		};
 
-		Ok(Part::Recurse(recurse, nest))
+		Ok(Part::Recurse(recurse, nest, instruction))
 	}
 	/// Parse the part after the `[` in a idiom
 	pub(super) async fn parse_bracket_part(

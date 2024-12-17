@@ -500,6 +500,12 @@ impl From<Vec<f32>> for Value {
 	}
 }
 
+impl From<Vec<f64>> for Value {
+	fn from(v: Vec<f64>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<Vec<usize>> for Value {
 	fn from(v: Vec<usize>) -> Self {
 		Value::Array(Array::from(v))

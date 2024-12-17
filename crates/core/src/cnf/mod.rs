@@ -103,3 +103,35 @@ pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 		.map(|s| s.parse::<usize>().unwrap_or(256))
 		.unwrap_or(256)
 });
+
+pub static MEMORY_THRESHOLD: LazyLock<usize> = std::sync::LazyLock::new(|| {
+	std::env::var("SURREAL_MEMORY_THRESHOLD")
+		.map(|input| {
+			// Trim the input of any spaces
+			let input = input.trim();
+			// Check if this contains a suffix
+			let split = input.find(|c: char| !c.is_ascii_digit());
+			// Split the value into number and suffix
+			let parts = match split {
+				Some(index) => input.split_at(index),
+				None => (input, ""),
+			};
+			// Parse the number as a positive number
+			let number = parts.0.parse::<usize>().unwrap_or_default();
+			// Parse the supplied suffix as a multiplier
+			let suffix = match parts.1.trim().to_lowercase().as_str() {
+				"" | "b" => 1,
+				"k" | "kb" | "kib" => 1024,
+				"m" | "mb" | "mib" => 1024 * 1024,
+				"g" | "gb" | "gib" => 1024 * 1024 * 1024,
+				_ => 1,
+			};
+			// Multiply the input by the suffix
+			let bytes = number.checked_mul(suffix).unwrap_or_default();
+			// Log the parsed memory threshold
+			debug!("Memory threshold guide: {input} ({bytes} bytes)");
+			// Return the total byte threshold
+			bytes
+		})
+		.unwrap_or(0)
+});

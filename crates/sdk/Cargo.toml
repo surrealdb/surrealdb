@@ -49,6 +49,7 @@ rustls = [
 ml = ["surrealdb-core/ml"]
 jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
+allocation-tracking = ["surrealdb-core/allocation-tracking"]
 # Special features
 kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
 kv-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]

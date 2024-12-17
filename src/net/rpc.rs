@@ -26,10 +26,10 @@ use http::header::SEC_WEBSOCKET_PROTOCOL;
 use http::HeaderMap;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
+use surrealdb::mem::ALLOC;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
 use surrealdb::rpc::method::Method;
-use surrealdb::sys;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
@@ -175,7 +175,7 @@ async fn post_handler(
 	// Create a new HTTP instance
 	let mut rpc = PostRpcContext::new(&state.datastore, session, BTreeMap::new());
 	// Check to see available memory
-	if sys::is_beyond_threshold().await {
+	if ALLOC.is_beyond_threshold() {
 		return Err(Error::ServerOverloaded);
 	}
 	// Parse the HTTP request body

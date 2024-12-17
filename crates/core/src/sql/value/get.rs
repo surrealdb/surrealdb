@@ -39,7 +39,7 @@ impl Value {
 		}
 		match path.first() {
 			// The knowledge of the current value is not relevant to Part::Recurse
-			Some(Part::Recurse(recurse, inner_path)) => {
+			Some(Part::Recurse(recurse, inner_path, instruction)) => {
 				// Find the path to recurse and what path to process after the recursion is finished
 				let (path, after) = match inner_path {
 					Some(p) => (p.0.as_slice(), path.next().to_vec()),
@@ -55,12 +55,23 @@ impl Value {
 					// If we do not find a root-level repeat-recurse symbol, we
 					// can scan for a nested one. We only ever allow for a single
 					// repeat recurse symbol, hence the separate check.
-					_ => match path.find_recursion_plan() {
-						Some((path, plan, local_after)) => {
-							(path, Some(plan), [local_after, &after].concat())
+					_ => {
+						// If the user already specified a recursion instruction,
+						// we will not process any recursion plans.
+						if instruction.is_some() {
+							match path.find_recursion_plan() {
+								Some(_) => return Err(Error::RecursionInstructionPlanConflict),
+								_ => (path, None, after),
+							}
+						} else {
+							match path.find_recursion_plan() {
+								Some((path, plan, local_after)) => {
+									(path, Some(plan), [local_after, &after].concat())
+								}
+								_ => (path, None, after),
+							}
 						}
-						_ => (path, None, after),
-					},
+					}
 				};
 
 				// Collect the min & max for the recursion context
@@ -73,6 +84,7 @@ impl Value {
 					current: self,
 					path,
 					plan: plan.as_ref(),
+					instruction: instruction.as_ref(),
 				};
 
 				// Compute the recursion

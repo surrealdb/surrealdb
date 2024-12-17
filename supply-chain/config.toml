@@ -851,6 +851,10 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.ntapi]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.num-complex]]
 version = "0.4.5"
 criteria = "safe-to-deploy"
@@ -1409,6 +1413,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.sync_wrapper]]
 version = "1.0.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.sysinfo]]
+version = "0.33.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tar]]
