@@ -464,15 +464,15 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "2.1.0"
-when = "2024-11-21"
+version = "2.1.3"
+when = "2024-12-10"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "2.1.0"
-when = "2024-11-21"
+version = "2.1.3"
+when = "2024-12-10"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -492,8 +492,8 @@ user-login = "mumoshu"
 user-name = "Yusuke Kuoka"
 
 [[publisher.surrealkv]]
-version = "0.6.0"
-when = "2024-11-23"
+version = "0.6.1"
+when = "2024-11-25"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1187,12 +1187,6 @@ who = "Johan Andersson <opensource@embark-studios.com>"
 criteria = "safe-to-deploy"
 version = "0.5.9"
 notes = "Proc macro. No unsafe usage or ambient capabilities"
-
-[[audits.embark-studios.audits.derive_more]]
-who = "Johan Andersson <opensource@embark-studios.com>"
-criteria = "safe-to-deploy"
-version = "0.99.17"
-notes = "No unsafe usage or ambient capabilities"
 
 [[audits.embark-studios.audits.ident_case]]
 who = "Johan Andersson <opensource@embark-studios.com>"
