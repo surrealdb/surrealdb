@@ -28,8 +28,12 @@ mod telemetry;
 
 use std::future::Future;
 use std::process::ExitCode;
+#[cfg(feature = "allocation-tracking")]
+use surrealdb_core::mem::enable_thread_alloc;
 
 fn main() -> ExitCode {
+	#[cfg(feature = "allocation-tracking")]
+	enable_thread_alloc();
 	// Initiate the command line
 	with_enough_stack(cli::init())
 }

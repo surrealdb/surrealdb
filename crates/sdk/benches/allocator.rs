@@ -1,10 +1,11 @@
 use criterion::{criterion_group, criterion_main, Criterion};
+use parking_lot::Mutex;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::hint::black_box;
 use std::ptr::null_mut;
-use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
 trait BenchAllocator: Send + Sync {
 	fn alloc(&self, size: usize);
@@ -12,6 +13,8 @@ trait BenchAllocator: Send + Sync {
 
 	fn total_usage(&self) -> usize;
 }
+
+static MAIN_PASSED: AtomicBool = AtomicBool::new(false);
 
 struct AtomicAllocator(AtomicUsize);
 
@@ -52,16 +55,23 @@ fn get_thread_node() -> *mut ThreadCounterNode {
 		let mut node_ptr = *cell.borrow();
 		if node_ptr.is_null() {
 			// Create a new node for this thread
-			let node = Box::new(ThreadCounterNode {
-				next: AtomicPtr::new(null_mut()),
-				counter: AtomicUsize::new(0),
-			});
+			let layout = Layout::new::<ThreadCounterNode>();
+			let node_raw = unsafe { System.alloc(layout) } as *mut ThreadCounterNode;
+			if node_raw.is_null() {
+				panic!("Failed to allocate ThreadCounterNode");
+			}
 
-			let node_raw = Box::into_raw(node);
+			// Initialize the newly allocated memory
+			unsafe {
+				node_raw.write(ThreadCounterNode {
+					next: AtomicPtr::new(null_mut()),
+					counter: AtomicUsize::new(0),
+				});
+			}
 
 			// Insert this thread's node into the global list
 			{
-				let _guard = GLOBAL_LIST_LOCK.lock().unwrap();
+				let _guard = GLOBAL_LIST_LOCK.lock();
 				let head = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
 				unsafe {
 					(*node_raw).next.store(head, Ordering::Relaxed);
@@ -80,29 +90,34 @@ struct PerThreadBenchAllocator;
 
 impl BenchAllocator for PerThreadBenchAllocator {
 	fn alloc(&self, size: usize) {
-		let node = get_thread_node();
-		unsafe {
-			(*node).counter.fetch_add(size, Ordering::Relaxed);
+		if MAIN_PASSED.load(Ordering::Relaxed) {
+			let node = get_thread_node();
+			unsafe {
+				(*node).counter.fetch_add(size, Ordering::Relaxed);
+			}
 		}
 	}
 
 	fn dealloc(&self, size: usize) {
-		let node = get_thread_node();
-		unsafe {
-			(*node).counter.fetch_sub(size, Ordering::Relaxed);
+		if MAIN_PASSED.load(Ordering::Relaxed) {
+			let node = get_thread_node();
+			unsafe {
+				(*node).counter.fetch_sub(size, Ordering::Relaxed);
+			}
 		}
 	}
 	fn total_usage(&self) -> usize {
 		let mut total = 0;
-		let mut current = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
+		if MAIN_PASSED.load(Ordering::Relaxed) {
+			let mut current = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
 
-		while !current.is_null() {
-			unsafe {
-				total += (*current).counter.load(Ordering::Relaxed);
-				current = (*current).next.load(Ordering::Relaxed);
+			while !current.is_null() {
+				unsafe {
+					total += (*current).counter.load(Ordering::Relaxed);
+					current = (*current).next.load(Ordering::Relaxed);
+				}
 			}
 		}
-
 		total
 	}
 }
@@ -110,6 +125,7 @@ impl BenchAllocator for PerThreadBenchAllocator {
 fn bench_alloc<T: BenchAllocator>(c: &mut Criterion, count: usize, bench_name: &str, allocator: T) {
 	c.bench_function(&bench_name, |b| {
 		b.iter(|| {
+			MAIN_PASSED.store(true, Ordering::Relaxed);
 			let r = (0..count)
 				.into_par_iter()
 				.map(|i| {
