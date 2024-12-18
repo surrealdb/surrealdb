@@ -431,31 +431,31 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the parser to have already eating the `REFERENCE` keyword
 	pub async fn parse_reference(&mut self, ctx: &mut Stk) -> ParseResult<Reference> {
-		let delete = if self.eat(t!("ON")) {
+		let on_delete = if self.eat(t!("ON")) {
 			expected!(self, t!("DELETE"));
 			let next = self.next();
 			match next.kind {
 				t!("BLOCK") => {
-					Some(ReferenceDeleteStrategy::Block)
+					ReferenceDeleteStrategy::Block
 				}
 				t!("CASCADE") => {
-					Some(ReferenceDeleteStrategy::Cascade)
+					ReferenceDeleteStrategy::Cascade
 				}
 				t!("IGNORE") => {
-					Some(ReferenceDeleteStrategy::Ignore)
+					ReferenceDeleteStrategy::Ignore
 				}
 				t!("THEN") => {
-					Some(ReferenceDeleteStrategy::Custom(
+					ReferenceDeleteStrategy::Custom(
 						ctx.run(|ctx| self.parse_value_field(ctx)).await?
-					))
+					)
 				}
 				_ => unexpected!(self, next, "`BLOCK`, `CASCASE`, `IGNORE` or `WIPE VALUE`"),
 			}
 		} else {
-			None
+			ReferenceDeleteStrategy::Ignore
 		};
 
-		Ok(Reference { delete })
+		Ok(Reference { on_delete })
 	}
 
 	/// Parses a view production

@@ -10,17 +10,12 @@ use super::Value;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Reference {
-	pub delete: Option<ReferenceDeleteStrategy>,
+	pub on_delete: ReferenceDeleteStrategy,
 }
 
 impl fmt::Display for Reference {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REFERENCE")?;
-        if let Some(delete) = &self.delete {
-            write!(f, " ON DELETE {}", delete)?;
-        }
-
-        Ok(())
+		write!(f, "REFERENCE ON DELETE {}", &self.on_delete)
 	}
 }
 

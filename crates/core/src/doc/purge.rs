@@ -97,52 +97,47 @@ impl Document {
 					for key in keys.drain(..) {
 						let r#ref = Ref::from(&key);
 						let fd = txn.get_tb_field(ns, db, r#ref.ft, r#ref.ff).await?;
-						println!("fd: {:?}", fd);
 						if let Some(reference) = &fd.reference {
-							println!("reference: {:?}", reference);
-							if let Some(delete_strategy) = &reference.delete {
-								println!("delete_strategy: {:?}", delete_strategy);
-								match delete_strategy {
-									ReferenceDeleteStrategy::Ignore => (),
-									ReferenceDeleteStrategy::Block => {
-										let thing = Thing {
-											tb: r#ref.ft.to_string(),
-											id: r#ref.fk.clone(),
-										};
-	
-										return Err(Error::ReferencedDeleteBlocked(rid.to_string(), thing.to_string()));
-									}
-									ReferenceDeleteStrategy::Cascade => {
-										let thing = Thing {
-											tb: r#ref.ft.to_string(),
-											id: r#ref.fk.clone(),
-										};
-	
-										// Setup the delete statement
-										let stm = DeleteStatement {
-											what: Values(vec![Value::from(thing)]),
-											..DeleteStatement::default()
-										};
-										// Execute the delete statement
-										stm.compute(stk, ctx, opt, None).await?;
-									}
-									ReferenceDeleteStrategy::Custom(v) => {
-										let reference = Value::from(rid.as_ref().clone());
-										let this = Thing {
-											tb: r#ref.ft.to_string(),
-											id: r#ref.fk.clone(),
-										};
-	
-										let mut ctx = MutableContext::new(ctx);
-										ctx.add_value("reference", reference.into());
-										let ctx = ctx.freeze();
+							match &reference.on_delete {
+								ReferenceDeleteStrategy::Ignore => (),
+								ReferenceDeleteStrategy::Block => {
+									let thing = Thing {
+										tb: r#ref.ft.to_string(),
+										id: r#ref.fk.clone(),
+									};
 
-										let doc: CursorValue = Value::None.into();
-										let doc = CursorDoc::new(Some(this.into()), None, doc);
-
-										v.compute(stk, &ctx, opt, Some(&doc)).await?;
-									} 
+									return Err(Error::ReferencedDeleteBlocked(rid.to_string(), thing.to_string()));
 								}
+								ReferenceDeleteStrategy::Cascade => {
+									let thing = Thing {
+										tb: r#ref.ft.to_string(),
+										id: r#ref.fk.clone(),
+									};
+
+									// Setup the delete statement
+									let stm = DeleteStatement {
+										what: Values(vec![Value::from(thing)]),
+										..DeleteStatement::default()
+									};
+									// Execute the delete statement
+									stm.compute(stk, ctx, opt, None).await?;
+								}
+								ReferenceDeleteStrategy::Custom(v) => {
+									let reference = Value::from(rid.as_ref().clone());
+									let this = Thing {
+										tb: r#ref.ft.to_string(),
+										id: r#ref.fk.clone(),
+									};
+
+									let mut ctx = MutableContext::new(ctx);
+									ctx.add_value("reference", reference.into());
+									let ctx = ctx.freeze();
+
+									let doc: CursorValue = Value::None.into();
+									let doc = CursorDoc::new(Some(this.into()), None, doc);
+
+									v.compute(stk, &ctx, opt, Some(&doc)).await?;
+								} 
 							}
 						}
 
