@@ -7,8 +7,11 @@ use std::sync::LazyLock;
 
 pub fn spawn<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static) -> Task<T> {
 	static GLOBAL: LazyLock<Executor<'_>> = LazyLock::new(|| {
+		// The name of the thread for the task executor
+		let name = "surrealdb-executor".to_string();
 		// Spawn a single thread for CPU intensive tasks
 		std::thread::Builder::new()
+			.name(name)
 			.spawn(|| {
 				catch_unwind(|| {
 					// Run the task executor indefinitely
