@@ -901,7 +901,7 @@ impl Parser<'_> {
 				}
 				t!("REFERENCE") => {
 					self.pop_peek();
-					res.reference = Some(self.parse_reference()?);
+					res.reference = Some(self.parse_reference(ctx).await?);
 				}
 				_ => break,
 			}

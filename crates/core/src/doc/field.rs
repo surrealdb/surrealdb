@@ -549,15 +549,14 @@ impl<'a> FieldEditContext<'a> {
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<(), Error> {
 		if let Some(_) = self.def.reference {
 			let doc = Some(&self.doc.current);
-			let old = self.old.get(self.stk, self.ctx, self.opt, doc, &self.def.name).await?;
+			let old = self.old.as_ref();
 
-			let action = if val == &old {
+			let action = if val == old {
 				RefAction::Ignore
 			} else if let Value::Thing(thing) = &old {
-				let path = self.def.name[..self.def.name.len() - 1].to_vec();
-				let parent = self.old.get(self.stk, self.ctx, self.opt, doc, &path).await?;
-				if let Value::Array(arr) = parent {
-					if arr.iter().any(|v| v == &old) {
+				let others = self.doc.current.doc.get(self.stk, self.ctx, self.opt, doc, &self.def.name).await?;
+				if let Value::Array(arr) = others {
+					if arr.iter().any(|v| v == old) {
 						RefAction::Ignore
 					} else {
 						RefAction::Delete(thing)

@@ -2,6 +2,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use super::Value;
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
 #[serde(rename = "$surrealdb::private::sql::Range")]
@@ -31,7 +33,7 @@ pub enum ReferenceDeleteStrategy {
     Block,
     Ignore,
     Cascade,
-    WipeValue,
+    Custom(Value),
 }
 
 impl fmt::Display for ReferenceDeleteStrategy {
@@ -40,7 +42,7 @@ impl fmt::Display for ReferenceDeleteStrategy {
             ReferenceDeleteStrategy::Block => write!(f, "BLOCK"),
             ReferenceDeleteStrategy::Ignore => write!(f, "IGNORE"),
             ReferenceDeleteStrategy::Cascade => write!(f, "CASCADE"),
-            ReferenceDeleteStrategy::WipeValue => write!(f, "WIPE VALUE"),
+            ReferenceDeleteStrategy::Custom(v) => write!(f, "THEN {}", v),
         }
 	}
 }

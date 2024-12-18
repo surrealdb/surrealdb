@@ -430,7 +430,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to have already eating the `REFERENCE` keyword
-	pub fn parse_reference(&mut self) -> ParseResult<Reference> {
+	pub async fn parse_reference(&mut self, ctx: &mut Stk) -> ParseResult<Reference> {
 		let delete = if self.eat(t!("ON")) {
 			expected!(self, t!("DELETE"));
 			let next = self.next();
@@ -444,9 +444,10 @@ impl Parser<'_> {
 				t!("IGNORE") => {
 					Some(ReferenceDeleteStrategy::Ignore)
 				}
-				t!("WIPE") => {
-					expected!(self, t!("VALUE"));
-					Some(ReferenceDeleteStrategy::WipeValue)
+				t!("THEN") => {
+					Some(ReferenceDeleteStrategy::Custom(
+						ctx.run(|ctx| self.parse_value_field(ctx)).await?
+					))
 				}
 				_ => unexpected!(self, next, "`BLOCK`, `CASCASE`, `IGNORE` or `WIPE VALUE`"),
 			}
