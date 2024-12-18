@@ -426,7 +426,7 @@ impl Connection {
 								// Otherwise process the request message
 								else {
 									// Acquire concurrent request rate limiter
-									let permit = semaphore.acquire_owned().await.unwrap();
+									let permit = semaphore.acquire().await.unwrap();
 									// Check to see whether we have available memory
 									if ALLOC.is_beyond_threshold() {
 										// Process the response
