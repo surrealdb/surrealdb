@@ -28,14 +28,18 @@ impl fmt::Display for Reference {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum ReferenceDeleteStrategy {
-	WipeRecord,
+    Block,
+    Ignore,
+    Cascade,
     WipeValue,
 }
 
 impl fmt::Display for ReferenceDeleteStrategy {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-            ReferenceDeleteStrategy::WipeRecord => write!(f, "WIPE RECORD"),
+            ReferenceDeleteStrategy::Block => write!(f, "BLOCK"),
+            ReferenceDeleteStrategy::Ignore => write!(f, "IGNORE"),
+            ReferenceDeleteStrategy::Cascade => write!(f, "CASCADE"),
             ReferenceDeleteStrategy::WipeValue => write!(f, "WIPE VALUE"),
         }
 	}

@@ -1234,6 +1234,10 @@ pub enum Error {
 	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
 	#[error("Can not construct a recursion plan when an instruction is provided")]
 	RecursionInstructionPlanConflict,
+
+	/// The record 0 cannot be deleted, because it's referenced and blocked by {1}
+	#[error("Cannot delete `{0}` as it is referenced and blocked by `{1}`")]
+	ReferencedDeleteBlocked(String, String),
 }
 
 impl From<Error> for String {

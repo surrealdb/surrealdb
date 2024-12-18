@@ -34,26 +34,59 @@ pub fn tb((arg,): (Thing,)) -> Result<Value, Error> {
 
 pub async fn refs(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(id, ft,): (Thing, String,)
+	(id, ft,ff): (Thing, Option<String>, Option<String>,)
 ) -> Result<Value, Error> {
 	let ns = opt.ns()?;
 	let db = opt.db()?;
-	let prefix = crate::key::r#ref::ftprefix(ns, db, &id.tb, &id.id, &ft);
-	let suffix = crate::key::r#ref::ftsuffix(ns, db, &id.tb, &id.id, &ft);
-	println!("prefix: {:?}", prefix);
-	println!("suffix: {:?}", suffix);
-	let rng = prefix..suffix;
+	let ff = match ff {
+		Some(ff) => Some(crate::syn::idiom(&ff)?),
+		None => None,
+	};
 
+	let (prefix, suffix, ff) = match (ft, ff) {
+		(Some(ft), Some(ff)) => {
+			let ff = ff.to_string();
+
+			(
+				crate::key::r#ref::ffprefix(ns, db, &id.tb, &id.id, &ft, &ff),
+				crate::key::r#ref::ffsuffix(ns, db, &id.tb, &id.id, &ft, &ff),
+				None,
+			)
+		},
+		(Some(ft), None) => (
+			crate::key::r#ref::ftprefix(ns, db, &id.tb, &id.id, &ft),
+			crate::key::r#ref::ftsuffix(ns, db, &id.tb, &id.id, &ft),
+			None,
+		),
+		(None, None) => (
+			crate::key::r#ref::prefix(ns, db, &id.tb, &id.id),
+			crate::key::r#ref::suffix(ns, db, &id.tb, &id.id),
+			None
+		),
+		(None, Some(ff)) => (
+			crate::key::r#ref::prefix(ns, db, &id.tb, &id.id),
+			crate::key::r#ref::suffix(ns, db, &id.tb, &id.id),
+			Some(ff.to_string())
+		)
+	};
+
+	let rng = prefix..suffix;
 	let raw = ctx.tx().keys(rng, 1000, opt.version).await?;
+
 	let val: Vec<Value> = raw
 		.iter()
-		.map(|x| {
+		.filter_map(|x| {
 			let key = Ref::from(x);
-			println!("found: {:?}", key);
-			Value::Thing(Thing {
-				tb: key.ft.to_string(),
+			if let Some(ff) = &ff {
+				if key.ff != ff {
+					return None;
+				}
+			}
+
+			Some(Value::Thing(Thing {
+				tb: key.tb.to_string(),
 				id: key.fk,
-			})
+			}))
 		})
 		.collect();
 

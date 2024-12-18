@@ -259,7 +259,13 @@ struct FieldEditContext<'a> {
 	inp: Arc<Value>,
 }
 
-impl FieldEditContext<'_> {
+enum RefAction<'a> {
+	Set(&'a Thing),
+	Delete(&'a Thing),
+	Ignore,
+}
+
+impl<'a> FieldEditContext<'a> {
 	/// Process any TYPE clause for the field definition
 	async fn process_type_clause(&self, val: Value) -> Result<Value, Error> {
 		// Check for a TYPE clause
@@ -542,22 +548,60 @@ impl FieldEditContext<'_> {
 
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<(), Error> {
 		if let Some(_) = self.def.reference {
-			if let Value::Thing(thing) = val {
-				let key = crate::key::r#ref::new(
-					self.opt.ns()?,
-					self.opt.db()?,
-					&thing.tb,
-					&thing.id,
-					&self.rid,
-					&self.def.name,
-				).encode().unwrap();
+			let doc = Some(&self.doc.current);
+			let old = self.old.get(self.stk, self.ctx, self.opt, doc, &self.def.name).await?;
 
-				println!("set: {:?}", key);
+			let action = if val == &old {
+				RefAction::Ignore
+			} else if let Value::Thing(thing) = &old {
+				let path = self.def.name[..self.def.name.len() - 1].to_vec();
+				let parent = self.old.get(self.stk, self.ctx, self.opt, doc, &path).await?;
+				if let Value::Array(arr) = parent {
+					if arr.iter().any(|v| v == &old) {
+						RefAction::Ignore
+					} else {
+						RefAction::Delete(thing)
+					}
+				} else {
+					RefAction::Delete(thing)
+				}
+			} else if let Value::Thing(thing) = val {
+				RefAction::Set(thing)
+			} else {
+				RefAction::Ignore
+			};
 
-				self.ctx.tx().set(key, vec![], None).await?;
+			match action {
+				RefAction::Set(thing) => {
+					let key = crate::key::r#ref::new(
+						self.opt.ns()?,
+						self.opt.db()?,
+						&thing.tb,
+						&thing.id,
+						&self.rid.tb,
+						&self.def.name.to_string(),
+						&self.rid.id,
+					).encode().unwrap();
+	
+					self.ctx.tx().set(key, vec![], None).await
+				}
+				RefAction::Delete(thing) => {
+					let key = crate::key::r#ref::new(
+						self.opt.ns()?,
+						self.opt.db()?,
+						&thing.tb,
+						&thing.id,
+						&self.rid.tb,
+						&self.def.name.to_string(),
+						&self.rid.id,
+					).encode().unwrap();
+	
+					self.ctx.tx().del(key).await
+				}
+				RefAction::Ignore => Ok(()),
 			}
+		} else {
+			Ok(())
 		}
-
-		Ok(())
 	}
 }

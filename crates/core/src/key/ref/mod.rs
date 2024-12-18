@@ -2,8 +2,6 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::sql::id::Id;
-use crate::sql::thing::Thing;
-use crate::sql::Idiom;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -68,6 +66,39 @@ impl<'a> PrefixFt<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+struct PrefixFf<'a> {
+	__: u8,
+	_a: u8,
+	pub ns: &'a str,
+	_b: u8,
+	pub db: &'a str,
+	_c: u8,
+	pub tb: &'a str,
+	_d: u8,
+	pub id: Id,
+	pub ft: &'a str,
+	pub ff: &'a str,
+}
+
+impl<'a> PrefixFf<'a> {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, ft: &'a str, ff: &'a str) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'*',
+			tb,
+			_d: b'&',
+			id: id.to_owned(),
+			ft,
+			ff,
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 #[non_exhaustive]
 pub struct Ref<'a> {
 	__: u8,
@@ -80,8 +111,8 @@ pub struct Ref<'a> {
 	_d: u8,
 	pub id: Id,
 	pub ft: &'a str,
+	pub ff: &'a str,
 	pub fk: Id,
-	pub ff: Idiom,
 }
 
 pub fn new<'a>(
@@ -89,10 +120,11 @@ pub fn new<'a>(
 	db: &'a str,
 	tb: &'a str,
 	id: &Id,
-	fk: &'a Thing,
-	ff: &'a Idiom,
+	ft: &'a str,
+	ff: &'a str,
+	fk: &Id,
 ) -> Ref<'a> {
-	Ref::new(ns, db, tb, id.to_owned(), fk, ff)
+	Ref::new(ns, db, tb, id.to_owned(), ft, ff, fk.to_owned())
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Vec<u8> {
@@ -119,6 +151,18 @@ pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Vec<u8> {
 	k
 }
 
+pub fn ffprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Vec<u8> {
+	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode().unwrap();
+	k.extend_from_slice(&[0x00]);
+	k
+}
+
+pub fn ffsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Vec<u8> {
+	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode().unwrap();
+	k.extend_from_slice(&[0xff]);
+	k
+}
+
 impl Categorise for Ref<'_> {
 	fn categorise(&self) -> Category {
 		Category::Ref
@@ -126,32 +170,7 @@ impl Categorise for Ref<'_> {
 }
 
 impl<'a> Ref<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id, fk: &'a Thing, ff: &'a Idiom) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb,
-			_d: b'&',
-			id,
-			ft: &fk.tb,
-			fk: fk.id.to_owned(),
-			ff: ff.to_owned(),
-		}
-	}
-
-	pub fn new_from_id(
-		ns: &'a str,
-		db: &'a str,
-		tb: &'a str,
-		id: Id,
-		ft: &'a str,
-		fk: Id,
-		ff: Idiom,
-	) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id, ft: &'a str, ff: &'a str, fk: Id) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -163,8 +182,8 @@ impl<'a> Ref<'a> {
 			_d: b'&',
 			id,
 			ft,
-			fk,
 			ff,
+			fk,
 		}
 	}
 }
@@ -174,22 +193,20 @@ mod tests {
 	#[test]
 	fn key() {
 		use super::*;
-		use crate::syn::Parse;
-		let fk = Thing::parse("other:test");
-		let ff = Idiom::parse("test.*");
 		#[rustfmt::skip]
 		let val = Ref::new(
 			"testns",
 			"testdb",
 			"testtb",
 			"testid".into(),
-			&fk,
-			&ff,
+			"othertb",
+			"test.*",
+			"otherid".into(),
 		);
 		let enc = Ref::encode(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\x00&\0\0\0\x01testid\0other\0\0\0\0\x01test\0"
+			b"/*testns\0*testdb\0*testtb\x00&\0\0\0\x01testid\0othertb\0test.*\0\0\0\0\x01otherid\0"
 		);
 
 		let dec = Ref::decode(&enc).unwrap();
