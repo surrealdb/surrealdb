@@ -1,6 +1,9 @@
 use crate::ctx::Context;
+use crate::ctx::MutableContext;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::doc::CursorDoc;
+use crate::doc::CursorValue;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::dir::Dir;
@@ -94,8 +97,11 @@ impl Document {
 					for key in keys.drain(..) {
 						let r#ref = Ref::from(&key);
 						let fd = txn.get_tb_field(ns, db, r#ref.ft, r#ref.ff).await?;
+						println!("fd: {:?}", fd);
 						if let Some(reference) = &fd.reference {
+							println!("reference: {:?}", reference);
 							if let Some(delete_strategy) = &reference.delete {
+								println!("delete_strategy: {:?}", delete_strategy);
 								match delete_strategy {
 									ReferenceDeleteStrategy::Ignore => (),
 									ReferenceDeleteStrategy::Block => {
@@ -120,7 +126,22 @@ impl Document {
 										// Execute the delete statement
 										stm.compute(stk, ctx, opt, None).await?;
 									}
-									ReferenceDeleteStrategy::WipeValue => ()
+									ReferenceDeleteStrategy::Custom(v) => {
+										let reference = Value::from(rid.as_ref().clone());
+										let this = Thing {
+											tb: r#ref.ft.to_string(),
+											id: r#ref.fk.clone(),
+										};
+	
+										let mut ctx = MutableContext::new(ctx);
+										ctx.add_value("reference", reference.into());
+										let ctx = ctx.freeze();
+
+										let doc: CursorValue = Value::None.into();
+										let doc = CursorDoc::new(Some(this.into()), None, doc);
+
+										v.compute(stk, &ctx, opt, Some(&doc)).await?;
+									} 
 								}
 							}
 						}

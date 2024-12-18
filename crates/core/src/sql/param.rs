@@ -59,7 +59,10 @@ impl Param {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.doc.as_ref().compute(stk, ctx, opt, doc).await,
+				Some(v) => match &v.rid {
+					Some(v) => Ok(Value::Thing(v.clone().deref().to_owned())),
+					None => v.doc.as_ref().compute(stk, ctx, opt, doc).await,
+				},
 				// The base document does not exist
 				None => Ok(Value::None),
 			},
