@@ -52,7 +52,7 @@ mod mem {
 	include!("snapshot.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
-	include!("multiwriter_same_keys_allow.rs");
+	include!("multiwriter_same_keys_conflict.rs");
 	include!("timestamp_to_versionstamp.rs");
 }
 
@@ -113,7 +113,7 @@ mod surrealkv {
 	include!("snapshot.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
-	include!("multiwriter_same_keys_allow.rs");
+	include!("multiwriter_same_keys_conflict.rs");
 	include!("timestamp_to_versionstamp.rs");
 }
 
