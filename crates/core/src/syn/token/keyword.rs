@@ -153,6 +153,7 @@ keyword! {
 	Range => "RANGE",
 	Readonly => "READONLY",
 	Rebuild => "REBUILD",
+	Refresh => "REFRESH",
 	Relate => "RELATE",
 	Relation => "RELATION",
 	Remove => "REMOVE",

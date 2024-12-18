@@ -66,7 +66,7 @@ mod graphql_integration {
 			let res = client.post(gql_url).body("").send().await?;
 			assert_eq!(res.status(), 400);
 			let body = res.text().await?;
-			assert!(body.contains("no tables found in database"), "body: {body}")
+			assert!(body.contains("no items found in database"), "body: {body}")
 		}
 
 		// add schema and data
@@ -418,6 +418,91 @@ mod graphql_integration {
 				]
 			);
 			assert_equal_arrs!(fields, &expected_fields);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn functions() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// add schema and data
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL auto;
+                    DEFINE TABLE foo SCHEMAFUL;
+                    DEFINE FIELD val ON foo TYPE int;
+                    CREATE foo:1 set val = 86;
+					DEFINE FUNCTION fn::num() -> int {return 42;};
+					DEFINE FUNCTION fn::double($x: int) -> int {return $x * 2};
+					DEFINE FUNCTION fn::foo() -> record<foo> {return foo:1};
+					DEFINE FUNCTION fn::record() -> record {return foo:1};
+                "#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// functions returning records
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query{fn_foo{id, val}, fn_record {id ...on foo {val}}}"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			let expected = json!({
+			  "data": {
+				"fn_foo": {
+				  "id": "foo:1",
+				  "val": 86
+				},
+				"fn_record": {
+					"id": "foo:1",
+					"val": 86
+				  }
+			  }
+			});
+			assert_eq!(expected.to_string(), body)
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query{fn_num, fn_double(x: 21)}"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.text().await?;
+			let expected = json!({
+			  "data": {
+				"fn_num": 42,
+				"fn_double": 42
+			  }
+			});
+			assert_eq!(expected.to_string(), body)
 		}
 
 		Ok(())

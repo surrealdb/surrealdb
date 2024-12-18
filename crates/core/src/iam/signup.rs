@@ -1,5 +1,5 @@
-use super::verify::authenticate_record;
-use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use super::access::{authenticate_record, create_refresh_token_record};
+use crate::cnf::{EXPERIMENTAL_BEARER_ACCESS, INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -12,14 +12,38 @@ use crate::sql::Object;
 use crate::sql::Value;
 use chrono::Utc;
 use jsonwebtoken::{encode, Header};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct SignupData {
+	pub token: Option<String>,
+	pub refresh: Option<String>,
+}
+
+impl From<SignupData> for Value {
+	fn from(v: SignupData) -> Value {
+		let mut out = Object::default();
+		if let Some(token) = v.token {
+			out.insert("token".to_string(), token.into());
+		}
+		if let Some(refresh) = v.refresh {
+			out.insert("refresh".to_string(), refresh.into());
+		}
+		out.into()
+	}
+}
 
 pub async fn signup(
 	kvs: &Datastore,
 	session: &mut Session,
 	vars: Object,
-) -> Result<Option<String>, Error> {
+) -> Result<SignupData, Error> {
 	// Check vars contains only computed values
 	vars.validate_computed()?;
 	// Parse the specified variables
@@ -48,7 +72,7 @@ pub async fn db_access(
 	db: String,
 	ac: String,
 	vars: Object,
-) -> Result<Option<String>, Error> {
+) -> Result<SignupData, Error> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -109,6 +133,28 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
+											// Create refresh token if defined for the record access method
+											let refresh = match &at.bearer {
+												Some(_) => {
+													// TODO(gguillemas): Remove this once bearer access is no longer experimental
+													if !*EXPERIMENTAL_BEARER_ACCESS {
+														debug!("Will not create refresh token with disabled bearer access feature");
+														None
+													} else {
+														Some(
+															create_refresh_token_record(
+																kvs,
+																av.name.clone(),
+																&ns,
+																&db,
+																rid.clone(),
+															)
+															.await?,
+														)
+													}
+												}
+												None => None,
+											};
 											// Log the authenticated access method info
 											trace!("Signing up with access method `{}`", ac);
 											// Create the authentication token
@@ -129,7 +175,10 @@ pub async fn db_access(
 											// Check the authentication token
 											match enc {
 												// The auth token was created successfully
-												Ok(tk) => Ok(Some(tk)),
+												Ok(token) => Ok(SignupData {
+													token: Some(token),
+													refresh,
+												}),
 												_ => Err(Error::TokenMakingFailed),
 											}
 										}
@@ -291,6 +340,199 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn test_signup_record_with_refresh() {
+		use crate::iam::signin;
+
+		// Test without refresh
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNUP (
+						CREATE user CONTENT {
+							name: $user,
+							pass: crypto::argon2::generate($pass)
+						}
+					)
+					DURATION FOR GRANT 1w, FOR SESSION 2h
+				;
+
+				CREATE user:test CONTENT {
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signup with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("user", "user".into());
+			vars.insert("pass", "pass".into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			match res {
+				Ok(data) => {
+					assert!(data.refresh.is_none(), "Refresh token was unexpectedly returned")
+				}
+				Err(e) => panic!("Failed to signup with credentials: {e}"),
+			}
+		}
+		// Test with refresh
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNUP (
+						CREATE user CONTENT {
+							name: $user,
+							pass: crypto::argon2::generate($pass)
+						}
+					)
+					WITH REFRESH
+					DURATION FOR GRANT 1w, FOR SESSION 2h
+				;
+
+				CREATE user:test CONTENT {
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signup with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("user", "user".into());
+			vars.insert("pass", "pass".into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signup with credentials: {:?}", res);
+			let refresh = match res {
+				Ok(data) => match data.refresh {
+					Some(refresh) => refresh,
+					None => panic!("Refresh token was not returned"),
+				},
+				Err(e) => panic!("Failed to signup with credentials: {e}"),
+			};
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert!(sess.au.id().starts_with("user:"));
+			assert!(sess.au.is_record());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			// Record users should not have roles
+			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+			// Signin with the refresh token
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("refresh", refresh.clone().into());
+			let res = signin::db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+			// Authentication should be identical as with user credentials
+			match res {
+				Ok(data) => match data.refresh {
+					Some(new_refresh) => assert!(
+						new_refresh != refresh,
+						"New refresh token is identical to used one"
+					),
+					None => panic!("Refresh token was not returned"),
+				},
+				Err(e) => panic!("Failed to signin with credentials: {e}"),
+			};
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert!(sess.au.id().starts_with("user:"));
+			assert!(sess.au.is_record());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			// Record users should not have roles
+			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should match the defined duration
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow the defined duration"
+			);
+			// Attempt to sign in with the original refresh token
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("refresh", refresh.into());
+			let res = signin::db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+			match res {
+				Ok(data) => panic!("Unexpected successful signin: {:?}", data),
+				Err(Error::InvalidAuth) => {} // ok
+				Err(e) => panic!("Expected InvalidAuth, but got: {e}"),
+			}
+		}
+	}
+
+	#[tokio::test]
 	async fn test_record_signup_with_jwt_issuer() {
 		use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 		// Test with valid parameters
@@ -407,7 +649,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			// Decode token and check that it has been issued as intended
-			if let Ok(Some(tk)) = res {
+			if let Ok(SignupData {
+				token: Some(tk),
+				..
+			}) = res
+			{
 				// Check that token can be verified with the defined algorithm
 				let val = Validation::new(Algorithm::RS256);
 				// Check that token can be verified with the defined public key

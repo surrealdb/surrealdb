@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-pub static GRANT_BEARER_PREFIX: &str = "surreal-bearer";
 // Keys and their identifiers are generated randomly from a 62-character pool.
 pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =
 	b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -26,9 +25,6 @@ pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =
 pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 // With 24 characters from the pool, the key part has ~140 bits of entropy.
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
-// Total bearer key length.
-pub static GRANT_BEARER_LENGTH: usize =
-	GRANT_BEARER_PREFIX.len() + 1 + GRANT_BEARER_ID_LENGTH + 1 + GRANT_BEARER_KEY_LENGTH;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -256,7 +252,7 @@ pub struct GrantBearer {
 
 impl GrantBearer {
 	#[allow(clippy::new_without_default)]
-	pub fn new() -> Self {
+	pub fn new(prefix: &str) -> Self {
 		let id = format!(
 			"{}{}",
 			// The pool for the first character of the key identifier excludes digits.
@@ -266,7 +262,7 @@ impl GrantBearer {
 		let secret = random_string(GRANT_BEARER_KEY_LENGTH, GRANT_BEARER_CHARACTER_POOL);
 		Self {
 			id: id.clone().into(),
-			key: format!("{GRANT_BEARER_PREFIX}-{id}-{secret}").into(),
+			key: format!("{prefix}-{id}-{secret}").into(),
 		}
 	}
 }
@@ -282,12 +278,11 @@ fn random_string(length: usize, pool: &[u8]) -> String {
 	string
 }
 
-async fn compute_grant(
+pub async fn create_grant(
 	stmt: &AccessStatementGrant,
 	ctx: &Context,
 	opt: &Options,
-	_doc: Option<&CursorDoc>,
-) -> Result<Value, Error> {
+) -> Result<AccessGrant, Error> {
 	let base = match &stmt.base {
 		Some(base) => base.clone(),
 		None => opt.selected_base()?,
@@ -315,9 +310,73 @@ async fn compute_grant(
 		AccessType::Jwt(_) => Err(Error::FeatureNotYetImplemented {
 			feature: format!("Grants for JWT on {base}"),
 		}),
-		AccessType::Record(_) => Err(Error::FeatureNotYetImplemented {
-			feature: format!("Grants for record on {base}"),
-		}),
+		AccessType::Record(at) => {
+			match &stmt.subject {
+				Subject::User(_) => {
+					return Err(Error::AccessGrantInvalidSubject);
+				}
+				Subject::Record(_) => {
+					// If the grant is being created for a record, a database must be selected.
+					if !matches!(base, Base::Db) {
+						return Err(Error::DbEmpty);
+					}
+				}
+			};
+			// The record access type must allow issuing bearer grants.
+			let atb = match &at.bearer {
+				Some(bearer) => bearer,
+				None => return Err(Error::AccessMethodMismatch),
+			};
+			// Create a new bearer key.
+			let grant = GrantBearer::new(atb.kind.prefix());
+			let gr = AccessGrant {
+				ac: ac.name.clone(),
+				// Unique grant identifier.
+				// In the case of bearer grants, the key identifier.
+				id: grant.id.clone(),
+				// Current time.
+				creation: Datetime::default(),
+				// Current time plus grant duration. Only if set.
+				expiration: ac.duration.grant.map(|d| d + Datetime::default()),
+				// The grant is initially not revoked.
+				revocation: None,
+				// Subject associated with the grant.
+				subject: stmt.subject.to_owned(),
+				// The contents of the grant.
+				grant: Grant::Bearer(grant),
+			};
+
+			// Create the grant.
+			// On the very unlikely event of a collision, "put" will return an error.
+			let res = match base {
+				Base::Db => {
+					let key =
+						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &gr.ac, &gr.id);
+					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+					txn.put(key, &gr, None).await
+				}
+				_ => return Err(Error::AccessLevelMismatch),
+			};
+
+			// Check if a collision was found in order to log a specific error on the server.
+			// For an access method with a billion grants, this chance is of only one in 295 billion.
+			if let Err(Error::TxKeyAlreadyExists) = res {
+				error!("A collision was found when attempting to create a new grant. Purging inactive grants is advised")
+			}
+			res?;
+
+			info!(
+				"Access method '{}' was used to create grant '{}' of type '{}' for '{}' by '{}'",
+				gr.ac,
+				gr.id,
+				gr.grant.variant(),
+				gr.subject.id(),
+				opt.auth.id()
+			);
+
+			Ok(gr)
+		}
 		AccessType::Bearer(at) => {
 			match &stmt.subject {
 				Subject::User(user) => {
@@ -348,7 +407,7 @@ async fn compute_grant(
 				}
 			};
 			// Create a new bearer key.
-			let grant = GrantBearer::new();
+			let grant = GrantBearer::new(at.kind.prefix());
 			let gr = AccessGrant {
 				ac: ac.name.clone(),
 				// Unique grant identifier.
@@ -409,9 +468,19 @@ async fn compute_grant(
 				opt.auth.id()
 			);
 
-			Ok(Value::Object(gr.into()))
+			Ok(gr)
 		}
 	}
+}
+
+async fn compute_grant(
+	stmt: &AccessStatementGrant,
+	ctx: &Context,
+	opt: &Options,
+	_doc: Option<&CursorDoc>,
+) -> Result<Value, Error> {
+	let grant = create_grant(stmt, ctx, opt).await?;
+	Ok(Value::Object(grant.into()))
 }
 
 async fn compute_show(
@@ -510,12 +579,11 @@ async fn compute_show(
 	}
 }
 
-async fn compute_revoke(
+pub async fn revoke_grant(
 	stmt: &AccessStatementRevoke,
 	stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
-	_doc: Option<&CursorDoc>,
 ) -> Result<Value, Error> {
 	let base = match &stmt.base {
 		Some(base) => base.clone(),
@@ -541,9 +609,10 @@ async fn compute_revoke(
 	};
 
 	// Get the grants to revoke.
+	let mut revoked = Vec::new();
 	match &stmt.gr {
 		Some(gr) => {
-			let mut revoked = match base {
+			let mut revoke = match base {
 				Base::Root => (*txn.get_root_access_grant(&stmt.ac, gr).await?).clone(),
 				Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, gr).await?).clone(),
 				Base::Db => {
@@ -556,28 +625,28 @@ async fn compute_revoke(
 					))
 				}
 			};
-			if revoked.revocation.is_some() {
+			if revoke.revocation.is_some() {
 				return Err(Error::AccessGrantRevoked);
 			}
-			revoked.revocation = Some(Datetime::default());
+			revoke.revocation = Some(Datetime::default());
 
 			// Revoke the grant.
 			match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&stmt.ac, gr);
-					txn.set(key, &revoked, None).await?;
+					txn.set(key, &revoke, None).await?;
 				}
 				Base::Ns => {
 					let key = crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.set(key, &revoked, None).await?;
+					txn.set(key, &revoke, None).await?;
 				}
 				Base::Db => {
 					let key =
 						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.set(key, &revoked, None).await?;
+					txn.set(key, &revoke, None).await?;
 				}
 				_ => {
 					return Err(Error::Unimplemented(
@@ -589,14 +658,14 @@ async fn compute_revoke(
 
 			info!(
 				"Access method '{}' was used to revoke grant '{}' of type '{}' for '{}' by '{}'",
-				revoked.ac,
-				revoked.id,
-				revoked.grant.variant(),
-				revoked.subject.id(),
+				revoke.ac,
+				revoke.id,
+				revoke.grant.variant(),
+				revoke.subject.id(),
 				opt.auth.id()
 			);
 
-			Ok(Value::Object(revoked.redacted().into()))
+			revoked.push(Value::Object(revoke.redacted().into()));
 		}
 		None => {
 			// Get all grants.
@@ -611,7 +680,6 @@ async fn compute_revoke(
 					)),
 				};
 
-			let mut revoked = Vec::new();
 			for gr in grs.iter() {
 				// If the grant is already revoked, it cannot be revoked again.
 				if gr.revocation.is_some() {
@@ -683,13 +751,24 @@ async fn compute_revoke(
 				);
 
 				// Store revoked version of the redacted grant.
-				revoked.push(Value::Object(gr.redacted().to_owned().into()));
+				revoked.push(Value::Object(gr.redacted().into()));
 			}
-
-			// Return revoked grants.
-			Ok(Value::Array(revoked.into()))
 		}
 	}
+
+	// Return revoked grants.
+	Ok(Value::Array(revoked.into()))
+}
+
+async fn compute_revoke(
+	stmt: &AccessStatementRevoke,
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	_doc: Option<&CursorDoc>,
+) -> Result<Value, Error> {
+	let revoked = revoke_grant(stmt, stk, ctx, opt).await?;
+	Ok(Value::Array(revoked.into()))
 }
 
 async fn compute_purge(
@@ -742,11 +821,13 @@ async fn compute_purge(
 		// Grants expired or revoked at exactly the current second will not be purged.
 		let purge_expired = stmt.expired
 			&& gr.expiration.as_ref().map_or(false, |exp| {
-				(now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
+				now.timestamp() >= exp.timestamp() // Prevent saturating when not expired yet.
+					&& (now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
 			});
 		let purge_revoked = stmt.revoked
 			&& gr.revocation.as_ref().map_or(false, |rev| {
-				(now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
+				now.timestamp() >= rev.timestamp() // Prevent saturating when not revoked yet.
+					&& (now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
 			});
 		// If it should, delete the grant and append the redacted version to the result.
 		if purge_expired || purge_revoked {
@@ -816,6 +897,10 @@ impl Display for AccessStatement {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
+				match stmt.subject {
+					Subject::User(_) => write!(f, " FOR USER {}", stmt.subject.id())?,
+					Subject::Record(_) => write!(f, " FOR RECORD {}", stmt.subject.id())?,
+				}
 				Ok(())
 			}
 			Self::Show(stmt) => {
