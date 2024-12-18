@@ -89,6 +89,15 @@ When developing, make sure to follow the best industry standards and practices.
 
 Please avoid introducing new dependencies to SurrealDB without consulting the team. New dependencies can be very helpful but also introduce new security and privacy issues, complexity, and impact total docker image size. Adding a new dependency should have vital value on the product with minimum possible risk.
 
+## Revisioned structs
+
+SurrealDB uses Revision to manage versions of internal types, if these types are changed then the revisioning must be updated accordingly.
+To keep track of these versions revision-lock is used generate a lock file. If the revision.lock check fails in CI you can install and run it with:
+```bash
+cargo install revision-lock
+revision-lock
+```
+
 ## Introducing new features
 
 We would &nbsp;<img width="15" alt="Love" src="https://github.com/surrealdb/surrealdb/blob/main/img/love.svg?raw=true">&nbsp; for you to contribute to SurrealDB, but we would also like to make sure SurrealDB is as great as possible and loyal to its vision and mission statement. For us to find the right balance, please open a question on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions) with any ideas before creating a [**GitHub Issue**](https://github.com/surrealdb/surrealdb/issues). This will allow the SurrealDB community to have sufficient discussion about the new feature value and how it fits in the product roadmap and vision, before introducing a new pull request.
