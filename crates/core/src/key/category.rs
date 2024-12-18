@@ -160,7 +160,7 @@ pub enum Category {
 	///
 	/// ------------------------------
 	///
-	/// crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{fk}{ff}
+	/// crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{ff}{fk}
 	Ref,
 }
 

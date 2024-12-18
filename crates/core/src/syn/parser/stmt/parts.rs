@@ -433,16 +433,22 @@ impl Parser<'_> {
 	pub fn parse_reference(&mut self) -> ParseResult<Reference> {
 		let delete = if self.eat(t!("ON")) {
 			expected!(self, t!("DELETE"));
-			expected!(self, t!("WIPE"));
 			let next = self.next();
 			match next.kind {
-				t!("RECORD") => {
-					Some(ReferenceDeleteStrategy::WipeRecord)
+				t!("BLOCK") => {
+					Some(ReferenceDeleteStrategy::Block)
 				}
-				t!("VALUE") => {
+				t!("CASCADE") => {
+					Some(ReferenceDeleteStrategy::Cascade)
+				}
+				t!("IGNORE") => {
+					Some(ReferenceDeleteStrategy::Ignore)
+				}
+				t!("WIPE") => {
+					expected!(self, t!("VALUE"));
 					Some(ReferenceDeleteStrategy::WipeValue)
 				}
-				_ => unexpected!(self, next, "'RECORD' or 'VALUE'"),
+				_ => unexpected!(self, next, "`BLOCK`, `CASCASE`, `IGNORE` or `WIPE VALUE`"),
 			}
 		} else {
 			None

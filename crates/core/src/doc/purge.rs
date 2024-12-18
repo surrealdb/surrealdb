@@ -8,10 +8,13 @@ use crate::sql::edges::Edges;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
+use crate::sql::reference::ReferenceDeleteStrategy;
 use crate::sql::statements::DeleteStatement;
 use crate::sql::table::Tables;
 use crate::sql::value::{Value, Values};
+use crate::sql::Thing;
 use reblessive::tree::Stk;
+use crate::key::r#ref::Ref;
 
 impl Document {
 	pub(super) async fn purge(
@@ -31,6 +34,7 @@ impl Document {
 		let mut txn = txn.lock().await;
 		// Get the record id
 		if let Some(rid) = &self.id {
+
 			// Get the namespace
 			let ns = opt.ns()?;
 			// Get the database
@@ -59,6 +63,8 @@ impl Document {
 					// Purge the right pointer edge
 					let key = crate::key::graph::new(ns, db, &r.tb, &r.id, i, rid);
 					txn.del(key).await?;
+					// Release the transaction
+					drop(txn);
 				}
 				_ => {
 					// Release the transaction
@@ -74,6 +80,54 @@ impl Document {
 					};
 					// Execute the delete statement
 					stm.compute(stk, ctx, opt, None).await?;
+				}
+			}
+			// Process any record references
+			{
+				let prefix = crate::key::r#ref::prefix(ns, db, &rid.tb, &rid.id);
+				let suffix = crate::key::r#ref::suffix(ns, db, &rid.tb, &rid.id);
+				let range = prefix..suffix;
+
+				let txn = ctx.tx();
+				let mut keys = txn.keys(range.clone(), 1000, None).await?;
+				while !keys.is_empty() {
+					for key in keys.drain(..) {
+						let r#ref = Ref::from(&key);
+						let fd = txn.get_tb_field(ns, db, r#ref.ft, r#ref.ff).await?;
+						if let Some(reference) = &fd.reference {
+							if let Some(delete_strategy) = &reference.delete {
+								match delete_strategy {
+									ReferenceDeleteStrategy::Ignore => (),
+									ReferenceDeleteStrategy::Block => {
+										let thing = Thing {
+											tb: r#ref.ft.to_string(),
+											id: r#ref.fk.clone(),
+										};
+	
+										return Err(Error::ReferencedDeleteBlocked(rid.to_string(), thing.to_string()));
+									}
+									ReferenceDeleteStrategy::Cascade => {
+										let thing = Thing {
+											tb: r#ref.ft.to_string(),
+											id: r#ref.fk.clone(),
+										};
+	
+										// Setup the delete statement
+										let stm = DeleteStatement {
+											what: Values(vec![Value::from(thing)]),
+											..DeleteStatement::default()
+										};
+										// Execute the delete statement
+										stm.compute(stk, ctx, opt, None).await?;
+									}
+									ReferenceDeleteStrategy::WipeValue => ()
+								}
+							}
+						}
+
+						txn.del(key).await?;
+					}
+					keys = txn.keys(range.clone(), 1000, None).await?;
 				}
 			}
 		}
