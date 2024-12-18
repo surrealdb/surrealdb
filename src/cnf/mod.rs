@@ -67,9 +67,11 @@ pub static WEBSOCKET_MAX_FRAME_SIZE: LazyLock<usize> =
 pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", usize, 128 << 20);
 
-/// How many concurrent tasks can be handled on each WebSocket (defaults to 24)
+/// How many concurrent tasks can be handled on each WebSocket (defaults to the number of CPU cores4)
 pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS", usize, 24);
+	lazy_env_parse_or_else!("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS", usize, |_| {
+		num_cpus::get()
+	});
 
 /// What is the number of runtime worker threads to start (defaults to the number of CPU cores)
 pub static RUNTIME_WORKER_THREADS: LazyLock<usize> =
