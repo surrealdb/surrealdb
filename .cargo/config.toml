@@ -22,3 +22,8 @@ rustflags = [
 	"-C", "link-arg=/DEFAULTLIB:libcmt.lib",
 	"-C", "link-arg=/DEFAULTLIB:ucrt.lib"
 ]
+
+[target.aarch64-apple-darwin]
+rustflags = [
+	"--cfg", "surrealdb_unstable"
+]
