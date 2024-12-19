@@ -22,7 +22,7 @@ use crate::sql::object::Object;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{Id, IdRange};
+use crate::sql::{Fields, Id, IdRange};
 #[cfg(not(target_arch = "wasm32"))]
 use async_channel::{bounded, unbounded, Receiver, Sender};
 #[cfg(not(target_arch = "wasm32"))]
@@ -331,6 +331,7 @@ impl Iterator {
 		)?;
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
+		// Check if we actually need to process and iterate over the results
 		if plan.do_iterate {
 			// Process prepared values
 			if let Some(qp) = ctx.get_query_planner() {
@@ -721,8 +722,14 @@ impl Iterator {
 		stm: &Statement<'_>,
 		pro: Processed,
 	) {
+		// Check if this is a count all
+		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
 		// Process the document
-		let res = stk.run(|stk| Document::process(stk, ctx, opt, stm, pro)).await;
+		let res = if count_all {
+			Ok(map! { "count".to_string() => Value::from(1) }.into())
+		} else {
+			stk.run(|stk| Document::process(stk, ctx, opt, stm, pro)).await
+		};
 		// Process the result
 		self.result(stk, ctx, opt, stm, res).await;
 	}
