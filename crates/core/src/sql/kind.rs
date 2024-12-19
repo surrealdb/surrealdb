@@ -1,5 +1,5 @@
 use super::escape::escape_key;
-use super::{Duration, Number, Strand};
+use super::{Duration, Idiom, Number, Strand};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
@@ -38,6 +38,8 @@ pub enum Kind {
 	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
 	Range,
 	Literal(Literal),
+	Refs(Option<Table>, Option<Idiom>),
+	DynRefs(Option<Table>, Option<Idiom>),
 }
 
 impl Default for Kind {
@@ -170,7 +172,9 @@ impl Kind {
 				| Kind::Geometry(_)
 				| Kind::Function(_, _)
 				| Kind::Range
-				| Kind::Literal(_) => return None,
+				| Kind::Literal(_)
+				| Kind::Refs(_, _)
+				| Kind::DynRefs(_, _) => return None,
 				Kind::Option(x) => {
 					this = x;
 				}
@@ -236,6 +240,18 @@ impl Display for Kind {
 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
 			Kind::Range => f.write_str("range"),
 			Kind::Literal(l) => write!(f, "{}", l),
+			kind @ Kind::Refs(t, i) | 
+			kind @ Kind::DynRefs(t, i) => {
+				if matches!(kind, Kind::DynRefs(_, _)) {
+					write!(f, "dyn")?;
+				}
+
+				match (t, i) {
+					(Some(t), None) => write!(f, "refs<{}>", t),
+					(Some(t), Some(i)) => write!(f, "refs<{}, {}>", t, i),
+					(None, _) => f.write_str("refs"),
+				}
+			},
 		}
 	}
 }

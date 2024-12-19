@@ -279,6 +279,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("OUT") => TokenKind::Keyword(Keyword::Out),
 	UniCase::ascii("NORMAL") => TokenKind::Keyword(Keyword::Normal),
 
+	// Types
 	UniCase::ascii("ANY") => TokenKind::Keyword(Keyword::Any),
 	UniCase::ascii("ARRAY") => TokenKind::Keyword(Keyword::Array),
 	UniCase::ascii("GEOMETRY") => TokenKind::Keyword(Keyword::Geometry),
@@ -289,6 +290,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("DATETIME") => TokenKind::Keyword(Keyword::Datetime),
 	UniCase::ascii("DECIMAL") => TokenKind::Keyword(Keyword::Decimal),
 	UniCase::ascii("DURATION") => TokenKind::Keyword(Keyword::Duration),
+	UniCase::ascii("DYNREFS") => TokenKind::Keyword(Keyword::DynRefs),
 	UniCase::ascii("FLOAT") => TokenKind::Keyword(Keyword::Float),
 	UniCase::ascii("fn") => TokenKind::Keyword(Keyword::Fn),
 	UniCase::ascii("INT") => TokenKind::Keyword(Keyword::Int),
@@ -298,6 +300,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("UUID") => TokenKind::Keyword(Keyword::Uuid),
 	UniCase::ascii("ULID") => TokenKind::Keyword(Keyword::Ulid),
 	UniCase::ascii("RAND") => TokenKind::Keyword(Keyword::Rand),
+	UniCase::ascii("REFS") => TokenKind::Keyword(Keyword::Refs),
 	UniCase::ascii("FEATURE") => TokenKind::Keyword(Keyword::Feature),
 	UniCase::ascii("LINE") => TokenKind::Keyword(Keyword::Line),
 	UniCase::ascii("POINT") => TokenKind::Keyword(Keyword::Point),

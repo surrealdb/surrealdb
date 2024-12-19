@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{kind::Literal, Duration, Kind, Strand},
+	sql::{kind::Literal, Duration, Idiom, Kind, Strand, Table},
 	syn::{
 		lexer::compound,
 		parser::mac::expected,
@@ -143,6 +143,29 @@ impl Parser<'_> {
 					Ok(Kind::Set(Box::new(kind), size))
 				} else {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
+				}
+			}
+			kind @ t!("REFS") |
+			kind @ t!("DYNREFS") => {
+				let span = self.peek().span;
+				let (table, path) = if self.eat(t!("<")) {
+					let table: Option<Table> = Some(self.next_token_value()?);
+					let path: Option<Idiom> = if self.eat(t!(",")) {
+						Some(self.parse_local_idiom(ctx).await?)
+					} else {
+						None
+					};
+
+					self.expect_closing_delimiter(t!(">"), span)?;
+					(table, path)
+				} else {
+					(None, None)
+				};
+
+				if matches!(kind, t!("DYNREFS")) {
+					Ok(Kind::DynRefs(table, path))
+				} else {
+					Ok(Kind::Refs(table, path))
 				}
 			}
 			_ => unexpected!(self, next, "a kind name"),
