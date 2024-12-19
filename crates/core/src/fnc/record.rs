@@ -32,7 +32,7 @@ pub fn tb((arg,): (Thing,)) -> Result<Value, Error> {
 
 pub async fn refs(
 	(ctx, opt): (&Context, &Options),
-	(id, ft,ff): (Thing, Option<String>, Option<String>,)
+	(id, ft, ff): (Thing, Option<String>, Option<String>),
 ) -> Result<Value, Error> {
 	let ft = ft.map(Table::from);
 	let ff = match ff {

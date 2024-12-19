@@ -435,27 +435,21 @@ impl Parser<'_> {
 			expected!(self, t!("DELETE"));
 			let next = self.next();
 			match next.kind {
-				t!("BLOCK") => {
-					ReferenceDeleteStrategy::Block
-				}
-				t!("CASCADE") => {
-					ReferenceDeleteStrategy::Cascade
-				}
-				t!("IGNORE") => {
-					ReferenceDeleteStrategy::Ignore
-				}
-				t!("THEN") => {
-					ReferenceDeleteStrategy::Custom(
-						ctx.run(|ctx| self.parse_value_field(ctx)).await?
-					)
-				}
+				t!("BLOCK") => ReferenceDeleteStrategy::Block,
+				t!("CASCADE") => ReferenceDeleteStrategy::Cascade,
+				t!("IGNORE") => ReferenceDeleteStrategy::Ignore,
+				t!("THEN") => ReferenceDeleteStrategy::Custom(
+					ctx.run(|ctx| self.parse_value_field(ctx)).await?,
+				),
 				_ => unexpected!(self, next, "`BLOCK`, `CASCASE`, `IGNORE` or `WIPE VALUE`"),
 			}
 		} else {
 			ReferenceDeleteStrategy::Ignore
 		};
 
-		Ok(Reference { on_delete })
+		Ok(Reference {
+			on_delete,
+		})
 	}
 
 	/// Parses a view production

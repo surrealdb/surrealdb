@@ -226,41 +226,29 @@ impl DefineFieldStatement {
 	fn validate_reference_options(&self) -> Result<(), Error> {
 		if self.reference.is_some() {
 			if !matches!(self.kind, Some(Kind::Record(_))) {
-				return Err(Error::Thrown(
-					"Reference can only be set on record fields".into(),
-				));
+				return Err(Error::Thrown("Reference can only be set on record fields".into()));
 			}
 		}
 
 		if matches!(self.kind, Some(Kind::Refs(_, _) | Kind::DynRefs(_, _))) {
 			if self.default.is_some() {
-				return Err(Error::Thrown(
-					"Default clause cannot be set on refs fields".into(),
-				));
+				return Err(Error::Thrown("Default clause cannot be set on refs fields".into()));
 			}
 
 			if self.value.is_some() {
-				return Err(Error::Thrown(
-					"Value clause cannot be set on refs fields".into(),
-				));
+				return Err(Error::Thrown("Value clause cannot be set on refs fields".into()));
 			}
 
 			if self.assert.is_some() {
-				return Err(Error::Thrown(
-					"Assert clause cannot be set on refs fields".into(),
-				));
+				return Err(Error::Thrown("Assert clause cannot be set on refs fields".into()));
 			}
 
 			if self.flex {
-				return Err(Error::Thrown(
-					"Flexible clause cannot be set on refs fields".into(),
-				));
+				return Err(Error::Thrown("Flexible clause cannot be set on refs fields".into()));
 			}
 
 			if self.readonly {
-				return Err(Error::Thrown(
-					"Readonly clause cannot be set on refs fields".into(),
-				));
+				return Err(Error::Thrown("Readonly clause cannot be set on refs fields".into()));
 			}
 		}
 

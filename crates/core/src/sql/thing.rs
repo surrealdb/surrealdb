@@ -132,20 +132,26 @@ impl Thing {
 		}
 	}
 
-	pub(crate) async fn refs(&self, ctx: &Context, opt: &Options, ft: Option<&Table>, ff: Option<&Idiom>) -> Result<Vec<Thing>, Error> {
+	pub(crate) async fn refs(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+		ft: Option<&Table>,
+		ff: Option<&Idiom>,
+	) -> Result<Vec<Thing>, Error> {
 		let ns = opt.ns()?;
 		let db = opt.db()?;
 
 		let (mut prefix, suffix, ff) = match (ft, ff) {
 			(Some(ft), Some(ff)) => {
 				let ff = ff.to_string();
-	
+
 				(
 					crate::key::r#ref::ffprefix(ns, db, &self.tb, &self.id, &ft, &ff),
 					crate::key::r#ref::ffsuffix(ns, db, &self.tb, &self.id, &ft, &ff),
 					None,
 				)
-			},
+			}
 			(Some(ft), None) => (
 				crate::key::r#ref::ftprefix(ns, db, &self.tb, &self.id, &ft),
 				crate::key::r#ref::ftsuffix(ns, db, &self.tb, &self.id, &ft),
@@ -154,15 +160,15 @@ impl Thing {
 			(None, None) => (
 				crate::key::r#ref::prefix(ns, db, &self.tb, &self.id),
 				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
-				None
+				None,
 			),
 			(None, Some(ff)) => (
 				crate::key::r#ref::prefix(ns, db, &self.tb, &self.id),
 				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
-				Some(ff.to_string())
-			)
+				Some(ff.to_string()),
+			),
 		};
-	
+
 		let mut keys: Vec<Vec<u8>> = vec![];
 		loop {
 			let rng = prefix.clone()..suffix.clone();
@@ -177,7 +183,7 @@ impl Thing {
 			prefix.clone_from(keys.last().unwrap());
 			prefix.extend_from_slice(b"\0");
 		}
-	
+
 		let ids = keys
 			.iter()
 			.filter_map(|x| {
@@ -187,7 +193,7 @@ impl Thing {
 						return None;
 					}
 				}
-	
+
 				Some(Thing {
 					tb: key.ft.to_string(),
 					id: key.fk,

@@ -1389,7 +1389,7 @@ impl Value {
 			Kind::Refs(_, _) | Kind::DynRefs(_, _) => Err(Error::CoerceTo {
 				from: self,
 				into: kind.to_string(),
-			})
+			}),
 		};
 		// Check for any conversion errors
 		match res {
@@ -1988,7 +1988,7 @@ impl Value {
 			Kind::Refs(_, _) | Kind::DynRefs(_, _) => Err(Error::CoerceTo {
 				from: self,
 				into: kind.to_string(),
-			})
+			}),
 		};
 		// Check for any conversion errors
 		match res {

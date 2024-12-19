@@ -57,8 +57,8 @@ impl From<Value> for serde_json::Value {
 				let v = match v {
 					Refs::Static(_, _, sql::Array(v)) => v,
 					Refs::Dynamic(_, _) => vec![],
-				}; 
-				
+				};
+
 				json!(v)
 			}
 		}
