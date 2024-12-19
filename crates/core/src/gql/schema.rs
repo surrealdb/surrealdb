@@ -423,6 +423,14 @@ fn polygon_to_list(polygon: &Polygon) -> Result<GqlValue, GqlError> {
 	))
 }
 
+fn geometry_kind_name_to_type_kind(name: &str) -> TypeRef
+{
+	match name {
+		
+	}
+	
+}
+
 pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
 	let (optional, match_kind) = match kind {
 		Kind::Option(op_ty) => (true, *op_ty),
@@ -460,7 +468,11 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 				TypeRef::named(ty_name)
 			}
 		},
-		Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
+		// Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
+		Kind::Geometry(g) => match g.len() {
+			0 => TypeRef::Named("Geometry")
+			1 => TypeRef::Named("Geometry")
+		}
 		Kind::Option(t) => {
 			let mut non_op_ty = *t;
 			while let Kind::Option(inner) = non_op_ty {

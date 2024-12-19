@@ -248,7 +248,6 @@ keyword! {
 	Uuid => "UUID",
 	Ulid => "ULID",
 	Rand => "RAND",
-	Feature => "FEATURE",
 	Line => "LINE",
 	Point => "POINT",
 	Polygon => "POLYGON",

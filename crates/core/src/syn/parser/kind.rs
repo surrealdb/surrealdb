@@ -154,8 +154,7 @@ impl Parser<'_> {
 		let next = self.next();
 		match next.kind {
 			TokenKind::Keyword(
-				x @ (Keyword::Feature
-				| Keyword::Point
+				x @ (Keyword::Point
 				| Keyword::Line
 				| Keyword::Polygon
 				| Keyword::MultiPoint
