@@ -224,31 +224,46 @@ impl DefineFieldStatement {
 	}
 
 	fn validate_reference_options(&self) -> Result<(), Error> {
-		if self.reference.is_some() {
-			if !matches!(self.kind, Some(Kind::Record(_))) {
-				return Err(Error::Thrown("Reference can only be set on record fields".into()));
-			}
-		}
+		if let Some(kind) = &self.kind {
+			// As the refs and dynrefs type essentially take over a field
+			// they are not allowed to be mixed with most other clauses
+			if matches!(kind, Kind::Refs(_, _) | Kind::DynRefs(_, _)) {
+				let typename = if matches!(kind, Kind::Refs(_, _)) {
+					"refs".to_string()
+				} else {
+					"dynrefs".to_string()
+				};
 
-		if matches!(self.kind, Some(Kind::Refs(_, _) | Kind::DynRefs(_, _))) {
-			if self.default.is_some() {
-				return Err(Error::Thrown("Default clause cannot be set on refs fields".into()));
+				if self.reference.is_some() {
+					return Err(Error::RefsTypeConflict("REFERENCE".into(), typename));
+				}
+
+				if self.default.is_some() {
+					return Err(Error::RefsTypeConflict("DEFAULT".into(), typename));
+				}
+
+				if self.value.is_some() {
+					return Err(Error::RefsTypeConflict("VALUE".into(), typename));
+				}
+
+				if self.assert.is_some() {
+					return Err(Error::RefsTypeConflict("ASSERT".into(), typename));
+				}
+
+				if self.flex {
+					return Err(Error::RefsTypeConflict("FLEXIBLE".into(), typename));
+				}
+
+				if self.readonly {
+					return Err(Error::RefsTypeConflict("READONLY".into(), typename));
+				}
 			}
 
-			if self.value.is_some() {
-				return Err(Error::Thrown("Value clause cannot be set on refs fields".into()));
-			}
-
-			if self.assert.is_some() {
-				return Err(Error::Thrown("Assert clause cannot be set on refs fields".into()));
-			}
-
-			if self.flex {
-				return Err(Error::Thrown("Flexible clause cannot be set on refs fields".into()));
-			}
-
-			if self.readonly {
-				return Err(Error::Thrown("Readonly clause cannot be set on refs fields".into()));
+			// If a reference is defined, the field must be a record
+			if self.reference.is_some() {
+				if !matches!(kind, Kind::Record(_)) {
+					return Err(Error::ReferenceTypeConflict(kind.to_owned()));
+				}
 			}
 		}
 

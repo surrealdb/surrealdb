@@ -5,6 +5,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::Kind;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64::DecodeError as Base64Error;
@@ -1238,6 +1239,16 @@ pub enum Error {
 	/// The record cannot be deleted as it's still referenced elsewhere
 	#[error("Cannot delete `{0}` as it is referenced and rejected by `{1}`")]
 	DeleteRejectedByReference(String, String),
+
+	/// The record cannot be deleted as it's still referenced elsewhere
+	#[error(
+		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type instead."
+	)]
+	ReferenceTypeConflict(Kind),
+
+	/// The record cannot be deleted as it's still referenced elsewhere
+	#[error("Cannot use the `{0}` keyword with `TYPE {0}`.")]
+	RefsTypeConflict(String, String),
 }
 
 impl From<Error> for String {
