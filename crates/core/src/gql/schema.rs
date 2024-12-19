@@ -18,6 +18,7 @@ use async_graphql::dynamic::{Enum, Type, Union};
 use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
+use geo::{Coord, CoordNum, CoordsIter, LinesIter, Polygon};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -25,6 +26,7 @@ use serde_json::Number;
 use super::error::{resolver_error, GqlError};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
+use super::ext::{TryFromExt, TryIntoExt};
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::NamedContainer;
 use crate::kvs::LockType;
@@ -159,6 +161,67 @@ pub async fn generate_schema(
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
+	scalar_debug_validated!(
+		schema,
+		"GeometryPoint",
+		Kind::Geometry(vec!["point".to_string()]),
+		"Latitude and Longitude",
+		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.2"
+	);
+	scalar_debug_validated!(
+		schema,
+		"GeometryLineString",
+		Kind::Geometry(vec!["linestring".to_string()]),
+		"Geometric path",
+		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.4"
+	);
+	scalar_debug_validated!(
+		schema,
+		"GeometryPolygon",
+		Kind::Geometry(vec!["polygon".to_string()]),
+		"Geometric area",
+		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.6"
+	);
+	scalar_debug_validated!(
+		schema,
+		"GeometryMultiPoint",
+		Kind::Geometry(vec!["multipoint".to_string()]),
+		"Multiple points",
+		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.3"
+	);
+	scalar_debug_validated!(
+		schema,
+		"GeometryMultiLineString",
+		Kind::Geometry(vec!["multilinestring".to_string()]),
+		"Multiple geometry lines",
+		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.5"
+	);
+	scalar_debug_validated!(
+		schema,
+		"GeometryMultiPolygon",
+		Kind::Geometry(vec!["multipolygon".to_string()]),
+		"Multiple geometric areas",
+		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.7"
+	);
+	scalar_debug_validated!(
+		schema,
+		"GeometryCollection",
+		Kind::Geometry(vec!["collection".to_string()]),
+		"Multiple different geometry types",
+		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.8"
+	);
+
+	let mut geometry_union = Union::new("Geometry");
+	geometry_union = geometry_union.possible_type("GeometryPoint");
+	geometry_union = geometry_union.possible_type("GeometryLineString");
+	geometry_union = geometry_union.possible_type("GeometryPolygon");
+	geometry_union = geometry_union.possible_type("GeometryMultiPoint");
+	geometry_union = geometry_union.possible_type("GeometryMultiLineString");
+	geometry_union = geometry_union.possible_type("GeometryMultiPolygon");
+	geometry_union = geometry_union.possible_type("GeometryCollection");
+
+	schema = schema.register(geometry_union);
+
 	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
 	scalar_debug_validated!(schema, "number", Kind::Number);
 	scalar_debug_validated!(schema, "null", Kind::Null);
@@ -209,12 +272,120 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
 				.collect(),
 		),
-		SqlValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
+		SqlValue::Geometry(kind) => match kind {
+			Geometry::Point(point) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("Point".to_string())),
+					(
+						Name::new("coordinates"),
+						GqlValue::List(vec![point.x().try_intox()?, point.y().try_intox()?]),
+					),
+				]
+				.into(),
+			),
+			Geometry::Line(line) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("LineString".to_string())),
+					(Name::new("coordinates"), coord_collection_to_list(line)?),
+				]
+				.into(),
+			),
+			Geometry::MultiLine(multiline) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("MultiLineString".to_string())),
+					(
+						Name::new("coordinates"),
+						GqlValue::List(
+							multiline
+								.into_iter()
+								.map(coord_collection_to_list)
+								.collect::<Result<Vec<_>, GqlError>>()?,
+						),
+					),
+				]
+				.into(),
+			),
+			Geometry::MultiPoint(multipoint) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("MultiPoint".to_string())),
+					(
+						Name::new("coordinates"),
+						coord_collection_to_list(multipoint.into_iter().map(|p| p.0))?,
+					),
+				]
+				.into(),
+			),
+			Geometry::Polygon(polygon) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("Polygon".to_string())),
+					(Name::new("coordinates"), polygon_to_list(&polygon)?),
+				]
+				.into(),
+			),
+			Geometry::MultiPolygon(multipolygon) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("MultiPolygon".to_string())),
+					(
+						Name::new("coordinates"),
+						GqlValue::List(
+							multipolygon
+								.iter()
+								.map(polygon_to_list)
+								.collect::<Result<Vec<_>, _>>()?,
+						),
+					),
+				]
+				.into(),
+			),
+			Geometry::Collection(collection) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("GeometryCollection".to_string())),
+					(
+						Name::new("geometries"),
+						GqlValue::List(
+							collection
+								.into_iter()
+								.map(|g| sql_value_to_gql_value(SqlValue::Geometry(g)).unwrap())
+								.collect(),
+						),
+					),
+				]
+				.into(),
+			),
+		},
 		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
 		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
+}
+
+fn coord_to_list(coord: Coord<f64>) -> Result<GqlValue, GqlError> {
+	Ok(GqlValue::List(
+		<[f64; 2]>::from(coord)
+			.into_iter()
+			.map(GqlValue::try_fromx)
+			.collect::<Result<Vec<_>, _>>()?,
+	))
+}
+
+fn coord_collection_to_list(
+	coord_collection: impl IntoIterator<Item = Coord<f64>>,
+) -> Result<GqlValue, GqlError> {
+	Ok(GqlValue::List(
+		coord_collection.into_iter().map(coord_to_list).collect::<Result<Vec<_>, _>>()?,
+	))
+}
+
+fn polygon_to_list(polygon: &Polygon) -> Result<GqlValue, GqlError> {
+	Ok(GqlValue::List(
+		[polygon.exterior()]
+			.into_iter()
+			.chain(polygon.interiors().iter())
+			.cloned()
+			.map(coord_collection_to_list)
+			.collect::<Result<_, _>>()?,
+	))
 }
 
 pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
