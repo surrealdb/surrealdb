@@ -3,7 +3,6 @@ use std::ops::Deref;
 use crate::sql::statements::define::config::graphql::TableConfig;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::{statements::UseStatement, Cond, Ident, Idiom, Limit, Part, Start, Table, Value};
-use async_graphql::{Name, Value as GqlValue};
 
 pub trait IntoExt<T> {
 	fn intox(self) -> T;
@@ -133,23 +132,6 @@ impl TryFromExt<f64> for async_graphql::Value {
 	}
 }
 
-// impl TryFromExt<Coord<f64>> for (GqlValue, GqlValue) {
-// 	type Error = GqlError;
-
-// 	fn try_fromx(value: Coord<f64>) -> Result<Self, Self::Error> {
-// 		// Ok(GqlValue::Object(
-// 		// 	[
-// 		// 		(Name::new("type"), GqlValue::String("Point".to_string())),
-// 		// 		(
-// 		// 			Name::new("coordinates"),
-// 		// 			GqlValue::List(vec![value.x().try_intox()?, value.y().try_intox()?]),
-// 		// 		),
-// 		// 	]
-// 		// 	.into(),
-// 		// ))
-// 	}
-// }
-
 #[cfg(debug_assertions)]
 pub trait ValidatorExt {
 	fn add_validator(
@@ -160,7 +142,6 @@ pub trait ValidatorExt {
 
 #[cfg(debug_assertions)]
 use async_graphql::dynamic::Scalar;
-use geo::{Coord, CoordFloat};
 use serde_json::Number;
 #[cfg(debug_assertions)]
 impl ValidatorExt for Scalar {

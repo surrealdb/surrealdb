@@ -13,11 +13,11 @@ use crate::sql::{Expression, Value as SqlValue};
 use crate::sql::{Idiom, Kind};
 use crate::sql::{Statement, Thing};
 use async_graphql::dynamic::indexmap::IndexMap;
+use async_graphql::dynamic::FieldFuture;
 use async_graphql::dynamic::InputValue;
 use async_graphql::dynamic::TypeRef;
 use async_graphql::dynamic::{Enum, FieldValue, Type};
 use async_graphql::dynamic::{Field, ResolverContext};
-use async_graphql::dynamic::{FieldFuture, Union};
 use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
@@ -64,10 +64,6 @@ fn filter_name_from_table(tb_name: impl Display) -> String {
 	format!("_filter_{tb_name}")
 }
 
-fn filter_obj_name_from_table(tb_name: impl Display) -> String {
-	format!("_filter_obj_{tb_name}")
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn process_tbs(
 	tbs: Arc<[DefineTableStatement]>,
@@ -102,9 +98,8 @@ pub async fn process_tbs(
 			.field(InputValue::new("then", TypeRef::named(&table_order_name)));
 
 		let table_filter_name = filter_name_from_table(&tb_name);
-		let table_filter_obj_name = filter_obj_name_from_table(&tb_name);
-		let mut table_filter_obj = InputObject::new(&table_filter_obj_name);
-		table_filter_obj = table_filter_obj
+		let mut table_filter = InputObject::new(&table_filter_name);
+		table_filter = table_filter
 			.field(InputValue::new("id", TypeRef::named("_filter_id")))
 			.field(InputValue::new("and", TypeRef::named_nn_list(&table_filter_name)))
 			.field(InputValue::new("or", TypeRef::named_nn_list(&table_filter_name)))
@@ -326,7 +321,7 @@ pub async fn process_tbs(
 			trace!("\n{type_filter:?}\n");
 			types.push(type_filter);
 
-			table_filter_obj = table_filter_obj
+			table_filter = table_filter
 				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
 
 			table_ty_obj = table_ty_obj
@@ -342,15 +337,10 @@ pub async fn process_tbs(
 				});
 		}
 
-		let table_filter = Union::new(table_filter_name)
-			.possible_type(TypeRef::STRING)
-			.possible_type(table_filter_obj_name);
-
 		types.push(Type::Object(table_ty_obj));
 		types.push(table_order.into());
 		types.push(Type::Enum(table_orderable));
-		types.push(Type::InputObject(table_filter_obj));
-		types.push(Type::Union(table_filter));
+		types.push(Type::InputObject(table_filter));
 	}
 
 	let sess3 = session.to_owned();

@@ -4,21 +4,22 @@ use std::sync::Arc;
 use crate::dbs::Session;
 use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
+use crate::gql::utils::GqlValueUtils;
 use crate::kvs::Datastore;
 use crate::sql;
 use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use crate::sql::Geometry;
 use crate::sql::Kind;
-use async_graphql::dynamic::Interface;
-use async_graphql::dynamic::InterfaceField;
-use async_graphql::dynamic::Object;
 use async_graphql::dynamic::Schema;
 use async_graphql::dynamic::{Enum, Type, Union};
+use async_graphql::dynamic::{Field, Interface};
+use async_graphql::dynamic::{FieldFuture, Object};
+use async_graphql::dynamic::{InterfaceField, ResolverContext};
 use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
-use geo::{Coord, CoordNum, CoordsIter, LinesIter, Polygon};
+use geo::{Coord, Polygon};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -153,6 +154,36 @@ pub async fn generate_schema(
 		}};
 	}
 
+	macro_rules! geometry_type {
+		($schema:ident, $name:expr, $type:expr) => {
+			$schema = $schema.register(
+				Object::new($name)
+					.field(Field::new(
+						"type",
+						TypeRef::named("GeometryType"),
+						|_: ResolverContext| {
+							async_graphql::dynamic::FieldFuture::Value(Some(
+								GqlValue::String($name.to_string()).into(),
+							))
+						},
+					))
+					.field(Field::new("coordinates", $type.clone(), |ctx: ResolverContext| {
+						FieldFuture::new({
+							async move {
+								let val = ctx
+									.parent_value
+									.try_to_value()?
+									.as_object()
+									.ok_or_else(|| internal_error("Expected object"))?
+									.get("coordinates");
+								Ok(val.cloned())
+							}
+						})
+					})),
+			);
+		};
+	}
+
 	scalar_debug_validated!(
 		schema,
 		"uuid",
@@ -161,54 +192,58 @@ pub async fn generate_schema(
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
-	scalar_debug_validated!(
-		schema,
+	schema = schema.register(Enum::new("GeometryType").items([
 		"GeometryPoint",
-		Kind::Geometry(vec!["point".to_string()]),
-		"Latitude and Longitude",
-		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.2"
-	);
-	scalar_debug_validated!(
-		schema,
 		"GeometryLineString",
-		Kind::Geometry(vec!["linestring".to_string()]),
-		"Geometric path",
-		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.4"
-	);
-	scalar_debug_validated!(
-		schema,
 		"GeometryPolygon",
-		Kind::Geometry(vec!["polygon".to_string()]),
-		"Geometric area",
-		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.6"
-	);
-	scalar_debug_validated!(
-		schema,
 		"GeometryMultiPoint",
-		Kind::Geometry(vec!["multipoint".to_string()]),
-		"Multiple points",
-		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.3"
-	);
-	scalar_debug_validated!(
-		schema,
 		"GeometryMultiLineString",
-		Kind::Geometry(vec!["multilinestring".to_string()]),
-		"Multiple geometry lines",
-		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.5"
-	);
-	scalar_debug_validated!(
-		schema,
 		"GeometryMultiPolygon",
-		Kind::Geometry(vec!["multipolygon".to_string()]),
-		"Multiple geometric areas",
-		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.7"
-	);
-	scalar_debug_validated!(
-		schema,
 		"GeometryCollection",
-		Kind::Geometry(vec!["collection".to_string()]),
-		"Multiple different geometry types",
-		"https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.8"
+	]));
+
+	let coordinate_type = TypeRef::named_nn_list_nn(TypeRef::FLOAT);
+	let coordinate_list_type = TypeRef::NonNull(Box::new(TypeRef::List(Box::new(
+		TypeRef::NonNull(Box::new(coordinate_type.clone())),
+	))));
+	let coordinate_list_list_type = TypeRef::NonNull(Box::new(TypeRef::List(Box::new(
+		TypeRef::NonNull(Box::new(coordinate_list_type.clone())),
+	))));
+	let coordinate_list_list_list_type = TypeRef::NonNull(Box::new(TypeRef::List(Box::new(
+		TypeRef::NonNull(Box::new(coordinate_list_type.clone())),
+	))));
+
+	geometry_type!(schema, "GeometryPoint", coordinate_type);
+	geometry_type!(schema, "GeometryLineString", coordinate_list_type);
+	geometry_type!(schema, "GeometryPolygon", coordinate_list_list_type);
+	geometry_type!(schema, "GeometryMultiPoint", coordinate_list_type);
+	geometry_type!(schema, "GeometryMultiLineString", coordinate_list_list_type);
+	geometry_type!(schema, "GeometryMultiPolygon", coordinate_list_list_list_type);
+
+	schema = schema.register(
+		Object::new("GeometryCollection")
+			.field(Field::new("type", TypeRef::named("GeometryType"), |_: ResolverContext| {
+				async_graphql::dynamic::FieldFuture::Value(Some(
+					GqlValue::String("GeometryCollection".to_string()).into(),
+				))
+			}))
+			.field(Field::new(
+				"geometries",
+				TypeRef::named_nn_list_nn("Geometry"),
+				|ctx: ResolverContext| {
+					FieldFuture::new({
+						async move {
+							let val = ctx
+								.parent_value
+								.try_to_value()?
+								.as_object()
+								.ok_or_else(|| internal_error("Expected Object"))?
+								.get("geometries");
+							Ok(val.cloned())
+						}
+					})
+				},
+			)),
 	);
 
 	let mut geometry_union = Union::new("Geometry");
