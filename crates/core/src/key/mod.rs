@@ -67,6 +67,7 @@
 /// crate::key::thing                    /*{ns}*{db}*{tb}*{id}
 ///
 /// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
+/// crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{ff}{fk}
 ///
 pub(crate) mod category;
 pub(crate) mod change;
@@ -76,6 +77,7 @@ pub(crate) mod graph;
 pub(crate) mod index;
 pub(crate) mod namespace;
 pub(crate) mod node;
+pub(crate) mod r#ref;
 pub(crate) mod root;
 pub(crate) mod table;
 pub(crate) mod thing;

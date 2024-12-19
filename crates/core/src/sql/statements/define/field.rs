@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::sql::reference::Reference;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::Part;
@@ -15,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use uuid::Uuid;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -35,6 +36,8 @@ pub struct DefineFieldStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 4)]
 	pub overwrite: bool,
+	#[revision(start = 5)]
+	pub reference: Option<Reference>,
 }
 
 impl DefineFieldStatement {
@@ -47,6 +50,8 @@ impl DefineFieldStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
+		// Validate reference options
+		self.validate_reference_options()?;
 		// Get the NS and DB
 		let ns = opt.ns()?;
 		let db = opt.db()?;
@@ -216,6 +221,53 @@ impl DefineFieldStatement {
 		txn.clear();
 		// Ok all good
 		Ok(Value::None)
+	}
+
+	fn validate_reference_options(&self) -> Result<(), Error> {
+		if let Some(kind) = &self.kind {
+			// As the refs and dynrefs type essentially take over a field
+			// they are not allowed to be mixed with most other clauses
+			if matches!(kind, Kind::Refs(_, _) | Kind::DynRefs(_, _)) {
+				let typename = if matches!(kind, Kind::Refs(_, _)) {
+					"refs".to_string()
+				} else {
+					"dynrefs".to_string()
+				};
+
+				if self.reference.is_some() {
+					return Err(Error::RefsTypeConflict("REFERENCE".into(), typename));
+				}
+
+				if self.default.is_some() {
+					return Err(Error::RefsTypeConflict("DEFAULT".into(), typename));
+				}
+
+				if self.value.is_some() {
+					return Err(Error::RefsTypeConflict("VALUE".into(), typename));
+				}
+
+				if self.assert.is_some() {
+					return Err(Error::RefsTypeConflict("ASSERT".into(), typename));
+				}
+
+				if self.flex {
+					return Err(Error::RefsTypeConflict("FLEXIBLE".into(), typename));
+				}
+
+				if self.readonly {
+					return Err(Error::RefsTypeConflict("READONLY".into(), typename));
+				}
+			}
+
+			// If a reference is defined, the field must be a record
+			if self.reference.is_some() {
+				if !matches!(kind, Kind::Record(_)) {
+					return Err(Error::ReferenceTypeConflict(kind.to_owned()));
+				}
+			}
+		}
+
+		Ok(())
 	}
 }
 
