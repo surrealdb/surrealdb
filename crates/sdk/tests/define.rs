@@ -161,14 +161,6 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 	Ok(())
 }
 
-fn check_range(t: &mut Test, result: &str, explain: &str) -> Result<(), Error> {
-	for _ in 0..2 {
-		t.expect_val(result)?;
-	}
-	t.expect_val(explain)?;
-	Ok(())
-}
-
 #[test(tokio::test)]
 async fn define_statement_index_concurrently_building_status() -> Result<(), Error> {
 	let session = Session::owner().with_ns("test").with_db("test");
