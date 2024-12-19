@@ -103,6 +103,8 @@ pub(crate) enum Workable {
 
 #[derive(Debug)]
 pub(crate) struct Processed {
+	/// Whether this document only fetched keys
+	pub(crate) keys_only: bool,
 	/// Whether this document needs to have an ID generated
 	pub(crate) generate: Option<Table>,
 	/// The record id for this document that should be processed
@@ -721,17 +723,19 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
-	) {
+	) -> Result<(), Error> {
 		// Check if this is a count all
 		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
 		// Process the document
-		let res = if count_all {
+		let res = if count_all && pro.keys_only {
 			Ok(map! { "count".to_string() => Value::from(1) }.into())
 		} else {
 			stk.run(|stk| Document::process(stk, ctx, opt, stm, pro)).await
 		};
 		// Process the result
 		self.result(stk, ctx, opt, stm, res).await;
+		// Everything ok
+		Ok(())
 	}
 
 	/// Accept a processed record result
