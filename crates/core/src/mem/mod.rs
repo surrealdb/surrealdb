@@ -1,6 +1,3 @@
-#[cfg(feature = "allocation-tracking")]
-use std::sync::atomic::{AtomicBool, Ordering};
-
 mod fake;
 mod track;
 
@@ -18,8 +15,7 @@ pub static ALLOC: fake::FakeAlloc = fake::FakeAlloc::new();
 	target_os = "openbsd"
 )))]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<std::alloc::System> =
-	track::TrackAlloc::new(std::alloc::System);
+pub static ALLOC: std::alloc::System = std::alloc::System;
 
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "android")]
@@ -62,11 +58,3 @@ pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
 #[global_allocator]
 pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
 	track::TrackAlloc::new(jemallocator::Jemalloc);
-
-#[cfg(feature = "allocation-tracking")]
-static ENABLE_THREAD_ALLOC: AtomicBool = AtomicBool::new(false);
-
-#[cfg(feature = "allocation-tracking")]
-pub fn enable_thread_alloc() {
-	ENABLE_THREAD_ALLOC.store(true, Ordering::Relaxed);
-}
