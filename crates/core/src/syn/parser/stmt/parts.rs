@@ -435,13 +435,13 @@ impl Parser<'_> {
 			expected!(self, t!("DELETE"));
 			let next = self.next();
 			match next.kind {
-				t!("BLOCK") => ReferenceDeleteStrategy::Block,
+				t!("REJECT") => ReferenceDeleteStrategy::Reject,
 				t!("CASCADE") => ReferenceDeleteStrategy::Cascade,
 				t!("IGNORE") => ReferenceDeleteStrategy::Ignore,
 				t!("THEN") => ReferenceDeleteStrategy::Custom(
 					ctx.run(|ctx| self.parse_value_field(ctx)).await?,
 				),
-				_ => unexpected!(self, next, "`BLOCK`, `CASCASE`, `IGNORE` or `WIPE VALUE`"),
+				_ => unexpected!(self, next, "`REJECT`, `CASCASE`, `IGNORE` or `WIPE VALUE`"),
 			}
 		} else {
 			ReferenceDeleteStrategy::Ignore
