@@ -170,7 +170,15 @@ impl Categorise for Ref<'_> {
 }
 
 impl<'a> Ref<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id, ft: &'a str, ff: &'a str, fk: Id) -> Self {
+	pub fn new(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		id: Id,
+		ft: &'a str,
+		ff: &'a str,
+		fk: Id,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

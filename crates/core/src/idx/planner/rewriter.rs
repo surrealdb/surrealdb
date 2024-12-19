@@ -60,7 +60,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			Refs::Static(ft, ff, a) => {
 				let a = self.eval_array(a)?;
 				Some(Value::Refs(Refs::Static(ft.clone(), ff.clone(), a)))
-			},
+			}
 			v @ Refs::Dynamic(_, _) => Some(Value::Refs(v.clone())),
 		}
 	}

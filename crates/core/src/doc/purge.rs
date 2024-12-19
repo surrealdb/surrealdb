@@ -6,6 +6,7 @@ use crate::doc::CursorDoc;
 use crate::doc::CursorValue;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::key::r#ref::Ref;
 use crate::sql::dir::Dir;
 use crate::sql::edges::Edges;
 use crate::sql::paths::EDGE;
@@ -17,7 +18,6 @@ use crate::sql::table::Tables;
 use crate::sql::value::{Value, Values};
 use crate::sql::Thing;
 use reblessive::tree::Stk;
-use crate::key::r#ref::Ref;
 
 impl Document {
 	pub(super) async fn purge(
@@ -37,7 +37,6 @@ impl Document {
 		let mut txn = txn.lock().await;
 		// Get the record id
 		if let Some(rid) = &self.id {
-
 			// Get the namespace
 			let ns = opt.ns()?;
 			// Get the database
@@ -106,7 +105,10 @@ impl Document {
 										id: r#ref.fk.clone(),
 									};
 
-									return Err(Error::ReferencedDeleteBlocked(rid.to_string(), thing.to_string()));
+									return Err(Error::ReferencedDeleteBlocked(
+										rid.to_string(),
+										thing.to_string(),
+									));
 								}
 								ReferenceDeleteStrategy::Cascade => {
 									let thing = Thing {
@@ -137,7 +139,7 @@ impl Document {
 									let doc = CursorDoc::new(Some(this.into()), None, doc);
 
 									v.compute(stk, &ctx, opt, Some(&doc)).await?;
-								} 
+								}
 							}
 						}
 

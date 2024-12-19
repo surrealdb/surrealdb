@@ -563,7 +563,12 @@ impl<'a> FieldEditContext<'a> {
 			let action = if val == old {
 				RefAction::Ignore
 			} else if let Value::Thing(thing) = &old {
-				let others = self.doc.current.doc.get(self.stk, self.ctx, self.opt, doc, &self.def.name).await?;
+				let others = self
+					.doc
+					.current
+					.doc
+					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
+					.await?;
 				if let Value::Array(arr) = others {
 					if arr.iter().any(|v| v == old) {
 						RefAction::Ignore
@@ -589,8 +594,10 @@ impl<'a> FieldEditContext<'a> {
 						&self.rid.tb,
 						&self.def.name.to_string(),
 						&self.rid.id,
-					).encode().unwrap();
-	
+					)
+					.encode()
+					.unwrap();
+
 					self.ctx.tx().set(key, vec![], None).await?;
 
 					let ns = self.opt.ns()?;
@@ -598,7 +605,11 @@ impl<'a> FieldEditContext<'a> {
 					let fields = self.ctx.tx().all_tb_fields(ns, db, &thing.tb, None).await?;
 					for fd in fields.iter() {
 						if let Some(Kind::Refs(ft, ff)) = &fd.kind {
-							let val = self.ctx.tx().get_record(ns, db, &thing.tb, &thing.id, None).await?;
+							let val = self
+								.ctx
+								.tx()
+								.get_record(ns, db, &thing.tb, &thing.id, None)
+								.await?;
 							let pick = val.get(self.stk, self.ctx, self.opt, doc, &fd.name).await?;
 							if let Value::Refs(Refs::Static(cft, cff, arr)) = pick {
 								if &cft == ft && &cff == ff {
@@ -608,8 +619,18 @@ impl<'a> FieldEditContext<'a> {
 										arr.push(v);
 
 										let mut val = val.deref().to_owned();
-										val.put(&fd.name, Value::Refs(Refs::Static(cft.clone(), cff.clone(), arr)));
-										self.ctx.tx().set_record(ns, db, &thing.tb, &thing.id, val).await?;
+										val.put(
+											&fd.name,
+											Value::Refs(Refs::Static(
+												cft.clone(),
+												cff.clone(),
+												arr,
+											)),
+										);
+										self.ctx
+											.tx()
+											.set_record(ns, db, &thing.tb, &thing.id, val)
+											.await?;
 									}
 								}
 							}
@@ -627,8 +648,10 @@ impl<'a> FieldEditContext<'a> {
 						&self.rid.tb,
 						&self.def.name.to_string(),
 						&self.rid.id,
-					).encode().unwrap();
-	
+					)
+					.encode()
+					.unwrap();
+
 					self.ctx.tx().del(key).await?;
 
 					let ns = self.opt.ns()?;
@@ -636,7 +659,11 @@ impl<'a> FieldEditContext<'a> {
 					let fields = self.ctx.tx().all_tb_fields(ns, db, &thing.tb, None).await?;
 					for fd in fields.iter() {
 						if let Some(Kind::Refs(ft, ff)) = &fd.kind {
-							let val = self.ctx.tx().get_record(ns, db, &thing.tb, &thing.id, None).await?;
+							let val = self
+								.ctx
+								.tx()
+								.get_record(ns, db, &thing.tb, &thing.id, None)
+								.await?;
 							let pick = val.get(self.stk, self.ctx, self.opt, doc, &fd.name).await?;
 							if let Value::Refs(Refs::Static(cft, cff, arr)) = pick {
 								if &cft == ft && &cff == ff {
@@ -646,8 +673,18 @@ impl<'a> FieldEditContext<'a> {
 										arr.retain(|x| x != &v);
 
 										let mut val = val.deref().to_owned();
-										val.put(&fd.name, Value::Refs(Refs::Static(cft.clone(), cff.clone(), arr)));
-										self.ctx.tx().set_record(ns, db, &thing.tb, &thing.id, val).await?;
+										val.put(
+											&fd.name,
+											Value::Refs(Refs::Static(
+												cft.clone(),
+												cff.clone(),
+												arr,
+											)),
+										);
+										self.ctx
+											.tx()
+											.set_record(ns, db, &thing.tb, &thing.id, val)
+											.await?;
 									}
 								}
 							}
@@ -665,18 +702,17 @@ impl<'a> FieldEditContext<'a> {
 
 	async fn process_refs_type(&mut self, val: &Value) -> Result<Option<Value>, Error> {
 		let refs = match &self.def.kind {
-			Some(Kind::DynRefs(ft, ff)) => {
-				Refs::Dynamic(ft.clone(), ff.clone())
-			}
+			Some(Kind::DynRefs(ft, ff)) => Refs::Dynamic(ft.clone(), ff.clone()),
 			Some(Kind::Refs(ft, ff)) => match val {
-				Value::Refs(Refs::Static(cft, cff, arr)) 
-					if ft == cft && ff == cff => Refs::Static(cft.clone(), cff.clone(), arr.clone()),
+				Value::Refs(Refs::Static(cft, cff, arr)) if ft == cft && ff == cff => {
+					Refs::Static(cft.clone(), cff.clone(), arr.clone())
+				}
 				_ => {
 					let ids = self.rid.refs(self.ctx, self.opt, ft.as_ref(), ff.as_ref()).await?;
 					let val = ids.into_iter().map(Value::Thing).collect();
 					Refs::Static(ft.clone(), ff.clone(), val)
 				}
-			}
+			},
 			_ => return Ok(None),
 		};
 

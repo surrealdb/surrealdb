@@ -240,8 +240,7 @@ impl Display for Kind {
 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
 			Kind::Range => f.write_str("range"),
 			Kind::Literal(l) => write!(f, "{}", l),
-			kind @ Kind::Refs(t, i) | 
-			kind @ Kind::DynRefs(t, i) => {
+			kind @ Kind::Refs(t, i) | kind @ Kind::DynRefs(t, i) => {
 				if matches!(kind, Kind::DynRefs(_, _)) {
 					write!(f, "dyn")?;
 				}
@@ -251,7 +250,7 @@ impl Display for Kind {
 					(Some(t), Some(i)) => write!(f, "refs<{}, {}>", t, i),
 					(None, _) => f.write_str("refs"),
 				}
-			},
+			}
 		}
 	}
 }
