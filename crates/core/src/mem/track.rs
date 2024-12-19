@@ -59,7 +59,8 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 		(total, threads)
 	}
 
-	/// Returns the number of bytes that are allocated to the process
+	/// Returns a tuple with the current total allocated bytes (summed across all threads),
+	/// and the number of threads that have allocated memory.
 	#[cfg(not(feature = "allocation-tracking"))]
 	pub fn current_usage(&self) -> (usize, usize) {
 		(0, 0)
