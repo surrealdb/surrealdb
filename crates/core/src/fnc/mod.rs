@@ -677,7 +677,7 @@ pub async fn idiom(
 				"id" => record::id,
 				"table" => record::tb,
 				"tb" => record::tb,
-				"refs" => record::refs((stk, ctx, opt, doc)).await,
+				"refs" => record::refs((ctx, opt)).await,
 			)
 		}
 		Value::Object(_) => {

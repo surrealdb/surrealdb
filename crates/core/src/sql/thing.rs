@@ -4,6 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::key::r#ref::Ref;
 use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
 use crate::syn;
 use derive::Store;
@@ -129,6 +130,72 @@ impl Thing {
 				Thing::from((self.tb, self.id)).into(),
 			))))),
 		}
+	}
+
+	pub(crate) async fn refs(&self, ctx: &Context, opt: &Options, ft: Option<&Table>, ff: Option<&Idiom>) -> Result<Vec<Thing>, Error> {
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+
+		let (mut prefix, suffix, ff) = match (ft, ff) {
+			(Some(ft), Some(ff)) => {
+				let ff = ff.to_string();
+	
+				(
+					crate::key::r#ref::ffprefix(ns, db, &self.tb, &self.id, &ft, &ff),
+					crate::key::r#ref::ffsuffix(ns, db, &self.tb, &self.id, &ft, &ff),
+					None,
+				)
+			},
+			(Some(ft), None) => (
+				crate::key::r#ref::ftprefix(ns, db, &self.tb, &self.id, &ft),
+				crate::key::r#ref::ftsuffix(ns, db, &self.tb, &self.id, &ft),
+				None,
+			),
+			(None, None) => (
+				crate::key::r#ref::prefix(ns, db, &self.tb, &self.id),
+				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
+				None
+			),
+			(None, Some(ff)) => (
+				crate::key::r#ref::prefix(ns, db, &self.tb, &self.id),
+				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
+				Some(ff.to_string())
+			)
+		};
+	
+		let mut keys: Vec<Vec<u8>> = vec![];
+		loop {
+			let rng = prefix.clone()..suffix.clone();
+			let res = ctx.tx().keys(rng, 1000, opt.version).await?;
+			if res.is_empty() {
+				break;
+			}
+
+			keys.extend(res);
+
+			// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
+			prefix.clone_from(keys.last().unwrap());
+			prefix.extend_from_slice(b"\0");
+		}
+	
+		let ids = keys
+			.iter()
+			.filter_map(|x| {
+				let key = Ref::from(x);
+				if let Some(ff) = &ff {
+					if key.ff != ff {
+						return None;
+					}
+				}
+	
+				Some(Thing {
+					tb: key.ft.to_string(),
+					id: key.fk,
+				})
+			})
+			.collect();
+
+		Ok(ids)
 	}
 }
 

@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::sql;
+use crate::sql::reference::Refs;
 use crate::sql::Value;
 use serde::de::DeserializeOwned;
 use serde_content::Deserializer;
@@ -68,6 +69,18 @@ impl Value {
 			Value::Query(v) => serializer.serialize(v).map_err(Into::into),
 			Value::Model(v) => serializer.serialize(v).map_err(Into::into),
 			Value::Closure(v) => serializer.serialize(v).map_err(Into::into),
+			Value::Refs(v) => {
+				let v = match v {
+					Refs::Static(_, _, sql::Array(v)) => v,
+					Refs::Dynamic(_, _) => vec![],
+				};
+
+				let mut vec = Vec::with_capacity(v.len());
+				for value in v {
+					vec.push(value.into_content()?);
+				}
+				Ok(Content::Seq(vec))
+			}
 		}
 	}
 }

@@ -8,10 +8,12 @@ use crate::sql::data::Data;
 use crate::sql::idiom::Idiom;
 use crate::sql::kind::Kind;
 use crate::sql::permission::Permission;
+use crate::sql::reference::Refs;
 use crate::sql::statements::DefineFieldStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
+use std::ops::Deref;
 use std::sync::Arc;
 
 impl Document {
@@ -202,20 +204,27 @@ impl Document {
 					old,
 					inp,
 				};
-				// Skip this field?
-				if !skipped {
-					// Process any DEFAULT clause
-					val = field.process_default_clause(val).await?;
-					// Process any TYPE clause
-					val = field.process_type_clause(val).await?;
-					// Process any VALUE clause
-					val = field.process_value_clause(val).await?;
-					// Process any TYPE clause
-					val = field.process_type_clause(val).await?;
-					// Process any ASSERT clause
-					val = field.process_assert_clause(val).await?;
-					// Process any REFERENCE clause
-					field.process_reference_clause(&val).await?;
+				// Process a potential `dynrefs` or `refs` TYPE
+				let res = field.process_refs_type(&val).await?;
+				if let Some(v) = res {
+					// We found a `dynrefs` or `refs` TYPE
+					val = v;
+				} else {
+					// Skip this field?
+					if !skipped {
+						// Process any DEFAULT clause
+						val = field.process_default_clause(val).await?;
+						// Process any TYPE clause
+						val = field.process_type_clause(val).await?;
+						// Process any VALUE clause
+						val = field.process_value_clause(val).await?;
+						// Process any TYPE clause
+						val = field.process_type_clause(val).await?;
+						// Process any ASSERT clause
+						val = field.process_assert_clause(val).await?;
+						// Process any REFERENCE clause
+						field.process_reference_clause(&val).await?;
+					}
 				}
 				// Process any PERMISSIONS clause
 				val = field.process_permissions_clause(val).await?;
@@ -582,7 +591,32 @@ impl<'a> FieldEditContext<'a> {
 						&self.rid.id,
 					).encode().unwrap();
 	
-					self.ctx.tx().set(key, vec![], None).await
+					self.ctx.tx().set(key, vec![], None).await?;
+
+					let ns = self.opt.ns()?;
+					let db = self.opt.db()?;
+					let fields = self.ctx.tx().all_tb_fields(ns, db, &thing.tb, None).await?;
+					for fd in fields.iter() {
+						if let Some(Kind::Refs(ft, ff)) = &fd.kind {
+							let val = self.ctx.tx().get_record(ns, db, &thing.tb, &thing.id, None).await?;
+							let pick = val.get(self.stk, self.ctx, self.opt, doc, &fd.name).await?;
+							if let Value::Refs(Refs::Static(cft, cff, arr)) = pick {
+								if &cft == ft && &cff == ff {
+									let v = Value::Thing(self.rid.deref().to_owned());
+									if !arr.iter().any(|x| x == &v) {
+										let mut arr = arr;
+										arr.push(v);
+
+										let mut val = val.deref().to_owned();
+										val.put(&fd.name, Value::Refs(Refs::Static(cft.clone(), cff.clone(), arr)));
+										self.ctx.tx().set_record(ns, db, &thing.tb, &thing.id, val).await?;
+									}
+								}
+							}
+						}
+					}
+
+					Ok(())
 				}
 				RefAction::Delete(thing) => {
 					let key = crate::key::r#ref::new(
@@ -595,12 +629,57 @@ impl<'a> FieldEditContext<'a> {
 						&self.rid.id,
 					).encode().unwrap();
 	
-					self.ctx.tx().del(key).await
+					self.ctx.tx().del(key).await?;
+
+					let ns = self.opt.ns()?;
+					let db = self.opt.db()?;
+					let fields = self.ctx.tx().all_tb_fields(ns, db, &thing.tb, None).await?;
+					for fd in fields.iter() {
+						if let Some(Kind::Refs(ft, ff)) = &fd.kind {
+							let val = self.ctx.tx().get_record(ns, db, &thing.tb, &thing.id, None).await?;
+							let pick = val.get(self.stk, self.ctx, self.opt, doc, &fd.name).await?;
+							if let Value::Refs(Refs::Static(cft, cff, arr)) = pick {
+								if &cft == ft && &cff == ff {
+									let v = Value::Thing(self.rid.deref().to_owned());
+									if arr.iter().any(|x| x == &v) {
+										let mut arr = arr;
+										arr.retain(|x| x != &v);
+
+										let mut val = val.deref().to_owned();
+										val.put(&fd.name, Value::Refs(Refs::Static(cft.clone(), cff.clone(), arr)));
+										self.ctx.tx().set_record(ns, db, &thing.tb, &thing.id, val).await?;
+									}
+								}
+							}
+						}
+					}
+
+					Ok(())
 				}
 				RefAction::Ignore => Ok(()),
 			}
 		} else {
 			Ok(())
 		}
+	}
+
+	async fn process_refs_type(&mut self, val: &Value) -> Result<Option<Value>, Error> {
+		let refs = match &self.def.kind {
+			Some(Kind::DynRefs(ft, ff)) => {
+				Refs::Dynamic(ft.clone(), ff.clone())
+			}
+			Some(Kind::Refs(ft, ff)) => match val {
+				Value::Refs(Refs::Static(cft, cff, arr)) 
+					if ft == cft && ff == cff => Refs::Static(cft.clone(), cff.clone(), arr.clone()),
+				_ => {
+					let ids = self.rid.refs(self.ctx, self.opt, ft.as_ref(), ff.as_ref()).await?;
+					let val = ids.into_iter().map(Value::Thing).collect();
+					Refs::Static(ft.clone(), ff.clone(), val)
+				}
+			}
+			_ => return Ok(None),
+		};
+
+		Ok(Some(Value::Refs(refs)))
 	}
 }

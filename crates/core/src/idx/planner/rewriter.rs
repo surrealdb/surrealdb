@@ -1,6 +1,7 @@
 use crate::idx::planner::executor::KnnExpressions;
 use crate::sql::id::range::IdRange;
 use crate::sql::part::DestructurePart;
+use crate::sql::reference::Refs;
 use crate::sql::{
 	Array, Cast, Cond, Expression, Function, Id, Idiom, Model, Object, Part, Range, Thing, Value,
 };
@@ -34,6 +35,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			Value::Function(f) => self.eval_value_function(f),
 			Value::Expression(e) => self.eval_value_expression(e),
 			Value::Model(m) => self.eval_value_model(m),
+			Value::Refs(v) => self.eval_value_refs(v),
 			Value::None
 			| Value::Null
 			| Value::Bool(_)
@@ -50,6 +52,16 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Value::Regex(_)
 			| Value::Constant(_)
 			| Value::Closure(_) => Some(v.clone()),
+		}
+	}
+
+	fn eval_value_refs(&self, v: &Refs) -> Option<Value> {
+		match v {
+			Refs::Static(ft, ff, a) => {
+				let a = self.eval_array(a)?;
+				Some(Value::Refs(Refs::Static(ft.clone(), ff.clone(), a)))
+			},
+			v @ Refs::Dynamic(_, _) => Some(Value::Refs(v.clone())),
 		}
 	}
 
