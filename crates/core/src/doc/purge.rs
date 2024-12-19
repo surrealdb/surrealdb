@@ -99,13 +99,13 @@ impl Document {
 						if let Some(reference) = &fd.reference {
 							match &reference.on_delete {
 								ReferenceDeleteStrategy::Ignore => (),
-								ReferenceDeleteStrategy::Block => {
+								ReferenceDeleteStrategy::Reject => {
 									let thing = Thing {
 										tb: r#ref.ft.to_string(),
 										id: r#ref.fk.clone(),
 									};
 
-									return Err(Error::ReferencedDeleteBlocked(
+									return Err(Error::DeleteRejectedByReference(
 										rid.to_string(),
 										thing.to_string(),
 									));

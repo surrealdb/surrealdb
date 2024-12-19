@@ -27,7 +27,7 @@ impl fmt::Display for Reference {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum ReferenceDeleteStrategy {
-	Block,
+	Reject,
 	Ignore,
 	Cascade,
 	Custom(Value),
@@ -36,7 +36,7 @@ pub enum ReferenceDeleteStrategy {
 impl fmt::Display for ReferenceDeleteStrategy {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			ReferenceDeleteStrategy::Block => write!(f, "BLOCK"),
+			ReferenceDeleteStrategy::Reject => write!(f, "REJECT"),
 			ReferenceDeleteStrategy::Ignore => write!(f, "IGNORE"),
 			ReferenceDeleteStrategy::Cascade => write!(f, "CASCADE"),
 			ReferenceDeleteStrategy::Custom(v) => write!(f, "THEN {}", v),

@@ -42,7 +42,7 @@ keyword! {
 	Before => "BEFORE",
 	Begin => "BEGIN",
 	Blank => "BLANK",
-	Block => "BLOCK",
+	Reject => "REJECT",
 	Bm25 => "BM25",
 	Break => "BREAK",
 	By => "BY",
