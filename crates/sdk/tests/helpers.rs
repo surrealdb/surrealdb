@@ -11,6 +11,7 @@ use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
 use surrealdb_core::dbs::Response;
 use surrealdb_core::sql::{value, Number, Value};
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub async fn new_ds() -> Result<Datastore, Error> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
@@ -234,7 +235,6 @@ pub struct Test {
 	pub responses: Vec<Response>,
 	pos: usize,
 }
-
 impl Debug for Test {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "Responses left: {:?}.", self.responses)
@@ -244,13 +244,25 @@ impl Debug for Test {
 impl Test {
 	#[allow(dead_code)]
 	pub async fn new_ds_session(ds: Datastore, session: Session, sql: &str) -> Result<Self, Error> {
-		let responses = ds.execute(sql, &session, None).await?;
-		Ok(Self {
+		let mut t = Self {
 			ds,
 			session,
-			responses,
+			responses: Vec::new(),
 			pos: 0,
-		})
+		};
+		let responses = t.execute(sql).await?;
+		t.append_responses(responses);
+		Ok(t)
+	}
+
+	#[allow(dead_code)]
+	pub async fn execute(&self, sql: &str) -> Result<Vec<Response>, Error> {
+		self.ds.execute(sql, &self.session, None).await
+	}
+
+	#[allow(dead_code)]
+	pub fn append_responses(&mut self, mut responses: Vec<Response>) {
+		self.responses.append(&mut responses);
 	}
 
 	#[allow(dead_code)]
@@ -304,6 +316,7 @@ impl Test {
 	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
 	/// The panic message will include the last position in the responses list before it was emptied.
 	#[track_caller]
+	#[allow(dead_code)]
 	pub fn next_value(&mut self) -> Result<Value, Error> {
 		self.next()?.result
 	}
@@ -487,6 +500,30 @@ impl Test {
 		let val: Vec<u8> = val.into();
 		let val = Value::Bytes(val.into());
 		self.expect_value_info(val, info)
+	}
+}
+
+#[allow(dead_code)]
+#[derive(Clone)]
+pub struct ParallelTest(Arc<RwLock<Test>>);
+
+impl ParallelTest {
+	#[allow(dead_code)]
+	pub async fn new(sql: &str) -> Result<Self, Error> {
+		Ok(Self(Arc::new(RwLock::new(Test::new(sql).await?))))
+	}
+	#[allow(dead_code)]
+	pub async fn write(&self) -> RwLockWriteGuard<'_, Test> {
+		self.0.write().await
+	}
+
+	#[allow(dead_code)]
+	pub async fn read(&self) -> RwLockReadGuard<'_, Test> {
+		self.0.read().await
+	}
+
+	pub async fn execute(&self, sql: &str) -> Result<Vec<Response>, Error> {
+		self.0.read().await.execute(sql).await
 	}
 }
 
