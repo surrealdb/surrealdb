@@ -73,6 +73,7 @@ impl Document {
 						.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version)
 						.await?;
 					pro = Processed {
+						keys_only: false,
 						generate: None,
 						rid: Some(Arc::new(v)),
 						ir: None,
