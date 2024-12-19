@@ -99,8 +99,20 @@ impl<'a> StatementContext<'a> {
 			// Get the table for this planner
 			match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
 				Ok(table) => {
+					// TODO(tobiemh): we should really
+					// not even get here if the table
+					// permissions are NONE, because
+					// there is no point in processing
+					// a table which we can't access.
 					let perms = self.stm.permissions(&table, false);
+					// If permissions are specific, we
+					// need to fetch the record content.
 					if perms.is_specific() {
+						return Ok(false);
+					}
+					// If permissions are NONE, we also
+					// need to fetch the record content.
+					if perms.is_none() {
 						return Ok(false);
 					}
 				}
