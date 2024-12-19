@@ -151,11 +151,6 @@ category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = true }
 
-[tasks.ci-api-integration-file]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
-run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = true }
-
 [tasks.ci-api-integration-rocksdb]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "rocksdb", _TEST_FEATURES = "kv-rocksdb" }
