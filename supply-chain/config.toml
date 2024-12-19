@@ -911,10 +911,6 @@ criteria = "safe-to-deploy"
 version = "2.2.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.parking_lot]]
-version = "0.12.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.parking_lot_core]]
 version = "0.9.9"
 criteria = "safe-to-deploy"
