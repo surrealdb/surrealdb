@@ -78,7 +78,7 @@ impl<'a> StatementContext<'a> {
 			match p {
 				Ordering::Random => {}
 				Ordering::Order(x) => {
-					if !x.0.is_empty() {
+					if !x.is_empty() {
 						return Ok(false);
 					}
 				}
@@ -95,7 +95,7 @@ impl<'a> StatementContext<'a> {
 		// If there are specific permissions
 		// defined on the table, then we need
 		// to process record values.
-		if self.opt.perms {
+		if self.opt.check_perms(self.stm.into())? {
 			// Get the table for this planner
 			match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
 				Ok(table) => {

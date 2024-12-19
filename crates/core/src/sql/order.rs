@@ -3,6 +3,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::ops::Deref;
 use std::{cmp, fmt};
 
 #[revisioned(revision = 1)]
@@ -28,6 +29,13 @@ impl fmt::Display for Ordering {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct OrderList(pub Vec<Order>);
+
+impl Deref for OrderList {
+	type Target = Vec<Order>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
 
 impl fmt::Display for OrderList {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
