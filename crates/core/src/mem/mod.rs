@@ -1,3 +1,6 @@
+#[cfg(feature = "allocation-tracking")]
+use std::sync::atomic::{AtomicBool, Ordering};
+
 mod fake;
 mod track;
 
@@ -58,3 +61,11 @@ pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
 #[global_allocator]
 pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
 	track::TrackAlloc::new(jemallocator::Jemalloc);
+
+#[cfg(feature = "allocation-tracking")]
+static ENABLE_THREAD_ALLOC: AtomicBool = AtomicBool::new(false);
+
+#[cfg(feature = "allocation-tracking")]
+pub fn enable_thread_alloc() {
+	ENABLE_THREAD_ALLOC.store(true, Ordering::Relaxed);
+}
