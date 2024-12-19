@@ -1,5 +1,7 @@
 #![cfg(feature = "kv-surrealkv")]
 
+mod cnf;
+
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::{Check, Key, Val, Version};
@@ -54,6 +56,13 @@ impl Datastore {
 		opts.disk_persistence = true;
 		// Set the data storage directory
 		opts.dir = path.to_string().into();
+		// Set the maximum value threshold
+		opts.max_value_threshold = *cnf::SURREALKV_MAX_VALUE_THRESHOLD;
+		// Set the maximum segment size
+		opts.max_segment_size = *cnf::SURREALKV_MAX_SEGMENT_SIZE;
+		// Set the maximum value cache size
+		opts.max_value_cache_size = *cnf::SURREALKV_MAX_VALUE_CACHE_SIZE;
+
 		// Create a new datastore
 		match Store::new(opts) {
 			Ok(db) => Ok(Datastore {
