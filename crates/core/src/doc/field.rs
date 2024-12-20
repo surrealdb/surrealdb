@@ -555,7 +555,7 @@ impl<'a> FieldEditContext<'a> {
 	}
 
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<(), Error> {
-		if let Some(_) = self.def.reference {
+		if self.def.reference.is_some() {
 			let doc = Some(&self.doc.current);
 			let old = self.old.as_ref();
 
