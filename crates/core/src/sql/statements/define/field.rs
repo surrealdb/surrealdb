@@ -7,8 +7,8 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{Literal, Part};
 use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
+use crate::sql::{Literal, Part};
 use crate::sql::{Relation, TableType};
 use derive::Store;
 use revision::revisioned;
@@ -288,26 +288,32 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	async fn correct_reference_type(&self, ctx: &Context, opt: &Options) -> Result<Option<Kind>, Error> {
+	async fn correct_reference_type(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Option<Kind>, Error> {
 		if let Some(Kind::References(Some(ft), Some(ff))) = &self.kind {
-			let tb = match ctx.tx().get_tb_field(opt.ns()?, opt.db()?, &ft.to_string(), &ff.to_string()).await {
+			let tb = match ctx
+				.tx()
+				.get_tb_field(opt.ns()?, opt.db()?, &ft.to_string(), &ff.to_string())
+				.await
+			{
 				Ok(tb) => tb,
-				Err(Error::FdNotFound { .. }) => return Ok(None),
+				Err(Error::FdNotFound {
+					..
+				}) => return Ok(None),
 				Err(e) => return Err(e),
 			};
 
 			let is_contained = matches!(
 				tb.kind,
-				Some(
-					Kind::Array(_, _) |
-					Kind::Set(_, _) |
-					Kind::Literal(Literal::Array(_))
-				)
+				Some(Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_)))
 			);
 
 			if is_contained {
 				let ff = ff.clone().push(Part::All);
-				return Ok(Some(Kind::References(Some(ft.clone()), Some(ff))))
+				return Ok(Some(Kind::References(Some(ft.clone()), Some(ff))));
 			}
 		}
 
