@@ -438,6 +438,10 @@ impl Parser<'_> {
 				t!("REJECT") => ReferenceDeleteStrategy::Reject,
 				t!("CASCADE") => ReferenceDeleteStrategy::Cascade,
 				t!("IGNORE") => ReferenceDeleteStrategy::Ignore,
+				t!("WIPE") => {
+					expected!(self, t!("VALUE"));
+					ReferenceDeleteStrategy::WipeValue
+				}
 				t!("THEN") => ReferenceDeleteStrategy::Custom(
 					ctx.run(|ctx| self.parse_value_field(ctx)).await?,
 				),

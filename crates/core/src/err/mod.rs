@@ -1248,6 +1248,10 @@ pub enum Error {
 	/// The record cannot be deleted as it's still referenced elsewhere
 	#[error("Cannot use the `{0}` keyword with `TYPE {0}`.")]
 	RefsTypeConflict(String, String),
+
+	/// The record cannot be deleted as it's still referenced elsewhere
+	#[error("An error occured while updating references for `{0}`: {1}")]
+	RefsUpdateFailure(String, String),
 }
 
 impl From<Error> for String {
