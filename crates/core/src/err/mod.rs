@@ -1241,7 +1241,7 @@ pub enum Error {
 
 	/// The record cannot be deleted as it's still referenced elsewhere
 	#[error(
-		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type instead."
+		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type, or a type containing only records, instead."
 	)]
 	ReferenceTypeConflict(String),
 
