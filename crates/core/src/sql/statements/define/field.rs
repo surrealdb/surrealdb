@@ -7,7 +7,7 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::Part;
+use crate::sql::{Literal, Part};
 use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::sql::{Relation, TableType};
 use derive::Store;
@@ -52,6 +52,12 @@ impl DefineFieldStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Validate reference options
 		self.validate_reference_options()?;
+		// Correct reference type
+		let kind = if let Some(kind) = self.correct_reference_type(ctx, opt).await? {
+			Some(kind)
+		} else {
+			self.kind.clone()
+		};
 		// Get the NS and DB
 		let ns = opt.ns()?;
 		let db = opt.db()?;
@@ -80,6 +86,7 @@ impl DefineFieldStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,
+				kind,
 				..self.clone()
 			},
 			None,
@@ -131,6 +138,7 @@ impl DefineFieldStatement {
 				{
 					DefineFieldStatement {
 						kind: Some(cur_kind),
+						reference: self.reference.clone(),
 						if_not_exists: false,
 						overwrite: false,
 						..existing.clone()
@@ -141,6 +149,7 @@ impl DefineFieldStatement {
 						what: self.what.clone(),
 						flex: self.flex,
 						kind: Some(cur_kind),
+						reference: self.reference.clone(),
 						..Default::default()
 					}
 				};
@@ -257,13 +266,52 @@ impl DefineFieldStatement {
 
 			// If a reference is defined, the field must be a record
 			if self.reference.is_some() {
-				if !matches!(kind, Kind::Record(_)) {
+				let kinds = match kind {
+					Kind::Either(kinds) => kinds,
+					Kind::Array(kind, _) | Kind::Set(kind, _) => match kind.as_ref() {
+						Kind::Either(kinds) => kinds,
+						kind => &vec![kind.to_owned()],
+					},
+					Kind::Literal(lit) => match lit {
+						Literal::Array(kinds) => kinds,
+						lit => &vec![Kind::Literal(lit.to_owned())],
+					},
+					kind => &vec![kind.to_owned()],
+				};
+
+				if !kinds.iter().all(|k| matches!(k, Kind::Record(_))) {
 					return Err(Error::ReferenceTypeConflict(kind.to_string()));
 				}
 			}
 		}
 
 		Ok(())
+	}
+
+	async fn correct_reference_type(&self, ctx: &Context, opt: &Options) -> Result<Option<Kind>, Error> {
+		if let Some(Kind::References(Some(ft), Some(ff))) = &self.kind {
+			let tb = match ctx.tx().get_tb_field(opt.ns()?, opt.db()?, &ft.to_string(), &ff.to_string()).await {
+				Ok(tb) => tb,
+				Err(Error::FdNotFound { .. }) => return Ok(None),
+				Err(e) => return Err(e),
+			};
+
+			let is_contained = matches!(
+				tb.kind,
+				Some(
+					Kind::Array(_, _) |
+					Kind::Set(_, _) |
+					Kind::Literal(Literal::Array(_))
+				)
+			);
+
+			if is_contained {
+				let ff = ff.clone().push(Part::All);
+				return Ok(Some(Kind::References(Some(ft.clone()), Some(ff))))
+			}
+		}
+
+		Ok(None)
 	}
 }
 
