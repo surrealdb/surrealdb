@@ -38,8 +38,7 @@ pub enum Kind {
 	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
 	Range,
 	Literal(Literal),
-	Refs(Option<Table>, Option<Idiom>),
-	DynRefs(Option<Table>, Option<Idiom>),
+	References(Option<Table>, Option<Idiom>),
 }
 
 impl Default for Kind {
@@ -173,8 +172,7 @@ impl Kind {
 				| Kind::Function(_, _)
 				| Kind::Range
 				| Kind::Literal(_)
-				| Kind::Refs(_, _)
-				| Kind::DynRefs(_, _) => return None,
+				| Kind::References(_, _) => return None,
 				Kind::Option(x) => {
 					this = x;
 				}
@@ -240,16 +238,10 @@ impl Display for Kind {
 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
 			Kind::Range => f.write_str("range"),
 			Kind::Literal(l) => write!(f, "{}", l),
-			kind @ Kind::Refs(t, i) | kind @ Kind::DynRefs(t, i) => {
-				if matches!(kind, Kind::DynRefs(_, _)) {
-					write!(f, "dyn")?;
-				}
-
-				match (t, i) {
-					(Some(t), None) => write!(f, "refs<{}>", t),
-					(Some(t), Some(i)) => write!(f, "refs<{}, {}>", t, i),
-					(None, _) => f.write_str("refs"),
-				}
+			Kind::References(t, i) => match (t, i) {
+				(Some(t), None) => write!(f, "references<{}>", t),
+				(Some(t), Some(i)) => write!(f, "references<{}, {}>", t, i),
+				(None, _) => f.write_str("references"),
 			}
 		}
 	}

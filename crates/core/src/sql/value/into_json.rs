@@ -1,6 +1,5 @@
 use crate::sql;
 use crate::sql::constant::ConstantValue;
-use crate::sql::reference::Refs;
 use crate::sql::Number;
 use crate::sql::Value;
 use serde::Serialize;
@@ -53,14 +52,7 @@ impl From<Value> for serde_json::Value {
 			Value::Subquery(subquery) => json!(subquery),
 			Value::Expression(expression) => json!(expression),
 			Value::Closure(closure) => json!(closure),
-			Value::Refs(v) => {
-				let v = match v {
-					Refs::Static(_, _, sql::Array(v)) => v,
-					Refs::Dynamic(_, _) => vec![],
-				};
-
-				json!(v)
-			}
+			Value::Refs(_) => json!(sql::Array::new())
 		}
 	}
 }
