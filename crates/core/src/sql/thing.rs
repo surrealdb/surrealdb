@@ -147,14 +147,14 @@ impl Thing {
 				let ff = ff.to_string();
 
 				(
-					crate::key::r#ref::ffprefix(ns, db, &self.tb, &self.id, &ft, &ff),
-					crate::key::r#ref::ffsuffix(ns, db, &self.tb, &self.id, &ft, &ff),
+					crate::key::r#ref::ffprefix(ns, db, &self.tb, &self.id, ft, &ff),
+					crate::key::r#ref::ffsuffix(ns, db, &self.tb, &self.id, ft, &ff),
 					None,
 				)
 			}
 			(Some(ft), None) => (
-				crate::key::r#ref::ftprefix(ns, db, &self.tb, &self.id, &ft),
-				crate::key::r#ref::ftsuffix(ns, db, &self.tb, &self.id, &ft),
+				crate::key::r#ref::ftprefix(ns, db, &self.tb, &self.id, ft),
+				crate::key::r#ref::ftsuffix(ns, db, &self.tb, &self.id, ft),
 				None,
 			),
 			(None, None) => (
