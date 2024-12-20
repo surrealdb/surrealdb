@@ -1386,7 +1386,7 @@ impl Value {
 				})
 			}
 			Kind::Literal(lit) => self.coerce_to_literal(lit),
-			Kind::References(_, _)  => Err(Error::CoerceTo {
+			Kind::References(_, _) => Err(Error::CoerceTo {
 				from: self,
 				into: kind.to_string(),
 			}),

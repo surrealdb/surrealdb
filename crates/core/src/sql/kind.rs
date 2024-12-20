@@ -242,7 +242,7 @@ impl Display for Kind {
 				(Some(t), None) => write!(f, "references<{}>", t),
 				(Some(t), Some(i)) => write!(f, "references<{}, {}>", t, i),
 				(None, _) => f.write_str("references"),
-			}
+			},
 		}
 	}
 }
