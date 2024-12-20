@@ -143,11 +143,7 @@ impl Document {
 											Value::Thing(rid.as_ref().clone()),
 										)]),
 										// This is a self contained value, we can set it NONE
-										_ => Data::SetExpression(vec![(
-											fd.name.as_ref().into(),
-											Operator::Equal,
-											Value::None,
-										)]),
+										_ => Data::UnsetExpression(vec![fd.name.as_ref().into()]),
 									};
 
 									// Setup the delete statement
