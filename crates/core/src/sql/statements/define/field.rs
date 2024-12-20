@@ -227,12 +227,8 @@ impl DefineFieldStatement {
 		if let Some(kind) = &self.kind {
 			// As the refs and dynrefs type essentially take over a field
 			// they are not allowed to be mixed with most other clauses
-			if matches!(kind, Kind::Refs(_, _) | Kind::DynRefs(_, _)) {
-				let typename = if matches!(kind, Kind::Refs(_, _)) {
-					"refs".to_string()
-				} else {
-					"dynrefs".to_string()
-				};
+			if matches!(kind, Kind::References(_, _)) {
+				let typename = kind.to_string();
 
 				if self.reference.is_some() {
 					return Err(Error::RefsTypeConflict("REFERENCE".into(), typename));
@@ -262,7 +258,7 @@ impl DefineFieldStatement {
 			// If a reference is defined, the field must be a record
 			if self.reference.is_some() {
 				if !matches!(kind, Kind::Record(_)) {
-					return Err(Error::ReferenceTypeConflict(kind.to_owned()));
+					return Err(Error::ReferenceTypeConflict(kind.to_string()));
 				}
 			}
 		}

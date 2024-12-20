@@ -145,7 +145,7 @@ impl Parser<'_> {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
 			}
-			kind @ t!("REFS") | kind @ t!("DYNREFS") => {
+			t!("REFERENCES") => {
 				let span = self.peek().span;
 				let (table, path) = if self.eat(t!("<")) {
 					let table: Option<Table> = Some(self.next_token_value()?);
@@ -161,11 +161,7 @@ impl Parser<'_> {
 					(None, None)
 				};
 
-				if matches!(kind, t!("DYNREFS")) {
-					Ok(Kind::DynRefs(table, path))
-				} else {
-					Ok(Kind::Refs(table, path))
-				}
+				Ok(Kind::References(table, path))
 			}
 			_ => unexpected!(self, next, "a kind name"),
 		}

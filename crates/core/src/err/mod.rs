@@ -5,7 +5,6 @@ use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::Kind;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64::DecodeError as Base64Error;
@@ -1244,7 +1243,7 @@ pub enum Error {
 	#[error(
 		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type instead."
 	)]
-	ReferenceTypeConflict(Kind),
+	ReferenceTypeConflict(String),
 
 	/// The record cannot be deleted as it's still referenced elsewhere
 	#[error("Cannot use the `{0}` keyword with `TYPE {0}`.")]
