@@ -1239,19 +1239,23 @@ pub enum Error {
 	#[error("Cannot delete `{0}` as it is referenced and rejected by `{1}`")]
 	DeleteRejectedByReference(String, String),
 
-	/// The record cannot be deleted as it's still referenced elsewhere
+	/// The `REFERENCE` keyword can only be used in combination with a type referencing a record
 	#[error(
 		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type, or a type containing only records, instead."
 	)]
 	ReferenceTypeConflict(String),
 
-	/// The record cannot be deleted as it's still referenced elsewhere
+	/// The `references` type cannot be used with other clauses altering or working with the value
 	#[error("Cannot use the `{0}` keyword with `TYPE {0}`.")]
 	RefsTypeConflict(String, String),
 
-	/// The record cannot be deleted as it's still referenced elsewhere
+	/// Something went wrong while updating references
 	#[error("An error occured while updating references for `{0}`: {1}")]
 	RefsUpdateFailure(String, String),
+
+	/// Cannot process `Value::Refs` as there is no Record ID in the context for the operation
+	#[error("Cannot obtain a list of references as there is no Record ID in the context for the operation")]
+	InvalidRefsContext,
 }
 
 impl From<Error> for String {

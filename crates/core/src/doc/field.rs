@@ -203,10 +203,11 @@ impl Document {
 					old,
 					inp,
 				};
-				// Process a potential `dynrefs` or `refs` TYPE
+				// Process a potential `references` TYPE
 				let res = field.process_refs_type().await?;
 				if let Some(v) = res {
-					// We found a `dynrefs` or `refs` TYPE
+					// We found a `references` TYPE
+					// No other clauses will be present, so no need to process them
 					val = v;
 				} else {
 					// Skip this field?
@@ -553,21 +554,27 @@ impl<'a> FieldEditContext<'a> {
 		// Return the original value
 		Ok(val)
 	}
-
+	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<(), Error> {
+		// Is there a `REFERENCE` clause?
 		if self.def.reference.is_some() {
 			let doc = Some(&self.doc.current);
 			let old = self.old.as_ref();
 
+			// If the value has not changed, there is no need to update any references
 			let action = if val == old {
 				RefAction::Ignore
+			// Check if the old value was a record id
 			} else if let Value::Thing(thing) = old {
+				// We need to check if this reference is contained in an array
 				let others = self
 					.doc
 					.current
 					.doc
 					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
 					.await?;
+				// If the reference is contained in an array, we only delete it from the array
+				// if there is no other reference to the same record id in the array
 				if let Value::Array(arr) = others {
 					if arr.iter().any(|v| v == old) {
 						RefAction::Ignore
@@ -575,15 +582,23 @@ impl<'a> FieldEditContext<'a> {
 						RefAction::Delete(thing)
 					}
 				} else {
+					// Otherwise we delete the reference
 					RefAction::Delete(thing)
 				}
+			// We found a new reference, let's create the link
 			} else if let Value::Thing(thing) = val {
 				RefAction::Set(thing)
 			} else {
+				// This value is not a record id, nothing to process
+				// This can be a containing array for record ids, for example
 				RefAction::Ignore
 			};
 
+			// Process the action
 			match action {
+				// Nothing to process
+				RefAction::Ignore => Ok(()),
+				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
 					let key = crate::key::r#ref::new(
 						self.opt.ns()?,
@@ -601,6 +616,7 @@ impl<'a> FieldEditContext<'a> {
 
 					Ok(())
 				}
+				// Delete the reference, if it exists
 				RefAction::Delete(thing) => {
 					let key = crate::key::r#ref::new(
 						self.opt.ns()?,
@@ -618,16 +634,18 @@ impl<'a> FieldEditContext<'a> {
 
 					Ok(())
 				}
-				RefAction::Ignore => Ok(()),
 			}
 		} else {
 			Ok(())
 		}
 	}
-
+	/// Process any `TYPE reference` clause for the field definition
 	async fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
 		let refs = match &self.def.kind {
+			// We found a reference type for this field
+			// In this case, we force the value to be a reference
 			Some(Kind::References(ft, ff)) => Refs(ft.clone(), ff.clone()),
+			// This is not a reference type, continue as normal
 			_ => return Ok(None),
 		};
 

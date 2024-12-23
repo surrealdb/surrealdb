@@ -189,6 +189,13 @@ impl Kind {
 			}
 		}
 	}
+
+	pub(crate) fn non_optional(&self) -> &Kind {
+		match self {
+			Kind::Option(k) => k.as_ref().non_optional(),
+			_ => self,
+		}
+	}
 }
 
 impl From<&Kind> for Box<Kind> {

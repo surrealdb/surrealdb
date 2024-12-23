@@ -74,15 +74,25 @@ impl Refs {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
+		// Collect an array of references
 		let arr = match doc {
-			Some(doc) => match &doc.rid {
-				Some(id) => {
-					let ids = id.refs(ctx, opt, self.0.as_ref(), self.1.as_ref()).await?;
-					ids.into_iter().map(Value::Thing).collect()
-				}
-				None => return Err(Error::Unreachable("bla".into())),
+			// Check if the current document has specified an ID
+			Some(doc) => {
+				// Obtain a record id from the document
+				let rid = match &doc.rid {
+					Some(id) => id.as_ref().to_owned(),
+					None => match &doc.doc.rid() {
+						Value::Thing(id) => id.to_owned(),
+						_ => return Err(Error::InvalidRefsContext),
+					},
+				};
+
+				// Collect the references
+				let ids = rid.refs(ctx, opt, self.0.as_ref(), self.1.as_ref()).await?;
+				// Convert the references into values
+				ids.into_iter().map(Value::Thing).collect()
 			},
-			None => return Err(Error::Unreachable("bla".into())),
+			None => return Err(Error::InvalidRefsContext),
 		};
 
 		Ok(Value::Array(arr))

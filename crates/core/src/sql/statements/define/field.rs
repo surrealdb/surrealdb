@@ -266,7 +266,7 @@ impl DefineFieldStatement {
 
 			// If a reference is defined, the field must be a record
 			if self.reference.is_some() {
-				let kinds = match kind {
+				let kinds = match kind.non_optional() {
 					Kind::Either(kinds) => kinds,
 					Kind::Array(kind, _) | Kind::Set(kind, _) => match kind.as_ref() {
 						Kind::Either(kinds) => kinds,
@@ -294,23 +294,33 @@ impl DefineFieldStatement {
 		opt: &Options,
 	) -> Result<Option<Kind>, Error> {
 		if let Some(Kind::References(Some(ft), Some(ff))) = &self.kind {
-			let tb = match ctx
+			// Obtain the field definition
+			let fd = match ctx
 				.tx()
 				.get_tb_field(opt.ns()?, opt.db()?, &ft.to_string(), &ff.to_string())
 				.await
 			{
-				Ok(tb) => tb,
+				Ok(fd) => fd,
+				// If the field does not exist, there is nothing to correct
 				Err(Error::FdNotFound {
 					..
 				}) => return Ok(None),
 				Err(e) => return Err(e),
 			};
 
-			let is_contained = matches!(
-				tb.kind,
-				Some(Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_)))
-			);
+			// Check if the field is an array-like value and thus "containing" references
+			let is_contained = if let Some(kind) = &fd.kind {
+				matches!(
+					kind.non_optional(),
+						Kind::Array(_, _) | 
+						Kind::Set(_, _) | 
+						Kind::Literal(Literal::Array(_))
+				)
+			} else {
+				false
+			};
 
+			// If the field is an array-like value, add the `.*` part
 			if is_contained {
 				let ff = ff.clone().push(Part::All);
 				return Ok(Some(Kind::References(Some(ft.clone()), Some(ff))));
