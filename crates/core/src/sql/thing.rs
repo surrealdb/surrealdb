@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
+use futures::StreamExt;
 
 const ID: &str = "id";
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
@@ -142,7 +143,7 @@ impl Thing {
 		let ns = opt.ns()?;
 		let db = opt.db()?;
 
-		let (mut prefix, suffix, ff) = match (ft, ff) {
+		let (prefix, suffix, ff) = match (ft, ff) {
 			(Some(ft), Some(ff)) => {
 				let ff = ff.to_string();
 
@@ -169,19 +170,14 @@ impl Thing {
 			),
 		};
 
+		let txn = ctx.tx();
+		let range = prefix..suffix;
+		let mut stream = txn.stream_keys(range);
+		
+		// Collect the keys from the stream into a vec
 		let mut keys: Vec<Vec<u8>> = vec![];
-		loop {
-			let rng = prefix.clone()..suffix.clone();
-			let res = ctx.tx().keys(rng, 1000, opt.version).await?;
-			if res.is_empty() {
-				break;
-			}
-
-			keys.extend(res);
-
-			// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
-			prefix.clone_from(keys.last().unwrap());
-			prefix.extend_from_slice(b"\0");
+		while let Some(res) = stream.next().await {
+			keys.push(res?);
 		}
 
 		let ids = keys
