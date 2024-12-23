@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error};
 
-use super::{Idiom, Table, Value};
+use super::{statements::info::InfoStructure, Idiom, Table, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -18,6 +18,14 @@ pub struct Reference {
 impl fmt::Display for Reference {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "REFERENCE ON DELETE {}", &self.on_delete)
+	}
+}
+
+impl InfoStructure for Reference {
+	fn structure(self) -> Value {
+		map! {
+			"on_delete" => self.on_delete.structure(),
+		}.into()
 	}
 }
 
@@ -43,6 +51,12 @@ impl fmt::Display for ReferenceDeleteStrategy {
 			ReferenceDeleteStrategy::WipeValue => write!(f, "WIPE VALUE"),
 			ReferenceDeleteStrategy::Custom(v) => write!(f, "THEN {}", v),
 		}
+	}
+}
+
+impl InfoStructure for ReferenceDeleteStrategy {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }
 
