@@ -55,28 +55,28 @@ pub async fn refs(
 	Ok(Value::Array(val))
 }
 
-async fn correct_refs_field(ctx: &Context, opt: &Options, ft: &Table, ff: Idiom) -> Result<Idiom, Error> {
+async fn correct_refs_field(
+	ctx: &Context,
+	opt: &Options,
+	ft: &Table,
+	ff: Idiom,
+) -> Result<Idiom, Error> {
 	// Obtain the field definition
-	let fd = match ctx
-		.tx()
-		.get_tb_field(opt.ns()?, opt.db()?, &ft.to_string(), &ff.to_string())
-		.await
-	{
-		Ok(fd) => fd,
-		// If the field does not exist, there is nothing to correct
-		Err(Error::FdNotFound {
-			..
-		}) => return Ok(ff),
-		Err(e) => return Err(e),
-	};
+	let fd =
+		match ctx.tx().get_tb_field(opt.ns()?, opt.db()?, &ft.to_string(), &ff.to_string()).await {
+			Ok(fd) => fd,
+			// If the field does not exist, there is nothing to correct
+			Err(Error::FdNotFound {
+				..
+			}) => return Ok(ff),
+			Err(e) => return Err(e),
+		};
 
 	// Check if the field is an array-like value and thus "containing" references
 	let is_contained = if let Some(kind) = &fd.kind {
 		matches!(
 			kind.non_optional(),
-				Kind::Array(_, _) | 
-				Kind::Set(_, _) | 
-				Kind::Literal(Literal::Array(_))
+			Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_))
 		)
 	} else {
 		false

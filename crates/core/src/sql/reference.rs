@@ -25,7 +25,8 @@ impl InfoStructure for Reference {
 	fn structure(self) -> Value {
 		map! {
 			"on_delete" => self.on_delete.structure(),
-		}.into()
+		}
+		.into()
 	}
 }
 
@@ -91,7 +92,7 @@ impl Refs {
 				let ids = rid.refs(ctx, opt, self.0.as_ref(), self.1.as_ref()).await?;
 				// Convert the references into values
 				ids.into_iter().map(Value::Thing).collect()
-			},
+			}
 			None => return Err(Error::InvalidRefsContext),
 		};
 

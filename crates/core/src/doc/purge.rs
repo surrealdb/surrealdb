@@ -21,8 +21,8 @@ use crate::sql::Data;
 use crate::sql::Operator;
 use crate::sql::Part;
 use crate::sql::Thing;
-use reblessive::tree::Stk;
 use futures::StreamExt;
+use reblessive::tree::Stk;
 
 impl Document {
 	pub(super) async fn purge(
@@ -191,23 +191,25 @@ impl Document {
 
 								// Obtain the document for the remote record
 								let doc: CursorValue = Value::Thing(this)
-									.get(stk, &ctx, &opt.clone().with_perms(false), None, &[Part::All])
-									.await?.into();
+									.get(
+										stk,
+										&ctx,
+										&opt.clone().with_perms(false),
+										None,
+										&[Part::All],
+									)
+									.await?
+									.into();
 								// Construct the document for the compute method
 								let doc = CursorDoc::new(None, None, doc);
 
 								// Compute the custom instruction.
-								v.compute(
-									stk,
-									&ctx,
-									&opt.clone().with_perms(false),
-									Some(&doc),
-								)
-								.await
-								// Wrap any error in an error explaining what went wrong
-								.map_err(|e| {
-									Error::RefsUpdateFailure(rid.to_string(), e.to_string())
-								})?;
+								v.compute(stk, &ctx, &opt.clone().with_perms(false), Some(&doc))
+									.await
+									// Wrap any error in an error explaining what went wrong
+									.map_err(|e| {
+										Error::RefsUpdateFailure(rid.to_string(), e.to_string())
+									})?;
 							}
 						}
 					}
