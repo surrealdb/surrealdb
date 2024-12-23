@@ -445,7 +445,7 @@ impl Parser<'_> {
 				t!("THEN") => ReferenceDeleteStrategy::Custom(
 					ctx.run(|ctx| self.parse_value_field(ctx)).await?,
 				),
-				_ => unexpected!(self, next, "`REJECT`, `CASCASE`, `IGNORE` or `WIPE VALUE`"),
+				_ => unexpected!(self, next, "`REJECT`, `CASCASE`, `IGNORE`, `WIPE VALUE` or `THEN`"),
 			}
 		} else {
 			ReferenceDeleteStrategy::Ignore

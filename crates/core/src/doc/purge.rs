@@ -171,8 +171,10 @@ impl Document {
 									ctx.add_value("reference", reference.into());
 									let ctx = ctx.freeze();
 
-									let doc: CursorValue = Value::None.into();
-									let doc = CursorDoc::new(Some(this.into()), None, doc);
+									let doc: CursorValue = Value::Thing(this)
+										.get(stk, &ctx, &opt.clone().with_perms(false), None, &[Part::All])
+										.await?.into();
+									let doc = CursorDoc::new(None, None, doc);
 
 									v.compute(
 										stk,

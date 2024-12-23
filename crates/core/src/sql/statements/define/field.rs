@@ -349,6 +349,9 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.assert {
 			write!(f, " ASSERT {v}")?
 		}
+		if let Some(ref v) = self.reference {
+			write!(f, " REFERENCE {v}")?
+		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
