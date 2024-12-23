@@ -84,9 +84,8 @@ async fn correct_refs_field(
 
 	// If the field is an array-like value, add the `.*` part
 	if is_contained {
-		let ff = ff.push(Part::All);
-		return Ok(ff);
+		Ok(ff.push(Part::All))
 	} else {
-		return Ok(ff);
+		Ok(ff)
 	}
 }
