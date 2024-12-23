@@ -209,7 +209,6 @@ keyword! {
 	Version => "VERSION",
 	Vs => "VS",
 	When => "WHEN",
-	Wipe => "WIPE",
 	Where => "WHERE",
 	With => "WITH",
 	AllInside => "ALLINSIDE",

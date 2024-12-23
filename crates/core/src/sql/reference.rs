@@ -39,7 +39,7 @@ pub enum ReferenceDeleteStrategy {
 	Reject,
 	Ignore,
 	Cascade,
-	WipeValue,
+	Unset,
 	Custom(Value),
 }
 
@@ -49,7 +49,7 @@ impl fmt::Display for ReferenceDeleteStrategy {
 			ReferenceDeleteStrategy::Reject => write!(f, "REJECT"),
 			ReferenceDeleteStrategy::Ignore => write!(f, "IGNORE"),
 			ReferenceDeleteStrategy::Cascade => write!(f, "CASCADE"),
-			ReferenceDeleteStrategy::WipeValue => write!(f, "WIPE VALUE"),
+			ReferenceDeleteStrategy::Unset => write!(f, "UNSET"),
 			ReferenceDeleteStrategy::Custom(v) => write!(f, "THEN {}", v),
 		}
 	}
