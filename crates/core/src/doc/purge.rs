@@ -141,7 +141,7 @@ impl Document {
 									})?;
 							}
 							// Delete only the reference on the remote record
-							ReferenceDeleteStrategy::WipeValue => {
+							ReferenceDeleteStrategy::Unset => {
 								let thing = Thing {
 									tb: r#ref.ft.to_string(),
 									id: r#ref.fk.clone(),

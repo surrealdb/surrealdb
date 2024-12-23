@@ -75,7 +75,7 @@ DEFINE FIELD author ON post TYPE record<person>
     REFERENCE ON DELETE REJECT;
 
 DEFINE FIELD tags ON post TYPE array<record<tag>>
-    REFERENCE ON DELETE WIPE VALUE;
+    REFERENCE ON DELETE UNSET;
 
 CREATE tag:surrealdb, tag:multimodel;
 CREATE person:micha;
