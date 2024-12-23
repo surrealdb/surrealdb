@@ -8,13 +8,13 @@ use crate::key::r#ref::Ref;
 use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
 use crate::syn;
 use derive::Store;
+use futures::StreamExt;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
-use futures::StreamExt;
 
 const ID: &str = "id";
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
@@ -173,7 +173,7 @@ impl Thing {
 		let txn = ctx.tx();
 		let range = prefix..suffix;
 		let mut stream = txn.stream_keys(range);
-		
+
 		// Collect the keys from the stream into a vec
 		let mut keys: Vec<Vec<u8>> = vec![];
 		while let Some(res) = stream.next().await {

@@ -312,9 +312,7 @@ impl DefineFieldStatement {
 			let is_contained = if let Some(kind) = &fd.kind {
 				matches!(
 					kind.non_optional(),
-						Kind::Array(_, _) | 
-						Kind::Set(_, _) | 
-						Kind::Literal(Literal::Array(_))
+					Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_))
 				)
 			} else {
 				false
