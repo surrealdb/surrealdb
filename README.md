@@ -1,17 +1,9 @@
-<br>
-
 <p align="center">
-    <img width="300" src="./img/icon.png" alt="SurrealDB Icon">
-</p>
-
-<br>
-
-<p align="center">
-    <a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
-        <img width="300" src="./img/white/logo.svg" alt="SurrealDB Logo">
+	<a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
+        <img width="100%" src="./img/white/hero.png" alt="SurrealDB Logo">
     </a>
     <a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
-        <img width="300" src="./img/black/logo.svg" alt="SurrealDB Logo">
+        <img width="100%" src="./img/black/hero.png" alt="SurrealDB Logo">
     </a>
 </p>
 
@@ -19,13 +11,14 @@
     <a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
         <img src="./img/white/text.svg" height="15" alt="SurrealDB">
     </a>
-    <a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
+	<a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
         <img src="./img/black/text.svg" height="15" alt="SurrealDB">
     </a>
-    is the ultimate cloud <br> database for tomorrow's applications
+    is the world's most <br> powerful multi-model database
 </h3>
 
-<h3 align="center">Develop easier. &nbsp; Build faster. &nbsp; Scale quicker.</h3>
+
+<h3 align="center">One platform. &nbsp; Unlimited possibilities.</h3>
 
 <br>
 
