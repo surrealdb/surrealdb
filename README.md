@@ -1,9 +1,9 @@
 <p align="center">
 	<a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
-        <img width="100%" src="./img/white/hero.png" alt="SurrealDB Logo">
+        <img width="100%" src="/img/white/hero.png" alt="SurrealDB Hero">
     </a>
     <a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
-        <img width="100%" src="./img/black/hero.png" alt="SurrealDB Logo">
+        <img width="100%" src="/img/black/hero.png" alt="SurrealDB Hero">
     </a>
 </p>
 

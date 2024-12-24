@@ -1,23 +1,8 @@
-<br>
-
 <p align="center">
-    <img width="300" src="https://github.com/surrealdb/surrealdb/blob/main/img/icon.png?raw=true" alt="SurrealDB Icon">
+    <a href="https://surrealdb.com" target="_blank">
+        <img width="100%" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/hero.png?raw=true" alt="SurrealDB Hero">
+    </a>
 </p>
-
-<br>
-
-<p align="center">
-    <img width="300" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/logo.svg?raw=true" alt="SurrealDB Logo">
-</p>
-
-<h3 align="center">
-    <img src="https://github.com/surrealdb/surrealdb/blob/main/img/black/text.svg?raw=true" height="15" alt="SurrealDB">
-    is the ultimate cloud <br> database for tomorrow's applications
-</h3>
-
-<h3 align="center">Develop easier. &nbsp; Build faster. &nbsp; Scale quicker.</h3>
-
-<br>
 
 <p align="center">
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/github/v/release/surrealdb/surrealdb?color=%23ff00a0&include_prereleases&label=version&sort=semver&style=flat-square"></a>
