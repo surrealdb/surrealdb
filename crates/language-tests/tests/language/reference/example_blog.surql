@@ -44,7 +44,7 @@ value = "[]"
 value = "[{ author: person:micha, id: post:whysurrealdb, tags: [tag:surrealdb] }]"
 
 [[test.results]]
-error = "Cannot delete `person:micha` as it is referenced and rejected by `post:whysurrealdb`"
+error = "Cannot delete `person:micha` as it is referenced by `post:whysurrealdb` with an ON DELETE REJECT clause"
 
 [[test.results]]
 value = "NONE"
