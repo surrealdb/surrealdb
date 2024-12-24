@@ -143,31 +143,24 @@ impl Thing {
 		let ns = opt.ns()?;
 		let db = opt.db()?;
 
-		let (prefix, suffix, ff) = match (ft, ff) {
+		let (prefix, suffix) = match (ft, ff) {
 			(Some(ft), Some(ff)) => {
 				let ff = ff.to_string();
 
 				(
 					crate::key::r#ref::ffprefix(ns, db, &self.tb, &self.id, ft, &ff),
 					crate::key::r#ref::ffsuffix(ns, db, &self.tb, &self.id, ft, &ff),
-					None,
 				)
 			}
 			(Some(ft), None) => (
 				crate::key::r#ref::ftprefix(ns, db, &self.tb, &self.id, ft),
 				crate::key::r#ref::ftsuffix(ns, db, &self.tb, &self.id, ft),
-				None,
 			),
 			(None, None) => (
 				crate::key::r#ref::prefix(ns, db, &self.tb, &self.id),
 				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
-				None,
 			),
-			(None, Some(ff)) => (
-				crate::key::r#ref::prefix(ns, db, &self.tb, &self.id),
-				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
-				Some(ff.to_string()),
-			),
+			(None, Some(_)) => return Err(Error::Unreachable("A foreign field was passed without a foreign table".into())),
 		};
 
 		let txn = ctx.tx();
@@ -184,11 +177,6 @@ impl Thing {
 			.iter()
 			.filter_map(|x| {
 				let key = Ref::from(x);
-				if let Some(ff) = &ff {
-					if key.ff != ff {
-						return None;
-					}
-				}
 
 				Some(Thing {
 					tb: key.ft.to_string(),
