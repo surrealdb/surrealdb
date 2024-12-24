@@ -116,6 +116,11 @@ impl Value {
 			}
 			// Get the current value at the path
 			Some(p) => match self {
+				// Compute the refs first, then continue the path
+				Value::Refs(r) => {
+					let v = r.compute(ctx, opt, doc).await?;
+					stk.run(|stk| v.get(stk, ctx, opt, doc, path)).await
+				}
 				// Current value at path is a geometry
 				Value::Geometry(v) => match p {
 					// If this is the 'type' field then continue

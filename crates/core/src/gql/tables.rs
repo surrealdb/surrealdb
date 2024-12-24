@@ -488,6 +488,7 @@ fn filter_from_type(
 		Kind::Function(_, _) => {}
 		Kind::Range => {}
 		Kind::Literal(_) => {}
+		Kind::References(_, _) => {}
 	};
 	Ok(filter)
 }
