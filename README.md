@@ -7,21 +7,6 @@
     </a>
 </p>
 
-<h3 align="center">
-    <a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
-        <img src="./img/white/text.svg" height="15" alt="SurrealDB">
-    </a>
-	<a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
-        <img src="./img/black/text.svg" height="15" alt="SurrealDB">
-    </a>
-    is the world's most <br> powerful multi-model database
-</h3>
-
-
-<h3 align="center">One platform. &nbsp; Unlimited possibilities.</h3>
-
-<br>
-
 <p align="center">
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/github/v/release/surrealdb/surrealdb?color=ff00a0&include_prereleases&label=version&sort=semver&style=flat-square"></a>
     &nbsp;
