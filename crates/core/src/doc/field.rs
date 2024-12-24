@@ -12,6 +12,7 @@ use crate::sql::reference::Refs;
 use crate::sql::statements::DefineFieldStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::Part;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -270,7 +271,7 @@ struct FieldEditContext<'a> {
 
 enum RefAction<'a> {
 	Set(&'a Thing),
-	Delete(&'a Thing),
+	Delete(Vec<&'a Thing>, String),
 	Ignore,
 }
 
@@ -579,12 +580,48 @@ impl<'a> FieldEditContext<'a> {
 					if arr.iter().any(|v| v == old) {
 						RefAction::Ignore
 					} else {
-						RefAction::Delete(thing)
+						RefAction::Delete(vec![thing], self.def.name.to_string())
 					}
 				} else {
 					// Otherwise we delete the reference
-					RefAction::Delete(thing)
+					RefAction::Delete(vec![thing], self.def.name.to_string())
 				}
+			} else if let Value::Array(oldarr) = old {
+				// If the new value is still an array, we only filter out the record ids that are not present in the new array
+				let removed = if let Value::Array(newarr) = val {
+					oldarr
+						.iter()
+						.filter_map(|v| {
+							// If the record id is still present in the new array, we do not remove the reference
+							if newarr.contains(v) {
+								None
+							} else if let Value::Thing(thing) = v {
+								Some(thing)
+							} else {
+								None
+							}
+						})
+						.collect()
+
+				// If the new value is not an array, then all record ids in the old array are removed
+				} else {
+					oldarr
+						.iter()
+						.filter_map(|v| {
+							if let Value::Thing(thing) = v {
+								Some(thing)
+							} else {
+								None
+							}
+						})
+						.collect()
+				};
+
+
+				RefAction::Delete(
+					removed,
+					self.def.name.to_owned().push(Part::All).to_string(),
+				)
 			// We found a new reference, let's create the link
 			} else if let Value::Thing(thing) = val {
 				RefAction::Set(thing)
@@ -617,20 +654,22 @@ impl<'a> FieldEditContext<'a> {
 					Ok(())
 				}
 				// Delete the reference, if it exists
-				RefAction::Delete(thing) => {
-					let key = crate::key::r#ref::new(
-						self.opt.ns()?,
-						self.opt.db()?,
-						&thing.tb,
-						&thing.id,
-						&self.rid.tb,
-						&self.def.name.to_string(),
-						&self.rid.id,
-					)
-					.encode()
-					.unwrap();
-
-					self.ctx.tx().del(key).await?;
+				RefAction::Delete(things, ff) => {
+					for thing in things {
+						let key = crate::key::r#ref::new(
+							self.opt.ns()?,
+							self.opt.db()?,
+							&thing.tb,
+							&thing.id,
+							&self.rid.tb,
+							&ff,
+							&self.rid.id,
+						)
+						.encode()
+						.unwrap();
+	
+						self.ctx.tx().del(key).await?;
+					}
 
 					Ok(())
 				}
