@@ -60,7 +60,7 @@
 <p align="center">
 	<a href="https://surrealdb.com/discord"><img src="https://img.shields.io/discord/902568124350599239?label=discord&style=flat-square&color=5a66f6"></a>
 	&nbsp;
-    <a href="https://twitter.com/surrealdb"><img src="https://img.shields.io/badge/twitter-follow_us-1d9bf0.svg?style=flat-square"></a>
+    <a href="https://twitter.com/surrealdb"><img src="https://img.shields.io/badge/x-follow_us-000000.svg?style=flat-square"></a>
     &nbsp;
     <a href="https://dev.to/surrealdb"><img src="https://img.shields.io/badge/dev-join_us-86f7b7.svg?style=flat-square"></a>
     &nbsp;
@@ -76,7 +76,7 @@
 	&nbsp;
     <a href="https://www.linkedin.com/company/surrealdb/"><img height="25" src="./img/social/linkedin.svg" alt="LinkedIn"></a>
     &nbsp;
-    <a href="https://twitter.com/surrealdb"><img height="25" src="./img/social/twitter.svg" alt="Twitter"></a>
+    <a href="https://x.com/surrealdb"><img height="25" src="./img/social/x.svg" alt="X"></a>
     &nbsp;
     <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="./img/social/youtube.svg" alt="Youtube"></a>
     &nbsp;
