@@ -3450,7 +3450,7 @@ dependencies = [
  "unicase",
  "url",
  "uuid",
- "vart",
+ "vart 0.7.0",
  "wasm-bindgen-futures",
  "wasmtimer",
  "ws_stream_wasm",
@@ -3484,7 +3484,7 @@ dependencies = [
  "quick_cache 0.6.9",
  "revision",
  "tokio",
- "vart",
+ "vart 0.8.1",
  "wasm-bindgen-futures",
 ]
 
@@ -3943,6 +3943,12 @@ dependencies = [
  "serde",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "vart"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87782b74f898179396e93c0efabb38de0d58d50bbd47eae00c71b3a1144dbbae"
 
 [[package]]
 name = "vart"
