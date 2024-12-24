@@ -242,4 +242,4 @@ Join the growing [SurrealDB Community](https://surrealdb.com/community) around t
 - Chat live with us on [Discord](https://discord.gg/surrealdb)
 - Get involved on [Reddit](http://reddit.com/r/surrealdb/)
 - Read our blog posts on [Medium](https://medium.com/surrealdb)
-- Questions tagged #surrealdb on [StackOverflow](https://stackoverflow.com/questions/tagged/surrealdb)
+- Questions tagged #surrealdb on [Stack Overflow](https://stackoverflow.com/questions/tagged/surrealdb)

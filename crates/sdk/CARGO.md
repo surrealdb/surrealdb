@@ -36,15 +36,15 @@
 	&nbsp;
     <a href="https://www.linkedin.com/company/surrealdb/"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/linkedin.svg?raw=true" alt="LinkedIn"></a>
     &nbsp;
-    <a href="https://twitter.com/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/twitter.svg?raw=true" alt="Twitter"></a>
+    <a href="https://x.com/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/x.svg?raw=true" alt="X"></a>
     &nbsp;
-    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/youtube.svg?raw=true" alt="Youtube"></a>
+    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/youtube.svg?raw=true" alt="YouTube"></a>
     &nbsp;
     <a href="https://dev.to/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/dev.svg?raw=true" alt="Dev"></a>
     &nbsp;
     <a href="https://surrealdb.com/discord"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/discord.svg?raw=true" alt="Discord"></a>
     &nbsp;
-    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/stack-overflow.svg?raw=true" alt="StackOverflow"></a>
+    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/stack-overflow.svg?raw=true" alt="Stack Overflow"></a>
 </p>
 
 <br>
