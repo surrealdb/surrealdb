@@ -179,13 +179,13 @@ impl Thing {
 
 		let ids = keys
 			.iter()
-			.filter_map(|x| {
+			.map(|x| {
 				let key = Ref::from(x);
 
-				Some(Thing {
+				Thing {
 					tb: key.ft.to_string(),
 					id: key.fk,
-				})
+				}
 			})
 			.collect();
 
