@@ -234,9 +234,20 @@ impl DefineFieldStatement {
 
 	fn validate_reference_options(&self) -> Result<(), Error> {
 		if let Some(kind) = &self.kind {
-			// As the refs and dynrefs type essentially take over a field
-			// they are not allowed to be mixed with most other clauses
-			if matches!(kind, Kind::References(_, _)) {
+			let kinds = match kind {
+				Kind::Either(kinds) => kinds,
+				kind => &vec![kind.to_owned()],
+			};
+
+			// Check if any of the kinds are references
+			if kinds.iter().any(|k| matches!(k, Kind::References(_, _))) {
+				// If any of the kinds are references, all of them must be
+				if !kinds.iter().all(|k| matches!(k, Kind::References(_, _))) {
+					return Err(Error::RefsMismatchingVariants);
+				}
+
+				// As the refs and dynrefs type essentially take over a field
+				// they are not allowed to be mixed with most other clauses
 				let typename = kind.to_string();
 
 				if self.reference.is_some() {

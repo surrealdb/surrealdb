@@ -683,7 +683,29 @@ impl<'a> FieldEditContext<'a> {
 		let refs = match &self.def.kind {
 			// We found a reference type for this field
 			// In this case, we force the value to be a reference
-			Some(Kind::References(ft, ff)) => Refs(ft.clone(), ff.clone()),
+			Some(Kind::References(ft, ff)) => Refs(vec![(ft.clone(), ff.clone())]),
+			Some(Kind::Either(kinds)) => {
+				if !kinds.iter().all(|k| matches!(k, Kind::References(_, _))) {
+					return Ok(None);
+				}
+
+				// Extract all reference types
+				let pairs: Vec<_> = kinds.iter().filter_map(|k| {
+					if let Kind::References(ft, ff) = k {
+						Some((ft.clone(), ff.clone()))
+					} else {
+						None
+					}
+				}).collect();
+
+				// If the length does not match, there were non-reference types
+				if pairs.len() != kinds.len() {
+					return Err(Error::RefsMismatchingVariants);
+				}
+
+				// All ok
+				Refs(pairs)
+			}
 			// This is not a reference type, continue as normal
 			_ => return Ok(None),
 		};

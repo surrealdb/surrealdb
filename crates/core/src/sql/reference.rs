@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error};
 
-use super::{statements::info::InfoStructure, Idiom, Table, Value};
+use super::{array::Uniq, statements::info::InfoStructure, Array, Idiom, Table, Thing, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -66,7 +66,7 @@ impl InfoStructure for ReferenceDeleteStrategy {
 #[serde(rename = "$surrealdb::private::sql::Range")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Refs(pub Option<Table>, pub Option<Idiom>);
+pub struct Refs(pub Vec<(Option<Table>, Option<Idiom>)>);
 
 impl Refs {
 	pub(crate) async fn compute(
@@ -76,7 +76,7 @@ impl Refs {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Collect an array of references
-		let arr = match doc {
+		let arr: Array = match doc {
 			// Check if the current document has specified an ID
 			Some(doc) => {
 				// Obtain a record id from the document
@@ -88,15 +88,21 @@ impl Refs {
 					},
 				};
 
-				// Collect the references
-				let ids = rid.refs(ctx, opt, self.0.as_ref(), self.1.as_ref()).await?;
+				let mut ids: Vec<Thing> = Vec::new();
+
+				// Map over all input pairs
+				for (ft, ff) in self.0.iter() {
+					// Collect the references
+					ids.append(&mut rid.refs(ctx, opt, ft.as_ref(), ff.as_ref()).await?);
+				}
+
 				// Convert the references into values
 				ids.into_iter().map(Value::Thing).collect()
 			}
 			None => return Err(Error::InvalidRefsContext),
 		};
 
-		Ok(Value::Array(arr))
+		Ok(Value::Array(arr.uniq()))
 	}
 }
 
