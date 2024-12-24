@@ -1236,7 +1236,7 @@ pub enum Error {
 	RecursionInstructionPlanConflict,
 
 	/// The record cannot be deleted as it's still referenced elsewhere
-	#[error("Cannot delete `{0}` as it is referenced and rejected by `{1}`")]
+	#[error("Cannot delete `{0}` as it is referenced by `{1}` with an ON DELETE REJECT clause")]
 	DeleteRejectedByReference(String, String),
 
 	/// The `REFERENCE` keyword can only be used in combination with a type referencing a record
