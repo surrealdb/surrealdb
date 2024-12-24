@@ -56,7 +56,7 @@
     &nbsp;
     <a href="https://x.com/surrealdb"><img height="25" src="./img/social/x.svg" alt="X"></a>
     &nbsp;
-    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="./img/social/youtube.svg" alt="Youtube"></a>
+    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="./img/social/youtube.svg" alt="YouTube"></a>
     &nbsp;
     <a href="https://dev.to/surrealdb"><img height="25" src="./img/social/dev.svg" alt="Dev"></a>
     &nbsp;
