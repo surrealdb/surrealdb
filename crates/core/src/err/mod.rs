@@ -1249,6 +1249,10 @@ pub enum Error {
 	#[error("Cannot use the `{0}` keyword with `TYPE {0}`.")]
 	RefsTypeConflict(String, String),
 
+	/// The `references` type cannot be used with other clauses altering or working with the value
+	#[error("When specifying a `TYPE` clause with `references`, all variants must be of type `references`.")]
+	RefsMismatchingVariants,
+
 	/// Something went wrong while updating references
 	#[error("An error occured while updating references for `{0}`: {1}")]
 	RefsUpdateFailure(String, String),
