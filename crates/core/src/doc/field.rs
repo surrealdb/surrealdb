@@ -617,11 +617,7 @@ impl<'a> FieldEditContext<'a> {
 						.collect()
 				};
 
-
-				RefAction::Delete(
-					removed,
-					self.def.name.to_owned().push(Part::All).to_string(),
-				)
+				RefAction::Delete(removed, self.def.name.to_owned().push(Part::All).to_string())
 			// We found a new reference, let's create the link
 			} else if let Value::Thing(thing) = val {
 				RefAction::Set(thing)
@@ -667,7 +663,7 @@ impl<'a> FieldEditContext<'a> {
 						)
 						.encode()
 						.unwrap();
-	
+
 						self.ctx.tx().del(key).await?;
 					}
 
@@ -690,13 +686,16 @@ impl<'a> FieldEditContext<'a> {
 				}
 
 				// Extract all reference types
-				let pairs: Vec<_> = kinds.iter().filter_map(|k| {
-					if let Kind::References(ft, ff) = k {
-						Some((ft.clone(), ff.clone()))
-					} else {
-						None
-					}
-				}).collect();
+				let pairs: Vec<_> = kinds
+					.iter()
+					.filter_map(|k| {
+						if let Kind::References(ft, ff) = k {
+							Some((ft.clone(), ff.clone()))
+						} else {
+							None
+						}
+					})
+					.collect();
 
 				// If the length does not match, there were non-reference types
 				if pairs.len() != kinds.len() {

@@ -160,7 +160,11 @@ impl Thing {
 				crate::key::r#ref::prefix(ns, db, &self.tb, &self.id),
 				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
 			),
-			(None, Some(_)) => return Err(Error::Unreachable("A foreign field was passed without a foreign table".into())),
+			(None, Some(_)) => {
+				return Err(Error::Unreachable(
+					"A foreign field was passed without a foreign table".into(),
+				))
+			}
 		};
 
 		let txn = ctx.tx();
