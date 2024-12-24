@@ -17,7 +17,7 @@ pub struct Reference {
 
 impl fmt::Display for Reference {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REFERENCE ON DELETE {}", &self.on_delete)
+		write!(f, "ON DELETE {}", &self.on_delete)
 	}
 }
 
