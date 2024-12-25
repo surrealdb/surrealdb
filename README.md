@@ -451,7 +451,7 @@ Join our growing community around the world, for help, ideas, and discussions re
 
 - View our official [Blog](https://surrealdb.com/blog)
 - Chat live with us on [Discord](https://surrealdb.com/discord)
-- Follow us on [Twitter](https://twitter.com/surrealdb)
+- Follow us on [X](https://x.com/surrealdb)
 - Connect with us on [LinkedIn](https://www.linkedin.com/company/surrealdb/)
 - Visit us on [YouTube](https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w)
 - Join our [Dev community](https://dev.to/surrealdb)
