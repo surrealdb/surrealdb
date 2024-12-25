@@ -32,7 +32,7 @@
 <p align="center">
 	<a href="https://surrealdb.com/blog"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/blog.svg?raw=true" alt="Blog"></a>
 	&nbsp;
-	<a href="https://github.com/surrealdb/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/github.svg?raw=true" alt="Github	"></a>
+	<a href="https://github.com/surrealdb/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/github.svg?raw=true" alt="Github"></a>
 	&nbsp;
     <a href="https://www.linkedin.com/company/surrealdb/"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/linkedin.svg?raw=true" alt="LinkedIn"></a>
     &nbsp;

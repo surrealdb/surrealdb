@@ -19,19 +19,19 @@
 </p>
 
 <p align="center">
-	<a href="https://surrealdb.com/discord"><img src="https://img.shields.io/discord/902568124350599239?label=discord&style=flat-square&color=5a66f6"></a>
+	<a href="https://surrealdb.com/discord"><img src="https://img.shields.io/discord/902568124350599239?label=discord&style=flat-square&color=5a66f6" alt="Discord"></a>
 	&nbsp;
-    <a href="https://twitter.com/surrealdb"><img src="https://img.shields.io/badge/x-follow_us-000000.svg?style=flat-square"></a>
+    <a href="https://x.com/surrealdb"><img src="https://img.shields.io/badge/x-follow_us-222222.svg?style=flat-square" alt="X"></a>
     &nbsp;
-    <a href="https://dev.to/surrealdb"><img src="https://img.shields.io/badge/dev-join_us-86f7b7.svg?style=flat-square"></a>
+    <a href="https://dev.to/surrealdb"><img src="https://img.shields.io/badge/dev-join_us-86f7b7.svg?style=flat-square" alt="Dev"></a>
     &nbsp;
-    <a href="https://www.linkedin.com/company/surrealdb/"><img src="https://img.shields.io/badge/linkedin-connect_with_us-0a66c2.svg?style=flat-square"></a>
+    <a href="https://www.linkedin.com/company/surrealdb/"><img src="https://img.shields.io/badge/linkedin-connect_with_us-0a66c2.svg?style=flat-square" alt="LinkedIn"></a>
 </p>
 
 <p align="center">
 	<a href="https://surrealdb.com/blog"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/blog.svg?raw=true" alt="Blog"></a>
 	&nbsp;
-	<a href="https://github.com/surrealdb/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/github.svg?raw=true" alt="Github	"></a>
+	<a href="https://github.com/surrealdb/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/github.svg?raw=true" alt="Github"></a>
 	&nbsp;
     <a href="https://www.linkedin.com/company/surrealdb/"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/linkedin.svg?raw=true" alt="LinkedIn"></a>
     &nbsp;
@@ -85,11 +85,11 @@ services:
   surrealdb:
     command: start 
     image: surrealdb/surrealdb:latest # Consider using a specific version
-    pull_policy: always # Remove this when not using "latest"
+    pull_policy: always
     ports:
       - 8000:8000
     environment:
-      - SURREAL_LOG=debug # Use "info" in production
+      - SURREAL_LOG=info # Use "info" in production
       - SURREAL_USER=root
       - SURREAL_PASS=root # Change this in production!
 ```
@@ -110,7 +110,7 @@ Here is an example of running the container with a persistent volume as a non-ro
 services:
   surrealdb:
     image: surrealdb/surrealdb:latest # Consider using a specific version
-    pull_policy: always # Remove this when not using "latest"
+    pull_policy: always
     command: start rocksdb:/mydata/mydatabase.db
     user: "1000"
     ports:
