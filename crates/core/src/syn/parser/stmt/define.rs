@@ -1216,6 +1216,14 @@ impl Parser<'_> {
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::EdgeNgram(a, b));
 							}
+							t!("JIEBA") => {
+								let open_span = expected!(self, t!("(")).span;
+								let a = self.next_token_value()?;
+								expected!(self, t!(","));
+								let b = self.next_token_value()?;
+								self.expect_closing_delimiter(t!(")"), open_span)?;
+								filters.push(Filter::Jieba(a, b));
+							}
 							t!("NGRAM") => {
 								let open_span = expected!(self, t!("(")).span;
 								let a = self.next_token_value()?;

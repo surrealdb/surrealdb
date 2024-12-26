@@ -16,6 +16,23 @@ pub(crate) trait TokenValue: Sized {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self>;
 }
 
+impl TokenValue for bool {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.peek();
+		match token.kind {
+			t!("true") => {
+				parser.pop_peek();
+				Ok(true)
+			}
+			t!("false") => {
+				parser.pop_peek();
+				Ok(false)
+			}
+			_ => unexpected!(parser, token, "a boolean"),
+		}
+	}
+}
+
 impl TokenValue for Ident {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();

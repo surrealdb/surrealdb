@@ -6,7 +6,11 @@ use crate::idx::trees::store::IndexStores;
 use crate::sql::filter::Filter as SqlFilter;
 use crate::sql::language::Language;
 use deunicode::deunicode;
+use jieba_rs::{Jieba, TokenizeMode};
 use rust_stemmers::{Algorithm, Stemmer};
+use std::sync::OnceLock;
+
+static JIEBA_TOKENIZER: OnceLock<Jieba> = OnceLock::new();
 
 #[derive(Clone, Copy)]
 pub(super) enum FilteringStage {
@@ -18,6 +22,7 @@ pub(super) enum Filter {
 	Ascii,
 	Ngram(u16, u16),
 	EdgeNgram(u16, u16),
+	Jieba(bool, bool),
 	Lowercase,
 	Uppercase,
 	Mapper(Mapper),
@@ -28,6 +33,7 @@ impl Filter {
 		let f = match f {
 			SqlFilter::Ascii => Filter::Ascii,
 			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(*min, *max),
+			SqlFilter::Jieba(mp, hmm) => Filter::Jieba(*mp, *hmm),
 			SqlFilter::Lowercase => Filter::Lowercase,
 			SqlFilter::Ngram(min, max) => Filter::Ngram(*min, *max),
 			SqlFilter::Snowball(l) => {
@@ -100,6 +106,7 @@ impl Filter {
 		match self {
 			Filter::Ascii => Self::deunicode(c),
 			Filter::EdgeNgram(min, max) => Self::edgengram(c, *min, *max),
+			Filter::Jieba(mp, hmm) => Self::jieba(c, *mp, *hmm),
 			Filter::Lowercase => Self::lowercase(c),
 			Filter::Ngram(min, max) => Self::ngram(c, *min, *max),
 			Filter::Stemmer(s) => Self::stem(s, c),
@@ -185,6 +192,35 @@ impl Filter {
 			})
 			.collect();
 		FilterResult::Terms(ng)
+	}
+
+	#[inline]
+	fn jieba(c: &str, mp: bool, hmm: bool) -> FilterResult {
+		let mode = if mp {
+			TokenizeMode::Search
+		} else {
+			TokenizeMode::Default
+		};
+
+		let jb: Vec<_> = JIEBA_TOKENIZER
+			.get_or_init(Jieba::new)
+			.tokenize(c, mode, hmm)
+			.iter()
+			.filter(|&s| !s.word.is_empty())
+			.map(|token| {
+				if token.word.eq(c) {
+					Term::Unchanged
+				} else {
+					Term::NewTerm(token.word.to_string(), token.start as Position)
+				}
+			})
+			.collect();
+
+		if jb.is_empty() {
+			FilterResult::Ignore
+		} else {
+			FilterResult::Terms(jb)
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ use std::fmt::Display;
 pub enum Filter {
 	Ascii,
 	EdgeNgram(u16, u16),
+	Jieba(bool, bool),
 	Lowercase,
 	Ngram(u16, u16),
 	Snowball(Language),
@@ -23,6 +24,7 @@ impl Display for Filter {
 		match self {
 			Self::Ascii => f.write_str("ASCII"),
 			Self::EdgeNgram(min, max) => write!(f, "EDGENGRAM({min},{max})"),
+			Self::Jieba(mp, hmm) => write!(f, "JIEBA({mp},{hmm})"),
 			Self::Lowercase => f.write_str("LOWERCASE"),
 			Self::Ngram(min, max) => write!(f, "NGRAM({min},{max})"),
 			Self::Snowball(lang) => write!(f, "SNOWBALL({lang})"),
