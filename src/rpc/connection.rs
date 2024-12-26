@@ -162,7 +162,11 @@ impl Connection {
 					// Create a new ping message
 					let msg = Message::Ping(vec![]);
 					// Close the connection if the message fails
-					if internal_sender.send(msg).await.is_err() {
+					if let Err(err) = internal_sender.send(msg).await {
+						// Output any errors if not a close error
+						if err.to_string() != CONN_CLOSED_ERR {
+							trace!("WebSocket error: {err}");
+						}
 						// Cancel the WebSocket tasks
 						rpc.read().await.canceller.cancel();
 						// Exit out of the loop
@@ -196,7 +200,7 @@ impl Connection {
 					if let Err(err) = sender.send(res).await {
 						// Output any errors if not a close error
 						if err.to_string() != CONN_CLOSED_ERR {
-							debug!("WebSocket error: {err:?}");
+							trace!("WebSocket error: {err}");
 						}
 						// Cancel the WebSocket tasks
 						rpc.read().await.canceller.cancel();
@@ -241,7 +245,7 @@ impl Connection {
 					// There was an uncaught panic in the task
 					Err(err) if err.is_panic() => {
 						// There was an error with the task
-						warn!("WebSocket request error: {err:?}");
+						error!("WebSocket request error: {err}");
 						// Cancel the WebSocket tasks
 						rpc.read().await.canceller.cancel();
 						// Exit out of the loop
@@ -287,7 +291,7 @@ impl Connection {
 						Message::Close(_) => {
 							// Respond with a close message
 							if let Err(err) = internal_sender.send(Message::Close(None)).await {
-								trace!("WebSocket error when replying to the close message: {err:?}");
+								trace!("WebSocket error when replying to the close message: {err}");
 							};
 							// Cancel the WebSocket tasks
 							rpc.read().await.canceller.cancel();
@@ -303,7 +307,7 @@ impl Connection {
 					},
 					Err(err) => {
 						// There was an error with the WebSocket
-						trace!("WebSocket error: {err:?}");
+						trace!("WebSocket error: {err}");
 						// Cancel the WebSocket tasks
 						rpc.read().await.canceller.cancel();
 						// Exit out of the loop
@@ -318,7 +322,7 @@ impl Connection {
 			if let Err(err) = res {
 				// There was an uncaught panic in the task
 				if err.is_panic() {
-					warn!("WebSocket request error: {err:?}");
+					error!("WebSocket request error: {err}");
 				}
 			}
 		}
@@ -491,7 +495,7 @@ impl Connection {
 		};
 		// Respond with a close message
 		if let Err(err) = chn.send(Message::Close(Some(frame))).await {
-			trace!("WebSocket error when sending close message: {err:?}");
+			debug!("WebSocket error when sending close message: {err}");
 		};
 		// Cancel the WebSocket tasks
 		rpc.read().await.canceller.cancel();
@@ -534,13 +538,13 @@ impl RpcContext for Connection {
 	/// Handles the execution of a LIVE statement
 	async fn handle_live(&self, lqid: &Uuid) {
 		self.state.live_queries.write().await.insert(*lqid, self.id);
-		trace!("Registered live query {} on websocket {}", lqid, self.id);
+		trace!("Registered live query {lqid} on websocket {}", self.id);
 	}
 
 	/// Handles the execution of a KILL statement
 	async fn handle_kill(&self, lqid: &Uuid) {
 		if let Some(id) = self.state.live_queries.write().await.remove(lqid) {
-			trace!("Unregistered live query {} on websocket {}", lqid, id);
+			trace!("Unregistered live query {lqid} on websocket {id}");
 		}
 	}
 
@@ -550,7 +554,7 @@ impl RpcContext for Connection {
 		// Find all live queries for to this connection
 		self.state.live_queries.write().await.retain(|key, value| {
 			if value == &self.id {
-				trace!("Removing live query: {}", key);
+				trace!("Removing live query: {key}");
 				gc.push(*key);
 				return false;
 			}
@@ -558,7 +562,7 @@ impl RpcContext for Connection {
 		});
 		// Garbage collect the live queries on this connection
 		if let Err(err) = self.kvs().delete_queries(gc).await {
-			error!("Error handling RPC connection: {}", err);
+			error!("Error handling RPC connection: {err}");
 		}
 	}
 
