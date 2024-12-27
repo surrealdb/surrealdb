@@ -22,10 +22,10 @@ pub(super) enum Filter {
 	Ascii,
 	Ngram(u16, u16),
 	EdgeNgram(u16, u16),
-	Jieba(bool, bool),
 	Lowercase,
 	Uppercase,
 	Mapper(Mapper),
+	Jieba(bool, bool),
 }
 
 impl Filter {
@@ -81,7 +81,7 @@ impl Filter {
 
 	fn is_stage(&self, stage: FilteringStage) -> bool {
 		if let FilteringStage::Querying = stage {
-			!matches!(self, Filter::EdgeNgram(_, _) | Filter::Ngram(_, _))
+			!matches!(self, Filter::EdgeNgram(_, _) | Filter::Jieba(_, _) | Filter::Ngram(_, _))
 		} else {
 			true
 		}
@@ -856,6 +856,60 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
 			"Ālea iacta est",
 			&["āl", "āle", "ia", "iac", "es", "est"],
+		)
+		.await;
+	}
+
+	#[tokio::test]
+	async fn test_jieba() {
+		test_analyzer(
+			"ANALYZER test TOKENIZERS blank,class FILTERS jieba(false,false);",
+			"一幅怀旧风格的肖像画，一个穿着蓝色头巾和黄色围巾的人物，背景为深色。",
+			&[
+				"一幅",
+				"怀旧",
+				"风格",
+				"的",
+				"肖像画",
+				"一个",
+				"穿着",
+				"蓝色",
+				"头巾",
+				"和",
+				"黄色",
+				"围巾",
+				"的",
+				"人物",
+				"背景",
+				"为",
+				"深色",
+			],
+		)
+		.await;
+
+		test_analyzer(
+			"ANALYZER test TOKENIZERS blank,class FILTERS jieba(true,true);",
+			"一幅怀旧风格的肖像画，一个穿着蓝色头巾和黄色围巾的人物，背景为深色。",
+			&[
+				"一幅",
+				"怀旧",
+				"风格",
+				"的",
+				"肖像",
+				"肖像画",
+				"一个",
+				"穿着",
+				"蓝色",
+				"头巾",
+				"和",
+				"黄色",
+				"围巾",
+				"的",
+				"人物",
+				"背景",
+				"为",
+				"深色",
+			],
 		)
 		.await;
 	}

@@ -11,12 +11,12 @@ use std::fmt::Display;
 pub enum Filter {
 	Ascii,
 	EdgeNgram(u16, u16),
-	Jieba(bool, bool),
 	Lowercase,
 	Ngram(u16, u16),
 	Snowball(Language),
 	Uppercase,
 	Mapper(String),
+	Jieba(bool, bool),
 }
 
 impl Display for Filter {

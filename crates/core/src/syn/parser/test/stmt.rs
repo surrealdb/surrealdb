@@ -2039,7 +2039,7 @@ fn parse_define_index() {
 fn parse_define_analyzer() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar"#
+		r#"DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), JIEBA(false,true), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar"#
 	).unwrap();
 
 	assert_eq!(
@@ -2055,6 +2055,7 @@ fn parse_define_analyzer() {
 			filters: Some(vec![
 				Filter::Ascii,
 				Filter::EdgeNgram(1, 2),
+				Filter::Jieba(false, true),
 				Filter::Ngram(3, 4),
 				Filter::Lowercase,
 				Filter::Snowball(Language::Dutch),

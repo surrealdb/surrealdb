@@ -1311,7 +1311,10 @@ allow_apis = ["fs"]
 [pkg.derive_builder_macro]
 allow_proc_macro = true
 
-[pkg.jieba-rs]
+[pkg.jieba-macros]
+allow_proc_macro = true
+
+[pkg.include-flate-codegen]
 allow_proc_macro = true
 
 [pkg.cedarwood]
