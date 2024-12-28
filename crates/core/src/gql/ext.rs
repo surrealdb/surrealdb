@@ -99,6 +99,39 @@ where
 	}
 }
 
+pub trait TryIntoExt<T> {
+	type Error;
+
+	fn try_intox(self) -> Result<T, Self::Error>;
+}
+
+pub trait TryFromExt<T>: Sized {
+	type Error;
+
+	fn try_fromx(value: T) -> Result<Self, Self::Error>;
+}
+
+impl<S, T> TryIntoExt<T> for S
+where
+	T: TryFromExt<S>,
+{
+	type Error = <T as TryFromExt<S>>::Error;
+
+	fn try_intox(self) -> Result<T, <T as TryFromExt<S>>::Error> {
+		T::try_fromx(self)
+	}
+}
+
+impl TryFromExt<f64> for async_graphql::Value {
+	type Error = GqlError;
+
+	fn try_fromx(value: f64) -> Result<Self, GqlError> {
+		Ok(Self::Number(Number::from_f64(value).ok_or_else(|| {
+			resolver_error(format!("non-finite float (not supported in json): {}", value))
+		})?))
+	}
+}
+
 #[cfg(debug_assertions)]
 pub trait ValidatorExt {
 	fn add_validator(
@@ -109,6 +142,7 @@ pub trait ValidatorExt {
 
 #[cfg(debug_assertions)]
 use async_graphql::dynamic::Scalar;
+use serde_json::Number;
 #[cfg(debug_assertions)]
 impl ValidatorExt for Scalar {
 	fn add_validator(
@@ -124,6 +158,9 @@ impl ValidatorExt for Scalar {
 
 use crate::sql::Thing as SqlThing;
 use crate::sql::Value as SqlValue;
+
+use super::error::resolver_error;
+use super::GqlError;
 
 pub trait TryAsExt {
 	fn try_as_thing(self) -> Result<SqlThing, Self>

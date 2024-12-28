@@ -97,7 +97,7 @@ pub async fn process_tbs(
 			.field(InputValue::new("desc", TypeRef::named(&table_orderable_name)))
 			.field(InputValue::new("then", TypeRef::named(&table_order_name)));
 
-		let table_filter_name = filter_name_from_table(tb_name);
+		let table_filter_name = filter_name_from_table(&tb_name);
 		let mut table_filter = InputObject::new(&table_filter_name);
 		table_filter = table_filter
 			.field(InputValue::new("id", TypeRef::named("_filter_id")))

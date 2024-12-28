@@ -4,20 +4,22 @@ use std::sync::Arc;
 use crate::dbs::Session;
 use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
+use crate::gql::utils::GqlValueUtils;
 use crate::kvs::Datastore;
 use crate::sql;
 use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use crate::sql::Geometry;
 use crate::sql::Kind;
-use async_graphql::dynamic::Interface;
-use async_graphql::dynamic::InterfaceField;
-use async_graphql::dynamic::Object;
 use async_graphql::dynamic::Schema;
 use async_graphql::dynamic::{Enum, Type, Union};
+use async_graphql::dynamic::{Field, Interface};
+use async_graphql::dynamic::{FieldFuture, Object};
+use async_graphql::dynamic::{InterfaceField, ResolverContext};
 use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
+use geo::{Coord, Polygon};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -25,6 +27,7 @@ use serde_json::Number;
 use super::error::{resolver_error, GqlError};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
+use super::ext::{TryFromExt, TryIntoExt};
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::NamedContainer;
 use crate::kvs::LockType;
@@ -151,6 +154,36 @@ pub async fn generate_schema(
 		}};
 	}
 
+	macro_rules! geometry_type {
+		($schema:ident, $name:expr, $type:expr) => {
+			$schema = $schema.register(
+				Object::new($name)
+					.field(Field::new(
+						"type",
+						TypeRef::named("GeometryType"),
+						|_: ResolverContext| {
+							async_graphql::dynamic::FieldFuture::Value(Some(
+								GqlValue::String($name.to_string()).into(),
+							))
+						},
+					))
+					.field(Field::new("coordinates", $type.clone(), |ctx: ResolverContext| {
+						FieldFuture::new({
+							async move {
+								let val = ctx
+									.parent_value
+									.try_to_value()?
+									.as_object()
+									.ok_or_else(|| internal_error("Expected object"))?
+									.get("coordinates");
+								Ok(val.cloned())
+							}
+						})
+					})),
+			);
+		};
+	}
+
 	scalar_debug_validated!(
 		schema,
 		"uuid",
@@ -158,6 +191,71 @@ pub async fn generate_schema(
 		"String encoded UUID",
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
+
+	schema = schema.register(Enum::new("GeometryType").items([
+		"GeometryPoint",
+		"GeometryLineString",
+		"GeometryPolygon",
+		"GeometryMultiPoint",
+		"GeometryMultiLineString",
+		"GeometryMultiPolygon",
+		"GeometryCollection",
+	]));
+
+	let coordinate_type = TypeRef::named_nn_list_nn(TypeRef::FLOAT);
+	let coordinate_list_type = TypeRef::NonNull(Box::new(TypeRef::List(Box::new(
+		TypeRef::NonNull(Box::new(coordinate_type.clone())),
+	))));
+	let coordinate_list_list_type = TypeRef::NonNull(Box::new(TypeRef::List(Box::new(
+		TypeRef::NonNull(Box::new(coordinate_list_type.clone())),
+	))));
+	let coordinate_list_list_list_type = TypeRef::NonNull(Box::new(TypeRef::List(Box::new(
+		TypeRef::NonNull(Box::new(coordinate_list_type.clone())),
+	))));
+
+	geometry_type!(schema, "GeometryPoint", coordinate_type);
+	geometry_type!(schema, "GeometryLineString", coordinate_list_type);
+	geometry_type!(schema, "GeometryPolygon", coordinate_list_list_type);
+	geometry_type!(schema, "GeometryMultiPoint", coordinate_list_type);
+	geometry_type!(schema, "GeometryMultiLineString", coordinate_list_list_type);
+	geometry_type!(schema, "GeometryMultiPolygon", coordinate_list_list_list_type);
+
+	schema = schema.register(
+		Object::new("GeometryCollection")
+			.field(Field::new("type", TypeRef::named("GeometryType"), |_: ResolverContext| {
+				async_graphql::dynamic::FieldFuture::Value(Some(
+					GqlValue::String("GeometryCollection".to_string()).into(),
+				))
+			}))
+			.field(Field::new(
+				"geometries",
+				TypeRef::named_nn_list_nn("Geometry"),
+				|ctx: ResolverContext| {
+					FieldFuture::new({
+						async move {
+							let val = ctx
+								.parent_value
+								.try_to_value()?
+								.as_object()
+								.ok_or_else(|| internal_error("Expected Object"))?
+								.get("geometries");
+							Ok(val.cloned())
+						}
+					})
+				},
+			)),
+	);
+
+	let mut geometry_union = Union::new("Geometry");
+	geometry_union = geometry_union.possible_type("GeometryPoint");
+	geometry_union = geometry_union.possible_type("GeometryLineString");
+	geometry_union = geometry_union.possible_type("GeometryPolygon");
+	geometry_union = geometry_union.possible_type("GeometryMultiPoint");
+	geometry_union = geometry_union.possible_type("GeometryMultiLineString");
+	geometry_union = geometry_union.possible_type("GeometryMultiPolygon");
+	geometry_union = geometry_union.possible_type("GeometryCollection");
+
+	schema = schema.register(geometry_union);
 
 	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
 	scalar_debug_validated!(schema, "number", Kind::Number);
@@ -209,12 +307,128 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
 				.collect(),
 		),
-		SqlValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
+		SqlValue::Geometry(kind) => match kind {
+			Geometry::Point(point) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("Point".to_string())),
+					(
+						Name::new("coordinates"),
+						GqlValue::List(vec![point.x().try_intox()?, point.y().try_intox()?]),
+					),
+				]
+				.into(),
+			),
+			Geometry::Line(line) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("LineString".to_string())),
+					(Name::new("coordinates"), coord_collection_to_list(line)?),
+				]
+				.into(),
+			),
+			Geometry::MultiLine(multiline) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("MultiLineString".to_string())),
+					(
+						Name::new("coordinates"),
+						GqlValue::List(
+							multiline
+								.into_iter()
+								.map(coord_collection_to_list)
+								.collect::<Result<Vec<_>, GqlError>>()?,
+						),
+					),
+				]
+				.into(),
+			),
+			Geometry::MultiPoint(multipoint) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("MultiPoint".to_string())),
+					(
+						Name::new("coordinates"),
+						coord_collection_to_list(multipoint.into_iter().map(|p| p.0))?,
+					),
+				]
+				.into(),
+			),
+			Geometry::Polygon(polygon) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("Polygon".to_string())),
+					(Name::new("coordinates"), polygon_to_list(&polygon)?),
+				]
+				.into(),
+			),
+			Geometry::MultiPolygon(multipolygon) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("MultiPolygon".to_string())),
+					(
+						Name::new("coordinates"),
+						GqlValue::List(
+							multipolygon
+								.iter()
+								.map(polygon_to_list)
+								.collect::<Result<Vec<_>, _>>()?,
+						),
+					),
+				]
+				.into(),
+			),
+			Geometry::Collection(collection) => GqlValue::Object(
+				[
+					(Name::new("type"), GqlValue::String("GeometryCollection".to_string())),
+					(
+						Name::new("geometries"),
+						GqlValue::List(
+							collection
+								.into_iter()
+								.map(|g| sql_value_to_gql_value(SqlValue::Geometry(g)).unwrap())
+								.collect(),
+						),
+					),
+				]
+				.into(),
+			),
+		},
 		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
 		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
+}
+
+fn coord_to_list(coord: Coord<f64>) -> Result<GqlValue, GqlError> {
+	Ok(GqlValue::List(
+		<[f64; 2]>::from(coord)
+			.into_iter()
+			.map(GqlValue::try_fromx)
+			.collect::<Result<Vec<_>, _>>()?,
+	))
+}
+
+fn coord_collection_to_list(
+	coord_collection: impl IntoIterator<Item = Coord<f64>>,
+) -> Result<GqlValue, GqlError> {
+	Ok(GqlValue::List(
+		coord_collection.into_iter().map(coord_to_list).collect::<Result<Vec<_>, _>>()?,
+	))
+}
+
+fn polygon_to_list(polygon: &Polygon) -> Result<GqlValue, GqlError> {
+	Ok(GqlValue::List(
+		[polygon.exterior()]
+			.into_iter()
+			.chain(polygon.interiors().iter())
+			.cloned()
+			.map(coord_collection_to_list)
+			.collect::<Result<_, _>>()?,
+	))
+}
+
+fn geometry_kind_name_to_type_kind(name: &str) -> TypeRef
+{
+	match name {
+		
+	}
+	
 }
 
 pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
@@ -254,7 +468,11 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 				TypeRef::named(ty_name)
 			}
 		},
-		Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
+		// Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
+		Kind::Geometry(g) => match g.len() {
+			0 => TypeRef::Named("Geometry")
+			1 => TypeRef::Named("Geometry")
+		}
 		Kind::Option(t) => {
 			let mut non_op_ty = *t;
 			while let Kind::Option(inner) = non_op_ty {
