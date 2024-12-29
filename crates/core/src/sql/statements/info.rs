@@ -153,6 +153,7 @@ impl InfoStatement {
 				Ok(match structured {
 					true => Value::from(map! {
 						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
+						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
 						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
 						"models".to_string() => process(txn.all_db_models(ns, db).await?),
@@ -166,6 +167,13 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()) {
 								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"apis".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_apis(ns, db).await?.iter() {
+								out.insert(v.path.to_url(), v.to_string().into());
 							}
 							out.into()
 						},

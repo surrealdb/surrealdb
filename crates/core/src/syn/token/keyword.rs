@@ -32,6 +32,7 @@ keyword! {
 	Always => "ALWAYS",
 	Analyze => "ANALYZE",
 	Analyzer => "ANALYZER",
+	Api => "API",
 	As => "AS",
 	Ascending => "ASCENDING",
 	Ascii => "ASCII",
@@ -104,6 +105,7 @@ keyword! {
 	Highlights => "HIGHLIGHTS",
 	Hnsw => "HNSW",
 	Ignore => "IGNORE",
+	Impersonate => "IMPERSONATE",
 	Include => "INCLUDE",
 	Index => "INDEX",
 	Info => "INFO",
@@ -208,6 +210,7 @@ keyword! {
 	Value => "VALUE",
 	Values => "VALUES",
 	Version => "VERSION",
+	Via => "VIA",
 	Vs => "VS",
 	When => "WHEN",
 	Where => "WHERE",
@@ -264,6 +267,10 @@ keyword! {
 
 	FN => "fn",
 	ML => "ml",
+
+	Get => "GET",
+	Post => "POST",
+	Put => "PUT",
 }
 
 pub(crate) use keyword_t;

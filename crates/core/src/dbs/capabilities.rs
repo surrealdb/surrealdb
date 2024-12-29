@@ -310,6 +310,7 @@ pub enum RouteTarget {
 	Key,
 	Ml,
 	GraphQL,
+	Api,
 }
 
 // impl display
@@ -328,6 +329,7 @@ impl fmt::Display for RouteTarget {
 			RouteTarget::Key => write!(f, "key"),
 			RouteTarget::Ml => write!(f, "ml"),
 			RouteTarget::GraphQL => write!(f, "graphql"),
+			RouteTarget::Api => write!(f, "api"),
 		}
 	}
 }
@@ -365,6 +367,7 @@ impl std::str::FromStr for RouteTarget {
 			"key" => Ok(RouteTarget::Key),
 			"ml" => Ok(RouteTarget::Ml),
 			"graphql" => Ok(RouteTarget::GraphQL),
+			"api" => Ok(RouteTarget::Api),
 			_ => Err(ParseRouteTargetError),
 		}
 	}

@@ -10,6 +10,7 @@ mod js;
 mod number;
 mod regex;
 mod strand;
+mod path;
 mod uuid;
 
 pub use datetime::{datetime, datetime_inner};
@@ -20,6 +21,7 @@ pub use number::{
 };
 pub use regex::regex;
 pub use strand::strand;
+pub use path::path;
 pub use uuid::uuid;
 
 #[derive(Debug)]

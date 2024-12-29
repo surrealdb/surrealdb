@@ -28,6 +28,7 @@ pub(crate) mod throw;
 pub(crate) mod update;
 pub(crate) mod upsert;
 pub(crate) mod r#use;
+pub(crate) mod impersonate;
 
 pub use self::access::{AccessGrant, AccessStatement};
 pub use self::analyze::AnalyzeStatement;
@@ -55,11 +56,12 @@ pub use self::sleep::SleepStatement;
 pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
 pub use self::upsert::UpsertStatement;
+pub use self::impersonate::ImpersonateStatement;
 
 pub use self::alter::{AlterStatement, AlterTableStatement};
 
 pub use self::define::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
+	DefineAccessStatement, DefineApiStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
 	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
 	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
 	DefineUserStatement,
@@ -71,3 +73,5 @@ pub use self::remove::{
 	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
 	RemoveUserStatement,
 };
+
+pub use self::define::FindApi;

@@ -1,10 +1,13 @@
 use reblessive::Stk;
 
+use crate::api::path::Path;
+use crate::api::method::Method;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::ConfigInner;
-use crate::sql::statements::define::DefineConfigStatement;
+use crate::sql::statements::define::{ApiAction, DefineConfigStatement};
+use crate::sql::statements::DefineApiStatement;
 use crate::sql::Value;
 use crate::syn::error::bail;
 use crate::{
@@ -48,6 +51,7 @@ impl Parser<'_> {
 			t!("SCOPE") => self.parse_define_scope(ctx).await.map(DefineStatement::Access),
 			t!("PARAM") => self.parse_define_param(ctx).await.map(DefineStatement::Param),
 			t!("TABLE") => self.parse_define_table(ctx).await.map(DefineStatement::Table),
+			t!("API") => self.parse_define_api(ctx).await.map(DefineStatement::Api),
 			t!("EVENT") => {
 				ctx.run(|ctx| self.parse_define_event(ctx)).await.map(DefineStatement::Event)
 			}
@@ -789,6 +793,70 @@ impl Parser<'_> {
 
 		if let Some(kind) = kind {
 			res.kind = kind;
+		}
+
+		Ok(res)
+	}
+
+	pub async fn parse_define_api(&mut self, ctx: &mut Stk) -> ParseResult<DefineApiStatement> {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
+		} else {
+			(false, false)
+		};
+
+		let path: Path = self.next_token_value()?;
+		println!("path {:?}", path);
+
+		let mut res = DefineApiStatement {
+			path,
+			if_not_exists,
+			overwrite,
+			..Default::default()
+		};
+
+		loop {
+			match self.peek().kind {
+				t!("ANY") => {
+					self.pop_peek();
+					res.fallback = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
+				},
+				t!("DELETE") | t!("GET") | t!("PATCH") | t!("POST") | t!("PUT") => {
+					let mut methods: Vec<Method> = vec![];
+					'methods: loop {
+						let method = match self.peek().kind {
+							t!("DELETE") => Method::Delete,
+							t!("GET") => Method::Get,
+							t!("PATCH") => Method::Patch,
+							t!("POST") => Method::Post,
+							t!("PUT") => Method::Put,
+							found => {
+								bail!("Expected one of `DELETE`, `GET`, `PATCH`, `POST` or `PUT`, found {found}");
+							}
+						};
+
+						self.pop_peek();
+						methods.push(method);
+
+						if !self.eat(t!("|")) {
+							break 'methods;
+						}
+					}
+
+					let action = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+					res.actions.push(ApiAction {
+						methods,
+						action
+					});
+				}
+				_ => {
+					break;
+				}
+			}
 		}
 
 		Ok(res)

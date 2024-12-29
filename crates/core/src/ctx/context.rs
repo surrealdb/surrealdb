@@ -61,7 +61,12 @@ pub struct MutableContext {
 	// An optional transaction
 	transaction: Option<Arc<Transaction>>,
 	// Does not read from parent `values`.
-	isolated: bool,
+	isolation: Option<ContextIsolation>,
+}
+
+pub enum ContextIsolation {
+	Full,
+	User,
 }
 
 impl Default for MutableContext {
@@ -109,7 +114,7 @@ impl MutableContext {
 			#[cfg(storage)]
 			temporary_directory: None,
 			transaction: None,
-			isolated: false,
+			isolation: None,
 		}
 	}
 
@@ -131,7 +136,7 @@ impl MutableContext {
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
-			isolated: false,
+			isolation: None,
 			parent: Some(parent.clone()),
 		}
 	}
@@ -139,7 +144,7 @@ impl MutableContext {
 	/// Create a new context from a frozen parent context.
 	/// This context is isolated, and values specified on
 	/// any parent contexts will not be accessible.
-	pub(crate) fn new_isolated(parent: &Context) -> Self {
+	pub(crate) fn new_isolated(parent: &Context, isolation: ContextIsolation) -> Self {
 		Self {
 			values: HashMap::default(),
 			deadline: parent.deadline,
@@ -156,7 +161,7 @@ impl MutableContext {
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
-			isolated: true,
+			isolation: Some(isolation),
 			parent: Some(parent.clone()),
 		}
 	}
@@ -181,7 +186,7 @@ impl MutableContext {
 			#[cfg(storage)]
 			temporary_directory: from.temporary_directory.clone(),
 			transaction: None,
-			isolated: false,
+			isolation: None,
 			parent: None,
 		}
 	}
@@ -212,7 +217,7 @@ impl MutableContext {
 			#[cfg(storage)]
 			temporary_directory,
 			transaction: None,
-			isolated: false,
+			isolation: None,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -239,6 +244,17 @@ impl MutableContext {
 	{
 		self.values.insert(key.into(), value);
 	}
+
+	/// Add a value to the context. It overwrites any previously set values
+	/// with the same key.
+	pub(crate) fn add_values<T, K, V>(&mut self, iter: T)
+	where
+		T: IntoIterator<Item = (K, V)>,
+		K: Into<Cow<'static, str>>, 
+		V: Into<Arc<Value>>,
+	{
+        self.values.extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
+    }
 
 	/// Add cancellation to the context. The value that is returned will cancel
 	/// the context and it's children once called.
@@ -376,13 +392,12 @@ impl MutableContext {
 	/// Get a value from the context. If no value is stored under the
 	/// provided key, then this will return None.
 	pub(crate) fn value(&self, key: &str) -> Option<&Value> {
-		match self.values.get(key) {
-			Some(v) => Some(v.as_ref()),
-			None if PROTECTED_PARAM_NAMES.contains(&key) || !self.isolated => match &self.parent {
-				Some(p) => p.value(key),
-				_ => None,
-			},
-			None => None,
+		match (self.values.get(key), &self.isolation) {
+			(Some(v), _) => Some(v.as_ref()),
+			(_, None) => self.parent.as_ref().and_then(|p| p.value(key)),
+			(_, Some(ContextIsolation::User)) if PROTECTED_PARAM_NAMES.contains(&key) => 
+				self.parent.as_ref().and_then(|p| p.value(key)),
+			_ => None,
 		}
 	}
 

@@ -98,6 +98,11 @@ impl Auth {
 		self.actor.has_role(role)
 	}
 
+	/// Checks if the current actor has a Owner role
+	pub fn has_owner_role(&self) -> bool {
+		self.actor.has_owner_role()
+	}
+
 	/// Checks if the current actor has a Editor role
 	pub fn has_editor_role(&self) -> bool {
 		self.actor.has_editor_role()

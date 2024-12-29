@@ -1,5 +1,5 @@
 use super::{Ident, Kind};
-use crate::ctx::MutableContext;
+use crate::ctx::{ContextIsolation, MutableContext};
 use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::value::Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -28,7 +28,7 @@ impl Closure {
 		doc: Option<&CursorDoc>,
 		args: Vec<Value>,
 	) -> Result<Value, Error> {
-		let mut ctx = MutableContext::new_isolated(ctx);
+		let mut ctx = MutableContext::new_isolated(ctx, ContextIsolation::User);
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			match (kind, args.get(i)) {
 				(Kind::Option(_), None) => continue,

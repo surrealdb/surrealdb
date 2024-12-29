@@ -1,4 +1,4 @@
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, ContextIsolation, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -92,6 +92,15 @@ impl Function {
 			Self::Script(_, _) => "function".to_string().into(),
 			Self::Normal(f, _) => f.to_owned().into(),
 			Self::Custom(f, _) => format!("fn::{f}").into(),
+		}
+	}
+	/// Checks if this function invocation is writable
+	pub fn writeable(&self) -> bool {
+		match self {
+			Self::Custom(_, _) => true,
+			Self::Script(_, _) => true,
+			Self::Normal(f, _) if f == "api::invoke" => true,
+			_ => self.args().iter().any(Value::writeable),
 		}
 	}
 	/// Convert this function to an aggregate
@@ -323,7 +332,7 @@ impl Function {
 					})
 					.await?;
 				// Duplicate context
-				let mut ctx = MutableContext::new_isolated(ctx);
+				let mut ctx = MutableContext::new_isolated(ctx, ContextIsolation::User);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
 					ctx.add_value(name.to_raw(), val.coerce_to(kind)?.into());

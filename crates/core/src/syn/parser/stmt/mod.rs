@@ -41,6 +41,7 @@ mod remove;
 mod select;
 mod update;
 mod upsert;
+mod impersonate;
 
 impl Parser<'_> {
 	pub(super) async fn parse_stmt_list(&mut self, ctx: &mut Stk) -> ParseResult<Statements> {
@@ -214,6 +215,10 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_use_stmt().map(Statement::Use)
 			}
+			t!("IMPERSONATE") => {
+				self.pop_peek();
+				ctx.run(|ctx| self.parse_impersonate_stmt(ctx)).await.map(Statement::Impersonate)
+			}
 			_ => {
 				// TODO: Provide information about keywords.
 				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
@@ -302,6 +307,10 @@ impl Parser<'_> {
 			t!("UPSERT") => {
 				self.pop_peek();
 				self.parse_upsert_stmt(ctx).await.map(Entry::Upsert)
+			}
+			t!("IMPERSONATE") => {
+				self.pop_peek();
+				self.parse_impersonate_stmt(ctx).await.map(Entry::Impersonate)
 			}
 			_ => {
 				// TODO: Provide information about keywords.

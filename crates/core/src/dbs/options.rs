@@ -424,6 +424,21 @@ impl Options {
 		}
 		// Check the action to determine if we need to check permissions
 		match action {
+			// This is a request to impersonate a resource
+			Action::Impersonate => {
+				// Check if the actor is allowed to edit
+				let allowed = self.auth.has_owner_role();
+				// Today all users have at least View
+				// permissions, so if the target database
+				// belongs to the user's level, we don't
+				// need to check any table permissions.
+				let db_in_actor_level = self.auth.is_root()
+					|| self.auth.is_ns_check(self.ns()?)
+					|| self.auth.is_db_check(self.ns()?, self.db()?);
+				// If either of the above checks are false
+				// then we need to check table permissions
+				Ok(!allowed || !db_in_actor_level)
+			}
 			// This is a request to edit a resource
 			Action::Edit => {
 				// Check if the actor is allowed to edit

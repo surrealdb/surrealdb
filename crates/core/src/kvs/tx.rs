@@ -16,6 +16,7 @@ use crate::kvs::Transactor;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
+use crate::sql::statements::DefineApiStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
 use crate::sql::statements::DefineEventStatement;
@@ -649,6 +650,29 @@ impl Transaction {
 		}
 	}
 
+	/// Retrieve all api definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn all_db_apis(
+		&self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineApiStatement]>, Error> {
+		let qey = cache::tx::Lookup::Aps(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::ap::prefix(ns, db);
+				let end = crate::key::database::ap::suffix(ns, db);
+				let val = self.getr(beg..end, None).await?;
+				let val = val.convert().into();
+				let val = cache::tx::Entry::Aps(Arc::clone(&val));
+				self.cache.insert(qey.into(), val.clone());
+				val
+			}
+		}
+		.try_into_aps()
+	}
+
 	/// Retrieve all analyzer definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_analyzers(
@@ -1206,6 +1230,31 @@ impl Transaction {
 				Ok(val)
 			}
 		}
+	}
+
+	/// Retrieve a specific api definition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_api(
+		&self,
+		ns: &str,
+		db: &str,
+		ap: &str,
+	) -> Result<Arc<DefineApiStatement>, Error> {
+		let qey = cache::tx::Lookup::Ap(ns, db, ap);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::ap::new(ns, db, ap).encode()?;
+				let val = self.get(key, None).await?.ok_or_else(|| Error::ApNotFound {
+					value: ap.to_owned(),
+				})?;
+				let val: DefineApiStatement = val.into();
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey.into(), val.clone());
+				val
+			}
+		}
+		.try_into_type()
 	}
 
 	/// Retrieve a specific analyzer definition.

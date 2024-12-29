@@ -100,6 +100,7 @@ impl ForeachStatement {
 					Entry::Delete(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 					Entry::Relate(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 					Entry::Insert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+					Entry::Impersonate(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 					Entry::Define(v) => v.compute(stk, &ctx, opt, doc).await,
 					Entry::Alter(v) => v.compute(stk, &ctx, opt, doc).await,
 					Entry::Rebuild(v) => v.compute(stk, &ctx, opt, doc).await,

@@ -1,10 +1,9 @@
 use crate::{
-	sql::{language::Language, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid},
-	syn::{
+	api::path::Path, sql::{language::Language, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid}, syn::{
 		lexer::compound,
 		parser::{mac::unexpected, ParseResult, Parser},
 		token::{self, t, TokenKind},
-	},
+	}
 };
 
 use super::mac::pop_glued;
@@ -115,6 +114,20 @@ impl TokenValue for Strand {
 				Ok(Strand(v))
 			}
 			_ => unexpected!(parser, token, "a strand"),
+		}
+	}
+}
+
+impl TokenValue for Path {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.peek();
+		match token.kind {
+			t!("/") => {
+				parser.pop_peek();
+				let v = parser.lexer.lex_compound(token, compound::path)?.value;
+				Ok(Path(v))
+			}
+			_ => unexpected!(parser, token, "a path"),
 		}
 	}
 }

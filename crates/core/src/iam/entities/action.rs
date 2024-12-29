@@ -10,6 +10,7 @@ use crate::dbs::Statement;
 pub enum Action {
 	View,
 	Edit,
+	Impersonate,
 }
 
 impl std::fmt::Display for Action {
@@ -17,6 +18,7 @@ impl std::fmt::Display for Action {
 		match self {
 			Action::View => write!(f, "View"),
 			Action::Edit => write!(f, "Edit"),
+			Action::Impersonate => write!(f, "Edit"),
 		}
 	}
 }

@@ -20,6 +20,8 @@ pub enum PathKind {
 
 /// A map of path strings for parsing paths.
 pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
+		UniCase::ascii("api::invoke") => PathKind::Function,
+		//
 		UniCase::ascii("array::add") => PathKind::Function,
 		UniCase::ascii("array::all") => PathKind::Function,
 		UniCase::ascii("array::any") => PathKind::Function,

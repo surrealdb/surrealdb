@@ -82,19 +82,11 @@ impl Session {
 		}
 	}
 
-	/// Convert a session into a runtime
-	pub(crate) fn context(&self, ctx: &mut MutableContext) {
-		// Add access method data
-		let val: Value = self.ac.to_owned().into();
-		ctx.add_value("access", val.into());
-		// Add record access data
-		let val: Value = self.rd.to_owned().into();
-		ctx.add_value("auth", val.into());
-		// Add token data
-		let val: Value = self.tk.to_owned().into();
-		ctx.add_value("token", val.into());
-		// Add session value
-		let val: Value = Value::from(map! {
+	pub(crate) fn values(&self) -> Vec<(&'static str, Value)> {
+		let access: Value = self.ac.to_owned().into();
+		let auth: Value = self.rd.to_owned().into();
+		let token: Value = self.tk.to_owned().into();
+		let session: Value = Value::from(map! {
 			"ac".to_string() => self.ac.to_owned().into(),
 			"exp".to_string() => self.exp.to_owned().into(),
 			"db".to_string() => self.db.to_owned().into(),
@@ -105,7 +97,22 @@ impl Session {
 			"rd".to_string() => self.rd.to_owned().into(),
 			"tk".to_string() => self.tk.to_owned().into(),
 		});
-		ctx.add_value("session", val.into());
+
+		vec![
+			("access", access),
+			("auth", auth),
+			("token", token),
+			("session", session),
+		]
+	}
+
+	/// Convert a session into a runtime
+	pub(crate) fn context(&self, ctx: &mut MutableContext) {
+		let vars = self
+			.values()
+			.into_iter();
+
+		ctx.add_values(vars);
 	}
 
 	/// Create a system session for a given level and role

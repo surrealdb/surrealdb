@@ -65,6 +65,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("ALWAYS") => TokenKind::Keyword(Keyword::Always),
 	UniCase::ascii("ANALYZE") => TokenKind::Keyword(Keyword::Analyze),
 	UniCase::ascii("ANALYZER") => TokenKind::Keyword(Keyword::Analyzer),
+	UniCase::ascii("API") => TokenKind::Keyword(Keyword::Api),
 	UniCase::ascii("AS") => TokenKind::Keyword(Keyword::As),
 	UniCase::ascii("ASCENDING") => TokenKind::Keyword(Keyword::Ascending),
 	UniCase::ascii("ASC") => TokenKind::Keyword(Keyword::Ascending),
@@ -143,6 +144,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("HIGHLIGHTS") => TokenKind::Keyword(Keyword::Highlights),
 	UniCase::ascii("HNSW") => TokenKind::Keyword(Keyword::Hnsw),
 	UniCase::ascii("IGNORE") => TokenKind::Keyword(Keyword::Ignore),
+	UniCase::ascii("IMPERSONATE") => TokenKind::Keyword(Keyword::Impersonate),
 	UniCase::ascii("INCLUDE") => TokenKind::Keyword(Keyword::Include),
 	UniCase::ascii("INDEX") => TokenKind::Keyword(Keyword::Index),
 	UniCase::ascii("INFO") => TokenKind::Keyword(Keyword::Info),
@@ -254,6 +256,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("VALUE") => TokenKind::Keyword(Keyword::Value),
 	UniCase::ascii("VALUES") => TokenKind::Keyword(Keyword::Values),
 	UniCase::ascii("VERSION") => TokenKind::Keyword(Keyword::Version),
+	UniCase::ascii("VIA") => TokenKind::Keyword(Keyword::Via),
 	UniCase::ascii("VS") => TokenKind::Keyword(Keyword::Vs),
 	UniCase::ascii("WHEN") => TokenKind::Keyword(Keyword::When),
 	UniCase::ascii("WHERE") => TokenKind::Keyword(Keyword::Where),
@@ -393,4 +396,8 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("I32") => TokenKind::VectorType(VectorTypeKind::I32),
 	UniCase::ascii("I16") => TokenKind::VectorType(VectorTypeKind::I16),
 
+	// HTTP methods
+	UniCase::ascii("GET") => TokenKind::Keyword(Keyword::Get),
+	UniCase::ascii("POST") => TokenKind::Keyword(Keyword::Post),
+	UniCase::ascii("PUT") => TokenKind::Keyword(Keyword::Put)
 };

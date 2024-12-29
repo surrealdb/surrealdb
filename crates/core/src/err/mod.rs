@@ -393,6 +393,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested api does not exist
+	#[error("The api '/{value}' does not exist")]
+	ApNotFound {
+		value: String,
+	},
+
 	/// The requested analyzer does not exist
 	#[error("The analyzer '{value}' does not exist")]
 	AzNotFound {
@@ -899,6 +905,12 @@ pub enum Error {
 	// The cluster node already exists
 	#[error("The node '{value}' already exists")]
 	ClAlreadyExists {
+		value: String,
+	},
+
+	/// The requested api already exists
+	#[error("The api '/{value}' already exists")]
+	ApAlreadyExists {
 		value: String,
 	},
 

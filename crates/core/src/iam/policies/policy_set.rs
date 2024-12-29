@@ -36,5 +36,15 @@ pub static POLICY_SET: LazyLock<PolicySet> = LazyLock::new(|| {
         principal.roles.contains(Role::"Owner") &&
         resource.level in principal.level
     };
+
+    // Owner role can impersonate all users on the same level hierarchy or below
+    permit(
+        principal,
+        action == Action::"Impersonate",
+        resource
+    ) when {
+        principal.roles.contains(Role::"Owner") &&
+        resource.level in principal.level
+    };
 "#).unwrap()
 });

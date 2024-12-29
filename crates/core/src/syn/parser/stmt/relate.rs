@@ -99,7 +99,8 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("ALTER")
 			| t!("REMOVE")
-			| t!("REBUILD") => {
+			| t!("REBUILD")
+			| t!("IMPERSONATE") => {
 				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))
 			}
 			t!("IF") => {

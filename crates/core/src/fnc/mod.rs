@@ -13,6 +13,7 @@ pub mod array;
 pub mod bytes;
 pub mod count;
 pub mod crypto;
+pub mod api;
 pub mod duration;
 pub mod encoding;
 pub mod geo;
@@ -45,6 +46,7 @@ pub async fn run(
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
 	if name.eq("sleep")
+		|| name.eq("api::invoke")
 		|| name.eq("array::all")
 		|| name.eq("array::any")
 		|| name.eq("array::every")
@@ -480,6 +482,8 @@ pub async fn asynchronous(
 		name,
 		args,
 		"no such builtin function found",
+		//
+		"api::invoke" => api::invoke((stk, ctx, opt)).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,

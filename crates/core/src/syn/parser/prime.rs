@@ -86,7 +86,8 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE")
-			| t!("REBUILD") => {
+			| t!("REBUILD")
+			| t!("IMPERSONATE") => {
 				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))
 			}
 			t!("fn") => {
@@ -307,7 +308,8 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE")
-			| t!("REBUILD") => {
+			| t!("REBUILD")
+			| t!("IMPERSONATE") => {
 				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))?
 			}
 			t!("fn") => {

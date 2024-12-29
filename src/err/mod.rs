@@ -76,6 +76,9 @@ pub enum Error {
 
 	#[error("The HTTP route '{0}' is forbidden")]
 	ForbiddenRoute(String),
+
+	#[error("The HTTP route '{0}' is not found")]
+	NotFound(String),
 }
 
 impl From<Error> for String {
@@ -209,6 +212,15 @@ impl IntoResponse for Error {
 					description: Some("Not allowed to do this.".to_string()),
 					information: Some(err.to_string()),
 				})
+			),
+			Error::NotFound(_) => (
+				StatusCode::NOT_FOUND,
+				Json(Message {
+					code: StatusCode::NOT_FOUND.as_u16(),
+					details: Some("Not found".to_string()),
+					description: Some("The request was made to an endpoint which does not exist.".to_string()),
+					information: None,
+				}),
 			),
 			Error::InvalidType => (
 				StatusCode::UNSUPPORTED_MEDIA_TYPE,
