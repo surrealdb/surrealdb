@@ -271,6 +271,7 @@ keyword! {
 	Get => "GET",
 	Post => "POST",
 	Put => "PUT",
+	Trace => "TRACE",
 }
 
 pub(crate) use keyword_t;

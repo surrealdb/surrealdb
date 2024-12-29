@@ -810,7 +810,6 @@ impl Parser<'_> {
 		};
 
 		let path: Path = self.next_token_value()?;
-		println!("path {:?}", path);
 
 		let mut res = DefineApiStatement {
 			path,
@@ -825,7 +824,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.fallback = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				},
-				t!("DELETE") | t!("GET") | t!("PATCH") | t!("POST") | t!("PUT") => {
+				t!("DELETE") | t!("GET") | t!("PATCH") | t!("POST") | t!("PUT") | t!("TRACE") => {
 					let mut methods: Vec<Method> = vec![];
 					'methods: loop {
 						let method = match self.peek().kind {
@@ -834,8 +833,9 @@ impl Parser<'_> {
 							t!("PATCH") => Method::Patch,
 							t!("POST") => Method::Post,
 							t!("PUT") => Method::Put,
+							t!("TRACE") => Method::Trace,
 							found => {
-								bail!("Expected one of `DELETE`, `GET`, `PATCH`, `POST` or `PUT`, found {found}");
+								bail!("Expected one of `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`, found {found}");
 							}
 						};
 

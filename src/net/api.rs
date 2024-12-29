@@ -94,6 +94,7 @@ async fn handler(
 		Method::PATCH => ApiMethod::Patch,
 		Method::POST => ApiMethod::Post,
 		Method::PUT => ApiMethod::Put,
+		Method::TRACE => ApiMethod::Trace,
 		_ => return Err(Error::NotFound(url)),
 	};
 

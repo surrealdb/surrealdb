@@ -51,7 +51,7 @@ impl ImpersonateStatement {
 				let ns = opt.ns()?;
 				let db = opt.db()?;
 				let auth = Auth::for_record(thing.to_string(), ns, db, &ac);
-				let opt = opt.clone().with_auth(auth.into());
+				let opt = opt.new_with_auth(auth.into());
 
 				let mut ctx = MutableContext::new(ctx);
 				ctx.add_value("auth", Value::from(thing).into());

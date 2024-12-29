@@ -84,7 +84,8 @@ pub fn path(lexer: &mut Lexer, start: Token) -> Result<Vec<Segment>, SyntaxError
 			lexer.scratch.push(x as char);
 		}
 
-		let segment = if lexer.scratch.is_empty() {
+		let (segment, done) = if lexer.scratch.is_empty() {
+			lexer.advance_span();
 			break;
 		} else if (
 			lexer.scratch.starts_with(':') ||
@@ -95,19 +96,26 @@ pub fn path(lexer: &mut Lexer, start: Token) -> Result<Vec<Segment>, SyntaxError
 			// Let's error
 			bail!("Expected a name or content for this segment", @lexer.current_span());
 		} else if lexer.scratch.starts_with(':') {
-			Segment::Dynamic(lexer.scratch[1..].to_string(), kind)
+			let segment = Segment::Dynamic(lexer.scratch[1..].to_string(), kind);
+			(segment, false)
 		} else if lexer.scratch.starts_with('*') {
-			Segment::Rest(lexer.scratch[1..].to_string())
+			let segment = Segment::Rest(lexer.scratch[1..].to_string());
+			(segment, true)
 		} else if lexer.scratch.starts_with('\\') {
-			Segment::Fixed(lexer.scratch[1..].to_string())
+			let segment = Segment::Fixed(lexer.scratch[1..].to_string());
+			(segment, false)
 		} else {
-			Segment::Fixed(lexer.scratch.to_string())
+			let segment = Segment::Fixed(lexer.scratch.to_string());
+			(segment, false)
 		};
 
 		segments.push(segment);
 		lexer.advance_span();
-	}
 
-	lexer.advance_span();
+		if done {
+			break;
+		}
+	}
+	
 	Ok(segments)
 }

@@ -220,6 +220,19 @@ impl Options {
 	// --------------------------------------------------
 
 	/// Create a new Options object for a subquery
+	pub fn new_with_auth(&self, auth: Arc<Auth>) -> Self {
+		Self {
+			sender: self.sender.clone(),
+			auth,
+			ns: self.ns.clone(),
+			db: self.db.clone(),
+			force: self.force.clone(),
+			perms: self.perms.clone(),
+			..*self
+		}
+	}
+
+	/// Create a new Options object for a subquery
 	pub fn new_with_perms(&self, perms: bool) -> Self {
 		Self {
 			sender: self.sender.clone(),

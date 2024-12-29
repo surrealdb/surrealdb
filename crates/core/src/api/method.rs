@@ -16,6 +16,7 @@ pub enum Method {
 	Patch,
 	Post,
 	Put,
+	Trace,
 }
 
 impl TryFrom<&Value> for Method {
@@ -28,6 +29,7 @@ impl TryFrom<&Value> for Method {
 				v if v.eq_ignore_ascii_case("patch") => Ok(Self::Patch),
 				v if v.eq_ignore_ascii_case("post") => Ok(Self::Post),
 				v if v.eq_ignore_ascii_case("put") => Ok(Self::Put),
+				v if v.eq_ignore_ascii_case("trace") => Ok(Self::Trace),
 				_ => Err(Error::Thrown("method does not match".into()))
 			}
 			_ => Err(Error::Thrown("method does not match".into()))
@@ -43,6 +45,7 @@ impl Display for Method {
 			Self::Patch => write!(f, "PATCH"),
 			Self::Post => write!(f, "POST"),
 			Self::Put => write!(f, "PUT"),
+			Self::Trace => write!(f, "TRACE"),
 		}
 	}
 }

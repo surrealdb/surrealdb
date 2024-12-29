@@ -39,7 +39,7 @@ pub async fn invoke(
 	
 	if let Some((api, params)) = apis.as_ref().find_api(segments) {
 		let values = vec![
-			("session", ctx.value("session").map(|v| v.to_owned()).unwrap_or_default()),
+			("access", ctx.value("access").map(|v| v.to_owned()).unwrap_or_default()),
 			("auth", ctx.value("auth").map(|v| v.to_owned()).unwrap_or_default()),
 			("token", ctx.value("token").map(|v| v.to_owned()).unwrap_or_default()),
 			("session", ctx.value("session").map(|v| v.to_owned()).unwrap_or_default()),

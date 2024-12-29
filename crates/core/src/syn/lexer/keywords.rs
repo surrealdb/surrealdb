@@ -399,5 +399,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	// HTTP methods
 	UniCase::ascii("GET") => TokenKind::Keyword(Keyword::Get),
 	UniCase::ascii("POST") => TokenKind::Keyword(Keyword::Post),
-	UniCase::ascii("PUT") => TokenKind::Keyword(Keyword::Put)
+	UniCase::ascii("PUT") => TokenKind::Keyword(Keyword::Put),
+	UniCase::ascii("TRACE") => TokenKind::Keyword(Keyword::Trace)
 };

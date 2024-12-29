@@ -84,7 +84,6 @@ pub enum Segment {
 impl Segment {
     fn fit(&self, segments: &[&str]) -> Option<Option<(String, Value)>> {
         if let Some(current) = segments.first() {
-            println!("fitting '{}' into '{}'", current, self);
             match self {
                 Self::Fixed(x) if x == current => Some(None),
                 Self::Dynamic(x, k) => {
