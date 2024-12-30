@@ -15,8 +15,7 @@ pub static ALLOC: fake::FakeAlloc = fake::FakeAlloc::new();
 	target_os = "openbsd"
 )))]
 #[global_allocator]
-pub static ALLOC: track::TrackAlloc<std::alloc::System> =
-	track::TrackAlloc::new(std::alloc::System);
+pub static ALLOC: std::alloc::System = std::alloc::System;
 
 #[cfg(feature = "allocator")]
 #[cfg(target_os = "android")]
