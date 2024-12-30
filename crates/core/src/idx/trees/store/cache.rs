@@ -4,14 +4,34 @@ use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, Tr
 use crate::kvs::{Key, Transaction};
 use ahash::{HashMap, HashSet};
 use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
-pub(super) struct TreeCaches<N>(Arc<DashMap<Key, Arc<TreeCache<N>>>>)
+pub(super) struct TreeCaches<N>(Arc<Inner<N>>)
 where
 	N: TreeNode + Debug + Clone + Display;
+
+struct Inner<N>
+where
+	N: TreeNode + Debug + Clone + Display,
+{
+	current: DashMap<Key, Arc<TreeCache<N>>>,
+	modified: DashSet<Key>,
+}
+
+impl<N> Default for TreeCaches<N>
+where
+	N: TreeNode + Debug + Clone + Display,
+{
+	fn default() -> Self {
+		Self(Arc::new(Inner {
+			current: DashMap::new(),
+			modified: DashSet::new(),
+		}))
+	}
+}
 
 impl<N> TreeCaches<N>
 where
@@ -27,7 +47,7 @@ where
 		debug!("get_cache {generation}");
 		// We take the key from the node 0 as the key identifier for the cache
 		let cache_key = keys.get_key(0);
-		match self.0.entry(cache_key.clone()) {
+		match self.0.current.entry(cache_key.clone()) {
 			Entry::Occupied(mut e) => {
 				let c = e.get_mut();
 				// The cache and the store are matching, we can send a clone of the cache.
@@ -62,15 +82,17 @@ where
 	}
 
 	pub(super) fn new_cache(&self, new_cache: TreeCache<N>) {
-		match self.0.entry(new_cache.cache_key().clone()) {
+		match self.0.current.entry(new_cache.cache_key().clone()) {
 			Entry::Occupied(mut e) => {
 				let old_cache = e.get();
 				// We only store the cache if it is a newer generation
 				if new_cache.generation() > old_cache.generation() {
+					self.0.modified.insert(e.key().clone());
 					e.insert(Arc::new(new_cache));
 				}
 			}
 			Entry::Vacant(e) => {
+				self.0.modified.insert(e.key().clone());
 				e.insert(Arc::new(new_cache));
 			}
 		}
@@ -78,20 +100,11 @@ where
 
 	pub(super) fn remove_caches(&self, keys: &TreeNodeProvider) {
 		let key = keys.get_key(0);
-		self.0.remove(&key);
+		self.0.current.remove(&key);
 	}
 
 	pub(crate) fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-}
-
-impl<N> Default for TreeCaches<N>
-where
-	N: TreeNode + Debug + Clone + Display,
-{
-	fn default() -> Self {
-		Self(Arc::new(DashMap::new()))
+		self.0.current.is_empty()
 	}
 }
 

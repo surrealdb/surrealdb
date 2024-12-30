@@ -734,7 +734,10 @@ where
 	) -> Result<(bool, bool, Key, NodeId), Error> {
 		// CLRS 3 Determine the root x.ci that must contain k
 		let child_idx = keys.get_child_idx(&key_to_delete);
-		let child_id = children[child_idx];
+		let child_id = match children.get(child_idx) {
+			None => return Err(Error::CorruptedIndex("deleted_traversal:invalid_child_idx")),
+			Some(&child_id) => child_id,
+		};
 		#[cfg(debug_assertions)]
 		debug!(
 			"CLRS: 3 - key_to_delete: {} - child_id: {child_id}",
