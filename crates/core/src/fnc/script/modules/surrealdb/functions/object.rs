@@ -9,6 +9,7 @@ impl_module_def!(
 	"object",
 	"entries" => run,
 	"from_entries" => run,
+	"is_empty" => run,
 	"keys" => run,
 	"len" => run,
 	"values" => run

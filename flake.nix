@@ -52,6 +52,7 @@
             stable.rustc
             stable.cargo
             targets.${target}.stable.rust-std
+            stable.clippy
           ] ++ extraComponents);
 
         buildPlatform = pkgs.stdenv.buildPlatform.config;

@@ -261,6 +261,7 @@
 "meta::tb("
 "object::entries("
 "object::from_entries("
+"object::is_empty("
 "object::keys("
 "object::len("
 "object::values("
