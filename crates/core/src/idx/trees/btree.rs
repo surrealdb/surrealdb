@@ -1085,11 +1085,11 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let st = ds
-			.index_store()
+		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let st = tx
+			.index_caches()
 			.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
 			.await;
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		(tx, st)
 	}
 
@@ -1102,11 +1102,11 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let st = ds
-			.index_store()
+		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let st = tx
+			.index_caches()
 			.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
 			.await;
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		(tx, st)
 	}
 

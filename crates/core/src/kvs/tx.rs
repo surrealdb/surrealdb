@@ -6,6 +6,7 @@ use super::Val;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
+use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::kvs::cache;
 use crate::kvs::cache::tx::Cache;
 use crate::kvs::scanner::Scanner;
@@ -42,6 +43,8 @@ pub struct Transaction {
 	tx: Mutex<Transactor>,
 	/// The query cache for this store
 	cache: Cache,
+	/// Tracks the index cache updates occurring during this transaction
+	index_caches: IndexTreeCaches,
 }
 
 impl Transaction {
@@ -50,6 +53,7 @@ impl Transaction {
 		Transaction {
 			tx: Mutex::new(tx),
 			cache: cache::tx::new(),
+			index_caches: IndexTreeCaches::default(),
 		}
 	}
 
@@ -68,9 +72,9 @@ impl Transaction {
 		self.tx.lock().await
 	}
 
-	/// Check if transaction is finished.
+	/// Check if the transaction is finished.
 	///
-	/// If the transaction has been cancelled or committed,
+	/// If the transaction has been canceled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
 	/// in a [`Error::TxFinished`] error.
@@ -1792,5 +1796,9 @@ impl Transaction {
 			}
 		}
 		.try_into_type()
+	}
+
+	pub(crate) fn index_caches(&self) -> &IndexTreeCaches {
+		&self.index_caches
 	}
 }
