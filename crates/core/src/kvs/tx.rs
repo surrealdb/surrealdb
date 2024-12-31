@@ -43,7 +43,7 @@ pub struct Transaction {
 	tx: Mutex<Transactor>,
 	/// The query cache for this store
 	cache: Cache,
-	/// Tracks the index cache updates occurring during this transaction
+	/// Cache the index updates
 	index_caches: IndexTreeCaches,
 }
 
