@@ -113,6 +113,9 @@ impl Datastore {
 		// Store 4KB values separate from keys
 		debug!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
+		// Allow multiple writers to update memtables in parallel
+		debug!(target: TARGET, "Allow concurrent memtable writes: true");
+		opts.set_allow_concurrent_memtable_write(true);
 		// Set the block cache size in bytes
 		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		let mut block_opts = BlockBasedOptions::default();
