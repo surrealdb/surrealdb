@@ -123,8 +123,11 @@ impl Datastore {
 		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		let mut block_opts = BlockBasedOptions::default();
 		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
+		block_opts.set_hybrid_ribbon_filter(10.0, 2);
 		block_opts.set_block_cache(&cache);
 		opts.set_block_based_table_factory(&block_opts);
+		opts.set_blob_cache(&cache);
+		opts.set_row_cache(&cache);
 		// Set the delete compaction factory
 		debug!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
