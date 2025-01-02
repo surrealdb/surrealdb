@@ -105,7 +105,7 @@ reqwest = { version = "0.12.7", default-features = false, features = ["json", "s
 revision = { version = "0.10.0", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
 rmpv = "1.0.1"
 roaring = { version = "0.10.6", features = ["serde"] }
-rocksdb = { version = "0.23.0", features = ["lz4", "snappy", "io-uring"], optional = true }
+rocksdb = { version = "0.23.0", features = ["lz4", "snappy", "io-uring", "lto"], optional = true }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
