@@ -65,7 +65,7 @@ impl Parser<'_> {
 						let token = self.peek();
 						if Self::kind_starts_statement(token.kind) {
 							// user likely forgot a semicolon.
-							unexpected!(self,token,"the query to end", => "maybe forgot a semicolon  after the previous statement?");
+							unexpected!(self,token,"the query to end", => "maybe forgot a semicolon after the previous statement?");
 						}
 
 						expected!(self, t!("eof"));

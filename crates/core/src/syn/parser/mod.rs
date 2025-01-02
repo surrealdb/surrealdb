@@ -21,8 +21,8 @@
 //! ## Far Token Peek
 //!
 //! Occasionally the parser needs to check further ahead than peeking allows.
-//! This is done with the `Parser::peek_token_at` function. This function peeks a given number
-//! of tokens further than normal up to 3 tokens further.
+//! This is done with the [`Parser::peek1`] function. This function peeks one token further then
+//! peek.
 //!
 //! ## WhiteSpace Tokens
 //!
@@ -52,6 +52,7 @@
 //! where gluing comes in. Calling `Parser::glue` checks if the next token could start a compound
 //! token and combines them into a single token. This can only be done in places where we know if
 //! we encountered a leading token of a compound token it will result in the 'default' compound token.
+
 use self::token_buffer::TokenBuffer;
 use crate::{
 	sql::{self, Datetime, Duration, Strand, Uuid},
@@ -61,7 +62,8 @@ use crate::{
 		token::{t, Span, Token, TokenKind},
 	},
 };
-use reblessive::Stk;
+use bytes::BytesMut;
+use reblessive::{Stack, Stk};
 
 mod basic;
 mod builtin;
@@ -80,6 +82,8 @@ mod token;
 mod token_buffer;
 
 pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
+
+use super::error::{syntax_error, RenderedError};
 
 #[cfg(test)]
 pub mod test;
@@ -117,6 +121,35 @@ pub enum GluedValue {
 	None,
 }
 
+#[derive(Clone, Debug)]
+pub struct ParserSettings {
+	/// Parse strand like the old parser where a strand which looks like a UUID, Record-Id, Or a
+	/// DateTime will be parsed as a date-time.
+	pub legacy_strands: bool,
+	/// Set whether to allow record-id's which don't adheare to regular ident rules.
+	/// Setting this to true will allow parsing of, for example, `foo:0bar`. This would be rejected
+	/// by normal identifier rules as most identifiers can't start with a number.
+	pub flexible_record_id: bool,
+	/// Disallow a query to have objects deeper that limit.
+	/// Arrays also count towards objects. So `[{foo: [] }]` would be 3 deep.
+	pub object_recursion_limit: usize,
+	/// Disallow a query from being deeper than the give limit.
+	/// A query recurses when a statement contains another statement within itself.
+	/// Examples are subquery and blocks like block statements and if statements and such.
+	pub query_recursion_limit: usize,
+}
+
+impl Default for ParserSettings {
+	fn default() -> Self {
+		ParserSettings {
+			legacy_strands: false,
+			flexible_record_id: true,
+			object_recursion_limit: 100,
+			query_recursion_limit: 20,
+		}
+	}
+}
+
 /// The SurrealQL parser.
 pub struct Parser<'a> {
 	lexer: Lexer<'a>,
@@ -124,83 +157,30 @@ pub struct Parser<'a> {
 	token_buffer: TokenBuffer<4>,
 	glued_value: GluedValue,
 	pub(crate) table_as_field: bool,
-	legacy_strands: bool,
-	flexible_record_id: bool,
-	object_recursion: usize,
-	query_recursion: usize,
+	settings: ParserSettings,
 }
 
 impl<'a> Parser<'a> {
 	/// Create a new parser from a give source.
 	pub fn new(source: &'a [u8]) -> Self {
+		Parser::new_with_settings(source, ParserSettings::default())
+	}
+
+	/// Create a new parser from a give source.
+	pub fn new_with_settings(source: &'a [u8], settings: ParserSettings) -> Self {
 		Parser {
 			lexer: Lexer::new(source),
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
 			glued_value: GluedValue::None,
 			table_as_field: true,
-			legacy_strands: false,
-			flexible_record_id: true,
-			object_recursion: 100,
-			query_recursion: 20,
+			settings,
 		}
 	}
 
-	/// Disallow a query to have objects deeper that limit.
-	/// Arrays also count towards objects. So `[{foo: [] }]` would be 3 deep.
-	pub fn with_object_recursion_limit(mut self, limit: usize) -> Self {
-		self.object_recursion = limit;
+	pub fn with_settings(mut self, settings: ParserSettings) -> Self {
+		self.settings = settings;
 		self
-	}
-
-	/// Disallow a query from being deeper than the give limit.
-	/// A query recurses when a statement contains another statement within itself.
-	/// Examples are subquery and blocks like block statements and if statements and such.
-	pub fn with_query_recursion_limit(mut self, limit: usize) -> Self {
-		self.query_recursion = limit;
-		self
-	}
-
-	/// Parse strand like the old parser where a strand which looks like a UUID, Record-Id, Or a
-	/// DateTime will be parsed as a date-time.
-	pub fn with_allow_legacy_strand(mut self, value: bool) -> Self {
-		self.legacy_strands = value;
-		self
-	}
-
-	/// Set whether to parse strands as legacy strands.
-	pub fn allow_legacy_strand(&mut self, value: bool) {
-		self.legacy_strands = value;
-	}
-
-	/// Set whether to allow record-id's which don't adheare to regular ident rules.
-	/// Setting this to true will allow parsing of, for example, `foo:0bar`. This would be rejected
-	/// by normal identifier rules as most identifiers can't start with a number.
-	pub fn allow_fexible_record_id(&mut self, value: bool) {
-		self.flexible_record_id = value;
-	}
-
-	/// Reset the parser state. Doesnt change the position of the parser in buffer.
-	pub fn reset(&mut self) {
-		self.last_span = Span::empty();
-		self.token_buffer.clear();
-		self.table_as_field = true;
-		self.lexer.reset();
-	}
-
-	/// Change the source of the parser reusing the existing buffers.
-	pub fn change_source(self, source: &[u8]) -> Parser {
-		Parser {
-			lexer: self.lexer.change_source(source),
-			last_span: Span::empty(),
-			token_buffer: TokenBuffer::new(),
-			glued_value: GluedValue::None,
-			legacy_strands: self.legacy_strands,
-			flexible_record_id: self.flexible_record_id,
-			table_as_field: false,
-			object_recursion: self.object_recursion,
-			query_recursion: self.query_recursion,
-		}
 	}
 
 	/// Returns the next token and advance the parser one token forward.
@@ -398,48 +378,163 @@ impl<'a> Parser<'a> {
 	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<sql::Statement> {
 		self.parse_stmt(ctx).await
 	}
+}
 
-	/// Parse a possibly partial statement.
+/// A struct which can parse queries statements by statement
+pub struct StatementStream {
+	stack: Stack,
+	settings: ParserSettings,
+	col_offset: usize,
+	line_offset: usize,
+}
+
+impl StatementStream {
+	pub fn new() -> Self {
+		Self::new_with_settings(ParserSettings::default())
+	}
+
+	pub fn new_with_settings(settings: ParserSettings) -> Self {
+		StatementStream {
+			stack: Stack::new(),
+			settings,
+			col_offset: 0,
+			line_offset: 0,
+		}
+	}
+
+	/// updates the line and column offset after consuming bytes.
+	fn accumulate_line_col(&mut self, bytes: &[u8]) {
+		// The parser should have ensured that bytes is a valid utf-8 string.
+		// TODO: Maybe change this to unsafe cast once we have more convidence in the parsers
+		// correctness.
+		let (line_num, remaining) =
+			std::str::from_utf8(bytes).unwrap().lines().enumerate().last().unwrap_or((0, ""));
+
+		self.line_offset += line_num;
+		if line_num > 0 {
+			self.col_offset = 0;
+		}
+		self.col_offset += remaining.chars().count();
+	}
+
+	/// Parses a statement if the buffer contains sufficient data to parse a statement.
 	///
-	/// This will try to parse a statement if a full statement can be parsed from the buffer parser
-	/// is operating on.
-	pub async fn parse_partial_statement(
+	/// When it will have done so the it will remove the read bytes from the buffer and return
+	/// Ok(Some(_)). In case of a parsing error it will return Err(_), this will not consume data.
+	///
+	/// If the function returns Ok(None), not enough data was in the buffer to fully parse a
+	/// statement, the function might still consume data from the buffer, like whitespace between statements,
+	/// when a none is returned.
+	pub fn parse_partial(
 		&mut self,
-		complete: bool,
-		ctx: &mut Stk,
-	) -> PartialResult<sql::Statement> {
-		while self.eat(t!(";")) {}
-
-		if self.peek().kind == TokenKind::Eof {
-			return PartialResult::Empty {
-				used: self.lexer.reader.offset(),
-			};
+		buffer: &mut BytesMut,
+	) -> Result<Option<sql::Statement>, RenderedError> {
+		let mut slice = &**buffer;
+		if slice.len() > u32::MAX as usize {
+			// limit slice length.
+			slice = &slice[..u32::MAX as usize];
 		}
 
-		let res = ctx.run(|ctx| self.parse_stmt(ctx)).await;
-		let v = match res {
-			Err(e) => {
-				let peek = self.peek_whitespace1();
-				if !complete && e.is_data_pending()
-					|| matches!(peek.kind, TokenKind::Eof | TokenKind::WhiteSpace)
-				{
-					return PartialResult::MoreData;
-				}
-				return PartialResult::Err {
-					err: e,
-					used: self.lexer.reader.offset(),
-				};
+		let mut parser = Parser::new_with_settings(slice, self.settings.clone());
+
+		// eat empty statements.
+		while parser.eat(t!(";")) {}
+
+		if parser.peek().span.offset != 0 && buffer.len() > u32::MAX as usize {
+			// we ate some bytes statements, so in order to ensure whe can parse a full statement
+			// of 4gigs we need recreate the parser starting with the empty bytes removed.
+			let eaten = buffer.split_to(parser.peek().span.offset as usize);
+			self.accumulate_line_col(&eaten);
+			slice = &**buffer;
+			if slice.len() > u32::MAX as usize {
+				// limit slice length.
+				slice = &slice[..u32::MAX as usize];
 			}
-			Ok(x) => x,
-		};
-
-		if complete || self.eat(t!(";")) {
-			return PartialResult::Ok {
-				value: v,
-				used: self.lexer.reader.offset(),
-			};
+			parser = Parser::new_with_settings(slice, self.settings.clone())
 		}
 
-		PartialResult::MoreData
+		// test if the buffer is now empty, which would cause the parse_statement function to fail.
+		if parser.peek().is_eof() {
+			return Ok(None);
+		}
+
+		let res = self.stack.enter(|ctx| parser.parse_statement(ctx)).finish();
+		if parser.peek().is_eof() {
+			if buffer.len() > u32::MAX as usize {
+				let error = syntax_error!("Cannot parse query, statement exceeded maximum size of 4G", @parser.last_span());
+				return Err(error
+					.render_on_bytes(buffer)
+					.offset_location(self.line_offset, self.col_offset));
+			}
+
+			// finished on an eof token.
+			// We can't know if this is an actual result, or if it would change when more data
+			// is available.
+			return Ok(None);
+		}
+
+		// we need a trailing semicolon.
+		if !parser.eat(t!(";")) {
+			let peek = parser.peek();
+			let error = syntax_error!("Unexpected token `{}` expected the query to end.",peek.kind.as_str(),
+				@peek.span => "maybe forgot a semicolon after the previous statement?");
+			return Err(error
+				.render_on_bytes(&slice)
+				.offset_location(self.line_offset, self.col_offset));
+		}
+
+		// Eat possible empty statements.
+		while parser.eat(t!(";")) {}
+
+		let eaten = buffer.split_to(parser.last_span().after_offset() as usize);
+		let res = res.map(Some).map_err(|e| {
+			e.render_on_bytes(&eaten).offset_location(self.line_offset, self.col_offset)
+		});
+		self.accumulate_line_col(&eaten);
+		res
+	}
+
+	/// Parse remaining statements once the buffer is complete.
+	pub fn parse_complete(
+		&mut self,
+		buffer: &mut BytesMut,
+	) -> Result<Option<sql::Statement>, RenderedError> {
+		let mut slice = &**buffer;
+		if slice.len() > u32::MAX as usize {
+			// limit slice length.
+			slice = &slice[..u32::MAX as usize];
+		}
+
+		let mut parser = Parser::new_with_settings(slice, self.settings.clone());
+		// eat empty statements.
+		while parser.eat(t!(";")) {}
+
+		if parser.peek().is_eof() {
+			// There were no statements in the buffer, clear possible used
+			buffer.clear();
+			return Ok(None);
+		}
+
+		match self.stack.enter(|ctx| parser.parse_statement(ctx)).finish() {
+			Ok(x) => {
+				if !parser.peek().is_eof() && !parser.eat(t!(";")) {
+					let peek = parser.peek();
+					let error = syntax_error!("Unexpected token `{}` expected the query to end.",peek.kind.as_str(),
+						@peek.span => "maybe forgot a semicolon after the previous statement?");
+					return Err(error
+						.render_on_bytes(&slice)
+						.offset_location(self.line_offset, self.col_offset));
+				}
+
+				let eaten = buffer.split_off(parser.last_span().after_offset() as usize);
+				self.accumulate_line_col(&eaten);
+				return Ok(Some(x));
+			}
+			Err(e) => {
+				return Err(e
+					.render_on_bytes(slice)
+					.offset_location(self.line_offset, self.col_offset))
+			}
+		}
 	}
 }

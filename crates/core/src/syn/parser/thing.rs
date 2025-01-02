@@ -248,7 +248,7 @@ impl Parser<'_> {
 				}
 			}
 			TokenKind::Digits => {
-				if self.flexible_record_id {
+				if self.settings.flexible_record_id {
 					let next = self.peek_whitespace1();
 					if Self::kind_is_identifier(next.kind) {
 						let ident = self.parse_flexible_ident()?.0;
@@ -265,7 +265,7 @@ impl Parser<'_> {
 					Ok(Id::String(digits_str.to_owned()))
 				}
 			}
-			TokenKind::Glued(Glued::Duration) if self.flexible_record_id => {
+			TokenKind::Glued(Glued::Duration) if self.settings.flexible_record_id => {
 				let slice = self.lexer.reader.span(token.span);
 				if slice.iter().any(|x| !x.is_ascii()) {
 					unexpected!(self, token, "a identifier");
@@ -313,7 +313,7 @@ impl Parser<'_> {
 				}
 			}
 			_ => {
-				let ident = if self.flexible_record_id {
+				let ident = if self.settings.flexible_record_id {
 					self.parse_flexible_ident()?.0
 				} else {
 					self.next_token_value::<Ident>()?.0
@@ -332,6 +332,7 @@ mod tests {
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
 	use crate::sql::Value;
+	use crate::syn::parser::ParserSettings;
 	use crate::syn::Parse as _;
 
 	fn thing(i: &str) -> ParseResult<Thing> {
@@ -528,8 +529,13 @@ mod tests {
 
 		fn assert_ident_parses_correctly(ident: &str) {
 			let thing = format!("t:{}", ident);
-			let mut parser = Parser::new(thing.as_bytes());
-			parser.allow_fexible_record_id(true);
+			let mut parser = Parser::new_with_settings(
+				thing.as_bytes(),
+				ParserSettings {
+					flexible_record_id: true,
+					..Default::default()
+				},
+			);
 			let mut stack = Stack::new();
 			let r = stack
 				.enter(|ctx| async move { parser.parse_thing(ctx).await })
