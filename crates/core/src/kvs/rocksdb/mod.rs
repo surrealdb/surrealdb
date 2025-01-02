@@ -116,6 +116,9 @@ impl Datastore {
 		// Allow multiple writers to update memtables in parallel
 		debug!(target: TARGET, "Allow concurrent memtable writes: true");
 		opts.set_allow_concurrent_memtable_write(true);
+		// Avoid unnecessary blocking io, preferring background threads
+		debug!(target: TARGET, "Avoid unnecessary blocking IO: true");
+		opts.set_avoid_unnecessary_blocking_io(true);
 		// Set the block cache size in bytes
 		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		let mut block_opts = BlockBasedOptions::default();
