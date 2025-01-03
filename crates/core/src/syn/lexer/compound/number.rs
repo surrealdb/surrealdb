@@ -2,8 +2,8 @@ use std::{
 	borrow::Cow,
 	num::{ParseFloatError, ParseIntError},
 	str::FromStr,
-	time::Duration,
 };
+use chrono::Duration as ChronoDuration;
 
 use rust_decimal::Decimal;
 
@@ -24,13 +24,13 @@ use crate::{
 
 pub enum Numeric {
 	Number(Number),
-	Duration(Duration),
+	Duration(ChronoDuration),
 }
 
 /// Like numeric but holds of parsing the a number into a specific value.
 pub enum NumericKind {
 	Number(NumberKind),
-	Duration(Duration),
+	Duration(ChronoDuration),
 }
 
 pub enum NumberKind {
@@ -267,61 +267,76 @@ where
 		.map_err(|e| syntax_error!("Invalid floating point number: {e}", @lexer.current_span()))
 }
 
-pub fn duration(lexer: &mut Lexer, start: Token) -> Result<Duration, SyntaxError> {
+pub fn duration(lexer: &mut Lexer, start: Token) -> Result<ChronoDuration, SyntaxError> {
+	let offset = start.span.offset as usize;
+	let mut is_negative = false;
+
 	match start.kind {
+		t!("+") => {
+			eat_digits1(lexer, offset)?;
+		}
+		t!("-") => {
+			eat_digits1(lexer, offset)?;
+			is_negative = true;
+		}
 		TokenKind::Digits => {}
 		x => bail!("Unexpected token {x}, expected duration", @start.span),
 	}
 
-	let mut duration = Duration::ZERO;
+	let mut duration = ChronoDuration::zero();
 
-	let mut number_span = start.span;
+	let operation = match is_negative {
+		true => ChronoDuration::checked_sub,
+		false => ChronoDuration::checked_add,
+	};
+
+	let mut number_span = start.span; // TODO? let number_span = lexer.current_span();
 	loop {
 		let suffix = lex_duration_suffix(lexer)?;
 
 		let numeric_string = prepare_number_str(lexer.span_str(number_span));
-		let numeric_value: u64 = numeric_string.parse().map_err(
+		let numeric_value: i64 = numeric_string.parse().map_err(
 			|e| syntax_error!("Invalid token, failed to parse duration digits: {e}",@lexer.current_span()),
 		)?;
 
-		let addition = match suffix {
-			DurationSuffix::Nano => Duration::from_nanos(numeric_value),
-			DurationSuffix::Micro => Duration::from_micros(numeric_value),
-			DurationSuffix::Milli => Duration::from_millis(numeric_value),
-			DurationSuffix::Second => Duration::from_secs(numeric_value),
+		let delta = match suffix {
+			DurationSuffix::Nano => ChronoDuration::nanoseconds(numeric_value),
+			DurationSuffix::Micro => ChronoDuration::microseconds(numeric_value),
+			DurationSuffix::Milli => ChronoDuration::milliseconds(numeric_value),
+			DurationSuffix::Second => ChronoDuration::seconds(numeric_value),
 			DurationSuffix::Minute => {
 				let minutes = numeric_value.checked_mul(SECONDS_PER_MINUTE).ok_or_else(
 					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
-				Duration::from_secs(minutes)
+				ChronoDuration::seconds(minutes)
 			}
 			DurationSuffix::Hour => {
 				let hours = numeric_value.checked_mul(SECONDS_PER_HOUR).ok_or_else(
 					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
-				Duration::from_secs(hours)
+				ChronoDuration::seconds(hours)
 			}
 			DurationSuffix::Day => {
 				let day = numeric_value.checked_mul(SECONDS_PER_DAY).ok_or_else(
 					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
-				Duration::from_secs(day)
+				ChronoDuration::seconds(day)
 			}
 			DurationSuffix::Week => {
 				let week = numeric_value.checked_mul(SECONDS_PER_WEEK).ok_or_else(
 					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
-				Duration::from_secs(week)
+				ChronoDuration::seconds(week)
 			}
 			DurationSuffix::Year => {
 				let year = numeric_value.checked_mul(SECONDS_PER_YEAR).ok_or_else(
 					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 				)?;
-				Duration::from_secs(year)
+				ChronoDuration::seconds(year)
 			}
 		};
 
-		duration = duration.checked_add(addition).ok_or_else(
+		duration = operation(&duration, &delta).ok_or_else(
 			|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
 		)?;
 

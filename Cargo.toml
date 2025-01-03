@@ -63,7 +63,7 @@ axum-extra = { version = "0.9.3", features = ["query", "typed-routing", "typed-h
 axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
-chrono = "0.4.38"
+chrono = "0.4.39"
 ciborium = "0.2.1"
 clap = { version = "4.4.11", features = ["env", "derive", "wrap_help", "unicode"] }
 futures = "0.3.30"
@@ -117,7 +117,7 @@ nix = { version = "0.27.1", features = ["signal", "user"] }
 
 [dev-dependencies]
 assert_fs = "1.0.13"
-chrono = "0.4.38"
+chrono = "0.4.39"
 env_logger = "0.10.1"
 jsonwebtoken = "9.3.0"
 opentelemetry-proto = { version = "0.7.0", features = ["gen-tonic", "metrics", "logs"] }

@@ -101,7 +101,7 @@ impl IncFakeClock {
 	}
 
 	pub async fn now(&self) -> Timestamp {
-		self.now.fetch_add(self.increment.as_millis() as u64, Ordering::SeqCst);
+		self.now.fetch_add(self.increment.millis() as u64, Ordering::SeqCst);
 		Timestamp {
 			value: self.now.load(Ordering::SeqCst),
 		}

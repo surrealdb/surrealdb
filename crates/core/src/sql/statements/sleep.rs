@@ -27,7 +27,8 @@ impl SleepStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Root)?;
 		// Calculate the sleep duration
-		let dur = match (ctx.timeout(), self.duration.0) {
+		let dur = self.duration.0.to_std().map_err(|_| Error::InvalidTimeout(self.duration.0.to_string()))?;
+		let dur = match (ctx.timeout(), dur) {
 			(Some(t), d) if t < d => t,
 			(_, d) => d,
 		};
@@ -51,17 +52,17 @@ impl fmt::Display for SleepStatement {
 mod tests {
 	use super::*;
 	use crate::dbs::test::mock;
-	use std::time::{self, SystemTime};
+	use std::time::SystemTime;
 
 	#[tokio::test]
 	async fn test_sleep_compute() {
 		let time = SystemTime::now();
 		let (ctx, opt) = mock().await;
 		let stm = SleepStatement {
-			duration: Duration(time::Duration::from_micros(500)),
+			duration: Duration(chrono::Duration::microseconds(500)),
 		};
 		let value = stm.compute(&ctx, &opt, None).await.unwrap();
-		assert!(time.elapsed().unwrap() >= time::Duration::from_micros(500));
+		assert!(time.elapsed().unwrap() >= time::Duration::microseconds(500));
 		assert_eq!(value, Value::None);
 	}
 }

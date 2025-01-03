@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::sql::duration::Duration;
 use crate::sql::Algorithm;
-use chrono::Duration as ChronoDuration;
 use chrono::Utc;
 use jsonwebtoken::EncodingKey;
 
@@ -26,14 +25,10 @@ pub(crate) fn config(alg: Algorithm, key: &str) -> Result<EncodingKey, Error> {
 pub(crate) fn expiration(d: Option<Duration>) -> Result<Option<i64>, Error> {
 	let exp = match d {
 		Some(v) => {
-			// The defined duration must be valid
-			match ChronoDuration::from_std(v.0) {
-				// The resulting expiration must be valid
-				Ok(d) => match Utc::now().checked_add_signed(d) {
-					Some(exp) => Some(exp.timestamp()),
-					None => return Err(Error::AccessInvalidExpiration),
-				},
-				Err(_) => return Err(Error::AccessInvalidDuration),
+			// The resulting expiration must be valid
+			match Utc::now().checked_add_signed(v.0) {
+				Some(exp) => Some(exp.timestamp()),
+				None => return Err(Error::AccessInvalidExpiration),
 			}
 		}
 		_ => None,

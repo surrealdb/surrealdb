@@ -133,13 +133,13 @@ impl TryFrom<Cbor> for Value {
 						},
 						_ => Err("Expected a CBOR text data type"),
 					},
-					// A custom [seconds: Option<u64>, nanos: Option<u32>] duration
+					// A custom [seconds: Option<i64>, nanos: Option<u32>] duration
 					TAG_CUSTOM_DURATION => match *v {
 						Data::Array(v) if v.len() <= 2 => {
 							let mut iter = v.into_iter();
 
 							let seconds = match iter.next() {
-								Some(Data::Integer(v)) => match u64::try_from(v) {
+								Some(Data::Integer(v)) => match i64::try_from(v) {
 									Ok(v) => v,
 									_ => return Err("Expected a CBOR integer data type"),
 								},
@@ -154,7 +154,10 @@ impl TryFrom<Cbor> for Value {
 								_ => 0,
 							};
 
-							Ok(Duration::new(seconds, nanos).into())
+							match Duration::new(seconds, nanos) {
+								Ok(v) => Ok(v.into()),
+								_ => Err("Expected a valid Duration value"),
+							}
 						}
 						_ => Err("Expected a CBOR array with at most 2 elements"),
 					},
