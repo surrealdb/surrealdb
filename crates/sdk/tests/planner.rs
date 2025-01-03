@@ -3273,6 +3273,24 @@ async fn select_limit_start_parallel() -> Result<(), Error> {
 	let mut t = Test::new(sql).await?;
 	t.expect_size(2)?;
 	t.skip_ok(1)?;
+	t.expect_val(
+		"[
+	{
+		detail: {
+			table: 'item'
+		},
+		operation: 'Iterate Table'
+	},
+	{
+		detail: {
+			batch_size: 1024,
+			limit: 12,
+			type: 'MemoryOrdered'
+		},
+		operation: 'Collector'
+	}
+]",
+	)?;
 	let r = t.next()?.result?;
 	if let Value::Array(a) = r {
 		assert_eq!(a.len(), 10);

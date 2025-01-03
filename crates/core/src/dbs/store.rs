@@ -273,7 +273,7 @@ impl MemoryOrdered {
 	}
 }
 
-struct OrderedValue {
+pub(super) struct OrderedValue {
 	value: Value,
 	orders: Arc<OrderList>,
 }
@@ -311,7 +311,7 @@ pub(super) struct MemoryOrderedLimit {
 impl MemoryOrderedLimit {
 	pub(super) fn new(limit: usize, orders: OrderList) -> Self {
 		Self {
-			heap: BinaryHeap::with_capacity(limit),
+			heap: BinaryHeap::with_capacity(limit + 1),
 			limit,
 			orders: Arc::new(orders),
 			result: None,
@@ -341,7 +341,7 @@ impl MemoryOrderedLimit {
 
 	pub(super) fn sort(&mut self) {
 		if self.result.is_none() {
-			let mut sorted_vec: Vec<_> = Vec::new();
+			let mut sorted_vec: Vec<_> = Vec::with_capacity(self.heap.len());
 			while let Some(i) = self.heap.pop() {
 				sorted_vec.push(i.0.value);
 			}
