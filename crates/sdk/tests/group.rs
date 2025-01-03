@@ -904,7 +904,7 @@ async fn select_count_group_all_permissions(
 
 #[tokio::test]
 async fn select_count_group_all_permissions_select_none() -> Result<(), Error> {
-	select_count_group_all_permissions("FOR SELECT NONE", true, "[]").await
+	select_count_group_all_permissions("FOR SELECT NONE", false, "[]").await
 }
 
 #[tokio::test]
@@ -1088,7 +1088,7 @@ async fn select_count_range_keys_only_permissions(
 
 #[tokio::test]
 async fn select_count_range_keys_only_permissions_select_none() -> Result<(), Error> {
-	select_count_range_keys_only_permissions("FOR SELECT NONE", true, "[]", "[]").await
+	select_count_range_keys_only_permissions("FOR SELECT NONE", false, "[]", "[]").await
 }
 
 #[tokio::test]

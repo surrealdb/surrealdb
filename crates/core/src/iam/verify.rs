@@ -1,12 +1,12 @@
-use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::iam::access::{authenticate_generic, authenticate_record};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
 use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::access_type::{AccessType, Jwt, JwtAccessVerify};
-use crate::sql::{statements::DefineUserStatement, Algorithm, Thing, Value};
+use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
@@ -651,88 +651,6 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	}
 }
 
-// Execute the AUTHENTICATE clause for a Record access method
-pub async fn authenticate_record(
-	kvs: &Datastore,
-	session: &Session,
-	authenticate: &Value,
-) -> Result<Thing, Error> {
-	match kvs.evaluate(authenticate, session, None).await {
-		Ok(val) => match val.record() {
-			// If the AUTHENTICATE clause returns a record, authentication continues with that record
-			Some(id) => Ok(id),
-			// If the AUTHENTICATE clause returns anything else, authentication fails generically
-			_ => {
-				debug!("Authentication attempt as record user rejected by AUTHENTICATE clause");
-				Err(Error::InvalidAuth)
-			}
-		},
-		Err(e) => {
-			match e {
-				// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
-				Error::Thrown(_) => Err(e),
-				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
-				// This allows clients to handle these errors, which may be retryable
-				Error::Tx(_) | Error::TxFailure => {
-					debug!("Unexpected error found while executing AUTHENTICATE clause: {e}");
-					Err(Error::UnexpectedAuth)
-				}
-				// Otherwise, return a generic error unless it should be forwarded
-				e => {
-					debug!("Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}");
-					if *INSECURE_FORWARD_ACCESS_ERRORS {
-						Err(e)
-					} else {
-						Err(Error::InvalidAuth)
-					}
-				}
-			}
-		}
-	}
-}
-
-// Execute the AUTHENTICATE clause for any other access method
-pub async fn authenticate_generic(
-	kvs: &Datastore,
-	session: &Session,
-	authenticate: &Value,
-) -> Result<(), Error> {
-	match kvs.evaluate(authenticate, session, None).await {
-		Ok(val) => {
-			match val {
-				// If the AUTHENTICATE clause returns nothing, authentication continues
-				Value::None => Ok(()),
-				// If the AUTHENTICATE clause returns anything else, authentication fails generically
-				_ => {
-					debug!("Authentication attempt as system user rejected by AUTHENTICATE clause");
-					Err(Error::InvalidAuth)
-				}
-			}
-		}
-		Err(e) => {
-			match e {
-				// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
-				Error::Thrown(_) => Err(e),
-				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
-				// This allows clients to handle these errors, which may be retryable
-				Error::Tx(_) | Error::TxFailure => {
-					debug!("Unexpected error found while executing an AUTHENTICATE clause: {e}");
-					Err(Error::UnexpectedAuth)
-				}
-				// Otherwise, return a generic error unless it should be forwarded
-				e => {
-					debug!("Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}");
-					if *INSECURE_FORWARD_ACCESS_ERRORS {
-						Err(e)
-					} else {
-						Err(Error::InvalidAuth)
-					}
-				}
-			}
-		}
-	}
-}
-
 fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Result<(), Error> {
 	match decode::<Claims>(token, key, validation) {
 		Ok(_) => Ok(()),
@@ -875,9 +793,9 @@ mod tests {
 					}
 
 					// Check roles
-					for role in &AVAILABLE_ROLES {
+					for role in AVAILABLE_ROLES {
 						let has_role = sess.au.has_role(role);
-						let should_have_role = case.roles.contains(role);
+						let should_have_role = case.roles.contains(&role);
 						assert_eq!(has_role, should_have_role, "Role {:?} check failed", role);
 					}
 
@@ -1092,9 +1010,9 @@ mod tests {
 					assert_eq!(sess.au.id(), "token");
 
 					// Check roles
-					for role in &AVAILABLE_ROLES {
+					for role in AVAILABLE_ROLES {
 						let has_role = sess.au.has_role(role);
-						let should_have_role = case.expect_roles.contains(role);
+						let should_have_role = case.expect_roles.contains(&role);
 						assert_eq!(has_role, should_have_role, "Role {:?} check failed", role);
 					}
 
@@ -1254,7 +1172,7 @@ mod tests {
 					assert_eq!(sess.au.id(), *id);
 
 					// Ensure record users do not have roles
-					for role in &AVAILABLE_ROLES {
+					for role in AVAILABLE_ROLES {
 						assert!(
 							!sess.au.has_role(role),
 							"Auth user expected to not have role {:?} in case: {:?}",
@@ -1359,9 +1277,9 @@ mod tests {
 			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration has been set explicitly
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
@@ -1518,9 +1436,9 @@ mod tests {
 			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			assert_eq!(sess.exp, None, "Default session expiration is expected to be None");
 		}
 
@@ -1815,15 +1733,15 @@ mod tests {
 
 					// Check roles
 					assert!(
-						sess.au.has_role(&Role::Viewer),
+						sess.au.has_role(Role::Viewer),
 						"Auth user expected to have Viewer role"
 					);
 					assert!(
-						!sess.au.has_role(&Role::Editor),
+						!sess.au.has_role(Role::Editor),
 						"Auth user expected to not have Editor role"
 					);
 					assert!(
-						!sess.au.has_role(&Role::Owner),
+						!sess.au.has_role(Role::Owner),
 						"Auth user expected to not have Owner role"
 					);
 
@@ -1904,9 +1822,9 @@ mod tests {
 			assert_eq!(sess.au.level().db(), Some("test"));
 			assert_eq!(sess.au.level().id(), Some("user:2"));
 			// Record users should not have roles
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
@@ -1985,9 +1903,9 @@ mod tests {
 			assert_eq!(sess.au.level().db(), Some("test"));
 			assert_eq!(sess.au.level().id(), Some("user:1"));
 			// Record users should not have roles
-			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
-			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
-			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin

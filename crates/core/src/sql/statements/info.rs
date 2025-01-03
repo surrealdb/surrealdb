@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::{Base, Ident, Object, Value, Version};
+use crate::sys::INFORMATION;
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -60,6 +61,7 @@ impl InfoStatement {
 						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
+						"system".to_string() => system().await,
 						"users".to_string() => process(txn.all_root_users().await?),
 					}),
 					false => Value::from(map! {
@@ -84,13 +86,14 @@ impl InfoStatement {
 							}
 							out.into()
 						},
+						"system".to_string() => system().await,
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_users().await?.iter() {
 								out.insert(v.name.to_raw(), v.to_string().into());
 							}
 							out.into()
-						},
+						}
 					}),
 				})
 			}
@@ -390,4 +393,16 @@ where
 	T: InfoStructure + Clone,
 {
 	Value::Array(a.iter().cloned().map(InfoStructure::structure).collect())
+}
+
+async fn system() -> Value {
+	let info = INFORMATION.lock().await;
+	Value::from(map! {
+		"available_parallelism".to_string() => info.available_parallelism.into(),
+		"cpu_usage".to_string() => info.cpu_usage.into(),
+		"load_average".to_string() => info.load_average.to_vec().into(),
+		"memory_usage".to_string() => info.memory_usage.into(),
+		"physical_cores".to_string() => info.physical_cores.into(),
+		"memory_allocated".to_string() => info.memory_allocated.into(),
+	})
 }

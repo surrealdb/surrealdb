@@ -1,4 +1,5 @@
 mod parse;
+
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
@@ -231,14 +232,15 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
-			accesses: {},
-			namespaces: { test: 'DEFINE NAMESPACE test' },
-			nodes: {},
-			users: {},
-		}",
-	);
+	let val = Value::parse(&format!(
+		"{{
+			accesses: {{ }},
+			namespaces: {{ test: 'DEFINE NAMESPACE test' }},
+			nodes: {{ }},
+			system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }},
+			users: {{ }},
+		}}"
+	));
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;

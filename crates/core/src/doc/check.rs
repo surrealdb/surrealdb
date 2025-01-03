@@ -20,7 +20,7 @@ impl Document {
 	/// type is `ANY` or `RELATION`. When inserting
 	/// a node or normal record, we check that the
 	/// table type is `ANY` or `NORMAL`.
-	pub async fn check_table_type(
+	pub(super) async fn check_table_type(
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
@@ -87,7 +87,7 @@ impl Document {
 	/// If the user specifies a record directly
 	/// using a Record ID, and that record does not
 	/// exist, then this function will exit early.
-	pub async fn check_record_exists(
+	pub(super) async fn check_record_exists(
 		&self,
 		_ctx: &Context,
 		_opt: &Options,
@@ -109,7 +109,7 @@ impl Document {
 	/// match the in and out values specified in the
 	/// statement, or present in any record which
 	/// is being updated.
-	pub async fn check_data_fields(
+	pub(super) async fn check_data_fields(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -296,7 +296,7 @@ impl Document {
 	/// the document. This ensures that records from
 	/// a table, or from an index can be filtered out
 	/// before being included within the query output.
-	pub async fn check_where_condition(
+	pub(super) async fn check_where_condition(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -327,7 +327,7 @@ impl Document {
 	/// This function is used when outputting a record,
 	/// ensuring that a user has the permission to view
 	/// the record after it has been updated or modified.
-	pub async fn check_permissions_view(
+	pub(super) async fn check_permissions_view(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -368,7 +368,7 @@ impl Document {
 	/// permissions are `NONE`. This function does not
 	/// check any custom advanced table permissions,
 	/// which should be checked at a later stage.
-	pub async fn check_permissions_quick(
+	pub(super) async fn check_permissions_quick(
 		&self,
 		_stk: &mut Stk,
 		ctx: &Context,
@@ -397,7 +397,7 @@ impl Document {
 	/// clauses and evaluating the expression. This
 	/// function checks and evaluates `FULL`, `NONE`,
 	/// and specific permissions clauses on the table.
-	pub async fn check_permissions_table(
+	pub(super) async fn check_permissions_table(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,

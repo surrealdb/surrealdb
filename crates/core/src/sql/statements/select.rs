@@ -136,7 +136,7 @@ impl SelectStatement {
 		};
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
-		let mut stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
+		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, &opt, doc).await?;
@@ -144,7 +144,7 @@ impl SelectStatement {
 				Value::Thing(v) => match v.is_range() {
 					true => {
 						// Evaluate if we can only scan keys (rather than keys AND values)
-						let keys_only = stm_ctx.check_keys_only(&v.tb).await?;
+						let keys_only = stm_ctx.is_keys_only(&v.tb).await?;
 						i.prepare_range(&stm, v, keys_only)?
 					}
 					false => i.prepare_thing(&stm, v)?,
@@ -181,7 +181,7 @@ impl SelectStatement {
 							Value::Thing(v) => match v.is_range() {
 								true => {
 									// Evaluate if we can only scan keys (rather than keys AND values)
-									let keys_only = stm_ctx.check_keys_only(&v.tb).await?;
+									let keys_only = stm_ctx.is_keys_only(&v.tb).await?;
 									i.prepare_range(&stm, v, keys_only)?
 								}
 								false => i.prepare_thing(&stm, v)?,

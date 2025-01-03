@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{self, AtomicU8};
 
 /// The goal of this structure is to cache parameters so they can be easily passed
-/// from one function to the other, so we don't pass too much arguments.
+/// from one function to the other, so we don't pass too many arguments.
 /// It also caches evaluated fields (like is_keys_only)
 pub(crate) struct StatementContext<'a> {
 	pub(crate) ctx: &'a Context,
@@ -34,7 +34,6 @@ pub(crate) struct StatementContext<'a> {
 	pub(crate) order: Option<&'a Ordering>,
 	pub(crate) cond: Option<&'a Cond>,
 	pub(crate) group: Option<&'a Groups>,
-	is_keys_only: HashMap<String, bool>,
 }
 
 impl<'a> StatementContext<'a> {
@@ -46,71 +45,89 @@ impl<'a> StatementContext<'a> {
 		Ok(Self {
 			ctx,
 			opt,
+			stm,
 			ns: opt.ns()?,
 			db: opt.db()?,
-			stm,
 			fields: stm.expr(),
 			with: stm.with(),
 			order: stm.order(),
 			cond: stm.cond(),
 			group: stm.group(),
-			is_keys_only: HashMap::default(),
 		})
 	}
 
-	async fn is_keys_only(&self, tb: &str) -> Result<bool, Error> {
-		if let Some(fields) = self.fields {
-			if !fields.is_count_all_only() {
-				return Ok(false);
-			}
-		}
+	pub(crate) async fn is_keys_only(&self, tb: &str) -> Result<bool, Error> {
+		// If there is a WHERE clause then
+		// we need to fetch and process
+		// record content values too.
 		if self.cond.is_some() {
 			return Ok(false);
 		}
+		// If there is a GROUP BY clause,
+		// and it is not GROUP ALL, then we
+		// need to process record values.
 		if let Some(g) = self.group {
 			if !g.is_empty() {
 				return Ok(false);
 			}
 		}
+		// If there is a ORDER BY clause,
+		// with specific fields, then we
+		// need to process record values.
 		if let Some(p) = self.order {
 			match p {
 				Ordering::Random => {}
 				Ordering::Order(x) => {
-					if !x.0.is_empty() {
+					if !x.is_empty() {
 						return Ok(false);
 					}
 				}
 			}
 		}
-		if self.opt.perms {
+		// If there are any field expressions
+		// defined which are not count() then
+		// we need to process record values.
+		if let Some(fields) = self.fields {
+			if !fields.is_count_all_only() {
+				return Ok(false);
+			}
+		}
+		// If there are specific permissions
+		// defined on the table, then we need
+		// to process record values.
+		if self.opt.check_perms(self.stm.into())? {
+			// Get the table for this planner
 			match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
 				Ok(table) => {
+					// TODO(tobiemh): we should really
+					// not even get here if the table
+					// permissions are NONE, because
+					// there is no point in processing
+					// a table which we can't access.
 					let perms = self.stm.permissions(&table, false);
+					// If permissions are specific, we
+					// need to fetch the record content.
 					if perms.is_specific() {
+						return Ok(false);
+					}
+					// If permissions are NONE, we also
+					// need to fetch the record content.
+					if perms.is_none() {
 						return Ok(false);
 					}
 				}
 				Err(Error::TbNotFound {
 					..
 				}) => {
-					// We can safely ignore this error, as it just means that there are no permissions defined
+					// We can safely ignore this error,
+					// as it just means that there is no
+					// table and no permissions defined.
 				}
 				Err(e) => return Err(e),
 			}
 		}
+		// Otherwise we can iterate over keys
 		Ok(true)
-	}
-
-	pub(crate) async fn check_keys_only(&mut self, tb: &str) -> Result<bool, Error> {
-		// If we already have evaluated it, we can just return the cached result
-		if let Some(keys) = self.is_keys_only.get(tb) {
-			return Ok(*keys);
-		}
-		// Otherwise, we do the evaluation
-		let r = self.is_keys_only(tb).await?;
-		// And store the result in the cache
-		self.is_keys_only.insert(tb.to_string(), r);
-		Ok(r)
 	}
 }
 
@@ -145,16 +162,15 @@ impl QueryPlanner {
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
 
-		let mut tree = Tree::build(stk, ctx, &t).await?;
+		let tree = Tree::build(stk, ctx, &t).await?;
 
 		let is_knn = !tree.knn_expressions.is_empty();
-		let order = tree.index_map.order_limit.take();
 		let mut exe = InnerQueryExecutor::new(
 			stk,
 			ctx.ctx,
 			ctx.opt,
 			&t,
-			tree.index_map,
+			tree.index_map.options,
 			tree.knn_expressions,
 			tree.knn_brute_force_expressions,
 			tree.knn_condition,
@@ -165,7 +181,8 @@ impl QueryPlanner {
 			tree.root,
 			ctx,
 			tree.with_indexes,
-			order,
+			tree.index_map.compound_indexes,
+			tree.index_map.order_limit,
 			tree.all_and_groups,
 			tree.all_and,
 			tree.all_expressions_with_index,

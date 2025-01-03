@@ -7,7 +7,7 @@ use crate::sql::value::Value;
 use reblessive::tree::Stk;
 
 impl Document {
-	pub async fn relate(
+	pub(super) async fn relate(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -42,7 +42,7 @@ impl Document {
 		self.process_record_data(stk, ctx, opt, stm).await?;
 		self.store_edges_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
-		self.cleanup_table_fields(stk, ctx, opt, stm).await?;
+		self.cleanup_table_fields(ctx, opt, stm).await?;
 		self.default_record_data(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.store_record_data(ctx, opt, stm).await?;
@@ -68,7 +68,7 @@ impl Document {
 		self.store_edges_data(ctx, opt, stm).await?;
 		self.process_record_data(stk, ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
-		self.cleanup_table_fields(stk, ctx, opt, stm).await?;
+		self.cleanup_table_fields(ctx, opt, stm).await?;
 		self.default_record_data(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.store_record_data(ctx, opt, stm).await?;

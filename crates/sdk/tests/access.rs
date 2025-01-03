@@ -78,31 +78,31 @@ async fn access_bearer_operations() {
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok =
 			Regex::new(&format!(
-				r"\{{ accesses: \{{ api: 'DEFINE ACCESS api ON {base} TYPE BEARER DURATION FOR GRANT NONE, FOR TOKEN 1h, FOR SESSION NONE' \}}, .* \}}"
+				r"\{{ accesses: \{{ api: 'DEFINE ACCESS api ON {base} TYPE BEARER FOR USER DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE' \}}, .* \}}"
 			)).unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		//
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok =
-			Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
+			Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		//
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok =
-			Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
+			Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		//
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok =
-			Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
+			Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		//
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok =
-			Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
+			Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		//
@@ -244,13 +244,13 @@ async fn access_bearer_grant() {
 		//
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok =
-			Regex::new(r"\{ ac: 'srv', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
+			Regex::new(r"\{ ac: 'srv', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		//
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok =
-			Regex::new(r"\{ ac: 'srv', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
+			Regex::new(r"\{ ac: 'srv', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		//
@@ -314,25 +314,25 @@ async fn access_bearer_grant() {
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
@@ -398,7 +398,7 @@ async fn access_bearer_revoke() {
 		// Retrieve the first generated bearer grant
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let re =
-			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: NONE, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
+			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: .*, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
 		let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
 		// Consume the results of the other three
@@ -475,13 +475,13 @@ async fn access_bearer_revoke() {
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: d'.*?', subject: \{ record: user:tobie \}, type: 'bearer' \}")
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: d'.*?', subject: \{ record: user:tobie \}, type: 'bearer' \}")
 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: d'.*?', subject: \{ record: user:jaime \}, type: 'bearer' \}")
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: d'.*?', subject: \{ record: user:jaime \}, type: 'bearer' \}")
 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		}
@@ -541,7 +541,7 @@ async fn access_bearer_show() {
 		// Retrieve the first generated bearer grant
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let re =
-			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: NONE, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
+			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: .*, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
 		let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
 		// Consume the results of the other three
@@ -604,7 +604,7 @@ async fn access_bearer_show() {
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Show all active bearer grants
 		let res = &mut dbs
-			.execute("ACCESS srv SHOW WHERE revocation IS NONE AND (expiration IS NONE OR expiration < time::now())", &ses, None)
+			.execute("ACCESS srv SHOW WHERE revocation IS NONE AND (expiration IS NONE OR expiration > time::now())", &ses, None)
 			.await
 			.unwrap();
 		let tmp = res.remove(0).result.unwrap().to_string();
@@ -635,13 +635,13 @@ async fn access_bearer_show() {
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
 			let tmp = res.remove(0).result.unwrap().to_string();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: NONE, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		}
@@ -743,6 +743,11 @@ async fn access_bearer_purge() {
 		let tmp = res.remove(0).result.unwrap().to_string();
 		let ok = Regex::new(r"\[\{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}\]")
 		.unwrap();
+		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
+		// Purge expired grants, of which there are none
+		let res = &mut dbs.execute("ACCESS srv PURGE EXPIRED", &ses, None).await.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_string();
+		let ok = Regex::new(r"\[\]").unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Wait for all grants to expire
 		std::thread::sleep(Duration::from_secs(2));

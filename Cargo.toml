@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "2.1.2"
+version = "2.1.3"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -35,6 +35,7 @@ http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
+allocation-tracking = ["surrealdb/allocation-tracking"]
 performance-profiler = ["dep:pprof"]
 # Special features
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
@@ -79,7 +80,7 @@ opentelemetry = { version = "0.24" }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
 pin-project-lite = "0.2.13"
-pprof = { version = "0.13.0", features = ["flamegraph", "prost-codec"], optional = true }
+pprof = { version = "0.14.0", features = ["flamegraph", "prost-codec"], optional = true }
 rand = "0.8.5"
 reqwest = { version = "0.12.7", default-features = false, features = ["blocking", "gzip", "http2"] }
 revision = { version = "0.10.0", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
@@ -102,6 +103,7 @@ tower = "0.4.13"
 tower-http = { version = "0.5.2", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension", "compression-full"] }
 tower-service = "0.3.3"
 tracing = "0.1"
+tracing-appender = "0.2.3"
 tracing-opentelemetry = "0.25.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 urlencoding = "2.1.3"

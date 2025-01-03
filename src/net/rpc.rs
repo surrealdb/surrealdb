@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use super::headers::Accept;
+use super::headers::ContentType;
 use super::headers::SurrealId;
+use super::AppState;
 use crate::cnf;
 use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
 use crate::err::Error;
@@ -24,22 +27,17 @@ use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::header::SEC_WEBSOCKET_PROTOCOL;
 use http::HeaderMap;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
 use surrealdb::rpc::method::Method;
+use surrealdb::rpc::rpc_context::RpcContext;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
-
-use super::headers::Accept;
-use super::headers::ContentType;
-use super::AppState;
-
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::rpc::rpc_context::RpcContext;
 
 pub(super) fn router() -> Router<Arc<RpcState>> {
 	Router::new()
@@ -175,7 +173,7 @@ async fn post_handler(
 	// Create a new HTTP instance
 	let mut rpc = PostRpcContext::new(&state.datastore, session, BTreeMap::new());
 	// Check to see available memory
-	if ALLOC.is_beyond_threshold().await {
+	if ALLOC.is_beyond_threshold() {
 		return Err(Error::ServerOverloaded);
 	}
 	// Parse the HTTP request body

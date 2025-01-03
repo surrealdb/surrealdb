@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_graphql::dynamic::FieldValue;
 use async_graphql::{dynamic::indexmap::IndexMap, Name, Value as GqlValue};
 use reblessive::TreeStack;
 pub(crate) trait GqlValueUtils {
@@ -49,7 +50,9 @@ use crate::iam::Error as IamError;
 use crate::kvs::Datastore;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
+use crate::sql;
 use crate::sql::part::Part;
+use crate::sql::Function;
 use crate::sql::Statement;
 use crate::sql::{Thing, Value as SqlValue};
 
@@ -106,4 +109,23 @@ impl GQLTx {
 
 		Ok(res)
 	}
+
+	pub async fn run_fn(&self, name: &str, args: Vec<SqlValue>) -> Result<SqlValue, GqlError> {
+		let mut stack = TreeStack::new();
+		let fun = sql::Value::Function(Box::new(Function::Custom(name.to_string(), args)));
+
+		let res = stack
+			// .enter(|stk| fnc::run(stk, &self.ctx, &self.opt, None, name, args))
+			.enter(|stk| fun.compute(stk, &self.ctx, &self.opt, None))
+			.finish()
+			.await?;
+
+		Ok(res)
+	}
+}
+
+pub type ErasedRecord = (GQLTx, Thing);
+
+pub fn field_val_erase_owned(val: ErasedRecord) -> FieldValue<'static> {
+	FieldValue::owned_any(val)
 }

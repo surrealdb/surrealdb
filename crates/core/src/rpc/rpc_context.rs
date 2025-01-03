@@ -183,6 +183,8 @@ pub trait RpcContext {
 		Ok(Value::None.into())
 	}
 
+	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
+	// This will allow returning refresh tokens as well as any additional credential resulting from signing up.
 	async fn signup(&mut self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
@@ -192,13 +194,15 @@ pub trait RpcContext {
 		let mut session = mem::take(self.session_mut());
 		// Attempt signup, storing information in the session
 		let out: Result<Value, Error> =
-			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(Into::into);
+			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(|v| v.token.into());
 		// Return ownership of the current session
 		*self.session_mut() = session;
 		// Return the signup result
 		out.map(Into::into).map_err(Into::into)
 	}
 
+	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
+	// This will allow returning refresh tokens as well as any additional credential resulting from signing in.
 	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
@@ -207,8 +211,10 @@ pub trait RpcContext {
 		// Take ownership over the current session
 		let mut session = mem::take(self.session_mut());
 		// Attempt signin, storing information in the session
-		let out: Result<Value, Error> =
-			crate::iam::signin::signin(self.kvs(), &mut session, v).await.map(Into::into);
+		let out: Result<Value, Error> = crate::iam::signin::signin(self.kvs(), &mut session, v)
+			.await
+			// The default `signin` method just returns the token
+			.map(|v| v.token.into());
 		// Return ownership of the current session
 		*self.session_mut() = session;
 		// Return the signin result

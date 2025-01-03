@@ -18,6 +18,7 @@ use futures::StreamExt;
 use reblessive::tree::Stk;
 use std::borrow::Cow;
 use std::ops::Bound;
+use std::sync::Arc;
 use std::vec;
 
 impl Iterable {
@@ -134,16 +135,13 @@ impl Collected {
 		// Parse the data from the store
 		let gra: graph::Graph = graph::Graph::decode(&key)?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, gra.ft, &gra.fk);
-		let val = txn.get(key, None).await?;
+		let val = txn.get_record(opt.ns()?, opt.db()?, gra.ft, &gra.fk, None).await?;
 		let rid = Thing::from((gra.ft, gra.fk));
 		// Parse the data from the store
-		let val = Operable::Value(match val {
-			Some(v) => Value::from(v).into(),
-			None => Value::None.into(),
-		});
+		let val = Operable::Value(val);
 		// Process the record
 		Ok(Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -159,6 +157,7 @@ impl Collected {
 		let val = Operable::Value(val.into());
 		// Process the record
 		let pro = Processed {
+			keys_only: true,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -172,6 +171,7 @@ impl Collected {
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record
 		let pro = Processed {
+			keys_only: true,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -191,17 +191,12 @@ impl Collected {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = txn.get(key, None).await?;
-		// Parse the data from the store
-		let x = match val {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		};
+		let val = txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, None).await?;
 		// Create a new operable value
-		let val = Operable::Relate(f, x.into(), w, o.map(|v| v.into()));
+		let val = Operable::Relate(f, val, w, o.map(|v| v.into()));
 		// Process the document record
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -214,18 +209,12 @@ impl Collected {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &v.tb, &v.id);
-		let val = txn.get(key, opt.version).await?;
+		let val = txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version).await?;
 		// Parse the data from the store
-		let val = Operable::Value(
-			match val {
-				Some(v) => Value::from(v),
-				None => Value::None,
-			}
-			.into(),
-		);
+		let val = Operable::Value(val);
 		// Process the document record
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -240,6 +229,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v, opt.strict).await?;
 		// Pass the value through
 		let pro = Processed {
+			keys_only: false,
 			generate: Some(v),
 			rid: None,
 			ir: None,
@@ -251,6 +241,7 @@ impl Collected {
 	fn process_value(v: Value) -> Result<Processed, Error> {
 		// Pass the value through
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: None,
 			ir: None,
@@ -264,6 +255,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -282,6 +274,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -299,6 +292,7 @@ impl Collected {
 		let val = Operable::Value(val.into());
 		// Process the record
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -317,9 +311,10 @@ impl Collected {
 			v
 		} else {
 			// Otherwise we have to fetch the record
-			Iterable::fetch_thing(txn, opt, &r.0).await?.into()
+			Iterable::fetch_thing(txn, opt, &r.0).await?
 		};
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(r.0),
 			ir: Some(r.1.into()),
@@ -338,10 +333,10 @@ pub(super) struct ConcurrentCollector<'a> {
 	ite: &'a mut Iterator,
 }
 
-impl<'a> Collector for ConcurrentCollector<'a> {
+impl Collector for ConcurrentCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
 		let pro = collected.process(self.opt, self.txn).await?;
-		self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await;
+		self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
 		Ok(())
 	}
 }
@@ -351,14 +346,14 @@ pub(super) struct ConcurrentDistinctCollector<'a> {
 	dis: &'a mut SyncDistinct,
 }
 
-impl<'a> Collector for ConcurrentDistinctCollector<'a> {
+impl Collector for ConcurrentDistinctCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
 		let pro = collected.process(self.coll.opt, self.coll.txn).await?;
 		if !self.dis.check_already_processed(&pro) {
 			self.coll
 				.ite
 				.process(self.coll.stk, self.coll.ctx, self.coll.opt, self.coll.stm, pro)
-				.await;
+				.await?;
 		}
 		Ok(())
 	}
@@ -747,11 +742,9 @@ impl Iterable {
 		txn: &Transaction,
 		opt: &Options,
 		thg: &Thing,
-	) -> Result<Value, Error> {
-		// Fetch the data from the store
-		let key = thing::new(opt.ns()?, opt.db()?, &thg.tb, &thg.id);
+	) -> Result<Arc<Value>, Error> {
 		// Fetch and parse the data from the store
-		let val = txn.get(key, None).await?.map(Value::from).unwrap_or(Value::None);
+		let val = txn.get_record(opt.ns()?, opt.db()?, &thg.tb, &thg.id, None).await?;
 		// Return the result
 		Ok(val)
 	}

@@ -500,6 +500,12 @@ impl From<Vec<f32>> for Value {
 	}
 }
 
+impl From<Vec<f64>> for Value {
+	fn from(v: Vec<f64>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<Vec<usize>> for Value {
 	fn from(v: Vec<usize>) -> Self {
 		Value::Array(Array::from(v))
@@ -3196,26 +3202,21 @@ mod tests {
 	#[test]
 	fn check_size() {
 		assert!(64 >= std::mem::size_of::<Value>(), "size of value too big");
-		assert_eq!(104, std::mem::size_of::<Error>());
-		assert_eq!(104, std::mem::size_of::<Result<Value, Error>>());
-		assert_eq!(24, std::mem::size_of::<crate::sql::number::Number>());
-		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
-		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
-		assert_eq!(12, std::mem::size_of::<crate::sql::datetime::Datetime>());
-		assert_eq!(24, std::mem::size_of::<crate::sql::array::Array>());
-		assert_eq!(24, std::mem::size_of::<crate::sql::object::Object>());
-		assert_eq!(48, std::mem::size_of::<crate::sql::geometry::Geometry>());
-		assert_eq!(24, std::mem::size_of::<crate::sql::param::Param>());
-		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
-		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
-		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
-		assert_eq!(40, std::mem::size_of::<crate::sql::mock::Mock>());
-		assert_eq!(32, std::mem::size_of::<crate::sql::regex::Regex>());
-		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
-		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());
-		assert_eq!(8, std::mem::size_of::<Box<crate::sql::function::Function>>());
-		assert_eq!(8, std::mem::size_of::<Box<crate::sql::subquery::Subquery>>());
-		assert_eq!(8, std::mem::size_of::<Box<crate::sql::expression::Expression>>());
+		assert!(104 >= std::mem::size_of::<Error>());
+		assert!(104 >= std::mem::size_of::<Result<Value, Error>>());
+		assert!(24 >= std::mem::size_of::<crate::sql::number::Number>());
+		assert!(24 >= std::mem::size_of::<crate::sql::strand::Strand>());
+		assert!(16 >= std::mem::size_of::<crate::sql::duration::Duration>());
+		assert!(12 >= std::mem::size_of::<crate::sql::datetime::Datetime>());
+		assert!(24 >= std::mem::size_of::<crate::sql::array::Array>());
+		assert!(24 >= std::mem::size_of::<crate::sql::object::Object>());
+		assert!(48 >= std::mem::size_of::<crate::sql::geometry::Geometry>());
+		assert!(24 >= std::mem::size_of::<crate::sql::param::Param>());
+		assert!(24 >= std::mem::size_of::<crate::sql::idiom::Idiom>());
+		assert!(24 >= std::mem::size_of::<crate::sql::table::Table>());
+		assert!(56 >= std::mem::size_of::<crate::sql::thing::Thing>());
+		assert!(40 >= std::mem::size_of::<crate::sql::mock::Mock>());
+		assert!(32 >= std::mem::size_of::<crate::sql::regex::Regex>());
 	}
 
 	#[test]

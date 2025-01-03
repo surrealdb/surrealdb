@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
-use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
+use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use revision::{revisioned, Revisioned};
@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 pub type DocId = u64;
 
 pub struct DocIds {
-	ixs: IndexStores,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
@@ -22,7 +21,6 @@ pub struct DocIds {
 
 impl DocIds {
 	pub async fn new(
-		ixs: &IndexStores,
 		tx: &Transaction,
 		tt: TransactionType,
 		ikb: IndexKeyBase,
@@ -35,7 +33,8 @@ impl DocIds {
 		} else {
 			State::new(default_btree_order)
 		};
-		let store = ixs
+		let store = tx
+			.index_caches()
 			.get_store_btree_trie(
 				TreeNodeProvider::DocIds(ikb.clone()),
 				state.btree.generation(),
@@ -44,7 +43,6 @@ impl DocIds {
 			)
 			.await;
 		Ok(Self {
-			ixs: ixs.clone(),
 			state_key,
 			index_key_base: ikb,
 			btree: BTree::new(state.btree),
@@ -143,7 +141,7 @@ impl DocIds {
 				next_doc_id: self.next_doc_id,
 			};
 			tx.set(self.state_key.clone(), VersionedStore::try_into(&state)?, None).await?;
-			self.ixs.advance_cache_btree_trie(new_cache);
+			tx.index_caches().advance_store_btree_trie(new_cache);
 		}
 		Ok(())
 	}
@@ -258,9 +256,7 @@ mod tests {
 
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Transaction, DocIds) {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let d = DocIds::new(ds.index_store(), &tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100)
-			.await
-			.unwrap();
+		let d = DocIds::new(&tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100).await.unwrap();
 		(tx, d)
 	}
 

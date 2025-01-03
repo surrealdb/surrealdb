@@ -154,6 +154,22 @@ jobs:
 
       - name: Check wasm
         run: cargo make ci-check-wasm
+  
+  check-revision-lock:
+    name: Check revision.lock
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install revision-lock
+        run: cargo install revision-lock
+      
+      - name: Check revision.lock
+        run: revision-lock --check
 
   clippy:
     name: Check clippy
@@ -718,6 +734,26 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Test upgrade
-        # Allow breaking changes until v2 stabilises
-        continue-on-error: true
         run: cargo make ci-database-upgrade
+
+  lang-tests:
+    name: Run SurrealQL language tests.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: crates/language-tests
+
+      - name: Run Suite
+        run: |
+          cd crates/language-tests
+          cargo build
+          ./target/debug/surrealql-test --color always run

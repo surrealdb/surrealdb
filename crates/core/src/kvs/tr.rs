@@ -229,7 +229,7 @@ impl Transactor {
 
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Val>, Error>
+	pub async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Option<Val>>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
