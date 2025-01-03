@@ -1077,7 +1077,7 @@ impl Datastore {
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
-		// Free the context
+		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;

@@ -6,10 +6,10 @@ mod weight;
 pub(crate) use entry::Entry;
 pub(crate) use lookup::Lookup;
 
-pub(crate) type Cache = quick_cache::sync::Cache<key::Key, entry::Entry, weight::Weight>;
+pub(crate) type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
 
 pub(crate) fn new() -> Cache {
-	quick_cache::sync::Cache::with_weighter(
+	Cache::with_weighter(
 		*crate::cnf::TRANSACTION_CACHE_SIZE,
 		*crate::cnf::TRANSACTION_CACHE_SIZE as u64,
 		weight::Weight,

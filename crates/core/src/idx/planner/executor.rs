@@ -168,14 +168,8 @@ impl InnerQueryExecutor {
 							Entry::Vacant(e) => {
 								let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, e.key())?;
 								let tx = ctx.tx();
-								let mt = MTreeIndex::new(
-									ctx.get_index_stores(),
-									&tx,
-									ikb,
-									p,
-									TransactionType::Read,
-								)
-								.await?;
+								let mt =
+									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
 								drop(tx);
 								let entry =
 									MtEntry::new(stk, ctx, opt, &mt, a, *k, knn_condition.clone())

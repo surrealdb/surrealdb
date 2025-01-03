@@ -18,9 +18,7 @@ use crate::idx::planner::checker::MTreeConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
-use crate::idx::trees::store::{
-	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
-};
+use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
@@ -29,7 +27,6 @@ use crate::sql::{Number, Object, Thing, Value};
 
 #[non_exhaustive]
 pub struct MTreeIndex {
-	ixs: IndexStores,
 	state_key: Key,
 	dim: usize,
 	vector_type: VectorType,
@@ -47,14 +44,13 @@ struct MTreeSearchContext<'a> {
 
 impl MTreeIndex {
 	pub async fn new(
-		ixs: &IndexStores,
 		txn: &Transaction,
 		ikb: IndexKeyBase,
 		p: &MTreeParams,
 		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(ixs, txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
+			DocIds::new(txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
 		let state_key = ikb.new_vm_key(None);
 		let state: MState = if let Some(val) = txn.get(state_key.clone(), None).await? {
@@ -62,7 +58,8 @@ impl MTreeIndex {
 		} else {
 			MState::new(p.capacity)
 		};
-		let store = ixs
+		let store = txn
+			.index_caches()
 			.get_store_mtree(
 				TreeNodeProvider::Vector(ikb),
 				state.generation,
@@ -72,7 +69,6 @@ impl MTreeIndex {
 			.await;
 		let mtree = Arc::new(RwLock::new(MTree::new(state, p.distance.clone())));
 		Ok(Self {
-			ixs: ixs.clone(),
 			state_key,
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
@@ -176,7 +172,7 @@ impl MTreeIndex {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			mtree.state.generation += 1;
 			tx.set(self.state_key.clone(), VersionedStore::try_into(&mtree.state)?, None).await?;
-			self.ixs.advance_store_mtree(new_cache);
+			tx.index_caches().advance_store_mtree(new_cache);
 		}
 		drop(mtree);
 		Ok(())
@@ -1496,11 +1492,11 @@ mod tests {
 		tt: TransactionType,
 		cache_size: usize,
 	) -> (Context, TreeStore<MTreeNode>) {
-		let st = ds
-			.index_store()
+		let tx = ds.transaction(tt, Optimistic).await.unwrap().enclose();
+		let st = tx
+			.index_caches()
 			.get_store_mtree(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
 			.await;
-		let tx = ds.transaction(tt, Optimistic).await.unwrap().enclose();
 		let mut ctx = MutableContext::default();
 		ctx.set_transaction(tx);
 		(ctx.freeze(), st)
@@ -1516,7 +1512,7 @@ mod tests {
 		if let Some(new_cache) = st.finish(tx).await? {
 			assert!(new_cache.len() > 0, "new_cache.len() = {}", new_cache.len());
 			t.state.generation += 1;
-			ds.index_store().advance_store_mtree(new_cache);
+			tx.index_caches().advance_store_mtree(new_cache);
 		}
 		if commit {
 			tx.commit().await?;
@@ -1755,16 +1751,10 @@ mod tests {
 
 				let (ctx, _st) = new_operation(&ds, &t, TransactionType::Read, cache_size).await;
 				let tx = ctx.tx();
-				let doc_ids = DocIds::new(
-					ds.index_store(),
-					&tx,
-					TransactionType::Read,
-					IndexKeyBase::default(),
-					7,
-					100,
-				)
-				.await
-				.unwrap();
+				let doc_ids =
+					DocIds::new(&tx, TransactionType::Read, IndexKeyBase::default(), 7, 100)
+						.await
+						.unwrap();
 
 				let map = if collection.len() < 1000 {
 					insert_collection_one_by_one(stk, &ds, &mut t, &collection, cache_size).await?
