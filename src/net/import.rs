@@ -50,18 +50,20 @@ async fn handler(
 
 	// Execute the sql query in the database
 	match db.import_stream(&session, body_stream).await {
-		Ok(res) => match accept.as_deref() {
-			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
-			// Return nothing
-			Some(Accept::ApplicationOctetStream) => Ok(output::none()),
-			// Internal serialization
-			Some(Accept::Surrealdb) => Ok(output::full(&res)),
-			// An incorrect content-type was requested
-			_ => Err(Error::InvalidType),
-		},
+		Ok(res) => {
+			match accept.as_deref() {
+				// Simple serialization
+				Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
+				Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
+				Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+				// Return nothing
+				Some(Accept::ApplicationOctetStream) => Ok(output::none()),
+				// Internal serialization
+				Some(Accept::Surrealdb) => Ok(output::full(&res)),
+				// An incorrect content-type was requested
+				_ => Err(Error::InvalidType),
+			}
+		}
 		// There was an error when executing the query
 		Err(err) => Err(Error::from(err)),
 	}

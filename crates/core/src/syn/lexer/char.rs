@@ -1,7 +1,7 @@
 use crate::syn::{
 	error::syntax_error,
 	lexer::Lexer,
-	token::{t, Token},
+	token::{t, Token, TokenKind},
 };
 
 impl Lexer<'_> {
@@ -28,6 +28,12 @@ impl Lexer<'_> {
 			'⊄' => t!("⊄"),
 			'×' => t!("×"),
 			'÷' => t!("÷"),
+			'\u{00A0}' | '\u{1680}' | '\u{2000}' | '\u{2001}' | '\u{2002}' | '\u{2003}'
+			| '\u{2004}' | '\u{2005}' | '\u{2006}' | '\u{2007}' | '\u{2008}' | '\u{2009}'
+			| '\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}' => {
+				self.eat_whitespace();
+				TokenKind::WhiteSpace
+			}
 			x => {
 				let err = syntax_error!("Invalid token `{x}`", @self.current_span());
 				return self.invalid_token(err);

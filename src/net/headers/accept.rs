@@ -4,6 +4,7 @@ use http::HeaderName;
 use http::HeaderValue;
 
 /// Typed header implementation for the `Accept` header.
+#[derive(Debug)]
 pub enum Accept {
 	TextPlain,
 	ApplicationJson,

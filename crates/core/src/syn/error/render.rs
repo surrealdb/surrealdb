@@ -11,6 +11,22 @@ pub struct RenderedError {
 	pub snippets: Vec<Snippet>,
 }
 
+impl RenderedError {
+	/// Offset the snippet locations within the rendered error by a given number of lines and
+	/// columns.
+	///
+	/// The column offset is only applied to the any snippet which is at line 1
+	pub fn offset_location(mut self, line: usize, col: usize) -> Self {
+		for s in self.snippets.iter_mut() {
+			if s.location.line == 1 {
+				s.location.column += col;
+			}
+			s.location.line += line
+		}
+		self
+	}
+}
+
 impl fmt::Display for RenderedError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self.errors.len().cmp(&1) {

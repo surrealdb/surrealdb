@@ -50,6 +50,10 @@ impl Span {
 			len: 0,
 		}
 	}
+	// returns a zero-length span that starts after the current span.
+	pub fn after_offset(self) -> u32 {
+		self.offset + self.len
+	}
 
 	/// Returns if the given span is the next span after this one.
 	pub fn is_followed_by(&self, other: &Self) -> bool {
