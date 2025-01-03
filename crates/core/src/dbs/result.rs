@@ -45,7 +45,10 @@ impl Results {
 		if let Some(ordering) = stm.order() {
 			#[cfg(not(target_arch = "wasm32"))]
 			if stm.parallel() {
-				return Ok(Self::AsyncMemoryOrdered(AsyncMemoryOrdered::new(ordering, None)));
+				let limit = limit.map(|l| l + start.unwrap_or(0)).filter(|l| *l < 1000);
+				return Ok(Self::AsyncMemoryOrdered(AsyncMemoryOrdered::new(
+					ordering, limit, None,
+				)));
 			}
 			return match ordering {
 				Ordering::Random => Ok(Self::MemoryRandom(MemoryRandom::new(None))),

@@ -281,9 +281,10 @@ fn three_table_explain(parallel: bool) -> String {
 
 fn three_multi_index_explain(parallel: bool) -> String {
 	let collector = if parallel {
-		"AsyncMemoryOrdered"
+		r"batch_size: 1024,
+		type: 'AsyncMemoryOrdered'"
 	} else {
-		"MemoryOrdered"
+		"type: 'MemoryOrdered'"
 	};
 	format!(
 		"[
@@ -322,7 +323,7 @@ fn three_multi_index_explain(parallel: bool) -> String {
 				}},
 				{{
 					detail: {{
-						type: '{collector}'
+						{collector}
 					}},
 					operation: 'Collector'
 				}},
@@ -338,9 +339,10 @@ fn three_multi_index_explain(parallel: bool) -> String {
 
 fn single_index_ft_explain(parallel: bool) -> String {
 	let collector = if parallel {
-		"AsyncMemoryOrdered"
+		r"batch_size: 1024,
+		type: 'AsyncMemoryOrdered'"
 	} else {
-		"MemoryOrdered"
+		"type: 'MemoryOrdered'"
 	};
 	format!(
 		"[
@@ -357,7 +359,7 @@ fn single_index_ft_explain(parallel: bool) -> String {
 				}},
 				{{
 					detail: {{
-						type: '{collector}'
+						{collector}
 					}},
 					operation: 'Collector'
 				}},
@@ -3271,6 +3273,7 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 				},
 				{
 					detail: {
+						batch_size: 1024,
 						type: 'AsyncMemoryOrdered'
 					},
 					operation: 'Collector'
@@ -3311,11 +3314,64 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 #[tokio::test]
 async fn select_limit_start_parallel() -> Result<(), Error> {
 	let sql = r"
-		CREATE |item:1000|;
+		CREATE |item:1000| RETURN NONE;
+		SELECT * FROM item LIMIT 10 START 0 PARALLEL EXPLAIN;
 		SELECT * FROM item LIMIT 10 START 0 PARALLEL;";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(2)?;
+	t.expect_size(3)?;
 	t.skip_ok(1)?;
+	t.expect_val(
+		"[
+	{
+		detail: {
+			table: 'item'
+		},
+		operation: 'Iterate Table'
+	},
+	{
+		detail: {
+			type: 'Memory'
+		},
+		operation: 'Collector'
+	}
+]",
+	)?;
+	let r = t.next()?.result?;
+	if let Value::Array(a) = r {
+		assert_eq!(a.len(), 10);
+	} else {
+		panic!("Unexpected value: {r:#}");
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_limit_start_order_parallel() -> Result<(), Error> {
+	let sql = r"
+		CREATE |item:1000| RETURN NONE;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL EXPLAIN;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(3)?;
+	t.skip_ok(1)?;
+	t.expect_val(
+		"[
+	{
+		detail: {
+			table: 'item'
+		},
+		operation: 'Iterate Table'
+	},
+	{
+		detail: {
+			batch_size: 1024,
+			limit: 12,
+			type: 'AsyncMemoryOrdered'
+		},
+		operation: 'Collector'
+	}
+]",
+	)?;
 	let r = t.next()?.result?;
 	if let Value::Array(a) = r {
 		assert_eq!(a.len(), 10);
