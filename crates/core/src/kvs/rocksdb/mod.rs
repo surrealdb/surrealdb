@@ -113,12 +113,21 @@ impl Datastore {
 		// Store 4KB values separate from keys
 		debug!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
+		// Allow multiple writers to update memtables in parallel
+		debug!(target: TARGET, "Allow concurrent memtable writes: true");
+		opts.set_allow_concurrent_memtable_write(true);
+		// Avoid unnecessary blocking io, preferring background threads
+		debug!(target: TARGET, "Avoid unnecessary blocking IO: true");
+		opts.set_avoid_unnecessary_blocking_io(true);
 		// Set the block cache size in bytes
 		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		let mut block_opts = BlockBasedOptions::default();
 		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
+		block_opts.set_hybrid_ribbon_filter(10.0, 2);
 		block_opts.set_block_cache(&cache);
 		opts.set_block_based_table_factory(&block_opts);
+		opts.set_blob_cache(&cache);
+		opts.set_row_cache(&cache);
 		// Set the delete compaction factory
 		debug!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
@@ -143,9 +152,9 @@ impl Datastore {
 		opts.set_compression_per_level(&[
 			DBCompressionType::None,
 			DBCompressionType::None,
-			DBCompressionType::Lz4hc,
-			DBCompressionType::Lz4hc,
-			DBCompressionType::Lz4hc,
+			DBCompressionType::Snappy,
+			DBCompressionType::Snappy,
+			DBCompressionType::Snappy,
 		]);
 		// Set specific storage log level
 		debug!(target: TARGET, "Setting storage engine log level: {}", *cnf::ROCKSDB_STORAGE_LOG_LEVEL);

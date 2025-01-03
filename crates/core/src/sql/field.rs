@@ -19,14 +19,15 @@ use std::ops::Deref;
 pub struct Fields(pub Vec<Field>, pub bool);
 
 impl Fields {
-	pub fn all() -> Self {
+	/// Create a new `*` field projection
+	pub(crate) fn all() -> Self {
 		Self(vec![Field::All], false)
 	}
-	/// Check to see if this field is a * projection
+	/// Check to see if this field is a `*` projection
 	pub fn is_all(&self) -> bool {
 		self.0.iter().any(|v| matches!(v, Field::All))
 	}
-	/// Get all fields which are not an * projection
+	/// Get all fields which are not an `*` projection
 	pub fn other(&self) -> impl Iterator<Item = &Field> {
 		self.0.iter().filter(|v| !matches!(v, Field::All))
 	}
@@ -41,7 +42,6 @@ impl Fields {
 			_ => None,
 		}
 	}
-
 	/// Check if the fields are only about counting
 	pub(crate) fn is_count_all_only(&self) -> bool {
 		let mut is_count_only = false;

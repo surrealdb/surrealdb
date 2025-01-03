@@ -31,7 +31,7 @@ pub static ROCKSDB_MIN_BLOB_SIZE: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_MIN_BLOB_SIZE", u64, 4 * 1024);
 
 pub static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BLOCK_CACHE_SIZE", usize, 256 * 1024 * 1024);
+	lazy_env_parse!("SURREAL_ROCKSDB_BLOCK_CACHE_SIZE", usize, 512 * 1024 * 1024);
 
 pub static ROCKSDB_KEEP_LOG_FILE_NUM: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_ROCKSDB_KEEP_LOG_FILE_NUM", usize, 20);
