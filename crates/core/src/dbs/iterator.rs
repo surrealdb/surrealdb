@@ -330,6 +330,8 @@ impl Iterator {
 			#[cfg(storage)]
 			ctx,
 			stm,
+			self.start,
+			self.limit,
 		)?;
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);

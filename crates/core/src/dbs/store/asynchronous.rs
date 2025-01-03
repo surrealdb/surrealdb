@@ -1,10 +1,13 @@
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::llrbtree::LLRBTree;
-use crate::dbs::store::{MemoryCollector, MemoryRandom, DEFAULT_BATCH_SIZE};
+use crate::dbs::store::{MemoryCollector, MemoryRandom, OrderedValue, DEFAULT_BATCH_SIZE};
 use crate::err::Error;
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::Value;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::mem;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::{spawn_blocking, JoinHandle};
@@ -24,16 +27,28 @@ pub(in crate::dbs) struct AsyncMemoryOrdered {
 	batch_size: usize,
 	/// Current len
 	len: usize,
+	/// An optional limit (start + limit)
+	limit: Option<u32>,
 }
 
 impl AsyncMemoryOrdered {
-	pub(in crate::dbs) fn new(ordering: &Ordering, batch_size: Option<usize>) -> Self {
+	pub(in crate::dbs) fn new(
+		ordering: &Ordering,
+		limit: Option<u32>,
+		batch_size: Option<usize>,
+	) -> Self {
 		let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
 		let batch_size = batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
 		// Spawns a merge task to process and merge incoming batches asynchronously.finalize
 		let rx = match ordering {
 			Ordering::Random => tokio::spawn(Self::batch_random_task(rx)),
-			Ordering::Order(orders) => tokio::spawn(Self::batch_ordered_task(rx, orders.clone())),
+			Ordering::Order(orders) => {
+				if let Some(limit) = limit {
+					tokio::spawn(Self::batch_ordered_limit_task(rx, orders.clone(), limit))
+				} else {
+					tokio::spawn(Self::batch_ordered_task(rx, orders.clone()))
+				}
+			}
 		};
 		Self {
 			tx: Some(tx),
@@ -42,6 +57,7 @@ impl AsyncMemoryOrdered {
 			batch: Vec::with_capacity(batch_size),
 			result: None,
 			len: 0,
+			limit,
 		}
 	}
 
@@ -77,6 +93,34 @@ impl AsyncMemoryOrdered {
 		})
 		.await
 		.map_err(|e| Error::OrderingError(format!("{e}")))?
+	}
+
+	async fn batch_ordered_limit_task(
+		mut rx: Receiver<Vec<Value>>,
+		orders: OrderList,
+		limit: u32,
+	) -> Result<Vec<Value>, Error> {
+		let limit = limit as usize;
+		let orders = Arc::new(orders);
+		let mut heap = BinaryHeap::with_capacity(limit + 1);
+		while let Some(batch) = rx.recv().await {
+			for value in batch {
+				let value = OrderedValue {
+					value,
+					orders: orders.clone(),
+				};
+				heap.push(Reverse(value));
+				if heap.len() > limit {
+					heap.pop();
+				}
+			}
+		}
+		let mut result: Vec<_> = Vec::with_capacity(heap.len());
+		while let Some(i) = heap.pop() {
+			result.push(i.0.value);
+		}
+		result.reverse();
+		Ok(result)
 	}
 
 	pub(in crate::dbs) fn len(&self) -> usize {
@@ -144,6 +188,10 @@ impl AsyncMemoryOrdered {
 	}
 
 	pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
-		exp.add_collector("AsyncMemoryOrdered", vec![]);
+		let mut details = vec![("batch_size", self.batch_size.into())];
+		if let Some(limit) = self.limit {
+			details.push(("limit", limit.into()));
+		}
+		exp.add_collector("AsyncMemoryOrdered", details);
 	}
 }
