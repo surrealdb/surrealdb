@@ -44,8 +44,9 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 		},
 		Err(err) => match err.status() {
 			Some(s) => Err(Error::Http(format!(
-				"{}: {err}",
-				s.canonical_reason().unwrap_or_default().to_owned(),
+				"{} {}",
+				s.as_u16(),
+				s.canonical_reason().unwrap_or_default(),
 			))),
 			None => Err(Error::Http(err.to_string())),
 		},
@@ -75,9 +76,16 @@ pub async fn head(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result
 		_ => req.send().await?,
 	};
 	// Check the response status
-	match res.status() {
-		s if s.is_success() => Ok(Value::None),
-		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
+	match res.error_for_status() {
+		Ok(_) => Ok(Value::None),
+		Err(err) => match err.status() {
+			Some(s) => Err(Error::Http(format!(
+				"{} {}",
+				s.as_u16(),
+				s.canonical_reason().unwrap_or_default(),
+			))),
+			None => Err(Error::Http(err.to_string())),
+		},
 	}
 }
 
