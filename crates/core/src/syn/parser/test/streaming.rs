@@ -26,8 +26,8 @@ use crate::{
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
-		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
+		Permission, Permissions, Scoring, Script, Split, Splits, Start, Statement, Strand,
+		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::parser::StatementStream,
 };
@@ -108,6 +108,7 @@ static SOURCE: &str = r#"
 	REMOVE FIELD foo.bar[10] ON bar;
 	UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL;
 	UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL;
+	function(){ ((1 + 1)) };
 "#;
 
 fn statements() -> Vec<Statement> {
@@ -725,6 +726,10 @@ fn statements() -> Vec<Statement> {
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
 		}),
+		Statement::Value(Value::Function(Box::new(crate::sql::Function::Script(
+			Script(" ((1 + 1)) ".to_owned()),
+			Vec::new(),
+		)))),
 	]
 }
 

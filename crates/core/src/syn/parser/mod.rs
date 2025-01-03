@@ -475,7 +475,12 @@ impl StatementStream {
 
 		// we need a trailing semicolon.
 		if !parser.eat(t!(";")) {
-			let peek = parser.peek();
+			let peek = parser.next();
+
+			if parser.peek1().is_eof() {
+				return Ok(None);
+			}
+
 			let error = syntax_error!("Unexpected token `{}` expected the query to end.",peek.kind.as_str(),
 				@peek.span => "maybe forgot a semicolon after the previous statement?");
 			return Err(error
