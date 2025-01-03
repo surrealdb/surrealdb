@@ -80,6 +80,7 @@ geo-types = { version = "0.7.13", features = ["arbitrary"] }
 hex = { version = "0.4.3" }
 indxdb = { version = "0.5.0", optional = true }
 ipnet = "2.9.0"
+jieba-rs = "0.7.1"
 js = { version = "0.8.1", package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties", "rust-alloc"], optional = true }
 jsonwebtoken = "9.3.0"
 lexicmp = "0.1.0"

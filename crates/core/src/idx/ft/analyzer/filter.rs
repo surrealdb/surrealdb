@@ -6,7 +6,11 @@ use crate::idx::trees::store::IndexStores;
 use crate::sql::filter::Filter as SqlFilter;
 use crate::sql::language::Language;
 use deunicode::deunicode;
+use jieba_rs::{Jieba, TokenizeMode};
 use rust_stemmers::{Algorithm, Stemmer};
+use std::sync::OnceLock;
+
+static JIEBA_TOKENIZER: OnceLock<Jieba> = OnceLock::new();
 
 #[derive(Clone, Copy)]
 pub(super) enum FilteringStage {
@@ -21,6 +25,7 @@ pub(super) enum Filter {
 	Lowercase,
 	Uppercase,
 	Mapper(Mapper),
+	Jieba(bool, bool),
 }
 
 impl Filter {
@@ -28,6 +33,7 @@ impl Filter {
 		let f = match f {
 			SqlFilter::Ascii => Filter::Ascii,
 			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(*min, *max),
+			SqlFilter::Jieba(mp, hmm) => Filter::Jieba(*mp, *hmm),
 			SqlFilter::Lowercase => Filter::Lowercase,
 			SqlFilter::Ngram(min, max) => Filter::Ngram(*min, *max),
 			SqlFilter::Snowball(l) => {
@@ -75,7 +81,7 @@ impl Filter {
 
 	fn is_stage(&self, stage: FilteringStage) -> bool {
 		if let FilteringStage::Querying = stage {
-			!matches!(self, Filter::EdgeNgram(_, _) | Filter::Ngram(_, _))
+			!matches!(self, Filter::EdgeNgram(_, _) | Filter::Jieba(_, _) | Filter::Ngram(_, _))
 		} else {
 			true
 		}
@@ -100,6 +106,7 @@ impl Filter {
 		match self {
 			Filter::Ascii => Self::deunicode(c),
 			Filter::EdgeNgram(min, max) => Self::edgengram(c, *min, *max),
+			Filter::Jieba(mp, hmm) => Self::jieba(c, *mp, *hmm),
 			Filter::Lowercase => Self::lowercase(c),
 			Filter::Ngram(min, max) => Self::ngram(c, *min, *max),
 			Filter::Stemmer(s) => Self::stem(s, c),
@@ -185,6 +192,35 @@ impl Filter {
 			})
 			.collect();
 		FilterResult::Terms(ng)
+	}
+
+	#[inline]
+	fn jieba(c: &str, mp: bool, hmm: bool) -> FilterResult {
+		let mode = if mp {
+			TokenizeMode::Search
+		} else {
+			TokenizeMode::Default
+		};
+
+		let jb: Vec<_> = JIEBA_TOKENIZER
+			.get_or_init(Jieba::new)
+			.tokenize(c, mode, hmm)
+			.iter()
+			.filter(|&s| !s.word.is_empty())
+			.map(|token| {
+				if token.word.eq(c) {
+					Term::Unchanged
+				} else {
+					Term::NewTerm(token.word.to_string(), token.start as Position)
+				}
+			})
+			.collect();
+
+		if jb.is_empty() {
+			FilterResult::Ignore
+		} else {
+			FilterResult::Terms(jb)
+		}
 	}
 }
 
@@ -820,6 +856,60 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
 			"Ālea iacta est",
 			&["āl", "āle", "ia", "iac", "es", "est"],
+		)
+		.await;
+	}
+
+	#[tokio::test]
+	async fn test_jieba() {
+		test_analyzer(
+			"ANALYZER test TOKENIZERS blank,class FILTERS jieba(false,false);",
+			"一幅怀旧风格的肖像画，一个穿着蓝色头巾和黄色围巾的人物，背景为深色。",
+			&[
+				"一幅",
+				"怀旧",
+				"风格",
+				"的",
+				"肖像画",
+				"一个",
+				"穿着",
+				"蓝色",
+				"头巾",
+				"和",
+				"黄色",
+				"围巾",
+				"的",
+				"人物",
+				"背景",
+				"为",
+				"深色",
+			],
+		)
+		.await;
+
+		test_analyzer(
+			"ANALYZER test TOKENIZERS blank,class FILTERS jieba(true,true);",
+			"一幅怀旧风格的肖像画，一个穿着蓝色头巾和黄色围巾的人物，背景为深色。",
+			&[
+				"一幅",
+				"怀旧",
+				"风格",
+				"的",
+				"肖像",
+				"肖像画",
+				"一个",
+				"穿着",
+				"蓝色",
+				"头巾",
+				"和",
+				"黄色",
+				"围巾",
+				"的",
+				"人物",
+				"背景",
+				"为",
+				"深色",
+			],
 		)
 		.await;
 	}
