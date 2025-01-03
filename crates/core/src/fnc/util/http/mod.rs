@@ -13,15 +13,16 @@ pub(crate) fn uri_is_valid(uri: &str) -> bool {
 
 fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
 	match body {
-		Value::Bytes(bytes) => req.header(CONTENT_TYPE, "application/octet-stream").body(bytes.0),
+		Value::Bytes(v) => req.body(v.0),
+		Value::Strand(v) => req.body(v.0),
 		_ if body.is_some() => req.json(&body.into_json()),
 		_ => req,
 	}
 }
 
 async fn decode_response(res: Response) -> Result<Value, Error> {
-	match res.status() {
-		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
+	match res.error_for_status() {
+		Ok(res) => match res.headers().get(CONTENT_TYPE) {
 			Some(mime) => match mime.to_str() {
 				Ok(v) if v.starts_with("application/json") => {
 					let txt = res.text().await?;
@@ -41,7 +42,13 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 			},
 			_ => Ok(Value::None),
 		},
-		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
+		Err(err) => match err.status() {
+			Some(s) => Err(Error::Http(format!(
+				"{}: {err}",
+				s.canonical_reason().unwrap_or_default().to_owned(),
+			))),
+			None => Err(Error::Http(err.to_string())),
+		},
 	}
 }
 
