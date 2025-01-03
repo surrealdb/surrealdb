@@ -2,6 +2,7 @@
 
 use reblessive::Stk;
 
+use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
 use crate::sql::Fetch;
 use crate::syn::error::bail;
 use crate::{
@@ -422,6 +423,35 @@ impl Parser<'_> {
 		Ok(ChangeFeed {
 			expiry,
 			store_diff,
+		})
+	}
+
+	/// Parses a reference
+	///
+	/// # Parser State
+	/// Expects the parser to have already eating the `REFERENCE` keyword
+	pub async fn parse_reference(&mut self, ctx: &mut Stk) -> ParseResult<Reference> {
+		let on_delete = if self.eat(t!("ON")) {
+			expected!(self, t!("DELETE"));
+			let next = self.next();
+			match next.kind {
+				t!("REJECT") => ReferenceDeleteStrategy::Reject,
+				t!("CASCADE") => ReferenceDeleteStrategy::Cascade,
+				t!("IGNORE") => ReferenceDeleteStrategy::Ignore,
+				t!("UNSET") => ReferenceDeleteStrategy::Unset,
+				t!("THEN") => ReferenceDeleteStrategy::Custom(
+					ctx.run(|ctx| self.parse_value_field(ctx)).await?,
+				),
+				_ => {
+					unexpected!(self, next, "`REJECT`, `CASCASE`, `IGNORE`, `UNSET` or `THEN`")
+				}
+			}
+		} else {
+			ReferenceDeleteStrategy::Ignore
+		};
+
+		Ok(Reference {
+			on_delete,
 		})
 	}
 

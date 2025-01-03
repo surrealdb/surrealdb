@@ -1879,6 +1879,7 @@ fn parse_define_field() {
 				comment: None,
 				if_not_exists: false,
 				overwrite: false,
+				reference: None,
 			}))
 		)
 	}
@@ -1911,6 +1912,7 @@ fn parse_define_field() {
 				comment: None,
 				if_not_exists: false,
 				overwrite: false,
+				reference: None,
 			}))
 		)
 	}

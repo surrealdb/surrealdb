@@ -317,6 +317,14 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		// TODO(raphaeldarley): check if union is of literals and generate enum
 		// generate custom scalar from other literals?
 		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
+		Kind::References(ft, _) => {
+			let inner = match ft.to_owned() {
+				Some(ft) => Kind::Record(vec![ft]),
+				None => Kind::Record(vec![]),
+			};
+
+			TypeRef::List(Box::new(kind_to_type(inner, types)?))
+		}
 	};
 
 	let out = match optional {
@@ -643,5 +651,6 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Function(_, _) => Err(resolver_error("Sets are not yet supported")),
 		Kind::Range => Err(resolver_error("Ranges are not yet supported")),
 		Kind::Literal(_) => Err(resolver_error("Literals are not yet supported")),
+		Kind::References(_, _) => Err(resolver_error("Cannot convert value into references")),
 	}
 }
