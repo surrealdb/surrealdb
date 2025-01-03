@@ -330,6 +330,9 @@ impl TryFrom<Value> for Cbor {
 				Number::Decimal(v) => {
 					Ok(Cbor(Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.to_string())))))
 				}
+				Number::Felts252(v) => {
+					Ok(Cbor(Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.to_string())))))
+				}
 			},
 			Value::Strand(v) => Ok(Cbor(Data::Text(v.0))),
 			Value::Duration(v) => {
