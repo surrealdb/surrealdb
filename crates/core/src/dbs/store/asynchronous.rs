@@ -27,7 +27,7 @@ pub(in crate::dbs) struct AsyncMemoryOrdered {
 	batch_size: usize,
 	/// Current len
 	len: usize,
-	///
+	/// An optional limit (start + limit)
 	limit: Option<u32>,
 }
 
