@@ -114,7 +114,7 @@ impl TryFrom<Value> for Pack {
 				Number::Decimal(v) => {
 					Ok(Pack(Data::Ext(TAG_DECIMAL, v.to_string().as_bytes().to_vec())))
 				}
-				Number::Felts252(v) => {
+				Number::Felt252(v) => {
 					Ok(Pack(Data::Ext(TAG_DECIMAL, v.to_string().as_bytes().to_vec())))
 				}
 			},

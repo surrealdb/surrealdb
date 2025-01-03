@@ -165,6 +165,7 @@ ulid = { version = "1.1.0", features = ["serde"] }
 unicase = "2.7.0"
 url = "2.5.0"
 vart = "0.8.1"
+lazy_static = "1.5.0"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }

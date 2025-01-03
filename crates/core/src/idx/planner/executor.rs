@@ -496,7 +496,7 @@ impl QueryExecutor {
 				of = d.to_f64();
 				od = Some(*d);
 			}
-			Number::Felts252(f) => {
+			Number::Felt252(f) => {
 				oi = f.to_i64();
 				of = f.to_f64();
 				od = Some(Decimal::from_i128(f.to_i128().unwrap_or_default()).unwrap_or_default());

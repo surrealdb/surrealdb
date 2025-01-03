@@ -6,7 +6,7 @@ use crate::sql::Value;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-use starknet_types_core::felt::Felt;
+use starknet_types_core::felt::{Felt, NonZeroFelt};
 use std::cmp::Ordering;
 use std::f64::consts::PI;
 use std::fmt::Debug;
@@ -15,6 +15,11 @@ use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
+
+lazy_static::lazy_static! {
+	pub static ref HALF_PRIME: Felt =
+		Felt::MAX.field_div(&NonZeroFelt::from_felt_unchecked(Felt::from(2))) + Felt::ONE;
+}
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
@@ -27,7 +32,7 @@ pub enum Number {
 	Int(i64),
 	Float(f64),
 	Decimal(Decimal),
-	Felts252(Felt),
+	Felt252(Felt),
 	// Add new variants here
 }
 
@@ -128,7 +133,7 @@ macro_rules! try_into_prim {
 							Some(v) => Ok(v),
 							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
 						},
-						Number::Felts252(ref v) => match v.$to_int() {
+						Number::Felt252(ref v) => match v.$to_int() {
 							Some(v) => Ok(v),
 							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
 						},
@@ -158,7 +163,7 @@ impl TryFrom<Number> for Decimal {
 				_ => Err(Error::TryFrom(value.to_string(), "Decimal")),
 			},
 			Number::Decimal(x) => Ok(x),
-			Number::Felts252(_) => Err(Error::TryFrom(value.to_string(), "Decimal")),
+			Number::Felt252(_) => Err(Error::TryFrom(value.to_string(), "Decimal")),
 		}
 	}
 }
@@ -225,7 +230,7 @@ impl Display for Number {
 				}
 			}
 			Number::Decimal(v) => write!(f, "{v}dec"),
-			Number::Felts252(v) => write!(f, "{v}felt"),
+			Number::Felt252(v) => write!(f, "{v}felt"),
 		}
 	}
 }
@@ -262,7 +267,7 @@ impl Number {
 			Number::Int(_) => true,
 			Number::Float(v) => v.fract() == 0.0,
 			Number::Decimal(v) => v.is_integer(),
-			Number::Felts252(_) => false,
+			Number::Felt252(_) => true,
 		}
 	}
 
@@ -271,7 +276,7 @@ impl Number {
 			Number::Int(v) => v != &0,
 			Number::Float(v) => v != &0.0,
 			Number::Decimal(v) => v != &Decimal::ZERO,
-			Number::Felts252(v) => v != &Felt::zero(),
+			Number::Felt252(v) => v != &Felt::zero(),
 		}
 	}
 
@@ -280,7 +285,7 @@ impl Number {
 			Number::Int(v) => v > &0,
 			Number::Float(v) => v > &0.0,
 			Number::Decimal(v) => v > &Decimal::ZERO,
-			Number::Felts252(v) => v > &Felt::zero(),
+			Number::Felt252(v) => v < &HALF_PRIME,
 		}
 	}
 
@@ -289,7 +294,7 @@ impl Number {
 			Number::Int(v) => v < &0,
 			Number::Float(v) => v < &0.0,
 			Number::Decimal(v) => v < &Decimal::ZERO,
-			Number::Felts252(_) => false,
+			Number::Felt252(v) => v >= &HALF_PRIME,
 		}
 	}
 
@@ -298,7 +303,7 @@ impl Number {
 			Number::Int(v) => v == &0,
 			Number::Float(v) => v == &0.0,
 			Number::Decimal(v) => v == &Decimal::ZERO,
-			Number::Felts252(v) => v == &Felt::zero(),
+			Number::Felt252(v) => v == &Felt::zero(),
 		}
 	}
 
@@ -307,7 +312,7 @@ impl Number {
 			Number::Int(v) => v >= &0,
 			Number::Float(v) => v >= &0.0,
 			Number::Decimal(v) => v >= &Decimal::ZERO,
-			Number::Felts252(v) => v >= &Felt::zero(),
+			Number::Felt252(v) => v == &Felt::zero() || v < &HALF_PRIME,
 		}
 	}
 
@@ -316,7 +321,7 @@ impl Number {
 			Number::Int(v) => v <= &0,
 			Number::Float(v) => v <= &0.0,
 			Number::Decimal(v) => v <= &Decimal::ZERO,
-			Number::Felts252(_) => false,
+			Number::Felt252(v) => v == &Felt::zero() || v >= &HALF_PRIME,
 		}
 	}
 
@@ -329,7 +334,7 @@ impl Number {
 			Number::Int(v) => v as usize,
 			Number::Float(v) => v as usize,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
-			Number::Felts252(v) => v.to_usize().unwrap_or_default(),
+			Number::Felt252(_) => panic!("Cannot convert Felt252 to usize"),
 		}
 	}
 
@@ -338,7 +343,7 @@ impl Number {
 			Number::Int(v) => v,
 			Number::Float(v) => v as i64,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
-			Number::Felts252(v) => v.to_i64().unwrap_or_default(),
+			Number::Felt252(_) => panic!("Cannot convert Felt252 to i64"),
 		}
 	}
 
@@ -347,7 +352,7 @@ impl Number {
 			Number::Int(v) => v as f64,
 			Number::Float(v) => v,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
-			Number::Felts252(v) => v.to_f64().unwrap_or_default(),
+			Number::Felt252(_) => panic!("Cannot convert Felt252 to f64"),
 		}
 	}
 
@@ -356,7 +361,7 @@ impl Number {
 			Number::Int(v) => Decimal::from(v),
 			Number::Float(v) => Decimal::try_from(v).unwrap_or_default(),
 			Number::Decimal(v) => v,
-			Number::Felts252(v) => Decimal::from(v.to_i64().unwrap_or_default()),
+			Number::Felt252(_) => panic!("Cannot convert Felt252 to decimal"),
 		}
 	}
 
@@ -369,7 +374,7 @@ impl Number {
 			Number::Int(v) => *v as usize,
 			Number::Float(v) => *v as usize,
 			Number::Decimal(v) => v.to_usize().unwrap_or_default(),
-			Number::Felts252(v) => v.to_usize().unwrap_or_default(),
+			Number::Felt252(_) => panic!("Cannot convert Felt252 to usize"),
 		}
 	}
 
@@ -378,7 +383,7 @@ impl Number {
 			Number::Int(v) => *v,
 			Number::Float(v) => *v as i64,
 			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
-			Number::Felts252(v) => v.to_i64().unwrap_or_default(),
+			Number::Felt252(_) => panic!("Cannot convert Felt252 to i64"),
 		}
 	}
 
@@ -387,7 +392,7 @@ impl Number {
 			Number::Int(v) => *v as f64,
 			Number::Float(v) => *v,
 			&Number::Decimal(v) => v.try_into().unwrap_or_default(),
-			Number::Felts252(v) => v.to_f64().unwrap_or_default(),
+			Number::Felt252(_) => panic!("Cannot convert Felt252 to f64"),
 		}
 	}
 
@@ -396,7 +401,7 @@ impl Number {
 			Number::Int(v) => Decimal::from(*v),
 			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
 			Number::Decimal(v) => *v,
-			Number::Felts252(v) => Decimal::from(v.to_i64().unwrap_or_default()),
+			Number::Felt252(_) => panic!("Cannot convert Felt252 to decimal"),
 		}
 	}
 
@@ -409,7 +414,13 @@ impl Number {
 			Number::Int(v) => v.abs().into(),
 			Number::Float(v) => v.abs().into(),
 			Number::Decimal(v) => v.abs().into(),
-			Number::Felts252(v) => Number::Felts252(v),
+			Number::Felt252(v) => {
+				if v > *HALF_PRIME {
+					Number::Felt252(*HALF_PRIME - v)
+				} else {
+					Number::Felt252(v)
+				}
+			}
 		}
 	}
 
@@ -434,7 +445,7 @@ impl Number {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.ceil().into(),
 			Number::Decimal(v) => v.ceil().into(),
-			Number::Felts252(v) => Number::Felts252(v),
+			Number::Felt252(v) => Number::Felt252(v),
 		}
 	}
 
@@ -444,7 +455,12 @@ impl Number {
 			(Number::Decimal(n), min, max) => n.clamp(min.to_decimal(), max.to_decimal()).into(),
 			(Number::Float(n), min, max) => n.clamp(min.to_float(), max.to_float()).into(),
 			(Number::Int(n), min, max) => n.to_float().clamp(min.to_float(), max.to_float()).into(),
-			(Number::Felts252(n), _, _) => Number::Felts252(n),
+			(Number::Felt252(n), Number::Felt252(min), Number::Felt252(max)) => {
+				Number::Felt252(n.clamp(min, max))
+			}
+			(Number::Felt252(_), _, _) => {
+				panic!("Felt252 values must be clamped with Felt252 min and max")
+			}
 		}
 	}
 
@@ -465,7 +481,7 @@ impl Number {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.floor().into(),
 			Number::Decimal(v) => v.floor().into(),
-			Number::Felts252(v) => Number::Felts252(v),
+			Number::Felt252(v) => Number::Felt252(v),
 		}
 	}
 
@@ -545,7 +561,7 @@ impl Number {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.round().into(),
 			Number::Decimal(v) => v.round().into(),
-			Number::Felts252(v) => Number::Felts252(v),
+			Number::Felt252(v) => Number::Felt252(v),
 		}
 	}
 
@@ -554,7 +570,7 @@ impl Number {
 			Number::Int(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
 			Number::Float(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
 			Number::Decimal(v) => v.round_dp(precision as u32).into(),
-			Number::Felts252(v) => Number::Felts252(v),
+			Number::Felt252(_) => panic!("Operation not supported for Felt252"),
 		}
 	}
 
@@ -563,7 +579,15 @@ impl Number {
 			Number::Int(n) => n.signum().into(),
 			Number::Float(n) => n.signum().into(),
 			Number::Decimal(n) => n.signum().into(),
-			Number::Felts252(v) => Number::Felts252(v),
+			Number::Felt252(v) => {
+				if v == Felt::ZERO {
+					0.into()
+				} else if v < *HALF_PRIME {
+					1.into()
+				} else {
+					Number::Int(-1)
+				}
+			}
 		}
 	}
 
@@ -580,7 +604,7 @@ impl Number {
 			Number::Int(v) => (v as f64).sqrt().into(),
 			Number::Float(v) => v.sqrt().into(),
 			Number::Decimal(v) => v.sqrt().unwrap_or_default().into(),
-			Number::Felts252(v) => Number::Felts252(v.sqrt().unwrap_or_default()),
+			Number::Felt252(v) => Number::Felt252(v.sqrt().expect("Value overflowed")),
 		}
 	}
 
@@ -588,6 +612,8 @@ impl Number {
 		match (self, power) {
 			(Number::Int(v), Number::Int(p)) => Number::Int(v.pow(p as u32)),
 			(Number::Decimal(v), Number::Int(p)) => v.powi(p).into(),
+			(Number::Felt252(v), Number::Felt252(p)) => Number::Felt252(v.pow_felt(&p)),
+			(Number::Felt252(v), p) => Number::Felt252(v.pow(p.as_int() as u128)),
 			// TODO: (Number::Decimal(v), Number::Float(p)) => todo!(),
 			// TODO: (Number::Decimal(v), Number::Decimal(p)) => todo!(),
 			(v, p) => v.as_float().powf(p.as_float()).into(),
@@ -624,7 +650,7 @@ impl Ord for Number {
 			(Number::Int(v), Number::Int(w)) => v.cmp(w),
 			(Number::Float(v), Number::Float(w)) => total_cmp_f64(*v, *w),
 			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
-			(Number::Felts252(v), Number::Felts252(w)) => v.cmp(w),
+			(Number::Felt252(v), Number::Felt252(w)) => v.cmp(w),
 			// ------------------------------
 			(Number::Int(v), Number::Float(w)) => {
 				// If the float is not finite, we don't need to compare it to the integer.
@@ -753,28 +779,8 @@ impl Ord for Number {
 			}
 			(v @ Number::Decimal(..), w @ Number::Float(..)) => w.cmp(v).reverse(),
 			// ------------------------------
-			(Number::Int(v), Number::Felts252(w)) => Decimal::from(*v)
-				.cmp(&Decimal::from_i128(w.to_i128().unwrap_or_default()).unwrap_or_default()),
-			(Number::Felts252(v), Number::Int(w)) => {
-				Decimal::from_i128(w.to_i128().unwrap_or_default())
-					.cmp(&Decimal::from_str(&v.to_hex_string()).ok())
-			}
-			// ------------------------------
-			(Number::Float(v), Number::Felts252(w)) => {
-				Decimal::from_f64(*v).cmp(&Decimal::from_i128(w.to_i128().unwrap_or_default()))
-			}
-			(Number::Felts252(v), Number::Float(w)) => {
-				Decimal::from_i128(v.to_i128().unwrap_or_default())
-					.cmp(&Decimal::from_f64(*w).into())
-			}
-			// ------------------------------
-			(Number::Decimal(v), Number::Felts252(w)) => {
-				v.cmp(&Decimal::from_i128(w.to_i128().unwrap_or_default()).unwrap_or_default())
-			}
-			(Number::Felts252(v), Number::Decimal(w)) => {
-				Decimal::from_i128(w.to_i128().unwrap_or_default())
-					.cmp(&Decimal::from_str(&v.to_hex_string()).ok())
-			}
+			(_, Number::Felt252(_)) => panic!("Cannot compare. Try convert to felt"),
+			(Number::Felt252(_), _) => panic!("Cannot compare. Try convert to felt"),
 		}
 	}
 }
@@ -787,7 +793,7 @@ impl hash::Hash for Number {
 			Number::Int(v) => v.hash(state),
 			Number::Float(v) => v.to_bits().hash(state),
 			Number::Decimal(v) => v.hash(state),
-			Number::Felts252(v) => v.hash(state),
+			Number::Felt252(v) => v.hash(state),
 		}
 	}
 }
@@ -802,7 +808,7 @@ impl PartialEq for Number {
 			(Number::Int(v), Number::Int(w)) => v.eq(w),
 			(Number::Float(v), Number::Float(w)) => total_eq_f64(*v, *w),
 			(Number::Decimal(v), Number::Decimal(w)) => v.eq(w),
-			(Number::Felts252(v), Number::Felts252(w)) => v.eq(w),
+			(Number::Felt252(v), Number::Felt252(w)) => v.eq(w),
 			// ------------------------------
 			(v @ Number::Int(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
 			(v @ Number::Float(_), w @ Number::Int(_)) => v.cmp(w) == Ordering::Equal,
@@ -813,27 +819,8 @@ impl PartialEq for Number {
 			(v @ Number::Float(_), w @ Number::Decimal(_)) => v.cmp(w) == Ordering::Equal,
 			(v @ Number::Decimal(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
 			// ------------------------------
-			(Number::Int(v), Number::Felts252(w)) => Decimal::from(*v)
-				.eq(&Decimal::from_i128(w.to_i128().unwrap_or_default()).unwrap_or_default()),
-			(Number::Felts252(v), Number::Int(w)) => {
-				Decimal::from_i128(v.to_i128().unwrap_or_default())
-					.unwrap_or_default()
-					.eq(&Decimal::from(*w))
-			}
-			// ------------------------------
-			(Number::Float(v), Number::Felts252(w)) => {
-				total_eq_f64(*v, w.to_f64().unwrap_or_default())
-			}
-			(Number::Felts252(v), Number::Float(w)) => {
-				total_eq_f64(v.to_f64().unwrap_or_default(), *w)
-			}
-			// ------------------------------
-			(Number::Decimal(v), Number::Felts252(w)) => {
-				v.eq(&Decimal::from_i128(w.to_i128().unwrap_or_default()).unwrap_or_default())
-			}
-			(Number::Felts252(v), Number::Decimal(w)) => {
-				Decimal::from_i128(v.to_i128().unwrap_or_default()).unwrap_or_default().eq(w)
-			}
+			(_, Number::Felt252(_)) => panic!("Cannot compare. Try convert to felt"),
+			(Number::Felt252(_), _) => panic!("Cannot compare. Try convert to felt"),
 		}
 	}
 }
@@ -916,6 +903,7 @@ impl TryPow for Number {
 			(Self::Decimal(v), Self::Decimal(p)) => Self::Decimal(
 				v.checked_powd(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
 			),
+			(Self::Felt252(v), Self::Felt252(p)) => Self::Felt252(v.pow_felt(&p)),
 			(v, p) => v.as_float().powf(p.as_float()).into(),
 		})
 	}
@@ -931,7 +919,13 @@ impl TryNeg for Number {
 			}
 			Self::Float(n) => Number::Float(-n),
 			Self::Decimal(n) => Number::Decimal(-n),
-			Self::Felts252(n) => Number::Felts252(-n),
+			Self::Felt252(n) => {
+				if n < *HALF_PRIME {
+					Number::Felt252(n + *HALF_PRIME)
+				} else {
+					Number::Felt252(n)
+				}
+			}
 		})
 	}
 }
@@ -963,6 +957,7 @@ impl ops::Add for Number {
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v + w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 + w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v + w as f64),
+			(Number::Felt252(v), Number::Felt252(w)) => Number::Felt252(v + w),
 			(v, w) => Number::from(v.as_decimal() + w.as_decimal()),
 		}
 	}
@@ -977,6 +972,7 @@ impl<'b> ops::Add<&'b Number> for &Number {
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v + w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 + w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v + *w as f64),
+			(Number::Felt252(v), Number::Felt252(w)) => Number::Felt252(v + w),
 			(v, w) => Number::from(v.to_decimal() + w.to_decimal()),
 		}
 	}
@@ -991,6 +987,7 @@ impl ops::Sub for Number {
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v - w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 - w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v - w as f64),
+			(Number::Felt252(v), Number::Felt252(w)) => Number::Felt252(v - w),
 			(v, w) => Number::from(v.as_decimal() - w.as_decimal()),
 		}
 	}
@@ -1005,6 +1002,7 @@ impl<'b> ops::Sub<&'b Number> for &Number {
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v - w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 - w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v - *w as f64),
+			(Number::Felt252(v), Number::Felt252(w)) => Number::Felt252(v - w),
 			(v, w) => Number::from(v.to_decimal() - w.to_decimal()),
 		}
 	}
@@ -1019,6 +1017,7 @@ impl ops::Mul for Number {
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v * w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 * w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v * w as f64),
+			(Number::Felt252(v), Number::Felt252(w)) => Number::Felt252(v.mul(w)),
 			(v, w) => Number::from(v.as_decimal() * w.as_decimal()),
 		}
 	}
@@ -1033,6 +1032,7 @@ impl<'b> ops::Mul<&'b Number> for &Number {
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v * w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 * w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v * *w as f64),
+			(Number::Felt252(v), Number::Felt252(w)) => Number::Felt252(v.mul(w)),
 			(v, w) => Number::from(v.to_decimal() * w.to_decimal()),
 		}
 	}
@@ -1074,7 +1074,13 @@ impl Neg for Number {
 			Self::Int(n) => Number::Int(-n),
 			Self::Float(n) => Number::Float(-n),
 			Self::Decimal(n) => Number::Decimal(-n),
-			Self::Felts252(n) => Number::Felts252(-n),
+			Self::Felt252(n) => {
+				if n < *HALF_PRIME {
+					Number::Felt252(n + *HALF_PRIME)
+				} else {
+					Number::Felt252(n)
+				}
+			}
 		}
 	}
 }

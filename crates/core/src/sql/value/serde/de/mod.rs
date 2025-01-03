@@ -20,7 +20,7 @@ impl Value {
 				sql::Number::Int(v) => Ok(Content::Number(Number::I64(v))),
 				sql::Number::Float(v) => Ok(Content::Number(Number::F64(v))),
 				sql::Number::Decimal(v) => serializer.serialize(v).map_err(Into::into),
-				sql::Number::Felts252(v) => {
+				sql::Number::Felt252(v) => {
 					Ok(Content::Number(Number::U128(v.to_u128().unwrap_or_default())))
 				}
 			},
