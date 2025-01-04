@@ -215,7 +215,7 @@ impl MutableContext {
 			isolated: false,
 		};
 		if let Some(timeout) = time_out {
-			ctx.add_timeout(timeout)?;
+			ctx.add_std_timeout(timeout)?;
 		}
 		Ok(ctx)
 	}
@@ -259,14 +259,23 @@ impl MutableContext {
 	/// Add a timeout to the context. If the current timeout is sooner than
 	/// the provided timeout, this method does nothing. If the result of the
 	/// addition causes an overflow, this method returns an error.
-	pub(crate) fn add_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
+	pub(crate) fn add_std_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
 		match Instant::now().checked_add(timeout) {
 			Some(deadline) => {
 				self.add_deadline(deadline);
 				Ok(())
 			}
-			None => Err(Error::InvalidTimeout(timeout.as_secs())),
+			None => Err(Error::InvalidTimeout(timeout.as_secs().to_string())),
 		}
+	}
+
+	/// Add a timeout to the context. If the current timeout is sooner than
+	/// the provided timeout, this method does nothing. If the result of the
+	/// addition causes an overflow, this method returns an error.
+	pub(crate) fn add_timeout(&mut self, timeout: chrono::Duration) -> Result<(), Error> {
+		let timeout = timeout.to_std()
+			.map_err(|_| Error::InvalidTimeout(timeout.num_seconds().to_string()))?;
+		self.add_std_timeout(timeout)
 	}
 
 	/// Add the LIVE query notification channel to the context, so that we

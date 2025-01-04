@@ -39,7 +39,7 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 		// Fetch all tables
 		let tbs = tx.all_tb(ns, &db.name, None).await?;
 		// Get the database changefeed expiration
-		let db_cf_expiry = db.changefeed.map(|v| v.expiry.as_secs()).unwrap_or_default();
+		let db_cf_expiry = db.changefeed.map(|v| v.expiry.num_seconds().max(0) as u64).unwrap_or_default();
 		// Get the maximum table changefeed expiration
 		let tb_cf_expiry = tbs.as_ref().iter().fold(0, |acc, tb| match &tb.changefeed {
 			None => acc,
@@ -47,7 +47,7 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 				if cf.expiry.is_zero() {
 					acc
 				} else {
-					acc.max(cf.expiry.as_secs())
+					acc.max(cf.expiry.num_seconds().max(0) as u64)
 				}
 			}
 		});

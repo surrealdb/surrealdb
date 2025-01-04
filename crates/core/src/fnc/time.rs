@@ -6,32 +6,24 @@ use chrono::offset::TimeZone;
 use chrono::{DateTime, Datelike, DurationRound, Local, Timelike, Utc};
 
 pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
-	match chrono::Duration::from_std(*duration) {
-		Ok(d) => {
-			let floor_to_ceil = |floor: DateTime<Utc>| -> Option<DateTime<Utc>> {
-				if floor == *val {
-					Some(floor)
-				} else {
-					floor.checked_add_signed(d)
-				}
-			};
-			// Check for zero duration.
-			if d.is_zero() {
-				return Ok(Value::Datetime(val));
-			}
-			let result = val
-				.duration_trunc(d)
-				.ok()
-				.and_then(floor_to_ceil);
+	let floor_to_ceil = |floor: DateTime<Utc>| -> Option<DateTime<Utc>> {
+		if floor == *val {
+			Some(floor)
+		} else {
+			floor.checked_add_signed(*duration)
+		}
+	};
+	// Check for zero duration.
+	if duration.is_zero() {
+		return Ok(Value::Datetime(val));
+	}
+	let result = val
+		.duration_trunc(*duration)
+		.ok()
+		.and_then(floor_to_ceil);
 
-			match result {
-				Some(v) => Ok(v.into()),
-				_ => Err(Error::InvalidArguments {
-					name: String::from("time::ceil"),
-					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-				}),
-			}
-		},
+	match result {
+		Some(v) => Ok(v.into()),
 		_ => Err(Error::InvalidArguments {
 			name: String::from("time::ceil"),
 			message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
@@ -47,20 +39,12 @@ pub fn day((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 }
 
 pub fn floor((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
-	match chrono::Duration::from_std(*duration) {
-		Ok(d) => {
-			// Check for zero duration
-			if d.is_zero() {
-				return Ok(Value::Datetime(val));
-			}
-			match val.duration_trunc(d){
-				Ok(v) => Ok(v.into()),
-				_ => Err(Error::InvalidArguments {
-					name: String::from("time::floor"),
-					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-				}),
-			}
-		},
+	// Check for zero duration
+	if duration.is_zero() {
+		return Ok(Value::Datetime(val));
+	}
+	match val.duration_trunc(*duration){
+		Ok(v) => Ok(v.into()),
 		_ => Err(Error::InvalidArguments {
 			name: String::from("time::floor"),
 			message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
@@ -172,20 +156,12 @@ pub fn now(_: ()) -> Result<Value, Error> {
 }
 
 pub fn round((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
-	match chrono::Duration::from_std(*duration) {
-		Ok(d) => {
-			// Check for zero duration
-			if d.is_zero() {
-				return Ok(Value::Datetime(val));
-			}
-			match val.duration_round(d) {
-				Ok(v) => Ok(v.into()),
-				_ => Err(Error::InvalidArguments {
-					name: String::from("time::round"),
-					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-				}),
-			}
-		},
+	// Check for zero duration
+	if duration.is_zero() {
+		return Ok(Value::Datetime(val));
+	}
+	match val.duration_round(*duration) {
+		Ok(v) => Ok(v.into()),
 		_ => Err(Error::InvalidArguments {
 			name: String::from("time::round"),
 			message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
