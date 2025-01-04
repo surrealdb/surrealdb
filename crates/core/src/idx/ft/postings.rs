@@ -3,14 +3,13 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore};
-use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
+use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType};
 
 pub(super) type TermFrequency = u64;
 
 pub(super) struct Postings {
-	ixs: IndexStores,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
@@ -19,7 +18,6 @@ pub(super) struct Postings {
 
 impl Postings {
 	pub(super) async fn new(
-		ixs: &IndexStores,
 		tx: &Transaction,
 		index_key_base: IndexKeyBase,
 		order: u32,
@@ -32,7 +30,8 @@ impl Postings {
 		} else {
 			BState::new(order)
 		};
-		let store = ixs
+		let store = tx
+			.index_caches()
 			.get_store_btree_trie(
 				TreeNodeProvider::Postings(index_key_base.clone()),
 				state.generation(),
@@ -41,7 +40,6 @@ impl Postings {
 			)
 			.await;
 		Ok(Self {
-			ixs: ixs.clone(),
 			state_key,
 			index_key_base,
 			btree: BTree::new(state),
@@ -88,7 +86,7 @@ impl Postings {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
 			tx.set(self.state_key.clone(), VersionedStore::try_into(state)?, None).await?;
-			self.ixs.advance_cache_btree_trie(new_cache);
+			tx.index_caches().advance_store_btree_trie(new_cache);
 		}
 		Ok(())
 	}
@@ -107,9 +105,7 @@ mod tests {
 		tt: TransactionType,
 	) -> (Transaction, Postings) {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let p = Postings::new(ds.index_store(), &tx, IndexKeyBase::default(), order, tt, 100)
-			.await
-			.unwrap();
+		let p = Postings::new(&tx, IndexKeyBase::default(), order, tt, 100).await.unwrap();
 		(tx, p)
 	}
 
