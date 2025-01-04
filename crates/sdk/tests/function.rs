@@ -3423,6 +3423,50 @@ async fn function_record_table() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
+async fn function_string_capitalize() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::capitalize("");
+		RETURN string::capitalize("word");
+		RETURN string::capitalize("Word");
+		RETURN string::capitalize("a sentence with multiple words");
+		RETURN string::capitalize("a Sentence with Multiple words");
+		RETURN string::capitalize("a Sentence with Multiple words", false);
+		RETURN string::capitalize("a sentence with multiple words", true);
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("Word");
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("Word");
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("A Sentence With Multiple Words");
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("A Sentence With Multiple Words");
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("A Sentence With Multiple Words");
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("A sentence with multiple words");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_concat() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::concat();

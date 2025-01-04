@@ -13,6 +13,7 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"string",
+	"capitalize" => run,
 	"concat" => run,
 	"contains" => run,
 	"distance" => (distance::Package),

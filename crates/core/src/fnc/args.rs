@@ -41,6 +41,12 @@ impl FromArg for Strand {
 	}
 }
 
+impl FromArg for bool {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_bool()
+	}
+}
+
 impl FromArg for Number {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		arg.coerce_to_number()
@@ -245,15 +251,10 @@ impl<A: FromArg, B: FromArg> FromArgs for (A, Option<B>) {
 		};
 		// Process the function arguments
 		let mut args = args.into_iter();
-		// Process the first argument
-		let a = A::from_arg(args.next().ok_or_else(err)?).map_err(|e| Error::InvalidArguments {
-			name: name.to_owned(),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
-		let b = match args.next() {
-			Some(b) => Some(B::from_arg(b)?),
-			None => None,
-		};
+
+		let a: A = get_arg(name, 1, &mut args, err)?;
+		let b: Option<B> = get_opt_arg(name, 2, &mut args)?;
+
 		// Process additional function arguments
 		if args.next().is_some() {
 			// Too many arguments

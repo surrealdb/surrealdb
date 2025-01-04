@@ -293,6 +293,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("sleep") => PathKind::Function,
 		//
+		UniCase::ascii("string::capitalize") => PathKind::Function,
 		UniCase::ascii("string::concat") => PathKind::Function,
 		UniCase::ascii("string::contains") => PathKind::Function,
 		UniCase::ascii("string::ends_with") => PathKind::Function,

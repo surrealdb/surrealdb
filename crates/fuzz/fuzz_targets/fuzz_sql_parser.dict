@@ -310,6 +310,7 @@
 "session::origin("
 "sleep("
 "string"
+"string::capitalize("
 "string::concat("
 "string::contains("
 "string::distance::damerau_levenshtein("

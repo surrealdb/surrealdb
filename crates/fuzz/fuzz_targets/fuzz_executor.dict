@@ -312,6 +312,7 @@
 # Sleep is just going to slow the fuzzer down
 # "sleep("
 "string"
+"string::capitalize("
 "string::concat("
 "string::contains("
 "string::distance::damerau_levenshtein("
