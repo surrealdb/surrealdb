@@ -1,23 +1,8 @@
-<br>
-
 <p align="center">
-    <a href="https://github.com/surrealdb/surrealdb" target="_blank">
-        <img width="200" src="https://raw.githubusercontent.com/surrealdb/surrealdb/master/img/logo.svg" alt="SurrealDB Logo">
+    <a href="https://surrealdb.com" target="_blank">
+        <img width="100%" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/hero.png?raw=true" alt="SurrealDB Hero">
     </a>
 </p>
-
-<h3 align="center">
-    <img src="https://github.com/surrealdb/surrealdb/blob/main/img/black/text.svg?raw=true" height="12" alt="SurrealDB">
-    is the ultimate cloud <br> database for tomorrow's applications
-</h3>
-
-<h3 align="center">Develop easier. &nbsp; Build faster. &nbsp; Scale quicker.</h3>
-
-<br>
-
-<p align="center">A scalable, distributed, collaborative, document-graph database, for the realtime web.</p>
-
-<br>
 
 <p align="center">
 	<a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/status-stable-ff00bb.svg?style=flat-square"></a>
@@ -213,7 +198,6 @@ RELATE $from->like->$devs UNIQUE
 	SET time.connected = time::now()
 ;
 ```
-
 
 Query data flexibly with advanced expressions and graph queries.
 
