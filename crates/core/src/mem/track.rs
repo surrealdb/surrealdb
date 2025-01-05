@@ -48,8 +48,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	/// Returns a tuple with the current total allocated bytes (summed across all threads),
 	/// and the number of threads that have allocated memory.
 	///
-	/// - We only sum if `ENABLE_THREAD_ALLOC` is set, meaning thread-local tracking is enabled.
-	/// - We traverse a global linked list of thread nodes.
+	/// We traverse a global linked list of thread nodes.
 	/// Each node has a counter of allocated bytes.
 	#[cfg(feature = "allocation-tracking")]
 	pub fn current_usage(&self) -> (usize, usize) {
