@@ -991,7 +991,7 @@ impl Datastore {
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout)?;
+			ctx.add_std_timeout(timeout)?;
 		}
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
@@ -1063,7 +1063,7 @@ impl Datastore {
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout)?;
+			ctx.add_std_timeout(timeout)?;
 		}
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

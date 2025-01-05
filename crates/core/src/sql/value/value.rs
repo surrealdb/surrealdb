@@ -440,6 +440,12 @@ impl From<&str> for Value {
 	}
 }
 
+impl From<chrono::Duration> for Value {
+	fn from(v: chrono::Duration) -> Self {
+		Value::Duration(Duration::from(v))
+	}
+}
+
 impl From<DateTime<Utc>> for Value {
 	fn from(v: DateTime<Utc>) -> Self {
 		Value::Datetime(Datetime::from(v))
@@ -800,12 +806,12 @@ impl TryFrom<Value> for bool {
 	}
 }
 
-impl TryFrom<Value> for std::time::Duration {
+impl TryFrom<Value> for chrono::Duration {
 	type Error = Error;
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Duration(x) => Ok(x.into()),
-			_ => Err(Error::TryFrom(value.to_string(), "time::Duration")),
+			_ => Err(Error::TryFrom(value.to_string(), "chrono::Duration")),
 		}
 	}
 }
@@ -970,7 +976,7 @@ impl Value {
 			Value::Object(v) => !v.is_empty(),
 			Value::Strand(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
-			Value::Duration(v) => v.as_nanos() > 0,
+			Value::Duration(v) => v.is_zero(),
 			_ => false,
 		}
 	}
@@ -3012,7 +3018,7 @@ impl TrySub for Value {
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
-			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v.try_sub(w)?),
+			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v - w),
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),

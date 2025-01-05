@@ -64,7 +64,7 @@ blake3 = "1.5.3"
 bytes = "1.5.0"
 castaway = "0.2.3"
 cedar-policy = "2.4.2"
-chrono = { version = "0.4.38", features = ["serde"] }
+chrono = { version = "0.4.39", features = ["serde"] }
 ciborium = "0.2.1"
 dashmap = "5.5.3"
 derive = { version = "0.12.0", package = "surrealdb-derive" }

@@ -6,7 +6,8 @@ use crate::sql::Value;
 /// Sleep during the provided duration parameter.
 pub async fn sleep(ctx: &Context, (dur,): (Duration,)) -> Result<Value, Error> {
 	// Calculate the sleep duration
-	let dur = match (ctx.timeout(), dur.0) {
+	let dur = dur.to_std().map_err(|_| Error::InvalidTimeout(dur.to_string()))?;
+	let dur = match (ctx.timeout(), dur) {
 		(Some(t), d) if t < d => t,
 		(_, d) => d,
 	};

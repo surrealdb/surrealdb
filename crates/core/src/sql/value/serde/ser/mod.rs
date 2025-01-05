@@ -27,7 +27,7 @@ where
 		rust_decimal::Decimal as v => Ok(v.into()),
 		sql::Strand as v => Ok(v.into()),
 		sql::Duration as v => Ok(v.into()),
-		core::time::Duration as v => Ok(v.into()),
+		chrono::Duration as v => Ok(v.into()),
 		sql::Datetime as v => Ok(v.into()),
 		chrono::DateTime<chrono::Utc> as v => Ok(v.into()),
 		sql::Uuid as v => Ok(v.into()),
