@@ -414,8 +414,7 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<(), Error> {
 		let txn = ctx.tx();
 		let ikb = IndexKeyBase::new(self.opt.ns()?, self.opt.db()?, self.ix)?;
-		let mut mt =
-			MTreeIndex::new(ctx.get_index_stores(), &txn, ikb, p, TransactionType::Write).await?;
+		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			mt.remove_document(stk, &txn, self.rid, &o).await?;

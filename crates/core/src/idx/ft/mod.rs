@@ -126,12 +126,10 @@ impl FtIndex {
 			State::default()
 		};
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(ixs, txn, tt, index_key_base.clone(), p.doc_ids_order, p.doc_ids_cache)
-				.await?,
+			DocIds::new(txn, tt, index_key_base.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
 		let doc_lengths = Arc::new(RwLock::new(
 			DocLengths::new(
-				ixs,
 				txn,
 				index_key_base.clone(),
 				p.doc_lengths_order,
@@ -141,11 +139,11 @@ impl FtIndex {
 			.await?,
 		));
 		let postings = Arc::new(RwLock::new(
-			Postings::new(ixs, txn, index_key_base.clone(), p.postings_order, tt, p.postings_cache)
+			Postings::new(txn, index_key_base.clone(), p.postings_order, tt, p.postings_cache)
 				.await?,
 		));
 		let terms = Arc::new(RwLock::new(
-			Terms::new(ixs, txn, index_key_base.clone(), p.terms_order, tt, p.terms_cache).await?,
+			Terms::new(txn, index_key_base.clone(), p.terms_order, tt, p.terms_cache).await?,
 		));
 		let term_docs = TermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());

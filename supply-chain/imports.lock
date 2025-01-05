@@ -590,8 +590,8 @@ user-login = "hsivonen"
 user-name = "Henri Sivonen"
 
 [[publisher.vart]]
-version = "0.7.0"
-when = "2024-10-28"
+version = "0.8.1"
+when = "2024-12-06"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"

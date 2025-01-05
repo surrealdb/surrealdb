@@ -50,8 +50,4 @@ impl HnswIndexes {
 		let key = ikb.new_vm_key(None);
 		self.0.write().await.remove(&key);
 	}
-
-	pub(super) async fn is_empty(&self) -> bool {
-		self.0.read().await.is_empty()
-	}
 }
