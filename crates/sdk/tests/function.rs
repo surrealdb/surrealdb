@@ -7037,7 +7037,7 @@ pub async fn function_http_error() -> Result<(), Error> {
 	);
 
 	Test::new(&query).await?.expect_error(
-		"There was an error processing a remote HTTP request: Internal Server Error",
+		"There was an error processing a remote HTTP request: 500 Internal Server Error",
 	)?;
 
 	server.verify().await;
