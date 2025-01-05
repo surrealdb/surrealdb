@@ -65,7 +65,11 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/documentation.svg?raw=true">&nbsp;&nbsp;Documentation</h2>
 
-For guidance on installation, development, deployment, and administration, see our [documentation](https://surrealdb.com/docs).
+For guidance on installation, development, deployment, and administration, take a look at the following resources:
+
+- Documentation: https://surrealdb.com/docs
+- SurrealDB University: https://surrealdb.com/learn/fundamentals
+- Aeon's Surreal Renaissance (interative book): https://surrealdb.com/learn/book
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/installation.svg?raw=true">&nbsp;&nbsp;Installation</h2>
 
@@ -125,7 +129,7 @@ docker pull surrealdb/surrealdb:latest
 
 Getting started with SurrealDB is as easy as starting up the SurrealDB database server, choosing your platform, and integrating its SDK into your code. You can easily get started with your platform of choice by reading one of our tutorials.
 
-##### Client side apps
+**Client side apps**
 
 - [x] [Getting started with Javascript](https://surrealdb.com/docs/integration/libraries/javascript)
 - [x] [Getting started with WebAssembly](https://surrealdb.com/docs/integration/libraries/webassembly)
@@ -135,7 +139,7 @@ Getting started with SurrealDB is as easy as starting up the SurrealDB database 
 - [ ] [Getting started with Vue.js](https://surrealdb.com/docs/integration/libraries/vuejs)
 - [ ] [Getting started with Apollo GraphQL](https://surrealdb.com/docs/integration/libraries/apollo)
 
-##### Server side code
+**Server side code**
 
 - [x] [Getting started with Javascript](https://surrealdb.com/docs/integration/libraries/javascript)
 - [x] [Getting started with Node.js](https://surrealdb.com/docs/integration/libraries/nodejs)
