@@ -91,6 +91,7 @@ ndarray-stats = "=0.5.1"
 num_cpus = "1.16.0"
 num-traits = "0.2.18"
 object_store = { version = "0.10.2", optional = false }
+parking_lot = "0.12.3"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
 phf = { version = "0.11.2", features = ["macros", "unicase"] }
 pin-project-lite = "0.2.13"

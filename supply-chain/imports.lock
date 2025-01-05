@@ -281,6 +281,13 @@ user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"
 
+[[publisher.parking_lot]]
+version = "0.12.3"
+when = "2024-05-24"
+user-id = 2915
+user-login = "Amanieu"
+user-name = "Amanieu d'Antras"
+
 [[publisher.paste]]
 version = "1.0.14"
 when = "2023-07-15"
@@ -581,6 +588,13 @@ when = "2023-12-01"
 user-id = 4484
 user-login = "hsivonen"
 user-name = "Henri Sivonen"
+
+[[publisher.vart]]
+version = "0.8.1"
+when = "2024-12-06"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.vart]]
 version = "0.8.1"
