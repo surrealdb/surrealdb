@@ -34,6 +34,19 @@ impl<A> TrackAlloc<A> {
 impl<A: GlobalAlloc> TrackAlloc<A> {
 	/// Returns a tuple with the current total allocated bytes (summed across all threads),
 	/// and the number of threads that have allocated memory.
+	#[cfg(not(feature = "allocation-tracking"))]
+	pub fn current_usage(&self) -> (usize, usize) {
+		(0, 0)
+	}
+
+	/// Checks whether the allocator is above the memory limit threshold
+	#[cfg(not(feature = "allocation-tracking"))]
+	pub fn is_beyond_threshold(&self) -> bool {
+		false
+	}
+
+	/// Returns a tuple with the current total allocated bytes (summed across all threads),
+	/// and the number of threads that have allocated memory.
 	///
 	/// - We only sum if `ENABLE_THREAD_ALLOC` is set, meaning thread-local tracking is enabled.
 	/// - We traverse a global linked list of thread nodes.
@@ -57,13 +70,6 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 			}
 		}
 		(total, threads)
-	}
-
-	/// Returns a tuple with the current total allocated bytes (summed across all threads),
-	/// and the number of threads that have allocated memory.
-	#[cfg(not(feature = "allocation-tracking"))]
-	pub fn current_usage(&self) -> (usize, usize) {
-		(0, 0)
 	}
 
 	/// Checks if the current usage exceeds a configured threshold. No tracking if the feature is off.
@@ -172,11 +178,24 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 			node_ptr
 		})
 	}
+}
 
-	/// Checks whether the allocator is above the memory limit threshold
-	#[cfg(not(feature = "allocation-tracking"))]
-	pub fn is_beyond_threshold(&self) -> bool {
-		false
+#[cfg(not(feature = "allocation-tracking"))]
+unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
+	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+		self.alloc.alloc(layout)
+	}
+
+	unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+		self.alloc.alloc_zeroed(layout)
+	}
+
+	unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+		self.alloc.dealloc(ptr, layout);
+	}
+
+	unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+		self.alloc.realloc(ptr, layout, new_size)
 	}
 }
 
@@ -242,23 +261,4 @@ thread_local! {
 	/// `THREAD_NODE` stores a pointer to this thread's `ThreadCounterNode`.
 	/// It's initially null, and once the thread first allocates, we initialize the node and store it here.
 	static THREAD_NODE: RefCell<*mut ThreadCounterNode> = RefCell::new(null_mut());
-}
-
-#[cfg(not(feature = "allocation-tracking"))]
-unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
-	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-		self.alloc.alloc(layout)
-	}
-
-	unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-		self.alloc.alloc_zeroed(layout)
-	}
-
-	unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-		self.alloc.dealloc(ptr, layout);
-	}
-
-	unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-		self.alloc.realloc(ptr, layout, new_size)
-	}
 }
