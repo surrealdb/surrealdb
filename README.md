@@ -76,9 +76,7 @@ SurrealDB is an end-to-end cloud-native database designed for modern application
 - **Support for multiple querying languages:** SurrealDB supports SQL querying from client devices, GraphQL, ACID transactions, WebSocket connections, structured and unstructured data, graph querying, full-text indexing, and geospatial querying.
 - **Granular access control**: SurrealDB provides row-level permissions-based access control, giving you the ability to manage data access with precision.
 
-
 View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), and [documentation](https://surrealdb.com/docs).
-
 
 <img src="./img/interface.png">
 
