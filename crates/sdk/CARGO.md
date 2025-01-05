@@ -1,8 +1,6 @@
-<p align="center">
-    <a href="https://surrealdb.com" target="_blank">
-        <img width="100%" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/hero.png?raw=true" alt="SurrealDB Hero">
-    </a>
-</p>
+<a href="https://surrealdb.com" target="_blank">
+    <img width="100%" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/hero.png?raw=true" alt="SurrealDB Hero">
+</a>
 
 <p align="center">
 	<a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/status-stable-ff00bb.svg?style=flat-square"></a>
@@ -47,7 +45,13 @@ SurrealDB is an end-to-end cloud-native database designed for modern application
 
 View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), and [documentation](https://surrealdb.com/docs).
 
-<img src="https://github.com/surrealdb/surrealdb/blob/main/img/interface.png">
+<img width="100%" src="https://github.com/surrealdb/surrealdb/blob/main/img/interface.png" alt="Surrealist">
+
+<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/cloud.svg?raw=true">&nbsp;&nbsp;Surreal Cloud</h2>
+	
+<a href="https://surrealdb.com/cloud" target="_blank">
+    <img width="100%" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/cloud.png" alt="Surreal Cloud">
+</a>
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/features.svg?raw=true">&nbsp;&nbsp;Features</h2>
 

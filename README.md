@@ -1,11 +1,9 @@
-<p align="center">
-	<a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
-        <img width="100%" src="/img/white/hero.png" alt="SurrealDB Hero">
-    </a>
-    <a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
-        <img width="100%" src="/img/black/hero.png" alt="SurrealDB Hero">
-    </a>
-</p>
+<a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
+    <img width="100%" src="/img/white/hero.png" alt="SurrealDB Hero">
+</a>
+<a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
+    <img width="100%" src="/img/black/hero.png" alt="SurrealDB Hero">
+</a>
 
 <p align="center">
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/github/v/release/surrealdb/surrealdb?color=ff00a0&include_prereleases&label=version&sort=semver&style=flat-square"></a>
@@ -78,7 +76,16 @@ SurrealDB is an end-to-end cloud-native database designed for modern application
 
 View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), and [documentation](https://surrealdb.com/docs).
 
-<img src="./img/interface.png">
+<img width="100%" src="./img/interface.png" alt="Surrealist">
+
+<h2><img height="20" src="/img/cloud.svg?raw=true">&nbsp;&nbsp;Surreal Cloud</h2>
+
+<a href="https://surrealdb.com/cloud#gh-dark-mode-only" target="_blank">
+    <img width="100%" src="/img/white/cloud.png" alt="Surreal Cloud">
+</a>
+<a href="https://surrealdb.com/cloud#gh-light-mode-only" target="_blank">
+    <img width="100%" src="/img/black/cloud.png" alt="Surreal Cloud">
+</a>
 
 <h2><img height="20" src="./img/contents.svg">&nbsp;&nbsp;Contents</h2>
 
