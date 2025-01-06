@@ -822,8 +822,28 @@ impl Datastore {
 		let mut parse_size = 4096;
 		let mut bytes_stream = pin!(query);
 		let mut complete = false;
+		let mut filling = true;
 
 		let stream = futures::stream::poll_fn(move |cx| loop {
+			// fill the buffer to at least parse_size when filling is required.
+			while filling {
+				let bytes = ready!(bytes_stream.as_mut().poll_next(cx));
+				let bytes = match bytes {
+					Some(Err(e)) => return Poll::Ready(Some(Err(e))),
+					Some(Ok(x)) => x,
+					None => {
+						complete = true;
+						filling = false;
+						break;
+					}
+				};
+
+				buffer.extend_from_slice(&bytes);
+				filling = buffer.len() < parse_size
+			}
+
+			// if we finished streaming we can parse with complete so that the parser can be sure
+			// of it's results.
 			if complete {
 				return match statements_stream.parse_complete(&mut buffer) {
 					Err(e) => Poll::Ready(Some(Err(Error::InvalidQuery(e)))),
@@ -832,28 +852,21 @@ impl Datastore {
 				};
 			}
 
+			// otherwise try to parse a single statement.
 			match statements_stream.parse_partial(&mut buffer) {
 				Err(e) => return Poll::Ready(Some(Err(Error::InvalidQuery(e)))),
 				Ok(Some(x)) => return Poll::Ready(Some(Ok(x))),
 				Ok(None) => {
-					if buffer.len() >= parse_size && (parse_size as usize) < u32::MAX as usize {
+					// Couldn't parse a statement for sure.
+					if buffer.len() >= parse_size && parse_size < u32::MAX as usize {
+						// the buffer already contained more or equal to parse_size bytes
+						// this means we are trying to parse a statement of more then buffer size.
+						// so we need to increase the buffer size.
 						parse_size = parse_size.next_power_of_two();
 					}
+					// start filling the buffer again.
+					filling = true;
 				}
-			}
-
-			while !complete && buffer.len() < parse_size {
-				let bytes = ready!(bytes_stream.as_mut().poll_next(cx));
-				let bytes = match bytes {
-					Some(Err(e)) => return Poll::Ready(Some(Err(e))),
-					Some(Ok(x)) => x,
-					None => {
-						complete = true;
-						break;
-					}
-				};
-
-				buffer.extend_from_slice(&bytes);
 			}
 		});
 
