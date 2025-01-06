@@ -3,7 +3,7 @@ use reblessive::Stk;
 use crate::{
 	sql::{
 		part::{DestructurePart, Recurse, RecurseInstruction},
-		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value,
+		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Tables, Value,
 	},
 	syn::{
 		error::bail,
@@ -445,7 +445,18 @@ impl Parser<'_> {
 			},
 			"shortest" => {
 				expected!(self, t!("="));
-				let expects = Value::from(self.parse_thing(ctx).await?);
+				let token = self.peek();
+				let expects = match token.kind {
+					TokenKind::Parameter => {
+						Value::from(self.next_token_value::<Param>()?)
+					},
+					x if Parser::kind_is_identifier(x) => {
+						Value::from(self.parse_thing(ctx).await?)
+					}
+					_ => {
+						unexpected!(self, token, "a param or thing");
+					}
+				};
 				let mut inclusive = false;
 				loop {
 					parse_option!(
