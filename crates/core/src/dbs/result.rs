@@ -16,6 +16,7 @@ pub(super) enum Results {
 	Memory(MemoryCollector),
 	MemoryRandom(MemoryRandom),
 	MemoryOrdered(MemoryOrdered),
+	MemoryOrderedLimit(MemoryOrderedLimit),
 	#[cfg(storage)]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
@@ -97,8 +98,8 @@ impl Results {
 			#[cfg(storage)]
 			Self::File(f) => f.sort(orders),
 			Self::MemoryOrdered(c) => c.sort().await?,
-            Self::MemoryOrderedLimit(c) => c.sort(),
-            Self::MemoryRandom(c) => c.sort(),
+			Self::MemoryOrderedLimit(c) => c.sort(),
+			Self::MemoryRandom(c) => c.sort(),
 			Self::None | Self::Memory(_) | Self::Groups(_) => {}
 		}
 		Ok(())
@@ -124,8 +125,8 @@ impl Results {
 		match self {
 			Self::Memory(m) => m.start_limit(start, limit),
 			Self::MemoryOrdered(m) => m.start_limit(start, limit),
-            Self::MemoryOrderedLimit(m) => m.start_limit(start, limit),
-            Self::MemoryRandom(c) => c.start_limit(start, limit),
+			Self::MemoryOrderedLimit(m) => m.start_limit(start, limit),
+			Self::MemoryRandom(c) => c.start_limit(start, limit),
 			#[cfg(storage)]
 			Self::File(f) => f.start_limit(start, limit),
 			Self::None | Self::Groups(_) => {}
@@ -154,8 +155,8 @@ impl Results {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
 			Self::MemoryOrdered(c) => c.take_vec(),
-            Self::MemoryOrderedLimit(c) => c.take_vec(),
-            Self::MemoryRandom(c) => c.take_vec(),
+			Self::MemoryOrderedLimit(c) => c.take_vec(),
+			Self::MemoryRandom(c) => c.take_vec(),
 			#[cfg(storage)]
 			Self::File(f) => f.take_vec().await?,
 			Self::None | Self::Groups(_) => vec![],
@@ -169,7 +170,7 @@ impl Results {
 				s.explain(exp);
 			}
 			Self::MemoryOrdered(c) => c.explain(exp),
-            Self::MemoryOrderedLimit(c) => c.explain(exp),
+			Self::MemoryOrderedLimit(c) => c.explain(exp),
 			Self::MemoryRandom(c) => c.explain(exp),
 			#[cfg(storage)]
 			Self::File(e) => {

@@ -258,17 +258,17 @@ impl MemoryOrdered {
 		Ok(())
 	}
 
-	pub(in crate::dbs) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		if let Some(ref mut result) = self.result {
 			MemoryCollector::vec_start_limit(start, limit, result);
 		}
 	}
 
-	pub(in crate::dbs) fn take_vec(&mut self) -> Vec<Value> {
+	pub(super) fn take_vec(&mut self) -> Vec<Value> {
 		self.result.take().unwrap_or_default()
 	}
 
-	pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
+	pub(super) fn explain(&self, exp: &mut Explanation) {
 		exp.add_collector("MemoryOrdered", vec![]);
 	}
 }

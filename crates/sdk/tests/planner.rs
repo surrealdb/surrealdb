@@ -3266,36 +3266,78 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_limit_start_parallel() -> Result<(), Error> {
+async fn select_limit_start() -> Result<(), Error> {
 	let sql = r"
 		CREATE |item:1000|;
-		SELECT * FROM item LIMIT 10 START 0 PARALLEL;";
+		SELECT * FROM item LIMIT 10 START 0 PARALLEL EXPLAIN;
+		SELECT * FROM item LIMIT 10 START 0 PARALLEL;
+		SELECT * FROM item LIMIT 10 START 0 EXPLAIN;
+		SELECT * FROM item LIMIT 10 START 0;";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(2)?;
+	t.expect_size(5)?;
 	t.skip_ok(1)?;
-	t.expect_val(
-		"[
-	{
-		detail: {
-			table: 'item'
-		},
-		operation: 'Iterate Table'
-	},
-	{
-		detail: {
-			batch_size: 1024,
-			limit: 12,
-			type: 'MemoryOrdered'
-		},
-		operation: 'Collector'
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+					{
+						detail: {
+							table: 'item'
+						},
+						operation: 'Iterate Table'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+		)?;
+		let r = t.next()?.result?;
+		if let Value::Array(a) = r {
+			assert_eq!(a.len(), 10);
+		} else {
+			panic!("Unexpected value: {r:#}");
+		}
 	}
-]",
-	)?;
-	let r = t.next()?.result?;
-	if let Value::Array(a) = r {
-		assert_eq!(a.len(), 10);
-	} else {
-		panic!("Unexpected value: {r:#}");
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_limit_start_order() -> Result<(), Error> {
+	let sql = r"
+		CREATE |item:1000| RETURN NONE;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL EXPLAIN;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 EXPLAIN;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(5)?;
+	t.skip_ok(1)?;
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+					{
+						detail: {
+							table: 'item'
+						},
+						operation: 'Iterate Table'
+					},
+					{
+						detail: {
+							limit: 12,
+							type: 'MemoryOrderedLimit'
+						},
+						operation: 'Collector'
+					}
+				]",
+		)?;
+		let r = t.next()?.result?;
+		if let Value::Array(a) = r {
+			assert_eq!(a.len(), 10);
+		} else {
+			panic!("Unexpected value: {r:#}");
+		}
 	}
 	Ok(())
 }
