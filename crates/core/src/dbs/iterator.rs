@@ -1,13 +1,7 @@
 use crate::ctx::Context;
 use crate::ctx::{Canceller, MutableContext};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::Plan;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::dbs::processor::Collected;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::dbs::processor::ParallelCollector;
 use crate::dbs::result::Results;
 use crate::dbs::Options;
 use crate::dbs::Statement;
@@ -23,20 +17,9 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{Fields, Id, IdRange};
-#[cfg(not(target_arch = "wasm32"))]
-use async_channel::{bounded, unbounded, Receiver, Sender};
-#[cfg(not(target_arch = "wasm32"))]
-use async_executor::Executor;
-#[cfg(not(target_arch = "wasm32"))]
-use futures::executor::block_on;
 use reblessive::tree::Stk;
-#[cfg(not(target_arch = "wasm32"))]
-use reblessive::TreeStack;
-#[cfg(not(target_arch = "wasm32"))]
-use std::future::Future;
 use std::mem;
 use std::sync::Arc;
-use std::thread::available_parallelism;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -584,135 +567,14 @@ impl Iterator {
 		self.compute_start_limit(ctx, stm);
 		// Prevent deep recursion
 		let opt = opt.dive(4)?;
-		// Check if iterating in parallel
-		match stm.parallel() {
-			// Run statements sequentially
-			false => {
-				// If any iterator requires distinct, we need to create a global distinct instance
-				let mut distinct = SyncDistinct::new(ctx);
-				// Process all prepared values
-				for v in mem::take(&mut self.entries) {
-					v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
-				}
-				// Everything processed ok
-				Ok(())
-			}
-			// Run statements in parallel
-			true => {
-				// If any iterator requires distinct, we need to create a global distinct instance
-				let distinct = AsyncDistinct::new(ctx);
-				// Get the maximum number of threads
-				let max_threads =
-					available_parallelism().map_or_else(|_| num_cpus::get(), |m| m.get());
-				// Get the maximum number of concurrent tasks
-				let max_concurrent_tasks = *crate::cnf::MAX_CONCURRENT_TASKS;
-				// Create a new executor
-				let exe = Executor::new();
-				let (signal, shutdown) = unbounded::<()>();
-				// Take all of the iterator values
-				let vals = mem::take(&mut self.entries);
-				// Create an channel for collection
-				let (chn, collected) = bounded(max_concurrent_tasks);
-				// Create an async closure to collect key/value
-				let collecting = Self::collecting(ctx, &opt, &exe, vals, chn);
-				// Create an async closure to process key/values
-				let (chn, docs) = bounded(max_concurrent_tasks);
-				let processing =
-					Self::processing(ctx, &opt, &exe, max_threads, distinct, collected, chn);
-				// Create an unbounded channel
-				let (chn, vals) = bounded(max_concurrent_tasks);
-				// Create an async closure for received values
-				let computing = Self::computing(ctx, &opt, stm, &exe, max_threads, docs, chn);
-				// Create an async closure to process results
-				let resulting = async {
-					// Process all processed values
-					while let Ok(r) = vals.recv().await {
-						self.result(stk, ctx, &opt, stm, r).await;
-					}
-				};
-				Self::execute(
-					max_threads,
-					signal,
-					shutdown,
-					&exe,
-					(collecting, processing, computing, resulting),
-				);
-				// Everything processed ok
-				Ok(())
-			}
+		// If any iterator requires distinct, we need to create a global distinct instance
+		let mut distinct = SyncDistinct::new(ctx);
+		// Process all prepared values
+		for v in mem::take(&mut self.entries) {
+			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
 		}
-	}
-
-	#[cfg(not(target_arch = "wasm32"))]
-	async fn collecting<'a>(
-		ctx: &'a Context,
-		opt: &'a Options,
-		exe: &Executor<'a>,
-		vals: Vec<Iterable>,
-		chn: Sender<Collected>,
-	) {
-		for v in vals {
-			let chn = chn.clone();
-			let proc = v.channel(ctx, opt, chn);
-			exe.spawn(proc).detach();
-		}
-	}
-
-	#[cfg(not(target_arch = "wasm32"))]
-	async fn processing<'a>(
-		ctx: &'a Context,
-		opt: &'a Options,
-		exe: &Executor<'a>,
-		max_threads: usize,
-		distinct: Option<AsyncDistinct>,
-		collected: Receiver<Collected>,
-		chn: Sender<Processed>,
-	) {
-		for _ in 0..max_threads {
-			let tx = ctx.tx();
-			let chn = chn.clone();
-			let collected = collected.clone();
-			let distinct = distinct.clone();
-			let process = async move {
-				while let Ok(coll) = collected.recv().await {
-					let pro = coll.process(opt, &tx).await?;
-					ParallelCollector::process(distinct.as_ref(), pro, &chn).await?;
-				}
-				Ok::<_, Error>(())
-			};
-			exe.spawn(process).detach();
-		}
-	}
-
-	#[cfg(not(target_arch = "wasm32"))]
-	async fn computing<'a>(
-		ctx: &'a Context,
-		opt: &'a Options,
-		stm: &'a Statement<'a>,
-		exe: &Executor<'a>,
-		max_threads: usize,
-		docs: Receiver<Processed>,
-		chn: Sender<Result<Value, Error>>,
-	) {
-		for _ in 0..max_threads {
-			let docs = docs.clone();
-			let chn = chn.clone();
-			let compute = async move {
-				let mut stack = TreeStack::new();
-				stack
-					.enter(|stk| async {
-						while let Ok(pro) = docs.recv().await {
-							// Spawn an asynchronous task to process the received value
-							Document::compute(stk, ctx, opt, stm, &chn, pro).await?;
-						}
-						Ok::<(), Error>(())
-					})
-					.finish()
-					.await?;
-				Ok::<_, Error>(())
-			};
-			exe.spawn(compute).detach();
-		}
+		// Everything processed ok
+		Ok(())
 	}
 
 	/// Process a new record Thing and Value
@@ -750,7 +612,7 @@ impl Iterator {
 		// Count the result
 		self.count += 1;
 		// Periodically yield
-		if !stm.parallel() && self.count % 100 == 0 {
+		if self.count % 100 == 0 {
 			yield_now!();
 		}
 		// Process the result
@@ -777,52 +639,5 @@ impl Iterator {
 				self.run.cancel()
 			}
 		}
-	}
-
-	#[cfg(not(target_arch = "wasm32"))]
-	fn execute(
-		max_threads: usize,
-		signal: Sender<()>,
-		shutdown: Receiver<()>,
-		exe: &Executor<'_>,
-		tasks: (
-			impl Future<Output = ()> + Sized,
-			impl Future<Output = ()> + Sized,
-			impl Future<Output = ()> + Sized,
-			impl Future<Output = ()> + Sized,
-		),
-	) {
-		// Start executor threads
-		std::thread::scope(|scope| {
-			let handles = (0..max_threads)
-				.map(|_| {
-					scope.spawn(|| {
-						let shutdown = shutdown.clone();
-						// Run the executor in each thread
-						block_on(async {
-							let _ = exe.run(shutdown.recv()).await;
-						});
-					})
-				})
-				.collect::<Vec<_>>();
-
-			block_on(async {
-				// Wait for all closures
-				futures::join!(tasks.0, tasks.1, tasks.2, tasks.3);
-				// Stop every threads
-				drop(signal);
-			});
-
-			let mut err = None;
-			for h in handles {
-				if let Err(e) = h.join() {
-					err = Some(e);
-				}
-			}
-
-			if let Some(err) = err {
-				std::panic::resume_unwind(err);
-			}
-		});
 	}
 }

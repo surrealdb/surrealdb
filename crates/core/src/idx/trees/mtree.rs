@@ -1503,7 +1503,6 @@ mod tests {
 	}
 
 	async fn finish_operation(
-		ds: &Datastore,
 		t: &mut MTree,
 		tx: &Transaction,
 		mut st: TreeStore<MTreeNode>,
@@ -1536,7 +1535,7 @@ mod tests {
 				let (ctx, mut st) = new_operation(ds, t, TransactionType::Write, cache_size).await;
 				let tx = ctx.tx();
 				t.insert(stk, &tx, &mut st, obj.clone(), *doc_id).await?;
-				finish_operation(ds, t, &tx, st, true).await?;
+				finish_operation(t, &tx, st, true).await?;
 				map.insert(*doc_id, obj.clone());
 			}
 			c += 1;
@@ -1565,7 +1564,7 @@ mod tests {
 				t.insert(stk, &tx, &mut st, obj.clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
 			}
-			finish_operation(ds, t, &tx, st, true).await?;
+			finish_operation(t, &tx, st, true).await?;
 		}
 		{
 			let (ctx, mut st) = new_operation(ds, t, TransactionType::Read, cache_size).await;
@@ -1590,7 +1589,7 @@ mod tests {
 				let (ctx, mut st) = new_operation(ds, t, TransactionType::Write, cache_size).await;
 				let tx = ctx.tx();
 				let deleted = t.delete(stk, &tx, &mut st, obj.clone(), *doc_id).await?;
-				finish_operation(ds, t, &tx, st, true).await?;
+				finish_operation(t, &tx, st, true).await?;
 				drop(tx);
 				deleted
 			};
