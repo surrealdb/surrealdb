@@ -26,7 +26,7 @@ use crate::{
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Scoring, Script, Split, Splits, Start, Statement, Strand,
+		Permission, Permissions, Regex, Scoring, Script, Split, Splits, Start, Statement, Strand,
 		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::parser::StatementStream,
@@ -112,6 +112,8 @@ static SOURCE: &str = r#"
 	"a b c d e f g h";
 	u"ffffffff-ffff-ffff-ffff-ffffffffffff";
 	r"a:[1,2,3,4,5,6,7,8,9,10]";
+	/a b c d e f/;
+	-123.456e10;
 "#;
 
 fn statements() -> Vec<Statement> {
@@ -743,6 +745,8 @@ fn statements() -> Vec<Statement> {
 				[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].iter().copied().map(Value::from).collect(),
 			)),
 		})),
+		Statement::Value(Value::Regex(Regex("a b c d e f".try_into().unwrap()))),
+		Statement::Value(Value::from(-123.456e10)),
 	]
 }
 

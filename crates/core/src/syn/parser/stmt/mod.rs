@@ -66,7 +66,6 @@ impl Parser<'_> {
 						if Self::kind_starts_statement(token.kind) {
 							// consume token for streaming
 							self.pop_peek();
-							dbg!("called");
 							// user likely forgot a semicolon.
 							unexpected!(self,token,"the query to end", => "maybe forgot a semicolon after the previous statement?");
 						}
