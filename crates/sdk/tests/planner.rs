@@ -2696,7 +2696,8 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 4,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -2801,7 +2802,8 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 3,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -2890,7 +2892,8 @@ async fn select_from_standard_index_descending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 4,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -2987,7 +2990,8 @@ async fn select_from_unique_index_descending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 3,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
