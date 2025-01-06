@@ -109,6 +109,9 @@ static SOURCE: &str = r#"
 	UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL;
 	UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL;
 	function(){ ((1 + 1)) };
+	"a b c d e f g h";
+	u"ffffffff-ffff-ffff-ffff-ffffffffffff";
+	r"a:[1,2,3,4,5,6,7,8,9,10]";
 "#;
 
 fn statements() -> Vec<Statement> {
@@ -730,6 +733,16 @@ fn statements() -> Vec<Statement> {
 			Script(" ((1 + 1)) ".to_owned()),
 			Vec::new(),
 		)))),
+		Statement::Value(Value::Strand(Strand("a b c d e f g h".to_owned()))),
+		Statement::Value(Value::Uuid(Uuid(uuid::Uuid::from_u128(
+			0xffffffff_ffff_ffff_ffff_ffffffffffff,
+		)))),
+		Statement::Value(Value::Thing(Thing {
+			tb: "a".to_string(),
+			id: Id::Array(Array(
+				[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].iter().copied().map(Value::from).collect(),
+			)),
+		})),
 	]
 }
 
@@ -748,7 +761,11 @@ fn test_streaming() {
 			}
 			Ok(None) => {}
 			Err(e) => {
-				panic!("Streaming test returned an error: {}", e)
+				panic!(
+					"Streaming test returned an error: {}\n\n buffer was {}",
+					e,
+					String::from_utf8_lossy(&buffer)
+				)
 			}
 		}
 

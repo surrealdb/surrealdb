@@ -482,6 +482,14 @@ impl StatementStream {
 				return Ok(None);
 			}
 
+			if let Err(e) = res {
+				return Err(e
+					.render_on_bytes(slice)
+					.offset_location(self.line_offset, self.col_offset));
+			}
+
+			dbg!(res);
+
 			let error = syntax_error!("Unexpected token `{}` expected the query to end.",peek.kind.as_str(),
 				@peek.span => "maybe forgot a semicolon after the previous statement?");
 			return Err(error
