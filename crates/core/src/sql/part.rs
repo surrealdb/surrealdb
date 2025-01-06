@@ -685,7 +685,8 @@ impl RecurseInstruction {
 				expects,
 				inclusive,
 			} => {
-				let expects = expects.compute(stk, ctx, opt, doc).await?.coerce_to_record()?;
+				let expects =
+					Value::from(expects.compute(stk, ctx, opt, doc).await?.coerce_to_record()?);
 				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Some(&expects))
 			}
 			Self::Collect {
