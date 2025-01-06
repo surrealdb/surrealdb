@@ -251,7 +251,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 			}
 		}
 	} else {
-		let response: Vec<QueryMethodResponse> = deserialize(&*res.bytes().await?, false)?;
+		let response: Vec<QueryMethodResponse> = deserialize(&res.bytes().await?, false)?;
 		for res in response {
 			if let Status::Err = res.status {
 				return Err(Error::Query(res.result.0.as_string()).into());
