@@ -389,6 +389,7 @@ pub struct StatementStream {
 }
 
 impl StatementStream {
+	#[allow(clippy::new_without_default)]
 	pub fn new() -> Self {
 		Self::new_with_settings(ParserSettings::default())
 	}
@@ -484,7 +485,7 @@ impl StatementStream {
 			let error = syntax_error!("Unexpected token `{}` expected the query to end.",peek.kind.as_str(),
 				@peek.span => "maybe forgot a semicolon after the previous statement?");
 			return Err(error
-				.render_on_bytes(&slice)
+				.render_on_bytes(slice)
 				.offset_location(self.line_offset, self.col_offset));
 		}
 
@@ -527,18 +528,16 @@ impl StatementStream {
 					let error = syntax_error!("Unexpected token `{}` expected the query to end.",peek.kind.as_str(),
 						@peek.span => "maybe forgot a semicolon after the previous statement?");
 					return Err(error
-						.render_on_bytes(&slice)
+						.render_on_bytes(slice)
 						.offset_location(self.line_offset, self.col_offset));
 				}
 
 				let eaten = buffer.split_off(parser.last_span().after_offset() as usize);
 				self.accumulate_line_col(&eaten);
-				return Ok(Some(x));
+				Ok(Some(x))
 			}
 			Err(e) => {
-				return Err(e
-					.render_on_bytes(slice)
-					.offset_location(self.line_offset, self.col_offset))
+				Err(e.render_on_bytes(slice).offset_location(self.line_offset, self.col_offset))
 			}
 		}
 	}
