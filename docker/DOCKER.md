@@ -1,23 +1,8 @@
-<br>
-
 <p align="center">
-    <img width="300" src="https://github.com/surrealdb/surrealdb/blob/main/img/icon.png?raw=true" alt="SurrealDB Icon">
+    <a href="https://surrealdb.com" target="_blank">
+        <img width="100%" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/hero.png?raw=true" alt="SurrealDB Hero">
+    </a>
 </p>
-
-<br>
-
-<p align="center">
-    <img width="300" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/logo.svg?raw=true" alt="SurrealDB Logo">
-</p>
-
-<h3 align="center">
-    <img src="https://github.com/surrealdb/surrealdb/blob/main/img/black/text.svg?raw=true" height="15" alt="SurrealDB">
-    is the ultimate cloud <br> database for tomorrow's applications
-</h3>
-
-<h3 align="center">Develop easier. &nbsp; Build faster. &nbsp; Scale quicker.</h3>
-
-<br>
 
 <p align="center">
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/github/v/release/surrealdb/surrealdb?color=%23ff00a0&include_prereleases&label=version&sort=semver&style=flat-square"></a>
@@ -34,31 +19,31 @@
 </p>
 
 <p align="center">
-	<a href="https://surrealdb.com/discord"><img src="https://img.shields.io/discord/902568124350599239?label=discord&style=flat-square&color=5a66f6"></a>
+	<a href="https://surrealdb.com/discord"><img src="https://img.shields.io/discord/902568124350599239?label=discord&style=flat-square&color=5a66f6" alt="Discord"></a>
 	&nbsp;
-    <a href="https://twitter.com/surrealdb"><img src="https://img.shields.io/badge/twitter-follow_us-1d9bf0.svg?style=flat-square"></a>
+    <a href="https://x.com/surrealdb"><img src="https://img.shields.io/badge/x-follow_us-222222.svg?style=flat-square" alt="X"></a>
     &nbsp;
-    <a href="https://dev.to/surrealdb"><img src="https://img.shields.io/badge/dev-join_us-86f7b7.svg?style=flat-square"></a>
+    <a href="https://dev.to/surrealdb"><img src="https://img.shields.io/badge/dev-join_us-86f7b7.svg?style=flat-square" alt="Dev"></a>
     &nbsp;
-    <a href="https://www.linkedin.com/company/surrealdb/"><img src="https://img.shields.io/badge/linkedin-connect_with_us-0a66c2.svg?style=flat-square"></a>
+    <a href="https://www.linkedin.com/company/surrealdb/"><img src="https://img.shields.io/badge/linkedin-connect_with_us-0a66c2.svg?style=flat-square" alt="LinkedIn"></a>
 </p>
 
 <p align="center">
 	<a href="https://surrealdb.com/blog"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/blog.svg?raw=true" alt="Blog"></a>
 	&nbsp;
-	<a href="https://github.com/surrealdb/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/github.svg?raw=true" alt="Github	"></a>
+	<a href="https://github.com/surrealdb/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/github.svg?raw=true" alt="Github"></a>
 	&nbsp;
     <a href="https://www.linkedin.com/company/surrealdb/"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/linkedin.svg?raw=true" alt="LinkedIn"></a>
     &nbsp;
-    <a href="https://twitter.com/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/twitter.svg?raw=true" alt="Twitter"></a>
+    <a href="https://x.com/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/x.svg?raw=true" alt="X"></a>
     &nbsp;
-    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/youtube.svg?raw=true" alt="Youtube"></a>
+    <a href="https://www.youtube.com/@surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/youtube.svg?raw=true" alt="YouTube"></a>
     &nbsp;
     <a href="https://dev.to/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/dev.svg?raw=true" alt="Dev"></a>
     &nbsp;
     <a href="https://surrealdb.com/discord"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/discord.svg?raw=true" alt="Discord"></a>
     &nbsp;
-    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/stack-overflow.svg?raw=true" alt="StackOverflow"></a>
+    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/stack-overflow.svg?raw=true" alt="Stack Overflow"></a>
 </p>
 
 <br>
@@ -100,11 +85,11 @@ services:
   surrealdb:
     command: start 
     image: surrealdb/surrealdb:latest # Consider using a specific version
-    pull_policy: always # Remove this when not using "latest"
+    pull_policy: always
     ports:
       - 8000:8000
     environment:
-      - SURREAL_LOG=debug # Use "info" in production
+      - SURREAL_LOG=info # Use "info" in production
       - SURREAL_USER=root
       - SURREAL_PASS=root # Change this in production!
 ```
@@ -125,7 +110,7 @@ Here is an example of running the container with a persistent volume as a non-ro
 services:
   surrealdb:
     image: surrealdb/surrealdb:latest # Consider using a specific version
-    pull_policy: always # Remove this when not using "latest"
+    pull_policy: always
     command: start rocksdb:/mydata/mydatabase.db
     user: "1000"
     ports:
@@ -148,9 +133,9 @@ Join our growing community around the world, for help, ideas, and discussions re
 
 - View our official [Blog](https://surrealdb.com/blog)
 - Chat live with us on [Discord](https://surrealdb.com/discord)
-- Follow us on [Twitter](https://twitter.com/surrealdb)
+- Follow us on [X](https://x.com/surrealdb)
 - Connect with us on [LinkedIn](https://www.linkedin.com/company/surrealdb/)
-- Visit us on [YouTube](https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w)
+- Visit us on [YouTube](https://www.youtube.com/@surrealdb)
 - Join our [Dev community](https://dev.to/surrealdb)
 - Questions tagged #surrealdb on [Stack Overflow](https://stackoverflow.com/questions/tagged/surrealdb)
 
