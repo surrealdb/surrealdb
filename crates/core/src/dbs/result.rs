@@ -1,3 +1,4 @@
+use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::Context;
 #[cfg(storage)]
 use crate::dbs::file::FileCollector;
@@ -43,7 +44,7 @@ impl Results {
 				Ordering::Order(orders) => {
 					if let Some(limit) = limit {
 						let limit = start.unwrap_or(0) + limit;
-						if limit < 1000 {
+						if limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
 							return Ok(Self::MemoryOrderedLimit(MemoryOrderedLimit::new(
 								limit as usize,
 								orders.clone(),
