@@ -836,7 +836,7 @@ impl Datastore {
 				Err(e) => return Poll::Ready(Some(Err(Error::InvalidQuery(e)))),
 				Ok(Some(x)) => return Poll::Ready(Some(Ok(x))),
 				Ok(None) => {
-					if buffer.len() >= parse_size && parse_size as usize < (u32::MAX as usize) {
+					if buffer.len() >= parse_size && (parse_size as usize) < u32::MAX as usize {
 						parse_size = parse_size.next_power_of_two();
 					}
 				}
