@@ -1,6 +1,3 @@
-#[cfg(storage)]
-pub(super) mod file;
-
 use crate::dbs::plan::Explanation;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::err::Error;

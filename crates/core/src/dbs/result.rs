@@ -1,8 +1,8 @@
 use crate::ctx::Context;
+#[cfg(storage)]
+use crate::dbs::file::FileCollector;
 use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
-#[cfg(storage)]
-use crate::dbs::store::file::FileCollector;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryRandom};
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
