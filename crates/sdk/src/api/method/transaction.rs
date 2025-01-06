@@ -5,10 +5,13 @@ use crate::{
 };
 use serde::Serialize;
 use std::{borrow::Cow, marker::PhantomData};
-use surrealdb_core::sql::{statements::CreateStatement, to_value, Data, Output, Query, Statement};
 use surrealdb_core::sql::{
-	statements::{BeginStatement, CommitStatement},
+	statements::{self, BeginStatement, CommitStatement},
 	Object as CoreObject, Values as CoreValues,
+};
+use surrealdb_core::sql::{
+	statements::{CreateStatement, DeleteStatement},
+	to_value, Data, Output, Query, Statement,
 };
 
 pub struct TransactionBuilder<'r, C: Connection> {
@@ -86,6 +89,17 @@ where
 			builder: self,
 			response_type: PhantomData,
 		})
+	}
+
+	pub fn delete<R>(mut self, resource: impl CreateResource<Option<R>>) -> Result<Self> {
+		let statement = {
+			let mut stmt = DeleteStatement::default();
+			stmt.what = resource_to_values(resource.into_resource()?);
+			stmt.output = Some(Output::Before);
+			stmt
+		};
+		self.statements.push(Statement::Delete(statement));
+		Ok(self)
 	}
 
 	pub async fn end_transaction(mut self) -> Result<Response> {
