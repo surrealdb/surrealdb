@@ -1226,7 +1226,7 @@ async fn idiom_recursion_invalid_instruction() -> Result<(), Error> {
 	expect_parse_error!("a:1.{..+shortest}", "Unexpected token `}`, expected =");
 	expect_parse_error!(
 		"a:1.{..+shortest=123}",
-		"Unexpected token `a number`, expected an identifier"
+		"Unexpected token `a number`, expected a param or thing"
 	);
 	Ok(())
 }
