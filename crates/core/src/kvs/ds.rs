@@ -853,14 +853,7 @@ impl Datastore {
 					}
 				};
 
-				match bytes.try_into_mut() {
-					Ok(x) => {
-						buffer.unsplit(x);
-					}
-					Err(e) => {
-						buffer.extend_from_slice(&e);
-					}
-				}
+				buffer.extend_from_slice(&bytes);
 			}
 		});
 
