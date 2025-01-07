@@ -15,7 +15,7 @@ use tempfile::{Builder, TempDir};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::task::spawn_blocking;
 
-pub(in crate::dbs) struct FileCollector {
+pub(super) struct FileCollector {
 	dir: TempDir,
 	len: usize,
 	writer: Option<FileWriter>,
@@ -32,7 +32,7 @@ impl FileCollector {
 
 	const USIZE_SIZE: usize = mem::size_of::<usize>();
 
-	pub(in crate::dbs) fn new(temp_dir: &Path) -> Result<Self, Error> {
+	pub(super) fn new(temp_dir: &Path) -> Result<Self, Error> {
 		let dir = Builder::new().prefix("SURREAL").tempdir_in(temp_dir)?;
 		Ok(Self {
 			len: 0,
@@ -43,7 +43,7 @@ impl FileCollector {
 			dir,
 		})
 	}
-	pub(in crate::dbs) async fn push(&mut self, value: Value) -> Result<(), Error> {
+	pub(super) async fn push(&mut self, value: Value) -> Result<(), Error> {
 		if let Some(mut writer) = self.writer.take() {
 			#[cfg(not(target_arch = "wasm32"))]
 			let writer = spawn_blocking(move || {
@@ -71,20 +71,20 @@ impl FileCollector {
 		}
 		Ok(())
 	}
-	pub(in crate::dbs) fn sort(&mut self, orders: &Ordering) {
+	pub(super) fn sort(&mut self, orders: &Ordering) {
 		self.orders = Some(orders.clone());
 	}
 
-	pub(in crate::dbs) fn len(&self) -> usize {
+	pub(super) fn len(&self) -> usize {
 		self.len
 	}
 
-	pub(in crate::dbs) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		self.paging.start = start;
 		self.paging.limit = limit;
 	}
 
-	pub(in crate::dbs) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
+	pub(super) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
 		self.check_reader()?;
 		if let Some(mut reader) = self.reader.take() {
 			if let Some((start, num)) = self.paging.get_start_num(reader.len as u32) {
@@ -178,7 +178,7 @@ impl FileCollector {
 		}
 	}
 
-	pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
+	pub(super) fn explain(&self, exp: &mut Explanation) {
 		exp.add_collector("TempFiles", vec![]);
 	}
 }

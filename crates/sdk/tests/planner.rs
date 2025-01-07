@@ -16,10 +16,10 @@ async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
 	skip_ok(&mut res, 8)?;
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
 	// OR results
-	check_result(&mut res, &three_multi_index_explain(false))?;
+	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &single_index_ft_explain(false))?;
+	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
 	Ok(())
 }
 
@@ -30,10 +30,10 @@ async fn select_where_iterate_three_multi_index_parallel() -> Result<(), Error> 
 	skip_ok(&mut res, 8)?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
-	check_result(&mut res, &three_multi_index_explain(true))?;
+	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &single_index_ft_explain(true))?;
+	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
 	Ok(())
 }
 
@@ -49,10 +49,10 @@ async fn select_where_iterate_three_multi_index_with_all_index() -> Result<(), E
 	skip_ok(&mut res, 8)?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
-	check_result(&mut res, &three_multi_index_explain(false))?;
+	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &single_index_ft_explain(false))?;
+	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
 	Ok(())
 }
 
@@ -68,7 +68,7 @@ async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()
 	check_result(&mut res, &three_table_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &single_index_ft_explain(false))?;
+	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
 	Ok(())
 }
 
@@ -84,7 +84,7 @@ async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), E
 	check_result(&mut res, &three_table_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &single_index_uniq_explain(false))?;
+	check_result(&mut res, SINGLE_INDEX_UNIQ_EXPLAIN)?;
 	Ok(())
 }
 
@@ -279,132 +279,105 @@ fn three_table_explain(parallel: bool) -> String {
 	)
 }
 
-fn three_multi_index_explain(parallel: bool) -> String {
-	let collector = if parallel {
-		"AsyncMemoryOrdered"
-	} else {
-		"MemoryOrdered"
-	};
-	format!(
-		"[
-				{{
-					detail: {{
-						plan: {{
+const THREE_MULTI_INDEX_EXPLAIN: &str = "[
+				{
+					detail: {
+						plan: {
 							index: 'uniq_name',
 							operator: '=',
 							value: 'Jaime'
-						}},
+						},
 						table: 'person',
-					}},
+					},
 					operation: 'Iterate Index'
-				}},
-                {{
-					detail: {{
-						plan: {{
+				},
+                {
+					detail: {
+						plan: {
 							index: 'idx_genre',
 							operator: '=',
 							value: 'm'
-						}},
+						},
 						table: 'person',
-					}},
+					},
 					operation: 'Iterate Index'
-				}},
-				{{
-					detail: {{
-						plan: {{
+				},
+				{
+					detail: {
+						plan: {
 							index: 'ft_company',
 							operator: '@@',
 							value: 'surrealdb'
-						}},
+						},
 						table: 'person',
-					}},
+					},
 					operation: 'Iterate Index'
-				}},
-				{{
-					detail: {{
-						type: '{collector}'
-					}},
+				},
+				{
+					detail: {
+						type: 'MemoryOrdered'
+					},
 					operation: 'Collector'
-				}},
-				{{
-					detail: {{
+				},
+				{
+					detail: {
 						count: 3
-					}},
+					},
 					operation: 'Fetch'
-				}}
-			]"
-	)
-}
+				}
+			]";
 
-fn single_index_ft_explain(parallel: bool) -> String {
-	let collector = if parallel {
-		"AsyncMemoryOrdered"
-	} else {
-		"MemoryOrdered"
-	};
-	format!(
-		"[
-				{{
-					detail: {{
-						plan: {{
+const SINGLE_INDEX_FT_EXPLAIN: &str = "[
+				{
+					detail: {
+						plan: {
 							index: 'ft_company',
 							operator: '@@',
 							value: 'surrealdb'
-						}},
+						},
 						table: 'person',
-					}},
+					},
 					operation: 'Iterate Index'
-				}},
-				{{
-					detail: {{
-						type: '{collector}'
-					}},
+				},
+				{
+					detail: {
+						type: 'MemoryOrdered'
+					},
 					operation: 'Collector'
-				}},
-				{{
-					detail: {{
+				},
+				{
+					detail: {
 						count: 1
-					}},
+					},
 					operation: 'Fetch'
-				}}
-			]"
-	)
-}
+				}
+			]";
 
-fn single_index_uniq_explain(parallel: bool) -> String {
-	let collector = if parallel {
-		"AsyncMemoryOrdered"
-	} else {
-		"MemoryOrdered"
-	};
-	format!(
-		"[
-				{{
-					detail: {{
-						plan: {{
+const SINGLE_INDEX_UNIQ_EXPLAIN: &str = "[
+				{
+					detail: {
+						plan: {
 							index: 'uniq_name',
 							operator: '=',
 							value: 'Jaime'
-						}},
+						},
 						table: 'person',
-					}},
+					},
 					operation: 'Iterate Index'
-				}},
-				{{
-					detail: {{
-						type: '{collector}'
-					}},
+				},
+				{
+					detail: {
+						type: 'MemoryOrdered'
+					},
 					operation: 'Collector'
-				}},
-				{{
-					detail: {{
+				},
+				{
+					detail: {
 						count: 1
-					}},
+					},
 					operation: 'Fetch'
-				}}
-			]"
-	)
-}
+				}
+			]";
 
 const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 	{
@@ -3224,8 +3197,9 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 	t.expect_size(9)?;
 	t.skip_ok(1)?;
 	// Check explain plans
-	t.expect_val(
-		"[
+	for _ in 0..2 {
+		t.expect_val(
+			"[
 				{
 					detail: {
 						table: 'i'
@@ -3239,24 +3213,7 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 					operation: 'Collector'
 				}
 			]",
-	)?;
-	t.expect_val(
-		"[
-				{
-					detail: {
-						table: 'i'
-					},
-					operation: 'Iterate Table'
-				},
-				{
-					detail: {
-						type: 'MemoryOrdered'
-					},
-					operation: 'Collector'
-				}
-			]",
-	)?;
-	for _ in 0..2 {
+		)?;
 		t.expect_val(
 			"[
 				{
@@ -3267,7 +3224,7 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'AsyncMemoryOrdered'
+						type: 'MemoryOrdered'
 					},
 					operation: 'Collector'
 				}

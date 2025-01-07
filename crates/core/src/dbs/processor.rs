@@ -1,7 +1,5 @@
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, MutableContext};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
@@ -12,8 +10,6 @@ use crate::kvs::{Key, Transaction, Val};
 use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
 use crate::sql::{Edges, Table, Thing, Value};
-#[cfg(not(target_arch = "wasm32"))]
-use async_channel::Sender;
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use std::borrow::Cow;
@@ -52,21 +48,6 @@ impl Iterable {
 			}
 		}
 		Ok(())
-	}
-
-	#[cfg(not(target_arch = "wasm32"))]
-	pub(super) async fn channel(
-		self,
-		ctx: &Context,
-		opt: &Options,
-		chn: Sender<Collected>,
-	) -> Result<(), Error> {
-		if self.iteration_stage_check(ctx) {
-			let mut collector = ParallelCollector(chn);
-			collector.collect_iterable(ctx, opt, self).await
-		} else {
-			Ok(())
-		}
 	}
 
 	fn iteration_stage_check(&self, ctx: &Context) -> bool {
@@ -358,33 +339,7 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 		Ok(())
 	}
 }
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) struct ParallelCollector(Sender<Collected>);
 
-#[cfg(not(target_arch = "wasm32"))]
-impl ParallelCollector {
-	pub(super) async fn process(
-		distinct: Option<&AsyncDistinct>,
-		pro: Processed,
-		chn: &Sender<Processed>,
-	) -> Result<(), Error> {
-		if let Some(d) = distinct {
-			// If the record has already been processed, we can return
-			if d.check_already_processed(&pro).await {
-				return Ok(());
-			}
-		}
-		chn.send(pro).await?;
-		Ok(())
-	}
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl Collector for ParallelCollector {
-	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
-		self.0.send(collected).await.map_err(|e| Error::Channel(e.to_string()))?;
-		Ok(())
-	}
-}
 pub(super) trait Collector {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error>;
 

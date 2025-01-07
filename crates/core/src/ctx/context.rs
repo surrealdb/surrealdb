@@ -164,6 +164,7 @@ impl MutableContext {
 	/// Create a new context from a frozen parent context.
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.
+	#[cfg(not(target_arch = "wasm32"))]
 	pub(crate) fn new_concurrent(from: &Context) -> Self {
 		Self {
 			values: HashMap::default(),
@@ -176,7 +177,6 @@ impl MutableContext {
 			capabilities: from.capabilities.clone(),
 			index_stores: from.index_stores.clone(),
 			cache: from.cache.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
 			index_builder: from.index_builder.clone(),
 			#[cfg(storage)]
 			temporary_directory: from.temporary_directory.clone(),
