@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use crate::dbs::Session;
+use crate::err;
 use crate::gql::ext::TryAsExt;
 use crate::gql::schema::{kind_to_type, unwrap_type};
 use crate::kvs::{Datastore, Transaction};
@@ -312,9 +313,10 @@ pub async fn process_tbs(
 				continue;
 			};
 			let fd_name = Name::new(fd.name.to_string());
-			let fd_type = kind_to_type(kind.clone(), types)?;
+			let fd_type = kind_to_type(kind.clone(), types, false)?;
+			let fd_type_input = kind_to_type(kind.clone(), types, true)?;
 			table_orderable = table_orderable.item(fd_name.to_string());
-			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
+			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type_input.clone()));
 
 			let type_filter =
 				Type::InputObject(filter_from_type(kind.clone(), type_filter_name.clone(), types)?);
@@ -457,7 +459,7 @@ fn filter_from_type(
 			)),
 			_ => TypeRef::named(TypeRef::ID),
 		},
-		k => unwrap_type(kind_to_type(k.clone(), types)?),
+		k => unwrap_type(kind_to_type(k.clone(), types, true)?),
 	};
 
 	let mut filter = InputObject::new(filter_name);

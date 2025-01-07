@@ -11,15 +11,16 @@ use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use crate::sql::Geometry;
 use crate::sql::Kind;
-use async_graphql::dynamic::Schema;
-use async_graphql::dynamic::{Enum, Type, Union};
+use async_graphql::dynamic::indexmap::IndexMap;
+use async_graphql::dynamic::{Enum, InputValue, Type, Union};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, Object};
+use async_graphql::dynamic::{InputObject, Schema};
 use async_graphql::dynamic::{InterfaceField, ResolverContext};
 use async_graphql::dynamic::{Scalar, TypeRef};
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
-use geo::{Coord, Polygon};
+use geo::{Coord, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -181,6 +182,12 @@ pub async fn generate_schema(
 						})
 					})),
 			);
+			$schema = $schema.register(
+				InputObject::new(format!("{}_input", $name))
+					.field(InputValue::new("type", TypeRef::named("GeometryType")))
+					// .field(InputValue::new("geotype", TypeRef::named(TypeRef::STRING)))
+					.field(InputValue::new("coordinates", $type.clone())),
+			);
 		};
 	}
 
@@ -245,6 +252,11 @@ pub async fn generate_schema(
 				},
 			)),
 	);
+	schema = schema.register(
+		InputObject::new("GeometryCollection_input")
+			.field(InputValue::new("type", TypeRef::named("GeometryType")))
+			.field(InputValue::new("geometries", TypeRef::named_nn_list_nn("Geometry_input"))),
+	);
 
 	let mut geometry_union = Union::new("Geometry");
 	geometry_union = geometry_union.possible_type("GeometryPoint");
@@ -256,6 +268,8 @@ pub async fn generate_schema(
 	geometry_union = geometry_union.possible_type("GeometryCollection");
 
 	schema = schema.register(geometry_union);
+
+	scalar_debug_validated!(schema, "Geometry_input", Kind::Geometry(vec![]));
 
 	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
 	scalar_debug_validated!(schema, "number", Kind::Number);
@@ -423,35 +437,44 @@ fn polygon_to_list(polygon: &Polygon) -> Result<GqlValue, GqlError> {
 	))
 }
 
-fn geometry_kind_name_to_type_kind(name: &str) -> TypeRef
-{
+fn geometry_kind_name_to_type_name(name: &str) -> Result<&'static str, GqlError> {
 	match name {
-		
+		"point" => Ok("GeometryPoint"),
+		"line" => Ok("GeometryLineString"),
+		"polygon" => Ok("GeometryPolygon"),
+		"multipoint" => Ok("GeometryMultiPoint"),
+		"multiline" => Ok("GeometryMultiLineString"),
+		"multipolygon" => Ok("GeometryMultiPolygon"),
+		"collection" => Ok("GeometryCollection"),
+		_ => Err(internal_error(format!("expected valid geometry name"))),
 	}
-	
 }
 
-pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
+pub fn kind_to_type(
+	kind: Kind,
+	types: &mut Vec<Type>,
+	is_input: bool,
+) -> Result<TypeRef, GqlError> {
 	let (optional, match_kind) = match kind {
 		Kind::Option(op_ty) => (true, *op_ty),
 		_ => (false, kind),
 	};
-	let out_ty = match match_kind {
-		Kind::Any => TypeRef::named("any"),
-		Kind::Null => TypeRef::named("null"),
-		Kind::Bool => TypeRef::named(TypeRef::BOOLEAN),
-		Kind::Bytes => TypeRef::named("bytes"),
-		Kind::Datetime => TypeRef::named("datetime"),
-		Kind::Decimal => TypeRef::named("decimal"),
-		Kind::Duration => TypeRef::named("duration"),
-		Kind::Float => TypeRef::named(TypeRef::FLOAT),
-		Kind::Int => TypeRef::named(TypeRef::INT),
-		Kind::Number => TypeRef::named("number"),
-		Kind::Object => TypeRef::named("object"),
-		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
-		Kind::String => TypeRef::named(TypeRef::STRING),
-		Kind::Uuid => TypeRef::named("uuid"),
-		Kind::Record(mut r) => match r.len() {
+	let out_ty = match (match_kind, is_input) {
+		(Kind::Any, _) => TypeRef::named("any"),
+		(Kind::Null, _) => TypeRef::named("null"),
+		(Kind::Bool, _) => TypeRef::named(TypeRef::BOOLEAN),
+		(Kind::Bytes, _) => TypeRef::named("bytes"),
+		(Kind::Datetime, _) => TypeRef::named("datetime"),
+		(Kind::Decimal, _) => TypeRef::named("decimal"),
+		(Kind::Duration, _) => TypeRef::named("duration"),
+		(Kind::Float, _) => TypeRef::named(TypeRef::FLOAT),
+		(Kind::Int, _) => TypeRef::named(TypeRef::INT),
+		(Kind::Number, _) => TypeRef::named("number"),
+		(Kind::Object, _) => TypeRef::named("object"),
+		(Kind::Point, _) => return Err(schema_error("Kind::Point is not yet supported")),
+		(Kind::String, _) => TypeRef::named(TypeRef::STRING),
+		(Kind::Uuid, _) => TypeRef::named("uuid"),
+		(Kind::Record(mut r), _) => match r.len() {
 			0 => TypeRef::named("record"),
 			1 => TypeRef::named(r.pop().unwrap().0),
 			_ => {
@@ -468,19 +491,42 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 				TypeRef::named(ty_name)
 			}
 		},
-		// Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
-		Kind::Geometry(g) => match g.len() {
-			0 => TypeRef::Named("Geometry")
-			1 => TypeRef::Named("Geometry")
-		}
-		Kind::Option(t) => {
+		(Kind::Geometry(g), false) => match g.len() {
+			0 => TypeRef::named("Geometry"),
+			1 => {
+				let name = g.into_iter().next().expect("checked that length is 1");
+				TypeRef::named(geometry_kind_name_to_type_name(&name)?)
+			}
+			_ => {
+				let geo_types = g
+					.iter()
+					.map(|n| geometry_kind_name_to_type_name(n).map(TypeRef::named))
+					.collect::<Result<Vec<_>, GqlError>>()?;
+				let geo_union_name = format!("geometry_{}", g.join("_"));
+				let mut geo_union = Union::new(&geo_union_name);
+				for geo_type in geo_types {
+					geo_union = geo_union.possible_type(geo_type.type_name())
+				}
+				types.push(Type::Union(geo_union));
+				TypeRef::named(geo_union_name)
+			}
+		},
+		(Kind::Geometry(g), true) => match g.len() {
+			1 => {
+				let name = g.into_iter().next().expect("checked that length is 1");
+				TypeRef::named(format!("{}_input", geometry_kind_name_to_type_name(&name)?))
+			}
+			// TODO: more robust type checking on multiple geometries
+			_ => TypeRef::named("Geometry_input"),
+		},
+		(Kind::Option(t), _) => {
 			let mut non_op_ty = *t;
 			while let Kind::Option(inner) = non_op_ty {
 				non_op_ty = *inner;
 			}
-			kind_to_type(non_op_ty, types)?
+			kind_to_type(non_op_ty, types, is_input)?
 		}
-		Kind::Either(ks) => {
+		(Kind::Either(ks), _) => {
 			let (ls, others): (Vec<Kind>, Vec<Kind>) =
 				ks.into_iter().partition(|k| matches!(k, Kind::Literal(Literal::String(_))));
 
@@ -512,7 +558,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 			};
 
 			let pos_names: Result<Vec<TypeRef>, GqlError> =
-				others.into_iter().map(|k| kind_to_type(k, types)).collect();
+				others.into_iter().map(|k| kind_to_type(k, types, is_input)).collect();
 			let pos_names: Vec<String> = pos_names?.into_iter().map(|tr| tr.to_string()).collect();
 			let ty_name = pos_names.join("_or_");
 
@@ -528,13 +574,15 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 			types.push(Type::Union(tmp_union));
 			TypeRef::named(ty_name)
 		}
-		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported")),
-		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types)?)),
-		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
-		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
+		(Kind::Set(_, _), _) => return Err(schema_error("Kind::Set is not yet supported")),
+		(Kind::Array(k, _), _) => TypeRef::List(Box::new(kind_to_type(*k, types, is_input)?)),
+		(Kind::Function(_, _), _) => {
+			return Err(schema_error("Kind::Function is not yet supported"))
+		}
+		(Kind::Range, _) => return Err(schema_error("Kind::Range is not yet supported")),
 		// TODO(raphaeldarley): check if union is of literals and generate enum
 		// generate custom scalar from other literals?
-		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
+		(Kind::Literal(_), _) => return Err(schema_error("Kind::Literal is not yet supported")),
 	};
 
 	let out = match optional {
@@ -786,7 +834,32 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 			_ => Err(type_error(kind, val)),
 		},
 		// TODO: add geometry
-		Kind::Geometry(_) => Err(resolver_error("Geometry is not yet supported")),
+		// Kind::Geometry(_) => Err(resolver_error("Geometry is not yet supported")),
+		Kind::Geometry(ref ts) => match &val {
+			GqlValue::Object(map) => match map.get("type") {
+				Some(t) => match t {
+					GqlValue::String(acutal_t) => {
+						let mut included = false;
+						for ty in ts {
+							if geometry_kind_name_to_type_name(ty)? == acutal_t {
+								included = true;
+								break;
+							}
+						}
+						if included {
+							extract_geometry(map)
+								.map(SqlValue::Geometry)
+								.ok_or_else(|| type_error(kind, val))
+						} else {
+							Err(type_error(kind, val))
+						}
+					}
+					_ => Err(type_error(kind, val)),
+				},
+				None => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
 		Kind::Option(k) => match val {
 			GqlValue::Null => Ok(SqlValue::None),
 			v => gql_to_sql_kind(v, *k),
@@ -861,5 +934,91 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Function(_, _) => Err(resolver_error("Sets are not yet supported")),
 		Kind::Range => Err(resolver_error("Ranges are not yet supported")),
 		Kind::Literal(_) => Err(resolver_error("Literals are not yet supported")),
+	}
+}
+
+fn extract_coord(arr: &[GqlValue]) -> Option<Coord> {
+	match arr {
+		[GqlValue::Number(y), GqlValue::Number(x)] => Some(Coord {
+			x: x.as_f64()?,
+			y: y.as_f64()?,
+		}),
+		_ => None,
+	}
+}
+
+fn extract_coord_list(arr: &[GqlValue]) -> Option<Vec<Coord>> {
+	arr.iter()
+		.map(|c| match c {
+			GqlValue::List(c) => extract_coord(c),
+			_ => None,
+		})
+		.collect()
+}
+
+fn extract_coord_list_list(arr: &[GqlValue]) -> Option<Vec<Vec<Coord>>> {
+	arr.iter()
+		.map(|c| match c {
+			GqlValue::List(c) => extract_coord_list(c),
+			_ => None,
+		})
+		.collect()
+}
+
+fn extract_polygon(arr: &[GqlValue]) -> Option<Polygon> {
+	let mut line_strings = extract_coord_list_list(arr)?.into_iter().map(LineString);
+	let exterior = line_strings.next()?;
+	let interior = line_strings.collect();
+	Some(Polygon::new(exterior, interior))
+}
+
+fn extract_polygon_list(arr: &[GqlValue]) -> Option<Vec<Polygon>> {
+	arr.iter()
+		.map(|c| match c {
+			GqlValue::List(c) => extract_polygon(c),
+			_ => None,
+		})
+		.collect()
+}
+
+fn extract_geometry(map: &IndexMap<Name, GqlValue>) -> Option<Geometry> {
+	let ty = match map.get("type") {
+		Some(GqlValue::String(ty)) => Some(ty),
+		_ => None,
+	};
+
+	let coordinates = match map.get("coordinates") {
+		Some(GqlValue::List(cs)) => Some(cs.as_slice()),
+		_ => None,
+	};
+
+	let geometries = match map.get("geometries") {
+		Some(GqlValue::List(cs)) => Some(cs.as_slice()),
+		_ => None,
+	};
+
+	match ty?.as_str() {
+		"GeometryPoint" => Some(Geometry::Point(Point(extract_coord(coordinates?).unwrap()))),
+		"GeometryLineString" => Some(Geometry::Line(LineString(extract_coord_list(coordinates?)?))),
+		"GeometryPolygon" => Some(Geometry::Polygon(extract_polygon(coordinates?)?)),
+		"GeometryMultiPoint" => Some(Geometry::MultiPoint(MultiPoint(
+			extract_coord_list(&coordinates?)?.into_iter().map(Point).collect(),
+		))),
+		"GeometryMultiLineString" => Some(Geometry::MultiLine(MultiLineString(
+			extract_coord_list_list(&coordinates?)?.into_iter().map(LineString).collect(),
+		))),
+		"GeometryMultiPolygon" => {
+			Some(Geometry::MultiPolygon(MultiPolygon(extract_polygon_list(&coordinates?)?)))
+		}
+		"GeometryCollection" => Some(Geometry::Collection(
+			geometries?
+				.iter()
+				.map(|g| match g {
+					GqlValue::Object(inner_map) => extract_geometry(inner_map),
+					_ => None,
+				})
+				.collect::<Option<_>>()?,
+		)),
+		_ => None,
 	}
 }

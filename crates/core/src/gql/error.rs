@@ -1,4 +1,7 @@
-use std::{backtrace, fmt::Debug};
+use std::{
+	backtrace::{self, Backtrace},
+	fmt::Debug,
+};
 
 use async_graphql::{InputType, InputValueError};
 use thiserror::Error;
@@ -44,6 +47,8 @@ pub fn internal_error(msg: impl Into<String>) -> GqlError {
 }
 
 pub fn type_error(kind: Kind, val: &async_graphql::Value) -> GqlError {
+	let bt = Backtrace::force_capture();
+	error!("{bt}");
 	GqlError::TypeError {
 		target: kind,
 		val: val.to_owned(),
