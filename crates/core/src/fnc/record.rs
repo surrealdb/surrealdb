@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::paths::ID;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{Idiom, Kind, Literal, Part, Table};
+use crate::sql::{Array, Idiom, Kind, Literal, Part, Table};
 use reblessive::tree::Stk;
 
 pub async fn exists(
@@ -31,7 +31,7 @@ pub fn tb((arg,): (Thing,)) -> Result<Value, Error> {
 }
 
 pub async fn refs(
-	(ctx, opt): (&Context, &Options),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(id, ft, ff): (Thing, Option<String>, Option<String>),
 ) -> Result<Value, Error> {
 	// Process the inputs and make sure they are valid
@@ -40,6 +40,11 @@ pub async fn refs(
 		Some(ff) => Some(crate::syn::idiom(&ff)?),
 		None => None,
 	};
+
+	// Check to see if the user is allowed to select the origin record id
+	if exists((stk, ctx, Some(opt), doc), (id.clone(),)).await?.is_false() {
+		return Ok(Value::Array(Array::default()));
+	}
 
 	// If both a table and a field are provided, attempt to correct the field if needed
 	let ff = match (&ft, ff) {
