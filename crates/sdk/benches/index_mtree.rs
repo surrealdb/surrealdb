@@ -43,7 +43,6 @@ fn bench_index_mtree_combinations(c: &mut Criterion) {
 }
 
 async fn mtree_index(
-	ds: &Datastore,
 	tx: &Transaction,
 	dimension: usize,
 	cache_size: usize,
@@ -58,7 +57,7 @@ async fn mtree_index(
 		cache_size as u32,
 		cache_size as u32,
 	);
-	MTreeIndex::new(ds.index_store(), tx, IndexKeyBase::default(), &p, tt).await.unwrap()
+	MTreeIndex::new(tx, IndexKeyBase::default(), &p, tt).await.unwrap()
 }
 
 fn runtime() -> Runtime {
@@ -134,7 +133,7 @@ async fn insert_objects(
 	cache_size: usize,
 ) {
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let mut mt = mtree_index(ds, &tx, vector_size, cache_size, Write).await;
+	let mut mt = mtree_index(&tx, vector_size, cache_size, Write).await;
 	let mut stack = TreeStack::new();
 	let mut rng = StdRng::from_entropy();
 	stack
@@ -160,7 +159,7 @@ async fn knn_lookup_objects(
 	knn: usize,
 ) {
 	let txn = ds.transaction(Read, Optimistic).await.unwrap();
-	let mt = Arc::new(mtree_index(ds, &txn, vector_size, cache_size, Read).await);
+	let mt = Arc::new(mtree_index(&txn, vector_size, cache_size, Read).await);
 	let ctx = Arc::new(MutableContext::from(txn));
 
 	let counter = Arc::new(AtomicUsize::new(0));
