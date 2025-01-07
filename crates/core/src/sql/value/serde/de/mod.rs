@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::sql;
 use crate::sql::Value;
-use num_traits::ToPrimitive;
 use serde::de::DeserializeOwned;
 use serde_content::Deserializer;
 use serde_content::Number;
@@ -20,9 +19,7 @@ impl Value {
 				sql::Number::Int(v) => Ok(Content::Number(Number::I64(v))),
 				sql::Number::Float(v) => Ok(Content::Number(Number::F64(v))),
 				sql::Number::Decimal(v) => serializer.serialize(v).map_err(Into::into),
-				sql::Number::Felt252(v) => {
-					Ok(Content::Number(Number::U128(v.to_u128().unwrap_or_default())))
-				}
+				sql::Number::Felt252(v) => Ok(Content::String(Cow::Owned(v.to_string()))),
 			},
 			Value::Strand(sql::Strand(v)) => Ok(Content::String(Cow::Owned(v))),
 			Value::Duration(sql::Duration(v)) => serializer.serialize(v).map_err(Into::into),

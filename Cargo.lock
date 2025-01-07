@@ -5371,7 +5371,7 @@ dependencies = [
 [[package]]
 name = "starknet-types-core"
 version = "0.1.7"
-source = "git+https://github.com/anhelinakruk/types-rs.git?branch=feat/revisioned-trait#20d39ed4bee33e8efbb696d9de1ad8ba2f54e031"
+source = "git+https://github.com/anhelinakruk/types-rs.git?rev=e614dd3c40882968b66ec656144003c3700738c8#e614dd3c40882968b66ec656144003c3700738c8"
 dependencies = [
  "lambdaworks-crypto",
  "lambdaworks-math",
