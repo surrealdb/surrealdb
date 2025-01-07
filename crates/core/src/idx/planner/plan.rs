@@ -73,23 +73,35 @@ impl PlanBuilder {
 				}
 			}
 			if let Some((_, io)) = compound_index {
-				return Ok(Plan::SingleIndex(None, io));
+				// Evaluate if we can use keys only
+				let keys_only = ctx.is_keys_only(true, tb).await?;
+				// Return the plan
+				return Ok(Plan::SingleIndex(None, io, keys_only));
 			}
 
 			// We take the "first" range query if one is available
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
-					return Ok(Plan::SingleIndexRange(ir, rq));
+					// Evaluate if we can use keys only
+					let keys_only = ctx.is_keys_only(true, tb).await?;
+					// Return the plan
+					return Ok(Plan::SingleIndexRange(ir, rq, keys_only));
 				}
 			}
 
 			// Otherwise, we try to find the most interesting (todo: TBD) single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
-				return Ok(Plan::SingleIndex(Some(e), i));
+				// Evaluate if we can use keys only
+				let keys_only = ctx.is_keys_only(true, tb).await?;
+				// Return the plan
+				return Ok(Plan::SingleIndex(Some(e), i, keys_only));
 			}
 			// If there is an order option
 			if let Some(o) = order {
-				return Ok(Plan::SingleIndex(None, o.clone()));
+				// Evaluate if we can use keys only
+				let keys_only = ctx.is_keys_only(true, tb).await?;
+				// Return the plan
+				return Ok(Plan::SingleIndex(None, o.clone(), keys_only));
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
@@ -102,7 +114,10 @@ impl PlanBuilder {
 					group.take_intersect_ranges(&mut ranges);
 				}
 			}
-			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges));
+			// Evaluate if we can use keys only
+			let keys_only = ctx.is_keys_only(true, tb).await?;
+			// Return the plan
+			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, keys_only));
 		}
 		Self::table_iterator(ctx, None, tb).await
 	}
@@ -113,7 +128,7 @@ impl PlanBuilder {
 		tb: &str,
 	) -> Result<Plan, Error> {
 		// If we only count and there are no conditions and no aggregations, then we can only scan keys
-		let keys_only = ctx.is_keys_only(tb).await?;
+		let keys_only = ctx.is_keys_only(false, tb).await?;
 		let reason = reason.map(|s| s.to_string());
 		Ok(Plan::TableIterator(reason, keys_only))
 	}
@@ -207,13 +222,27 @@ impl PlanBuilder {
 
 pub(super) enum Plan {
 	/// Table full scan
+	/// 1: An optional reason
+	/// 2: if true, we only need to collect the keys
 	TableIterator(Option<String>, bool),
 	/// Index scan filtered on records matching a given expression
-	SingleIndex(Option<Arc<Expression>>, IndexOption),
+	/// 1: The optional expression associated with the index
+	/// 2: if true, we only need to collect the keys
+	SingleIndex(Option<Arc<Expression>>, IndexOption, bool),
 	/// Union of filtered index scans
-	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexReference, UnionRangeQueryBuilder)>),
+	/// 1: A list of expression and index options
+	/// 2: A list of index ranges
+	/// 3: if true, we only need to collect the keys
+	MultiIndex(
+		Vec<(Arc<Expression>, IndexOption)>,
+		Vec<(IndexReference, UnionRangeQueryBuilder)>,
+		bool,
+	),
 	/// Index scan for record matching a given range
-	SingleIndexRange(IndexReference, UnionRangeQueryBuilder),
+	/// 1. The reference to the index
+	/// 2. The index range
+	/// 3. if true, we only need to collect the keys
+	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, bool),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]

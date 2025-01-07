@@ -148,7 +148,7 @@ impl ExplainItem {
 					("value", v.to_owned()),
 				],
 			},
-			Iterable::Index(t, ir) => {
+			Iterable::Index(t, ir, keys_only) => {
 				let mut details = vec![("table", Value::from(t.0.to_owned()))];
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(&t.0) {
@@ -156,7 +156,12 @@ impl ExplainItem {
 					}
 				}
 				Self {
-					name: "Iterate Index".into(),
+					name: if *keys_only {
+						"Iterate Index Keys"
+					} else {
+						"Iterate Index"
+					}
+					.into(),
 					details,
 				}
 			}

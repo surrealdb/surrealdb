@@ -3341,3 +3341,90 @@ async fn select_limit_start_order() -> Result<(), Error> {
 	}
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_count_group_all_with_or_without_index() -> Result<(), Error> {
+	let sql = r"
+		FOR $i IN 0..10000 {
+			 CREATE indexPerformance3 CONTENT {
+				something: $i
+			};
+		};
+		DEFINE INDEX somethingIndex ON TABLE indexPerformance3 COLUMNS something;
+		SELECT count() FROM indexPerformance3 WITH NOINDEX WHERE something >= 5000 GROUP ALL EXPLAIN;
+		SELECT count() FROM indexPerformance3 WHERE something >= 5000 GROUP ALL EXPLAIN;
+		SELECT count() FROM indexPerformance3 WITH NOINDEX WHERE something >= 5000 GROUP ALL;
+		SELECT count() FROM indexPerformance3 WHERE something >= 5000 GROUP ALL;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(6)?;
+	t.skip_ok(2)?;
+	t.expect_val(
+		"[
+			{
+				detail: {
+					table: 'indexPerformance3'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					reason: 'WITH NOINDEX'
+				},
+				operation: 'Fallback'
+			},
+			{
+				detail: {
+					idioms: {
+						count: [
+							'count'
+						]
+					},
+					type: 'Group'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)?;
+	t.expect_val(
+		"[
+			{
+				detail: {
+					plan: {
+						from: {
+							inclusive: true,
+							value: 5000
+						},
+						index: 'somethingIndex',
+						to: {
+							inclusive: false,
+							value: NONE
+						}
+					},
+					table: 'indexPerformance3'
+				},
+				operation: 'Iterate Index Keys'
+			},
+			{
+				detail: {
+					idioms: {
+						count: [
+							'count'
+						]
+					},
+					type: 'Group'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)?;
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+					{
+						count: 5000
+					}
+				]",
+		)?;
+	}
+	Ok(())
+}
