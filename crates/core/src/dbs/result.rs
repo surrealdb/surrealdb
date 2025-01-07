@@ -16,8 +16,8 @@ pub(super) enum Results {
 	Memory(MemoryCollector),
 	MemoryRandom(MemoryRandom),
 	MemoryOrdered(MemoryOrdered),
-    MemoryOrderedLimit(MemoryOrderedLimit),
-    #[cfg(storage)]
+	MemoryOrderedLimit(MemoryOrderedLimit),
+	#[cfg(storage)]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
 }
