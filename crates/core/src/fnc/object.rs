@@ -57,6 +57,10 @@ pub fn from_entries((array,): (Array,)) -> Result<Value, Error> {
 	Ok(Value::Object(Object(obj)))
 }
 
+pub fn is_empty((object,): (Object,)) -> Result<Value, Error> {
+	Ok(Value::Bool(object.0.is_empty()))
+}
+
 pub fn len((object,): (Object,)) -> Result<Value, Error> {
 	Ok(Value::from(object.len()))
 }

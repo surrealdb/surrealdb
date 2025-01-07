@@ -2949,14 +2949,13 @@ dependencies = [
 
 [[package]]
 name = "librocksdb-sys"
-version = "0.16.0+8.10.0"
+version = "0.17.1+9.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce3d60bc059831dc1c83903fb45c103f75db65c5a7bf22272764d9cc683e348c"
+checksum = "2b7869a512ae9982f4d46ba482c2a304f1efd80c6412a3d4bf57bb79a619679f"
 dependencies = [
  "bindgen",
  "bzip2-sys",
  "cc",
- "glob",
  "libc",
  "libz-sys",
  "lz4-sys",
@@ -3606,9 +3605,9 @@ checksum = "bb813b8af86854136c6922af0598d719255ecb2179515e6e7730d468f05c9cae"
 
 [[package]]
 name = "parking_lot"
-version = "0.12.1"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3742b2c103b9f06bc9fff0a37ff4912935851bee6d36f3c02bcc755bcfec228f"
+checksum = "f1bf18183cf54e8d6059647fc3063646a1801cf30896933ec2311622cc4b9a27"
 dependencies = [
  "lock_api",
  "parking_lot_core",
@@ -4647,9 +4646,9 @@ checksum = "cbf4a6aa5f6d6888f39e980649f3ad6b666acdce1d78e95b8a2cb076e687ae30"
 
 [[package]]
 name = "rocksdb"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bd13e55d6d7b8cd0ea569161127567cd587676c99f4472f779a0279aa60a7a7"
+checksum = "26ec73b20525cb235bad420f911473b69f9fe27cc856c5461bccd7e4af037f43"
 dependencies = [
  "libc",
  "librocksdb-sys",
@@ -5548,11 +5547,13 @@ dependencies = [
  "hashbrown 0.14.5",
  "indexmap 2.2.6",
  "native-tls",
+ "parking_lot",
  "path-clean",
  "pharos",
  "pprof",
  "radix_trie",
  "rand 0.8.5",
+ "rayon",
  "reblessive",
  "regex",
  "reqwest",
@@ -5636,6 +5637,7 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "object_store",
+ "parking_lot",
  "pbkdf2",
  "pharos",
  "phf",
@@ -5689,7 +5691,7 @@ dependencies = [
  "unicase",
  "url",
  "uuid",
- "vart 0.7.0",
+ "vart",
  "wasm-bindgen-futures",
  "wasmtimer",
  "wiremock",
@@ -5753,7 +5755,7 @@ dependencies = [
  "quick_cache 0.6.2",
  "revision",
  "tokio",
- "vart 0.8.1",
+ "vart",
  "wasm-bindgen-futures",
 ]
 
@@ -6690,12 +6692,6 @@ name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
-
-[[package]]
-name = "vart"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c92195d375eb94995afddeedfd7f246796eb60b85f727c538e42222c4c9b2d3"
 
 [[package]]
 name = "vart"

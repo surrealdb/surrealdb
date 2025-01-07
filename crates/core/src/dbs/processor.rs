@@ -141,6 +141,7 @@ impl Collected {
 		let val = Operable::Value(val);
 		// Process the record
 		Ok(Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -156,6 +157,7 @@ impl Collected {
 		let val = Operable::Value(val.into());
 		// Process the record
 		let pro = Processed {
+			keys_only: true,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -169,6 +171,7 @@ impl Collected {
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record
 		let pro = Processed {
+			keys_only: true,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -193,6 +196,7 @@ impl Collected {
 		let val = Operable::Relate(f, val, w, o.map(|v| v.into()));
 		// Process the document record
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -210,6 +214,7 @@ impl Collected {
 		let val = Operable::Value(val);
 		// Process the document record
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -224,6 +229,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v, opt.strict).await?;
 		// Pass the value through
 		let pro = Processed {
+			keys_only: false,
 			generate: Some(v),
 			rid: None,
 			ir: None,
@@ -235,6 +241,7 @@ impl Collected {
 	fn process_value(v: Value) -> Result<Processed, Error> {
 		// Pass the value through
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: None,
 			ir: None,
@@ -248,6 +255,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -266,6 +274,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -283,6 +292,7 @@ impl Collected {
 		let val = Operable::Value(val.into());
 		// Process the record
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -304,6 +314,7 @@ impl Collected {
 			Iterable::fetch_thing(txn, opt, &r.0).await?
 		};
 		let pro = Processed {
+			keys_only: false,
 			generate: None,
 			rid: Some(r.0),
 			ir: Some(r.1.into()),
@@ -325,7 +336,7 @@ pub(super) struct ConcurrentCollector<'a> {
 impl Collector for ConcurrentCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
 		let pro = collected.process(self.opt, self.txn).await?;
-		self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await;
+		self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
 		Ok(())
 	}
 }
@@ -342,7 +353,7 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 			self.coll
 				.ite
 				.process(self.coll.stk, self.coll.ctx, self.coll.opt, self.coll.stm, pro)
-				.await;
+				.await?;
 		}
 		Ok(())
 	}

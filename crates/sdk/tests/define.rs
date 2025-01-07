@@ -47,7 +47,8 @@ async fn define_statement_namespace() -> Result<(), Error> {
 				],
 				memory_allocated: 0,
 				memory_usage: 0,
-				physical_cores: 0
+				physical_cores: 0,
+                threads: 0
 			}},
 			users: {{}},
 		}}"
@@ -157,14 +158,6 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 		}]",
 	)?;
 	//
-	Ok(())
-}
-
-fn check_range(t: &mut Test, result: &str, explain: &str) -> Result<(), Error> {
-	for _ in 0..2 {
-		t.expect_val(result)?;
-	}
-	t.expect_val(explain)?;
 	Ok(())
 }
 
@@ -523,8 +516,8 @@ async fn permissions_checks_define_ns() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let access1 = format!("{{ accesses: {{  }}, namespaces: {{ NS: 'DEFINE NAMESPACE NS' }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
+	let access1 = format!("{{ accesses: {{  }}, namespaces: {{ NS: 'DEFINE NAMESPACE NS' }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }}, users: {{  }} }}");
+	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }}, users: {{  }} }}");
 	let check_results = [vec![access1.as_str()], vec![access2.as_str()]];
 
 	let test_cases = [
@@ -687,8 +680,8 @@ async fn permissions_checks_define_access_root() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let access1 = format!("{{ accesses: {{ access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
+	let access1 = format!("{{ accesses: {{ access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }}, users: {{  }} }}");
+	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }}, users: {{  }} }}");
 	let check_results = [vec![access1.as_str()], vec![access2.as_str()]];
 
 	let test_cases = [
@@ -812,8 +805,8 @@ async fn permissions_checks_define_user_root() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{ user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" }} }}");
-	let check2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
+	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }}, users: {{ user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" }} }}");
+	let check2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }}, users: {{  }} }}");
 	let check_results = [vec![check1.as_str()], vec![check2.as_str()]];
 
 	let test_cases = [

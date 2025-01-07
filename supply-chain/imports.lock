@@ -281,6 +281,13 @@ user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"
 
+[[publisher.parking_lot]]
+version = "0.12.3"
+when = "2024-05-24"
+user-id = 2915
+user-login = "Amanieu"
+user-name = "Amanieu d'Antras"
+
 [[publisher.paste]]
 version = "1.0.14"
 when = "2023-07-15"
@@ -485,8 +492,8 @@ user-login = "mumoshu"
 user-name = "Yusuke Kuoka"
 
 [[publisher.surrealkv]]
-version = "0.6.1"
-when = "2024-11-25"
+version = "0.7.0"
+when = "2024-12-18"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -583,8 +590,15 @@ user-login = "hsivonen"
 user-name = "Henri Sivonen"
 
 [[publisher.vart]]
-version = "0.7.0"
-when = "2024-10-28"
+version = "0.8.1"
+when = "2024-12-06"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.vart]]
+version = "0.8.1"
+when = "2024-12-06"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"

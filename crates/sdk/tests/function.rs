@@ -2866,6 +2866,25 @@ async fn function_object_len() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_object_is_empty() -> Result<(), Error> {
+	let sql = r#"
+		{ a: 1, b: 2 }.is_empty();
+		{}.is_empty();
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse("false");
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::parse("true");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_object_values() -> Result<(), Error> {
 	let sql = r#"
 		RETURN object::values({ a: 1, b: 2 });
@@ -7018,7 +7037,7 @@ pub async fn function_http_error() -> Result<(), Error> {
 	);
 
 	Test::new(&query).await?.expect_error(
-		"There was an error processing a remote HTTP request: Internal Server Error",
+		"There was an error processing a remote HTTP request: 500 Internal Server Error",
 	)?;
 
 	server.verify().await;
