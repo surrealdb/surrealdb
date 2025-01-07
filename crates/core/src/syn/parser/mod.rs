@@ -538,7 +538,7 @@ impl StatementStream {
 						.offset_location(self.line_offset, self.col_offset));
 				}
 
-				let eaten = buffer.split_off(parser.last_span().after_offset() as usize);
+				let eaten = buffer.split_to(parser.last_span().after_offset() as usize);
 				self.accumulate_line_col(&eaten);
 				Ok(Some(x))
 			}
