@@ -52,7 +52,7 @@ impl Iterable {
 
 	fn iteration_stage_check(&self, ctx: &Context) -> bool {
 		match self {
-			Iterable::Table(tb, _) | Iterable::Index(tb, _) => {
+			Iterable::Table(tb, _) | Iterable::Index(tb, _, _) => {
 				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage() {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(tb) {
@@ -84,6 +84,7 @@ pub(super) enum Collected {
 	Mergeable(Thing, Value),
 	KeyVal(Key, Val),
 	IndexItem(CollectorRecord),
+	IndexItemKey(CollectorRecord),
 }
 
 impl Collected {
@@ -108,7 +109,8 @@ impl Collected {
 			Self::Defer(key) => Self::process_defer(opt, txn, key).await,
 			Self::Mergeable(v, o) => Self::process_mergeable(opt, txn, v, o).await,
 			Self::KeyVal(key, val) => Self::process_key_val(key, val).await,
-			Self::IndexItem(r) => Self::process_index_item(opt, txn, r).await,
+			Self::IndexItem(r) => Self::process_index_item(opt, txn, r, false).await,
+			Self::IndexItemKey(r) => Self::process_index_item(opt, txn, r, true).await,
 		}
 	}
 
@@ -286,16 +288,19 @@ impl Collected {
 		opt: &Options,
 		txn: &Transaction,
 		r: CollectorRecord,
+		keys_only: bool,
 	) -> Result<Processed, Error> {
 		let v = if let Some(v) = r.2 {
 			// The value may already be fetched by the KNN iterator to evaluate the condition
 			v
+		} else if keys_only {
+			Arc::new(Value::Null)
 		} else {
 			// Otherwise we have to fetch the record
 			Iterable::fetch_thing(txn, opt, &r.0).await?
 		};
 		let pro = Processed {
-			keys_only: false,
+			keys_only,
 			generate: None,
 			rid: Some(r.0),
 			ir: Some(r.1.into()),
@@ -388,7 +393,7 @@ pub(super) trait Collector {
 						self.collect_table(&ctx, opt, &v).await?
 					}
 				}
-				Iterable::Index(v, irf) => {
+				Iterable::Index(v, irf, keys_only) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&v.0) {
 							// We set the query executor matching the current table in the Context
@@ -396,10 +401,10 @@ pub(super) trait Collector {
 							let mut ctx = MutableContext::new(ctx);
 							ctx.set_query_executor(exe.clone());
 							let ctx = ctx.freeze();
-							return self.collect_index_items(&ctx, opt, &v, irf).await;
+							return self.collect_index_items(&ctx, opt, &v, irf, keys_only).await;
 						}
 					}
-					self.collect_index_items(ctx, opt, &v, irf).await?
+					self.collect_index_items(ctx, opt, &v, irf, keys_only).await?
 				}
 				Iterable::Mergeable(v, o) => self.collect(Collected::Mergeable(v, o)).await?,
 				Iterable::Relatable(f, v, w, o) => {
@@ -660,6 +665,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		table: &Table,
 		irf: IteratorRef,
+		keys_only: bool,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &table.0, opt.strict).await?;
@@ -674,7 +680,12 @@ pub(super) trait Collector {
 						break;
 					}
 					for r in records {
-						self.collect(Collected::IndexItem(r)).await?;
+						self.collect(if keys_only {
+							Collected::IndexItemKey(r)
+						} else {
+							Collected::IndexItem(r)
+						})
+						.await?;
 					}
 				}
 				// Everything ok

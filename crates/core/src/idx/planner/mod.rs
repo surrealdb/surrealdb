@@ -56,11 +56,15 @@ impl<'a> StatementContext<'a> {
 		})
 	}
 
-	pub(crate) async fn is_keys_only(&self, tb: &str) -> Result<bool, Error> {
+	pub(crate) async fn is_keys_only(
+		&self,
+		with_all_indexes: bool,
+		tb: &str,
+	) -> Result<bool, Error> {
 		// If there is a WHERE clause then
 		// we need to fetch and process
 		// record content values too.
-		if self.cond.is_some() {
+		if !with_all_indexes && self.cond.is_some() {
 			return Ok(false);
 		}
 		// If there is a GROUP BY clause,
@@ -126,7 +130,7 @@ impl<'a> StatementContext<'a> {
 				Err(e) => return Err(e),
 			}
 		}
-		// Otherwise we can iterate over keys
+		// Otherwise we can iterate over keys only
 		Ok(true)
 	}
 }
@@ -189,40 +193,40 @@ impl QueryPlanner {
 		)
 		.await?
 		{
-			Plan::SingleIndex(exp, io) => {
+			Plan::SingleIndex(exp, io, keys_only) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;
 				}
 				let is_order = exp.is_none();
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
-				self.add(t.clone(), Some(ir), exe, it);
+				self.add(t.clone(), Some(ir), exe, it, keys_only);
 				if is_order {
 					self.orders.push(ir);
 				}
 			}
-			Plan::MultiIndex(non_range_indexes, ranges_indexes) => {
+			Plan::MultiIndex(non_range_indexes, ranges_indexes, keys_only) => {
 				for (exp, io) in non_range_indexes {
 					let ie = IteratorEntry::Single(Some(exp), io);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir));
+					it.ingest(Iterable::Index(t.clone(), ir, keys_only));
 				}
 				for (ixr, rq) in ranges_indexes {
 					let ie = IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir));
+					it.ingest(Iterable::Index(t.clone(), ir, keys_only));
 				}
 				self.requires_distinct = true;
-				self.add(t.clone(), None, exe, it);
+				self.add(t.clone(), None, exe, it, true);
 			}
-			Plan::SingleIndexRange(ixn, rq) => {
+			Plan::SingleIndexRange(ixn, rq, keys_only) => {
 				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
-				self.add(t.clone(), Some(ir), exe, it);
+				self.add(t.clone(), Some(ir), exe, it, keys_only);
 			}
 			Plan::TableIterator(reason, keys_only) => {
 				if let Some(reason) = reason {
 					self.fallbacks.push(reason);
 				}
-				self.add(t.clone(), None, exe, it);
+				self.add(t.clone(), None, exe, it, keys_only);
 				it.ingest(Iterable::Table(t, keys_only));
 				is_table_iterator = true;
 			}
@@ -241,10 +245,11 @@ impl QueryPlanner {
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
+		keys_only: bool,
 	) {
 		self.executors.insert(tb.0.clone(), exe.into());
 		if let Some(irf) = irf {
-			it.ingest(Iterable::Index(tb, irf));
+			it.ingest(Iterable::Index(tb, irf, keys_only));
 		}
 	}
 	pub(crate) fn has_executors(&self) -> bool {

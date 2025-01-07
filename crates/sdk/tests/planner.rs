@@ -3402,7 +3402,7 @@ async fn select_count_group_all_with_or_without_index() -> Result<(), Error> {
 					},
 					table: 'indexPerformance3'
 				},
-				operation: 'Iterate Index'
+				operation: 'Iterate Index Keys'
 			},
 			{
 				detail: {
