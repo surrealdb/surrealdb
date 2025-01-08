@@ -107,6 +107,7 @@ jobs:
       - name: Install cargo-acl
         run: |
           cargo install --debug --locked cargo-acl
+          sudo apt-get -y update
           sudo apt-get install -y bubblewrap
 
       - name: Check dependencies for unauthorized access
