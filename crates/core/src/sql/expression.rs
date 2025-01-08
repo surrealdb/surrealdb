@@ -151,10 +151,10 @@ impl Expression {
 				let mut r = r.compute(stk, ctx, opt, doc).await?;
 				if l.is_bytes() && r.is_bytes() {
 					println!("mul bytes");
-					l = Value::from(Number::Felt252(Felt::from_bytes_le_slice(
+					l = Value::from(Number::Felt252(Felt::from_bytes_be_slice(
 						l.convert_to_bytes().unwrap().as_slice(),
 					)));
-					r = Value::from(Number::Felt252(Felt::from_bytes_le_slice(
+					r = Value::from(Number::Felt252(Felt::from_bytes_be_slice(
 						r.convert_to_bytes().unwrap().as_slice(),
 					)));
 				}
