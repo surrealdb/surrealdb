@@ -16,6 +16,7 @@ pub mod crypto;
 pub mod duration;
 pub mod encoding;
 pub mod geo;
+pub mod graph;
 pub mod http;
 pub mod math;
 pub mod not;
@@ -69,6 +70,7 @@ pub async fn run(
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
+		|| name.starts_with("graph::find_relations")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
@@ -511,6 +513,8 @@ pub async fn asynchronous(
 		"http::delete" => http::delete(ctx).await,
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+		//
+		"graph::find_relations" => graph::find_relations((stk, ctx, opt, doc)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
