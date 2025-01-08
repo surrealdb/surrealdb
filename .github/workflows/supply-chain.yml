@@ -106,11 +106,10 @@ jobs:
 
       - name: Install cargo-acl
         run: |
-          cargo install --debug --locked cargo-acl
           sudo apt-get -y update
           sudo apt-get install -y bubblewrap
-          sudo ln -s /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/
-          sudo apparmor_parser /etc/apparmor.d/bwrap-userns-restrict
+          which bwrap
+          cargo install --debug --locked cargo-acl
 
       - name: Check dependencies for unauthorized access
         env:
