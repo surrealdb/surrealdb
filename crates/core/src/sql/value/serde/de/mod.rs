@@ -16,9 +16,18 @@ impl Value {
 			Value::Null => Ok(Content::Option(None)),
 			Value::Bool(v) => Ok(Content::Bool(v)),
 			Value::Number(v) => match v {
-				sql::Number::Int(v) => Ok(Content::Number(Number::I64(v))),
-				sql::Number::Float(v) => Ok(Content::Number(Number::F64(v))),
-				sql::Number::Decimal(v) => serializer.serialize(v).map_err(Into::into),
+				sql::Number::Int(v) => {
+					println!("int into_content");
+					Ok(Content::Number(Number::I64(v)))
+				}
+				sql::Number::Float(v) => {
+					println!("float into_content");
+					Ok(Content::Number(Number::F64(v)))
+				}
+				sql::Number::Decimal(v) => {
+					println!("decimal into_content");
+					serializer.serialize(v).map_err(Into::into)
+				}
 				sql::Number::Felt252(v) => serializer.serialize(v).map_err(Into::into),
 			},
 			Value::Strand(sql::Strand(v)) => Ok(Content::String(Cow::Owned(v))),
