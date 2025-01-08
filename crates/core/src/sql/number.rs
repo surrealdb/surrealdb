@@ -1012,7 +1012,7 @@ impl ops::Mul for Number {
 	type Output = Self;
 	fn mul(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
+			(Number::Int(v), Number::Int(w)) => Number::Int(v + w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v * w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 * w),
