@@ -106,10 +106,24 @@ jobs:
 
       - name: Install cargo-acl
         run: |
-          sudo apt-get -y update
-          sudo apt-get install -y bubblewrap
-          which bwrap
           cargo install --debug --locked cargo-acl
+          sudo apt-get install -y bubblewrap
+      
+      # See https://etbe.coker.com.au/2024/04/24/ubuntu-24-04-bubblewrap/
+      - name: Configure bubblewrap
+        run: |
+          sudo cat << EOF > /etc/apparmor.d/bwrap
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+
+            # Site-specific additions and overrides. See local/README for details.
+            include if exists <local/bwrap>
+          }
+          EOF
+          sudo systemctl reload apparmor
 
       - name: Check dependencies for unauthorized access
         env:
