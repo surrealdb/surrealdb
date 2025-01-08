@@ -837,13 +837,24 @@ macro_rules! impl_simple_try_op {
 			type Output = Self;
 			fn $fn(self, other: Self) -> Result<Self, Error> {
 				Ok(match (self, other) {
-					(Number::Int(v), Number::Int(w)) => Number::Int(
-						v.$checked(w).ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
-					),
-					(Number::Float(v), Number::Float(w)) => Number::Float(v.$unchecked(w)),
-					(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(
-						v.$checked(w).ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
-					),
+					(Number::Int(v), Number::Int(w)) => {
+						println!("mul int 2");
+						Number::Int(
+							v.$checked(w)
+								.ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
+						)
+					}
+					(Number::Float(v), Number::Float(w)) => {
+						println!("mul float 2");
+						Number::Float(v.$unchecked(w))
+					}
+					(Number::Decimal(v), Number::Decimal(w)) => {
+						println!("mul decimal 2");
+						Number::Decimal(
+							v.$checked(w)
+								.ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
+						)
+					}
 					(Number::Int(v), Number::Float(w)) => Number::Float((v as f64).$unchecked(w)),
 					(Number::Float(v), Number::Int(w)) => Number::Float(v.$unchecked(w as f64)),
 					(v, w) => Number::Decimal(
