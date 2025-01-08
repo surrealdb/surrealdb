@@ -15,8 +15,10 @@ use crate::sql::statements::{access, AccessGrant, DefineAccessStatement};
 use crate::sql::{access_type, AccessType, Datetime, Object, Value};
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
+use md5::Digest;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::str::FromStr;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
@@ -758,8 +760,14 @@ pub fn verify_grant_bearer(
 	// We use time-constant comparison to prevent timing attacks.
 	match &gr.grant {
 		access::Grant::Bearer(bearer) => {
+			// Hash provided signin bearer key.
+			let mut hasher = Sha256::new();
+			hasher.update(key);
+			let hash = hasher.finalize();
+			let hash_hex = format!("{hash:x}");
+			// Compare hashed key to stored bearer key.
+			let signin_key_bytes: &[u8] = hash_hex.as_bytes();
 			let bearer_key_bytes: &[u8] = bearer.key.as_bytes();
-			let signin_key_bytes: &[u8] = key.as_bytes();
 			let ok: bool = bearer_key_bytes.ct_eq(signin_key_bytes).into();
 			if ok {
 				Ok(bearer)
