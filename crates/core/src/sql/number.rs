@@ -870,7 +870,7 @@ macro_rules! impl_simple_try_op {
 
 impl_simple_try_op!(TryAdd, try_add, add, checked_add);
 impl_simple_try_op!(TrySub, try_sub, sub, checked_sub);
-impl_simple_try_op!(TryMul, try_mul, add, checked_mul);
+impl_simple_try_op!(TryMul, try_mul, add, checked_add);
 impl_simple_try_op!(TryDiv, try_div, div, checked_div);
 impl_simple_try_op!(TryRem, try_rem, rem, checked_rem);
 
