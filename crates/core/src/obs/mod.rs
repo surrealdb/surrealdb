@@ -26,14 +26,30 @@ fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 				Url::parse(&url).unwrap_or_else(|_| panic!("Expected a valid url for {}", env_var));
 			let (store, _) =
 				parse_url(&url).unwrap_or_else(|_| panic!("Expected a valid url for {}", env_var));
-			Arc::new(store)
+			if url.scheme() == "file" {
+				let path_buf = url.to_file_path().unwrap();
+				let path = path_buf.to_str().unwrap();
+				if !path_buf.as_path().exists() {
+					fs::create_dir_all(path_buf.as_path())
+						.unwrap_or_else(|_| panic!("Failed to create directory {:?}", path));
+				}
+				Arc::new(
+					LocalFileSystem::new_with_prefix(path)
+						.expect("Failed to create LocalFileSystem"),
+				)
+			} else {
+				Arc::new(store)
+			}
 		}
 		Err(_) => {
+			info!(
+				"No {} environment variable found, using default directory {}",
+				env_var, default_dir
+			);
 			let path = env::current_dir().unwrap().join(default_dir);
 			if !path.exists() || !path.is_dir() {
-				fs::create_dir_all(&path).unwrap_or_else(|_| {
-					panic!("Unable to create directory structure for {}", env_var)
-				});
+				fs::create_dir_all(&path)
+					.unwrap_or_else(|_| panic!("Failed to create directory {:?}", path));
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			{
@@ -95,4 +111,28 @@ pub fn hash(data: &[u8]) -> String {
 	let mut output = hex::encode(result);
 	output.truncate(6);
 	output
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use std::env;
+	#[test]
+	fn test_initialize_store_env_var() {
+		let url = "file:///tmp/test_store";
+		env::set_var("SURREAL_OBJECT_STORE", url.to_string());
+		let var = env::var("SURREAL_OBJECT_STORE").unwrap();
+		let store = initialize_store("SURREAL_OBJECT_STORE", "store");
+		// Assert the store is initialized with the correct URL
+		assert!(store.to_string().contains("store"));
+
+		env::remove_var("SURREAL_OBJECT_STORE");
+		assert!(env::var("SURREAL_OBJECT_STORE").is_err());
+		let store = initialize_store("SURREAL_OBJECT_STORE", "store");
+		println!("{:?}", store.to_string());
+		let current_dir = env::current_dir().unwrap();
+		assert!(env::current_dir().unwrap().join("store").exists());
+		// Remove the dir
+		fs::remove_dir_all(current_dir.join("store")).unwrap();
+	}
 }
