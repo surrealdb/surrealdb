@@ -32,6 +32,7 @@ use crate::sql::{Array, Cond, Expression, Idiom, Number, Object, Table, Thing, V
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
+use starknet_types_core::felt::Felt;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -473,39 +474,44 @@ impl QueryExecutor {
 	fn get_number_variants<F>(
 		n: &Number,
 		float_to_int: F,
-	) -> (Option<i64>, Option<f64>, Option<Decimal>)
+	) -> (Option<i64>, Option<f64>, Option<Decimal>, Option<Felt>)
 	where
 		F: Fn(&f64) -> Option<i64>,
 	{
 		let oi;
 		let of;
 		let od;
+		let of252: Option<Felt>;
 		match n {
 			Number::Int(i) => {
 				oi = Some(*i);
 				of = Some(*i as f64);
 				od = Decimal::from_i64(*i);
+				of252 = Some(Felt::from_i64(*i).unwrap());
 			}
 			Number::Float(f) => {
 				oi = float_to_int(f);
 				of = Some(*f);
 				od = Decimal::from_f64(*f);
+				of252 = Some(Felt::from_f64(*f).unwrap());
 			}
 			Number::Decimal(d) => {
 				oi = d.to_i64();
 				of = d.to_f64();
 				od = Some(*d);
+				of252 = Some(Felt::from_f64(d.to_f64().unwrap_or_default()).unwrap());
 			}
 			Number::Felt252(f) => {
-				oi = f.to_i64();
-				of = f.to_f64();
-				od = Some(Decimal::from_i128(f.to_i128().unwrap_or_default()).unwrap_or_default());
+				oi = None;
+				of = None;
+				od = None;
+				of252 = Some(*f);
 			}
 		};
-		(oi, of, od)
+		(oi, of, od, of252)
 	}
 	fn get_equal_number_variants(n: &Number) -> Vec<Arc<Value>> {
-		let (oi, of, od) = Self::get_number_variants(n, |f| {
+		let (oi, of, od, of252) = Self::get_number_variants(n, |f| {
 			if f.trunc().eq(f) {
 				f.to_i64()
 			} else {
@@ -522,19 +528,26 @@ impl QueryExecutor {
 		if let Some(d) = od {
 			values.push(Arc::new(Number::Decimal(d).into()));
 		}
+		if let Some(f) = of252 {
+			values.push(Arc::new(Number::Felt252(f).into()));
+		}
 		values
 	}
 
-	fn get_range_number_from_variants(n: &Number) -> (Option<i64>, Option<f64>, Option<Decimal>) {
+	fn get_range_number_from_variants(
+		n: &Number,
+	) -> (Option<i64>, Option<f64>, Option<Decimal>, Option<Felt>) {
 		Self::get_number_variants(n, |f| f.floor().to_i64())
 	}
 
-	fn get_range_number_to_variants(n: &Number) -> (Option<i64>, Option<f64>, Option<Decimal>) {
+	fn get_range_number_to_variants(
+		n: &Number,
+	) -> (Option<i64>, Option<f64>, Option<Decimal>, Option<Felt>) {
 		Self::get_number_variants(n, |f| f.ceil().to_i64())
 	}
 
 	fn get_from_range_number_variants<'a>(from: &Number, from_inc: bool) -> Vec<IteratorRange<'a>> {
-		let (from_i, from_f, from_d) = Self::get_range_number_from_variants(from);
+		let (from_i, from_f, from_d, from_f252) = Self::get_range_number_from_variants(from);
 		let mut vec = Vec::with_capacity(3);
 		if let Some(from) = from_i {
 			vec.push(IteratorRange::new(
@@ -575,11 +588,24 @@ impl QueryExecutor {
 				},
 			));
 		}
+		if let Some(from) = from_f252 {
+			vec.push(IteratorRange::new(
+				ValueType::NumberFelt252,
+				RangeValue {
+					value: Number::Felt252(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Value::None,
+					inclusive: false,
+				},
+			));
+		}
 		vec
 	}
 
 	fn get_to_range_number_variants<'a>(to: &Number, to_inc: bool) -> Vec<IteratorRange<'a>> {
-		let (from_i, from_f, from_d) = Self::get_range_number_to_variants(to);
+		let (from_i, from_f, from_d, from_f252) = Self::get_range_number_to_variants(to);
 		let mut vec = Vec::with_capacity(3);
 		if let Some(to) = from_i {
 			vec.push(IteratorRange::new(
@@ -620,6 +646,19 @@ impl QueryExecutor {
 				},
 			));
 		}
+		if let Some(to) = from_f252 {
+			vec.push(IteratorRange::new(
+				ValueType::NumberFelt252,
+				RangeValue {
+					value: Value::None,
+					inclusive: false,
+				},
+				RangeValue {
+					value: Number::Felt252(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
 		vec
 	}
 
@@ -629,9 +668,9 @@ impl QueryExecutor {
 		to: &Number,
 		to_inc: bool,
 	) -> Vec<IteratorRange<'a>> {
-		let (from_i, from_f, from_d) = Self::get_range_number_from_variants(from);
-		let (to_i, to_f, to_d) = Self::get_range_number_to_variants(to);
-		let mut vec = Vec::with_capacity(3);
+		let (from_i, from_f, from_d, from_f252) = Self::get_range_number_from_variants(from);
+		let (to_i, to_f, to_d, to_f252) = Self::get_range_number_to_variants(to);
+		let mut vec = Vec::with_capacity(4);
 		if let (Some(from), Some(to)) = (from_i, to_i) {
 			vec.push(IteratorRange::new(
 				ValueType::NumberInt,
@@ -667,6 +706,19 @@ impl QueryExecutor {
 				},
 				RangeValue {
 					value: Number::Decimal(to).into(),
+					inclusive: to_inc,
+				},
+			));
+		}
+		if let (Some(from), Some(to)) = (from_f252, to_f252) {
+			vec.push(IteratorRange::new(
+				ValueType::NumberFelt252,
+				RangeValue {
+					value: Number::Felt252(from).into(),
+					inclusive: from_inc,
+				},
+				RangeValue {
+					value: Number::Felt252(to).into(),
 					inclusive: to_inc,
 				},
 			));

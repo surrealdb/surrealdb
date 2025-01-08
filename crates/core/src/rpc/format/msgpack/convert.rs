@@ -12,7 +12,7 @@ const TAG_DECIMAL: i8 = 3;
 const TAG_DURATION: i8 = 4;
 const TAG_DATETIME: i8 = 5;
 const TAG_RECORDID: i8 = 6;
-
+const TAG_FELT252: i8 = 7;
 #[derive(Debug)]
 pub struct Pack(pub Data);
 
@@ -115,7 +115,7 @@ impl TryFrom<Value> for Pack {
 					Ok(Pack(Data::Ext(TAG_DECIMAL, v.to_string().as_bytes().to_vec())))
 				}
 				Number::Felt252(v) => {
-					Ok(Pack(Data::Ext(TAG_DECIMAL, v.to_string().as_bytes().to_vec())))
+					Ok(Pack(Data::Ext(TAG_FELT252, v.to_string().as_bytes().to_vec())))
 				}
 			},
 			Value::Strand(v) => Ok(Pack(Data::String(v.0.into()))),

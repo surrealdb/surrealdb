@@ -21,14 +21,8 @@ impl Value {
 					println!("int into_content");
 					Ok(Content::Number(Number::I64(v)))
 				}
-				sql::Number::Float(v) => {
-					println!("float into_content");
-					Ok(Content::Number(Number::F64(v)))
-				}
-				sql::Number::Decimal(v) => {
-					println!("decimal into_content");
-					serializer.serialize(v).map_err(Into::into)
-				}
+				sql::Number::Float(v) => Ok(Content::Number(Number::F64(v))),
+				sql::Number::Decimal(v) => serializer.serialize(v).map_err(Into::into),
 				sql::Number::Felt252(v) => {
 					println!("felt252 into_content");
 					serializer.serialize(v).map_err(Into::into)

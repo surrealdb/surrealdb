@@ -1090,34 +1090,13 @@ impl ops::Mul for Number {
 	type Output = Self;
 	fn mul(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => {
-				println!("mul int");
-				Number::Int(v + w)
-			}
-			(Number::Float(v), Number::Float(w)) => {
-				println!("mul float");
-				Number::Float(v * w)
-			}
-			(Number::Decimal(v), Number::Decimal(w)) => {
-				println!("mul decimal");
-				Number::Decimal(v * w)
-			}
-			(Number::Int(v), Number::Float(w)) => {
-				println!("mul int float");
-				Number::Float(v as f64 * w)
-			}
-			(Number::Float(v), Number::Int(w)) => {
-				println!("mul float int");
-				Number::Float(v * w as f64)
-			}
-			(Number::Felt252(v), Number::Felt252(w)) => {
-				println!("mul felt252");
-				Number::Felt252(v.mul(w))
-			}
-			(v, w) => {
-				println!("mul decimal");
-				Number::from(v.as_decimal() + w.as_decimal())
-			}
+			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
+			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
+			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v * w),
+			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 * w),
+			(Number::Float(v), Number::Int(w)) => Number::Float(v * w as f64),
+			(Number::Felt252(v), Number::Felt252(w)) => Number::Felt252(v.mul(w)),
+			(v, w) => Number::from(v.as_decimal() * w.as_decimal()),
 		}
 	}
 }
@@ -1126,26 +1105,11 @@ impl<'b> ops::Mul<&'b Number> for &Number {
 	type Output = Number;
 	fn mul(self, other: &'b Number) -> Number {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => {
-				println!("mul int 1");
-				Number::Int(v * w)
-			}
-			(Number::Float(v), Number::Float(w)) => {
-				println!("mul float 1");
-				Number::Float(v * w)
-			}
-			(Number::Decimal(v), Number::Decimal(w)) => {
-				println!("mul decimal 1");
-				Number::Decimal(v * w)
-			}
-			(Number::Int(v), Number::Float(w)) => {
-				println!("mul int float 1");
-				Number::Float(*v as f64 * w)
-			}
-			(Number::Float(v), Number::Int(w)) => {
-				println!("mul float int 1");
-				Number::Float(v * *w as f64)
-			}
+			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
+			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
+			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v * w),
+			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 * w),
+			(Number::Float(v), Number::Int(w)) => Number::Float(v * *w as f64),
 			(Number::Felt252(v), Number::Felt252(w)) => Number::Felt252(v.mul(w)),
 			(v, w) => Number::from(v.to_decimal() * w.to_decimal()),
 		}
@@ -1178,6 +1142,9 @@ impl<'b> ops::Div<&'b Number> for &Number {
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v / w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 / w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v / *w as f64),
+			(Number::Felt252(_), Number::Felt252(_)) => {
+				panic!("Division not supported for Felt252")
+			}
 			(v, w) => Number::from(v.to_decimal() / w.to_decimal()),
 		}
 	}
