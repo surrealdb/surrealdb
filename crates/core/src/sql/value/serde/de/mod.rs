@@ -11,6 +11,7 @@ use std::borrow::Cow;
 impl Value {
 	fn into_content(self) -> Result<Content<'static>, Error> {
 		let serializer = Serializer::new();
+		println!("into_content {:?}", self);
 		match self {
 			Value::None => Ok(Content::Option(None)),
 			Value::Null => Ok(Content::Option(None)),
@@ -28,7 +29,10 @@ impl Value {
 					println!("decimal into_content");
 					serializer.serialize(v).map_err(Into::into)
 				}
-				sql::Number::Felt252(v) => serializer.serialize(v).map_err(Into::into),
+				sql::Number::Felt252(v) => {
+					println!("felt252 into_content");
+					serializer.serialize(v).map_err(Into::into)
+				}
 			},
 			Value::Strand(sql::Strand(v)) => Ok(Content::String(Cow::Owned(v))),
 			Value::Duration(sql::Duration(v)) => serializer.serialize(v).map_err(Into::into),
