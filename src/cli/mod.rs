@@ -104,6 +104,9 @@ enum Commands {
 }
 
 pub async fn init() -> ExitCode {
+	// Enables ANSI code support on Windows
+	#[cfg(windows)]
+	nu_ansi_term::enable_ansi_support().ok();
 	// Print debug mode warning
 	#[cfg(debug_assertions)]
 	println!("{DEBUG_BUILD_WARNING}");
