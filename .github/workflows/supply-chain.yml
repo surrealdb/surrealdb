@@ -112,7 +112,7 @@ jobs:
       # See https://etbe.coker.com.au/2024/04/24/ubuntu-24-04-bubblewrap/
       - name: Configure bubblewrap
         run: |
-          cat << EOF
+          cat << EOF > bwrap
           abi <abi/4.0>,
           include <tunables/global>
 
@@ -122,7 +122,8 @@ jobs:
             # Site-specific additions and overrides. See local/README for details.
             include if exists <local/bwrap>
           }
-          EOF | sudo tee -a /etc/apparmor.d/bwrap
+          EOF
+          sudo mv bwrap /etc/apparmor.d/
           sudo systemctl reload apparmor
 
       - name: Check dependencies for unauthorized access
