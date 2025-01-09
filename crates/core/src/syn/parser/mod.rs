@@ -462,7 +462,7 @@ impl StatementStream {
 		let res = self.stack.enter(|ctx| parser.parse_statement(ctx)).finish();
 		if parser.peek().is_eof() {
 			if buffer.len() > u32::MAX as usize {
-				let error = syntax_error!("Cannot parse query, statement exceeded maximum size of 4G", @parser.last_span());
+				let error = syntax_error!("Cannot parse query, statement exceeded maximum size of 4GB", @parser.last_span());
 				return Err(error
 					.render_on_bytes(buffer)
 					.offset_location(self.line_offset, self.col_offset));
