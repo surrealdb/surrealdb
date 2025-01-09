@@ -77,7 +77,7 @@ jobs:
         run: cargo make ci-check-release
 
   make-check:
-    name: Check `make check` for errors
+    name: Check `make check`
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
