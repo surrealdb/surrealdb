@@ -2,6 +2,7 @@
 use super::api::Transaction;
 use super::Key;
 use super::Val;
+use super::Version;
 use crate::cf;
 use crate::dbs::node::Timestamp;
 use crate::doc::CursorValue;
@@ -468,30 +469,53 @@ impl Transactor {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches keys or key-value pairs, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches keys, in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn batch<K>(
+	pub async fn batch_keys<K>(
 		&mut self,
 		rng: Range<K>,
 		batch: u32,
-		values: bool,
 		version: Option<u64>,
-	) -> Result<Batch, Error>
+	) -> Result<Batch<Key>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let rng = beg.as_slice()..end.as_slice();
-		trace!(target: TARGET, rng = rng.sprint(), values = values, version = version, "Batch");
-		expand_inner!(&mut self.inner, v => { v.batch(beg..end, batch, values, version).await })
+		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
+		expand_inner!(&mut self.inner, v => { v.batch_keys(beg..end, batch, version).await })
+	}
+
+	/// Retrieve a batched scan over a specific range of keys in the datastore.
+	///
+	/// This function fetches key-value pairs, in batches, with multiple requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn batch_keys_vals<K>(
+		&mut self,
+		rng: Range<K>,
+		batch: u32,
+		version: Option<u64>,
+	) -> Result<Batch<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
+		expand_inner!(&mut self.inner, v => { v.batch_keys_vals(beg..end, batch, version).await })
 	}
 
 	/// Retrieve a batched scan of all versions over a specific range of keys in the datastore.
 	///
-	/// This function fetches (key, value, version and deleted) pairs, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches key-value-version pairs, in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn batch_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
+	pub async fn batch_keys_vals_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		batch: u32,
+	) -> Result<Batch<(Key, Val, Version, bool)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
@@ -499,7 +523,7 @@ impl Transactor {
 		let end: Key = rng.end.into();
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), "BatchVersions");
-		expand_inner!(&mut self.inner, v => { v.batch_versions(beg..end, batch).await })
+		expand_inner!(&mut self.inner, v => { v.batch_keys_vals_versions(beg..end, batch).await })
 	}
 
 	/// Obtain a new change timestamp for a key
