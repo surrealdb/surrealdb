@@ -203,9 +203,9 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, true, version).await?;
+			let res = self.batch_keys_vals(rng, *NORMAL_FETCH_SIZE, version).await?;
 			next = res.next;
-			for v in res.values.into_iter() {
+			for v in res.result.into_iter() {
 				out.push(v);
 			}
 		}
@@ -255,9 +255,9 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false, None).await?;
+			let res = self.batch_keys(rng, *NORMAL_FETCH_SIZE, None).await?;
 			next = res.next;
-			for (k, _) in res.values.into_iter() {
+			for k in res.result.into_iter() {
 				self.del(k).await?;
 			}
 		}
@@ -307,13 +307,38 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch(rng, *NORMAL_FETCH_SIZE, false, None).await?;
+			let res = self.batch_keys(rng, *NORMAL_FETCH_SIZE, None).await?;
 			next = res.next;
-			for (k, _) in res.values.into_iter() {
+			for k in res.result.into_iter() {
 				self.clr(k).await?;
 			}
 		}
 		Ok(())
+	}
+
+	/// Count the total number of keys within a range in the datastore.
+	///
+	/// This function fetches the total key count from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn count<K>(&mut self, rng: Range<K>) -> Result<usize, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Continue with function logic
+		let mut len = 0;
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let mut next = Some(beg..end);
+		while let Some(rng) = next {
+			let res = self.batch_keys(rng, 10_000, None).await?;
+			next = res.next;
+			len += res.result.len();
+		}
+		Ok(len)
 	}
 
 	/// Retrieve all the versions for a specific range of keys from the datastore.
@@ -333,15 +358,14 @@ pub trait Transaction {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches keys or key-value pairs, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches keys, in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch<K>(
+	async fn batch_keys<K>(
 		&mut self,
 		rng: Range<K>,
 		batch: u32,
-		values: bool,
 		version: Option<u64>,
-	) -> Result<Batch, Error>
+	) -> Result<Batch<Key>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -353,21 +377,13 @@ pub trait Transaction {
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		// Scan for the next batch
-		let res = if values {
-			self.scan(beg..end.clone(), batch, version).await?
-		} else {
-			self.keys(beg..end.clone(), batch, version)
-				.await?
-				.into_iter()
-				.map(|k| (k, vec![]))
-				.collect::<Vec<(Key, Val)>>()
-		};
+		let res = self.keys(beg..end.clone(), batch, version).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
-			Ok(Batch::new(None, res))
+			Ok(Batch::<Key>::new(None, res))
 		} else {
 			match res.last() {
-				Some((k, _)) => Ok(Batch::new(
+				Some(k) => Ok(Batch::<Key>::new(
 					Some(Range {
 						start: k.clone().add(0x00),
 						end,
@@ -377,13 +393,21 @@ pub trait Transaction {
 				// We have checked the length above, so
 				// there should be a last item in the
 				// vector, so we shouldn't arrive here
-				None => Ok(Batch::new(None, res)),
+				None => Ok(Batch::<Key>::new(None, res)),
 			}
 		}
 	}
 
+	/// Retrieve a batched scan over a specific range of keys in the datastore.
+	///
+	/// This function fetches key-value pairs, in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch_versions<K>(&mut self, rng: Range<K>, batch: u32) -> Result<Batch, Error>
+	async fn batch_keys_vals<K>(
+		&mut self,
+		rng: Range<K>,
+		batch: u32,
+		version: Option<u64>,
+	) -> Result<Batch<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -394,16 +418,14 @@ pub trait Transaction {
 		// Continue with function logic
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-
 		// Scan for the next batch
-		let res = self.scan_all_versions(beg..end.clone(), batch).await?;
-
+		let res = self.scan(beg..end.clone(), batch, version).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
-			Ok(Batch::new_versioned(None, res))
+			Ok(Batch::<(Key, Val)>::new(None, res))
 		} else {
 			match res.last() {
-				Some((k, _, _, _)) => Ok(Batch::new_versioned(
+				Some((k, _)) => Ok(Batch::<(Key, Val)>::new(
 					Some(Range {
 						start: k.clone().add(0x00),
 						end,
@@ -413,7 +435,48 @@ pub trait Transaction {
 				// We have checked the length above, so
 				// there should be a last item in the
 				// vector, so we shouldn't arrive here
-				None => Ok(Batch::new_versioned(None, res)),
+				None => Ok(Batch::<(Key, Val)>::new(None, res)),
+			}
+		}
+	}
+
+	/// Retrieve a batched scan over a specific range of keys in the datastore.
+	///
+	/// This function fetches key-value-version pairs, in batches, with multiple requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn batch_keys_vals_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		batch: u32,
+	) -> Result<Batch<(Key, Val, Version, bool)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Continue with function logic
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		// Scan for the next batch
+		let res = self.scan_all_versions(beg..end.clone(), batch).await?;
+		// Check if range is consumed
+		if res.len() < batch as usize && batch > 0 {
+			Ok(Batch::<(Key, Val, Version, bool)>::new(None, res))
+		} else {
+			match res.last() {
+				Some((k, _, _, _)) => Ok(Batch::<(Key, Val, Version, bool)>::new(
+					Some(Range {
+						start: k.clone().add(0x00),
+						end,
+					}),
+					res,
+				)),
+				// We have checked the length above, so
+				// there should be a last item in the
+				// vector, so we shouldn't arrive here
+				None => Ok(Batch::<(Key, Val, Version, bool)>::new(None, res)),
 			}
 		}
 	}
