@@ -120,8 +120,7 @@ mod tests {
 	#[test]
 	fn test_initialize_store_env_var() {
 		let url = "file:///tmp/test_store";
-		env::set_var("SURREAL_OBJECT_STORE", url.to_string());
-		let var = env::var("SURREAL_OBJECT_STORE").unwrap();
+		env::set_var("SURREAL_OBJECT_STORE", url);
 		let store = initialize_store("SURREAL_OBJECT_STORE", "store");
 		// Assert the store is initialized with the correct URL
 		assert!(store.to_string().contains("store"));
@@ -129,7 +128,7 @@ mod tests {
 		env::remove_var("SURREAL_OBJECT_STORE");
 		assert!(env::var("SURREAL_OBJECT_STORE").is_err());
 		let store = initialize_store("SURREAL_OBJECT_STORE", "store");
-		println!("{:?}", store.to_string());
+		debug!("{store:?}");
 		let current_dir = env::current_dir().unwrap();
 		assert!(env::current_dir().unwrap().join("store").exists());
 		// Remove the dir
