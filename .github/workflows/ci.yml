@@ -392,7 +392,7 @@ jobs:
       - name: Test workspace
         run: |
           docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:latest start --user root --pass root &
-          sleep 5
+          sleep 180
           docker logs $(docker ps -q)
           make test
 
