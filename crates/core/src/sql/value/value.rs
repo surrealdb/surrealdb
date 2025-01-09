@@ -1976,7 +1976,7 @@ impl Value {
 				Err(Error::ConvertTo {
 					from: val,
 					into: kind.to_string(),
-					path: "field.to".into(),
+					path: "type::coerce_to.convert".into(),
 				})
 			}
 			Kind::Literal(lit) => self.convert_to_literal(lit),
@@ -1990,7 +1990,7 @@ impl Value {
 			}) => Err(Error::ConvertTo {
 				from,
 				into: kind.to_string(),
-				path: "field.to".into(),
+				path: "type::coerce_to".into(),
 			}),
 			// There was a different error
 			Err(e) => Err(e),
@@ -2007,7 +2007,7 @@ impl Value {
 			Err(Error::ConvertTo {
 				from: self,
 				into: literal.to_string(),
-				path: "field.to".into(),
+				path: "type::literal.convert".into(),
 			})
 		}
 	}
@@ -2021,13 +2021,13 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "null".into(),
-				path: "field.to".into(),
+				path: "type::null.convert".into(),
 			}),
 		}
 	}
 
 	/// Try to convert this value to a `bool`
-	pub(crate) fn convert_to_bool(self, ) -> Result<bool, Error> {
+	pub(crate) fn convert_to_bool(self) -> Result<bool, Error> {
 		match self {
 			// Allow any boolean value
 			Value::Bool(v) => Ok(v),
