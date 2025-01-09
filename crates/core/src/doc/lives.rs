@@ -6,6 +6,7 @@ use crate::dbs::Statement;
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::kvs::LiveFilters;
 use crate::sql::paths::AC;
 use crate::sql::paths::META;
 use crate::sql::paths::RD;
@@ -50,6 +51,19 @@ impl Document {
 		for lv in lvs.iter() {
 			// Create a new statement
 			let lq = Statement::from(lv);
+			// Filter out statement if not expected by the live query
+			let query_type = if stm.is_delete() {
+				LiveFilters::Delete
+			} else if self.is_new() {
+				LiveFilters::Create
+			} else {
+				LiveFilters::Update
+			};
+			if let Some(filters) = &lv.filters {
+				if filters.contains(query_type) {
+					continue;
+				}
+			}
 			// Get the event action
 			let met = if stm.is_delete() {
 				Value::from("DELETE")
