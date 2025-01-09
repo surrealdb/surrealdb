@@ -2174,6 +2174,7 @@ impl Value {
 			// Allow any number
 			Value::Number(v) => Ok(v),
 			// Attempt to convert a string value
+			Value::Bytes(ref v) => Ok(Number::Felt252(Felt::from_bytes_be_slice(v.as_slice()))),
 			Value::Strand(ref v) => match Number::from_str(v) {
 				// The string can be parsed as a number
 				Ok(v) => Ok(v),
