@@ -316,6 +316,31 @@ pub trait Transaction {
 		Ok(())
 	}
 
+	/// Count the total number of keys within a range in the datastore.
+	///
+	/// This function fetches the total key count from the underlying datastore in grouped batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn count<K>(&mut self, rng: Range<K>) -> Result<usize, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TxFinished);
+		}
+		// Continue with function logic
+		let mut len = 0;
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let mut next = Some(beg..end);
+		while let Some(rng) = next {
+			let res = self.batch_keys(rng, 10_000, None).await?;
+			next = res.next;
+			len += res.result.len();
+		}
+		Ok(len)
+	}
+
 	/// Retrieve all the versions for a specific range of keys from the datastore.
 	///
 	/// This function fetches all the versions for the full range of key-value pairs, in a single request to the underlying datastore.

@@ -306,6 +306,17 @@ impl Transaction {
 		self.lock().await.scan(rng, limit, version).await
 	}
 
+	/// Count the total number of keys within a range in the datastore.
+	///
+	/// This function fetches the total count, in batches, with multiple requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn count<K>(&self, rng: Range<K>) -> Result<usize, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.count(rng).await
+	}
+
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches the keys in batches, with multiple requests to the underlying datastore.

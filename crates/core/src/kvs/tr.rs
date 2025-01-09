@@ -487,6 +487,21 @@ impl Transactor {
 		expand_inner!(&mut self.inner, v => { v.batch_keys(beg..end, batch, version).await })
 	}
 
+	/// Count the total number of keys within a range in the datastore.
+	///
+	/// This function fetches the total count, in batches, with multiple requests to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn count<K>(&mut self, rng: Range<K>) -> Result<usize, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), "Count");
+		expand_inner!(&mut self.inner, v => { v.count(beg..end).await })
+	}
+
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches key-value pairs, in batches, with multiple requests to the underlying datastore.
