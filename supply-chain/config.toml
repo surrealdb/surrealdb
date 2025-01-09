@@ -1307,10 +1307,6 @@ criteria = "safe-to-deploy"
 version = "3.7.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.shlex]]
-version = "1.3.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.simdutf8]]
 version = "0.1.4"
 criteria = "safe-to-deploy"
