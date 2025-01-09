@@ -31,6 +31,10 @@ pub fn decimal((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_decimal().map(Value::from)
 }
 
+pub fn felt252((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_felt252().map(Value::from)
+}
+
 pub fn duration((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_duration().map(Value::from)
 }

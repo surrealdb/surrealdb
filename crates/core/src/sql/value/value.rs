@@ -27,6 +27,7 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
+use starknet_types_core::felt::Felt;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -2146,6 +2147,23 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "decimal".into(),
+			}),
+		}
+	}
+
+	pub(crate) fn convert_to_felt252(self) -> Result<Number, Error> {
+		match self {
+			Value::Number(Number::Felt252(v)) => Ok(Number::Felt252(v)),
+			Value::Strand(ref v) => match Felt::from_str(v) {
+				Ok(v) => Ok(Number::Felt252(v)),
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "felt252".into(),
+				}),
+			},
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "felt252".into(),
 			}),
 		}
 	}

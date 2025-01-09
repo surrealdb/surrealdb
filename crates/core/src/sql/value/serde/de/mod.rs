@@ -11,7 +11,7 @@ use std::borrow::Cow;
 impl Value {
 	fn into_content(self) -> Result<Content<'static>, Error> {
 		let serializer = Serializer::new();
-		println!("into_content {:?}", self);
+		println!("into_content NEW{:?}", self);
 		match self {
 			Value::None => Ok(Content::Option(None)),
 			Value::Null => Ok(Content::Option(None)),
