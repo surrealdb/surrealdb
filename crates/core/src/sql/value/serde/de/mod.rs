@@ -11,14 +11,22 @@ use std::borrow::Cow;
 impl Value {
 	fn into_content(self) -> Result<Content<'static>, Error> {
 		let serializer = Serializer::new();
+		println!("into_content NEW{:?}", self);
 		match self {
 			Value::None => Ok(Content::Option(None)),
 			Value::Null => Ok(Content::Option(None)),
 			Value::Bool(v) => Ok(Content::Bool(v)),
 			Value::Number(v) => match v {
-				sql::Number::Int(v) => Ok(Content::Number(Number::I64(v))),
+				sql::Number::Int(v) => {
+					println!("int into_content");
+					Ok(Content::Number(Number::I64(v)))
+				}
 				sql::Number::Float(v) => Ok(Content::Number(Number::F64(v))),
 				sql::Number::Decimal(v) => serializer.serialize(v).map_err(Into::into),
+				sql::Number::Felt252(v) => {
+					println!("felt252 into_content");
+					serializer.serialize(v).map_err(Into::into)
+				}
 			},
 			Value::Strand(sql::Strand(v)) => Ok(Content::String(Cow::Owned(v))),
 			Value::Duration(sql::Duration(v)) => serializer.serialize(v).map_err(Into::into),

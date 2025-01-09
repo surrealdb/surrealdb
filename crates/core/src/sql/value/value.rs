@@ -27,6 +27,7 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
+use starknet_types_core::felt::Felt;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -2150,12 +2151,30 @@ impl Value {
 		}
 	}
 
+	pub(crate) fn convert_to_felt252(self) -> Result<Number, Error> {
+		match self {
+			Value::Number(Number::Felt252(v)) => Ok(Number::Felt252(v)),
+			Value::Strand(ref v) => match Felt::from_str(v) {
+				Ok(v) => Ok(Number::Felt252(v)),
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "felt252".into(),
+				}),
+			},
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "felt252".into(),
+			}),
+		}
+	}
+
 	/// Try to convert this value to a `Number`
 	pub(crate) fn convert_to_number(self) -> Result<Number, Error> {
 		match self {
 			// Allow any number
 			Value::Number(v) => Ok(v),
 			// Attempt to convert a string value
+			Value::Bytes(ref v) => Ok(Number::Felt252(Felt::from_bytes_be_slice(v.as_slice()))),
 			Value::Strand(ref v) => match Number::from_str(v) {
 				// The string can be parsed as a number
 				Ok(v) => Ok(v),
@@ -3031,8 +3050,12 @@ pub(crate) trait TryMul<Rhs = Self> {
 impl TryMul for Value {
 	type Output = Self;
 	fn try_mul(self, other: Self) -> Result<Self, Error> {
+		println!("mul values {:?} {:?}", self, other);
 		Ok(match (self, other) {
-			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_mul(w)?),
+			(Self::Number(v), Self::Number(w)) => {
+				println!("mul number");
+				Self::Number(v.try_mul(w)?)
+			}
 			(v, w) => return Err(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
 		})
 	}

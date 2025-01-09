@@ -5,9 +5,11 @@ use crate::err::Error;
 use crate::fnc;
 use crate::sql::operator::Operator;
 use crate::sql::value::Value;
+use crate::sql::Number;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use starknet_types_core::felt::Felt;
 use std::fmt;
 use std::str;
 
@@ -122,7 +124,7 @@ impl Expression {
 				o,
 				r,
 			} => {
-				let l = l.compute(stk, ctx, opt, doc).await?;
+				let mut l = l.compute(stk, ctx, opt, doc).await?;
 				match o {
 					Operator::Or => {
 						if l.is_truthy() {
@@ -146,7 +148,18 @@ impl Expression {
 					}
 					_ => {} // Continue
 				}
-				let r = r.compute(stk, ctx, opt, doc).await?;
+				let mut r = r.compute(stk, ctx, opt, doc).await?;
+				if l.is_bytes() && r.is_bytes() {
+					println!("mul bytes");
+					l = Value::from(Number::Felt252(Felt::from_bytes_be_slice(
+						l.convert_to_bytes().unwrap().as_slice(),
+					)));
+					r = Value::from(Number::Felt252(Felt::from_bytes_be_slice(
+						r.convert_to_bytes().unwrap().as_slice(),
+					)));
+				}
+
+				println!("mul bytes 2 {:?}, {:?}", l, r);
 				match o {
 					Operator::Or => fnc::operate::or(l, r),
 					Operator::And => fnc::operate::and(l, r),

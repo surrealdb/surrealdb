@@ -13,6 +13,7 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Ident, Number, Thing, Value};
 use radix_trie::Trie;
 use rust_decimal::Decimal;
+use starknet_types_core::felt::Felt;
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -281,6 +282,7 @@ pub(super) enum ValueType {
 	NumberInt,
 	NumberFloat,
 	NumberDecimal,
+	NumberFelt252,
 }
 
 impl ValueType {
@@ -308,6 +310,13 @@ impl ValueType {
 				ix_name,
 				&Array(vec![Value::Number(Number::Decimal(Decimal::MIN))]),
 			),
+			Self::NumberFelt252 => Index::prefix_ids_beg(
+				ns,
+				db,
+				ix_what,
+				ix_name,
+				&Array(vec![Value::Number(Number::Felt252(Felt::ZERO))]),
+			),
 		}
 	}
 
@@ -334,6 +343,13 @@ impl ValueType {
 				ix_what,
 				ix_name,
 				&Array(vec![Value::Number(Number::Decimal(Decimal::MAX))]),
+			),
+			Self::NumberFelt252 => Index::prefix_ids_end(
+				ns,
+				db,
+				ix_what,
+				ix_name,
+				&Array(vec![Value::Number(Number::Felt252(Felt::MAX))]),
 			),
 		}
 	}

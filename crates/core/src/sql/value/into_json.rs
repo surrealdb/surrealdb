@@ -19,6 +19,7 @@ impl From<Value> for serde_json::Value {
 				Number::Int(int) => int.into(),
 				Number::Float(float) => float.into(),
 				Number::Decimal(decimal) => json!(decimal),
+				Number::Felt252(felt252) => json!(felt252),
 			},
 			Value::Strand(strand) => strand.0.into(),
 			Value::Duration(duration) => duration.to_raw().into(),
