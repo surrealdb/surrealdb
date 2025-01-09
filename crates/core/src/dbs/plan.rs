@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
+use crate::idx::planner::RecordStrategy;
 use crate::sql::{Object, Value};
 use std::collections::HashMap;
 
@@ -109,11 +110,11 @@ impl ExplainItem {
 				name: "Iterate Edges".into(),
 				details: vec![("from", Value::Thing(e.from.to_owned()))],
 			},
-			Iterable::Table(t, keys_only) => Self {
-				name: if *keys_only {
-					"Iterate Table Keys"
-				} else {
-					"Iterate Table"
+			Iterable::Table(t, rs) => Self {
+				name: match rs {
+					RecordStrategy::Count => "Count",
+					RecordStrategy::KeysOnly => "Iterate Table Keys",
+					RecordStrategy::KeysAndValues => "Iterate Table",
 				}
 				.into(),
 				details: vec![("table", Value::from(t.0.to_owned()))],

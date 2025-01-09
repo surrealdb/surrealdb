@@ -3,7 +3,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
-use crate::idx::planner::StatementContext;
+use crate::idx::planner::{RecordStrategy, StatementContext};
 use crate::sql::with::With;
 use crate::sql::{Array, Expression, Idiom, Number, Object};
 use crate::sql::{Operator, Value};
@@ -74,34 +74,34 @@ impl PlanBuilder {
 			}
 			if let Some((_, io)) = compound_index {
 				// Evaluate if we can use keys only
-				let keys_only = ctx.is_keys_only(true, tb).await?;
+				let record_strategy = ctx.check_record_strategy(true, tb).await?;
 				// Return the plan
-				return Ok(Plan::SingleIndex(None, io, keys_only));
+				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
 
 			// We take the "first" range query if one is available
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
-					// Evaluate if we can use keys only
-					let keys_only = ctx.is_keys_only(true, tb).await?;
+					// Evaluate the record strategy
+					let record_strategy = ctx.check_record_strategy(true, tb).await?;
 					// Return the plan
-					return Ok(Plan::SingleIndexRange(ir, rq, keys_only));
+					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy));
 				}
 			}
 
 			// Otherwise, we try to find the most interesting (todo: TBD) single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
-				// Evaluate if we can use keys only
-				let keys_only = ctx.is_keys_only(true, tb).await?;
+				// Evaluate the record strategy
+				let record_strategy = ctx.check_record_strategy(true, tb).await?;
 				// Return the plan
-				return Ok(Plan::SingleIndex(Some(e), i, keys_only));
+				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
 			}
 			// If there is an order option
 			if let Some(o) = order {
-				// Evaluate if we can use keys only
-				let keys_only = ctx.is_keys_only(true, tb).await?;
+				// Evaluate the record strategy
+				let record_strategy = ctx.check_record_strategy(true, tb).await?;
 				// Return the plan
-				return Ok(Plan::SingleIndex(None, o.clone(), keys_only));
+				return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
@@ -114,10 +114,10 @@ impl PlanBuilder {
 					group.take_intersect_ranges(&mut ranges);
 				}
 			}
-			// Evaluate if we can use keys only
-			let keys_only = ctx.is_keys_only(true, tb).await?;
+			// Evaluate the record strategy
+			let record_strategy = ctx.check_record_strategy(true, tb).await?;
 			// Return the plan
-			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, keys_only));
+			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
 		Self::table_iterator(ctx, None, tb).await
 	}
@@ -127,10 +127,11 @@ impl PlanBuilder {
 		reason: Option<&str>,
 		tb: &str,
 	) -> Result<Plan, Error> {
-		// If we only count and there are no conditions and no aggregations, then we can only scan keys
-		let keys_only = ctx.is_keys_only(false, tb).await?;
+		// Evaluate the record strategy
+		let record_strategy = ctx.check_record_strategy(false, tb).await?;
+		// Collect the reason if any
 		let reason = reason.map(|s| s.to_string());
-		Ok(Plan::TableIterator(reason, keys_only))
+		Ok(Plan::TableIterator(reason, record_strategy))
 	}
 
 	/// Check if we have an explicit list of index that we should use
@@ -223,26 +224,26 @@ impl PlanBuilder {
 pub(super) enum Plan {
 	/// Table full scan
 	/// 1: An optional reason
-	/// 2: if true, we only need to collect the keys
-	TableIterator(Option<String>, bool),
+	/// 2: A record strategy
+	TableIterator(Option<String>, RecordStrategy),
 	/// Index scan filtered on records matching a given expression
 	/// 1: The optional expression associated with the index
-	/// 2: if true, we only need to collect the keys
-	SingleIndex(Option<Arc<Expression>>, IndexOption, bool),
+	/// 2: A record strategy
+	SingleIndex(Option<Arc<Expression>>, IndexOption, RecordStrategy),
 	/// Union of filtered index scans
 	/// 1: A list of expression and index options
 	/// 2: A list of index ranges
-	/// 3: if true, we only need to collect the keys
+	/// 3: A record strategy
 	MultiIndex(
 		Vec<(Arc<Expression>, IndexOption)>,
 		Vec<(IndexReference, UnionRangeQueryBuilder)>,
-		bool,
+		RecordStrategy,
 	),
 	/// Index scan for record matching a given range
-	/// 1. The reference to the index
+	/// 1. The reference to index
 	/// 2. The index range
-	/// 3. if true, we only need to collect the keys
-	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, bool),
+	/// 3. A record strategy
+	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]

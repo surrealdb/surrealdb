@@ -4,7 +4,7 @@ use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::idx::planner::iterators::{CollectorRecord, IteratorRef};
-use crate::idx::planner::IterationStage;
+use crate::idx::planner::{IterationStage, RecordStrategy};
 use crate::key::{graph, thing};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::dir::Dir;
@@ -378,22 +378,20 @@ pub(super) trait Collector {
 				Iterable::Thing(v) => self.collect(Collected::Thing(v)).await?,
 				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
 				Iterable::Edges(e) => self.collect_edges(ctx, opt, e).await?,
-				Iterable::Range(tb, v, keys_only) => {
-					if keys_only {
-						self.collect_range_keys(ctx, opt, &tb, v).await?
-					} else {
-						self.collect_range(ctx, opt, &tb, v).await?
-					}
-				}
-				Iterable::Table(v, keys_only) => {
+				Iterable::Range(tb, v, rs) => match rs {
+					RecordStrategy::Count => todo!(),
+					RecordStrategy::KeysOnly => self.collect_range_keys(ctx, opt, &tb, v).await?,
+					RecordStrategy::KeysAndValues => self.collect_range(ctx, opt, &tb, v).await?,
+				},
+				Iterable::Table(v, rs) => {
 					let ctx = Self::check_query_planner_context(ctx, &v);
-					if keys_only {
-						self.collect_table_keys(&ctx, opt, &v).await?
-					} else {
-						self.collect_table(&ctx, opt, &v).await?
+					match rs {
+						RecordStrategy::Count => todo!(),
+						RecordStrategy::KeysOnly => self.collect_table_keys(&ctx, opt, &v).await?,
+						RecordStrategy::KeysAndValues => self.collect_table(&ctx, opt, &v).await?,
 					}
 				}
-				Iterable::Index(v, irf, keys_only) => {
+				Iterable::Index(v, irf, rs) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&v.0) {
 							// We set the query executor matching the current table in the Context
@@ -401,10 +399,10 @@ pub(super) trait Collector {
 							let mut ctx = MutableContext::new(ctx);
 							ctx.set_query_executor(exe.clone());
 							let ctx = ctx.freeze();
-							return self.collect_index_items(&ctx, opt, &v, irf, keys_only).await;
+							return self.collect_index_items(&ctx, opt, &v, irf, rs).await;
 						}
 					}
-					self.collect_index_items(ctx, opt, &v, irf, keys_only).await?
+					self.collect_index_items(ctx, opt, &v, irf, rs).await?
 				}
 				Iterable::Mergeable(v, o) => self.collect(Collected::Mergeable(v, o)).await?,
 				Iterable::Relatable(f, v, w, o) => {
@@ -665,7 +663,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		table: &Table,
 		irf: IteratorRef,
-		keys_only: bool,
+		rs: RecordStrategy,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &table.0, opt.strict).await?;
@@ -680,10 +678,10 @@ pub(super) trait Collector {
 						break;
 					}
 					for r in records {
-						self.collect(if keys_only {
-							Collected::IndexItemKey(r)
-						} else {
-							Collected::IndexItem(r)
+						self.collect(match rs {
+							RecordStrategy::Count => todo!(),
+							RecordStrategy::KeysOnly => Collected::IndexItemKey(r),
+							RecordStrategy::KeysAndValues => Collected::IndexItem(r),
 						})
 						.await?;
 					}

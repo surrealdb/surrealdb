@@ -8,7 +8,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
-use crate::idx::planner::IterationStage;
+use crate::idx::planner::{IterationStage, RecordStrategy};
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::mock::Mock;
@@ -46,13 +46,11 @@ pub(crate) enum Iterable {
 	/// of a record before processing each document.
 	Edges(Edges),
 	/// An iterable which needs to iterate over the records
-	/// in a table before processing each document. When the
-	/// 2nd argument is true, we iterate over keys only.
-	Table(Table, bool),
+	/// in a table before processing each document.
+	Table(Table, RecordStrategy),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	/// When the 2nd argument is true, we iterate over keys only.
-	Range(String, IdRange, bool),
+	Range(String, IdRange, RecordStrategy),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
@@ -68,7 +66,7 @@ pub(crate) enum Iterable {
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
 	/// When the 3rd argument is true, we iterate over keys only.
-	Index(Table, IteratorRef, bool),
+	Index(Table, IteratorRef, RecordStrategy),
 }
 
 #[derive(Debug)]
@@ -158,7 +156,7 @@ impl Iterator {
 			Value::Object(v) => self.prepare_object(stm, v)?,
 			Value::Array(v) => self.prepare_array(stm, v)?,
 			Value::Thing(v) => match v.is_range() {
-				true => self.prepare_range(stm, v, false)?,
+				true => self.prepare_range(stm, v, RecordStrategy::KeysAndValues)?,
 				false => self.prepare_thing(stm, v)?,
 			},
 			v => {
@@ -177,10 +175,10 @@ impl Iterator {
 		match stm.is_deferable() {
 			true => self.ingest(Iterable::Yield(v)),
 			false => match stm.is_guaranteed() {
-				false => self.ingest(Iterable::Table(v, false)),
+				false => self.ingest(Iterable::Table(v, RecordStrategy::KeysAndValues)),
 				true => {
 					self.guaranteed = Some(Iterable::Yield(v.clone()));
-					self.ingest(Iterable::Table(v, false))
+					self.ingest(Iterable::Table(v, RecordStrategy::KeysAndValues))
 				}
 			},
 		}
@@ -231,7 +229,7 @@ impl Iterator {
 		&mut self,
 		stm: &Statement<'_>,
 		v: Thing,
-		keys: bool,
+		rs: RecordStrategy,
 	) -> Result<(), Error> {
 		// Check if this is a create statement
 		if stm.is_create() {
@@ -241,7 +239,7 @@ impl Iterator {
 		}
 		// Add the record to the iterator
 		if let (tb, Id::Range(v)) = (v.tb, v.id) {
-			self.ingest(Iterable::Range(tb, *v, keys));
+			self.ingest(Iterable::Range(tb, *v, rs));
 		}
 		// All ingested ok
 		Ok(())
@@ -277,7 +275,7 @@ impl Iterator {
 				Value::Edges(v) => self.prepare_edges(stm, *v)?,
 				Value::Object(v) => self.prepare_object(stm, v)?,
 				Value::Thing(v) => match v.is_range() {
-					true => self.prepare_range(stm, v, false)?,
+					true => self.prepare_range(stm, v, RecordStrategy::KeysAndValues)?,
 					false => self.prepare_thing(stm, v)?,
 				},
 				_ => {
