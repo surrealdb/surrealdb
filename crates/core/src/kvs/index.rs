@@ -303,13 +303,13 @@ impl Building {
 		while let Some(rng) = next {
 			// Get the next batch of records
 			let tx = self.new_read_tx().await?;
-			let batch = catch!(tx, tx.batch(rng, *INDEXING_BATCH_SIZE, true, None).await);
+			let batch = catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await);
 			// We can release the read transaction
 			drop(tx);
 			// Set the next scan range
 			next = batch.next;
 			// Check there are records
-			if batch.values.is_empty() {
+			if batch.result.is_empty() {
 				// If not, we are with the initial indexing
 				break;
 			}
@@ -317,7 +317,7 @@ impl Building {
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
 			// Index the batch
-			catch!(tx, self.index_initial_batch(&ctx, &tx, batch.values, &mut count).await);
+			catch!(tx, self.index_initial_batch(&ctx, &tx, batch.result, &mut count).await);
 			tx.commit().await?;
 		}
 		// Second iteration, we index/remove any records that has been added or removed since the initial indexing

@@ -44,6 +44,7 @@ use std::{
 	mem,
 	sync::Arc,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::sql::Function;
 use surrealdb_core::{

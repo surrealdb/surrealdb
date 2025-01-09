@@ -42,15 +42,12 @@ pub static DATASTORE_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_DATASTORE_CACHE_SIZE", usize, 1_000);
 
 /// The maximum number of keys that should be scanned at once in general queries.
-pub static NORMAL_FETCH_SIZE: LazyLock<u32> = lazy_env_parse!("SURREAL_NORMAL_FETCH_SIZE", u32, 50);
+pub static NORMAL_FETCH_SIZE: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_NORMAL_FETCH_SIZE", u32, 500);
 
 /// The maximum number of keys that should be scanned at once for export queries.
 pub static EXPORT_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_EXPORT_BATCH_SIZE", u32, 1000);
-
-/// The maximum number of keys that should be fetched when streaming range scans in a Scanner.
-pub static MAX_STREAM_BATCH_SIZE: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_MAX_STREAM_BATCH_SIZE", u32, 1000);
 
 /// The maximum size of the priority queue triggering usage of the priority queue for the result collector.
 pub static MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE: LazyLock<u32> =

@@ -46,7 +46,7 @@ static GLOBAL_LIST_LOCK: Mutex<()> = Mutex::new(());
 
 // Thread-local storage for the node pointer for this thread
 thread_local! {
-	static THREAD_NODE: RefCell<*mut ThreadCounterNode> = RefCell::new(null_mut());
+	static THREAD_NODE: RefCell<*mut ThreadCounterNode> = const { RefCell::new(null_mut()) };
 }
 
 // Retrieves the thread's node, creating and registering it if necessary
@@ -123,7 +123,7 @@ impl BenchAllocator for PerThreadBenchAllocator {
 }
 
 fn bench_alloc<T: BenchAllocator>(c: &mut Criterion, count: usize, bench_name: &str, allocator: T) {
-	c.bench_function(&bench_name, |b| {
+	c.bench_function(bench_name, |b| {
 		b.iter(|| {
 			MAIN_PASSED.store(true, Ordering::Relaxed);
 			let r = (0..count)
