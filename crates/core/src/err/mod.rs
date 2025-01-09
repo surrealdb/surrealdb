@@ -681,10 +681,11 @@ pub enum Error {
 	},
 
 	/// Unable to convert a value to another value
-	#[error("Expected a {into} but cannot convert {from} into a {into}")]
+	#[error("Expected a {into} but cannot convert {from} into a {into} at path: {path}")]
 	ConvertTo {
 		from: Value,
 		into: String,
+		path: String,
 	},
 
 	/// Unable to coerce to a value to another value

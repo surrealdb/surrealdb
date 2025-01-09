@@ -171,6 +171,7 @@ impl TryFrom<&Number> for f32 {
 		n.to_float().to_f32().ok_or_else(|| Error::ConvertTo {
 			from: Value::Number(*n),
 			into: "f32".to_string(),
+			path: "type::f32.convert".into(),
 		})
 	}
 }
@@ -189,6 +190,7 @@ impl TryFrom<&Number> for i32 {
 		n.to_int().to_i32().ok_or_else(|| Error::ConvertTo {
 			from: Value::Number(*n),
 			into: "i32".to_string(),
+			path: "type::i32.convert".into(),
 		})
 	}
 }
@@ -200,6 +202,7 @@ impl TryFrom<&Number> for i16 {
 		n.to_int().to_i16().ok_or_else(|| Error::ConvertTo {
 			from: Value::Number(*n),
 			into: "i16".to_string(),
+			path: "type::i16.convert".into(),
 		})
 	}
 }

@@ -153,10 +153,12 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
 				from: Value::Strand(v),
 				into: "record".into(),
+				path: "type::thing.strand_conversion.convert".into(),
 			}),
 			v => Err(Error::ConvertTo {
 				from: v,
 				into: "record".into(),
+				path: "type::thing.convert".into()
 			}),
 		}?
 		.into()),
