@@ -851,12 +851,12 @@ async fn compute_purge(
 		// Grants expired or revoked at a future time will not be purged.
 		// Grants expired or revoked at exactly the current second will not be purged.
 		let purge_expired = stmt.expired
-			&& gr.expiration.as_ref().map_or(false, |exp| {
+			&& gr.expiration.as_ref().is_some_and(|exp| {
 				now.timestamp() >= exp.timestamp() // Prevent saturating when not expired yet.
 					&& (now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
 			});
 		let purge_revoked = stmt.revoked
-			&& gr.revocation.as_ref().map_or(false, |rev| {
+			&& gr.revocation.as_ref().is_some_and(|rev| {
 				now.timestamp() >= rev.timestamp() // Prevent saturating when not revoked yet.
 					&& (now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
 			});
