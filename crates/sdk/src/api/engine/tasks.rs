@@ -1,6 +1,6 @@
 use crate::engine::IntervalStream;
 use crate::err::Error;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use core::future::Future;
 use futures::StreamExt;
 use std::pin::Pin;
@@ -9,25 +9,25 @@ use std::time::Duration;
 use surrealdb_core::{kvs::Datastore, options::EngineOptions};
 use tokio_util::sync::CancellationToken;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Send + 'static>>;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 type Task = Pin<Box<()>>;
 
 pub struct Tasks(#[allow(dead_code)] Vec<Task>);
 
 impl Tasks {
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	pub async fn resolve(self) -> Result<(), Error> {
 		Ok(())
 	}
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	pub async fn resolve(self) -> Result<(), Error> {
 		for task in self.0.into_iter() {
 			let _ = task.await;
@@ -175,9 +175,9 @@ fn spawn_task_changefeed_cleanup(
 }
 
 async fn interval_ticker(interval: Duration) -> IntervalStream {
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	use tokio::{time, time::MissedTickBehavior};
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	use wasmtimer::{tokio as time, tokio::MissedTickBehavior};
 	// Create a new interval timer
 	let mut interval = time::interval(interval);

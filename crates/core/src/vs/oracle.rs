@@ -3,9 +3,9 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 use super::{u16_u64_to_versionstamp, u64_to_versionstamp, u64_u16_to_versionstamp, Versionstamp};

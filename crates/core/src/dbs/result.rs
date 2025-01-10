@@ -76,7 +76,7 @@ impl Results {
 		Ok(())
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	pub(super) async fn sort(&mut self, orders: &Ordering) -> Result<(), Error> {
 		match self {
 			#[cfg(storage)]
@@ -88,7 +88,7 @@ impl Results {
 		Ok(())
 	}
 
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	pub(super) fn sort(&mut self, orders: &Ordering) {
 		match self {
 			Self::MemoryOrdered(c) => c.sort(),

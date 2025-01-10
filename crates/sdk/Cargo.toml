@@ -133,7 +133,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 ulid = { version = "1.1.0", features = ["serde"] }
 wiremock = "0.6.0"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(target_family = "wasm")'.dependencies]
 pharos = "0.5.3"
 ring = { version = "0.17.7", features = ["wasm32_unknown_unknown_js"] }
 tokio = { version = "1.40.0", default-features = false, features = [
@@ -147,7 +147,7 @@ wasmtimer = { version = "0.2.0", default-features = false, features = [
 ] }
 ws_stream_wasm = "0.7.4"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1.40.0", default-features = false, features = [
     "macros",
     "io-util",

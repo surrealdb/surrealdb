@@ -1,8 +1,8 @@
 //! WebSocket engine
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
 use crate::api::conn::Command;

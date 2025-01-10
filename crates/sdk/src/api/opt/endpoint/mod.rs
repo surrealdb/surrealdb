@@ -122,7 +122,7 @@ pub enum EndpointKind {
 	Ws,
 	Wss,
 	FoundationDb,
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	IndxDb,
 	Memory,
 	RocksDb,
@@ -142,7 +142,7 @@ impl From<&str> for EndpointKind {
 			"ws" => Self::Ws,
 			"wss" => Self::Wss,
 			"fdb" => Self::FoundationDb,
-			#[cfg(target_arch = "wasm32")]
+			#[cfg(target_family = "wasm")]
 			"indxdb" => Self::IndxDb,
 			"mem" => Self::Memory,
 			"file" => Self::File,

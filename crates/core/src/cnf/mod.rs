@@ -13,7 +13,7 @@ pub const SERVER_NAME: &str = "SurrealDB";
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
 /// Specifies how many concurrent jobs can be buffered in the worker channel.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 pub static MAX_CONCURRENT_TASKS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_MAX_CONCURRENT_TASKS", usize, 64);
 

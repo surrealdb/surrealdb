@@ -21,7 +21,7 @@ use crate::kvs::cache::ds::Cache;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
@@ -38,14 +38,14 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::task::{ready, Poll};
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
 use uuid::Uuid;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
@@ -80,7 +80,7 @@ pub struct Datastore {
 	// The cross transaction cache
 	cache: Arc<Cache>,
 	// The index asynchronous builder
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	index_builder: IndexBuilder,
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
@@ -264,7 +264,7 @@ impl Datastore {
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
 			index_stores: Default::default(),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(not(target_family = "wasm"))]
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
@@ -426,7 +426,7 @@ impl Datastore {
 				notification_channel: None,
 				capabilities: Capabilities::default(),
 				index_stores: IndexStores::default(),
-				#[cfg(not(target_arch = "wasm32"))]
+				#[cfg(not(target_family = "wasm"))]
 				index_builder: IndexBuilder::new(tf),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
@@ -1210,7 +1210,7 @@ impl Datastore {
 			self.capabilities.clone(),
 			self.index_stores.clone(),
 			self.cache.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(not(target_family = "wasm"))]
 			self.index_builder.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),

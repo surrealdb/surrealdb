@@ -1,15 +1,15 @@
 use crate::dbs::plan::Explanation;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use crate::err::Error;
 use crate::sql::order::OrderList;
 use crate::sql::value::Value;
 
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use rayon::prelude::ParallelSliceMut;
 use std::mem;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
 #[derive(Default)]
@@ -221,7 +221,7 @@ impl MemoryOrdered {
 		}
 	}
 
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	pub(super) fn sort(&mut self) {
 		if self.result.is_none() {
 			if !self.batch.is_empty() {
@@ -235,7 +235,7 @@ impl MemoryOrdered {
 		}
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	pub(super) async fn sort(&mut self) -> Result<(), Error> {
 		if self.result.is_none() {
 			if !self.batch.is_empty() {
