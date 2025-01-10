@@ -54,7 +54,7 @@ static CACHE_COOLDOWN: LazyLock<chrono::Duration> =
 		}
 	});
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 static REMOTE_TIMEOUT: LazyLock<chrono::Duration> =
 	LazyLock::new(|| match std::env::var("SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS") {
 		Ok(milliseconds_str) => {
@@ -290,9 +290,9 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<(), Error> {
 // Attempts to fetch a JWKS object from a remote location and stores it in the cache if successful
 async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Result<JwkSet, Error> {
 	let client = Client::new();
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	let res = client.get(url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	let res = client.get(url).send().await?;
 	if !res.status().is_success() {
 		warn!("Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'", res.status());
@@ -890,7 +890,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	async fn test_remote_timeout() {
 		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
 			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(

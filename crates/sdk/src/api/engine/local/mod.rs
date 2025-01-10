@@ -31,12 +31,12 @@ use crate::{
 	value::Notification,
 };
 use channel::Sender;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use std::task::{ready, Poll};
 use std::{
 	collections::{BTreeMap, HashMap},
@@ -44,7 +44,7 @@ use std::{
 	mem,
 	sync::Arc,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::sql::Function;
 use surrealdb_core::{
@@ -59,15 +59,15 @@ use surrealdb_core::{
 		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio_util::bytes::BytesMut;
 use uuid::Uuid;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use std::{future::Future, path::PathBuf};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use surrealdb_core::err::Error as CoreError;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio::{
 	fs::OpenOptions,
 	io::{self, AsyncReadExt, AsyncWriteExt},
@@ -76,11 +76,11 @@ use tokio::{
 #[cfg(feature = "ml")]
 use surrealdb_core::sql::Model;
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use crate::api::conn::MlExportConfig;
-#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use futures::StreamExt;
-#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
 	iam::{check::check_ns_db, Action, ResourceKind},
 	kvs::{LockType, TransactionType},
@@ -90,9 +90,9 @@ use surrealdb_core::{
 
 use super::resource_to_values;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
 /// In-memory database
@@ -474,7 +474,7 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<CoreValue> {
 	}
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 async fn export_file(
 	kvs: &Datastore,
 	sess: &Session,
@@ -497,7 +497,7 @@ async fn export_file(
 	Ok(())
 }
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 async fn export_ml(
 	kvs: &Datastore,
 	sess: &Session,
@@ -526,7 +526,7 @@ async fn export_ml(
 	Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 async fn copy<'a, R, W>(
 	path: PathBuf,
 	reader: &'a mut R,
@@ -779,7 +779,7 @@ async fn router(
 			Ok(DbResponse::Query(response))
 		}
 
-		#[cfg(target_arch = "wasm32")]
+		#[cfg(target_family = "wasm")]
 		Command::ExportFile {
 			..
 		}
@@ -790,7 +790,7 @@ async fn router(
 			..
 		} => Err(crate::api::Error::BackupsNotSupported.into()),
 
-		#[cfg(any(target_arch = "wasm32", not(feature = "ml")))]
+		#[cfg(any(target_family = "wasm", not(feature = "ml")))]
 		Command::ExportMl {
 			..
 		}
@@ -801,7 +801,7 @@ async fn router(
 			..
 		} => Err(crate::api::Error::BackupsNotSupported.into()),
 
-		#[cfg(not(target_arch = "wasm32"))]
+		#[cfg(not(target_family = "wasm"))]
 		Command::ExportFile {
 			path: file,
 			config,
@@ -848,7 +848,7 @@ async fn router(
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 
-		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 		Command::ExportMl {
 			path,
 			config,
@@ -895,7 +895,7 @@ async fn router(
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 
-		#[cfg(not(target_arch = "wasm32"))]
+		#[cfg(not(target_family = "wasm"))]
 		Command::ExportBytes {
 			bytes,
 			config,
@@ -924,7 +924,7 @@ async fn router(
 
 			Ok(DbResponse::Other(CoreValue::None))
 		}
-		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 		Command::ExportBytesMl {
 			bytes,
 			config,
@@ -953,7 +953,7 @@ async fn router(
 
 			Ok(DbResponse::Other(CoreValue::None))
 		}
-		#[cfg(not(target_arch = "wasm32"))]
+		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
 			path,
 		} => {
@@ -1000,7 +1000,7 @@ async fn router(
 
 			Ok(DbResponse::Other(CoreValue::None))
 		}
-		#[cfg(all(not(target_arch = "wasm32"), feature = "ml"))]
+		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 		Command::ImportMl {
 			path,
 		} => {

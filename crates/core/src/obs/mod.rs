@@ -5,9 +5,9 @@
 use crate::err::Error;
 use bytes::Bytes;
 use futures::stream::BoxStream;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use object_store::local::LocalFileSystem;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use object_store::memory::InMemory;
 use object_store::parse_url;
 use object_store::path::Path;
@@ -51,12 +51,12 @@ fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 				fs::create_dir_all(&path)
 					.unwrap_or_else(|_| panic!("Failed to create directory {:?}", path));
 			}
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(not(target_family = "wasm"))]
 			{
 				// As long as the provided path is correct, the following should never panic
 				Arc::new(LocalFileSystem::new_with_prefix(path).unwrap())
 			}
-			#[cfg(target_arch = "wasm32")]
+			#[cfg(target_family = "wasm")]
 			{
 				Arc::new(InMemory::new())
 			}
