@@ -55,13 +55,17 @@ mod version;
 mod tests;
 
 pub use authenticate::Authenticate;
-#[doc(hidden)] // Not supported yet
+/// Not supported yet
+#[doc(hidden)]
 pub use begin::Begin;
-#[doc(hidden)] // Not supported yet
+/// Not supported yet
+#[doc(hidden)]
 pub use begin::Transaction;
-#[doc(hidden)] // Not supported yet
+/// Not supported yet
+#[doc(hidden)]
 pub use cancel::Cancel;
-#[doc(hidden)] // Not supported yet
+/// Not supported yet
+#[doc(hidden)]
 pub use commit::Commit;
 pub use content::Content;
 pub use create::Create;
@@ -253,8 +257,11 @@ where
 		}
 	}
 
-	#[doc(hidden)] // Not supported yet
+	/// Not supported yet
+	#[doc(hidden)]
+	#[cfg(surrealdb_unstable)] // Mark this API as unstable
 	pub fn transaction(self) -> Begin<C> {
+		warn!("Client side transactions are not yet supported. This API doesn't do anything yet.");
 		Begin {
 			client: self,
 		}
