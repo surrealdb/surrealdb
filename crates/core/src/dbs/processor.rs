@@ -397,14 +397,14 @@ pub(super) trait Collector {
 				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
 				Iterable::Edges(e) => self.collect_edges(ctx, opt, e).await?,
 				Iterable::Range(tb, v, rs) => match rs {
-					RecordStrategy::Count => todo!(),
+					RecordStrategy::Count => self.collect_range_count(ctx, opt, &tb, v).await?,
 					RecordStrategy::KeysOnly => self.collect_range_keys(ctx, opt, &tb, v).await?,
 					RecordStrategy::KeysAndValues => self.collect_range(ctx, opt, &tb, v).await?,
 				},
 				Iterable::Table(v, rs) => {
 					let ctx = Self::check_query_planner_context(ctx, &v);
 					match rs {
-						RecordStrategy::Count => todo!(),
+						RecordStrategy::Count => self.collect_table_count(&ctx, opt, &v).await?,
 						RecordStrategy::KeysOnly => self.collect_table_keys(&ctx, opt, &v).await?,
 						RecordStrategy::KeysAndValues => self.collect_table(&ctx, opt, &v).await?,
 					}
@@ -496,6 +496,27 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	async fn collect_table_count(
+		&mut self,
+		ctx: &Context,
+		opt: &Options,
+		v: &Table,
+	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
+		// Check that the table exists
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
+		// Prepare the start and end keys
+		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
+		let end = thing::suffix(opt.ns()?, opt.db()?, v);
+		// Create a new iterable range
+		let count = txn.count(beg..end).await?;
+		// Collect the count
+		self.collect(Collected::Count(count)).await?;
+		// Everything ok
+		Ok(())
+	}
+
 	async fn range_prepare(
 		txn: &Transaction,
 		opt: &Options,
@@ -578,6 +599,25 @@ pub(super) trait Collector {
 			let k = res?;
 			self.collect(Collected::RangeKey(k)).await?;
 		}
+		// Everything ok
+		Ok(())
+	}
+
+	async fn collect_range_count(
+		&mut self,
+		ctx: &Context,
+		opt: &Options,
+		tb: &str,
+		r: IdRange,
+	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
+		// Prepare
+		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
+		// Create a new iterable range
+		let count = txn.count(beg..end).await?;
+		// Collect the count
+		self.collect(Collected::Count(count)).await?;
 		// Everything ok
 		Ok(())
 	}

@@ -759,7 +759,7 @@ async fn select_count_group_all() -> Result<(), Error> {
 					detail: {
 						table: 'table'
 					},
-					operation: 'Iterate Table Keys'
+					operation: 'Iterate Table Count'
 				},
 				{
 					detail: {
@@ -818,7 +818,7 @@ async fn select_count_group_all() -> Result<(), Error> {
 
 async fn select_count_group_all_permissions(
 	perm: &str,
-	expect_keys_only: bool,
+	expect_count_optim: bool,
 	expect_result: &str,
 ) -> Result<(), Error> {
 	// Define the permissions
@@ -846,8 +846,8 @@ async fn select_count_group_all_permissions(
 	.await?;
 	t.expect_size(4)?;
 	// The explain plan is still visible
-	let operation = if expect_keys_only {
-		"Iterate Table Keys"
+	let operation = if expect_count_optim {
+		"Iterate Table Count"
 	} else {
 		"Iterate Table"
 	};
@@ -875,7 +875,7 @@ async fn select_count_group_all_permissions(
 	// Check what is returned
 	t.expect_val(expect_result)?;
 	// The explain plan is still visible
-	let operation = if expect_keys_only {
+	let operation = if expect_count_optim {
 		"Iterate Range Keys"
 	} else {
 		"Iterate Range"
@@ -940,7 +940,7 @@ async fn select_count_range_keys_only() -> Result<(), Error> {
 						range: 1..4,
 						table: 'table'
 					},
-					operation: 'Iterate Range Keys'
+					operation: 'Iterate Range Count'
 				},
 				{
 					detail: {
