@@ -241,7 +241,7 @@ async fn record_access_invalid_query() {
         DEFINE ACCESS `{access}` ON DB TYPE RECORD
         SIGNUP {{ SELECT * FROM ONLY [1, 2] }}
         SIGNIN {{ SELECT * FROM ONLY [1, 2] }}
-		DURATION FOR SESSION 1d FOR TOKEN 300s
+		DURATION FOR SESSION 1d FOR TOKEN 15s
     "
 	);
 	let response = db.query(sql).await.unwrap();
