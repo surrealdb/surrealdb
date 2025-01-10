@@ -5451,6 +5451,7 @@ dependencies = [
  "hyper 1.4.1",
  "jsonwebtoken",
  "nix 0.27.1",
+ "nu-ansi-term",
  "num_cpus",
  "opentelemetry",
  "opentelemetry-otlp",
