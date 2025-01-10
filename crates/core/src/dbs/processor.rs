@@ -126,6 +126,7 @@ impl Collected {
 		let val = Operable::Value(val);
 		// Process the record
 		Ok(Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -141,6 +142,7 @@ impl Collected {
 		let val = Operable::Value(val.into());
 		// Process the record
 		let pro = Processed {
+			rs: RecordStrategy::KeysOnly,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -154,6 +156,7 @@ impl Collected {
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record
 		let pro = Processed {
+			rs: RecordStrategy::KeysOnly,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -178,6 +181,7 @@ impl Collected {
 		let val = Operable::Relate(f, val, w, o.map(|v| v.into()));
 		// Process the document record
 		let pro = Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -195,6 +199,7 @@ impl Collected {
 		let val = Operable::Value(val);
 		// Process the document record
 		let pro = Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -209,6 +214,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v, opt.strict).await?;
 		// Pass the value through
 		let pro = Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: Some(v),
 			rid: None,
 			ir: None,
@@ -220,6 +226,7 @@ impl Collected {
 	fn process_value(v: Value) -> Processed {
 		// Pass the value through
 		Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: None,
 			ir: None,
@@ -232,6 +239,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -250,6 +258,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -267,6 +276,7 @@ impl Collected {
 		let val = Operable::Value(val.into());
 		// Process the record
 		Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -276,6 +286,7 @@ impl Collected {
 
 	fn process_count(count: usize) -> Processed {
 		Processed {
+			rs: RecordStrategy::Count,
 			generate: None,
 			rid: None,
 			ir: None,
@@ -286,6 +297,7 @@ impl Collected {
 	fn process_index_item_key(i: IndexItemRecord) -> Processed {
 		let (t, v, ir) = i.consume();
 		Processed {
+			rs: RecordStrategy::KeysOnly,
 			generate: None,
 			rid: Some(t),
 			ir: Some(Arc::new(ir)),
@@ -306,6 +318,7 @@ impl Collected {
 			Iterable::fetch_thing(txn, opt, &t).await?
 		};
 		let pro = Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(t),
 			ir: Some(ir.into()),

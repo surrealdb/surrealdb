@@ -5,6 +5,7 @@ use crate::dbs::Workable;
 use crate::dbs::{Options, Processed};
 use crate::doc::Document;
 use crate::err::Error;
+use crate::idx::planner::RecordStrategy;
 use crate::sql::value::Value;
 use async_channel::Sender;
 use reblessive::tree::Stk;
@@ -34,10 +35,10 @@ impl Document {
 				Operable::Value(v) => (v, Workable::Normal),
 				Operable::Insert(v, o) => (v, Workable::Insert(o)),
 				Operable::Relate(f, v, w, o) => (v, Workable::Relate(f, w, o)),
-				Operable::Count(_) => todo!(),
+				Operable::Count(count) => (Arc::new(Value::Count(count as i64)), Workable::Normal),
 			};
 			// Setup a new document
-			let mut doc = Document::new(pro.rid, pro.ir, pro.generate, ins.0, ins.1, retry);
+			let mut doc = Document::new(pro.rid, pro.ir, pro.generate, ins.0, ins.1, retry, pro.rs);
 			// Generate a new document id if necessary
 			doc.generate_record_id(stk, ctx, opt, stm).await?;
 			// Optionally create a save point so we can roll back any upcoming changes
@@ -74,6 +75,7 @@ impl Document {
 						.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version)
 						.await?;
 					pro = Processed {
+						rs: RecordStrategy::KeysAndValues,
 						generate: None,
 						rid: Some(Arc::new(v)),
 						ir: None,

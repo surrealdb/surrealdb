@@ -96,7 +96,11 @@ impl GroupsCollector {
 		obj: Value,
 	) -> Result<(), Error> {
 		for (agr, idiom) in agrs.iter_mut().zip(idioms) {
-			let val = stk.run(|stk| obj.get(stk, ctx, opt, None, idiom)).await?;
+			let val = if let Value::Count(c) = obj {
+				Value::Count(c)
+			} else {
+				stk.run(|stk| obj.get(stk, ctx, opt, None, idiom)).await?
+			};
 			agr.push(stk, ctx, opt, val).await?;
 		}
 		Ok(())
@@ -262,7 +266,11 @@ impl Aggregator {
 		val: Value,
 	) -> Result<(), Error> {
 		if let Some(ref mut c) = self.count {
-			*c += 1;
+			if let Value::Count(count) = val {
+				*c += count as usize;
+			} else {
+				*c += 1;
+			}
 		}
 		if let Some((ref f, ref mut c)) = self.count_function {
 			if f.aggregate(val.clone())?.compute(stk, ctx, opt, None).await?.is_truthy() {

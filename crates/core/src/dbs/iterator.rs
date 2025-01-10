@@ -86,6 +86,8 @@ pub(crate) enum Workable {
 
 #[derive(Debug)]
 pub(crate) struct Processed {
+	/// Whether this document only fetched keys or just count
+	pub(crate) rs: RecordStrategy,
 	/// Whether this document needs to have an ID generated
 	pub(crate) generate: Option<Table>,
 	/// The record id for this document that should be processed
@@ -586,22 +588,33 @@ impl Iterator {
 		stm: &Statement<'_>,
 		pro: Processed,
 	) -> Result<(), Error> {
-		// Check if this is a count all
-		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
-		// Process the document
-		let res = if count_all {
-			let count = match pro.val {
-				Operable::Value(_) | Operable::Insert(_, _) | Operable::Relate(_, _, _, _) => 1,
-				Operable::Count(count) => count,
-			};
-			Ok(map! { "count".to_string() => Value::from(count) }.into())
-		} else {
-			stk.run(|stk| Document::process(stk, ctx, opt, stm, pro)).await
-		};
+		// Extract the value
+		let res = Self::extract_value(stk, ctx, opt, stm, pro).await;
 		// Process the result
 		self.result(stk, ctx, opt, stm, res).await;
 		// Everything ok
 		Ok(())
+	}
+
+	async fn extract_value(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+		pro: Processed,
+	) -> Result<Value, Error> {
+		// Check if this is a count all
+		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
+		if count_all {
+			if let Operable::Count(count) = pro.val {
+				return Ok(Value::Count(count as i64));
+			}
+			if matches!(pro.rs, RecordStrategy::KeysOnly) {
+				return Ok(Value::Count(1));
+			}
+		}
+		// Otherwise, we process the document
+		stk.run(|stk| Document::process(stk, ctx, opt, stm, pro)).await
 	}
 
 	/// Accept a processed record result

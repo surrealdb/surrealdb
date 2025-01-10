@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::idx::planner::iterators::IteratorRecord;
+use crate::idx::planner::RecordStrategy;
 use crate::kvs::cache;
 use crate::sql::permission::Permission;
 use crate::sql::statements::define::DefineEventStatement;
@@ -35,6 +36,7 @@ pub(crate) struct Document {
 	pub(super) current: CursorDoc,
 	pub(super) initial_reduced: CursorDoc,
 	pub(super) current_reduced: CursorDoc,
+	pub(super) record_strategy: RecordStrategy,
 }
 
 #[non_exhaustive]
@@ -180,6 +182,7 @@ impl Document {
 		val: Arc<Value>,
 		extras: Workable,
 		retry: bool,
+		rs: RecordStrategy,
 	) -> Self {
 		Document {
 			id: id.clone(),
@@ -190,6 +193,7 @@ impl Document {
 			initial: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			current_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			record_strategy: rs,
 		}
 	}
 
@@ -249,6 +253,11 @@ impl Document {
 			Workable::Normal if self.gen.is_none() => true,
 			_ => false,
 		}
+	}
+
+	/// Retur true if the document has been extracted by an iterator that already matcheed the condition.
+	pub(crate) fn is_condition_checked(&self) -> bool {
+		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}
 
 	/// Checks if permissions are required to be run

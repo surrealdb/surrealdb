@@ -793,7 +793,7 @@ impl UniqueEqualThingIterator {
 
 	async fn next_count(&mut self, tx: &Transaction) -> Result<usize, Error> {
 		if let Some(key) = self.key.take() {
-			if let Some(val) = tx.get(key, None).await? {
+			if tx.exists(key, None).await? {
 				return Ok(1);
 			}
 		}
@@ -919,7 +919,7 @@ impl UniqueRangeThingIterator {
 		limit += 1;
 		let res = tx.scan(min..max, limit, None).await?;
 		let mut count = 0;
-		for (k, v) in res {
+		for (k, _) in res {
 			limit -= 1;
 			if limit == 0 {
 				self.r.beg = k;
@@ -930,10 +930,8 @@ impl UniqueRangeThingIterator {
 			}
 		}
 		let end = self.r.end.clone();
-		if self.r.matches(&end) {
-			if let Some(v) = tx.get(end, None).await? {
-				count += 1;
-			}
+		if self.r.matches(&end) && tx.exists(end, None).await? {
+			count += 1;
 		}
 		self.done = true;
 		Ok(count)
@@ -984,7 +982,7 @@ impl UniqueUnionThingIterator {
 			}
 			if let Some(val) = tx.get(key, None).await? {
 				let rid: Thing = val.into();
-				results.add(IndexItemRecord::new_key(rid.into(), self.irf.into()));
+				results.add(IndexItemRecord::new_key(rid, self.irf.into()));
 				if results.len() >= limit {
 					break;
 				}
@@ -1174,7 +1172,7 @@ impl KnnIterator {
 		let limit = limit as usize;
 		let mut count = 0;
 		while limit > count && !ctx.is_done() {
-			if let Some(_) = self.res.pop_front() {
+			if self.res.pop_front().is_some() {
 				count += 1;
 			} else {
 				break;
