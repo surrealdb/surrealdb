@@ -36,7 +36,7 @@ pub(crate) struct StatementContext<'a> {
 	pub(crate) group: Option<&'a Groups>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum RecordStrategy {
 	Count,
 	KeysOnly,

@@ -74,6 +74,7 @@ pub(crate) enum Operable {
 	Value(Arc<Value>),
 	Insert(Arc<Value>, Arc<Value>),
 	Relate(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
+	Count(usize),
 }
 
 #[derive(Debug)]
@@ -85,8 +86,6 @@ pub(crate) enum Workable {
 
 #[derive(Debug)]
 pub(crate) struct Processed {
-	/// Whether this document only fetched keys
-	pub(crate) keys_only: bool,
 	/// Whether this document needs to have an ID generated
 	pub(crate) generate: Option<Table>,
 	/// The record id for this document that should be processed
@@ -590,8 +589,12 @@ impl Iterator {
 		// Check if this is a count all
 		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
 		// Process the document
-		let res = if count_all && pro.keys_only {
-			Ok(map! { "count".to_string() => Value::from(1) }.into())
+		let res = if count_all {
+			let count = match pro.val {
+				Operable::Value(_) | Operable::Insert(_, _) | Operable::Relate(_, _, _, _) => 1,
+				Operable::Count(count) => count,
+			};
+			Ok(map! { "count".to_string() => Value::from(count) }.into())
 		} else {
 			stk.run(|stk| Document::process(stk, ctx, opt, stm, pro)).await
 		};

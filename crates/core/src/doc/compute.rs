@@ -34,6 +34,7 @@ impl Document {
 				Operable::Value(v) => (v, Workable::Normal),
 				Operable::Insert(v, o) => (v, Workable::Insert(o)),
 				Operable::Relate(f, v, w, o) => (v, Workable::Relate(f, w, o)),
+				Operable::Count(_) => todo!(),
 			};
 			// Setup a new document
 			let mut doc = Document::new(pro.rid, pro.ir, pro.generate, ins.0, ins.1, retry);
@@ -73,7 +74,6 @@ impl Document {
 						.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version)
 						.await?;
 					pro = Processed {
-						keys_only: false,
 						generate: None,
 						rid: Some(Arc::new(v)),
 						ir: None,
