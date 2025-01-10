@@ -36,7 +36,7 @@ pub(crate) struct StatementContext<'a> {
 	pub(crate) group: Option<&'a Groups>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum RecordStrategy {
 	Count,
 	KeysOnly,
@@ -229,12 +229,12 @@ impl QueryPlanner {
 				for (exp, io) in non_range_indexes {
 					let ie = IteratorEntry::Single(Some(exp), io);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir, rs.clone()));
+					it.ingest(Iterable::Index(t.clone(), ir, rs));
 				}
 				for (ixr, rq) in ranges_indexes {
 					let ie = IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir, rs.clone()));
+					it.ingest(Iterable::Index(t.clone(), ir, rs));
 				}
 				self.requires_distinct = true;
 				self.add(t.clone(), None, exe, it, rs);
@@ -247,7 +247,7 @@ impl QueryPlanner {
 				if let Some(reason) = reason {
 					self.fallbacks.push(reason);
 				}
-				self.add(t.clone(), None, exe, it, rs.clone());
+				self.add(t.clone(), None, exe, it, rs);
 				it.ingest(Iterable::Table(t, rs));
 				is_table_iterator = true;
 			}

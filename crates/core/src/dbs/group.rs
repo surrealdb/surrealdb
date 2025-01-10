@@ -3,6 +3,7 @@ use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
+use crate::idx::planner::RecordStrategy;
 use crate::sql::function::OptimisedAggregate;
 use crate::sql::value::{TryAdd, TryFloatDiv, Value};
 use crate::sql::{Array, Field, Function, Idiom};
@@ -65,6 +66,7 @@ impl GroupsCollector {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
+		rs: RecordStrategy,
 		obj: Value,
 	) -> Result<(), Error> {
 		if let Some(groups) = stm.group() {
@@ -82,7 +84,7 @@ impl GroupsCollector {
 				.grp
 				.entry(arr)
 				.or_insert_with(|| self.base.iter().map(|a| a.new_instance()).collect());
-			Self::pushes(stk, ctx, opt, agr, &self.idioms, obj).await?
+			Self::pushes(stk, ctx, opt, agr, &self.idioms, rs, obj).await?
 		}
 		Ok(())
 	}
@@ -93,15 +95,22 @@ impl GroupsCollector {
 		opt: &Options,
 		agrs: &mut [Aggregator],
 		idioms: &[Idiom],
+		rs: RecordStrategy,
 		obj: Value,
 	) -> Result<(), Error> {
+		let mut count_value = None;
+		if matches!(rs, RecordStrategy::Count) {
+			if let Value::Number(n) = obj {
+				count_value = Some(Value::Number(n));
+			}
+		}
 		for (agr, idiom) in agrs.iter_mut().zip(idioms) {
-			let val = if let Value::Count(c) = obj {
-				Value::Count(c)
+			let val = if let Some(ref v) = count_value {
+				v.clone()
 			} else {
 				stk.run(|stk| obj.get(stk, ctx, opt, None, idiom)).await?
 			};
-			agr.push(stk, ctx, opt, val).await?;
+			agr.push(stk, ctx, opt, rs, val).await?;
 		}
 		Ok(())
 	}
@@ -263,14 +272,17 @@ impl Aggregator {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
+		rs: RecordStrategy,
 		val: Value,
 	) -> Result<(), Error> {
 		if let Some(ref mut c) = self.count {
-			if let Value::Count(count) = val {
-				*c += count as usize;
-			} else {
-				*c += 1;
+			let mut count = 1;
+			if matches!(rs, RecordStrategy::Count) {
+				if let Value::Number(n) = val {
+					count = n.to_usize();
+				}
 			}
+			*c += count;
 		}
 		if let Some((ref f, ref mut c)) = self.count_function {
 			if f.aggregate(val.clone())?.compute(stk, ctx, opt, None).await?.is_truthy() {

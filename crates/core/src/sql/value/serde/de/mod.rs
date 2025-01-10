@@ -68,7 +68,6 @@ impl Value {
 			Value::Query(v) => serializer.serialize(v).map_err(Into::into),
 			Value::Model(v) => serializer.serialize(v).map_err(Into::into),
 			Value::Closure(v) => serializer.serialize(v).map_err(Into::into),
-			Value::Count(c) => serializer.serialize(c).map_err(Into::into),
 		}
 	}
 }

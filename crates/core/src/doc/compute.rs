@@ -35,7 +35,7 @@ impl Document {
 				Operable::Value(v) => (v, Workable::Normal),
 				Operable::Insert(v, o) => (v, Workable::Insert(o)),
 				Operable::Relate(f, v, w, o) => (v, Workable::Relate(f, w, o)),
-				Operable::Count(count) => (Arc::new(Value::Count(count as i64)), Workable::Normal),
+				Operable::Count(count) => (Arc::new(count.into()), Workable::Normal),
 			};
 			// Setup a new document
 			let mut doc = Document::new(pro.rid, pro.ir, pro.generate, ins.0, ins.1, retry, pro.rs);

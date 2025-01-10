@@ -297,6 +297,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
+		rs: RecordStrategy,
 	) -> Result<Value, Error> {
 		// Log the statement
 		trace!(target: TARGET, statement = %stm, "Iterating statement");
@@ -349,7 +350,7 @@ impl Iterator {
 				}
 			}
 			// Process any SPLIT AT clause
-			self.output_split(stk, ctx, opt, stm).await?;
+			self.output_split(stk, ctx, opt, stm, rs).await?;
 			// Process any GROUP BY clause
 			self.output_group(stk, ctx, opt, stm).await?;
 			// Process any ORDER BY clause
@@ -460,6 +461,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
+		rs: RecordStrategy,
 	) -> Result<(), Error> {
 		if let Some(splits) = stm.split() {
 			// Loop over each split clause
@@ -479,7 +481,7 @@ impl Iterator {
 								// Set the value at the path
 								obj.set(stk, ctx, opt, split, val).await?;
 								// Add the object to the results
-								self.results.push(stk, ctx, opt, stm, obj).await?;
+								self.results.push(stk, ctx, opt, stm, rs, obj).await?;
 							}
 						}
 						_ => {
@@ -488,7 +490,7 @@ impl Iterator {
 							// Set the value at the path
 							obj.set(stk, ctx, opt, split, val).await?;
 							// Add the object to the results
-							self.results.push(stk, ctx, opt, stm, obj).await?;
+							self.results.push(stk, ctx, opt, stm, rs, obj).await?;
 						}
 					}
 				}
@@ -588,10 +590,11 @@ impl Iterator {
 		stm: &Statement<'_>,
 		pro: Processed,
 	) -> Result<(), Error> {
+		let rs = pro.rs;
 		// Extract the value
 		let res = Self::extract_value(stk, ctx, opt, stm, pro).await;
 		// Process the result
-		self.result(stk, ctx, opt, stm, res).await;
+		self.result(stk, ctx, opt, stm, rs, res).await;
 		// Everything ok
 		Ok(())
 	}
@@ -607,10 +610,10 @@ impl Iterator {
 		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
 		if count_all {
 			if let Operable::Count(count) = pro.val {
-				return Ok(Value::Count(count as i64));
+				return Ok(count.into());
 			}
 			if matches!(pro.rs, RecordStrategy::KeysOnly) {
-				return Ok(Value::Count(1));
+				return Ok(1.into());
 			}
 		}
 		// Otherwise, we process the document
@@ -624,6 +627,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
+		rs: RecordStrategy,
 		res: Result<Value, Error>,
 	) {
 		// Count the result
@@ -643,7 +647,7 @@ impl Iterator {
 				return;
 			}
 			Ok(v) => {
-				if let Err(e) = self.results.push(stk, ctx, opt, stm, v).await {
+				if let Err(e) = self.results.push(stk, ctx, opt, stm, rs, v).await {
 					self.error = Some(e);
 					self.run.cancel();
 					return;

@@ -137,7 +137,6 @@ pub enum Value {
 	Query(Query),
 	Model(Box<Model>),
 	Closure(Box<Closure>),
-	Count(i64),
 	// Add new variants here
 }
 
@@ -2891,10 +2890,6 @@ impl fmt::Display for Value {
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
-			Value::Count(c) => {
-				let m = map! { "count".to_string() => Value::from(*c) };
-				write!(f, "{}", Object::from(m))
-			}
 		}
 	}
 }

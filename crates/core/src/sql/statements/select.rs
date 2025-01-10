@@ -2,7 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::{QueryPlanner, StatementContext};
+use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::{
 	order::{OldOrders, Order, OrderList, Ordering},
 	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
@@ -201,7 +201,7 @@ impl SelectStatement {
 		}
 		let ctx = ctx.freeze();
 		// Process the statement
-		let res = i.output(stk, &ctx, &opt, &stm).await?;
+		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
 		if ctx.is_timedout() {
 			return Err(Error::QueryTimedout);

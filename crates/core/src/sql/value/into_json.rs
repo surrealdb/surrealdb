@@ -52,7 +52,6 @@ impl From<Value> for serde_json::Value {
 			Value::Subquery(subquery) => json!(subquery),
 			Value::Expression(expression) => json!(expression),
 			Value::Closure(closure) => json!(closure),
-			Value::Count(count) => json!({"count": count}),
 		}
 	}
 }
