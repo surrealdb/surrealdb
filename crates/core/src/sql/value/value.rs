@@ -3172,8 +3172,6 @@ impl TryNeg for Value {
 mod tests {
 	use super::*;
 	use chrono::TimeZone;
-
-	use super::*;
 	use crate::syn::Parse;
 
 	#[test]
