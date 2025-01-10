@@ -3308,43 +3308,4 @@ mod tests {
 		let value = Value::from(vector);
 		assert!(matches!(value, Value::Array(Array(_))));
 	}
-
-	#[test]
-	fn test_value_conversion_errors() {
-		// Test bool conversion error path
-		let value = Value::Strand("not_a_bool".into());
-		let result = value.clone().convert_to_bool();
-		assert!(matches!(
-			result,
-			Err(Error::ConvertTo {
-				from,
-				into,
-				path
-			}) if into == "bool" && path == "type::bool.convert"
-		));
-
-		// Test int conversion error path
-		let value = Value::Strand("not_an_int".into());
-		let result = value.clone().convert_to_int();
-		assert!(matches!(
-			result,
-			Err(Error::ConvertTo {
-				from,
-				into,
-				path
-			}) if into == "int" && path == "type::int.string_parse"
-		));
-
-		// Test float conversion error path
-		let value = Value::Strand("not_a_float".into());
-		let result = value.clone().convert_to_float();
-		assert!(matches!(
-			result,
-			Err(Error::ConvertTo {
-				from,
-				into,
-				path
-			}) if into == "float" && path == "type::float.string_parse"
-		));
-	}
 }

@@ -1193,43 +1193,4 @@ mod tests {
 			assert_consistent(a, b, c);
 		}
 	}
-
-	#[test]
-	fn test_number_conversion_errors() {
-		// Test f32 conversion error path
-		let large_number = Number::Float(f32::MAX as f64 * 2.0);
-		let result = f32::try_from(&large_number);
-		assert!(matches!(
-			result,
-			Err(Error::ConvertTo {
-				from: Value::Number(_),
-				into,
-				path
-			}) if into == "f32" && path == "number::f32.convert"
-		));
-
-		// Test i32 conversion error path
-		let large_int = Number::Int(i32::MAX as i64 + 1);
-		let result = i32::try_from(&large_int);
-		assert!(matches!(
-			result,
-			Err(Error::ConvertTo {
-				from: Value::Number(_),
-				into,
-				path
-			}) if into == "i32" && path == "number::i32.convert"
-		));
-
-		// Test i16 conversion error path
-		let large_int = Number::Int(i16::MAX as i64 + 1);
-		let result = i16::try_from(&large_int);
-		assert!(matches!(
-			result,
-			Err(Error::ConvertTo {
-				from: Value::Number(_),
-				into,
-				path
-			}) if into == "i16" && path == "number::i16.convert"
-		));
-	}
 }

@@ -31,6 +31,7 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
+
 	/// This error is used for breaking a loop in a foreach statement
 	#[doc(hidden)]
 	#[error("Break statement has been reached")]

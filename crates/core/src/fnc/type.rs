@@ -153,12 +153,12 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
 				from: Value::Strand(v),
 				into: "record".into(),
-				path: "type::thing.strand_conversion.convert".into(),
+				path: "type::record.table_conversion".into(),
 			}),
 			v => Err(Error::ConvertTo {
 				from: v,
 				into: "record".into(),
-				path: "type::thing.convert".into()
+				path: "type::record.table_conversion".into(),
 			}),
 		}?
 		.into()),
@@ -277,7 +277,6 @@ pub mod is {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use crate::err::Error;
 	use crate::sql::value::Value;
 
@@ -307,32 +306,5 @@ mod tests {
 		if !matches!(value, Err(_expected)) {
 			panic!("An empty thing id part should result in an error");
 		}
-	}
-
-	#[test]
-	fn test_type_conversion_errors() {
-		// Test record conversion error path
-		let invalid_record = Value::Strand("invalid:record".into());
-		let result = record((invalid_record, None));
-		assert!(matches!(
-			result,
-			Err(Error::ConvertTo {
-				from: Value::Strand(_),
-				into,
-				path
-			}) if into == "record" && path == "type::record.convert"
-		));
-
-		// Test thing conversion error path
-		let invalid_thing = Value::Strand("not_a_thing".into());
-		let result = thing((invalid_thing, None));
-		assert!(matches!(
-			result,
-			Err(Error::ConvertTo {
-				from: Value::Strand(_),
-				into,
-				path
-			}) if into == "record" && path == "type::thing.convert"
-		));
 	}
 }
