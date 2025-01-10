@@ -112,18 +112,18 @@ impl ExplainItem {
 			},
 			Iterable::Table(t, rs) => Self {
 				name: match rs {
-					RecordStrategy::Count => "Count",
+					RecordStrategy::Count => "Iterate Table Count",
 					RecordStrategy::KeysOnly => "Iterate Table Keys",
 					RecordStrategy::KeysAndValues => "Iterate Table",
 				}
 				.into(),
 				details: vec![("table", Value::from(t.0.to_owned()))],
 			},
-			Iterable::Range(tb, r, keys_only) => Self {
-				name: if *keys_only {
-					"Iterate Range Keys"
-				} else {
-					"Iterate Range"
+			Iterable::Range(tb, r, rs) => Self {
+				name: match rs {
+					RecordStrategy::Count => "Iterate Range Count",
+					RecordStrategy::KeysOnly => "Iterate Range Keys",
+					RecordStrategy::KeysAndValues => "Iterate Range",
 				}
 				.into(),
 				details: vec![("table", tb.to_owned().into()), ("range", r.to_owned().into())],
@@ -149,7 +149,7 @@ impl ExplainItem {
 					("value", v.to_owned()),
 				],
 			},
-			Iterable::Index(t, ir, keys_only) => {
+			Iterable::Index(t, ir, rs) => {
 				let mut details = vec![("table", Value::from(t.0.to_owned()))];
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(&t.0) {
@@ -157,10 +157,10 @@ impl ExplainItem {
 					}
 				}
 				Self {
-					name: if *keys_only {
-						"Iterate Index Keys"
-					} else {
-						"Iterate Index"
+					name: match rs {
+						RecordStrategy::Count => "Iterate Index Count",
+						RecordStrategy::KeysOnly => "Iterate Index Keys",
+						RecordStrategy::KeysAndValues => "Iterate Index",
 					}
 					.into(),
 					details,
