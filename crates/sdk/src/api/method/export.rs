@@ -123,13 +123,17 @@ where
 	///
 	/// We can pass a `bool` to export all tables or none at all:
 	/// ```
-	/// db.export().with_config().tables(true);
-	/// db.export().with_config().tables(false);
+	/// # let db = surrealdb::Surreal::<surrealdb::engine::any::Any>::init();
+	/// # let target = ();
+	/// db.export(target).with_config().tables(true);
+	/// db.export(target).with_config().tables(false);
 	/// ```
 	///
 	/// Or we can pass a `Vec<String>` to specify a list of tables to export:
 	/// ```
-	/// db.export().with_config().tables(vec!["users"]);
+	/// # let db = surrealdb::Surreal::<surrealdb::engine::any::Any>::init();
+	/// # let target = ();
+	/// db.export(target).with_config().tables(vec!["users"]);
 	/// ```
 	pub fn tables(mut self, tables: impl Into<TableConfig>) -> Self {
 		if let Some(cfg) = self.db_config.as_mut() {
