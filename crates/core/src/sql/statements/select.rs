@@ -2,7 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::{QueryPlanner, StatementContext};
+use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::{
 	order::{OldOrders, Order, OrderList, Ordering},
 	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
@@ -143,9 +143,9 @@ impl SelectStatement {
 			match v {
 				Value::Thing(v) => match v.is_range() {
 					true => {
-						// Evaluate if we can only scan keys (rather than keys AND values)
-						let keys_only = stm_ctx.is_keys_only(false, &v.tb).await?;
-						i.prepare_range(&stm, v, keys_only)?
+						// Evaluate if we can only scan keys (rather than keys AND values), or count
+						let rs = stm_ctx.check_record_strategy(false, &v.tb).await?;
+						i.prepare_range(&stm, v, rs)?
 					}
 					false => i.prepare_thing(&stm, v)?,
 				},
@@ -180,9 +180,9 @@ impl SelectStatement {
 							Value::Edges(v) => i.prepare_edges(&stm, *v)?,
 							Value::Thing(v) => match v.is_range() {
 								true => {
-									// Evaluate if we can only scan keys (rather than keys AND values)
-									let keys_only = stm_ctx.is_keys_only(false, &v.tb).await?;
-									i.prepare_range(&stm, v, keys_only)?
+									// Evaluate if we can only scan keys (rather than keys AND values) or just count
+									let rs = stm_ctx.check_record_strategy(false, &v.tb).await?;
+									i.prepare_range(&stm, v, rs)?
 								}
 								false => i.prepare_thing(&stm, v)?,
 							},
@@ -201,7 +201,7 @@ impl SelectStatement {
 		}
 		let ctx = ctx.freeze();
 		// Process the statement
-		let res = i.output(stk, &ctx, &opt, &stm).await?;
+		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
 		if ctx.is_timedout() {
 			return Err(Error::QueryTimedout);

@@ -759,7 +759,7 @@ async fn select_count_group_all() -> Result<(), Error> {
 					detail: {
 						table: 'table'
 					},
-					operation: 'Iterate Table Keys'
+					operation: 'Iterate Table Count'
 				},
 				{
 					detail: {
@@ -818,7 +818,7 @@ async fn select_count_group_all() -> Result<(), Error> {
 
 async fn select_count_group_all_permissions(
 	perm: &str,
-	expect_keys_only: bool,
+	expect_count_optim: bool,
 	expect_result: &str,
 ) -> Result<(), Error> {
 	// Define the permissions
@@ -846,8 +846,8 @@ async fn select_count_group_all_permissions(
 	.await?;
 	t.expect_size(4)?;
 	// The explain plan is still visible
-	let operation = if expect_keys_only {
-		"Iterate Table Keys"
+	let operation = if expect_count_optim {
+		"Iterate Table Count"
 	} else {
 		"Iterate Table"
 	};
@@ -875,7 +875,7 @@ async fn select_count_group_all_permissions(
 	// Check what is returned
 	t.expect_val(expect_result)?;
 	// The explain plan is still visible
-	let operation = if expect_keys_only {
+	let operation = if expect_count_optim {
 		"Iterate Range Keys"
 	} else {
 		"Iterate Range"
@@ -940,7 +940,7 @@ async fn select_count_range_keys_only() -> Result<(), Error> {
 						range: 1..4,
 						table: 'table'
 					},
-					operation: 'Iterate Range Keys'
+					operation: 'Iterate Range Count'
 				},
 				{
 					detail: {
@@ -1000,7 +1000,7 @@ async fn select_count_range_keys_only() -> Result<(), Error> {
 
 async fn select_count_range_keys_only_permissions(
 	perms: &str,
-	expect_keys_only: bool,
+	expect_count_optim: bool,
 	expect_group_all: &str,
 	expect_count: &str,
 ) -> Result<(), Error> {
@@ -1015,10 +1015,10 @@ async fn select_count_range_keys_only_permissions(
 		"
 	);
 	let mut t = Test::new(&sql).await?;
-	// The first select should be successful (and empty) when the table does not exist
-	t.expect_vals(&["[]", "[]"])?;
+	// The first selects should be successful
+	t.expect_vals(&["[{count: 0}]", "[]"])?;
 	//
-	t.skip_ok(2)?;
+	t.skip_ok(3)?;
 	// Create and select as a record user
 	let sql = r"
 			SELECT COUNT() FROM table:a..z GROUP ALL EXPLAIN;
@@ -1034,8 +1034,8 @@ async fn select_count_range_keys_only_permissions(
 	.await?;
 	t.expect_size(4)?;
 	// The explain plan is still accessible
-	let operation = if expect_keys_only {
-		"Iterate Range Keys"
+	let operation = if expect_count_optim {
+		"Iterate Range Count"
 	} else {
 		"Iterate Range"
 	};
@@ -1064,6 +1064,11 @@ async fn select_count_range_keys_only_permissions(
 	// Check what is returned
 	t.expect_val_info(expect_group_all, "GROUP ALL")?;
 	// The explain plan is still accessible
+	let operation = if expect_count_optim {
+		"Iterate Range Keys"
+	} else {
+		"Iterate Range"
+	};
 	t.expect_val(&format!(
 		r"[
 					{{

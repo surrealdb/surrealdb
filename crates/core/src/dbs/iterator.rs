@@ -8,7 +8,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
-use crate::idx::planner::IterationStage;
+use crate::idx::planner::{IterationStage, RecordStrategy};
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::mock::Mock;
@@ -46,13 +46,11 @@ pub(crate) enum Iterable {
 	/// of a record before processing each document.
 	Edges(Edges),
 	/// An iterable which needs to iterate over the records
-	/// in a table before processing each document. When the
-	/// 2nd argument is true, we iterate over keys only.
-	Table(Table, bool),
+	/// in a table before processing each document.
+	Table(Table, RecordStrategy),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	/// When the 2nd argument is true, we iterate over keys only.
-	Range(String, IdRange, bool),
+	Range(String, IdRange, RecordStrategy),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
@@ -68,7 +66,7 @@ pub(crate) enum Iterable {
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
 	/// When the 3rd argument is true, we iterate over keys only.
-	Index(Table, IteratorRef, bool),
+	Index(Table, IteratorRef, RecordStrategy),
 }
 
 #[derive(Debug)]
@@ -76,6 +74,7 @@ pub(crate) enum Operable {
 	Value(Arc<Value>),
 	Insert(Arc<Value>, Arc<Value>),
 	Relate(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
+	Count(usize),
 }
 
 #[derive(Debug)]
@@ -87,8 +86,8 @@ pub(crate) enum Workable {
 
 #[derive(Debug)]
 pub(crate) struct Processed {
-	/// Whether this document only fetched keys
-	pub(crate) keys_only: bool,
+	/// Whether this document only fetched keys or just count
+	pub(crate) rs: RecordStrategy,
 	/// Whether this document needs to have an ID generated
 	pub(crate) generate: Option<Table>,
 	/// The record id for this document that should be processed
@@ -158,7 +157,7 @@ impl Iterator {
 			Value::Object(v) => self.prepare_object(stm, v)?,
 			Value::Array(v) => self.prepare_array(stm, v)?,
 			Value::Thing(v) => match v.is_range() {
-				true => self.prepare_range(stm, v, false)?,
+				true => self.prepare_range(stm, v, RecordStrategy::KeysAndValues)?,
 				false => self.prepare_thing(stm, v)?,
 			},
 			v => {
@@ -177,10 +176,10 @@ impl Iterator {
 		match stm.is_deferable() {
 			true => self.ingest(Iterable::Yield(v)),
 			false => match stm.is_guaranteed() {
-				false => self.ingest(Iterable::Table(v, false)),
+				false => self.ingest(Iterable::Table(v, RecordStrategy::KeysAndValues)),
 				true => {
 					self.guaranteed = Some(Iterable::Yield(v.clone()));
-					self.ingest(Iterable::Table(v, false))
+					self.ingest(Iterable::Table(v, RecordStrategy::KeysAndValues))
 				}
 			},
 		}
@@ -231,7 +230,7 @@ impl Iterator {
 		&mut self,
 		stm: &Statement<'_>,
 		v: Thing,
-		keys: bool,
+		rs: RecordStrategy,
 	) -> Result<(), Error> {
 		// Check if this is a create statement
 		if stm.is_create() {
@@ -241,7 +240,7 @@ impl Iterator {
 		}
 		// Add the record to the iterator
 		if let (tb, Id::Range(v)) = (v.tb, v.id) {
-			self.ingest(Iterable::Range(tb, *v, keys));
+			self.ingest(Iterable::Range(tb, *v, rs));
 		}
 		// All ingested ok
 		Ok(())
@@ -277,7 +276,7 @@ impl Iterator {
 				Value::Edges(v) => self.prepare_edges(stm, *v)?,
 				Value::Object(v) => self.prepare_object(stm, v)?,
 				Value::Thing(v) => match v.is_range() {
-					true => self.prepare_range(stm, v, false)?,
+					true => self.prepare_range(stm, v, RecordStrategy::KeysAndValues)?,
 					false => self.prepare_thing(stm, v)?,
 				},
 				_ => {
@@ -298,6 +297,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
+		rs: RecordStrategy,
 	) -> Result<Value, Error> {
 		// Log the statement
 		trace!(target: TARGET, statement = %stm, "Iterating statement");
@@ -350,7 +350,7 @@ impl Iterator {
 				}
 			}
 			// Process any SPLIT AT clause
-			self.output_split(stk, ctx, opt, stm).await?;
+			self.output_split(stk, ctx, opt, stm, rs).await?;
 			// Process any GROUP BY clause
 			self.output_group(stk, ctx, opt, stm).await?;
 			// Process any ORDER BY clause
@@ -461,6 +461,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
+		rs: RecordStrategy,
 	) -> Result<(), Error> {
 		if let Some(splits) = stm.split() {
 			// Loop over each split clause
@@ -480,7 +481,7 @@ impl Iterator {
 								// Set the value at the path
 								obj.set(stk, ctx, opt, split, val).await?;
 								// Add the object to the results
-								self.results.push(stk, ctx, opt, stm, obj).await?;
+								self.results.push(stk, ctx, opt, stm, rs, obj).await?;
 							}
 						}
 						_ => {
@@ -489,7 +490,7 @@ impl Iterator {
 							// Set the value at the path
 							obj.set(stk, ctx, opt, split, val).await?;
 							// Add the object to the results
-							self.results.push(stk, ctx, opt, stm, obj).await?;
+							self.results.push(stk, ctx, opt, stm, rs, obj).await?;
 						}
 					}
 				}
@@ -589,18 +590,34 @@ impl Iterator {
 		stm: &Statement<'_>,
 		pro: Processed,
 	) -> Result<(), Error> {
-		// Check if this is a count all
-		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
-		// Process the document
-		let res = if count_all && pro.keys_only {
-			Ok(map! { "count".to_string() => Value::from(1) }.into())
-		} else {
-			stk.run(|stk| Document::process(stk, ctx, opt, stm, pro)).await
-		};
+		let rs = pro.rs;
+		// Extract the value
+		let res = Self::extract_value(stk, ctx, opt, stm, pro).await;
 		// Process the result
-		self.result(stk, ctx, opt, stm, res).await;
+		self.result(stk, ctx, opt, stm, rs, res).await;
 		// Everything ok
 		Ok(())
+	}
+
+	async fn extract_value(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+		pro: Processed,
+	) -> Result<Value, Error> {
+		// Check if this is a count all
+		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
+		if count_all {
+			if let Operable::Count(count) = pro.val {
+				return Ok(count.into());
+			}
+			if matches!(pro.rs, RecordStrategy::KeysOnly) {
+				return Ok(map! { "count".to_string() => Value::from(1) }.into());
+			}
+		}
+		// Otherwise, we process the document
+		stk.run(|stk| Document::process(stk, ctx, opt, stm, pro)).await
 	}
 
 	/// Accept a processed record result
@@ -610,6 +627,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
+		rs: RecordStrategy,
 		res: Result<Value, Error>,
 	) {
 		// Count the result
@@ -629,7 +647,7 @@ impl Iterator {
 				return;
 			}
 			Ok(v) => {
-				if let Err(e) = self.results.push(stk, ctx, opt, stm, v).await {
+				if let Err(e) = self.results.push(stk, ctx, opt, stm, rs, v).await {
 					self.error = Some(e);
 					self.run.cancel();
 					return;

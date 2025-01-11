@@ -3,8 +3,8 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
-use crate::idx::planner::iterators::{CollectorRecord, IteratorRef};
-use crate::idx::planner::IterationStage;
+use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
+use crate::idx::planner::{IterationStage, RecordStrategy};
 use crate::key::{graph, thing};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::dir::Dir;
@@ -83,8 +83,9 @@ pub(super) enum Collected {
 	Defer(Thing),
 	Mergeable(Thing, Value),
 	KeyVal(Key, Val),
-	IndexItem(CollectorRecord),
-	IndexItemKey(CollectorRecord),
+	Count(usize),
+	IndexItem(IndexItemRecord),
+	IndexItemKey(IndexItemRecord),
 }
 
 impl Collected {
@@ -105,12 +106,13 @@ impl Collected {
 			} => Self::process_relatable(opt, txn, f, v, w, o).await,
 			Self::Thing(thing) => Self::process_thing(opt, txn, thing).await,
 			Self::Yield(table) => Self::process_yield(opt, txn, table).await,
-			Self::Value(value) => Self::process_value(value),
+			Self::Value(value) => Ok(Self::process_value(value)),
 			Self::Defer(key) => Self::process_defer(opt, txn, key).await,
 			Self::Mergeable(v, o) => Self::process_mergeable(opt, txn, v, o).await,
-			Self::KeyVal(key, val) => Self::process_key_val(key, val).await,
-			Self::IndexItem(r) => Self::process_index_item(opt, txn, r, false).await,
-			Self::IndexItemKey(r) => Self::process_index_item(opt, txn, r, true).await,
+			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)),
+			Self::Count(c) => Ok(Self::process_count(c)),
+			Self::IndexItem(i) => Self::process_index_item(opt, txn, i).await,
+			Self::IndexItemKey(i) => Ok(Self::process_index_item_key(i)),
 		}
 	}
 
@@ -124,7 +126,7 @@ impl Collected {
 		let val = Operable::Value(val);
 		// Process the record
 		Ok(Processed {
-			keys_only: false,
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -140,7 +142,7 @@ impl Collected {
 		let val = Operable::Value(val.into());
 		// Process the record
 		let pro = Processed {
-			keys_only: true,
+			rs: RecordStrategy::KeysOnly,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -154,7 +156,7 @@ impl Collected {
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record
 		let pro = Processed {
-			keys_only: true,
+			rs: RecordStrategy::KeysOnly,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
@@ -179,7 +181,7 @@ impl Collected {
 		let val = Operable::Relate(f, val, w, o.map(|v| v.into()));
 		// Process the document record
 		let pro = Processed {
-			keys_only: false,
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -197,7 +199,7 @@ impl Collected {
 		let val = Operable::Value(val);
 		// Process the document record
 		let pro = Processed {
-			keys_only: false,
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -212,7 +214,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v, opt.strict).await?;
 		// Pass the value through
 		let pro = Processed {
-			keys_only: false,
+			rs: RecordStrategy::KeysAndValues,
 			generate: Some(v),
 			rid: None,
 			ir: None,
@@ -221,16 +223,15 @@ impl Collected {
 		Ok(pro)
 	}
 
-	fn process_value(v: Value) -> Result<Processed, Error> {
+	fn process_value(v: Value) -> Processed {
 		// Pass the value through
-		let pro = Processed {
-			keys_only: false,
+		Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: None,
 			ir: None,
 			val: Operable::Value(v.into()),
-		};
-		Ok(pro)
+		}
 	}
 
 	async fn process_defer(opt: &Options, txn: &Transaction, v: Thing) -> Result<Processed, Error> {
@@ -238,7 +239,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
-			keys_only: false,
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -257,7 +258,7 @@ impl Collected {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
-			keys_only: false,
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(v.into()),
 			ir: None,
@@ -267,43 +268,60 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_key_val(key: Key, val: Val) -> Result<Processed, Error> {
+	fn process_key_val(key: Key, val: Val) -> Processed {
 		let key: thing::Thing = (&key).into();
 		let val: Value = (&val).into();
 		let rid = Thing::from((key.tb, key.id));
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
-		let pro = Processed {
-			keys_only: false,
+		Processed {
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
 			val,
-		};
-		Ok(pro)
+		}
+	}
+
+	fn process_count(count: usize) -> Processed {
+		Processed {
+			rs: RecordStrategy::Count,
+			generate: None,
+			rid: None,
+			ir: None,
+			val: Operable::Count(count),
+		}
+	}
+
+	fn process_index_item_key(i: IndexItemRecord) -> Processed {
+		let (t, v, ir) = i.consume();
+		Processed {
+			rs: RecordStrategy::KeysOnly,
+			generate: None,
+			rid: Some(t),
+			ir: Some(Arc::new(ir)),
+			val: Operable::Value(v.unwrap_or_else(|| Value::Null.into())),
+		}
 	}
 
 	async fn process_index_item(
 		opt: &Options,
 		txn: &Transaction,
-		r: CollectorRecord,
-		keys_only: bool,
+		i: IndexItemRecord,
 	) -> Result<Processed, Error> {
-		let v = if let Some(v) = r.2 {
+		let (t, v, ir) = i.consume();
+		let v = if let Some(v) = v {
 			// The value may already be fetched by the KNN iterator to evaluate the condition
 			v
-		} else if keys_only {
-			Arc::new(Value::Null)
 		} else {
-			// Otherwise we have to fetch the record
-			Iterable::fetch_thing(txn, opt, &r.0).await?
+			Iterable::fetch_thing(txn, opt, &t).await?
 		};
 		let pro = Processed {
-			keys_only,
+			rs: RecordStrategy::KeysAndValues,
 			generate: None,
-			rid: Some(r.0),
-			ir: Some(r.1.into()),
+			rid: Some(t),
+			ir: Some(ir.into()),
 			val: Operable::Value(v),
 		};
 		Ok(pro)
@@ -378,22 +396,20 @@ pub(super) trait Collector {
 				Iterable::Thing(v) => self.collect(Collected::Thing(v)).await?,
 				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
 				Iterable::Edges(e) => self.collect_edges(ctx, opt, e).await?,
-				Iterable::Range(tb, v, keys_only) => {
-					if keys_only {
-						self.collect_range_keys(ctx, opt, &tb, v).await?
-					} else {
-						self.collect_range(ctx, opt, &tb, v).await?
-					}
-				}
-				Iterable::Table(v, keys_only) => {
+				Iterable::Range(tb, v, rs) => match rs {
+					RecordStrategy::Count => self.collect_range_count(ctx, opt, &tb, v).await?,
+					RecordStrategy::KeysOnly => self.collect_range_keys(ctx, opt, &tb, v).await?,
+					RecordStrategy::KeysAndValues => self.collect_range(ctx, opt, &tb, v).await?,
+				},
+				Iterable::Table(v, rs) => {
 					let ctx = Self::check_query_planner_context(ctx, &v);
-					if keys_only {
-						self.collect_table_keys(&ctx, opt, &v).await?
-					} else {
-						self.collect_table(&ctx, opt, &v).await?
+					match rs {
+						RecordStrategy::Count => self.collect_table_count(&ctx, opt, &v).await?,
+						RecordStrategy::KeysOnly => self.collect_table_keys(&ctx, opt, &v).await?,
+						RecordStrategy::KeysAndValues => self.collect_table(&ctx, opt, &v).await?,
 					}
 				}
-				Iterable::Index(v, irf, keys_only) => {
+				Iterable::Index(v, irf, rs) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&v.0) {
 							// We set the query executor matching the current table in the Context
@@ -401,10 +417,10 @@ pub(super) trait Collector {
 							let mut ctx = MutableContext::new(ctx);
 							ctx.set_query_executor(exe.clone());
 							let ctx = ctx.freeze();
-							return self.collect_index_items(&ctx, opt, &v, irf, keys_only).await;
+							return self.collect_index_items(&ctx, opt, &v, irf, rs).await;
 						}
 					}
-					self.collect_index_items(ctx, opt, &v, irf, keys_only).await?
+					self.collect_index_items(ctx, opt, &v, irf, rs).await?
 				}
 				Iterable::Mergeable(v, o) => self.collect(Collected::Mergeable(v, o)).await?,
 				Iterable::Relatable(f, v, w, o) => {
@@ -476,6 +492,27 @@ pub(super) trait Collector {
 			// Collect the key
 			self.collect(Collected::TableKey(k)).await?;
 		}
+		// Everything ok
+		Ok(())
+	}
+
+	async fn collect_table_count(
+		&mut self,
+		ctx: &Context,
+		opt: &Options,
+		v: &Table,
+	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
+		// Check that the table exists
+		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
+		// Prepare the start and end keys
+		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
+		let end = thing::suffix(opt.ns()?, opt.db()?, v);
+		// Create a new iterable range
+		let count = txn.count(beg..end).await?;
+		// Collect the count
+		self.collect(Collected::Count(count)).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -562,6 +599,25 @@ pub(super) trait Collector {
 			let k = res?;
 			self.collect(Collected::RangeKey(k)).await?;
 		}
+		// Everything ok
+		Ok(())
+	}
+
+	async fn collect_range_count(
+		&mut self,
+		ctx: &Context,
+		opt: &Options,
+		tb: &str,
+		r: IdRange,
+	) -> Result<(), Error> {
+		// Get the transaction
+		let txn = ctx.tx();
+		// Prepare
+		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
+		// Create a new iterable range
+		let count = txn.count(beg..end).await?;
+		// Collect the count
+		self.collect(Collected::Count(count)).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -665,27 +721,22 @@ pub(super) trait Collector {
 		opt: &Options,
 		table: &Table,
 		irf: IteratorRef,
-		keys_only: bool,
+		rs: RecordStrategy,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
-			if let Some(mut iterator) = exe.new_iterator(opt, irf).await? {
+			if let Some(iterator) = exe.new_iterator(opt, irf).await? {
 				let txn = ctx.tx();
-				// Collect by batches
-				while !ctx.is_done() {
-					let records: Vec<CollectorRecord> =
-						iterator.next_batch(ctx, &txn, *NORMAL_FETCH_SIZE).await?;
-					if records.is_empty() {
-						break;
+				match rs {
+					RecordStrategy::Count => {
+						self.collect_index_item_count(ctx, &txn, iterator).await?
 					}
-					for r in records {
-						self.collect(if keys_only {
-							Collected::IndexItemKey(r)
-						} else {
-							Collected::IndexItem(r)
-						})
-						.await?;
+					RecordStrategy::KeysOnly => {
+						self.collect_index_item_key(ctx, &txn, iterator).await?
+					}
+					RecordStrategy::KeysAndValues => {
+						self.collect_index_item_key_value(ctx, &txn, iterator).await?
 					}
 				}
 				// Everything ok
@@ -699,6 +750,61 @@ pub(super) trait Collector {
 		Err(Error::QueryNotExecutedDetail {
 			message: "No QueryExecutor has been found.".to_string(),
 		})
+	}
+
+	async fn collect_index_item_key(
+		&mut self,
+		ctx: &Context,
+		txn: &Transaction,
+		mut iterator: ThingIterator,
+	) -> Result<(), Error> {
+		while !ctx.is_done() {
+			let records: Vec<IndexItemRecord> =
+				iterator.next_batch(ctx, txn, *NORMAL_FETCH_SIZE).await?;
+			if records.is_empty() {
+				break;
+			}
+			for r in records {
+				self.collect(Collected::IndexItemKey(r)).await?;
+			}
+		}
+		Ok(())
+	}
+
+	async fn collect_index_item_key_value(
+		&mut self,
+		ctx: &Context,
+		txn: &Transaction,
+		mut iterator: ThingIterator,
+	) -> Result<(), Error> {
+		while !ctx.is_done() {
+			let records: Vec<IndexItemRecord> =
+				iterator.next_batch(ctx, txn, *NORMAL_FETCH_SIZE).await?;
+			if records.is_empty() {
+				break;
+			}
+			for r in records {
+				self.collect(Collected::IndexItem(r)).await?
+			}
+		}
+		Ok(())
+	}
+
+	async fn collect_index_item_count(
+		&mut self,
+		ctx: &Context,
+		txn: &Transaction,
+		mut iterator: ThingIterator,
+	) -> Result<(), Error> {
+		let mut total_count = 0;
+		while !ctx.is_done() {
+			let count = iterator.next_count(ctx, txn, *NORMAL_FETCH_SIZE).await?;
+			if count == 0 {
+				break;
+			}
+			total_count += count;
+		}
+		self.collect(Collected::Count(total_count)).await
 	}
 }
 

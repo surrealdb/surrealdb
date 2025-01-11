@@ -7,6 +7,7 @@ use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
+use crate::idx::planner::RecordStrategy;
 use crate::sql::order::Ordering;
 use crate::sql::Value;
 use reblessive::tree::Stk;
@@ -65,6 +66,7 @@ impl Results {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
+		rs: RecordStrategy,
 		val: Value,
 	) -> Result<(), Error> {
 		match self {
@@ -86,7 +88,7 @@ impl Results {
 				e.push(val).await?;
 			}
 			Self::Groups(g) => {
-				g.push(stk, ctx, opt, stm, val).await?;
+				g.push(stk, ctx, opt, stm, rs, val).await?;
 			}
 		}
 		Ok(())

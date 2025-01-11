@@ -3402,7 +3402,7 @@ async fn select_count_group_all_with_or_without_index() -> Result<(), Error> {
 					},
 					table: 'indexPerformance3'
 				},
-				operation: 'Iterate Index Keys'
+				operation: 'Iterate Index Count'
 			},
 			{
 				detail: {
@@ -3417,13 +3417,14 @@ async fn select_count_group_all_with_or_without_index() -> Result<(), Error> {
 			}
 		]",
 	)?;
-	for _ in 0..2 {
-		t.expect_val(
+	for i in 0..2 {
+		t.expect_val_info(
 			"[
 					{
 						count: 5000
 					}
 				]",
+			i,
 		)?;
 	}
 	Ok(())

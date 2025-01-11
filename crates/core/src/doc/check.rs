@@ -304,16 +304,18 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check where condition
-		if let Some(cond) = stm.cond() {
-			// Process the permitted documents
-			let current = match self.reduced(stk, ctx, opt, Current).await? {
-				true => &self.current_reduced,
-				false => &self.current,
-			};
-			// Check if the expression is truthy
-			if !cond.compute(stk, ctx, opt, Some(current)).await?.is_truthy() {
-				// Ignore this document
-				return Err(Error::Ignore);
+		if !self.is_condition_checked() {
+			if let Some(cond) = stm.cond() {
+				// Process the permitted documents
+				let current = match self.reduced(stk, ctx, opt, Current).await? {
+					true => &self.current_reduced,
+					false => &self.current,
+				};
+				// Check if the expression is truthy
+				if !cond.compute(stk, ctx, opt, Some(current)).await?.is_truthy() {
+					// Ignore this document
+					return Err(Error::Ignore);
+				}
 			}
 		}
 		// Carry on
