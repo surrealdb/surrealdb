@@ -20,6 +20,7 @@ mod object;
 mod parse;
 mod rand;
 mod record;
+mod schema;
 mod search;
 mod session;
 mod string;
@@ -49,6 +50,7 @@ impl_module_def!(
 	"parse" => (parse::Package),
 	"rand" => (rand::Package),
 	"record" => (record::Package),
+	"schema" => (schema::Package),
 	"search" => (search::Package),
 	"session" => (session::Package),
 	"sleep" => fut Async,

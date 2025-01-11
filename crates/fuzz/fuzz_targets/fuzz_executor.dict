@@ -297,6 +297,8 @@
 "uuid"
 "rand::uuid::v4("
 "rand::uuid::v7("
+"schema"
+"schema::tables("
 "search::analyze("
 "search::score("
 "search::highlight("

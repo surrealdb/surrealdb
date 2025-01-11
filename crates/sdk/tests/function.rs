@@ -3419,6 +3419,46 @@ async fn function_record_table() -> Result<(), Error> {
 }
 
 // --------------------------------------------------
+// schema
+// --------------------------------------------------
+
+#[tokio::test]
+async fn function_schema_tables() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::tables();
+
+		DEFINE TABLE user SCHEMAFULL;
+		DEFINE TABLE post SCHEMALESS;
+		DEFINE TABLE computed AS
+			SELECT * FROM user; 
+		DEFINE TABLE dropped DROP;
+		DEFINE TABLE commented COMMENT "This is a comment on a table";
+
+		RETURN schema::tables();
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(Vec::<Value>::new());
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+// --------------------------------------------------
 // string
 // --------------------------------------------------
 

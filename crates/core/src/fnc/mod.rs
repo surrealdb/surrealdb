@@ -24,6 +24,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod record;
+pub mod schema;
 pub mod script;
 pub mod search;
 pub mod session;
@@ -64,6 +65,7 @@ pub async fn run(
 		|| name.eq("value::diff")
 		|| name.eq("value::patch")
 		|| name.starts_with("http")
+		|| name.starts_with("schema")
 		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
@@ -511,6 +513,8 @@ pub async fn asynchronous(
 		"http::delete" => http::delete(ctx).await,
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+		//
+		"schema::tables" => schema::tables((ctx, opt)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
