@@ -289,8 +289,8 @@ impl From<reqwest::Error> for crate::Error {
 	}
 }
 
-#[cfg(all(feature = "protocol-ws", not(target_arch = "wasm32")))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "protocol-ws", not(target_arch = "wasm32")))))]
+#[cfg(all(feature = "protocol-ws", not(target_family = "wasm")))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "protocol-ws", not(target_family = "wasm")))))]
 impl From<tokio_tungstenite::tungstenite::Error> for crate::Error {
 	fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
 		Self::Api(Error::Ws(error.to_string()))
@@ -315,16 +315,16 @@ impl From<url::ParseError> for crate::Error {
 	}
 }
 
-#[cfg(all(feature = "protocol-ws", target_arch = "wasm32"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "protocol-ws", target_arch = "wasm32"))))]
+#[cfg(all(feature = "protocol-ws", target_family = "wasm"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "protocol-ws", target_family = "wasm"))))]
 impl From<ws_stream_wasm::WsErr> for crate::Error {
 	fn from(error: ws_stream_wasm::WsErr) -> Self {
 		Self::Api(Error::Ws(error.to_string()))
 	}
 }
 
-#[cfg(all(feature = "protocol-ws", target_arch = "wasm32"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "protocol-ws", target_arch = "wasm32"))))]
+#[cfg(all(feature = "protocol-ws", target_family = "wasm"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "protocol-ws", target_family = "wasm"))))]
 impl From<pharos::PharErr> for crate::Error {
 	fn from(error: pharos::PharErr) -> Self {
 		Self::Api(Error::Ws(error.to_string()))

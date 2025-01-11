@@ -72,14 +72,16 @@ impl Datastore {
 		}
 	}
 	pub(crate) fn parse_start_string(start: &str) -> Result<(&str, bool), Error> {
-		if start.starts_with("surrealkv+versioned://") {
-			let path = start.trim_start_matches("surrealkv+versioned://");
-			Ok((path, true))
-		} else if start.starts_with("surrealkv://") {
-			let path = start.trim_start_matches("surrealkv://");
-			Ok((path, false))
-		} else {
-			Err(Error::Ds("Invalid start string".into()))
+		let (scheme, path) = start
+			// Support conventional paths like surrealkv:///absolute/path
+			.split_once("://")
+			// Or paths like surrealkv:/absolute/path
+			.or_else(|| start.split_once(':'))
+			.unwrap_or_default();
+		match scheme {
+			"surrealkv+versioned" => Ok((path, true)),
+			"surrealkv" => Ok((path, false)),
+			_ => Err(Error::Ds("Invalid start string".into())),
 		}
 	}
 	/// Shutdown the database

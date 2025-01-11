@@ -1,3 +1,5 @@
+#![allow(clippy::regex_creation_in_loops)]
+
 mod parse;
 use parse::Parse;
 mod helpers;

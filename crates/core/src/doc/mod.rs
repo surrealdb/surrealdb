@@ -8,7 +8,7 @@ pub(crate) use self::document::*;
 
 mod document; // The entry point for a document to be processed
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 mod compute; // The point at which a document is processed
 mod process; // The point at which a document is processed
 

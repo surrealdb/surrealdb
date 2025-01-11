@@ -1242,7 +1242,7 @@ mod tests {
 
 			// Get the stored bearer key representing the refresh token
 			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
-			let grant = tx.get_db_access_grant("test", "test", "user".into(), id).await.unwrap();
+			let grant = tx.get_db_access_grant("test", "test", "user", id).await.unwrap();
 			let key = match &grant.grant {
 				access::Grant::Bearer(grant) => grant.key.clone(),
 				_ => panic!("Incorrect grant type returned, expected a bearer grant"),
@@ -2078,6 +2078,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test"),
 			},
 		];
+
+		let plain_text_regex =
+			Regex::new("surreal-bearer-[a-zA-Z0-9]{12}-[a-zA-Z0-9]{24}").unwrap();
+		let sha_256_regex = Regex::new(r"[0-9a-f]{64}").unwrap();
 
 		for level in &test_levels {
 			println!("Test level: {}", level.level);
@@ -3124,25 +3128,22 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				let key = grant.get("key").unwrap().clone().as_string();
 
 				// Test that returned key is in plain text
-				let ok = Regex::new(r"surreal-bearer-[a-zA-Z0-9]{12}-[a-zA-Z0-9]{24}").unwrap();
-				assert!(ok.is_match(&key), "Output '{}' doesn't match regex '{}'", key, ok);
+				assert!(
+					plain_text_regex.is_match(&key),
+					"Output '{}' doesn't match regex '{}'",
+					key,
+					plain_text_regex
+				);
 
 				// Get the stored bearer grant
 				let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
 				let grant = match level.level {
 					"DB" => tx
-						.get_db_access_grant(
-							level.ns.unwrap(),
-							level.db.unwrap(),
-							"api".into(),
-							&id,
-						)
+						.get_db_access_grant(level.ns.unwrap(), level.db.unwrap(), "api", &id)
 						.await
 						.unwrap(),
-					"NS" => {
-						tx.get_ns_access_grant(level.ns.unwrap(), "api".into(), &id).await.unwrap()
-					}
-					"ROOT" => tx.get_root_access_grant("api".into(), &id).await.unwrap(),
+					"NS" => tx.get_ns_access_grant(level.ns.unwrap(), "api", &id).await.unwrap(),
+					"ROOT" => tx.get_root_access_grant("api", &id).await.unwrap(),
 					_ => panic!("Unsupported level"),
 				};
 				let key = match &grant.grant {
@@ -3152,8 +3153,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				tx.cancel().await.unwrap();
 
 				// Test that the returned key is a SHA-256 hash
-				let ok = Regex::new(r"[0-9a-f]{64}").unwrap();
-				assert!(ok.is_match(&key), "Output '{}' doesn't match regex '{}'", key, ok);
+				assert!(
+					sha_256_regex.is_match(&key),
+					"Output '{}' doesn't match regex '{}'",
+					key,
+					sha_256_regex
+				);
 			}
 		}
 	}
@@ -4016,7 +4021,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Get the stored bearer grant
 			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
-			let grant = tx.get_db_access_grant("test", "test", "api".into(), &id).await.unwrap();
+			let grant = tx.get_db_access_grant("test", "test", "api", &id).await.unwrap();
 			let key = match &grant.grant {
 				access::Grant::Bearer(grant) => grant.key.clone(),
 				_ => panic!("Incorrect grant type returned, expected a bearer grant"),
