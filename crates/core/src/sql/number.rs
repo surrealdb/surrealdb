@@ -654,13 +654,13 @@ impl Ord for Number {
 				println!("cmp felt 252");
 				if v == w {
 					Ordering::Equal
-				} else if v > HALF_PRIME.as_ref() && w > HALF_PRIME.as_ref() {
+				} else if v >= HALF_PRIME.as_ref() && w >= HALF_PRIME.as_ref() {
 					v.cmp(w)
 				} else if v < HALF_PRIME.as_ref() && w < HALF_PRIME.as_ref() {
 					v.cmp(w)
-				} else if v < HALF_PRIME.as_ref() && w > HALF_PRIME.as_ref() {
+				} else if v < HALF_PRIME.as_ref() && w >= HALF_PRIME.as_ref() {
 					Ordering::Greater
-				} else if w < HALF_PRIME.as_ref() && v > HALF_PRIME.as_ref() {
+				} else if w < HALF_PRIME.as_ref() && v >= HALF_PRIME.as_ref() {
 					Ordering::Less
 				} else {
 					panic!("Cannot compare Felt252 values");
