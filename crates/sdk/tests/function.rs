@@ -3462,6 +3462,41 @@ async fn function_schema_fields() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_schema_indexes() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::indexes("user");
+
+		DEFINE INDEX nameIndex ON user COLUMNS name;
+		DEFINE INDEX userEmailIndex ON TABLE user COLUMNS email UNIQUE;
+		DEFINE INDEX userNameIndex ON TABLE user COLUMNS name SEARCH ANALYZER ascii BM25 HIGHLIGHTS;
+		DEFINE INDEX multiColumnIndex ON user COLUMNS firstname, lastname, birth_date;
+		DEFINE INDEX commentIndex ON user COMMENT "This is an index";
+
+		RETURN schema::indexes("user");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(Vec::<Value>::new());
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_schema_tables() -> Result<(), Error> {
 	let sql = r#"
 		RETURN schema::tables();

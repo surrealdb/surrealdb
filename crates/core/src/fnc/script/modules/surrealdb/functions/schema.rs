@@ -9,5 +9,6 @@ impl_module_def!(
 	Package,
 	"schema",
 	"fields" => fut Async,
+	"indexes" => fut Async,
 	"tables" => fut Async
 );

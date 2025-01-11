@@ -4,7 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::value::Value;
-use crate::sql::{Object, Table, TableType};
+use crate::sql::{Index, Object, Table, TableType};
 
 pub async fn fields(
     (ctx, opt): (&Context, &Options),
@@ -43,6 +43,41 @@ pub async fn fields(
     }).collect::<Vec<_>>();
 
     Ok(fields.into())
+}
+
+pub async fn indexes(
+    (ctx, opt): (&Context, &Options),
+    (table,): (Table,)
+) -> Result<Value, Error> {
+    // Get the NS and DB
+    let ns = opt.ns()?;
+    let db = opt.db()?;
+    // Get the transaction
+    let txn = ctx.tx();
+    // Retrieve statements
+    let statements = txn.all_tb_indexes(ns, db, &table.0).await?;
+
+    // Map statements to indexes
+    let indexes = statements.iter().map(|s| {
+        let _type = match &s.index {
+            Index::Idx => "INDEX",
+            Index::Uniq => "UNIQUE",
+            Index::Search(_) => "SEARCH",
+            Index::MTree(_) => "MTREE",
+            Index::Hnsw(_) => "HNSW",
+        };
+        let columns = s.cols.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+
+        let mut h = HashMap::<&str, Value>::new();
+        h.insert("name", s.name.to_string().into());
+        h.insert("type", _type.into());
+        h.insert("columns", columns.into());
+        h.insert("comment", s.comment.clone().into());
+
+        Value::Object(Object::from(h))
+    }).collect::<Vec<_>>();
+
+    Ok(indexes.into())
 }
 
 pub async fn tables(

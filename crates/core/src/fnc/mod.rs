@@ -515,6 +515,7 @@ pub async fn asynchronous(
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
 		//
 		"schema::fields" => schema::fields((ctx, opt)).await,
+		"schema::indexes" => schema::indexes((ctx, opt)).await,
 		"schema::tables" => schema::tables((ctx, opt)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
@@ -823,6 +824,7 @@ pub async fn idiom(
 				"no such method found for the table type",
 				//
 				"fields" => schema::fields((ctx, opt)).await,
+				"indexes" => schema::indexes((ctx, opt)).await,
 			)
 		}
 		_ => Err(Error::InvalidFunction {
