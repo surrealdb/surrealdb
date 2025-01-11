@@ -355,9 +355,9 @@ impl Iterator {
 			self.output_group(stk, ctx, opt, stm).await?;
 			// Process any ORDER BY clause
 			if let Some(orders) = stm.order() {
-				#[cfg(not(target_arch = "wasm32"))]
+				#[cfg(not(target_family = "wasm"))]
 				self.results.sort(orders).await?;
-				#[cfg(target_arch = "wasm32")]
+				#[cfg(target_family = "wasm")]
 				self.results.sort(orders);
 			}
 			// Process any START & LIMIT clause
@@ -416,7 +416,7 @@ impl Iterator {
 	}
 
 	/// Check if the iteration can be limited per iterator
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	fn check_set_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) -> bool {
 		// If there are groups we can't
 		if stm.group().is_some() {
@@ -442,7 +442,7 @@ impl Iterator {
 		false
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	fn compute_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {
@@ -538,7 +538,7 @@ impl Iterator {
 		Ok(())
 	}
 
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,
@@ -558,7 +558,7 @@ impl Iterator {
 		Ok(())
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,

@@ -124,9 +124,8 @@ pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	for i in 0..longest_length {
 		let lhv = lh.get(i);
 		let rhv = rh.get(i);
-		results.push(
-			(lhv.map_or(false, |v| v.is_truthy()) && rhv.map_or(false, |v| v.is_truthy())).into(),
-		);
+		results
+			.push((lhv.is_some_and(Value::is_truthy) && rhv.is_some_and(Value::is_truthy)).into());
 	}
 	Ok(results.into())
 }
@@ -142,9 +141,8 @@ pub fn boolean_or((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	for i in 0..longest_length {
 		let lhv = lh.get(i);
 		let rhv = rh.get(i);
-		results.push(
-			(lhv.map_or(false, |v| v.is_truthy()) || rhv.map_or(false, |v| v.is_truthy())).into(),
-		);
+		results
+			.push((lhv.is_some_and(Value::is_truthy) || rhv.is_some_and(Value::is_truthy)).into());
 	}
 	Ok(results.into())
 }
@@ -155,9 +153,8 @@ pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	for i in 0..longest_length {
 		let lhv = lh.get(i);
 		let rhv = rh.get(i);
-		results.push(
-			(lhv.map_or(false, |v| v.is_truthy()) ^ rhv.map_or(false, |v| v.is_truthy())).into(),
-		);
+		results
+			.push((lhv.is_some_and(Value::is_truthy) ^ rhv.is_some_and(Value::is_truthy)).into());
 	}
 	Ok(results.into())
 }

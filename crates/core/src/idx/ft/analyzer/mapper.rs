@@ -1,15 +1,15 @@
 use crate::err::Error;
 use crate::idx::ft::analyzer::filter::{FilterResult, Term};
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use std::fs::File;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio::fs::File;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio::io::{AsyncBufReadExt, BufReader};
 use vart::art::Tree;
 use vart::VariableSizeKey;
@@ -54,7 +54,7 @@ impl Mapper {
 		Ok(())
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	async fn iterate_file(
 		terms: &mut Tree<VariableSizeKey, String>,
 		path: &Path,
@@ -70,7 +70,7 @@ impl Mapper {
 		Ok(())
 	}
 
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	async fn iterate_file(
 		terms: &mut Tree<VariableSizeKey, String>,
 		path: &Path,

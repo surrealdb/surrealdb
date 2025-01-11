@@ -184,7 +184,7 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	let ulid = match timestamp {
 		Some(timestamp) => {
-			#[cfg(target_arch = "wasm32")]
+			#[cfg(target_family = "wasm")]
 			if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
 				return Err(Error::InvalidArguments {
 					name: String::from("rand::ulid"),
@@ -205,7 +205,7 @@ pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 pub fn uuid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	let uuid = match timestamp {
 		Some(timestamp) => {
-			#[cfg(target_arch = "wasm32")]
+			#[cfg(target_family = "wasm")]
 			if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
 				return Err(Error::InvalidArguments {
 					name: String::from("rand::ulid"),
@@ -236,7 +236,7 @@ pub mod uuid {
 	pub fn v7((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 		let uuid = match timestamp {
 			Some(timestamp) => {
-				#[cfg(target_arch = "wasm32")]
+				#[cfg(target_family = "wasm")]
 				if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
 					return Err(Error::InvalidArguments {
 						name: String::from("rand::ulid"),

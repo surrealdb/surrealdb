@@ -582,7 +582,7 @@ mod tests {
 		(hits, scr)
 	}
 
-	pub(super) async fn tx_fti<'a>(
+	pub(super) async fn tx_fti(
 		ds: &Datastore,
 		tt: TransactionType,
 		az: Arc<DefineAnalyzerStatement>,
