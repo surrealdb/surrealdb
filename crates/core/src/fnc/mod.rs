@@ -514,6 +514,7 @@ pub async fn asynchronous(
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
 		//
+		"schema::fields" => schema::fields((ctx, opt)).await,
 		"schema::tables" => schema::tables((ctx, opt)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
@@ -813,6 +814,15 @@ pub async fn idiom(
 				"week" => time::week,
 				"yday" => time::yday,
 				"year" => time::year,
+			)
+		}
+		Value::Table(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the table type",
+				//
+				"fields" => schema::fields((ctx, opt)).await,
 			)
 		}
 		_ => Err(Error::InvalidFunction {

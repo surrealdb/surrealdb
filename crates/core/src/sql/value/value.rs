@@ -1926,6 +1926,20 @@ impl Value {
 			})
 	}
 
+	/// Try to coerce this value to a `Table`
+	pub(crate) fn coerce_to_table(self) -> Result<Table, Error> {
+		match self {
+			// String and Table are allowed
+			Value::Table(v) => Ok(v),
+			Value::Strand(v) => Ok(v.0.into()),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "table".into(),
+			}),
+		}
+	}
+
 	// -----------------------------------
 	// Advanced type conversion of values
 	// -----------------------------------

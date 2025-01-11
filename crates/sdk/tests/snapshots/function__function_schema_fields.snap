@@ -1,0 +1,31 @@
+---
+source: crates/sdk/tests/function.rs
+expression: tmp
+snapshot_kind: text
+---
+Array(r#$surrealdb::private::sql::Array([
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": None,
+    "computed": Bool(true),
+    "flexible": Bool(false),
+    "name": Strand(r#$surrealdb::private::sql::Strand("computed")),
+    "readonly": Bool(false),
+    "type": Strand(r#$surrealdb::private::sql::Strand("string")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": None,
+    "computed": Bool(false),
+    "flexible": Bool(false),
+    "name": Strand(r#$surrealdb::private::sql::Strand("created_at")),
+    "readonly": Bool(true),
+    "type": Strand(r#$surrealdb::private::sql::Strand("datetime")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": None,
+    "computed": Bool(false),
+    "flexible": Bool(false),
+    "name": Strand(r#$surrealdb::private::sql::Strand("name")),
+    "readonly": Bool(false),
+    "type": Strand(r#$surrealdb::private::sql::Strand("string")),
+  })),
+]))

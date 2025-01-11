@@ -298,6 +298,7 @@
 "rand::uuid::v4("
 "rand::uuid::v7("
 "schema"
+"schema::fields("
 "schema::tables("
 "search::analyze("
 "search::score("

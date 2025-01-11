@@ -3423,6 +3423,45 @@ async fn function_record_table() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
+async fn function_schema_fields() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::fields("user");
+
+		DEFINE FIELD name ON user TYPE string;
+		DEFINE FIELD object ON post FLEXIBLE TYPE object;
+		DEFINE FIELD created_at ON user TYPE datetime READONLY; 
+		DEFINE FIELD computed ON user TYPE string VALUE firstname + " " + lastname;
+		DEFINE FIELD comment ON post COMMENT "This is a comment on a post";
+
+		RETURN schema::fields("user");
+		RETURN schema::fields("post");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(Vec::<Value>::new());
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_schema_tables() -> Result<(), Error> {
 	let sql = r#"
 		RETURN schema::tables();
