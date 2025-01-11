@@ -8,11 +8,11 @@ mod llrbtree;
 use crate::dbs::plan::Explanation;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::err::Error;
-use crate::sql::order::OrderList;
+use crate::sql::order::Ordering;
 use crate::sql::value::Value;
 
-use rand::prelude::SliceRandom;
-use rand::{thread_rng, Rng};
+use rand::prelude::{thread_rng, SliceRandom};
+use rand::Rng;
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::ParallelSliceMut;
 use std::mem;
@@ -187,12 +187,10 @@ pub(in crate::dbs) struct MemoryOrdered {
 	batch: Vec<Value>,
 	/// The finalized result
 	result: Option<Vec<Value>>,
-	/// The order specification
-	orders: OrderList,
 }
 
 impl MemoryOrdered {
-	pub(in crate::dbs) fn new(orders: OrderList, batch_size: Option<usize>) -> Self {
+	pub(in crate::dbs) fn new(batch_size: Option<usize>) -> Self {
 		let batch_size = batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
 		Self {
 			batch_size,
@@ -200,7 +198,6 @@ impl MemoryOrdered {
 			ordered: Vec::new(),
 			batch: Vec::with_capacity(batch_size),
 			result: None,
-			orders,
 		}
 	}
 
@@ -229,31 +226,38 @@ impl MemoryOrdered {
 	}
 
 	#[cfg(target_arch = "wasm32")]
-	pub(super) fn sort(&mut self) {
+	pub(super) fn sort(&mut self, orders: &Ordering) {
 		if self.result.is_none() {
 			if !self.batch.is_empty() {
 				self.send_batch();
 			}
 			let mut ordered = mem::take(&mut self.ordered);
 			let mut values = mem::take(&mut self.values);
-			ordered.sort_unstable_by(|a, b| self.orders.compare(&values[*a], &values[*b]));
+			ordered.sort_unstable_by(|a, b| orders.compare(&values[*a], &values[*b]));
 			let res = MemoryRandom::ordered_values_to_vec(&mut values, &ordered);
 			self.result = Some(res);
 		}
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
-	pub(super) async fn sort(&mut self) -> Result<(), Error> {
+	pub(super) async fn sort(&mut self, orders: &Ordering) -> Result<(), Error> {
 		if self.result.is_none() {
 			if !self.batch.is_empty() {
 				self.send_batch();
 			}
 			let mut ordered = mem::take(&mut self.ordered);
 			let mut values = mem::take(&mut self.values);
-			let orders = self.orders.clone();
-			let result = spawn_blocking(move || {
-				ordered.par_sort_unstable_by(|a, b| orders.compare(&values[*a], &values[*b]));
-				MemoryRandom::ordered_values_to_vec(&mut values, &ordered)
+			let orders = orders.clone();
+			let result = spawn_blocking(move || match orders {
+				Ordering::Random => {
+					ordered.shuffle(&mut thread_rng());
+					MemoryRandom::ordered_values_to_vec(&mut values, &ordered)
+				}
+				Ordering::Order(order_list) => {
+					ordered
+						.par_sort_unstable_by(|a, b| order_list.compare(&values[*a], &values[*b]));
+					MemoryRandom::ordered_values_to_vec(&mut values, &ordered)
+				}
 			})
 			.await
 			.map_err(|e| Error::OrderingError(format!("{e}")))?;

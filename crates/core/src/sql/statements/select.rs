@@ -65,10 +65,10 @@ impl SelectStatement {
 		let new_ord =
 			x.0.into_iter()
 				.map(|x| Order {
-					value: x.order,
+					value: Value::Idiom(x.order),
 					collate: x.collate,
 					numeric: x.numeric,
-					direction: x.direction,
+					direction: Value::Bool(x.direction),
 				})
 				.collect();
 

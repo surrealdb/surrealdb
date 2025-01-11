@@ -509,10 +509,10 @@ fn statements() -> Vec<Statement> {
 				Group(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
 			])),
 			order: Some(Ordering::Order(OrderList(vec![Order {
-				value: Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
+				value: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 				collate: true,
 				numeric: true,
-				direction: true,
+				direction: Value::Bool(true),
 			}]))),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),

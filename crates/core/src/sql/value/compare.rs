@@ -11,7 +11,7 @@ impl Value {
 		collate: bool,
 		numeric: bool,
 	) -> Option<Ordering> {
-		match path.first() {
+		let res = match path.first() {
 			// Get the current path part
 			Some(p) => match (self, other) {
 				// Current path part is an object
@@ -83,7 +83,8 @@ impl Value {
 				(false, true) => self.natural_cmp(other),
 				_ => self.partial_cmp(other),
 			},
-		}
+		};
+		res
 	}
 }
 

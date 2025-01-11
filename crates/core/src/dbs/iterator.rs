@@ -19,6 +19,7 @@ use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::mock::Mock;
 use crate::sql::object::Object;
+use crate::sql::order::Ordering;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -135,6 +136,8 @@ pub(crate) struct Iterator {
 	guaranteed: Option<Iterable>,
 	/// Set if the iterator can be cancelled once it reaches start/limit
 	cancel_on_limit: Option<u32>,
+	/// Order by clause
+	orders: Option<Ordering>,
 }
 
 impl Clone for Iterator {
@@ -149,6 +152,7 @@ impl Clone for Iterator {
 			entries: self.entries.clone(),
 			guaranteed: None,
 			cancel_on_limit: None,
+			orders: None,
 		}
 	}
 }
@@ -321,6 +325,8 @@ impl Iterator {
 		let mut cancel_ctx = MutableContext::new(ctx);
 		self.run = cancel_ctx.add_cancel();
 		let mut cancel_ctx = cancel_ctx.freeze();
+		// Process the query ORDER clause
+		self.setup_orders(stk, &cancel_ctx, opt, stm).await?;
 		// Process the query LIMIT clause
 		self.setup_limit(stk, &cancel_ctx, opt, stm).await?;
 		// Process the query START clause
@@ -368,11 +374,11 @@ impl Iterator {
 			// Process any GROUP BY clause
 			self.output_group(stk, ctx, opt, stm).await?;
 			// Process any ORDER BY clause
-			if let Some(orders) = stm.order() {
+			if let Some(orders) = self.orders.take() {
 				#[cfg(not(target_arch = "wasm32"))]
-				self.results.sort(orders).await?;
+				self.results.sort(&orders).await?;
 				#[cfg(target_arch = "wasm32")]
-				self.results.sort(orders);
+				self.results.sort(&orders);
 			}
 			// Process any START & LIMIT clause
 			self.results.start_limit(self.start, self.limit).await?;
@@ -397,6 +403,27 @@ impl Iterator {
 
 		// Output the results
 		Ok(results.into())
+	}
+
+	#[inline]
+	async fn setup_orders(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		stm: &Statement<'_>,
+	) -> Result<(), Error> {
+		if let Some(orders) = stm.order() {
+			self.orders = Some(match orders {
+				Ordering::Random => Ordering::Random,
+				Ordering::Order(order_list) => {
+					// Process the order list to resolve any parameters
+					let processed = order_list.process(stk, ctx, opt).await?;
+					Ordering::Order(processed)
+				}
+			});
+		}
+		Ok(())
 	}
 
 	#[inline]

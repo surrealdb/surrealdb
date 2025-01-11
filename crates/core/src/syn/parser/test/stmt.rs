@@ -2288,10 +2288,10 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 				Group(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
 			])),
 			order: Some(Ordering::Order(OrderList(vec![Order {
-				value: Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
+				value: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 				collate: true,
 				numeric: true,
-				direction: true,
+				direction: Value::Bool(true),
 			}]))),
 			limit: Some(Limit(Value::Thing(Thing {
 				tb: "a".to_owned(),
@@ -3110,4 +3110,26 @@ fn parse_access_purge() {
 #[test]
 fn parse_like_operator() {
 	test_parse!(parse_stmt, r#"SELECT * FROM "a" ~ "b"; "#).unwrap();
+}
+
+#[test]
+fn parse_select_with_order_by_params() {
+	let res = test_parse!(parse_stmt, r#"SELECT * FROM users ORDER BY $order_by $order_direction"#)
+		.unwrap();
+	let Statement::Select(stmt) = res else {
+		panic!()
+	};
+
+	if let Some(Ordering::Order(OrderList(orders))) = stmt.order {
+		assert_eq!(orders.len(), 1);
+		let order = &orders[0];
+
+		// Check the order field is a parameter
+		assert_eq!(order.value, Value::Param(Param(Ident("order_by".to_string()))));
+
+		// Check direction is a parameter
+		assert_eq!(order.direction, Value::Param(Param(Ident("order_direction".to_string()))));
+	} else {
+		panic!("Expected ORDER BY clause with parameters")
+	}
 }

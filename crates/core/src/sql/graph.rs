@@ -8,6 +8,7 @@ use crate::sql::order::{OldOrders, Order, OrderList, Ordering};
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
 use crate::sql::table::Tables;
+use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
@@ -51,10 +52,10 @@ impl Graph {
 		let new_ord =
 			x.0.into_iter()
 				.map(|x| Order {
-					value: x.order,
+					value: Value::Idiom(x.order),
 					collate: x.collate,
 					numeric: x.numeric,
-					direction: x.direction,
+					direction: Value::Bool(x.direction),
 				})
 				.collect();
 
