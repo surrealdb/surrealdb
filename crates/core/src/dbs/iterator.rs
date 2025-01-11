@@ -65,9 +65,10 @@ pub(crate) enum Iterable {
 	/// passed in to the iterable is unique for each record.
 	Relatable(Thing, Thing, Thing, Option<Value>),
 	/// An iterable which iterates over an index range for a
-	/// table, which then fetches the correesponding records
+	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
-	Index(Table, IteratorRef),
+	/// When the 3rd argument is true, we iterate over keys only.
+	Index(Table, IteratorRef, bool),
 }
 
 #[derive(Debug)]
@@ -313,6 +314,8 @@ impl Iterator {
 			#[cfg(storage)]
 			ctx,
 			stm,
+			self.start,
+			self.limit,
 		)?;
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
@@ -429,7 +432,7 @@ impl Iterator {
 		}
 		// If the iterator is backed by a sorted index
 		// and the sorting matches the first ORDER entry, we can
-		if let Some(Iterable::Index(_, irf)) = self.entries.first() {
+		if let Some(Iterable::Index(_, irf, _)) = self.entries.first() {
 			if let Some(qp) = ctx.get_query_planner() {
 				if qp.is_order(irf) {
 					return true;

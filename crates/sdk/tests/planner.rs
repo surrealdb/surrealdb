@@ -2696,7 +2696,8 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 4,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -2801,7 +2802,8 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 3,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -2890,7 +2892,8 @@ async fn select_from_standard_index_descending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 4,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -2987,7 +2990,8 @@ async fn select_from_unique_index_descending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 3,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -3262,18 +3266,165 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_limit_start_parallel() -> Result<(), Error> {
+async fn select_limit_start() -> Result<(), Error> {
 	let sql = r"
 		CREATE |item:1000|;
-		SELECT * FROM item LIMIT 10 START 0 PARALLEL;";
+		SELECT * FROM item LIMIT 10 START 0 PARALLEL EXPLAIN;
+		SELECT * FROM item LIMIT 10 START 0 PARALLEL;
+		SELECT * FROM item LIMIT 10 START 0 EXPLAIN;
+		SELECT * FROM item LIMIT 10 START 0;";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(2)?;
+	t.expect_size(5)?;
 	t.skip_ok(1)?;
-	let r = t.next()?.result?;
-	if let Value::Array(a) = r {
-		assert_eq!(a.len(), 10);
-	} else {
-		panic!("Unexpected value: {r:#}");
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+					{
+						detail: {
+							table: 'item'
+						},
+						operation: 'Iterate Table'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]",
+		)?;
+		let r = t.next()?.result?;
+		if let Value::Array(a) = r {
+			assert_eq!(a.len(), 10);
+		} else {
+			panic!("Unexpected value: {r:#}");
+		}
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_limit_start_order() -> Result<(), Error> {
+	let sql = r"
+		CREATE |item:1000| RETURN NONE;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL EXPLAIN;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 EXPLAIN;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(5)?;
+	t.skip_ok(1)?;
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+					{
+						detail: {
+							table: 'item'
+						},
+						operation: 'Iterate Table'
+					},
+					{
+						detail: {
+							limit: 12,
+							type: 'MemoryOrderedLimit'
+						},
+						operation: 'Collector'
+					}
+				]",
+		)?;
+		let r = t.next()?.result?;
+		if let Value::Array(a) = r {
+			assert_eq!(a.len(), 10);
+		} else {
+			panic!("Unexpected value: {r:#}");
+		}
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_count_group_all_with_or_without_index() -> Result<(), Error> {
+	let sql = r"
+		FOR $i IN 0..10000 {
+			 CREATE indexPerformance3 CONTENT {
+				something: $i
+			};
+		};
+		DEFINE INDEX somethingIndex ON TABLE indexPerformance3 COLUMNS something;
+		SELECT count() FROM indexPerformance3 WITH NOINDEX WHERE something >= 5000 GROUP ALL EXPLAIN;
+		SELECT count() FROM indexPerformance3 WHERE something >= 5000 GROUP ALL EXPLAIN;
+		SELECT count() FROM indexPerformance3 WITH NOINDEX WHERE something >= 5000 GROUP ALL;
+		SELECT count() FROM indexPerformance3 WHERE something >= 5000 GROUP ALL;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(6)?;
+	t.skip_ok(2)?;
+	t.expect_val(
+		"[
+			{
+				detail: {
+					table: 'indexPerformance3'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					reason: 'WITH NOINDEX'
+				},
+				operation: 'Fallback'
+			},
+			{
+				detail: {
+					idioms: {
+						count: [
+							'count'
+						]
+					},
+					type: 'Group'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)?;
+	t.expect_val(
+		"[
+			{
+				detail: {
+					plan: {
+						from: {
+							inclusive: true,
+							value: 5000
+						},
+						index: 'somethingIndex',
+						to: {
+							inclusive: false,
+							value: NONE
+						}
+					},
+					table: 'indexPerformance3'
+				},
+				operation: 'Iterate Index Keys'
+			},
+			{
+				detail: {
+					idioms: {
+						count: [
+							'count'
+						]
+					},
+					type: 'Group'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)?;
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+					{
+						count: 5000
+					}
+				]",
+		)?;
 	}
 	Ok(())
 }

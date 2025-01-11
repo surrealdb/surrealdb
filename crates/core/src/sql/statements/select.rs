@@ -144,7 +144,7 @@ impl SelectStatement {
 				Value::Thing(v) => match v.is_range() {
 					true => {
 						// Evaluate if we can only scan keys (rather than keys AND values)
-						let keys_only = stm_ctx.is_keys_only(&v.tb).await?;
+						let keys_only = stm_ctx.is_keys_only(false, &v.tb).await?;
 						i.prepare_range(&stm, v, keys_only)?
 					}
 					false => i.prepare_thing(&stm, v)?,
@@ -181,7 +181,7 @@ impl SelectStatement {
 							Value::Thing(v) => match v.is_range() {
 								true => {
 									// Evaluate if we can only scan keys (rather than keys AND values)
-									let keys_only = stm_ctx.is_keys_only(&v.tb).await?;
+									let keys_only = stm_ctx.is_keys_only(false, &v.tb).await?;
 									i.prepare_range(&stm, v, keys_only)?
 								}
 								false => i.prepare_thing(&stm, v)?,

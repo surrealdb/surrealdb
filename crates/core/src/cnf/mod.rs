@@ -49,6 +49,10 @@ pub static NORMAL_FETCH_SIZE: LazyLock<u32> =
 pub static EXPORT_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_EXPORT_BATCH_SIZE", u32, 1000);
 
+/// The maximum size of the priority queue triggering usage of the priority queue for the result collector.
+pub static MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE", u32, 1000);
+
 /// The maximum number of keys that should be scanned at once per concurrent indexing batch.
 pub static INDEXING_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", u32, 250);
