@@ -1,0 +1,13 @@
+---
+source: crates/sdk/tests/function.rs
+expression: tmp
+snapshot_kind: text
+---
+Object(r#$surrealdb::private::sql::Object({
+  "columns": Array(r#$surrealdb::private::sql::Array([
+    Strand(r#$surrealdb::private::sql::Strand("name")),
+  ])),
+  "comment": None,
+  "name": Strand(r#$surrealdb::private::sql::Strand("nameIndex")),
+  "type": Strand(r#$surrealdb::private::sql::Strand("INDEX")),
+}))

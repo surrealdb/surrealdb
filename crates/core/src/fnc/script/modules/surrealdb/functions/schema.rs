@@ -8,7 +8,10 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"schema",
+	"field" => fut Async,
 	"fields" => fut Async,
+	"index" => fut Async,
 	"indexes" => fut Async,
+	"table" => fut Async,
 	"tables" => fut Async
 );

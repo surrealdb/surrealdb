@@ -514,8 +514,11 @@ pub async fn asynchronous(
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
 		//
+		"schema::field" => schema::field((ctx, opt)).await,
 		"schema::fields" => schema::fields((ctx, opt)).await,
+		"schema::index" => schema::index((ctx, opt)).await,
 		"schema::indexes" => schema::indexes((ctx, opt)).await,
+		"schema::table" => schema::table((ctx, opt)).await,
 		"schema::tables" => schema::tables((ctx, opt)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
@@ -823,7 +826,9 @@ pub async fn idiom(
 				args.clone(),
 				"no such method found for the table type",
 				//
+				"field" => schema::field((ctx, opt)).await,
 				"fields" => schema::fields((ctx, opt)).await,
+				"index" => schema::index((ctx, opt)).await,
 				"indexes" => schema::indexes((ctx, opt)).await,
 			)
 		}
