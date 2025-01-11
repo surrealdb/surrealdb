@@ -650,7 +650,10 @@ impl Ord for Number {
 			(Number::Int(v), Number::Int(w)) => v.cmp(w),
 			(Number::Float(v), Number::Float(w)) => total_cmp_f64(*v, *w),
 			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
-			(Number::Felt252(v), Number::Felt252(w)) => v.cmp(w),
+			(Number::Felt252(v), Number::Felt252(w)) => {
+				println!("cmp felt 252");
+				v.cmp(w)
+			}
 			// ------------------------------
 			(Number::Int(v), Number::Float(w)) => {
 				// If the float is not finite, we don't need to compare it to the integer.
