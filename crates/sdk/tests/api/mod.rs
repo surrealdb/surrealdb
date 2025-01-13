@@ -1228,14 +1228,10 @@ async fn changefeed() {
 	let response = db.query(sql).await.unwrap();
 	response.check().unwrap();
 	// Create and update users
-	let sql = "
-        CREATE user:amos SET name = 'Amos';
-        CREATE user:jane SET name = 'Jane';
-        UPDATE user:amos SET name = 'AMOS';
-    ";
+	db.query("CREATE user:amos SET name = 'Amos';").await.unwrap().check().unwrap();
+	db.query("CREATE user:jane SET name = 'Jane';").await.unwrap().check().unwrap();
+	db.query("UPDATE user:amos SET name = 'AMOS';").await.unwrap().check().unwrap();
 	let table = "user";
-	let response = db.query(sql).await.unwrap();
-	response.check().unwrap();
 	let users: Vec<RecordBuf> = db
 		.update(table)
 		.content(Record {
