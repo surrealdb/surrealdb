@@ -178,12 +178,18 @@ fn map_table_statement(s: &DefineTableStatement) -> Value {
     let relation = match &s.kind {
         TableType::Relation(rel) => {
             let mut h = HashMap::<&str, Value>::new();
-            if let Some(Kind::Record(tables)) = &rel.from {
-                h.insert("in", tables.into_iter().map(|t| Value::from(Table(t.0.clone()))).collect::<Vec<_>>().into());
-            }
-            if let Some(Kind::Record(tables)) = &rel.to {
-                h.insert("out", tables.into_iter().map(|t| Value::from(Table(t.0.clone()))).collect::<Vec<_>>().into());
-            }
+            let _in = if let Some(Kind::Record(tables)) = &rel.from {
+                tables.into_iter().map(|t| Value::from(Table(t.0.clone()))).collect::<Vec<_>>().into()
+            } else {
+                Value::None
+            };
+            h.insert("in", _in);
+            let out = if let Some(Kind::Record(tables)) = &rel.to {
+                tables.into_iter().map(|t| Value::from(Table(t.0.clone()))).collect::<Vec<_>>().into()
+            } else {
+                Value::None
+            };
+            h.insert("out", out);
             h.insert("enforced", rel.enforced.into());
 
             Value::Object(Object::from(h))
