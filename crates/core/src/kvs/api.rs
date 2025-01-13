@@ -1,5 +1,6 @@
 use super::kv::Add;
 use super::tr::Check;
+use crate::cnf::COUNT_BATCH_SIZE;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
@@ -334,7 +335,7 @@ pub trait Transaction {
 		let end: Key = rng.end.into();
 		let mut next = Some(beg..end);
 		while let Some(rng) = next {
-			let res = self.batch_keys(rng, 10_000, None).await?;
+			let res = self.batch_keys(rng, *COUNT_BATCH_SIZE, None).await?;
 			next = res.next;
 			len += res.result.len();
 		}
