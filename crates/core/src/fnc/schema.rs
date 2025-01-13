@@ -5,7 +5,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement, DefineTableStatement};
 use crate::sql::value::Value;
-use crate::sql::{Index, Object, Table, TableType};
+use crate::sql::{Index, Kind, Object, Table, TableType};
 
 pub async fn field(
     (ctx, opt): (&Context, &Options),
@@ -175,13 +175,29 @@ fn map_table_statement(s: &DefineTableStatement) -> Value {
         TableType::Normal => "NORMAL",
         TableType::Relation(_) => "RELATION",
     };
+    let relation = match &s.kind {
+        TableType::Relation(rel) => {
+            let mut h = HashMap::<&str, Value>::new();
+            if let Some(Kind::Record(tables)) = rel.from.clone() {
+                h.insert("in", tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into());
+            }
+            if let Some(Kind::Record(tables)) = rel.to.clone() {
+                h.insert("out", tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into());
+            }
+            h.insert("enforced", rel.enforced.into());
+
+            Value::Object(Object::from(h))
+        },
+        _ => Value::None,
+    };
 
     let mut h = HashMap::<&str, Value>::new();
     h.insert("name", s.name.0.to_string().into());
-    h.insert("type", _type.into());
-    h.insert("schemafull", s.full.into());
-    h.insert("computed", computed.into());
     h.insert("drop", s.drop.into());
+    h.insert("schemafull", s.full.into());
+    h.insert("type", _type.into());
+    h.insert("relation", relation);
+    h.insert("computed", computed.into());
     h.insert("comment", s.comment.clone().into());
 
     Value::Object(Object::from(h))

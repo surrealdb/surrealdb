@@ -3589,6 +3589,7 @@ async fn function_schema_tables() -> Result<(), Error> {
 			SELECT * FROM user; 
 		DEFINE TABLE dropped DROP;
 		DEFINE TABLE commented COMMENT "This is a comment on a table";
+		DEFINE TABLE road_to TYPE RELATION IN city OUT city ENFORCED;
 
 		RETURN schema::tables();
 	"#;
@@ -3597,6 +3598,8 @@ async fn function_schema_tables() -> Result<(), Error> {
 	let tmp = test.next()?.result?;
 	let val = Value::from(Vec::<Value>::new());
 	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
 	//
 	let _ = test.next()?.result?; // skip
 	//

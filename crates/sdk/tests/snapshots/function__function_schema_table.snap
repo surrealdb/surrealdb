@@ -8,6 +8,7 @@ Object(r#$surrealdb::private::sql::Object({
   "computed": Bool(false),
   "drop": Bool(false),
   "name": Strand(r#$surrealdb::private::sql::Strand("user")),
+  "relation": None,
   "schemafull": Bool(true),
   "type": Strand(r#$surrealdb::private::sql::Strand("NORMAL")),
 }))
