@@ -178,11 +178,11 @@ fn map_table_statement(s: &DefineTableStatement) -> Value {
     let relation = match &s.kind {
         TableType::Relation(rel) => {
             let mut h = HashMap::<&str, Value>::new();
-            if let Some(Kind::Record(tables)) = rel.from.clone() {
-                h.insert("in", tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into());
+            if let Some(Kind::Record(tables)) = &rel.from {
+                h.insert("in", tables.into_iter().map(|t| Value::from(Table(t.0.clone()))).collect::<Vec<_>>().into());
             }
-            if let Some(Kind::Record(tables)) = rel.to.clone() {
-                h.insert("out", tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into());
+            if let Some(Kind::Record(tables)) = &rel.to {
+                h.insert("out", tables.into_iter().map(|t| Value::from(Table(t.0.clone()))).collect::<Vec<_>>().into());
             }
             h.insert("enforced", rel.enforced.into());
 
@@ -192,7 +192,7 @@ fn map_table_statement(s: &DefineTableStatement) -> Value {
     };
 
     let mut h = HashMap::<&str, Value>::new();
-    h.insert("name", s.name.0.to_string().into());
+    h.insert("name", Value::from(Table(s.name.0.to_string())));
     h.insert("drop", s.drop.into());
     h.insert("schemafull", s.full.into());
     h.insert("type", _type.into());
