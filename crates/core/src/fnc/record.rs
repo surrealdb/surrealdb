@@ -1,5 +1,5 @@
-use crate::cnf::EXPERIMENTAL_RECORD_REFERENCES;
 use crate::ctx::Context;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -35,7 +35,7 @@ pub async fn refs(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(id, ft, ff): (Thing, Option<String>, Option<String>),
 ) -> Result<Value, Error> {
-	if !*EXPERIMENTAL_RECORD_REFERENCES {
+	if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 		return Err(Error::InvalidFunction {
 			name: "record::refs".to_string(),
 			message: "Experimental feature is disabled".to_string(),

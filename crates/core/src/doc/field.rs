@@ -1,5 +1,5 @@
-use crate::cnf::EXPERIMENTAL_RECORD_REFERENCES;
 use crate::ctx::{Context, MutableContext};
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
@@ -558,7 +558,7 @@ impl<'a> FieldEditContext<'a> {
 	}
 	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<(), Error> {
-		if !*EXPERIMENTAL_RECORD_REFERENCES {
+		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(());
 		}
 
@@ -681,7 +681,7 @@ impl<'a> FieldEditContext<'a> {
 	}
 	/// Process any `TYPE reference` clause for the field definition
 	async fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
-		if !*EXPERIMENTAL_RECORD_REFERENCES {
+		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 		return Ok(None);
 		}
 

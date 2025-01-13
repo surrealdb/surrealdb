@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::cnf::{EXPERIMENTAL_BEARER_ACCESS, EXPERIMENTAL_RECORD_REFERENCES};
+use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
@@ -899,7 +899,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
-				t!("REFERENCE") if *EXPERIMENTAL_RECORD_REFERENCES => {
+				t!("REFERENCE") => {
 					self.pop_peek();
 					res.reference = Some(self.parse_reference(ctx).await?);
 				}

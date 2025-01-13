@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{
-	Capabilities, FuncTarget, MethodTarget, NetTarget, RouteTarget, Targets,
+	Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget, Targets
 };
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
@@ -75,6 +75,13 @@ Function names must be in the form <family>[::<name>]. For example:
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	allow_funcs: Option<Targets<FuncTarget>>,
 
+	#[arg(hide = true)]
+	#[arg(env = "SURREAL_CAPS_ALLOW_EXPERIMENTAL", long)]
+	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::experimental_targets)]
+	allow_experimental: Option<Targets<ExperimentalTarget>>,
+
 	#[arg(
 		help = "Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow",
 		long_help = r#"Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow
@@ -141,6 +148,13 @@ Function names must be in the form <family>[::<name>]. For example:
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	deny_funcs: Option<Targets<FuncTarget>>,
+
+	#[arg(hide = true)]
+	#[arg(env = "SURREAL_CAPS_DENY_EXPERIMENTAL", long)]
+	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::experimental_targets)]
+	deny_experimental: Option<Targets<ExperimentalTarget>>,
 
 	#[arg(
 		help = "Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",

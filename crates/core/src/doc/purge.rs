@@ -1,6 +1,6 @@
-use crate::cnf::EXPERIMENTAL_RECORD_REFERENCES;
 use crate::ctx::Context;
 use crate::ctx::MutableContext;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::CursorDoc;
@@ -88,7 +88,7 @@ impl Document {
 				}
 			}
 			// Process any record references
-			if *EXPERIMENTAL_RECORD_REFERENCES {
+			if ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 				let prefix = crate::key::r#ref::prefix(ns, db, &rid.tb, &rid.id);
 				let suffix = crate::key::r#ref::suffix(ns, db, &rid.tb, &rid.id);
 				let range = prefix..suffix;

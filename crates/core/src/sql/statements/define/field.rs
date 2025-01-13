@@ -1,5 +1,5 @@
-use crate::cnf::EXPERIMENTAL_RECORD_REFERENCES;
 use crate::ctx::Context;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -52,7 +52,7 @@ impl DefineFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Validate reference options
-		self.validate_reference_options()?;
+		self.validate_reference_options(ctx)?;
 		// Correct reference type
 		let kind = if let Some(kind) = self.correct_reference_type(ctx, opt).await? {
 			Some(kind)
@@ -233,8 +233,8 @@ impl DefineFieldStatement {
 		Ok(Value::None)
 	}
 
-	fn validate_reference_options(&self) -> Result<(), Error> {
-		if !*EXPERIMENTAL_RECORD_REFERENCES {
+	fn validate_reference_options(&self, ctx: &Context) -> Result<(), Error> {
+		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(());
 		}
 
@@ -309,7 +309,7 @@ impl DefineFieldStatement {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Option<Kind>, Error> {
-		if !*EXPERIMENTAL_RECORD_REFERENCES {
+		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
 		}
 
@@ -377,10 +377,8 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.assert {
 			write!(f, " ASSERT {v}")?
 		}
-		if *EXPERIMENTAL_RECORD_REFERENCES {
-			if let Some(ref v) = self.reference {
-				write!(f, " REFERENCE {v}")?
-			}
+		if let Some(ref v) = self.reference {
+			write!(f, " REFERENCE {v}")?
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?

@@ -2,7 +2,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::{cnf::EXPERIMENTAL_RECORD_REFERENCES, ctx::Context, dbs::Options, doc::CursorDoc, err::Error};
+use crate::{ctx::Context, dbs::{capabilities::ExperimentalTarget, Options}, doc::CursorDoc, err::Error};
 
 use super::{array::Uniq, statements::info::InfoStructure, Array, Idiom, Table, Thing, Value};
 
@@ -75,7 +75,7 @@ impl Refs {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
-		if !*EXPERIMENTAL_RECORD_REFERENCES {
+		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(Value::Array(Default::default()))
 		}
 
