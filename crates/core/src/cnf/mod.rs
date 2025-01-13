@@ -94,6 +94,10 @@ pub static EXPERIMENTAL_BEARER_ACCESS: LazyLock<bool> =
 #[cfg(test)]
 pub static EXPERIMENTAL_BEARER_ACCESS: LazyLock<bool> = LazyLock::new(|| true);
 
+/// Specifies whether GraphQL querying and schema definition is enabled.
+pub static EXPERIMENTAL_RECORD_REFERENCES: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_EXPERIMENTAL_RECORD_REFERENCES", bool, false);
+
 /// Used to limit allocation for builtin functions
 pub static GENERATION_ALLOCATION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 	let n = std::env::var("SURREAL_GENERATION_ALLOCATION_LIMIT")

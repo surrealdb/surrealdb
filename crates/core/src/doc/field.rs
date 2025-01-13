@@ -1,3 +1,4 @@
+use crate::cnf::EXPERIMENTAL_RECORD_REFERENCES;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::dbs::Statement;
@@ -557,6 +558,10 @@ impl<'a> FieldEditContext<'a> {
 	}
 	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<(), Error> {
+		if !*EXPERIMENTAL_RECORD_REFERENCES {
+			return Ok(());
+		}
+
 		// Is there a `REFERENCE` clause?
 		if self.def.reference.is_some() {
 			let doc = Some(&self.doc.current);
@@ -676,6 +681,10 @@ impl<'a> FieldEditContext<'a> {
 	}
 	/// Process any `TYPE reference` clause for the field definition
 	async fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
+		if !*EXPERIMENTAL_RECORD_REFERENCES {
+		return Ok(None);
+		}
+
 		let refs = match &self.def.kind {
 			// We found a reference type for this field
 			// In this case, we force the value to be a reference

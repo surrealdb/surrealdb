@@ -1,3 +1,4 @@
+use crate::cnf::EXPERIMENTAL_RECORD_REFERENCES;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -233,6 +234,10 @@ impl DefineFieldStatement {
 	}
 
 	fn validate_reference_options(&self) -> Result<(), Error> {
+		if !*EXPERIMENTAL_RECORD_REFERENCES {
+			return Ok(());
+		}
+
 		if let Some(kind) = &self.kind {
 			let kinds = match kind {
 				Kind::Either(kinds) => kinds,
@@ -304,6 +309,10 @@ impl DefineFieldStatement {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Option<Kind>, Error> {
+		if !*EXPERIMENTAL_RECORD_REFERENCES {
+			return Ok(None);
+		}
+
 		if let Some(Kind::References(Some(ft), Some(ff))) = &self.kind {
 			// Obtain the field definition
 			let fd = match ctx
@@ -368,8 +377,10 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.assert {
 			write!(f, " ASSERT {v}")?
 		}
-		if let Some(ref v) = self.reference {
-			write!(f, " REFERENCE {v}")?
+		if *EXPERIMENTAL_RECORD_REFERENCES {
+			if let Some(ref v) = self.reference {
+				write!(f, " REFERENCE {v}")?
+			}
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?

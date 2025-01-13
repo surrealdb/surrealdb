@@ -1,3 +1,4 @@
+use crate::cnf::EXPERIMENTAL_RECORD_REFERENCES;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -34,6 +35,13 @@ pub async fn refs(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(id, ft, ff): (Thing, Option<String>, Option<String>),
 ) -> Result<Value, Error> {
+	if !*EXPERIMENTAL_RECORD_REFERENCES {
+		return Err(Error::InvalidFunction {
+			name: "record::refs".to_string(),
+			message: "Experimental feature is disabled".to_string(),
+		});
+	}
+
 	// Process the inputs and make sure they are valid
 	let ft = ft.map(Table::from);
 	let ff = match ff {

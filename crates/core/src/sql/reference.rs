@@ -2,7 +2,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error};
+use crate::{cnf::EXPERIMENTAL_RECORD_REFERENCES, ctx::Context, dbs::Options, doc::CursorDoc, err::Error};
 
 use super::{array::Uniq, statements::info::InfoStructure, Array, Idiom, Table, Thing, Value};
 
@@ -75,6 +75,10 @@ impl Refs {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
+		if !*EXPERIMENTAL_RECORD_REFERENCES {
+			return Ok(Value::Array(Default::default()))
+		}
+
 		// Collect an array of references
 		let arr: Array = match doc {
 			// Check if the current document has specified an ID
