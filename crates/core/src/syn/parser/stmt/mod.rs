@@ -64,8 +64,10 @@ impl Parser<'_> {
 
 						let token = self.peek();
 						if Self::kind_starts_statement(token.kind) {
+							// consume token for streaming
+							self.pop_peek();
 							// user likely forgot a semicolon.
-							unexpected!(self,token,"the query to end", => "maybe forgot a semicolon  after the previous statement?");
+							unexpected!(self,token,"the query to end", => "maybe forgot a semicolon after the previous statement?");
 						}
 
 						expected!(self, t!("eof"));
@@ -506,9 +508,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `BEGIN` to already be consumed.
 	fn parse_begin(&mut self) -> ParseResult<BeginStatement> {
-		if let t!("TRANSACTION") = self.peek().kind {
-			self.next();
-		}
+		self.eat(t!("TRANSACTION"));
 		Ok(BeginStatement)
 	}
 
@@ -517,9 +517,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `CANCEL` to already be consumed.
 	fn parse_cancel(&mut self) -> ParseResult<CancelStatement> {
-		if let t!("TRANSACTION") = self.peek().kind {
-			self.next();
-		}
+		self.eat(t!("TRANSACTION"));
 		Ok(CancelStatement)
 	}
 
@@ -528,9 +526,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `COMMIT` to already be consumed.
 	fn parse_commit(&mut self) -> ParseResult<CommitStatement> {
-		if let t!("TRANSACTION") = self.peek().kind {
-			self.next();
-		}
+		self.eat(t!("TRANSACTION"));
 		Ok(CommitStatement)
 	}
 

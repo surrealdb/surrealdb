@@ -220,6 +220,8 @@ async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()
 
 #[cfg(not(target_family = "wasm"))]
 async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
+	use crate::engine::proto::{QueryMethodResponse, Status};
+
 	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
@@ -231,7 +233,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		}
 	};
 
-	let res = request.header(ACCEPT, "application/octet-stream").body(file).send().await?;
+	let res = request.header(ACCEPT, "application/surrealdb").body(file).send().await?;
 
 	if res.error_for_status_ref().is_err() {
 		let res = res.text().await?;
@@ -248,7 +250,15 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 				return Err(Error::Http(res).into());
 			}
 		}
+	} else {
+		let response: Vec<QueryMethodResponse> = deserialize(&res.bytes().await?, false)?;
+		for res in response {
+			if let Status::Err = res.status {
+				return Err(Error::Query(res.result.0.as_string()).into());
+			}
+		}
 	}
+
 	Ok(())
 }
 
