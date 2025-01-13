@@ -26,7 +26,7 @@ resolver = "2"
 default = ["kv-mem"]
 kv-mem = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-indxdb = ["dep:indxdb"]
-kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort", "dep:affinitypool"]
 kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
@@ -50,6 +50,7 @@ targets = []
 [dependencies]
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
 ahash = "0.8.11"
+affinitypool = { version = "0.1.3", optional = true }
 ammonia = "4.0.0"
 arbitrary = { version = "1.3.2", features = ["derive"], optional = true }
 argon2 = "0.5.2"
