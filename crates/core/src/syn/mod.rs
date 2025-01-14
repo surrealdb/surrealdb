@@ -43,7 +43,23 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn parse(input: &str, capabilities: &Capabilities) -> Result<Query, Error> {
+pub fn parse(input: &str) -> Result<Query, Error> {
+	let capabilities = Capabilities::all();
+	parse_with_capabilities(input, &capabilities)
+}
+
+/// Parses a SurrealQL [`Query`]
+///
+/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
+/// functions, objects, sub-queries), Javascript values, and geometry collections count against
+/// a computation depth limit. If the limit is reached, parsing will return
+/// [`Error::ComputationDepthExceeded`], as opposed to spending more time and potentially
+/// overflowing the call stack.
+///
+/// If you encounter this limit and believe that it should be increased,
+/// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Query, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
 	if input.len() > u32::MAX as usize {

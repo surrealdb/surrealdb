@@ -929,7 +929,7 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let res = crate::syn::parse(&format!("RETURN {}()", name), &Capabilities::all());
+			let res = crate::syn::parse(&format!("RETURN {}()", name));
 			if let Ok(Query(mut x)) = res {
 				match x.0.pop() {
 					Some(Statement::Output(OutputStatement {

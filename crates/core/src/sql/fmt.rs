@@ -278,14 +278,11 @@ impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
 
 #[cfg(test)]
 mod tests {
-	use crate::{
-		dbs::Capabilities,
-		syn::{parse, value},
-	};
+	use crate::syn::{parse, value};
 
 	#[test]
 	fn pretty_query() {
-		let query = parse("SELECT * FROM {foo: [1, 2, 3]};", &Capabilities::all()).unwrap();
+		let query = parse("SELECT * FROM {foo: [1, 2, 3]};").unwrap();
 		assert_eq!(format!("{}", query), "SELECT * FROM { foo: [1, 2, 3] };");
 		assert_eq!(
 			format!("{:#}", query),
@@ -295,7 +292,7 @@ mod tests {
 
 	#[test]
 	fn pretty_define_query() {
-		let query = parse("DEFINE TABLE test SCHEMAFULL PERMISSIONS FOR create, update, delete NONE FOR select WHERE public = true;", &Capabilities::all()).unwrap();
+		let query = parse("DEFINE TABLE test SCHEMAFULL PERMISSIONS FOR create, update, delete NONE FOR select WHERE public = true;").unwrap();
 		assert_eq!(format!("{}", query), "DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS FOR select WHERE public = true, FOR create, update, delete NONE;");
 		assert_eq!(format!("{:#}", query), "DEFINE TABLE test TYPE NORMAL SCHEMAFULL\n\tPERMISSIONS\n\t\tFOR select\n\t\t\tWHERE public = true\n\t\tFOR create, update, delete NONE\n;");
 	}

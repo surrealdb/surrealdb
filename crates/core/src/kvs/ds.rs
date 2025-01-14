@@ -778,7 +778,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Parse the SQL query text
-		let ast = syn::parse(txt, &self.capabilities)?;
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}

@@ -10,10 +10,11 @@ use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
 use surrealdb_core::{
-	dbs::Capabilities, sql::{
+	sql::{
 		self, from_value as from_core_value, statements::*, Statement, Statements,
 		Value as CoreValue,
-	}, syn
+	},
+	syn,
 };
 
 /// A trait for converting inputs into SQL statements
@@ -168,19 +169,19 @@ impl IntoQuery for OptionStatement {
 
 impl IntoQuery for &str {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		syn::parse(self, &Capabilities::all())?.into_query()
+		syn::parse(self)?.into_query()
 	}
 }
 
 impl IntoQuery for &String {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		syn::parse(self, &Capabilities::all())?.into_query()
+		syn::parse(self)?.into_query()
 	}
 }
 
 impl IntoQuery for String {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		syn::parse(&self, &Capabilities::all())?.into_query()
+		syn::parse(&self)?.into_query()
 	}
 }
 

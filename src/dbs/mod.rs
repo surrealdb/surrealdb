@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{
-	Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget, Targets
+	Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget, Targets,
 };
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;

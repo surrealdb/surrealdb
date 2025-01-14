@@ -183,7 +183,6 @@ impl From<serde_content::Error> for Error {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::dbs::Capabilities;
 	use crate::sql;
 	use crate::sql::block::Entry;
 	use crate::sql::statements::CreateStatement;
@@ -447,7 +446,7 @@ mod tests {
 
 	#[test]
 	fn query() {
-		let query = sql::parse("SELECT * FROM foo", &Capabilities::all()).unwrap();
+		let query = sql::parse("SELECT * FROM foo").unwrap();
 		let value = to_value(query.clone()).unwrap();
 		let expected = Value::Query(query);
 		assert_eq!(value, expected);
