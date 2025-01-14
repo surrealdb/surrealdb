@@ -1294,7 +1294,7 @@ impl Transaction {
 		.try_into_type()
 	}
 
-	/// Retrieve a specific function definition from a database.
+	/// Retrieve a specific param definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_param(
 		&self,
