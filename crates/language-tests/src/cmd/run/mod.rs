@@ -12,7 +12,7 @@ use clap::ArgMatches;
 use progress::Progress;
 use report::{TestGrade, TestReport};
 use surrealdb_core::{
-	dbs::{Capabilities, Response, Session},
+	dbs::{capabilities::ExperimentalTarget, Capabilities, Response, Session},
 	err::Error as CoreError,
 	kvs::Datastore,
 	syn,
@@ -307,7 +307,7 @@ async fn run_test_with_dbs(
 
 	let source = &set[id].source;
 	let settings = syn::parser::ParserSettings {
-		experimental_enabled: dbs.get_capabilities().compute_experimental_allowed(),
+		references_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences),
 		..Default::default()
 	};
 	let mut parser = syn::parser::Parser::new_with_settings(source, settings);
