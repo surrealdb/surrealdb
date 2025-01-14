@@ -4,6 +4,7 @@ use super::lexer::Lexer;
 use super::parse;
 use super::parser::Parser;
 use super::Parse;
+use crate::dbs::Capabilities;
 use crate::err::Error;
 use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, Thing, Value};
 use crate::syn::token::{t, TokenKind};
@@ -86,7 +87,7 @@ fn test_error_in_lineterminator() {
 select * from person
 CREATE person CONTENT { foo:'bar'};
 "#;
-	parse(q).unwrap_err();
+	parse(q, &Capabilities::all()).unwrap_err();
 }
 
 #[test]
@@ -97,7 +98,7 @@ fn test_excessive_size() {
 		q.push(' ');
 	}
 	q.push_str("RETURN 1;");
-	parse(&q).unwrap_err();
+	parse(&q, &Capabilities::all()).unwrap_err();
 }
 
 #[test]

@@ -1,9 +1,7 @@
 //! Module containing the implementation of the surrealql tokens, lexer, and parser.
 
 use crate::{
-	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
-	err::Error,
-	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
+	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH}, dbs::Capabilities, err::Error, sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value}
 };
 
 pub mod error;
@@ -42,7 +40,7 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn parse(input: &str) -> Result<Query, Error> {
+pub fn parse(input: &str, capabilities: &Capabilities) -> Result<Query, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
 	if input.len() > u32::MAX as usize {
@@ -54,6 +52,7 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 		ParserSettings {
 			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
 			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			experimental_enabled: capabilities.compute_experimental_allowed(),
 			..Default::default()
 		},
 	);

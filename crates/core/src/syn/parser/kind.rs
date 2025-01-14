@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{kind::Literal, Duration, Idiom, Kind, Strand, Table}, syn::{
+	dbs::capabilities::ExperimentalTarget, sql::{kind::Literal, Duration, Idiom, Kind, Strand, Table}, syn::{
 		lexer::compound,
 		parser::mac::expected,
 		token::{t, Glued, Keyword, Span, TokenKind},
@@ -144,8 +144,8 @@ impl Parser<'_> {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
 			}
-			t!("REFERENCES") => {
-			let span = self.peek().span;
+			t!("REFERENCES") if self.use_experimental(&ExperimentalTarget::RecordReferences)? => {
+				let span = self.peek().span;
 				let (table, path) = if self.eat(t!("<")) {
 					let table: Option<Table> = Some(self.next_token_value()?);
 					let path: Option<Idiom> = if self.eat(t!(",")) {

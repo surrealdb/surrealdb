@@ -67,14 +67,14 @@ impl fmt::Display for SetStatement {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn::parse;
+	use crate::{dbs::Capabilities, syn::parse};
 
 	#[test]
 	fn check_type() {
-		let query = parse("LET $param = 5").unwrap();
+		let query = parse("LET $param = 5", &Capabilities::all()).unwrap();
 		assert_eq!(format!("{}", query), "LET $param = 5;");
 
-		let query = parse("LET $param: number = 5").unwrap();
+		let query = parse("LET $param: number = 5", &Capabilities::all()).unwrap();
 		assert_eq!(format!("{}", query), "LET $param: number = 5;");
 	}
 }

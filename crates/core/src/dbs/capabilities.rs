@@ -1,6 +1,8 @@
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 use std::{collections::HashSet, sync::Arc};
 
 use crate::rpc::method::Method;
@@ -107,18 +109,16 @@ impl std::str::FromStr for FuncTarget {
 	}
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, EnumIter)]
 #[non_exhaustive]
 pub enum ExperimentalTarget {
 	RecordReferences,
-	GraphQL,
 }
 
 impl fmt::Display for ExperimentalTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::RecordReferences => write!(f, "record_references"),
-			Self::GraphQL => write!(f, "graphql"),
 		}
 	}
 }
@@ -133,7 +133,6 @@ impl Target<str> for ExperimentalTarget {
 	fn matches(&self, elem: &str) -> bool {
 		match self {
 			Self::RecordReferences => elem.eq_ignore_ascii_case("record_references"),
-			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
 		}
 	}
 }
@@ -160,7 +159,6 @@ impl std::str::FromStr for ExperimentalTarget {
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.trim() {
 			s if s.eq_ignore_ascii_case("record_references") => Ok(ExperimentalTarget::RecordReferences),
-			s if s.eq_ignore_ascii_case("graphql") => Ok(ExperimentalTarget::GraphQL),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		}
 	}
@@ -375,7 +373,7 @@ pub enum Targets<T: Hash + Eq + PartialEq> {
 }
 
 impl<T: Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
-	fn matches<S>(&self, elem: &S) -> bool
+	pub(crate) fn matches<S>(&self, elem: &S) -> bool
 	where
 		S: ?Sized,
 		T: Target<S>,
@@ -591,17 +589,33 @@ impl Capabilities {
 	pub fn allows_http_route(&self, target: &RouteTarget) -> bool {
 		self.allow_http.matches(target) && !self.deny_http.matches(target)
 	}
-}
 
-impl Into<Vec<ExperimentalTarget>> for Capabilities {
-	fn into(self) -> Vec<ExperimentalTarget> {
-		self.allow_experimental
-			.as_ref()
-			.into_iter()
-			.filter(|t| !self.deny_experimental.matches(t))
-			.collect()
+	pub fn compute_experimental_allowed(&self) -> Vec<ExperimentalTarget> {
+		let denied = match self.deny_experimental.as_ref() {
+			Targets::All => return vec![],
+			Targets::Some(targets) => targets.iter().cloned().collect(),
+			_ => vec![],
+		};
+
+		let allowed: Vec<ExperimentalTarget> = match self.allow_experimental.as_ref() {
+			Targets::All => ExperimentalTarget::iter().collect(),
+			Targets::Some(targets) => targets.iter().cloned().collect(),
+			_ => return vec![],
+		};
+
+		allowed.into_iter().filter(|t| !denied.contains(t)).collect()
 	}
 }
+
+// impl Into<Vec<ExperimentalTarget>> for Capabilities {
+// 	fn into(self) -> Vec<ExperimentalTarget> {
+// 		self.allow_experimental
+// 			.as_ref()
+// 			.into_iter()
+// 			.filter(|t| !self.deny_experimental.matches(t))
+// 			.collect()
+// 	}
+// }
 
 #[cfg(test)]
 mod tests {

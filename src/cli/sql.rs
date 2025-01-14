@@ -101,6 +101,7 @@ pub async fn init(
 	// Set custom input validation
 	rl.set_helper(Some(InputValidator {
 		multi,
+		capabilities: config.get_capabilities(),
 	}));
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
@@ -181,7 +182,7 @@ pub async fn init(
 			continue;
 		}
 		// Complete the request
-		match sql::parse(&line) {
+		match sql::parse(&line, config.get_capabilities()) {
 			Ok(mut query) => {
 				let mut namespace = None;
 				let mut database = None;
@@ -396,9 +397,10 @@ fn print(result: Result<String, Error>) {
 }
 
 #[derive(Completer, Helper, Highlighter, Hinter)]
-struct InputValidator {
+struct InputValidator<'a> {
 	/// If omitting semicolon causes newline.
 	multi: bool,
+	capabilities: &'a Capabilities,
 }
 
 #[allow(clippy::if_same_then_else)]
@@ -418,7 +420,7 @@ impl Validator for InputValidator {
 			Incomplete // The line ends with a backslash
 		} else if input.is_empty() {
 			Valid(None) // Ignore empty lines
-		} else if let Err(e) = sql::parse(input) {
+		} else if let Err(e) = sql::parse(input, ctx.capabilities) {
 			Invalid(Some(format!(" --< {e}")))
 		} else {
 			Valid(None)

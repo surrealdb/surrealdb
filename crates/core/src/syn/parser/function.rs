@@ -117,8 +117,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod test {
 	use crate::{
-		sql::{Script, Value},
-		syn::{self, Parse},
+		dbs::Capabilities, sql::{Script, Value}, syn::{self, Parse}
 	};
 
 	use super::*;
@@ -215,7 +214,7 @@ mod test {
 				purchased_before: array::len(->purchased->property) > 0,
 			}) AS likely_to_buy FROM person:tobie;
 		";
-		let out = syn::parse(sql).unwrap();
+		let out = syn::parse(sql, &Capabilities::all()).unwrap();
 		assert_eq!(
 			"SELECT name, age, ml::insurance::prediction<1.0.0>({ age: age, disposable_income: math::round(income), purchased_before: array::len(->purchased->property) > 0 }) AS likely_to_buy FROM person:tobie;",
 			out.to_string()

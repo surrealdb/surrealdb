@@ -92,6 +92,11 @@ impl Config {
 		self
 	}
 
+	/// Get the capabilities for the database
+	pub fn get_capabilities(&self) -> &CoreCapabilities {
+		&self.capabilities
+	}
+
 	#[cfg(storage)]
 	pub fn temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path;

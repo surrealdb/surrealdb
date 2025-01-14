@@ -5671,6 +5671,8 @@ dependencies = [
  "snap",
  "storekey",
  "strsim",
+ "strum",
+ "strum_macros",
  "subtle",
  "surrealcs",
  "surrealdb-derive",

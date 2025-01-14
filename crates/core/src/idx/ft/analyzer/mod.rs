@@ -308,7 +308,7 @@ impl Analyzer {
 mod tests {
 	use super::Analyzer;
 	use crate::ctx::MutableContext;
-	use crate::dbs::Options;
+	use crate::dbs::{Capabilities, Options};
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
@@ -325,7 +325,7 @@ mod tests {
 		ctx.set_transaction(Arc::new(txn));
 		let ctx = ctx.freeze();
 
-		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
+		let mut stmt = syn::parse(&format!("DEFINE {def}"), &Capabilities::all()).unwrap();
 		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {
 			panic!()
 		};
