@@ -2879,7 +2879,7 @@ impl fmt::Display for Value {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		match self {
-			Value::None => write!(f, "NONE"),
+			Value::None => write!(f, "NONES"),
 			Value::Null => write!(f, "NULL"),
 			Value::Array(v) => write!(f, "{v}"),
 			Value::Block(v) => write!(f, "{v}"),
