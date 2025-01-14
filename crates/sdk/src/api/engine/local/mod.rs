@@ -59,6 +59,7 @@ use surrealdb_core::{
 		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
 };
+use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio_util::bytes::BytesMut;
 use uuid::Uuid;
@@ -564,9 +565,9 @@ async fn router(
 		..
 	}: RequestData,
 	kvs: &Arc<Datastore>,
-	session: &mut Session,
-	vars: &mut BTreeMap<String, CoreValue>,
-	live_queries: &mut HashMap<Uuid, Sender<Notification<CoreValue>>>,
+	session: &RwLock<Session>,
+	vars: &RwLock<BTreeMap<String, CoreValue>>,
+	live_queries: &RwLock<HashMap<Uuid, Sender<Notification<CoreValue>>>>,
 ) -> Result<DbResponse> {
 	match command {
 		Command::Use {
@@ -574,33 +575,35 @@ async fn router(
 			database,
 		} => {
 			if let Some(ns) = namespace {
-				session.ns = Some(ns);
+				session.write().await.ns = Some(ns);
 			}
 			if let Some(db) = database {
-				session.db = Some(db);
+				session.write().await.db = Some(db);
 			}
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Signup {
 			credentials,
 		} => {
-			let response = iam::signup::signup(kvs, session, credentials).await?.token;
+			let response =
+				iam::signup::signup(kvs, &mut *session.write().await, credentials).await?.token;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Signin {
 			credentials,
 		} => {
-			let response = iam::signin::signin(kvs, session, credentials).await?.token;
+			let response =
+				iam::signin::signin(kvs, &mut *session.write().await, credentials).await?.token;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Authenticate {
 			token,
 		} => {
-			iam::verify::token(kvs, session, &token).await?;
+			iam::verify::token(kvs, &mut *session.write().await, &token).await?;
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Invalidate => {
-			iam::clear::clear(session)?;
+			iam::clear::clear(&mut *session.write().await)?;
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Create {
@@ -616,7 +619,8 @@ async fn router(
 				stmt
 			};
 			query.0 .0 = vec![Statement::Create(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let response =
+				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
 			let value = take(true, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -634,8 +638,8 @@ async fn router(
 				stmt
 			};
 			query.0 .0 = vec![Statement::Upsert(statement)];
-			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session, Some(vars)).await?;
+			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -653,8 +657,8 @@ async fn router(
 				stmt
 			};
 			query.0 .0 = vec![Statement::Update(statement)];
-			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session, Some(vars)).await?;
+			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -672,8 +676,8 @@ async fn router(
 				stmt
 			};
 			query.0 .0 = vec![Statement::Insert(statement)];
-			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session, Some(vars)).await?;
+			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -692,7 +696,8 @@ async fn router(
 				stmt
 			};
 			query.0 .0 = vec![Statement::Insert(statement)];
-			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let response =
+				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -710,8 +715,8 @@ async fn router(
 				stmt
 			};
 			query.0 .0 = vec![Statement::Update(statement)];
-			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session, Some(vars)).await?;
+			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -729,8 +734,8 @@ async fn router(
 				stmt
 			};
 			query.0 .0 = vec![Statement::Update(statement)];
-			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session, Some(vars)).await?;
+			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -746,8 +751,8 @@ async fn router(
 				stmt
 			};
 			query.0 .0 = vec![Statement::Select(statement)];
-			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session, Some(vars)).await?;
+			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -763,8 +768,8 @@ async fn router(
 				stmt
 			};
 			query.0 .0 = vec![Statement::Delete(statement)];
-			let vars = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session, Some(vars)).await?;
+			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -772,9 +777,9 @@ async fn router(
 			query,
 			mut variables,
 		} => {
-			let mut vars = vars.clone();
+			let mut vars = vars.read().await.clone();
 			vars.append(&mut variables.0);
-			let response = kvs.process(query, &*session, Some(vars)).await?;
+			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
@@ -810,7 +815,8 @@ async fn router(
 			let (mut writer, mut reader) = io::duplex(10_240);
 
 			// Write to channel.
-			let export = export_file(kvs, session, tx, config);
+			let session = session.read().await.clone();
+			let export = export_file(kvs, &session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -903,7 +909,7 @@ async fn router(
 			let (tx, rx) = crate::channel::bounded(1);
 
 			let kvs = kvs.clone();
-			let session = session.clone();
+			let session = session.read().await.clone();
 			tokio::spawn(async move {
 				let export = async {
 					if let Err(error) = export_file(&kvs, &session, tx, config).await {
@@ -992,7 +998,9 @@ async fn router(
 				}
 			});
 
-			let responses = kvs.execute_import(&*session, Some(vars.clone()), stream).await?;
+			let responses = kvs
+				.execute_import(&*session.read().await, Some(vars.read().await.clone()), stream)
+				.await?;
 
 			for response in responses {
 				response.result?;
@@ -1072,14 +1080,14 @@ async fn router(
 			key,
 			value,
 		} => {
-			let mut tmp_vars = vars.clone();
+			let mut tmp_vars = vars.read().await.clone();
 			tmp_vars.insert(key.clone(), value.clone());
 
 			// Need to compute because certain keys might not be allowed to be set and those should
 			// be rejected by an error.
-			match kvs.compute(value, &*session, Some(tmp_vars)).await? {
-				CoreValue::None => vars.remove(&key),
-				v => vars.insert(key, v),
+			match kvs.compute(value, &*session.read().await, Some(tmp_vars)).await? {
+				CoreValue::None => vars.write().await.remove(&key),
+				v => vars.write().await.insert(key, v),
 			};
 
 			Ok(DbResponse::Other(CoreValue::None))
@@ -1087,21 +1095,23 @@ async fn router(
 		Command::Unset {
 			key,
 		} => {
-			vars.remove(&key);
+			vars.write().await.remove(&key);
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::SubscribeLive {
 			uuid,
 			notification_sender,
 		} => {
-			live_queries.insert(uuid, notification_sender);
+			live_queries.write().await.insert(uuid, notification_sender);
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Kill {
 			uuid,
 		} => {
-			live_queries.remove(&uuid);
-			let value = kill_live_query(kvs, uuid, session, vars.clone()).await?;
+			live_queries.write().await.remove(&uuid);
+			let value =
+				kill_live_query(kvs, uuid, &*session.read().await, vars.read().await.clone())
+					.await?;
 			Ok(DbResponse::Other(value))
 		}
 
@@ -1132,7 +1142,9 @@ async fn router(
 
 			let stmt = Statement::Value(func);
 
-			let response = kvs.process(stmt.into(), &*session, Some(vars.clone())).await?;
+			let response = kvs
+				.process(stmt.into(), &*session.read().await, Some(vars.read().await.clone()))
+				.await?;
 			let value = take(true, response).await?;
 
 			Ok(DbResponse::Other(value))

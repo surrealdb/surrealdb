@@ -19,7 +19,7 @@ use std::{
 	task::Poll,
 };
 use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
-use tokio::sync::watch;
+use tokio::sync::{watch, RwLock};
 use tokio_util::sync::CancellationToken;
 
 impl crate::api::Connection for Db {}
@@ -113,9 +113,9 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let mut vars = BTreeMap::default();
-	let mut live_queries = HashMap::new();
-	let mut session = Session::default().with_rt(true);
+	let vars = RwLock::new(BTreeMap::default());
+	let live_queries = RwLock::new(HashMap::new());
+	let session = RwLock::new(Session::default().with_rt(true));
 
 	let canceller = CancellationToken::new();
 
@@ -148,7 +148,7 @@ pub(crate) async fn run_router(
 				let Ok(route) = route else {
 					break
 				};
-				match super::router(route.request, &kvs, &mut session, &mut vars, &mut live_queries)
+				match super::router(route.request, &kvs, &session, &vars, &live_queries)
 					.await
 				{
 					Ok(value) => {
@@ -173,12 +173,12 @@ pub(crate) async fn run_router(
 				};
 
 				let id = notification.query_id;
-				if let Some(sender) = live_queries.get(&id) {
+				if let Some(sender) = live_queries.read().await.get(&id) {
 
 					if sender.send(notification).await.is_err() {
-						live_queries.remove(&id);
+						live_queries.write().await.remove(&id);
 						if let Err(error) =
-							super::kill_live_query(&kvs, id, &session, vars.clone()).await
+							super::kill_live_query(&kvs, id, &*session.read().await, vars.read().await.clone()).await
 						{
 							warn!("Failed to kill live query '{id}'; {error}");
 						}
