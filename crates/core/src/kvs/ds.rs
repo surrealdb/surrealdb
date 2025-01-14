@@ -6,7 +6,7 @@ use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::capabilities::{MethodTarget, RouteTarget};
+use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget, RouteTarget};
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
@@ -823,7 +823,9 @@ impl Datastore {
 		// Process all statements
 
 		let parser_settings = ParserSettings {
-			experimental_enabled: ctx.get_capabilities().compute_experimental_allowed(),
+			references_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
 			..Default::default()
 		};
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);

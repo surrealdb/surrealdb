@@ -2,7 +2,7 @@
 
 use crate::{
 	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
-	dbs::Capabilities,
+	dbs::{capabilities::ExperimentalTarget, Capabilities},
 	err::Error,
 	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
 };
@@ -71,7 +71,8 @@ pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 		ParserSettings {
 			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
 			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			experimental_enabled: capabilities.compute_experimental_allowed(),
+			references_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
 			..Default::default()
 		},
 	);
@@ -104,7 +105,8 @@ pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 		ParserSettings {
 			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
 			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			experimental_enabled: capabilities.compute_experimental_allowed(),
+			references_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
 			..Default::default()
 		},
 	);

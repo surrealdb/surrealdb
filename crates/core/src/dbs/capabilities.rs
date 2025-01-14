@@ -2,8 +2,6 @@ use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::{collections::HashSet, sync::Arc};
-use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
 
 use crate::rpc::method::Method;
 use ipnet::IpNet;
@@ -109,7 +107,7 @@ impl std::str::FromStr for FuncTarget {
 	}
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq, EnumIter)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ExperimentalTarget {
 	RecordReferences,
@@ -590,22 +588,6 @@ impl Capabilities {
 
 	pub fn allows_http_route(&self, target: &RouteTarget) -> bool {
 		self.allow_http.matches(target) && !self.deny_http.matches(target)
-	}
-
-	pub fn compute_experimental_allowed(&self) -> Vec<ExperimentalTarget> {
-		let denied = match self.deny_experimental.as_ref() {
-			Targets::All => return vec![],
-			Targets::Some(targets) => targets.iter().cloned().collect(),
-			_ => vec![],
-		};
-
-		let allowed: Vec<ExperimentalTarget> = match self.allow_experimental.as_ref() {
-			Targets::All => ExperimentalTarget::iter().collect(),
-			Targets::Some(targets) => targets.iter().cloned().collect(),
-			_ => return vec![],
-		};
-
-		allowed.into_iter().filter(|t| !denied.contains(t)).collect()
 	}
 }
 

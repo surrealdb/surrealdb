@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	dbs::capabilities::ExperimentalTarget,
 	sql::{kind::Literal, Duration, Idiom, Kind, Strand, Table},
 	syn::{
+		error::bail,
 		lexer::compound,
 		parser::mac::expected,
 		token::{t, Glued, Keyword, Span, TokenKind},
@@ -146,7 +146,11 @@ impl Parser<'_> {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
 			}
-			t!("REFERENCES") if self.use_experimental(&ExperimentalTarget::RecordReferences)? => {
+			t!("REFERENCES") => {
+				if !self.settings.references_enabled {
+					bail!("Experimental capability `record_references` is not enabled")
+				}
+
 				let span = self.peek().span;
 				let (table, path) = if self.eat(t!("<")) {
 					let table: Option<Table> = Some(self.next_token_value()?);

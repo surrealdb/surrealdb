@@ -55,7 +55,6 @@
 
 use self::token_buffer::TokenBuffer;
 use crate::{
-	dbs::capabilities::ExperimentalTarget,
 	sql::{self, Datetime, Duration, Strand, Uuid},
 	syn::{
 		error::{bail, SyntaxError},
@@ -138,8 +137,8 @@ pub struct ParserSettings {
 	/// A query recurses when a statement contains another statement within itself.
 	/// Examples are subquery and blocks like block statements and if statements and such.
 	pub query_recursion_limit: usize,
-	/// Experimental features which are enabled in the parser.
-	pub experimental_enabled: Vec<ExperimentalTarget>,
+	/// Whether record references are enabled.
+	pub references_enabled: bool,
 }
 
 impl Default for ParserSettings {
@@ -149,7 +148,7 @@ impl Default for ParserSettings {
 			flexible_record_id: true,
 			object_recursion_limit: 100,
 			query_recursion_limit: 20,
-			experimental_enabled: vec![],
+			references_enabled: false,
 		}
 	}
 }
@@ -381,20 +380,6 @@ impl<'a> Parser<'a> {
 	/// Parse a single statement.
 	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<sql::Statement> {
 		self.parse_stmt(ctx).await
-	}
-
-	/// Check if an experimental feature is enabled.
-	pub fn check_experimental_enabled(&self, target: &ExperimentalTarget) -> bool {
-		self.settings.experimental_enabled.contains(target)
-	}
-
-	/// Check if an experimental feature is allowed.
-	pub fn use_experimental(&self, target: &ExperimentalTarget) -> ParseResult<bool> {
-		if !self.check_experimental_enabled(target) {
-			bail!("Experimental capability `{}` is not enabled", target)
-		} else {
-			Ok(true)
-		}
 	}
 }
 
