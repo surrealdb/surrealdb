@@ -96,6 +96,8 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
+type LiveQueryMap = HashMap<Uuid, Sender<Notification<CoreValue>>>;
+
 /// In-memory database
 ///
 /// # Examples
@@ -567,7 +569,7 @@ async fn router(
 	kvs: &Arc<Datastore>,
 	session: &Arc<RwLock<Session>>,
 	vars: &Arc<RwLock<BTreeMap<String, CoreValue>>>,
-	live_queries: &Arc<RwLock<HashMap<Uuid, Sender<Notification<CoreValue>>>>>,
+	live_queries: &Arc<RwLock<LiveQueryMap>>,
 ) -> Result<DbResponse> {
 	match command {
 		Command::Use {
@@ -863,7 +865,8 @@ async fn router(
 			let (mut writer, mut reader) = io::duplex(10_240);
 
 			// Write to channel.
-			let export = export_ml(kvs, session, tx, config);
+			let session = session.read().await;
+			let export = export_ml(kvs, &session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -941,7 +944,7 @@ async fn router(
 			let session = session.clone();
 			tokio::spawn(async move {
 				let export = async {
-					if let Err(error) = export_ml(&kvs, &session, tx, config).await {
+					if let Err(error) = export_ml(&kvs, &*session.read().await, tx, config).await {
 						let _ = bytes.send(Err(error)).await;
 					}
 				};
@@ -1024,9 +1027,9 @@ async fn router(
 			};
 
 			// Ensure a NS and DB are set
-			let (nsv, dbv) = check_ns_db(session)?;
+			let (nsv, dbv) = check_ns_db(&*session.read().await)?;
 			// Check the permissions level
-			kvs.check(session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
+			kvs.check(&*session.read().await, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
 			// Create a new buffer
 			let mut buffer = Vec::new();
 			// Load all the uploaded file chunks
@@ -1064,7 +1067,8 @@ async fn router(
 			model.comment = Some(file.header.description.to_string().into());
 			model.hash = hash;
 			let query = DefineStatement::Model(model).into();
-			let responses = kvs.process(query, session, Some(vars.clone())).await?;
+			let responses =
+				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
 
 			for response in responses {
 				response.result?;
