@@ -342,7 +342,7 @@ impl super::api::Transaction for Transaction {
 		// Retrieve the scan range
 		let res = self.inner.keys(beg.as_slice()..end.as_slice(), Some(limit as usize));
 		// Convert the keys and values
-		let res = res.map(|k| Key::from(k)).collect();
+		let res = res.map(Key::from).collect();
 		// Return result
 		Ok(res)
 	}

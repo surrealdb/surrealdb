@@ -9,6 +9,12 @@
 #[derive(Debug)]
 pub struct FakeAlloc;
 
+impl Default for FakeAlloc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FakeAlloc {
 	#[inline]
 	pub const fn new() -> Self {
