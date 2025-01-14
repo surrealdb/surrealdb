@@ -3,9 +3,60 @@ use std::collections::HashMap;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement, DefineTableStatement};
+use crate::sql::statements::{DefineEventStatement, DefineFieldStatement, DefineIndexStatement, DefineTableStatement};
 use crate::sql::value::Value;
 use crate::sql::{Index, Kind, Object, Table, TableType};
+
+pub async fn event(
+    (ctx, opt): (&Context, &Options),
+    (table, name): (Table, String)
+) -> Result<Value, Error> {
+    // Get the NS and DB
+    let ns = opt.ns()?;
+    let db = opt.db()?;
+    // Get the transaction
+    let txn = ctx.tx();
+    // Retrieve statement
+    let statement = txn.get_tb_event(ns, db, &table.0, &name).await.ok();
+
+    // Map statements to events
+    let v = match statement {
+        Some(s) => map_event_statement(&s),
+        None => Value::None,
+    };
+
+    Ok(v)
+}
+
+pub async fn events(
+    (ctx, opt): (&Context, &Options),
+    (table,): (Table,)
+) -> Result<Value, Error> {
+    // Get the NS and DB
+    let ns = opt.ns()?;
+    let db = opt.db()?;
+    // Get the transaction
+    let txn = ctx.tx();
+    // Retrieve statements
+    let statements = txn.all_tb_events(ns, db, &table.0).await?;
+
+    // Map statements to events
+    let events = statements.iter().map(map_event_statement).collect::<Vec<_>>();
+
+    Ok(events.into())
+}
+
+fn map_event_statement(s: &DefineEventStatement) -> Value {
+    let then = s.then.iter().map(|v| Value::from(v.to_string())).collect::<Vec<_>>().into();
+
+    let mut h = HashMap::<&str, Value>::new();
+    h.insert("name", s.name.to_string().into());
+    h.insert("condition", s.when.to_string().into());
+    h.insert("actions", then);
+    h.insert("comment", s.comment.clone().into());
+
+    Value::Object(Object::from(h))
+}
 
 pub async fn field(
     (ctx, opt): (&Context, &Options),

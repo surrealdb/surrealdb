@@ -1,0 +1,39 @@
+---
+source: crates/sdk/tests/function.rs
+expression: tmp
+snapshot_kind: text
+---
+Array(r#$surrealdb::private::sql::Array([
+  Object(r#$surrealdb::private::sql::Object({
+    "actions": Array(r#$surrealdb::private::sql::Array([
+      Strand(r#$surrealdb::private::sql::Strand("(CREATE log SET `table` = \'user\', event = $event, happened_at = time::now())")),
+    ])),
+    "comment": Strand(r#$surrealdb::private::sql::Strand("This is a comment on a user event")),
+    "condition": Strand(r#$surrealdb::private::sql::Strand("$event = \'CREATE\' OR $event = \'UPDATE\' OR $event = \'DELETE\'")),
+    "name": Strand(r#$surrealdb::private::sql::Strand("user_comment")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "actions": Array(r#$surrealdb::private::sql::Array([
+      Strand(r#$surrealdb::private::sql::Strand("(CREATE notification SET message = \'User deleted\', user_id = $before.id, created_at = time::now())")),
+    ])),
+    "comment": None,
+    "condition": Strand(r#$surrealdb::private::sql::Strand("$event = \'DELETE\'")),
+    "name": Strand(r#$surrealdb::private::sql::Strand("user_deleted")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "actions": Array(r#$surrealdb::private::sql::Array([
+      Strand(r#$surrealdb::private::sql::Strand("(CREATE log SET `table` = \'user\', event = $event, happened_at = time::now())")),
+    ])),
+    "comment": None,
+    "condition": Strand(r#$surrealdb::private::sql::Strand("$event = \'CREATE\' OR $event = \'UPDATE\' OR $event = \'DELETE\'")),
+    "name": Strand(r#$surrealdb::private::sql::Strand("user_event")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "actions": Array(r#$surrealdb::private::sql::Array([
+      Strand(r#$surrealdb::private::sql::Strand("(CREATE notification SET message = \'User updated\', user_id = $after.id, created_at = time::now())")),
+    ])),
+    "comment": None,
+    "condition": Strand(r#$surrealdb::private::sql::Strand("$event = \'UPDATE\'")),
+    "name": Strand(r#$surrealdb::private::sql::Strand("user_updated")),
+  })),
+]))

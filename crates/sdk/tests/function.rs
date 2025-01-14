@@ -3423,6 +3423,91 @@ async fn function_record_table() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
+async fn function_schema_event() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::event("user", "user_event");
+
+		DEFINE EVENT user_event ON TABLE user
+			WHEN $event = "CREATE" OR $event = "UPDATE" OR $event = "DELETE"
+			THEN (
+				CREATE log SET
+					table = "user",
+					event = $event,
+					happened_at = time::now()
+			);
+
+		RETURN schema::event("user", "user_event");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_events() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::events("user");
+		
+		DEFINE EVENT user_updated ON TABLE user
+			WHEN $event = "UPDATE"
+			THEN (
+				CREATE notification SET message = "User updated", user_id = $after.id, created_at = time::now()
+			);
+		DEFINE EVENT user_deleted ON TABLE user
+			WHEN $event = "DELETE"
+			THEN (
+				CREATE notification SET message = "User deleted", user_id = $before.id, created_at = time::now()
+			);
+		DEFINE EVENT user_event ON TABLE user
+			WHEN $event = "CREATE" OR $event = "UPDATE" OR $event = "DELETE"
+			THEN (
+				CREATE log SET
+					table = "user",
+					event = $event,
+					happened_at = time::now()
+			);
+		DEFINE EVENT user_comment ON TABLE user
+			WHEN $event = "CREATE" OR $event = "UPDATE" OR $event = "DELETE"
+			THEN (
+				CREATE log SET
+					table = "user",
+					event = $event,
+					happened_at = time::now()
+			)
+			COMMENT "This is a comment on a user event";
+
+		RETURN schema::events("user");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(Vec::<Value>::new());
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_schema_field() -> Result<(), Error> {
 	let sql = r#"
 		RETURN schema::field("user", "name");
