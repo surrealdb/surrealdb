@@ -818,7 +818,8 @@ impl Datastore {
 		// Process all statements
 
 		let mut parser_settings = ParserSettings::default();
-		parser_settings.experimental_enabled = ctx.get_capabilities().compute_experimental_allowed();
+		parser_settings.experimental_enabled =
+			ctx.get_capabilities().compute_experimental_allowed();
 		let mut statements_stream = StatementStream::new();
 		let mut buffer = BytesMut::new();
 		let mut parse_size = 4096;

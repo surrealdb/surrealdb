@@ -184,7 +184,7 @@ impl From<serde_content::Error> for Error {
 mod tests {
 	use super::*;
 	use crate::dbs::Capabilities;
-use crate::sql;
+	use crate::sql;
 	use crate::sql::block::Entry;
 	use crate::sql::statements::CreateStatement;
 	use crate::sql::Number;

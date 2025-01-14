@@ -278,7 +278,10 @@ impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
 
 #[cfg(test)]
 mod tests {
-	use crate::{dbs::Capabilities, syn::{parse, value}};
+	use crate::{
+		dbs::Capabilities,
+		syn::{parse, value},
+	};
 
 	#[test]
 	fn pretty_query() {

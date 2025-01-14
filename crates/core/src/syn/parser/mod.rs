@@ -55,11 +55,13 @@
 
 use self::token_buffer::TokenBuffer;
 use crate::{
-	dbs::capabilities::ExperimentalTarget, sql::{self, Datetime, Duration, Strand, Uuid}, syn::{
+	dbs::capabilities::ExperimentalTarget,
+	sql::{self, Datetime, Duration, Strand, Uuid},
+	syn::{
 		error::{bail, SyntaxError},
 		lexer::{compound::NumberKind, Lexer},
 		token::{t, Span, Token, TokenKind},
-	}
+	},
 };
 use bytes::BytesMut;
 use reblessive::{Stack, Stk};

@@ -1,9 +1,9 @@
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
+use std::{collections::HashSet, sync::Arc};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
-use std::{collections::HashSet, sync::Arc};
 
 use crate::rpc::method::Method;
 use ipnet::IpNet;
@@ -158,7 +158,9 @@ impl std::str::FromStr for ExperimentalTarget {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.trim() {
-			s if s.eq_ignore_ascii_case("record_references") => Ok(ExperimentalTarget::RecordReferences),
+			s if s.eq_ignore_ascii_case("record_references") => {
+				Ok(ExperimentalTarget::RecordReferences)
+			}
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		}
 	}

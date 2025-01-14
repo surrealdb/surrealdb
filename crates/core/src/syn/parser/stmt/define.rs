@@ -900,7 +900,9 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
-				t!("REFERENCE") if self.use_experimental(&ExperimentalTarget::RecordReferences)? => {
+				t!("REFERENCE")
+					if self.use_experimental(&ExperimentalTarget::RecordReferences)? =>
+				{
 					self.pop_peek();
 					res.reference = Some(self.parse_reference(ctx).await?);
 				}

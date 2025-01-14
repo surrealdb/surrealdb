@@ -682,7 +682,7 @@ impl<'a> FieldEditContext<'a> {
 	/// Process any `TYPE reference` clause for the field definition
 	async fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-		return Ok(None);
+			return Ok(None);
 		}
 
 		let refs = match &self.def.kind {

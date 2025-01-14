@@ -117,7 +117,9 @@ impl Parser<'_> {
 #[cfg(test)]
 mod test {
 	use crate::{
-		dbs::Capabilities, sql::{Script, Value}, syn::{self, Parse}
+		dbs::Capabilities,
+		sql::{Script, Value},
+		syn::{self, Parse},
 	};
 
 	use super::*;

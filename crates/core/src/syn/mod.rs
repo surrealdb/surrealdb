@@ -1,7 +1,10 @@
 //! Module containing the implementation of the surrealql tokens, lexer, and parser.
 
 use crate::{
-	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH}, dbs::Capabilities, err::Error, sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value}
+	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
+	dbs::Capabilities,
+	err::Error,
+	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
 };
 
 pub mod error;

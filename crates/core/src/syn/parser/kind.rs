@@ -3,11 +3,13 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	dbs::capabilities::ExperimentalTarget, sql::{kind::Literal, Duration, Idiom, Kind, Strand, Table}, syn::{
+	dbs::capabilities::ExperimentalTarget,
+	sql::{kind::Literal, Duration, Idiom, Kind, Strand, Table},
+	syn::{
 		lexer::compound,
 		parser::mac::expected,
 		token::{t, Glued, Keyword, Span, TokenKind},
-	}
+	},
 };
 
 use super::{mac::unexpected, ParseResult, Parser};

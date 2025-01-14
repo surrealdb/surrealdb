@@ -628,7 +628,8 @@ mod tests {
 	#[test(tokio::test)]
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;", &Capabilities::all()).unwrap();
+		let mut q =
+			syn::parse("DEFINE ANALYZER test TOKENIZERS blank;", &Capabilities::all()).unwrap();
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 			panic!()
 		};
@@ -767,7 +768,8 @@ mod tests {
 		// Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
-			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;", &Capabilities::all()).unwrap();
+			let mut q =
+				syn::parse("DEFINE ANALYZER test TOKENIZERS blank;", &Capabilities::all()).unwrap();
 			let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 				panic!()
 			};
@@ -918,7 +920,8 @@ mod tests {
 	#[test(tokio::test)]
 	async fn concurrent_test() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
-		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;", &Capabilities::all()).unwrap();
+		let mut q =
+			syn::parse("DEFINE ANALYZER test TOKENIZERS blank;", &Capabilities::all()).unwrap();
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 			panic!()
 		};
@@ -947,7 +950,8 @@ mod tests {
 	async fn remove_insert_sequence() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut stack = reblessive::TreeStack::new();
-		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;", &Capabilities::all()).unwrap();
+		let mut q =
+			syn::parse("DEFINE ANALYZER test TOKENIZERS blank;", &Capabilities::all()).unwrap();
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 			panic!()
 		};
