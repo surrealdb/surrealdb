@@ -1,2 +1,0 @@
-[env]
-SURREAL_CAPS_ALLOW_EXPERIMENTAL = "record_references"

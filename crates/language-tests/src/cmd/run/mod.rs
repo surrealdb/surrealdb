@@ -306,7 +306,11 @@ async fn run_test_with_dbs(
 	}
 
 	let source = &set[id].source;
-	let mut parser = syn::parser::Parser::new(source);
+	let settings = syn::parser::ParserSettings {
+		experimental_enabled: dbs.get_capabilities().compute_experimental_allowed(),
+		..Default::default()
+	};
+	let mut parser = syn::parser::Parser::new_with_settings(source, settings);
 	let mut stack = reblessive::Stack::new();
 
 	let query = match stack.enter(|stk| parser.parse_query(stk)).finish() {

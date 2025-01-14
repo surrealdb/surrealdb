@@ -516,6 +516,11 @@ impl Datastore {
 		self.capabilities.allows_network_target(net_target)
 	}
 
+	/// Set specific capabilities for this Datastore
+	pub fn get_capabilities(&self) -> &Capabilities {
+		&self.capabilities
+	}
+
 	#[cfg(feature = "jwks")]
 	pub(crate) fn jwks_cache(&self) -> &Arc<RwLock<JwksCache>> {
 		&self.jwks_cache

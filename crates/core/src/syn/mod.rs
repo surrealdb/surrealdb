@@ -86,6 +86,13 @@ pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn value(input: &str) -> Result<Value, Error> {
+	let capabilities = Capabilities::all();
+	value_with_capabilities(input, &capabilities)
+}
+
+/// Parses a SurrealQL [`Value`].
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
 	if input.len() > u32::MAX as usize {
@@ -97,6 +104,7 @@ pub fn value(input: &str) -> Result<Value, Error> {
 		ParserSettings {
 			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
 			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			experimental_enabled: capabilities.compute_experimental_allowed(),
 			..Default::default()
 		},
 	);
