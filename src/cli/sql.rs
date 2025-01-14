@@ -406,7 +406,7 @@ struct InputValidator<'a> {
 }
 
 #[allow(clippy::if_same_then_else)]
-impl<'a> Validator for InputValidator<'a> {
+impl Validator for InputValidator<'_> {
 	fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
 		use ValidationResult::{Incomplete, Invalid, Valid};
 		// Filter out all new line characters

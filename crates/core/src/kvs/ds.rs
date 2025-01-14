@@ -822,10 +822,11 @@ impl Datastore {
 		vars.attach(&mut ctx)?;
 		// Process all statements
 
-		let mut parser_settings = ParserSettings::default();
-		parser_settings.experimental_enabled =
-			ctx.get_capabilities().compute_experimental_allowed();
-		let mut statements_stream = StatementStream::new();
+		let parser_settings = ParserSettings {
+			experimental_enabled: ctx.get_capabilities().compute_experimental_allowed(),
+			..Default::default()
+		};
+		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
 		let mut buffer = BytesMut::new();
 		let mut parse_size = 4096;
 		let mut bytes_stream = pin!(query);

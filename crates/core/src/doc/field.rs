@@ -276,7 +276,7 @@ enum RefAction<'a> {
 	Ignore,
 }
 
-impl<'a> FieldEditContext<'a> {
+impl FieldEditContext<'_> {
 	/// Process any TYPE clause for the field definition
 	async fn process_type_clause(&self, val: Value) -> Result<Value, Error> {
 		// Check for a TYPE clause
