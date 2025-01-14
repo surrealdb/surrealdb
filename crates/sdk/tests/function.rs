@@ -3570,6 +3570,84 @@ async fn function_schema_fields() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_schema_function() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::function("greet");
+
+		DEFINE FUNCTION fn::greet($name: string) {
+			RETURN "Hello, " + $name + "!";
+		};
+
+		RETURN schema::function("greet");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_functions() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::functions();
+
+		DEFINE FUNCTION fn::greet($name: string) -> string {
+			RETURN "Hello, " + $name + "!";
+		};
+		DEFINE FUNCTION fn::relation_exists(
+			$in: record,
+			$tb: string,
+			$out: record
+		) {
+			-- Check if a relation exists between the two nodes.
+			LET $results = SELECT VALUE id FROM type::table($tb) WHERE in = $in AND out = $out;
+			-- Return true if a relation exists, false otherwise
+			RETURN array::len($results) > 0;
+		};
+		DEFINE FUNCTION fn::last_option($required: number, $optional: option<number>) {
+			RETURN {
+				required_present: type::is::number($required),
+				optional_present: type::is::number($optional),
+			}
+		};
+		DEFINE FUNCTION fn::comment($name: string) {
+			RETURN "comment";
+		} COMMENT "This is a comment on a function";
+
+		RETURN schema::functions();
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(Vec::<Value>::new());
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_schema_index() -> Result<(), Error> {
 	let sql = r#"
 		RETURN schema::index("user", "nameIndex");

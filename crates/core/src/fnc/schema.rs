@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::sql::statements::{DefineEventStatement, DefineFieldStatement, DefineIndexStatement, DefineTableStatement};
+use crate::sql::statements::{DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineTableStatement};
 use crate::sql::value::Value;
-use crate::sql::{Index, Kind, Object, Table, TableType};
+use crate::sql::{Ident, Index, Kind, Object, Table, TableType};
 
 pub async fn event(
     (ctx, opt): (&Context, &Options),
@@ -117,6 +117,71 @@ fn map_field_statement(s: &DefineFieldStatement) -> Value {
     h.insert("computed", computed.into());
     h.insert("comment", s.comment.clone().into());
 
+    Value::Object(Object::from(h))
+}
+
+
+pub async fn function(
+    (ctx, opt): (&Context, &Options),
+    (name,): (String,)
+) -> Result<Value, Error> {
+    // Get the NS and DB
+    let ns = opt.ns()?;
+    let db = opt.db()?;
+    // Get the transaction
+    let txn = ctx.tx();
+    // Retrieve statement
+    let statement = txn.get_db_function(ns, db, &name).await.ok();
+
+    // Map statements to functions
+    let v = match statement {
+        Some(s) => map_function_statement(&s),
+        None => Value::None,
+    };
+
+    Ok(v)
+}
+
+pub async fn functions(
+    (ctx, opt): (&Context, &Options),
+    _: ()
+) -> Result<Value, Error> {
+    // Get the NS and DB
+    let ns = opt.ns()?;
+    let db = opt.db()?;
+    // Get the transaction
+    let txn = ctx.tx();
+    // Retrieve statements
+    let statements = txn.all_db_functions(ns, db).await?;
+
+    // Map statements to functions
+    let events = statements.iter().map(map_function_statement).collect::<Vec<_>>();
+
+    Ok(events.into())
+}
+
+fn map_function_statement(s: &DefineFunctionStatement) -> Value {
+    let args = s.args.iter().map(map_function_arg).collect::<Vec<_>>();
+    let returns = match &s.returns {
+        Some(v) => v.to_string().into(),
+        None => Value::None,
+    };
+
+    let mut h = HashMap::<&str, Value>::new();
+    h.insert("name", s.name.to_string().into());
+    h.insert("args", args.into());
+    h.insert("body", s.block.to_string().into());
+    h.insert("returns", returns);
+    h.insert("comment", s.comment.clone().into());
+
+    Value::Object(Object::from(h))
+}
+
+fn map_function_arg((name, kind): &(Ident, Kind)) -> Value {
+    let mut h = HashMap::<&str, Value>::new();
+    h.insert("name", name.to_string().into());
+    h.insert("type", kind.to_string().into());
+    
     Value::Object(Object::from(h))
 }
 

@@ -12,6 +12,8 @@ impl_module_def!(
 	"events" => fut Async,
 	"field" => fut Async,
 	"fields" => fut Async,
+	"function" => fut Async,
+	"functions" => fut Async,
 	"index" => fut Async,
 	"indexes" => fut Async,
 	"table" => fut Async,

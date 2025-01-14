@@ -518,6 +518,8 @@ pub async fn asynchronous(
 		"schema::events" => schema::events((ctx, opt)).await,
 		"schema::field" => schema::field((ctx, opt)).await,
 		"schema::fields" => schema::fields((ctx, opt)).await,
+		"schema::function" => schema::function((ctx, opt)).await,
+		"schema::functions" => schema::functions((ctx, opt)).await,
 		"schema::index" => schema::index((ctx, opt)).await,
 		"schema::indexes" => schema::indexes((ctx, opt)).await,
 		"schema::table" => schema::table((ctx, opt)).await,

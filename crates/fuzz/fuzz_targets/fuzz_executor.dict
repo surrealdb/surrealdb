@@ -302,6 +302,8 @@
 "schema::events("
 "schema::field("
 "schema::fields("
+"schema::function("
+"schema::functions("
 "schema::index("
 "schema::indexes("
 "schema::table("
