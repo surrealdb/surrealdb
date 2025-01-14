@@ -565,9 +565,9 @@ async fn router(
 		..
 	}: RequestData,
 	kvs: &Arc<Datastore>,
-	session: &RwLock<Session>,
-	vars: &RwLock<BTreeMap<String, CoreValue>>,
-	live_queries: &RwLock<HashMap<Uuid, Sender<Notification<CoreValue>>>>,
+	session: &Arc<RwLock<Session>>,
+	vars: &Arc<RwLock<BTreeMap<String, CoreValue>>>,
+	live_queries: &Arc<RwLock<HashMap<Uuid, Sender<Notification<CoreValue>>>>>,
 ) -> Result<DbResponse> {
 	match command {
 		Command::Use {

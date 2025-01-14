@@ -113,9 +113,9 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let vars = RwLock::new(BTreeMap::default());
-	let live_queries = RwLock::new(HashMap::new());
-	let session = RwLock::new(Session::default().with_rt(true));
+	let vars = Arc::new(RwLock::new(BTreeMap::default()));
+	let live_queries = Arc::new(RwLock::new(HashMap::new()));
+	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
 
 	let canceller = CancellationToken::new();
 
@@ -148,16 +148,22 @@ pub(crate) async fn run_router(
 				let Ok(route) = route else {
 					break
 				};
-				match super::router(route.request, &kvs, &session, &vars, &live_queries)
-					.await
-				{
-					Ok(value) => {
-						let _ = route.response.send(Ok(value)).await;
+				let kvs = kvs.clone();
+				let session = session.clone();
+				let vars = vars.clone();
+				let live_queries = live_queries.clone();
+				tokio::spawn(async move {
+					match super::router(route.request, &kvs, &session, &vars, &live_queries)
+						.await
+					{
+						Ok(value) => {
+							route.response.send(Ok(value)).await.ok();
+						}
+						Err(error) => {
+							route.response.send(Err(error)).await.ok();
+						}
 					}
-					Err(error) => {
-						let _ = route.response.send(Err(error)).await;
-					}
-				}
+				});
 			}
 			notification = notification_stream.next() => {
 				let Some(notification) = notification else {
