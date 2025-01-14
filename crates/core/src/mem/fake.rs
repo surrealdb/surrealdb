@@ -10,9 +10,9 @@
 pub struct FakeAlloc;
 
 impl Default for FakeAlloc {
-    fn default() -> Self {
-        Self::new()
-    }
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
 impl FakeAlloc {
