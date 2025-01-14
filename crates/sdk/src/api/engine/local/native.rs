@@ -75,25 +75,25 @@ pub(crate) async fn run_router(
 	let kvs = match Datastore::new(endpoint).await {
 		Ok(kvs) => {
 			if let Err(error) = kvs.check_version().await {
-				let _ = conn_tx.send(Err(error.into())).await;
+				conn_tx.send(Err(error.into())).await.ok();
 				return;
 			};
 			if let Err(error) = kvs.bootstrap().await {
-				let _ = conn_tx.send(Err(error.into())).await;
+				conn_tx.send(Err(error.into())).await.ok();
 				return;
 			}
 			// If a root user is specified, setup the initial datastore credentials
 			if let Some(root) = configured_root {
 				if let Err(error) = kvs.initialise_credentials(root.username, root.password).await {
-					let _ = conn_tx.send(Err(error.into())).await;
+					conn_tx.send(Err(error.into())).await.ok();
 					return;
 				}
 			}
-			let _ = conn_tx.send(Ok(())).await;
+			conn_tx.send(Ok(())).await.ok();
 			kvs.with_auth_enabled(configured_root.is_some())
 		}
 		Err(error) => {
-			let _ = conn_tx.send(Err(error.into())).await;
+			conn_tx.send(Err(error.into())).await.ok();
 			return;
 		}
 	};
@@ -143,15 +143,15 @@ pub(crate) async fn run_router(
 	});
 
 	loop {
+		let kvs = kvs.clone();
+		let session = session.clone();
+		let vars = vars.clone();
+		let live_queries = live_queries.clone();
 		tokio::select! {
 			route = route_rx.recv() => {
 				let Ok(route) = route else {
 					break
 				};
-				let kvs = kvs.clone();
-				let session = session.clone();
-				let vars = vars.clone();
-				let live_queries = live_queries.clone();
 				tokio::spawn(async move {
 					match super::router(route.request, &kvs, &session, &vars, &live_queries)
 						.await
@@ -178,25 +178,27 @@ pub(crate) async fn run_router(
 					data: notification.result
 				};
 
-				let id = notification.query_id;
-				if let Some(sender) = live_queries.read().await.get(&id) {
+				tokio::spawn(async move {
+					let id = notification.query_id;
+					if let Some(sender) = live_queries.read().await.get(&id) {
 
-					if sender.send(notification).await.is_err() {
-						live_queries.write().await.remove(&id);
-						if let Err(error) =
-							super::kill_live_query(&kvs, id, &*session.read().await, vars.read().await.clone()).await
-						{
-							warn!("Failed to kill live query '{id}'; {error}");
+						if sender.send(notification).await.is_err() {
+							live_queries.write().await.remove(&id);
+							if let Err(error) =
+								super::kill_live_query(&kvs, id, &*session.read().await, vars.read().await.clone()).await
+							{
+								warn!("Failed to kill live query '{id}'; {error}");
+							}
 						}
 					}
-				}
+				});
 			}
 		}
 	}
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish
-	let _ = tasks.resolve().await;
+	tasks.resolve().await.ok();
 	// Delete this node from the cluster
-	let _ = kvs.shutdown().await;
+	kvs.shutdown().await.ok();
 }
