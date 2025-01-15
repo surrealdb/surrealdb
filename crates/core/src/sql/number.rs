@@ -415,10 +415,10 @@ impl Number {
 			Number::Float(v) => v.abs().into(),
 			Number::Decimal(v) => v.abs().into(),
 			Number::Felt252(v) => {
-				if v > *HALF_PRIME {
-					Number::Felt252(*HALF_PRIME - v)
-				} else {
+				if v < *HALF_PRIME {
 					Number::Felt252(v)
+				} else {
+					Number::Felt252((Felt::MAX - v) + Felt::ONE)
 				}
 			}
 		}

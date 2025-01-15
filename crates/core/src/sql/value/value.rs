@@ -3050,12 +3050,8 @@ pub(crate) trait TryMul<Rhs = Self> {
 impl TryMul for Value {
 	type Output = Self;
 	fn try_mul(self, other: Self) -> Result<Self, Error> {
-		println!("mul values {:?} {:?}", self, other);
 		Ok(match (self, other) {
-			(Self::Number(v), Self::Number(w)) => {
-				println!("mul number");
-				Self::Number(v.try_mul(w)?)
-			}
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_mul(w)?),
 			(v, w) => return Err(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
 		})
 	}

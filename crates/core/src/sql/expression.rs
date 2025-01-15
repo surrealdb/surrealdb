@@ -150,7 +150,6 @@ impl Expression {
 				}
 				let mut r = r.compute(stk, ctx, opt, doc).await?;
 				if l.is_bytes() && r.is_bytes() {
-					println!("mul bytes");
 					l = Value::from(Number::Felt252(Felt::from_bytes_be_slice(
 						l.convert_to_bytes().unwrap().as_slice(),
 					)));
@@ -158,8 +157,6 @@ impl Expression {
 						r.convert_to_bytes().unwrap().as_slice(),
 					)));
 				}
-
-				println!("mul bytes 2 {:?}, {:?}", l, r);
 				match o {
 					Operator::Or => fnc::operate::or(l, r),
 					Operator::And => fnc::operate::and(l, r),
