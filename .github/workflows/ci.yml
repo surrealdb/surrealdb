@@ -395,12 +395,12 @@ jobs:
 
       - name: Test workspace
         run: |
-          npx -y concurrently 
-            --kill-others 
-            --success first 
-            --names "server,client" 
-            --prefix-colors "blue.bold,green.bold" 
-            "SURREAL_LOG=info make serve" 
+          npx -y concurrently \
+            --kill-others \
+            --success first \
+            --names "server,client" \
+            --prefix-colors "blue.bold,green.bold" \
+            "SURREAL_LOG=info make serve" \
             "make test"
 
   graphql-integration:
