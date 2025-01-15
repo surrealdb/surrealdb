@@ -406,7 +406,7 @@ impl Connection {
 								let res = Self::process_message(rpc.clone(), method, req.params).await;
 								// Process the response
 								res.into_response(req.id)
-									.send(otel_cx.clone(), fmt, &chn)
+									.send(otel_cx.clone(), fmt, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
 							}
@@ -416,7 +416,7 @@ impl Connection {
 								if shutdown.is_cancelled() {
 									// Process the response
 									failure(req.id, Failure::custom(SERVER_SHUTTING_DOWN))
-										.send(otel_cx.clone(), fmt, &chn)
+										.send(otel_cx.clone(), fmt, chn)
 										.with_context(otel_cx.as_ref().clone())
 										.await;
 								}
@@ -424,7 +424,7 @@ impl Connection {
 								else if ALLOC.is_beyond_threshold() {
 									// Process the response
 									failure(req.id, Failure::custom(SERVER_OVERLOADED))
-										.send(otel_cx.clone(), fmt, &chn)
+										.send(otel_cx.clone(), fmt, chn)
 										.with_context(otel_cx.as_ref().clone())
 										.await;
 								}
@@ -436,14 +436,14 @@ impl Connection {
 									if ALLOC.is_beyond_threshold() {
 										// Process the response
 										failure(req.id, Failure::custom(SERVER_OVERLOADED))
-											.send(otel_cx.clone(), fmt, &chn)
+											.send(otel_cx.clone(), fmt, chn)
 											.with_context(otel_cx.as_ref().clone())
 											.await;
 									} else {
 										// Process the message when the semaphore is acquired
 										Self::process_message(rpc.clone(), method, req.params).await
 											.into_response(req.id)
-											.send(otel_cx.clone(), fmt, &chn)
+											.send(otel_cx.clone(), fmt, chn)
 											.with_context(otel_cx.as_ref().clone())
 											.await;
 									}
@@ -457,7 +457,7 @@ impl Connection {
 				Err(err) => {
 					// Process the response
 					failure(None, err)
-						.send(otel_cx.clone(), fmt, &chn)
+						.send(otel_cx.clone(), fmt, chn)
 						.with_context(otel_cx.as_ref().clone())
 						.await
 				}

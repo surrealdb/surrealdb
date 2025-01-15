@@ -7,12 +7,14 @@ pub mod response;
 use crate::rpc::connection::Connection;
 use crate::rpc::response::success;
 use crate::telemetry::metrics::ws::NotificationContext;
+use futures::stream::FuturesUnordered;
 use opentelemetry::Context as TelemetryContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::kvs::Datastore;
 use tokio::sync::RwLock;
+use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -46,6 +48,8 @@ pub(crate) async fn notifications(
 	state: Arc<RpcState>,
 	canceller: CancellationToken,
 ) {
+	// Store messages being delivered
+	let mut futures = FuturesUnordered::new();
 	// Listen to the notifications channel
 	if let Some(channel) = ds.notifications() {
 		// Loop continuously
@@ -55,34 +59,39 @@ pub(crate) async fn notifications(
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
+				// Process any buffered messages
+				Some(_) = futures.next() => continue,
 				// Receive a notification on the channel
 				Ok(notification) = channel.recv() => {
-					// Find which WebSocket the notification belongs to
-					let found_ws = {
-						// We remove the lock asap
-						state.live_queries.read().await.get(&notification.id).cloned()
+					// Get the id for this notification
+					let id = notification.id.as_ref();
+					// Get the WebSocket for this notification
+					let websocket = {
+						state.live_queries.read().await.get(id).cloned()
 					};
-					if let Some(id) = found_ws {
-						// Check to see if the WebSocket exists
-						let maybe_ws = {
-							// We remove the lock ASAP
-							// WS is an Arc anyway
-							state.web_sockets.read().await.get(&id).cloned()
+					// Ensure the specified WebSocket exists
+					if let Some(id) = websocket.as_ref() {
+						// Get the WebSocket for this notification
+						let websocket = {
+							state.web_sockets.read().await.get(id).cloned()
 						};
-						if let Some(rpc) = maybe_ws {
+						// Ensure the specified WebSocket exists
+						if let Some(rpc) = websocket {
 							// Serialize the message to send
 							let message = success(None, notification);
-							// Add metrics
+							// Add telemetry metrics
 							let cx = TelemetryContext::new();
 							let not_ctx = NotificationContext::default()
 								  .with_live_id(id.to_string());
 							let cx = Arc::new(cx.with_value(not_ctx));
 							// Get the WebSocket output format
 							let format = rpc.read().await.format;
-							// get the WebSocket sending channel
+							// Get the WebSocket sending channel
 							let sender = rpc.read().await.channel.0.clone();
 							// Send the notification to the client
-							message.send(cx, format, &sender).await
+							let future = message.send(cx, format, sender);
+							// Pus the future to the pipeline
+							futures.push(future);
 						}
 					}
 				},
