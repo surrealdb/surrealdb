@@ -150,8 +150,7 @@ impl DatabaseMutation {
 impl ChangeSet {
 	pub fn into_value(self) -> Value {
 		let mut m = BTreeMap::<String, Value>::new();
-		let vs = self.0;
-		m.insert("versionstamp".to_string(), Value::from(vs.as_bytes().to_vec()));
+		m.insert("versionstamp".to_string(), Value::from(self.0.into_u128()));
 		m.insert("changes".to_string(), self.1.into_value());
 		let so: Object = m.into();
 		Value::Object(so)

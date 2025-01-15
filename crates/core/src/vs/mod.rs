@@ -48,17 +48,14 @@ impl Revisioned for VersionStamp {
 	}
 
 	fn serialize_revisioned<W: std::io::Write>(&self, w: &mut W) -> Result<(), revision::Error> {
-		w.write_all(&self.0).map_err(revision::Error::Io)?;
-		Ok(())
+		self.0.serialize_revisioned(w)
 	}
 
 	fn deserialize_revisioned<R: std::io::Read>(r: &mut R) -> Result<Self, revision::Error>
 	where
 		Self: Sized,
 	{
-		let mut buf = [0u8; 10];
-		r.read_exact(&mut buf).map_err(revision::Error::Io)?;
-		Ok(VersionStamp(buf))
+		Revisioned::deserialize_revisioned(r).map(VersionStamp)
 	}
 }
 
