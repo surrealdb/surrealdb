@@ -158,21 +158,21 @@ impl VersionStamp {
 	/// Returns an iterator of version stamps starting with the current version stamp.
 	pub fn iter(self) -> VersionStampIter {
 		VersionStampIter {
-			cur: self,
+			cur: Some(self),
 		}
 	}
 }
 
 pub struct VersionStampIter {
-	cur: VersionStamp,
+	cur: Option<VersionStamp>,
 }
 
 impl Iterator for VersionStampIter {
 	type Item = VersionStamp;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		let next = self.cur.next()?;
-		Some(mem::replace(&mut self.cur, next))
+		let next = self.cur?.next();
+		mem::replace(&mut self.cur, next)
 	}
 }
 
