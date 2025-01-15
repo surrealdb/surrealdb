@@ -243,7 +243,7 @@ mod test {
 		// No overflow
 		let v = u128::MAX >> 48;
 		let res = VersionStamp::try_from_u128(v).unwrap();
-		assert_eq!(res, [255, 255, 255, 255, 255, 255, 255, 255, 255, 255]);
+		assert_eq!(res.as_bytes(), [255, 255, 255, 255, 255, 255, 255, 255, 255, 255]);
 	}
 
 	#[test]
@@ -257,7 +257,7 @@ mod test {
 		let mid = mid + 1;
 		let vs = VersionStamp::from_u64(mid);
 		// The last 2 bytes are empty
-		assert_eq!("00000000000000060000", hex::encode(vs));
+		assert_eq!("00000000000000060000", hex::encode(vs.as_bytes()));
 		let end = vs.try_into_u64().unwrap();
 		assert_eq!(end, 6);
 	}

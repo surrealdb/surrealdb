@@ -161,7 +161,6 @@ mod tests {
 	use crate::sql::thing::Thing;
 	use crate::sql::value::Value;
 	use crate::sql::{Datetime, Idiom, Number, Object, Operation, Strand};
-	use crate::vs;
 	use crate::vs::VersionStamp;
 
 	const DONT_STORE_PREVIOUS: bool = false;

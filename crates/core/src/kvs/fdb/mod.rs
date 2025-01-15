@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
 use crate::kvs::{Check, Key, Val};
-use crate::vs::Versionstamp;
+use crate::vs::VersionStamp;
 use foundationdb::options::DatabaseOption;
 use foundationdb::options::MutationType;
 use foundationdb::Database;
@@ -581,7 +581,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Obtain a new change timestamp for a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
+	async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -592,7 +592,7 @@ impl super::api::Transaction for Transaction {
 		// Get the current read version
 		let res = self.inner.as_ref().unwrap().get_read_version().await?;
 		// Convert to a version stamp
-		let res = crate::vs::u64_to_versionstamp(res as u64);
+		let res = VersionStamp::from_u64(res as u64);
 		// Return result
 		Ok(res)
 	}
