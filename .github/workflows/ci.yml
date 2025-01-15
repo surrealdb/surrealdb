@@ -389,10 +389,19 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Test workspace
         run: |
-          SURREAL_LOG=info make serve &
-          make test
+          npx -y concurrently 
+            --kill-others 
+            --success first 
+            --names "server,client" 
+            --prefix-colors "blue.bold,green.bold" 
+            "SURREAL_LOG=info make serve" 
+            "make test"
 
   graphql-integration:
     name: GraphQL integration
