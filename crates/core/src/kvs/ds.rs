@@ -51,7 +51,7 @@ use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
-const LQ_CHANNEL_SIZE: usize = 100;
+const LQ_CHANNEL_SIZE: usize = 15_000;
 
 // The role assigned to the initial user created when starting the server with credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
