@@ -500,16 +500,9 @@ pub trait Transaction {
 		let key = key.into();
 		// Calculate the version number
 		let ver = match self.get(key.clone(), None).await? {
-			Some(prev) => {
-				let res: Result<[u8; 10], Error> = match prev.as_slice().try_into() {
-					Ok(ba) => Ok(ba),
-					Err(e) => Err(Error::Tx(e.to_string())),
-				};
-				VersionStamp::from_bytes(res?)
-					.iter()
-					.next()
-					.expect("exhausted all possible timestamps")
-			}
+			Some(prev) => VersionStamp::from_slice(prev.as_slice())?
+				.next()
+				.expect("exhausted all possible timestamps"),
 			None => VersionStamp::from_u64(1),
 		};
 		// Store the timestamp to prevent other transactions from committing

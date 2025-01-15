@@ -5,6 +5,7 @@
 
 pub use std::{error, fmt, mem};
 
+use num_traits::ToBytes;
 use revision::Revisioned;
 
 /// Versionstamp is a 10-byte array used to identify a specific version of a key.
@@ -82,73 +83,77 @@ impl error::Error for VersionStampError {}
 impl VersionStamp {
 	pub const ZERO: VersionStamp = VersionStamp([0; 10]);
 
-	pub fn from_u64(v: u64) -> Self {
-		let mut buf = [0; 10];
-		buf[0..8].copy_from_slice(&v.to_be_bytes());
-		VersionStamp(buf)
+	pub const fn from_u64(v: u64) -> Self {
+		let b = v.to_be_bytes();
+		VersionStamp([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], 0, 0])
 	}
 
-	pub fn from_u64_u16(v: u64, v2: u16) -> Self {
-		let mut buf = [0; 10];
-		buf[0..8].copy_from_slice(&v.to_be_bytes());
-		buf[8..10].copy_from_slice(&v2.to_be_bytes());
-		VersionStamp(buf)
+	pub const fn from_u64_u16(v: u64, v2: u16) -> Self {
+		let b1 = v.to_be_bytes();
+		let b2 = v2.to_be_bytes();
+		VersionStamp([b1[0], b1[1], b1[2], b1[3], b1[4], b1[5], b1[6], b1[7], b2[0], b2[1]])
 	}
 
-	pub fn try_from_u128(v: u128) -> Result<Self, VersionStampError> {
+	pub const fn try_from_u128(v: u128) -> Result<Self, VersionStampError> {
 		if (v >> 80) > 0 {
 			return Err(VersionStampError(()));
 		}
-		let bytes = v.to_be_bytes();
-		let mut res = [0u8; 10];
-		res.copy_from_slice(&bytes[6..16]);
-		Ok(VersionStamp(res))
+		let b = v.to_be_bytes();
+		Ok(VersionStamp([b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]]))
 	}
 
 	/// Convert the VersionStamp into a u64 ignoring the 2 normally zero bytes.
-	pub fn into_u64_u16(self) -> (u64, u16) {
-		let mut u64_bytes = [0; 8];
-		u64_bytes.copy_from_slice(&self.0[0..8]);
-		let mut u16_bytes = [0; 2];
-		u16_bytes.copy_from_slice(&self.0[8..10]);
-		(u64::from_be_bytes(u64_bytes), u16::from_be_bytes(u16_bytes))
+	pub const fn into_u64_u16(self) -> (u64, u16) {
+		let b = self.0;
+		(
+			u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
+			u16::from_be_bytes([b[8], b[9]]),
+		)
 	}
 
 	/// Convert the VersionStamp into a u64 ignoring the 2 normally zero bytes.
-	pub fn into_u64_lossy(self) -> u64 {
-		let mut bytes = [0; 8];
-		bytes.copy_from_slice(&self.0[0..8]);
-		u64::from_be_bytes(bytes)
+	pub const fn into_u64_lossy(self) -> u64 {
+		let b = self.0;
+		u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
 	}
 
-	pub fn try_into_u64(self) -> Result<u64, VersionStampError> {
+	pub const fn try_into_u64(self) -> Result<u64, VersionStampError> {
 		if self.0[8] > 0 || self.0[9] > 0 {
 			return Err(VersionStampError(()));
 		}
 		Ok(self.into_u64_lossy())
 	}
 
-	pub fn into_u128(self) -> u128 {
-		let mut bytes = [0; 16];
-		bytes[6..16].copy_from_slice(&self.0);
-		u128::from_be_bytes(bytes)
+	pub const fn into_u128(self) -> u128 {
+		let b = self.0;
+		u128::from_be_bytes([
+			0, 0, 0, 0, 0, 0, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9],
+		])
 	}
 
-	pub fn as_bytes(self) -> [u8; 10] {
+	pub const fn as_bytes(self) -> [u8; 10] {
 		self.0
 	}
 
-	pub fn from_bytes(bytes: [u8; 10]) -> Self {
+	pub const fn from_bytes(bytes: [u8; 10]) -> Self {
 		Self(bytes)
 	}
 
-	pub fn from_slice(slice: &[u8]) -> Result<Self, VersionStampError> {
+	pub const fn from_slice(slice: &[u8]) -> Result<Self, VersionStampError> {
 		if slice.len() != 10 {
 			return Err(VersionStampError(()));
 		}
-		let mut bytes = [0u8; 10];
-		bytes.copy_from_slice(slice);
-		Ok(Self::from_bytes(bytes))
+		Ok(VersionStamp([
+			slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
+			slice[8], slice[9],
+		]))
+	}
+
+	pub fn next(self) -> Option<Self> {
+		let (v, suffix) = self.into_u64_u16();
+		let v = v.checked_add(1)?;
+		let next = VersionStamp::from_u64_u16(v, suffix);
+		Some(next)
 	}
 
 	/// Returns an iterator of version stamps starting with the current version stamp.
@@ -167,9 +172,7 @@ impl Iterator for VersionStampIter {
 	type Item = VersionStamp;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		let (v, suffix) = self.cur.into_u64_u16();
-		let v = v.checked_add(1)?;
-		let next = VersionStamp::from_u64_u16(v, suffix);
+		let next = self.cur.next()?;
 		Some(mem::replace(&mut self.cur, next))
 	}
 }
