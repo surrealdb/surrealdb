@@ -90,7 +90,7 @@ impl Connection {
 			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
 			semaphore: Arc::new(Semaphore::new(*WEBSOCKET_MAX_CONCURRENT_REQUESTS)),
-			channel: channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS),
+			channel: channel::bounded(100),
 			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
