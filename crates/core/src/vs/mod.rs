@@ -5,7 +5,6 @@
 
 pub use std::{error, fmt, mem};
 
-use num_traits::ToBytes;
 use revision::Revisioned;
 
 /// Versionstamp is a 10-byte array used to identify a specific version of a key.
