@@ -47,11 +47,6 @@ pub mod sys;
 #[cfg(feature = "ml")]
 pub use surrealml as ml;
 
-pub mod test_helpers {
-	pub use crate::vs::conv::to_u128_be;
-	pub use crate::vs::generate_versionstamp_sequences;
-}
-
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
 	pub use async_channel::bounded;

@@ -21,7 +21,7 @@ use crate::kvs::savepoint::SavePointImpl;
 use crate::kvs::stash::Stash;
 use crate::sql;
 use crate::sql::thing::Thing;
-use crate::vs::Versionstamp;
+use crate::vs::VersionStamp;
 use sql::statements::DefineTableStatement;
 use std::fmt;
 use std::fmt::Debug;
@@ -546,7 +546,7 @@ impl Transactor {
 	/// NOTE: This should be called when composing the change feed entries for this transaction,
 	/// which should be done immediately before the transaction commit.
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
-	pub async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
+	pub async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp, Error>
 	where
 		K: Into<Key> + Debug,
 	{
@@ -729,7 +729,7 @@ impl Transactor {
 		ts: u64,
 		ns: &str,
 		db: &str,
-	) -> Result<Versionstamp, Error> {
+	) -> Result<VersionStamp, Error> {
 		// This also works as an advisory lock on the ts keys so that there is
 		// on other concurrent transactions that can write to the ts_key or the keys after it.
 		let key = crate::key::database::vs::new(ns, db);
@@ -738,7 +738,7 @@ impl Transactor {
 			target: TARGET,
 			"Setting timestamp {} for versionstamp {:?} in ns: {}, db: {}",
 			ts,
-			crate::vs::conv::versionstamp_to_u64(&vst),
+			vst.into_u64_lossy(),
 			ns,
 			db
 		);
@@ -766,7 +766,7 @@ impl Transactor {
 				ts_key = crate::key::database::ts::new(ns, db, latest_ts + 1);
 			}
 		}
-		self.replace(ts_key, vst).await?;
+		self.replace(ts_key, vst.as_bytes()).await?;
 		Ok(vst)
 	}
 
@@ -775,20 +775,14 @@ impl Transactor {
 		ts: u64,
 		ns: &str,
 		db: &str,
-	) -> Result<Option<Versionstamp>, Error> {
+	) -> Result<Option<VersionStamp>, Error> {
 		let start = crate::key::database::ts::prefix(ns, db);
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);
 		let end = ts_key.encode()?;
 		let ts_pairs = self.getr(start..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((_, v)) = latest_ts_pair {
-			if v.len() == 10 {
-				let mut sl = [0u8; 10];
-				sl.copy_from_slice(v);
-				return Ok(Some(sl));
-			} else {
-				return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
-			}
+			return Ok(Some(VersionStamp::from_slice(v)?));
 		}
 		Ok(None)
 	}

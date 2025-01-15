@@ -98,7 +98,7 @@ pub(crate) async fn graceful_shutdown(state: Arc<RpcState>) {
 		rpc.read().await.shutdown.cancel();
 	}
 	// Wait for all existing WebSocket connections to finish sending
-	while state.web_sockets.read().await.len() > 0 {
+	while !state.web_sockets.read().await.is_empty() {
 		tokio::time::sleep(Duration::from_millis(250)).await;
 	}
 }
