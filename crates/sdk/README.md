@@ -53,7 +53,7 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 - [x] Clonable connections with auto-reconnect capabilities, no need for a connection pool
 - [x] Range queries
 - [x] Consistent API across all supported protocols and storage engines
-- [x] Asynchronous, lock-free connections
+- [x] Asynchronous connections
 - [x] TLS support via either [`rustls`](https://crates.io/crates/rustls) or [`native-tls`](https://crates.io/crates/native-tls)
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/documentation.svg?raw=true">&nbsp;&nbsp;Documentation</h2>
