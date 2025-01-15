@@ -389,12 +389,9 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Create debug build
-        run: cargo build
-
       - name: Test workspace
         run: |
-          target/debug/surreal start --user root --pass root --allow-all &
+          SURREAL_LOG=info make serve &
           make test
 
   graphql-integration:
