@@ -506,6 +506,9 @@ pub trait Transaction {
 					Err(e) => Err(Error::Tx(e.to_string())),
 				};
 				VersionStamp::from_bytes(res?)
+					.iter()
+					.next()
+					.expect("exhausted all possible timestamps")
 			}
 			None => VersionStamp::from_u64(1),
 		};
