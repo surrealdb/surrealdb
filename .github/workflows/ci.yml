@@ -389,9 +389,12 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
+      - name: Create release build
+        run: cargo build --release
+
       - name: Test workspace
         run: |
-          docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:nightly start --user root --pass root --allow-all &
+          target/release/surreal start --user root --pass root --allow-all &
           make test
 
   graphql-integration:
