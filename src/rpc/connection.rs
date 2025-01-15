@@ -9,6 +9,7 @@ use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
 use axum::extract::ws::{close_code::AGAIN, CloseFrame, Message, WebSocket};
+use futures_util::sink::Buffer;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
@@ -107,7 +108,7 @@ impl Connection {
 		// Log the succesful WebSocket connection
 		trace!("WebSocket {} connected", id);
 		// Split the socket into sending and receiving streams
-		let (sender, receiver) = ws.split();
+		let (sender, receiver) = ws.buffer(100).split();
 		// Create an internal channel for sending and receiving
 		let internal_sender = rpc_lock.channel.0.clone();
 		let internal_receiver = rpc_lock.channel.1.clone();
@@ -180,7 +181,7 @@ impl Connection {
 	/// Write messages to the client
 	async fn write(
 		rpc: Arc<RwLock<Connection>>,
-		mut sender: SplitSink<WebSocket, Message>,
+		mut sender: SplitSink<Buffer<WebSocket, Message>, Message>,
 		internal_receiver: Receiver<Message>,
 	) {
 		// Pin the internal receiving channel
@@ -215,7 +216,7 @@ impl Connection {
 	/// Read messages sent from the client
 	async fn read(
 		rpc: Arc<RwLock<Connection>>,
-		mut receiver: SplitStream<WebSocket>,
+		mut receiver: SplitStream<Buffer<WebSocket, Message>>,
 		internal_sender: Sender<Message>,
 	) {
 		// Get all required values
