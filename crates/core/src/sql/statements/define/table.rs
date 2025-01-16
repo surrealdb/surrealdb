@@ -16,12 +16,13 @@ use crate::sql::{Idiom, Kind, TableType};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
+use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[revisioned(revision = 5)]
+#[revisioned(revision = 6)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -54,8 +55,8 @@ pub struct DefineTableStatement {
 	#[revision(start = 5)]
 	pub cache_indexes_ts: Uuid,
 	/// The last time that a LIVE query was added to this table
-	#[revision(start = 5)]
-	pub cache_lives_ts: Uuid,
+	#[revision(start = 5, end = 6, convert_fn = "convert_cache_ts")]
+	pub _cache_lives_ts: Uuid,
 }
 
 impl DefineTableStatement {
@@ -144,6 +145,10 @@ impl DefineTableStatement {
 		txn.clear();
 		// Ok all good
 		Ok(Value::None)
+	}
+
+	fn convert_cache_ts(&self, _revision: u16, _value: Uuid) -> Result<(), RevisionError> {
+		Ok(())
 	}
 }
 
