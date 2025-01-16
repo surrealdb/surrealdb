@@ -247,18 +247,14 @@ impl super::api::Transaction for Transaction {
 		}
 		// Mark this transaction as done
 		self.done = true;
-		// Cancel this transaction
-		match self.inner.take() {
-			Some(inner) => {
-				// Execute on the blocking threadpool
-				affinitypool::spawn_local(move || -> Result<_, Error> {
-					inner.rollback()?;
-					Ok(())
-				})
-				.await?;
-			}
-			None => return Err(fail!("Unable to cancel an already taken transaction")),
-		};
+		// Execute on the blocking threadpool
+		affinitypool::execute(move || -> Result<_, Error> {
+			// Cancel this transaction
+			self.inner.as_ref().unwrap().rollback()?;
+			// Continue
+			Ok(())
+		})
+		.await?;
 		// Continue
 		Ok(())
 	}
@@ -276,18 +272,14 @@ impl super::api::Transaction for Transaction {
 		}
 		// Mark this transaction as done
 		self.done = true;
-		// Commit this transaction
-		match self.inner.take() {
-			Some(inner) => {
-				// Execute on the blocking threadpool
-				affinitypool::spawn_local(move || -> Result<_, Error> {
-					inner.commit()?;
-					Ok(())
-				})
-				.await?;
-			}
-			None => return Err(fail!("Unable to commit an already taken transaction")),
-		};
+		// Execute on the blocking threadpool
+		affinitypool::execute(move || -> Result<_, Error> {
+			// Commit this transaction
+			self.inner.take().unwrap().commit()?;
+			// Continue
+			Ok(())
+		})
+		.await?;
 		// Continue
 		Ok(())
 	}
@@ -308,21 +300,14 @@ impl super::api::Transaction for Transaction {
 		}
 		// Get the arguments
 		let key = key.into();
-		// Get the transaction
-		let inner = match self.inner.take() {
-			Some(inner) => inner,
-			None => return Err(fail!("Unable to use an already taken transaction")),
-		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
+		let res = affinitypool::execute(move || -> Result<_, Error> {
 			// Get the key
-			let res = inner.get_pinned_opt(key, &self.ro)?.is_some();
+			let res = self.inner.as_ref().unwrap().get_pinned_opt(key, &self.ro)?.is_some();
 			// Return result
-			Ok((inner, res))
+			Ok(res)
 		})
 		.await?;
-		// Restore the transaction
-		self.inner = Some(inner);
 		// Return result
 		Ok(res)
 	}
@@ -343,21 +328,14 @@ impl super::api::Transaction for Transaction {
 		}
 		// Get the arguments
 		let key = key.into();
-		// Get the transaction
-		let inner = match self.inner.take() {
-			Some(inner) => inner,
-			None => return Err(fail!("Unable to use an already taken transaction")),
-		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
+		let res = affinitypool::execute(move || -> Result<_, Error> {
 			// Get the key
-			let res = inner.get_opt(key, &self.ro)?;
+			let res = self.inner.as_ref().unwrap().get_opt(key, &self.ro)?;
 			// Return result
-			Ok((inner, res))
+			Ok(res)
 		})
 		.await?;
-		// Restore the transaction
-		self.inner = Some(inner);
 		// Return result
 		Ok(res)
 	}
@@ -374,23 +352,16 @@ impl super::api::Transaction for Transaction {
 		}
 		// Get the arguments
 		let keys: Vec<Key> = keys.into_iter().map(Into::into).collect();
-		// Get the transaction
-		let inner = match self.inner.take() {
-			Some(inner) => inner,
-			None => return Err(fail!("Unable to use an already taken transaction")),
-		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
+		let res = affinitypool::execute(move || -> Result<_, Error> {
 			// Get the keys
-			let res = inner.multi_get_opt(keys, &self.ro);
+			let res = self.inner.as_ref().unwrap().multi_get_opt(keys, &self.ro);
 			// Convert result
 			let res = res.into_iter().collect::<Result<_, _>>()?;
 			// Return result
-			Ok((inner, res))
+			Ok(res)
 		})
 		.await?;
-		// Restore the transaction
-		self.inner = Some(inner);
 		// Return result
 		Ok(res)
 	}
@@ -417,21 +388,14 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		let val = val.into();
-		// Get the transaction
-		let inner = match self.inner.take() {
-			Some(inner) => inner,
-			None => return Err(fail!("Unable to use an already taken transaction")),
-		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Set the key
-			inner.put(key, val)?;
+			self.inner.as_ref().unwrap().put(key, val)?;
 			// Return result
-			Ok(inner)
+			Ok(())
 		})
 		.await?;
-		// Restore the transaction
-		self.inner = Some(inner);
 		// Return result
 		Ok(())
 	}
@@ -458,24 +422,17 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		let val = val.into();
-		// Get the transaction
-		let inner = match self.inner.take() {
-			Some(inner) => inner,
-			None => return Err(fail!("Unable to use an already taken transaction")),
-		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Set the key if empty
-			match inner.get_pinned_opt(&key, &self.ro)? {
-				None => inner.put(key, val)?,
+			match self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)? {
+				None => self.inner.as_ref().unwrap().put(key, val)?,
 				_ => return Err(Error::TxKeyAlreadyExists),
 			};
 			// Return result
-			Ok(inner)
+			Ok(())
 		})
 		.await?;
-		// Restore the transaction
-		self.inner = Some(inner);
 		// Return result
 		Ok(())
 	}
@@ -499,25 +456,18 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		let chk = chk.map(Into::into);
-		// Get the transaction
-		let inner = match self.inner.take() {
-			Some(inner) => inner,
-			None => return Err(fail!("Unable to use an already taken transaction")),
-		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Set the key if empty
-			match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
-				(Some(v), Some(w)) if v.eq(&w) => inner.put(key, val)?,
-				(None, None) => inner.put(key, val)?,
+			match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
+				(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().put(key, val)?,
+				(None, None) => self.inner.as_ref().unwrap().put(key, val)?,
 				_ => return Err(Error::TxConditionNotMet),
 			};
 			// Return result
-			Ok(inner)
+			Ok(())
 		})
 		.await?;
-		// Restore the transaction
-		self.inner = Some(inner);
 		// Return result
 		Ok(())
 	}
@@ -538,21 +488,14 @@ impl super::api::Transaction for Transaction {
 		}
 		// Get the arguments
 		let key = key.into();
-		// Get the transaction
-		let inner = match self.inner.take() {
-			Some(inner) => inner,
-			None => return Err(fail!("Unable to use an already taken transaction")),
-		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Remove the key
-			inner.delete(key)?;
+			self.inner.as_ref().unwrap().delete(key)?;
 			// Return result
-			Ok(inner)
+			Ok(())
 		})
 		.await?;
-		// Restore the transaction
-		self.inner = Some(inner);
 		// Return result
 		Ok(())
 	}
@@ -575,25 +518,18 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		let chk = chk.map(Into::into);
-		// Get the transaction
-		let inner = match self.inner.take() {
-			Some(inner) => inner,
-			None => return Err(fail!("Unable to use an already taken transaction")),
-		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Delete the key if valid
-			match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
-				(Some(v), Some(w)) if v.eq(&w) => inner.delete(key)?,
-				(None, None) => inner.delete(key)?,
+			match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
+				(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().delete(key)?,
+				(None, None) => self.inner.as_ref().unwrap().delete(key)?,
 				_ => return Err(Error::TxConditionNotMet),
 			};
 			// Return result
-			Ok(inner)
+			Ok(())
 		})
 		.await?;
-		// Restore the transaction
-		self.inner = Some(inner);
 		// Return result
 		Ok(())
 	}
@@ -622,13 +558,8 @@ impl super::api::Transaction for Transaction {
 			start: rng.start.into(),
 			end: rng.end.into(),
 		};
-		// Get the transaction
-		let inner = match self.inner.take() {
-			Some(inner) => inner,
-			None => return Err(fail!("Unable to use an already taken transaction")),
-		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::spawn_local(|| {
+		let res = affinitypool::execute(move || {
 			// Create result set
 			let mut res = vec![];
 			// Set the key range
@@ -636,13 +567,13 @@ impl super::api::Transaction for Transaction {
 			let end = rng.end.as_slice();
 			// Set the ReadOptions with the snapshot
 			let mut ro = ReadOptions::default();
-			ro.set_snapshot(&inner.snapshot());
+			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
 			ro.set_iterate_lower_bound(beg);
 			ro.set_iterate_upper_bound(end);
 			ro.set_async_io(true);
 			ro.fill_cache(true);
 			// Create the iterator
-			let mut iter = inner.raw_iterator_opt(ro);
+			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
 			// Seek to the start key
 			iter.seek(&rng.start);
 			// Check the scan limit
@@ -662,11 +593,9 @@ impl super::api::Transaction for Transaction {
 			// Drop the iterator
 			drop(iter);
 			// Return result
-			(inner, res)
+			res
 		})
 		.await;
-		// Restore the transaction
-		self.inner = Some(inner);
 		// Return result
 		Ok(res)
 	}
@@ -695,13 +624,8 @@ impl super::api::Transaction for Transaction {
 			start: rng.start.into(),
 			end: rng.end.into(),
 		};
-		// Get the transaction
-		let inner = match self.inner.take() {
-			Some(inner) => inner,
-			None => return Err(fail!("Unable to use an already taken transaction")),
-		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::spawn_local(|| {
+		let res = affinitypool::execute(move || {
 			// Create result set
 			let mut res = vec![];
 			// Set the key range
@@ -709,13 +633,13 @@ impl super::api::Transaction for Transaction {
 			let end = rng.end.as_slice();
 			// Set the ReadOptions with the snapshot
 			let mut ro = ReadOptions::default();
-			ro.set_snapshot(&inner.snapshot());
+			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
 			ro.set_iterate_lower_bound(beg);
 			ro.set_iterate_upper_bound(end);
 			ro.set_async_io(true);
 			ro.fill_cache(true);
 			// Create the iterator
-			let mut iter = inner.raw_iterator_opt(ro);
+			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
 			// Seek to the start key
 			iter.seek(&rng.start);
 			// Check the scan limit
@@ -735,11 +659,9 @@ impl super::api::Transaction for Transaction {
 			// Drop the iterator
 			drop(iter);
 			// Return result
-			(inner, res)
+			res
 		})
 		.await;
-		// Restore the transaction
-		self.inner = Some(inner);
 		// Return result
 		Ok(res)
 	}
