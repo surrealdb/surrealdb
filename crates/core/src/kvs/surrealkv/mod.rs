@@ -139,7 +139,7 @@ impl super::api::Transaction for Transaction {
 		// Mark the transaction as done.
 		self.done = true;
 		// Execute on the blocking threadpool
-		affinitypool::execute(|| -> Result<_, Error> {
+		affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Rollback this transaction
 			self.inner.rollback();
 			// Continue
@@ -165,7 +165,7 @@ impl super::api::Transaction for Transaction {
 		self.done = true;
 		/*
 		// Execute on the blocking threadpool
-		affinitypool::execute(|| -> Result<_, Error> {
+		affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Commit this transaction
 			self.inner.commit();
 			// Continue
@@ -192,7 +192,7 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		// Execute on the blocking threadpool
-		let res = affinitypool::execute(|| -> Result<_, Error> {
+		let res = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Get the key
 			let res = self.inner.get(&key)?.is_some();
 			// Continue
@@ -216,7 +216,7 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		// Execute on the blocking threadpool
-		let res = affinitypool::execute(|| -> Result<_, Error> {
+		let res = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Get the key
 			let res = match version {
 				Some(ts) => self.inner.get_at_version(&key, ts)?,
@@ -249,7 +249,7 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		// Execute on the blocking threadpool
-		affinitypool::execute(|| -> Result<_, Error> {
+		affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key
 			match version {
 				Some(ts) => self.inner.set_at_ts(&key, &val, ts)?,
@@ -282,7 +282,7 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		// Execute on the blocking threadpool
-		affinitypool::execute(|| -> Result<_, Error> {
+		affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Replace the key
 			self.inner.insert_or_replace(&key, &val)?;
 			// Return result
@@ -312,7 +312,7 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		// Execute on the blocking threadpool
-		affinitypool::execute(|| -> Result<_, Error> {
+		affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key if empty
 			if let Some(ts) = version {
 				self.inner.set_at_ts(&key, &val, ts)?;
@@ -350,7 +350,7 @@ impl super::api::Transaction for Transaction {
 		let val = val.into();
 		let chk = chk.map(Into::into);
 		// Execute on the blocking threadpool
-		affinitypool::execute(|| -> Result<_, Error> {
+		affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key if valid
 			match (self.inner.get(&key)?, chk) {
 				(Some(v), Some(w)) if v == w => self.inner.set(&key, &val)?,
@@ -382,7 +382,7 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		// Execute on the blocking threadpool
-		affinitypool::execute(|| -> Result<_, Error> {
+		affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Remove the key
 			self.inner.soft_delete(&key)?;
 			// Return result
@@ -412,7 +412,7 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let chk = chk.map(Into::into);
 		// Execute on the blocking threadpool
-		affinitypool::execute(|| -> Result<_, Error> {
+		affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key if valid
 			match (self.inner.get(&key)?, chk) {
 				(Some(v), Some(w)) if v == w => self.inner.soft_delete(&key)?,
@@ -444,7 +444,7 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		// Execute on the blocking threadpool
-		affinitypool::execute(|| -> Result<_, Error> {
+		affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Remove the key
 			self.inner.delete(&key)?;
 			// Return result
@@ -474,7 +474,7 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let chk = chk.map(Into::into);
 		// Execute on the blocking threadpool
-		affinitypool::execute(|| -> Result<_, Error> {
+		affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key if valid
 			match (self.inner.get(&key)?, chk) {
 				(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
@@ -508,7 +508,7 @@ impl super::api::Transaction for Transaction {
 		let beg = rng.start.into();
 		let end = rng.end.into();
 		// Execute on the blocking threadpool
-		let res = affinitypool::execute(|| -> Result<_, Error> {
+		let res = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Retrieve the scan range
 			let res = match version {
 				Some(ts) => self
@@ -549,7 +549,7 @@ impl super::api::Transaction for Transaction {
 		let beg = rng.start.into();
 		let end = rng.end.into();
 		// Execute on the blocking threadpool
-		let res = affinitypool::execute(|| -> Result<_, Error> {
+		let res = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Retrieve the scan range
 			let res = match version {
 				Some(ts) => self
@@ -588,7 +588,7 @@ impl super::api::Transaction for Transaction {
 		let beg = rng.start.into();
 		let end = rng.end.into();
 		// Execute on the blocking threadpool
-		let res = affinitypool::execute(|| -> Result<_, Error> {
+		let res = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Retrieve the scan range
 			let res = self
 				.inner
