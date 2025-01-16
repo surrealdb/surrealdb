@@ -902,7 +902,10 @@ impl Parser<'_> {
 				}
 				t!("REFERENCE") => {
 					if !self.settings.references_enabled {
-						bail!("Experimental capability `record_references` is not enabled")
+						bail!(
+							"Experimental capability `record_references` is not enabled",
+							@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
+						)
 					}
 
 					self.pop_peek();

@@ -148,7 +148,10 @@ impl Parser<'_> {
 			}
 			t!("REFERENCES") => {
 				if !self.settings.references_enabled {
-					bail!("Experimental capability `record_references` is not enabled")
+					bail!(
+						"Experimental capability `record_references` is not enabled",
+						@self.last_span() => "Use of `REFERENCES` keyword is still experimental"
+					)
 				}
 
 				let span = self.peek().span;

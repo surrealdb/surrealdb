@@ -63,8 +63,8 @@ pub async fn init(
 	}: SqlCommandArguments,
 ) -> Result<(), Error> {
 	// Default datastore configuration for local engines
-	let capabilities = Capabilities::all();
-	let config = Config::new().capabilities(capabilities.clone());
+	let config = Config::new().capabilities(Capabilities::all());
+	let capabilities = config.get_capabilities().clone();
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
 	let client = if username.is_some()
