@@ -5705,7 +5705,7 @@ dependencies = [
  "unicase",
  "url",
  "uuid",
- "vart",
+ "vart 0.8.1",
  "wasm-bindgen-futures",
  "wasmtimer",
  "wiremock",
@@ -5753,9 +5753,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c1607e5d2090f643365b39a3c63aba30f0124dca5d7e4313413f41b513abda0"
+checksum = "87b26b3b1ba4433ab3152304838b70b2798990ffdc739b8b551b4e3e64b8fe52"
 dependencies = [
  "ahash 0.8.11",
  "async-channel",
@@ -5769,7 +5769,7 @@ dependencies = [
  "quick_cache 0.6.2",
  "revision",
  "tokio",
- "vart",
+ "vart 0.9.0",
  "wasm-bindgen-futures",
 ]
 
@@ -6712,6 +6712,12 @@ name = "vart"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "87782b74f898179396e93c0efabb38de0d58d50bbd47eae00c71b3a1144dbbae"
+
+[[package]]
+name = "vart"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9486b23b6bec4be5205c9d696a8cc2bc82c51ee82a26e93ceabac56e535dfbcc"
 
 [[package]]
 name = "vcpkg"

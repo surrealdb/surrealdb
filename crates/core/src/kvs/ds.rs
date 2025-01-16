@@ -26,11 +26,11 @@ use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
-use crate::syn::parser::{Parser, PartialResult};
+use crate::syn::parser::StatementStream;
 use async_channel::{Receiver, Sender};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
-use reblessive::{Stack, TreeStack};
+use reblessive::TreeStack;
 use std::fmt;
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -817,78 +817,56 @@ impl Datastore {
 		vars.attach(&mut ctx)?;
 		// Process all statements
 
-		let mut offset = 0;
-		// A threshold of data in the buffer to avoid running the parser too many times when the
-		// statements get too big.
-		let mut buffer_size_threshold = 4096;
-		let mut buffer = Vec::new();
-		let mut query = pin!(query);
-		let mut stack = Stack::new();
+		let mut statements_stream = StatementStream::new();
+		let mut buffer = BytesMut::new();
+		let mut parse_size = 4096;
+		let mut bytes_stream = pin!(query);
 		let mut complete = false;
+		let mut filling = true;
 
-		let stream = futures::stream::poll_fn(move |ctx| loop {
-			if !complete && buffer.len() < buffer_size_threshold {
-				// if we aren't done loading the file and the buffer has less data then the
-				// threshold for running the parser then stream in more data.
-				let Some(bytes) = ready!(query.as_mut().poll_next(ctx)) else {
-					// stream return None, so no more data is available.
-					complete = true;
-					continue;
-				};
+		let stream = futures::stream::poll_fn(move |cx| loop {
+			// fill the buffer to at least parse_size when filling is required.
+			while filling {
+				let bytes = ready!(bytes_stream.as_mut().poll_next(cx));
 				let bytes = match bytes {
-					Ok(bytes) => bytes,
-					Err(e) => return Poll::Ready(Some(Err(e))),
+					Some(Err(e)) => return Poll::Ready(Some(Err(e))),
+					Some(Ok(x)) => x,
+					None => {
+						complete = true;
+						filling = false;
+						break;
+					}
 				};
 
 				buffer.extend_from_slice(&bytes);
-				continue;
+				filling = buffer.len() < parse_size
 			}
 
-			// try to parse a statement.
-			let res = stack
-				.enter(|ctx| async {
-					Parser::new(&buffer[offset..]).parse_partial_statement(complete, ctx).await
-				})
-				.finish();
-			// if we get a statement or error return it.
-			match res {
-				PartialResult::MoreData => {}
-				PartialResult::Empty {
-					used,
-				} => {
-					offset += used;
-					if complete {
-						return Poll::Ready(None);
+			// if we finished streaming we can parse with complete so that the parser can be sure
+			// of it's results.
+			if complete {
+				return match statements_stream.parse_complete(&mut buffer) {
+					Err(e) => Poll::Ready(Some(Err(Error::InvalidQuery(e)))),
+					Ok(None) => Poll::Ready(None),
+					Ok(Some(x)) => Poll::Ready(Some(Ok(x))),
+				};
+			}
+
+			// otherwise try to parse a single statement.
+			match statements_stream.parse_partial(&mut buffer) {
+				Err(e) => return Poll::Ready(Some(Err(Error::InvalidQuery(e)))),
+				Ok(Some(x)) => return Poll::Ready(Some(Ok(x))),
+				Ok(None) => {
+					// Couldn't parse a statement for sure.
+					if buffer.len() >= parse_size && parse_size < u32::MAX as usize {
+						// the buffer already contained more or equal to parse_size bytes
+						// this means we are trying to parse a statement of more then buffer size.
+						// so we need to increase the buffer size.
+						parse_size = parse_size.next_power_of_two();
 					}
+					// start filling the buffer again.
+					filling = true;
 				}
-				PartialResult::Ok {
-					value,
-					used,
-				} => {
-					offset += used;
-					return Poll::Ready(Some(Ok(value)));
-				}
-				PartialResult::Err {
-					err,
-					used,
-				} => {
-					offset += used;
-					let error = err.render_on_bytes(&buffer[offset..]);
-					let err = Error::InvalidQuery(error);
-					return Poll::Ready(Some(Err(err)));
-				}
-			}
-
-			// remove the already used data.
-			if offset > 0 {
-				// we used some of the data.
-				let len = buffer.len() - offset;
-				buffer.copy_within(offset.., 0);
-				buffer.truncate(len);
-				offset = 0;
-			} else {
-				// we didn't use any of the data which means this buffer size is not sufficient.
-				buffer_size_threshold = buffer_size_threshold.saturating_mul(2);
 			}
 		});
 

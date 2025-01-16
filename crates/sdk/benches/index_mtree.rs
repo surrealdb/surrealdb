@@ -1,6 +1,5 @@
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
-use futures::executor::block_on;
 use futures::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -77,7 +76,8 @@ fn bench_index_mtree(
 	};
 
 	// Both benchmark groups are sharing the same datastore
-	let ds = block_on(Datastore::new("memory")).unwrap();
+	let b = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+	let ds = b.block_on(Datastore::new("memory")).unwrap();
 
 	// Indexing benchmark group
 	{
