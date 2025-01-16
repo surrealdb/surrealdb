@@ -8,6 +8,8 @@ use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::idx::trees::store::cache::IndexTreeCaches;
+use crate::key;
+use crate::key::table::vl::Vl;
 use crate::kvs::cache;
 use crate::kvs::cache::tx::Cache;
 use crate::kvs::scanner::Scanner;
@@ -1642,6 +1644,21 @@ impl Transaction {
 				}
 			}
 		}
+	}
+
+	pub async fn get_lq_version(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<Option<Uuid>, Error> {
+		let range = key::table::vl::range(ns, db, tb);
+		let keys = self.keys(range, 1, None).await?;
+		let v = keys.iter().next().map(|k| {
+			let vl: Vl = k.into();
+			vl.v
+		});
+		Ok(v)
 	}
 
 	/// Clears all keys from the transaction cache.

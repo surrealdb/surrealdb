@@ -5,12 +5,10 @@ mod weight;
 
 use crate::channel;
 use crate::err::Error;
-use crate::key::table::vl::Vl;
 use crate::kvs::{Key, Transaction};
 use async_channel::{Receiver, Sender};
 pub(crate) use entry::Entry;
 pub(crate) use lookup::Lookup;
-use std::ops::Range;
 use uuid::Uuid;
 
 pub(crate) type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
@@ -35,25 +33,14 @@ impl CacheVersion {
 		}
 	}
 
-	fn get_range(&self, ns: &str, db: &str, tb: &str) -> Range<Key> {
-		match self {
-			Self::Lq => {
-				crate::key::table::vl::prefix(ns, db, tb)..crate::key::table::vl::suffix(ns, db, tb)
-			}
-		}
-	}
-
 	fn lookup_default<'a>(&self, ns: &'a str, db: &'a str, tb: &'a str) -> Lookup<'a> {
 		match self {
 			Self::Lq => Lookup::Lvs(ns, db, tb, Uuid::default()),
 		}
 	}
-	fn lookup<'a>(&self, ns: &'a str, db: &'a str, tb: &'a str, key: &Key) -> Lookup<'a> {
+	fn lookup<'a>(&self, ns: &'a str, db: &'a str, tb: &'a str, v: Uuid) -> Lookup<'a> {
 		match self {
-			Self::Lq => {
-				let vl: Vl = key.into();
-				Lookup::Lvs(ns, db, tb, vl.v)
-			}
+			Self::Lq => Lookup::Lvs(ns, db, tb, v),
 		}
 	}
 }
@@ -108,10 +95,9 @@ impl DatastoreCache {
 		tb: &'a str,
 		cache_version: CacheVersion,
 	) -> Result<Lookup<'a>, Error> {
-		let range = cache_version.get_range(ns, db, tb);
-		let keys = txn.keys(range, 1, None).await?;
-		let res = match keys.into_iter().next() {
-			Some(key) => cache_version.lookup(ns, db, tb, &key),
+		let version = txn.get_lq_version(ns, db, tb).await?;
+		let res = match version {
+			Some(version) => cache_version.lookup(ns, db, tb, version),
 			None => cache_version.lookup_default(ns, db, tb),
 		};
 		Ok(res)

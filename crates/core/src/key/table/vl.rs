@@ -1,8 +1,10 @@
 //! Stores LIVE QUERIES cache versions
+
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use derive::Key;
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 use uuid::Uuid;
 
 /// Vl is used to track the versions of the live queries.
@@ -27,16 +29,20 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, v: Uuid) -> Vl<'a> {
 	Vl::new(ns, db, tb, v)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
+fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(b"!vl\x00");
 	k
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
+fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(b"!vl\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	k
+}
+
+pub fn range(ns: &str, db: &str, tb: &str) -> Range<Vec<u8>> {
+	prefix(ns, db, tb)..suffix(ns, db, tb)
 }
 
 impl Categorise for Vl<'_> {

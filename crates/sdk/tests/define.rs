@@ -14,6 +14,8 @@ use surrealdb::kvs::{LockType, TransactionType};
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
 use surrealdb_core::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
+use surrealdb_core::key;
+use surrealdb_core::sql::Uuid;
 use test_log::test;
 use tracing::info;
 
@@ -1277,6 +1279,8 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	// Obtain the initial uuids
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let initial = txn.get_tb("test", "test", "test").await?;
+	let initial_live_query_version =
+		txn.get_lq_version("test", "test", "test").await?.unwrap_or(uuid::Uuid::default());
 	drop(txn);
 
 	// Define some resources to refresh the UUIDs
@@ -1299,13 +1303,15 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let after_define = txn.get_tb("test", "test", "test").await?;
+	let after_define_live_query_version =
+		txn.get_lq_version("test", "test", "test").await?.unwrap_or(uuid::Uuid::default());
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
 	assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
 	assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
 	assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
-	// TODO: EK check live query cache version
+	assert_ne!(initial_live_query_version, after_define_live_query_version);
 
 	// Remove the defined resources to refresh the UUIDs
 	let sql = r"
@@ -1327,13 +1333,14 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let after_remove = txn.get_tb("test", "test", "test").await?;
+	let after_remove_live_query_version =
+		txn.get_lq_version("test", "test", "test").await?.unwrap_or(uuid::Uuid::default());
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
 	assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
 	assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
-	assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
-	// TODO: EK check live query cache version
+	assert_ne!(after_define_live_query_version, after_remove_live_query_version);
 	//
 	Ok(())
 }
