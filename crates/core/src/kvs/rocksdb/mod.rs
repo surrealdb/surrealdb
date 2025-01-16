@@ -248,7 +248,7 @@ impl super::api::Transaction for Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Execute on the blocking threadpool
-		affinitypool::spawn_local(move || -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Cancel this transaction
 			self.inner.as_ref().unwrap().rollback()?;
 			// Continue
@@ -273,7 +273,7 @@ impl super::api::Transaction for Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Execute on the blocking threadpool
-		affinitypool::spawn_local(move || -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Commit this transaction
 			self.inner.take().unwrap().commit()?;
 			// Continue
@@ -301,7 +301,7 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || -> Result<_, Error> {
+		let res = affinitypool::execute(move || -> Result<_, Error> {
 			// Get the key
 			let res = self.inner.as_ref().unwrap().get_pinned_opt(key, &self.ro)?.is_some();
 			// Return result
@@ -329,7 +329,7 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || -> Result<_, Error> {
+		let res = affinitypool::execute(move || -> Result<_, Error> {
 			// Get the key
 			let res = self.inner.as_ref().unwrap().get_opt(key, &self.ro)?;
 			// Return result
@@ -353,7 +353,7 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let keys: Vec<Key> = keys.into_iter().map(Into::into).collect();
 		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || -> Result<_, Error> {
+		let res = affinitypool::execute(move || -> Result<_, Error> {
 			// Get the keys
 			let res = self.inner.as_ref().unwrap().multi_get_opt(keys, &self.ro);
 			// Convert result
@@ -389,7 +389,7 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		// Execute on the blocking threadpool
-		affinitypool::spawn_local(move || -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Set the key
 			self.inner.as_ref().unwrap().put(key, val)?;
 			// Return result
@@ -423,7 +423,7 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let val = val.into();
 		// Execute on the blocking threadpool
-		affinitypool::spawn_local(move || -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Set the key if empty
 			match self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)? {
 				None => self.inner.as_ref().unwrap().put(key, val)?,
@@ -457,7 +457,7 @@ impl super::api::Transaction for Transaction {
 		let val = val.into();
 		let chk = chk.map(Into::into);
 		// Execute on the blocking threadpool
-		affinitypool::spawn_local(move || -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Set the key if empty
 			match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
 				(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().put(key, val)?,
@@ -489,7 +489,7 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.into();
 		// Execute on the blocking threadpool
-		affinitypool::spawn_local(move || -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Remove the key
 			self.inner.as_ref().unwrap().delete(key)?;
 			// Return result
@@ -519,7 +519,7 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		let chk = chk.map(Into::into);
 		// Execute on the blocking threadpool
-		affinitypool::spawn_local(move || -> Result<_, Error> {
+		affinitypool::execute(move || -> Result<_, Error> {
 			// Delete the key if valid
 			match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
 				(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().delete(key)?,
@@ -559,7 +559,7 @@ impl super::api::Transaction for Transaction {
 			end: rng.end.into(),
 		};
 		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || {
+		let res = affinitypool::execute(move || {
 			// Create result set
 			let mut res = vec![];
 			// Set the key range
@@ -625,7 +625,7 @@ impl super::api::Transaction for Transaction {
 			end: rng.end.into(),
 		};
 		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || {
+		let res = affinitypool::execute(move || {
 			// Create result set
 			let mut res = vec![];
 			// Set the key range
