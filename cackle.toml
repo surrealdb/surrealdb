@@ -1307,3 +1307,6 @@ allow_proc_macro = true
 [pkg.sysinfo]
 allow_unsafe = true
 allow_apis = ["fs"]
+
+[pkg.affinitypool]
+allow_unsafe = true
