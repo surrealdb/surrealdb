@@ -8,7 +8,7 @@ use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::cache::ds::Cache;
+use crate::kvs::cache::ds::DatastoreCache;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
@@ -47,7 +47,7 @@ pub struct MutableContext {
 	// An optional iteration stage
 	iteration_stage: Option<IterationStage>,
 	// An optional datastore cache
-	cache: Option<Arc<Cache>>,
+	cache: Option<Arc<DatastoreCache>>,
 	// The index store
 	index_stores: IndexStores,
 	// The index concurrent builders
@@ -191,7 +191,7 @@ impl MutableContext {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
-		cache: Arc<Cache>,
+		cache: Arc<DatastoreCache>,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<MutableContext, Error> {
@@ -335,7 +335,7 @@ impl MutableContext {
 	}
 
 	// Get the current datastore cache
-	pub(crate) fn get_cache(&self) -> Option<Arc<Cache>> {
+	pub(crate) fn get_cache(&self) -> Option<Arc<DatastoreCache>> {
 		self.cache.clone()
 	}
 

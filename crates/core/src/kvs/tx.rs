@@ -934,10 +934,6 @@ impl Transaction {
 		.try_into_lvs()
 	}
 
-	pub(crate) async fn get_last_version(&self, _version_prefix: Vec<u8>) -> Result<Uuid, Error> {
-		todo!()
-	}
-
 	/// Retrieve a specific node in the cluster.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_node(&self, id: Uuid) -> Result<Arc<Node>, Error> {

@@ -17,7 +17,7 @@ use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache;
-use crate::kvs::cache::ds::Cache;
+use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
@@ -78,7 +78,7 @@ pub struct Datastore {
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
-	cache: Arc<Cache>,
+	cache: Arc<DatastoreCache>,
 	// The index asynchronous builder
 	#[cfg(not(target_family = "wasm"))]
 	index_builder: IndexBuilder,
@@ -271,7 +271,7 @@ impl Datastore {
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			transaction_factory: self.transaction_factory,
-			cache: Arc::new(cache::ds::new()),
+			cache: Arc::new(cache::ds::DatastoreCache::default()),
 		}
 	}
 
@@ -432,7 +432,7 @@ impl Datastore {
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 				#[cfg(storage)]
 				temporary_directory: None,
-				cache: Arc::new(cache::ds::new()),
+				cache: Arc::new(cache::ds::DatastoreCache::default()),
 			}
 		})
 	}
