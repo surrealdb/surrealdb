@@ -6,7 +6,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::UpdateStatement;
-use crate::sql::{Base, Ident, Idioms, Index, Output, Part, Strand, Value, Values};
+use crate::sql::{Base, Ident, Idioms, Index, Output, Strand, Value, Values};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -63,9 +63,8 @@ impl DefineIndexStatement {
 				if db.full {
 					// Check that the fields exists
 					for idiom in self.cols.iter() {
-						if let Some(Part::Field(id)) = idiom.first() {
-							txn.get_tb_field(opt.ns()?, opt.db()?, &self.what, id).await?;
-						}
+						txn.get_tb_field(opt.ns()?, opt.db()?, &self.what, &idiom.to_string())
+							.await?;
 					}
 				}
 			}
