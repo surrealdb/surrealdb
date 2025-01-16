@@ -528,8 +528,11 @@ impl Document {
 		let db = opt.db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
+		// Get the current cache key
+		let cache_key =
+			ctx.tx().get_last_version(crate::key::table::vl::prefix(ns, db, &tb.name)).await?;
 		// Get or update the cache entry
-		let key = cache::ds::Lookup::Lvs(ns, db, &tb.name, tb.cache_lives_ts);
+		let key = cache::ds::Lookup::Lvs(ns, db, &tb.name, cache_key);
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
