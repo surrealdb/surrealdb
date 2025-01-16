@@ -6,7 +6,7 @@ use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::capabilities::{MethodTarget, RouteTarget};
+use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget, RouteTarget};
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
@@ -26,7 +26,7 @@ use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
-use crate::syn::parser::StatementStream;
+use crate::syn::parser::{ParserSettings, StatementStream};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
@@ -516,6 +516,11 @@ impl Datastore {
 		self.capabilities.allows_network_target(net_target)
 	}
 
+	/// Set specific capabilities for this Datastore
+	pub fn get_capabilities(&self) -> &Capabilities {
+		&self.capabilities
+	}
+
 	#[cfg(feature = "jwks")]
 	pub(crate) fn jwks_cache(&self) -> &Arc<RwLock<JwksCache>> {
 		&self.jwks_cache
@@ -778,7 +783,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Parse the SQL query text
-		let ast = syn::parse(txt)?;
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -817,7 +822,13 @@ impl Datastore {
 		vars.attach(&mut ctx)?;
 		// Process all statements
 
-		let mut statements_stream = StatementStream::new();
+		let parser_settings = ParserSettings {
+			references_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			..Default::default()
+		};
+		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
 		let mut buffer = BytesMut::new();
 		let mut parse_size = 4096;
 		let mut bytes_stream = pin!(query);

@@ -1,4 +1,5 @@
 use crate::ctx::{Context, MutableContext};
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
@@ -8,9 +9,11 @@ use crate::sql::data::Data;
 use crate::sql::idiom::Idiom;
 use crate::sql::kind::Kind;
 use crate::sql::permission::Permission;
+use crate::sql::reference::Refs;
 use crate::sql::statements::DefineFieldStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::Part;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -202,18 +205,28 @@ impl Document {
 					old,
 					inp,
 				};
-				// Skip this field?
-				if !skipped {
-					// Process any DEFAULT clause
-					val = field.process_default_clause(val).await?;
-					// Process any TYPE clause
-					val = field.process_type_clause(val).await?;
-					// Process any VALUE clause
-					val = field.process_value_clause(val).await?;
-					// Process any TYPE clause
-					val = field.process_type_clause(val).await?;
-					// Process any ASSERT clause
-					val = field.process_assert_clause(val).await?;
+				// Process a potential `references` TYPE
+				let res = field.process_refs_type().await?;
+				if let Some(v) = res {
+					// We found a `references` TYPE
+					// No other clauses will be present, so no need to process them
+					val = v;
+				} else {
+					// Skip this field?
+					if !skipped {
+						// Process any DEFAULT clause
+						val = field.process_default_clause(val).await?;
+						// Process any TYPE clause
+						val = field.process_type_clause(val).await?;
+						// Process any VALUE clause
+						val = field.process_value_clause(val).await?;
+						// Process any TYPE clause
+						val = field.process_type_clause(val).await?;
+						// Process any ASSERT clause
+						val = field.process_assert_clause(val).await?;
+						// Process any REFERENCE clause
+						field.process_reference_clause(&val).await?;
+					}
 				}
 				// Process any PERMISSIONS clause
 				val = field.process_permissions_clause(val).await?;
@@ -255,6 +268,12 @@ struct FieldEditContext<'a> {
 	old: Arc<Value>,
 	/// The user input value of the field edited by the user
 	inp: Arc<Value>,
+}
+
+enum RefAction<'a> {
+	Set(&'a Thing),
+	Delete(Vec<&'a Thing>, String),
+	Ignore,
 }
 
 impl FieldEditContext<'_> {
@@ -536,5 +555,169 @@ impl FieldEditContext<'_> {
 		}
 		// Return the original value
 		Ok(val)
+	}
+	/// Process any REFERENCE clause for the field definition
+	async fn process_reference_clause(&mut self, val: &Value) -> Result<(), Error> {
+		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
+			return Ok(());
+		}
+
+		// Is there a `REFERENCE` clause?
+		if self.def.reference.is_some() {
+			let doc = Some(&self.doc.current);
+			let old = self.old.as_ref();
+
+			// If the value has not changed, there is no need to update any references
+			let action = if val == old {
+				RefAction::Ignore
+			// Check if the old value was a record id
+			} else if let Value::Thing(thing) = old {
+				// We need to check if this reference is contained in an array
+				let others = self
+					.doc
+					.current
+					.doc
+					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
+					.await?;
+				// If the reference is contained in an array, we only delete it from the array
+				// if there is no other reference to the same record id in the array
+				if let Value::Array(arr) = others {
+					if arr.iter().any(|v| v == old) {
+						RefAction::Ignore
+					} else {
+						RefAction::Delete(vec![thing], self.def.name.to_string())
+					}
+				} else {
+					// Otherwise we delete the reference
+					RefAction::Delete(vec![thing], self.def.name.to_string())
+				}
+			} else if let Value::Array(oldarr) = old {
+				// If the new value is still an array, we only filter out the record ids that are not present in the new array
+				let removed = if let Value::Array(newarr) = val {
+					oldarr
+						.iter()
+						.filter_map(|v| {
+							// If the record id is still present in the new array, we do not remove the reference
+							if newarr.contains(v) {
+								None
+							} else if let Value::Thing(thing) = v {
+								Some(thing)
+							} else {
+								None
+							}
+						})
+						.collect()
+
+				// If the new value is not an array, then all record ids in the old array are removed
+				} else {
+					oldarr
+						.iter()
+						.filter_map(|v| {
+							if let Value::Thing(thing) = v {
+								Some(thing)
+							} else {
+								None
+							}
+						})
+						.collect()
+				};
+
+				RefAction::Delete(removed, self.def.name.to_owned().push(Part::All).to_string())
+			// We found a new reference, let's create the link
+			} else if let Value::Thing(thing) = val {
+				RefAction::Set(thing)
+			} else {
+				// This value is not a record id, nothing to process
+				// This can be a containing array for record ids, for example
+				RefAction::Ignore
+			};
+
+			// Process the action
+			match action {
+				// Nothing to process
+				RefAction::Ignore => Ok(()),
+				// Create the reference, if it does not exist yet.
+				RefAction::Set(thing) => {
+					let key = crate::key::r#ref::new(
+						self.opt.ns()?,
+						self.opt.db()?,
+						&thing.tb,
+						&thing.id,
+						&self.rid.tb,
+						&self.def.name.to_string(),
+						&self.rid.id,
+					)
+					.encode()
+					.unwrap();
+
+					self.ctx.tx().set(key, vec![], None).await?;
+
+					Ok(())
+				}
+				// Delete the reference, if it exists
+				RefAction::Delete(things, ff) => {
+					for thing in things {
+						let key = crate::key::r#ref::new(
+							self.opt.ns()?,
+							self.opt.db()?,
+							&thing.tb,
+							&thing.id,
+							&self.rid.tb,
+							&ff,
+							&self.rid.id,
+						)
+						.encode()
+						.unwrap();
+
+						self.ctx.tx().del(key).await?;
+					}
+
+					Ok(())
+				}
+			}
+		} else {
+			Ok(())
+		}
+	}
+	/// Process any `TYPE reference` clause for the field definition
+	async fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
+		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
+			return Ok(None);
+		}
+
+		let refs = match &self.def.kind {
+			// We found a reference type for this field
+			// In this case, we force the value to be a reference
+			Some(Kind::References(ft, ff)) => Refs(vec![(ft.clone(), ff.clone())]),
+			Some(Kind::Either(kinds)) => {
+				if !kinds.iter().all(|k| matches!(k, Kind::References(_, _))) {
+					return Ok(None);
+				}
+
+				// Extract all reference types
+				let pairs: Vec<_> = kinds
+					.iter()
+					.filter_map(|k| {
+						if let Kind::References(ft, ff) = k {
+							Some((ft.clone(), ff.clone()))
+						} else {
+							None
+						}
+					})
+					.collect();
+
+				// If the length does not match, there were non-reference types
+				if pairs.len() != kinds.len() {
+					return Err(Error::RefsMismatchingVariants);
+				}
+
+				// All ok
+				Refs(pairs)
+			}
+			// This is not a reference type, continue as normal
+			_ => return Ok(None),
+		};
+
+		Ok(Some(Value::Refs(refs)))
 	}
 }

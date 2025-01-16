@@ -7,6 +7,7 @@ use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig
 use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::Value;
+use crate::syn::error::bail;
 use crate::{
 	sql::{
 		access_type,
@@ -898,6 +899,17 @@ impl Parser<'_> {
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
+				}
+				t!("REFERENCE") => {
+					if !self.settings.references_enabled {
+						bail!(
+							"Experimental capability `record_references` is not enabled",
+							@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
+						)
+					}
+
+					self.pop_peek();
+					res.reference = Some(self.parse_reference(ctx).await?);
 				}
 				_ => break,
 			}
