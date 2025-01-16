@@ -334,23 +334,21 @@ impl Transaction {
 
 		while let Some(rng) = next {
 			if cfg.versions {
-				let batch = self.batch_versions(rng, *EXPORT_BATCH_SIZE).await?;
+				let batch = self.batch_keys_vals_versions(rng, *EXPORT_BATCH_SIZE).await?;
 				next = batch.next;
-				let values = batch.versioned_values;
 				// If there are no versioned values, return early.
-				if values.is_empty() {
+				if batch.result.is_empty() {
 					break;
 				}
-				self.export_versioned_data(values, chn).await?;
+				self.export_versioned_data(batch.result, chn).await?;
 			} else {
-				let batch = self.batch(rng, *EXPORT_BATCH_SIZE, true, None).await?;
+				let batch = self.batch_keys_vals(rng, *EXPORT_BATCH_SIZE, None).await?;
 				next = batch.next;
 				// If there are no values, return early.
-				let values = batch.values;
-				if values.is_empty() {
+				if batch.result.is_empty() {
 					break;
 				}
-				self.export_regular_data(values, chn).await?;
+				self.export_regular_data(batch.result, chn).await?;
 			}
 			// Fetch more records
 			continue;

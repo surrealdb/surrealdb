@@ -368,20 +368,6 @@ impl Statement<'_> {
 		}
 	}
 
-	/// Returns any PARALLEL clause if specified
-	pub(crate) fn parallel(&self) -> bool {
-		match self {
-			Statement::Select(v) => v.parallel,
-			Statement::Create(v) => v.parallel,
-			Statement::Upsert(v) => v.parallel,
-			Statement::Update(v) => v.parallel,
-			Statement::Relate(v) => v.parallel,
-			Statement::Delete(v) => v.parallel,
-			Statement::Insert(v) => v.parallel,
-			_ => false,
-		}
-	}
-
 	/// Returns any TEMPFILES clause if specified
 	#[cfg(storage)]
 	pub(crate) fn tempfiles(&self) -> bool {

@@ -72,14 +72,16 @@ impl Datastore {
 		}
 	}
 	pub(crate) fn parse_start_string(start: &str) -> Result<(&str, bool), Error> {
-		if start.starts_with("surrealkv+versioned://") {
-			let path = start.trim_start_matches("surrealkv+versioned://");
-			Ok((path, true))
-		} else if start.starts_with("surrealkv://") {
-			let path = start.trim_start_matches("surrealkv://");
-			Ok((path, false))
-		} else {
-			Err(Error::Ds("Invalid start string".into()))
+		let (scheme, path) = start
+			// Support conventional paths like surrealkv:///absolute/path
+			.split_once("://")
+			// Or paths like surrealkv:/absolute/path
+			.or_else(|| start.split_once(':'))
+			.unwrap_or_default();
+		match scheme {
+			"surrealkv+versioned" => Ok((path, true)),
+			"surrealkv" => Ok((path, false)),
+			_ => Err(Error::Ds("Invalid start string".into())),
 		}
 	}
 	/// Shutdown the database
@@ -190,7 +192,7 @@ impl super::api::Transaction for Transaction {
 		}
 		// Fetch the value from the database.
 		let res = match version {
-			Some(ts) => self.inner.get_at_ts(&key.into(), ts)?,
+			Some(ts) => self.inner.get_at_version(&key.into(), ts)?,
 			None => self.inner.get(&key.into())?,
 		};
 		// Return result
@@ -418,9 +420,9 @@ impl super::api::Transaction for Transaction {
 		let beg = rng.start.into();
 		let end = rng.end.into();
 		// Retrieve the scan range
-		let res = self.inner.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))?;
+		let res = self.inner.keys(beg.as_slice()..end.as_slice(), Some(limit as usize));
 		// Convert the keys and values
-		let res = res.into_iter().map(|kv| Key::from(kv.0)).collect();
+		let res = res.map(Key::from).collect();
 		// Return result
 		Ok(res)
 	}
@@ -445,17 +447,17 @@ impl super::api::Transaction for Transaction {
 		let end = rng.end.into();
 		let range = beg.as_slice()..end.as_slice();
 		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => self.inner.scan_at_ts(range, ts, Some(limit as usize))?,
-			None => self
-				.inner
-				.scan(range, Some(limit as usize))?
-				.into_iter()
-				.map(|kv| (kv.0, kv.1))
-				.collect(),
-		};
-		// Return result
-		Ok(res)
+		if let Some(ts) = version {
+			self.inner
+				.scan_at_version(range, ts, Some(limit as usize))
+				.map(|r| r.map(|(k, v)| (k.to_vec(), v)).map_err(Into::into))
+				.collect()
+		} else {
+			self.inner
+				.scan(range, Some(limit as usize))
+				.map(|r| r.map(|(k, v, _)| (k.to_vec(), v)).map_err(Into::into))
+				.collect()
+		}
 	}
 
 	/// Retrieve all the versions from a range of keys from the databases
@@ -478,14 +480,10 @@ impl super::api::Transaction for Transaction {
 		let range = beg.as_slice()..end.as_slice();
 
 		// Retrieve the scan range
-		let res = self
-			.inner
-			.scan_all_versions(range, Some(limit as usize))?
-			.into_iter()
-			.map(|kv| (kv.0, kv.1, kv.2, kv.3))
-			.collect();
-
-		Ok(res)
+		self.inner
+			.scan_all_versions(range, Some(limit as usize))
+			.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
+			.collect()
 	}
 }
 

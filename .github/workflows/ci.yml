@@ -76,6 +76,30 @@ jobs:
       - name: Check workspace release
         run: cargo make ci-check-release
 
+  make-check:
+    name: Check `make check`
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: sudo apt-get -y update
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Check workspace
+        run: make check
+
   check-msrv:
     name: Check workspace MSRV
     runs-on: ubuntu-latest
@@ -339,6 +363,36 @@ jobs:
           name: code-coverage-report
           path: target/llvm-cov/html/
           retention-days: 5
+
+  make-test:
+    name: Check `make test`
+    runs-on: [runner-arm64-2xlarge]
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test workspace
+        run: |
+          docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:nightly start --user root --pass root --allow-all &
+          make test
 
   graphql-integration:
     name: GraphQL integration

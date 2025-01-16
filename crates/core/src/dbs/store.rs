@@ -1,22 +1,18 @@
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) mod asynchronous;
-#[cfg(storage)]
-pub(super) mod file;
-#[cfg(not(target_arch = "wasm32"))]
-mod llrbtree;
-
 use crate::dbs::plan::Explanation;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use crate::err::Error;
 use crate::sql::order::OrderList;
 use crate::sql::value::Value;
+use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
 
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use rayon::prelude::ParallelSliceMut;
 use std::mem;
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
 #[derive(Default)]
@@ -175,7 +171,7 @@ impl MemoryRandom {
 	}
 }
 
-/// The struct MemoryRandom represents an in-memory store that aggregates data randomly.
+/// The struct MemoryOrdered represents an in-memory store that aggregates ordered data.
 pub(in crate::dbs) struct MemoryOrdered {
 	/// Collected values
 	values: Vec<Value>,
@@ -209,7 +205,7 @@ impl MemoryOrdered {
 			// If we have a finalized result, we return its size
 			result.len()
 		} else {
-			// If we don't have a finalized result, we return the number of value summed with the current batch
+			// If we don't have a finalized result, we return the amount of value summed with the current batch
 			self.values.len() + self.batch.len()
 		}
 	}
@@ -228,7 +224,7 @@ impl MemoryOrdered {
 		}
 	}
 
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	pub(super) fn sort(&mut self) {
 		if self.result.is_none() {
 			if !self.batch.is_empty() {
@@ -242,7 +238,7 @@ impl MemoryOrdered {
 		}
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	pub(super) async fn sort(&mut self) -> Result<(), Error> {
 		if self.result.is_none() {
 			if !self.batch.is_empty() {
@@ -262,9 +258,95 @@ impl MemoryOrdered {
 		Ok(())
 	}
 
+	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+		if let Some(ref mut result) = self.result {
+			MemoryCollector::vec_start_limit(start, limit, result);
+		}
+	}
+
+	pub(super) fn take_vec(&mut self) -> Vec<Value> {
+		self.result.take().unwrap_or_default()
+	}
+
+	pub(super) fn explain(&self, exp: &mut Explanation) {
+		exp.add_collector("MemoryOrdered", vec![]);
+	}
+}
+
+pub(super) struct OrderedValue {
+	value: Value,
+	orders: Arc<OrderList>,
+}
+impl PartialOrd<Self> for OrderedValue {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Eq for OrderedValue {}
+
+impl Ord for OrderedValue {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.orders.compare(&other.value, &self.value)
+	}
+}
+
+impl PartialEq<Self> for OrderedValue {
+	fn eq(&self, other: &Self) -> bool {
+		self.value.eq(&other.value)
+	}
+}
+
+pub(super) struct MemoryOrderedLimit {
+	/// The priority list
+	heap: BinaryHeap<Reverse<OrderedValue>>,
+	/// The maximum size of the priority list
+	limit: usize,
+	/// The order specification
+	orders: Arc<OrderList>,
+	/// The finalized result
+	result: Option<Vec<Value>>,
+}
+
+impl MemoryOrderedLimit {
+	pub(super) fn new(limit: usize, orders: OrderList) -> Self {
+		Self {
+			heap: BinaryHeap::with_capacity(limit + 1),
+			limit,
+			orders: Arc::new(orders),
+			result: None,
+		}
+	}
+
+	pub(in crate::dbs) fn push(&mut self, value: Value) {
+		let value = OrderedValue {
+			value,
+			orders: self.orders.clone(),
+		};
+		self.heap.push(Reverse(value));
+		if self.heap.len() > self.limit {
+			self.heap.pop();
+		}
+	}
+
+	pub(in crate::dbs) fn len(&self) -> usize {
+		self.heap.len()
+	}
+
 	pub(in crate::dbs) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		if let Some(ref mut result) = self.result {
 			MemoryCollector::vec_start_limit(start, limit, result);
+		}
+	}
+
+	pub(super) fn sort(&mut self) {
+		if self.result.is_none() {
+			let mut sorted_vec: Vec<_> = Vec::with_capacity(self.heap.len());
+			while let Some(i) = self.heap.pop() {
+				sorted_vec.push(i.0.value);
+			}
+			sorted_vec.reverse();
+			self.result = Some(sorted_vec);
 		}
 	}
 
@@ -273,6 +355,6 @@ impl MemoryOrdered {
 	}
 
 	pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
-		exp.add_collector("MemoryOrdered", vec![]);
+		exp.add_collector("MemoryOrderedLimit", vec![("limit", self.limit.into())]);
 	}
 }

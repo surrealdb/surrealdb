@@ -36,6 +36,13 @@ pub(crate) struct StatementContext<'a> {
 	pub(crate) group: Option<&'a Groups>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RecordStrategy {
+	Count,
+	KeysOnly,
+	KeysAndValues,
+}
+
 impl<'a> StatementContext<'a> {
 	pub(crate) fn new(
 		ctx: &'a Context,
@@ -56,22 +63,31 @@ impl<'a> StatementContext<'a> {
 		})
 	}
 
-	pub(crate) async fn is_keys_only(&self, tb: &str) -> Result<bool, Error> {
-		// If there is a WHERE clause then
+	pub(crate) async fn check_record_strategy(
+		&self,
+		with_all_indexes: bool,
+		tb: &str,
+	) -> Result<RecordStrategy, Error> {
+		// If there is a WHERE clause, then
 		// we need to fetch and process
 		// record content values too.
-		if self.cond.is_some() {
-			return Ok(false);
+		if !with_all_indexes && self.cond.is_some() {
+			return Ok(RecordStrategy::KeysAndValues);
 		}
+
 		// If there is a GROUP BY clause,
 		// and it is not GROUP ALL, then we
 		// need to process record values.
-		if let Some(g) = self.group {
+		let is_group_all = if let Some(g) = self.group {
 			if !g.is_empty() {
-				return Ok(false);
+				return Ok(RecordStrategy::KeysAndValues);
 			}
-		}
-		// If there is a ORDER BY clause,
+			true
+		} else {
+			false
+		};
+
+		// If there is an ORDER BY clause,
 		// with specific fields, then we
 		// need to process record values.
 		if let Some(p) = self.order {
@@ -79,19 +95,24 @@ impl<'a> StatementContext<'a> {
 				Ordering::Random => {}
 				Ordering::Order(x) => {
 					if !x.is_empty() {
-						return Ok(false);
+						return Ok(RecordStrategy::KeysAndValues);
 					}
 				}
 			}
 		}
+
 		// If there are any field expressions
 		// defined which are not count() then
 		// we need to process record values.
-		if let Some(fields) = self.fields {
+		let is_count_all = if let Some(fields) = self.fields {
 			if !fields.is_count_all_only() {
-				return Ok(false);
+				return Ok(RecordStrategy::KeysAndValues);
 			}
-		}
+			true
+		} else {
+			false
+		};
+
 		// If there are specific permissions
 		// defined on the table, then we need
 		// to process record values.
@@ -108,12 +129,12 @@ impl<'a> StatementContext<'a> {
 					// If permissions are specific, we
 					// need to fetch the record content.
 					if perms.is_specific() {
-						return Ok(false);
+						return Ok(RecordStrategy::KeysAndValues);
 					}
 					// If permissions are NONE, we also
 					// need to fetch the record content.
 					if perms.is_none() {
-						return Ok(false);
+						return Ok(RecordStrategy::KeysAndValues);
 					}
 				}
 				Err(Error::TbNotFound {
@@ -126,8 +147,12 @@ impl<'a> StatementContext<'a> {
 				Err(e) => return Err(e),
 			}
 		}
-		// Otherwise we can iterate over keys
-		Ok(true)
+
+		if is_count_all && is_group_all {
+			return Ok(RecordStrategy::Count);
+		}
+		// Otherwise we can iterate over keys only
+		Ok(RecordStrategy::KeysOnly)
 	}
 }
 
@@ -189,41 +214,41 @@ impl QueryPlanner {
 		)
 		.await?
 		{
-			Plan::SingleIndex(exp, io) => {
+			Plan::SingleIndex(exp, io, rs) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;
 				}
 				let is_order = exp.is_none();
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
-				self.add(t.clone(), Some(ir), exe, it);
+				self.add(t.clone(), Some(ir), exe, it, rs);
 				if is_order {
 					self.orders.push(ir);
 				}
 			}
-			Plan::MultiIndex(non_range_indexes, ranges_indexes) => {
+			Plan::MultiIndex(non_range_indexes, ranges_indexes, rs) => {
 				for (exp, io) in non_range_indexes {
 					let ie = IteratorEntry::Single(Some(exp), io);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir));
+					it.ingest(Iterable::Index(t.clone(), ir, rs));
 				}
 				for (ixr, rq) in ranges_indexes {
 					let ie = IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir));
+					it.ingest(Iterable::Index(t.clone(), ir, rs));
 				}
 				self.requires_distinct = true;
-				self.add(t.clone(), None, exe, it);
+				self.add(t.clone(), None, exe, it, rs);
 			}
-			Plan::SingleIndexRange(ixn, rq) => {
+			Plan::SingleIndexRange(ixn, rq, keys_only) => {
 				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
-				self.add(t.clone(), Some(ir), exe, it);
+				self.add(t.clone(), Some(ir), exe, it, keys_only);
 			}
-			Plan::TableIterator(reason, keys_only) => {
+			Plan::TableIterator(reason, rs) => {
 				if let Some(reason) = reason {
 					self.fallbacks.push(reason);
 				}
-				self.add(t.clone(), None, exe, it);
-				it.ingest(Iterable::Table(t, keys_only));
+				self.add(t.clone(), None, exe, it, rs);
+				it.ingest(Iterable::Table(t, rs));
 				is_table_iterator = true;
 			}
 		}
@@ -241,10 +266,11 @@ impl QueryPlanner {
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
+		rs: RecordStrategy,
 	) {
 		self.executors.insert(tb.0.clone(), exe.into());
 		if let Some(irf) = irf {
-			it.ingest(Iterable::Index(tb, irf));
+			it.ingest(Iterable::Index(tb, irf, rs));
 		}
 	}
 	pub(crate) fn has_executors(&self) -> bool {
@@ -263,7 +289,7 @@ impl QueryPlanner {
 		&self.fallbacks
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn is_order(&self, irf: &IteratorRef) -> bool {
 		self.orders.contains(irf)
 	}

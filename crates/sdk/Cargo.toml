@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "2.1.3"
+version = "2.1.4"
 rust-version = "1.80.1"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -105,7 +105,7 @@ semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.209", features = ["derive"] }
 serde_json = "1.0.127"
 serde-content = "0.1.0"
-surrealdb-core = { version = "=2.1.3", default-features = false, path = "../core", package = "surrealdb-core" }
+surrealdb-core = { version = "=2.1.4", default-features = false, path = "../core", package = "surrealdb-core" }
 thiserror = "1.0.63"
 tokio-util = { version = "0.7.11", features = ["compat"] }
 tracing = "0.1.40"
@@ -118,9 +118,11 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 env_logger = "0.10.1"
 flate2 = "1.0.28"
 hashbrown = "0.14.5"
+parking_lot = "0.12.3"
 pprof = { version = "0.14.0", features = ["flamegraph", "criterion"] }
 radix_trie = "0.2.1"
 rand = "0.8.5"
+rayon = "1.10.0"
 regex = "1.10.6"
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
@@ -131,7 +133,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 ulid = { version = "1.1.0", features = ["serde"] }
 wiremock = "0.6.0"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(target_family = "wasm")'.dependencies]
 pharos = "0.5.3"
 ring = { version = "0.17.7", features = ["wasm32_unknown_unknown_js"] }
 tokio = { version = "1.40.0", default-features = false, features = [
@@ -145,7 +147,7 @@ wasmtimer = { version = "0.2.0", default-features = false, features = [
 ] }
 ws_stream_wasm = "0.7.4"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1.40.0", default-features = false, features = [
     "macros",
     "io-util",
@@ -214,4 +216,8 @@ harness = false
 
 [[bench]]
 name = "order"
+harness = false
+
+[[bench]]
+name = "allocator"
 harness = false

@@ -116,6 +116,10 @@ async fn get_handler(
 		.max_frame_size(*cnf::WEBSOCKET_MAX_FRAME_SIZE)
 		// Set the maximum WebSocket message size
 		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
+		// Set an error
+		.on_failed_upgrade(|err| {
+			warn!("Failed to upgrade WebSocket connection: {err}");
+		})
 		// Handle the WebSocket upgrade and process messages
 		.on_upgrade(move |socket| {
 			handle_socket(state.datastore.clone(), rpc_state, socket, sess, id)

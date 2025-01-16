@@ -1219,228 +1219,228 @@ async fn delete_record_range() {
 
 #[test_log::test(tokio::test)]
 async fn changefeed() {
-	let (permit, db) = new_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-	// Enable change feeds
-	let sql = "
-	DEFINE TABLE user CHANGEFEED 1h;
-	";
-	let response = db.query(sql).await.unwrap();
-	response.check().unwrap();
-	// Create and update users
-	let sql = "
-        CREATE user:amos SET name = 'Amos';
-        CREATE user:jane SET name = 'Jane';
-        UPDATE user:amos SET name = 'AMOS';
+    let (permit, db) = new_db().await;
+    db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+    // Enable change feeds
+    let sql = "
+    DEFINE TABLE testuser CHANGEFEED 1h;
     ";
-	let table = "user";
-	let response = db.query(sql).await.unwrap();
-	response.check().unwrap();
-	let users: Vec<RecordBuf> = db
-		.update(table)
-		.content(Record {
-			name: "Doe".to_owned(),
-		})
-		.await
-		.unwrap();
-	let expected = &[
-		RecordBuf {
-			id: "user:amos".parse().unwrap(),
-			name: "Doe".to_owned(),
-		},
-		RecordBuf {
-			id: "user:jane".parse().unwrap(),
-			name: "Doe".to_owned(),
-		},
-	];
-	assert_eq!(users, expected);
-	let users: Vec<RecordBuf> = db.select(table).await.unwrap();
-	assert_eq!(users, expected);
-	let sql = "
-        SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
+    let response = db.query(sql).await.unwrap();
+    response.check().unwrap();
+    // Create and update records
+    let sql = "
+        CREATE testuser:amos SET name = 'Amos';
+        CREATE testuser:jane SET name = 'Jane';
+        UPDATE testuser:amos SET name = 'AMOS';
     ";
-	let mut response = db.query(sql).await.unwrap();
-	drop(permit);
-	let v: Value = response.take(0).unwrap();
-	let CoreValue::Array(array) = v.into_inner() else {
-		panic!()
-	};
-	assert_eq!(array.len(), 5);
-	// DEFINE TABLE
-	let a = array.first().unwrap();
-	let CoreValue::Object(a) = a.clone() else {
-		unreachable!()
-	};
-	let CoreValue::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
-		unreachable!()
-	};
-	let changes = a.get("changes").unwrap().clone().to_owned();
-	assert_eq!(
-		Value::from_inner(changes),
-		"[
-		{
-			define_table: {
-				name: 'user'
-			}
-		}
-	]"
-		.parse()
-		.unwrap()
-	);
-	// UPDATE user:amos
-	let a = array.get(1).unwrap();
-	let CoreValue::Object(a) = a.clone() else {
-		unreachable!()
-	};
-	let CoreValue::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
-		unreachable!()
-	};
-	let changes = a.get("changes").unwrap().to_owned();
-	match FFLAGS.change_feed_live_queries.enabled() {
-		true => {
-			assert_eq!(
-				Value::from_inner(changes),
-				r#"[
-				 {
-					  create: {
-						  id: user:amos,
-						  name: 'Amos'
-					  }
-				 }
-			]"#
-				.parse()
-				.unwrap()
-			);
-		}
-		false => {
-			assert_eq!(
-				Value::from_inner(changes),
-				r#"[
-				 {
-					  update: {
-						  id: user:amos,
-						  name: 'Amos'
-					  }
-				 }
-			]"#
-				.parse()
-				.unwrap()
-			);
-		}
-	}
-	// UPDATE user:jane
-	let a = array.get(2).unwrap();
-	let CoreValue::Object(a) = a.clone() else {
-		unreachable!()
-	};
-	let CoreValue::Number(versionstamp2) = a.get("versionstamp").unwrap().clone() else {
-		unreachable!()
-	};
-	assert!(*versionstamp1 < versionstamp2);
-	let changes = a.get("changes").unwrap().to_owned();
-	match FFLAGS.change_feed_live_queries.enabled() {
-		true => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
-					{
-						 create: {
-							 id: user:jane,
-							 name: 'Jane'
-						 }
-					}
-				]"
-				.parse()
-				.unwrap()
-			);
-		}
-		false => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
-					{
-						 update: {
-							 id: user:jane,
-							 name: 'Jane'
-						 }
-					}
-				]"
-				.parse()
-				.unwrap()
-			);
-		}
-	}
-	// UPDATE user:amos
-	let a = array.get(3).unwrap();
-	let CoreValue::Object(a) = a.clone() else {
-		unreachable!()
-	};
-	let CoreValue::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
-		unreachable!()
-	};
-	assert!(versionstamp2 < *versionstamp3);
-	let changes = a.get("changes").unwrap().to_owned();
-	match FFLAGS.change_feed_live_queries.enabled() {
-		true => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
-					{
-						create: {
-							id: user:amos,
-							name: 'AMOS'
-						}
-					}
-				]"
-				.parse()
-				.unwrap()
-			);
-		}
-		false => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
-					{
-						update: {
-							id: user:amos,
-							name: 'AMOS'
-						}
-					}
-				]"
-				.parse()
-				.unwrap()
-			);
-		}
-	};
-	// UPDATE table
-	let a = array.get(4).unwrap();
-	let CoreValue::Object(a) = a.clone() else {
-		unreachable!()
-	};
-	let CoreValue::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
-		unreachable!()
-	};
-	assert!(versionstamp3 < versionstamp4);
-	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		Value::from_inner(changes),
-		"[
-		{
-			update: {
-				id: user:amos,
-				name: 'Doe'
-			}
-		},
-		{
-			update: {
-				id: user:jane,
-				name: 'Doe'
-			}
-		}
-	]"
-		.parse()
-		.unwrap()
-	);
+    let table = "testuser";
+    let response = db.query(sql).await.unwrap();
+    response.check().unwrap();
+    let users: Vec<RecordBuf> = db
+        .update(table)
+        .content(Record {
+            name: "Doe".to_owned(),
+        })
+        .await
+        .unwrap();
+    let expected = &[
+        RecordBuf {
+            id: "testuser:amos".parse().unwrap(),
+            name: "Doe".to_owned(),
+        },
+        RecordBuf {
+            id: "testuser:jane".parse().unwrap(),
+            name: "Doe".to_owned(),
+        },
+    ];
+    assert_eq!(users, expected);
+    let users: Vec<RecordBuf> = db.select(table).await.unwrap();
+    assert_eq!(users, expected);
+    let sql = "
+        SHOW CHANGES FOR TABLE testuser SINCE 0 LIMIT 10;
+    ";
+    let mut response = db.query(sql).await.unwrap();
+    drop(permit);
+    let v: Value = response.take(0).unwrap();
+    let CoreValue::Array(array) = v.into_inner() else {
+        panic!()
+    };
+    assert_eq!(array.len(), 5);
+    // DEFINE TABLE
+    let a = array.first().unwrap();
+    let CoreValue::Object(a) = a.clone() else {
+        unreachable!()
+    };
+    let CoreValue::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
+        unreachable!()
+    };
+    let changes = a.get("changes").unwrap().clone().to_owned();
+    assert_eq!(
+        Value::from_inner(changes),
+        "[
+        {
+            define_table: {
+                name: 'testuser'
+            }
+        }
+    ]"
+        .parse()
+        .unwrap()
+    );
+    // UPDATE testuser:amos
+    let a = array.get(1).unwrap();
+    let CoreValue::Object(a) = a.clone() else {
+        unreachable!()
+    };
+    let CoreValue::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+        unreachable!()
+    };
+    let changes = a.get("changes").unwrap().to_owned();
+    match FFLAGS.change_feed_live_queries.enabled() {
+        true => {
+            assert_eq!(
+                Value::from_inner(changes),
+                r#"[
+                 {
+                      create: {
+                          id: testuser:amos,
+                          name: 'Amos'
+                      }
+                 }
+            ]"#
+                .parse()
+                .unwrap()
+            );
+        }
+        false => {
+            assert_eq!(
+                Value::from_inner(changes),
+                r#"[
+                 {
+                      update: {
+                          id: testuser:amos,
+                          name: 'Amos'
+                      }
+                 }
+            ]"#
+                .parse()
+                .unwrap()
+            );
+        }
+    }
+    // UPDATE testuser:jane
+    let a = array.get(2).unwrap();
+    let CoreValue::Object(a) = a.clone() else {
+        unreachable!()
+    };
+    let CoreValue::Number(versionstamp2) = a.get("versionstamp").unwrap().clone() else {
+        unreachable!()
+    };
+    assert!(*versionstamp1 < versionstamp2);
+    let changes = a.get("changes").unwrap().to_owned();
+    match FFLAGS.change_feed_live_queries.enabled() {
+        true => {
+            assert_eq!(
+                Value::from_inner(changes),
+                "[
+                    {
+                         create: {
+                             id: testuser:jane,
+                             name: 'Jane'
+                         }
+                    }
+                ]"
+                .parse()
+                .unwrap()
+            );
+        }
+        false => {
+            assert_eq!(
+                Value::from_inner(changes),
+                "[
+                    {
+                         update: {
+                             id: testuser:jane,
+                             name: 'Jane'
+                         }
+                    }
+                ]"
+                .parse()
+                .unwrap()
+            );
+        }
+    }
+    // UPDATE testuser:amos
+    let a = array.get(3).unwrap();
+    let CoreValue::Object(a) = a.clone() else {
+        unreachable!()
+    };
+    let CoreValue::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
+        unreachable!()
+    };
+    assert!(versionstamp2 < *versionstamp3);
+    let changes = a.get("changes").unwrap().to_owned();
+    match FFLAGS.change_feed_live_queries.enabled() {
+        true => {
+            assert_eq!(
+                Value::from_inner(changes),
+                "[
+                    {
+                        create: {
+                            id: testuser:amos,
+                            name: 'AMOS'
+                        }
+                    }
+                ]"
+                .parse()
+                .unwrap()
+            );
+        }
+        false => {
+            assert_eq!(
+                Value::from_inner(changes),
+                "[
+                    {
+                        update: {
+                            id: testuser:amos,
+                            name: 'AMOS'
+                        }
+                    }
+                ]"
+                .parse()
+                .unwrap()
+            );
+        }
+    };
+    // UPDATE table
+    let a = array.get(4).unwrap();
+    let CoreValue::Object(a) = a.clone() else {
+        unreachable!()
+    };
+    let CoreValue::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
+        unreachable!()
+    };
+    assert!(versionstamp3 < versionstamp4);
+    let changes = a.get("changes").unwrap().to_owned();
+    assert_eq!(
+        Value::from_inner(changes),
+        "[
+        {
+            update: {
+                id: testuser:amos,
+                name: 'Doe'
+            }
+        },
+        {
+            update: {
+                id: testuser:jane,
+                name: 'Doe'
+            }
+        }
+    ]"
+        .parse()
+        .unwrap()
+    );
 }
 
 #[test_log::test(tokio::test)]

@@ -161,9 +161,10 @@ impl Datastore {
 					// Pause and yield execution
 					yield_now!();
 					// Fetch the next batch of keys and values
-					let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true, None).await);
+					let max = *NORMAL_FETCH_SIZE;
+					let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
 					next = res.next;
-					for (k, v) in res.values.iter() {
+					for (k, v) in res.result.iter() {
 						// Decode the data for this live query
 						let val: Live = v.into();
 						// Get the key for this node live query
@@ -249,9 +250,13 @@ impl Datastore {
 					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name);
 					let mut next = Some(beg..end);
 					while let Some(rng) = next {
-						let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true, None).await);
+						// Pause and yield execution
+						yield_now!();
+						// Fetch the next batch of keys and values
+						let max = *NORMAL_FETCH_SIZE;
+						let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
 						next = res.next;
-						for (k, v) in res.values.iter() {
+						for (k, v) in res.result.iter() {
 							// Decode the LIVE query statement
 							let stm: LiveStatement = v.into();
 							// Get the node id and the live query id

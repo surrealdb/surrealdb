@@ -15,8 +15,10 @@ use crate::sql::statements::{access, AccessGrant, DefineAccessStatement};
 use crate::sql::{access_type, AccessType, Datetime, Object, Value};
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
+use md5::Digest;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::str::FromStr;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
@@ -758,8 +760,14 @@ pub fn verify_grant_bearer(
 	// We use time-constant comparison to prevent timing attacks.
 	match &gr.grant {
 		access::Grant::Bearer(bearer) => {
+			// Hash provided signin bearer key.
+			let mut hasher = Sha256::new();
+			hasher.update(key);
+			let hash = hasher.finalize();
+			let hash_hex = format!("{hash:x}");
+			// Compare hashed key to stored bearer key.
+			let signin_key_bytes: &[u8] = hash_hex.as_bytes();
 			let bearer_key_bytes: &[u8] = bearer.key.as_bytes();
-			let signin_key_bytes: &[u8] = key.as_bytes();
 			let ok: bool = bearer_key_bytes.ct_eq(signin_key_bytes).into();
 			if ok {
 				Ok(bearer)
@@ -778,6 +786,7 @@ mod tests {
 	use crate::iam::Role;
 	use chrono::Duration;
 	use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+	use regex::Regex;
 	use std::collections::HashMap;
 
 	struct TestLevel {
@@ -1170,6 +1179,79 @@ mod tests {
 				Err(Error::InvalidAuth) => {} // ok
 				Err(e) => panic!("Expected InvalidAuth, but got: {e}"),
 			}
+		}
+		// Test that only the hash of the refresh token is stored
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+					)
+					WITH REFRESH
+					DURATION FOR GRANT 1w, FOR SESSION 2h
+				;
+
+				CREATE user:test CONTENT {
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("user", "user".into());
+			vars.insert("pass", "pass".into());
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			let refresh = match res {
+				Ok(data) => match data.refresh {
+					Some(refresh) => refresh,
+					None => panic!("Refresh token was not returned"),
+				},
+				Err(e) => panic!("Failed to signin with credentials: {e}"),
+			};
+
+			// Extract grant identifier from refresh token
+			let id = refresh.split("-").collect::<Vec<&str>>()[2];
+
+			// Test that returned refresh token is in plain text
+			let ok = Regex::new(r"surreal-refresh-[a-zA-Z0-9]{12}-[a-zA-Z0-9]{24}").unwrap();
+			assert!(ok.is_match(&refresh), "Output '{}' doesn't match regex '{}'", refresh, ok);
+
+			// Get the stored bearer key representing the refresh token
+			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
+			let grant = tx.get_db_access_grant("test", "test", "user", id).await.unwrap();
+			let key = match &grant.grant {
+				access::Grant::Bearer(grant) => grant.key.clone(),
+				_ => panic!("Incorrect grant type returned, expected a bearer grant"),
+			};
+			tx.cancel().await.unwrap();
+
+			// Test that the returned key is a SHA-256 hash
+			let ok = Regex::new(r"[0-9a-f]{64}").unwrap();
+			assert!(ok.is_match(&key), "Output '{}' doesn't match regex '{}'", key, ok);
 		}
 	}
 
@@ -1996,6 +2078,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test"),
 			},
 		];
+
+		let plain_text_regex =
+			Regex::new("surreal-bearer-[a-zA-Z0-9]{12}-[a-zA-Z0-9]{24}").unwrap();
+		let sha_256_regex = Regex::new(r"[0-9a-f]{64}").unwrap();
 
 		for level in &test_levels {
 			println!("Test level: {}", level.level);
@@ -3001,6 +3087,79 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					),
 				}
 			}
+
+			// Test that only the key hash is stored
+			{
+				let ds = Datastore::new("memory").await.unwrap();
+				let sess = Session::owner().with_ns("test").with_db("test");
+				let res = ds
+					.execute(
+						&format!(
+							r#"
+						DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DURATION FOR SESSION 2h
+						;
+						DEFINE USER tobie ON {} ROLES EDITOR;
+						ACCESS api ON {} GRANT FOR USER tobie;
+						"#,
+							level.level, level.level, level.level
+						),
+						&sess,
+						None,
+					)
+					.await
+					.unwrap();
+
+				// Get the bearer key from grant
+				let result = if let Ok(res) = &res.last().unwrap().result {
+					res.clone()
+				} else {
+					panic!("Unable to retrieve bearer key grant");
+				};
+				let grant = result
+					.coerce_to_object()
+					.unwrap()
+					.get("grant")
+					.unwrap()
+					.clone()
+					.coerce_to_object()
+					.unwrap();
+				let id = grant.get("id").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_string();
+
+				// Test that returned key is in plain text
+				assert!(
+					plain_text_regex.is_match(&key),
+					"Output '{}' doesn't match regex '{}'",
+					key,
+					plain_text_regex
+				);
+
+				// Get the stored bearer grant
+				let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
+				let grant = match level.level {
+					"DB" => tx
+						.get_db_access_grant(level.ns.unwrap(), level.db.unwrap(), "api", &id)
+						.await
+						.unwrap(),
+					"NS" => tx.get_ns_access_grant(level.ns.unwrap(), "api", &id).await.unwrap(),
+					"ROOT" => tx.get_root_access_grant("api", &id).await.unwrap(),
+					_ => panic!("Unsupported level"),
+				};
+				let key = match &grant.grant {
+					access::Grant::Bearer(grant) => grant.key.clone(),
+					_ => panic!("Incorrect grant type returned, expected a bearer grant"),
+				};
+				tx.cancel().await.unwrap();
+
+				// Test that the returned key is a SHA-256 hash
+				assert!(
+					sha_256_regex.is_match(&key),
+					"Output '{}' doesn't match regex '{}'",
+					key,
+					sha_256_regex
+				);
+			}
 		}
 	}
 
@@ -3819,6 +3978,59 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					res
 				),
 			}
+		}
+
+		// Test that only the key hash is stored
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			let res = ds
+				.execute(
+					r#"
+					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
+						DURATION FOR SESSION 2h
+					;
+					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
+					"#,
+					&sess,
+					None,
+				)
+				.await
+				.unwrap();
+
+			// Get the bearer key from grant
+			let result = if let Ok(res) = &res.last().unwrap().result {
+				res.clone()
+			} else {
+				panic!("Unable to retrieve bearer key grant");
+			};
+			let grant = result
+				.coerce_to_object()
+				.unwrap()
+				.get("grant")
+				.unwrap()
+				.clone()
+				.coerce_to_object()
+				.unwrap();
+			let id = grant.get("id").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_string();
+
+			// Test that returned key is in plain text
+			let ok = Regex::new(r"surreal-bearer-[a-zA-Z0-9]{12}-[a-zA-Z0-9]{24}").unwrap();
+			assert!(ok.is_match(&key), "Output '{}' doesn't match regex '{}'", key, ok);
+
+			// Get the stored bearer grant
+			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
+			let grant = tx.get_db_access_grant("test", "test", "api", &id).await.unwrap();
+			let key = match &grant.grant {
+				access::Grant::Bearer(grant) => grant.key.clone(),
+				_ => panic!("Incorrect grant type returned, expected a bearer grant"),
+			};
+			tx.cancel().await.unwrap();
+
+			// Test that the returned key is a SHA-256 hash
+			let ok = Regex::new(r"[0-9a-f]{64}").unwrap();
+			assert!(ok.is_match(&key), "Output '{}' doesn't match regex '{}'", key, ok);
 		}
 	}
 

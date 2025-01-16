@@ -26,13 +26,13 @@ use crate::{
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
-		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
+		Permission, Permissions, Regex, Scoring, Script, Split, Splits, Start, Statement, Strand,
+		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
-	syn::parser::{Parser, PartialResult},
+	syn::parser::StatementStream,
 };
+use bytes::BytesMut;
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
-use reblessive::Stack;
 
 fn ident_field(name: &str) -> Value {
 	Value::Idiom(Idiom(vec![Part::Field(Ident(name.to_string()))]))
@@ -108,6 +108,12 @@ static SOURCE: &str = r#"
 	REMOVE FIELD foo.bar[10] ON bar;
 	UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL;
 	UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL;
+	function(){ ((1 + 1)) };
+	"a b c d e f g h";
+	u"ffffffff-ffff-ffff-ffff-ffffffffffff";
+	r"a:[1,2,3,4,5,6,7,8,9,10]";
+	/a b c d e f/;
+	-123.456e10;
 "#;
 
 fn statements() -> Vec<Statement> {
@@ -726,73 +732,65 @@ fn statements() -> Vec<Statement> {
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
 		}),
+		Statement::Value(Value::Function(Box::new(crate::sql::Function::Script(
+			Script(" ((1 + 1)) ".to_owned()),
+			Vec::new(),
+		)))),
+		Statement::Value(Value::Strand(Strand("a b c d e f g h".to_owned()))),
+		Statement::Value(Value::Uuid(Uuid(uuid::Uuid::from_u128(
+			0xffffffff_ffff_ffff_ffff_ffffffffffff,
+		)))),
+		Statement::Value(Value::Thing(Thing {
+			tb: "a".to_string(),
+			id: Id::Array(Array(
+				[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].iter().copied().map(Value::from).collect(),
+			)),
+		})),
+		Statement::Value(Value::Regex(Regex("a b c d e f".try_into().unwrap()))),
+		Statement::Value(Value::from(-123.456e10)),
 	]
 }
 
 #[test]
 fn test_streaming() {
 	let expected = statements();
+	let mut statements = StatementStream::new();
+	let mut buffer = BytesMut::new();
 	let mut current_stmt = 0;
-	let source_bytes = SOURCE.as_bytes();
-	let mut source_start = 0;
-	let mut parser = Parser::new(&[]);
-	let mut stack = Stack::new();
 
-	for i in 0..(source_bytes.len() - 1) {
-		let partial_source = &source_bytes[source_start..i];
-		//let src = String::from_utf8_lossy(partial_source);
-		//println!("{}:{}", i, src);
-		parser = parser.change_source(partial_source);
-		parser.reset();
-		match stack
-			.enter(|stk| parser.parse_partial_statement(i == source_bytes.len(), stk))
-			.finish()
-		{
-			PartialResult::Empty {
-				..
-			} => continue,
-			PartialResult::MoreData => continue,
-			PartialResult::Ok {
-				value,
-				used,
-			} => {
+	for b in SOURCE.as_bytes() {
+		match statements.parse_partial(&mut buffer) {
+			Ok(Some(value)) => {
 				assert_eq!(value, expected[current_stmt]);
 				current_stmt += 1;
-				source_start += used;
 			}
-			PartialResult::Err {
-				err,
-				..
-			} => {
-				panic!("Streaming test returned an error: {}", err.render_on_bytes(partial_source))
+			Ok(None) => {}
+			Err(e) => {
+				panic!(
+					"Streaming test returned an error: {}\n\n buffer was {}",
+					e,
+					String::from_utf8_lossy(&buffer)
+				)
+			}
+		}
+
+		buffer.extend_from_slice(&[*b]);
+	}
+
+	loop {
+		match statements.parse_complete(&mut buffer) {
+			Ok(None) => break,
+			Ok(Some(value)) => {
+				assert_eq!(value, expected[current_stmt]);
+				current_stmt += 1;
+			}
+			Err(e) => {
+				panic!("Streaming test returned an error: {}", e)
 			}
 		}
 	}
 
-	let partial_source = &source_bytes[source_start..];
-	parser = parser.change_source(partial_source);
-	parser.reset();
-	match stack.enter(|stk| parser.parse_stmt(stk)).finish() {
-		Ok(value) => {
-			assert_eq!(value, expected[current_stmt]);
-			current_stmt += 1;
-		}
-		Err(e) => {
-			panic!("Streaming test returned an error: {}", e.render_on_bytes(partial_source))
-		}
+	if expected.len() != current_stmt {
+		panic!("Not all statements parsed")
 	}
-
-	let src = String::from_utf8_lossy(&source_bytes[source_start..]);
-	let range = src.char_indices().nth(100).map(|x| x.0).unwrap_or(src.len());
-	let src = &src[..range];
-	parser.reset();
-	parser = parser.change_source(&source_bytes[source_start..]);
-	assert_eq!(
-		current_stmt,
-		expected.len(),
-		"failed to parse at {}\nAt statement {}\n\n{:?}",
-		src,
-		expected[current_stmt],
-		stack.enter(|stk| parser.parse_partial_statement(true, stk)).finish()
-	);
 }
