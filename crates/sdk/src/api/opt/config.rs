@@ -93,6 +93,8 @@ impl Config {
 	}
 
 	/// Get the capabilities for the database
+	/// Used internally in the CLI to pass on capabilities to the parser
+	#[doc(hidden)]
 	pub fn get_capabilities(&self) -> &CoreCapabilities {
 		&self.capabilities
 	}
