@@ -593,12 +593,10 @@ impl super::api::Transaction for Transaction {
 			let res = match version {
 				Some(ts) => inner
 					.keys_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
-					.into_iter()
 					.map(Key::from)
 					.collect(),
 				None => inner
 					.keys(beg.as_slice()..end.as_slice(), Some(limit as usize))
-					.into_iter()
 					.map(Key::from)
 					.collect(),
 			};
@@ -684,7 +682,6 @@ impl super::api::Transaction for Transaction {
 			// Retrieve the scan range
 			let res = inner
 				.scan_all_versions(beg.as_slice()..end.as_slice(), Some(limit as usize))
-				.into_iter()
 				.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
 				.collect::<Result<_, Error>>()?;
 			// Return result
