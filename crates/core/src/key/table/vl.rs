@@ -1,4 +1,4 @@
-//! Stores a LIVE SELECT query definition on the table
+//! Stores LIVE QUERIES cache versions
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use derive::Key;
@@ -19,7 +19,7 @@ pub struct Vl<'a> {
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	#[serde(with = "uuid::serde::compact")]
+	#[serde(with = "crate::sql::uuid::reverse")]
 	pub v: Uuid,
 }
 
@@ -77,7 +77,7 @@ mod tests {
 		let enc = Vl::encode(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\x00*testdb\x00*testtb\x00!vl\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
+			b"/*testns\x00*testdb\x00*testtb\x00!vl\x10\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04\x03\x02\x01"
 		);
 
 		let dec = Vl::decode(&enc).unwrap();

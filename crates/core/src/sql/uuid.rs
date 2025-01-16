@@ -103,3 +103,30 @@ impl Display for Uuid {
 		Display::fmt(&quote_str(&self.0.to_string()), f)
 	}
 }
+
+/// This module implements a serializer/deserializer that ensure reverse order for UUID.
+/// More recent UUID comes first.
+pub(crate) mod reverse {
+	use serde::{Deserializer, Serializer};
+	use uuid::Uuid;
+
+	/// Custom serializer that reverses the bytes before serialization
+	pub(crate) fn serialize<S>(u: &Uuid, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		let mut b = u.into_bytes();
+		b.reverse();
+		serde::Serialize::serialize(&b, serializer)
+	}
+
+	/// Custom deserializer that reverses the bytes back after deserialization
+	pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Uuid, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		let mut bytes: [u8; 16] = serde::Deserialize::deserialize(deserializer)?;
+		bytes.reverse();
+		Ok(Uuid::from_bytes(bytes))
+	}
+}

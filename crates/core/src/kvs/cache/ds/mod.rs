@@ -20,7 +20,7 @@ pub(crate) struct DatastoreCache {
 	cache: Cache,
 	// Manage the eviction of old cache versions
 	sender: Sender<(CacheVersion, Uuid)>,
-	receiver: Receiver<(CacheVersion, Uuid)>,
+	_receiver: Receiver<(CacheVersion, Uuid)>,
 }
 
 #[derive(Clone, Copy)]
@@ -52,7 +52,7 @@ impl CacheVersion {
 		match self {
 			Self::Lq => {
 				let vl: Vl = key.into();
-				Lookup::Lvs(ns, db, &tb, vl.v)
+				Lookup::Lvs(ns, db, tb, vl.v)
 			}
 		}
 	}
@@ -65,11 +65,11 @@ impl Default for DatastoreCache {
 			*crate::cnf::DATASTORE_CACHE_SIZE as u64,
 			weight::Weight,
 		);
-		let (sender, receiver) = channel::unbounded();
+		let (sender, _receiver) = channel::unbounded();
 		Self {
 			cache,
 			sender,
-			receiver,
+			_receiver,
 		}
 	}
 }
