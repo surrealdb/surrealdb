@@ -1307,3 +1307,15 @@ allow_proc_macro = true
 [pkg.sysinfo]
 allow_unsafe = true
 allow_apis = ["fs"]
+
+[pkg.derive_builder_macro]
+allow_proc_macro = true
+
+[pkg.jieba-macros]
+allow_proc_macro = true
+
+[pkg.include-flate-codegen]
+allow_proc_macro = true
+
+[pkg.cedarwood]
+allow_unsafe = true

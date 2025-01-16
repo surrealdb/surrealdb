@@ -109,6 +109,7 @@ keyword! {
 	If => "IF",
 	Is => "IS",
 	Issuer => "ISSUER",
+	Jieba => "JIEBA",
 	Jwt => "JWT",
 	Jwks => "JWKS",
 	Key => "KEY",

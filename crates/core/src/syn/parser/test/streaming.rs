@@ -73,7 +73,7 @@ static SOURCE: &str = r#"
 			HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
 	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9;
-	DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar;
+	DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), JIEBA(false,true), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar;
 	DELETE FROM ONLY |foo:32..64| Where 2 RETURN AFTER TIMEOUT 1s PARALLEL;
 	DELETE FROM ONLY a:b->?[$][?true] WHERE null RETURN NULL TIMEOUT 1h PARALLEL;
 	FOR $foo IN (SELECT foo FROM bar) * 2 {
@@ -401,6 +401,7 @@ fn statements() -> Vec<Statement> {
 			filters: Some(vec![
 				Filter::Ascii,
 				Filter::EdgeNgram(1, 2),
+				Filter::Jieba(false, true),
 				Filter::Ngram(3, 4),
 				Filter::Lowercase,
 				Filter::Snowball(Language::Dutch),
