@@ -1,3 +1,5 @@
+#![cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+
 /// Create a new blocking threadpool
 #[cfg(not(target_family = "wasm"))]
 pub(super) fn initialise() {
@@ -11,5 +13,5 @@ pub(super) fn initialise() {
 /// Create a new blocking threadpool
 #[cfg(target_family = "wasm")]
 pub(super) fn initialise() {
-	// Do nothing in WebAssembly
+	// Do nothing
 }
