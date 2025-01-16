@@ -286,6 +286,9 @@ impl Datastore {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
@@ -299,6 +302,9 @@ impl Datastore {
 			s if s.starts_with("file:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
 					let s = s.trim_start_matches("file://");
@@ -315,6 +321,9 @@ impl Datastore {
 			s if s.starts_with("rocksdb:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
@@ -330,6 +339,9 @@ impl Datastore {
 			s if s.starts_with("surrealkv") => {
 				#[cfg(feature = "kv-surrealkv")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", s);
 					let (path, enable_versions) =
 						super::surrealkv::Datastore::parse_start_string(s)?;
@@ -410,12 +422,6 @@ impl Datastore {
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		}?;
-		// Create a new blocking threadpool
-		let _ = affinitypool::Builder::new()
-			.thread_name("surrealdb-threadpool")
-			.thread_per_core(true)
-			.build()
-			.build_global();
 		// Set the properties on the datastore
 		flavor.map(|flavor| {
 			let tf = TransactionFactory {
