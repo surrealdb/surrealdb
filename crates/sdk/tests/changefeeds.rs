@@ -11,7 +11,7 @@ use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
-use surrealdb_core::test_helpers::{generate_versionstamp_sequences, to_u128_be};
+use surrealdb_core::vs::VersionStamp;
 
 mod helpers;
 
@@ -67,17 +67,16 @@ async fn database_change_feeds() -> Result<(), Error> {
 
 	// Two timestamps
 	let variance = 4;
-	let first_timestamp = generate_versionstamp_sequences([0; 10]).take(variance);
-	let second_timestamp = first_timestamp.flat_map(|vs1| {
-		generate_versionstamp_sequences(vs1).skip(1).take(variance).map(move |vs2| (vs1, vs2))
-	});
+	let first_timestamp = VersionStamp::ZERO.iter().take(variance);
+	let second_timestamp = first_timestamp
+		.flat_map(|vs1| vs1.iter().skip(1).take(variance).map(move |vs2| (vs1, vs2)));
 
 	let potential_show_changes_values: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled()
 	{
 		true => second_timestamp
 			.map(|(vs1, vs2)| {
-				let vs1 = to_u128_be(vs1);
-				let vs2 = to_u128_be(vs2);
+				let vs1 = vs1.into_u128();
+				let vs2 = vs2.into_u128();
 				Value::parse(
 					format!(
 						r#"[
@@ -92,8 +91,8 @@ async fn database_change_feeds() -> Result<(), Error> {
 			.collect(),
 		false => second_timestamp
 			.map(|(vs1, vs2)| {
-				let vs1 = to_u128_be(vs1);
-				let vs2 = to_u128_be(vs2);
+				let vs1 = vs1.into_u128();
+				let vs2 = vs2.into_u128();
 				Value::parse(
 					format!(
 						r#"[
@@ -294,44 +293,31 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	// If you want to write a macro, you are welcome to
 	let limit_variance = 3;
-	let first = generate_versionstamp_sequences([0; 10]).take(limit_variance);
-	let second = first.flat_map(|vs1| {
-		generate_versionstamp_sequences(vs1).take(limit_variance).skip(1).map(move |vs2| (vs1, vs2))
-	});
+	let first = VersionStamp::ZERO.iter().take(limit_variance);
+	let second =
+		first.flat_map(|vs1| vs1.iter().take(limit_variance).skip(1).map(move |vs2| (vs1, vs2)));
 	let third = second.flat_map(|(vs1, vs2)| {
-		generate_versionstamp_sequences(vs2)
-			.take(limit_variance)
-			.skip(1)
-			.map(move |vs3| (vs1, vs2, vs3))
+		vs2.iter().take(limit_variance).skip(1).map(move |vs3| (vs1, vs2, vs3))
 	});
 	let fourth = third.flat_map(|(vs1, vs2, vs3)| {
-		generate_versionstamp_sequences(vs3)
-			.take(limit_variance)
-			.skip(1)
-			.map(move |vs4| (vs1, vs2, vs3, vs4))
+		vs3.iter().take(limit_variance).skip(1).map(move |vs4| (vs1, vs2, vs3, vs4))
 	});
 	let fifth = fourth.flat_map(|(vs1, vs2, vs3, vs4)| {
-		generate_versionstamp_sequences(vs4)
-			.take(limit_variance)
-			.skip(1)
-			.map(move |vs5| (vs1, vs2, vs3, vs4, vs5))
+		vs4.iter().take(limit_variance).skip(1).map(move |vs5| (vs1, vs2, vs3, vs4, vs5))
 	});
 	let sixth = fifth.flat_map(|(vs1, vs2, vs3, vs4, vs5)| {
-		generate_versionstamp_sequences(vs5)
-			.take(limit_variance)
-			.skip(1)
-			.map(move |vs6| (vs1, vs2, vs3, vs4, vs5, vs6))
+		vs5.iter().take(limit_variance).skip(1).map(move |vs6| (vs1, vs2, vs3, vs4, vs5, vs6))
 	});
 	let allowed_values: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled() {
 		true => sixth
 			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
 				let (vs1, vs2, vs3, vs4, vs5, vs6) = (
-					to_u128_be(vs1),
-					to_u128_be(vs2),
-					to_u128_be(vs3),
-					to_u128_be(vs4),
-					to_u128_be(vs5),
-					to_u128_be(vs6),
+					vs1.into_u128(),
+					vs2.into_u128(),
+					vs3.into_u128(),
+					vs4.into_u128(),
+					vs5.into_u128(),
+					vs6.into_u128(),
 				);
 				Value::parse(
 					format!(
@@ -351,12 +337,12 @@ async fn table_change_feeds() -> Result<(), Error> {
 		false => sixth
 			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
 				let (vs1, vs2, vs3, vs4, vs5, vs6) = (
-					to_u128_be(vs1),
-					to_u128_be(vs2),
-					to_u128_be(vs3),
-					to_u128_be(vs4),
-					to_u128_be(vs5),
-					to_u128_be(vs6),
+					vs1.into_u128(),
+					vs2.into_u128(),
+					vs3.into_u128(),
+					vs4.into_u128(),
+					vs5.into_u128(),
+					vs6.into_u128(),
 				);
 				Value::parse(
 					format!(

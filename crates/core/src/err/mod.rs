@@ -6,7 +6,7 @@ use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::syn::error::RenderedError as RenderedParserError;
-use crate::vs::Error as VersionstampError;
+use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 #[cfg(storage)]
@@ -815,7 +815,7 @@ pub enum Error {
 	Unimplemented(String),
 
 	#[error("Versionstamp in key is corrupted: {0}")]
-	CorruptedVersionstampInKey(#[from] VersionstampError),
+	CorruptedVersionstampInKey(#[from] VersionStampError),
 
 	/// Invalid level
 	#[error("Invalid level '{0}'")]

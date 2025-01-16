@@ -1,4 +1,5 @@
 use crate::vs::Versionstamp;
+use num_traits::ToBytes;
 use std::fmt;
 use thiserror::Error;
 
