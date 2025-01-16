@@ -56,7 +56,7 @@ pub struct DefineTableStatement {
 	pub cache_indexes_ts: Uuid,
 	/// The last time that a LIVE query was added to this table
 	#[revision(start = 5, end = 6, convert_fn = "convert_cache_ts")]
-	pub _cache_lives_ts: Uuid,
+	pub cache_lives_ts: Uuid,
 }
 
 impl DefineTableStatement {

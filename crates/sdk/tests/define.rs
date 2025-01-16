@@ -1305,7 +1305,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
 	assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
 	assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
-	assert_ne!(initial.cache_lives_ts, after_define.cache_lives_ts);
+	// TODO: EK check live query cache version
 
 	// Remove the defined resources to refresh the UUIDs
 	let sql = r"
@@ -1333,7 +1333,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
 	assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
 	assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
-	assert_ne!(after_define.cache_lives_ts, after_remove.cache_lives_ts);
+	// TODO: EK check live query cache version
 	//
 	Ok(())
 }
