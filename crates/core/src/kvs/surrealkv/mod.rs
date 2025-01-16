@@ -142,7 +142,7 @@ impl super::api::Transaction for Transaction {
 		match self.inner.take() {
 			Some(mut inner) => {
 				// Execute on the blocking threadpool
-				affinitypool::execute(move || -> Result<_, Error> {
+				affinitypool::spawn_local(move || -> Result<_, Error> {
 					inner.rollback();
 					Ok(())
 				})
@@ -171,7 +171,7 @@ impl super::api::Transaction for Transaction {
 		match self.inner.take() {
 			Some(mut inner) => {
 				// Execute on the blocking threadpool
-				/*affinitypool::execute(move || -> Result<_, Error> {
+				/*affinitypool::spawn_local(move || -> Result<_, Error> {
 					inner.commit();
 					Ok(())
 				})
@@ -202,7 +202,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::execute(|| -> Result<_, Error> {
+		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Get the key
 			let res = inner.get(&key)?.is_some();
 			// Return result
@@ -233,7 +233,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::execute(|| -> Result<_, Error> {
+		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Get the key
 			let res = match version {
 				Some(ts) => inner.get_at_version(&key, ts)?,
@@ -273,7 +273,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key
 			match version {
 				Some(ts) => inner.set_at_ts(&key, &val, ts)?,
@@ -313,7 +313,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Replace the key
 			inner.insert_or_replace(&key, &val)?;
 			// Return result
@@ -350,7 +350,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key if empty
 			if let Some(ts) = version {
 				inner.set_at_ts(&key, &val, ts)?;
@@ -395,7 +395,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key if valid
 			match (inner.get(&key)?, chk) {
 				(Some(v), Some(w)) if v == w => inner.set(&key, &val)?,
@@ -434,7 +434,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Remove the key
 			inner.soft_delete(&key)?;
 			// Return result
@@ -471,7 +471,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key if valid
 			match (inner.get(&key)?, chk) {
 				(Some(v), Some(w)) if v == w => inner.soft_delete(&key)?,
@@ -510,7 +510,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Remove the key
 			inner.delete(&key)?;
 			// Return result
@@ -547,7 +547,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key if valid
 			match (inner.get(&key)?, chk) {
 				(Some(v), Some(w)) if v == w => inner.delete(&key)?,
@@ -588,7 +588,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::execute(|| -> Result<_, Error> {
+		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Retrieve the scan range
 			let res = match version {
 				Some(ts) => inner
@@ -634,7 +634,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::execute(|| -> Result<_, Error> {
+		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Retrieve the scan range
 			let res = match version {
 				Some(ts) => inner
@@ -678,7 +678,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::execute(|| -> Result<_, Error> {
+		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Retrieve the scan range
 			let res = inner
 				.scan_all_versions(beg.as_slice()..end.as_slice(), Some(limit as usize))

@@ -251,7 +251,7 @@ impl super::api::Transaction for Transaction {
 		match self.inner.take() {
 			Some(inner) => {
 				// Execute on the blocking threadpool
-				affinitypool::execute(move || -> Result<_, Error> {
+				affinitypool::spawn_local(move || -> Result<_, Error> {
 					inner.rollback()?;
 					Ok(())
 				})
@@ -280,7 +280,7 @@ impl super::api::Transaction for Transaction {
 		match self.inner.take() {
 			Some(inner) => {
 				// Execute on the blocking threadpool
-				affinitypool::execute(move || -> Result<_, Error> {
+				affinitypool::spawn_local(move || -> Result<_, Error> {
 					inner.commit()?;
 					Ok(())
 				})
@@ -314,7 +314,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::execute(|| -> Result<_, Error> {
+		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Get the key
 			let res = inner.get_pinned_opt(key, &self.ro)?.is_some();
 			// Return result
@@ -349,7 +349,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::execute(|| -> Result<_, Error> {
+		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Get the key
 			let res = inner.get_opt(key, &self.ro)?;
 			// Return result
@@ -380,7 +380,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::execute(|| -> Result<_, Error> {
+		let (inner, res) = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Get the keys
 			let res = inner.multi_get_opt(keys, &self.ro);
 			// Convert result
@@ -423,7 +423,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key
 			inner.put(key, val)?;
 			// Return result
@@ -464,7 +464,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key if empty
 			match inner.get_pinned_opt(&key, &self.ro)? {
 				None => inner.put(key, val)?,
@@ -505,7 +505,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Set the key if empty
 			match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
 				(Some(v), Some(w)) if v.eq(&w) => inner.put(key, val)?,
@@ -544,7 +544,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Remove the key
 			inner.delete(key)?;
 			// Return result
@@ -581,7 +581,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let inner = affinitypool::execute(|| -> Result<_, Error> {
+		let inner = affinitypool::spawn_local(|| -> Result<_, Error> {
 			// Delete the key if valid
 			match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
 				(Some(v), Some(w)) if v.eq(&w) => inner.delete(key)?,
@@ -628,7 +628,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::execute(|| {
+		let (inner, res) = affinitypool::spawn_local(|| {
 			// Create result set
 			let mut res = vec![];
 			// Set the key range
@@ -701,7 +701,7 @@ impl super::api::Transaction for Transaction {
 			None => return Err(fail!("Unable to use an already taken transaction")),
 		};
 		// Execute on the blocking threadpool
-		let (inner, res) = affinitypool::execute(|| {
+		let (inner, res) = affinitypool::spawn_local(|| {
 			// Create result set
 			let mut res = vec![];
 			// Set the key range
