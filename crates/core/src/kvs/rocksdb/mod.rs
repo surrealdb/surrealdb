@@ -747,18 +747,15 @@ impl super::api::Transaction for Transaction {
 
 impl Transaction {
 	pub(crate) fn new_save_point(&mut self) {
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
-		// Set the save point
-		inner.set_savepoint();
+		if let Some(inner) = self.inner.as_ref() {
+			inner.set_savepoint();
+		}
 	}
 
 	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
-		// Rollback
-		inner.rollback_to_savepoint()?;
-		//
+		if let Some(inner) = self.inner.as_ref() {
+			inner.rollback_to_savepoint()?;
+		}
 		Ok(())
 	}
 

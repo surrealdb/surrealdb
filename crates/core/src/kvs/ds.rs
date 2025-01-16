@@ -410,6 +410,12 @@ impl Datastore {
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		}?;
+		// Create a new blocking threadpool
+		let _ = affinitypool::Builder::new()
+			.thread_name("surrealdb-threadpool")
+			.thread_per_core(true)
+			.build()
+			.build_global();
 		// Set the properties on the datastore
 		flavor.map(|flavor| {
 			let tf = TransactionFactory {
