@@ -53,6 +53,12 @@ user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2021-02-25"
 end = "2025-01-24"
 
+[[trusted.affinitypool]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-01-06"
+end = "2026-01-16"
+
 [[trusted.aho-corasick]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
