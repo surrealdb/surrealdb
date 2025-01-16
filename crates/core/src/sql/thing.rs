@@ -4,9 +4,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::key::r#ref::Ref;
 use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
 use crate::syn;
 use derive::Store;
+use futures::StreamExt;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -129,6 +131,65 @@ impl Thing {
 				Thing::from((self.tb, self.id)).into(),
 			))))),
 		}
+	}
+
+	pub(crate) async fn refs(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+		ft: Option<&Table>,
+		ff: Option<&Idiom>,
+	) -> Result<Vec<Thing>, Error> {
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+
+		let (prefix, suffix) = match (ft, ff) {
+			(Some(ft), Some(ff)) => {
+				let ff = ff.to_string();
+
+				(
+					crate::key::r#ref::ffprefix(ns, db, &self.tb, &self.id, ft, &ff),
+					crate::key::r#ref::ffsuffix(ns, db, &self.tb, &self.id, ft, &ff),
+				)
+			}
+			(Some(ft), None) => (
+				crate::key::r#ref::ftprefix(ns, db, &self.tb, &self.id, ft),
+				crate::key::r#ref::ftsuffix(ns, db, &self.tb, &self.id, ft),
+			),
+			(None, None) => (
+				crate::key::r#ref::prefix(ns, db, &self.tb, &self.id),
+				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
+			),
+			(None, Some(_)) => {
+				return Err(Error::Unreachable(
+					"A foreign field was passed without a foreign table".into(),
+				))
+			}
+		};
+
+		let txn = ctx.tx();
+		let range = prefix..suffix;
+		let mut stream = txn.stream_keys(range);
+
+		// Collect the keys from the stream into a vec
+		let mut keys: Vec<Vec<u8>> = vec![];
+		while let Some(res) = stream.next().await {
+			keys.push(res?);
+		}
+
+		let ids = keys
+			.iter()
+			.map(|x| {
+				let key = Ref::from(x);
+
+				Thing {
+					tb: key.ft.to_string(),
+					id: key.fk,
+				}
+			})
+			.collect();
+
+		Ok(ids)
 	}
 }
 

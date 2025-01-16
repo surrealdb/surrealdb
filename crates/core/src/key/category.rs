@@ -157,8 +157,13 @@ pub enum Category {
 	///
 	/// ------------------------------
 	///
-	/// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{fk}
+	/// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
 	Graph,
+	///
+	/// ------------------------------
+	///
+	/// crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{ff}{fk}
+	Ref,
 }
 
 impl Display for Category {
@@ -225,6 +230,7 @@ impl Display for Category {
 			Self::ChangeFeed => "ChangeFeed",
 			Self::Thing => "Thing",
 			Self::Graph => "Graph",
+			Self::Ref => "Ref",
 		};
 		write!(f, "{}", name)
 	}

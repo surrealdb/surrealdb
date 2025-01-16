@@ -257,7 +257,7 @@ mod cli_integration {
 		.await
 		.unwrap();
 
-		std::thread::sleep(std::time::Duration::from_millis(5000));
+		std::thread::sleep(std::time::Duration::from_millis(10000));
 		let output = server.kill().output().err().unwrap();
 
 		// Test the crt/key args but the keys are self signed so don't actually connect.

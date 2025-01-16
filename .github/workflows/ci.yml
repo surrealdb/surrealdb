@@ -389,10 +389,19 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Test workspace
         run: |
-          docker run --rm --pull always -p 8000:8000 surrealdb/surrealdb:nightly start --user root --pass root --allow-all &
-          make test
+          npx -y concurrently \
+            --kill-others \
+            --success first \
+            --names "server,client" \
+            --prefix-colors "blue.bold,green.bold" \
+            "SURREAL_LOG=info make serve" \
+            "npx -y wait-on tcp:8000 && make test"
 
   graphql-integration:
     name: GraphQL integration

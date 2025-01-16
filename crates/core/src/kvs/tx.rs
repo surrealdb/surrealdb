@@ -1529,6 +1529,18 @@ impl Transaction {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn del_record(&self, ns: &str, db: &str, tb: &str, id: &Id) -> Result<(), Error> {
+		// Set the value in the datastore
+		let key = crate::key::thing::new(ns, db, tb, id);
+		self.del(&key).await?;
+		// Set the value in the cache
+		let key = cache::tx::Lookup::Record(ns, db, tb, id);
+		self.cache.remove(&key);
+		// Return nothing
+		Ok(())
+	}
+
 	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_ns(
