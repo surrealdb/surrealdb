@@ -2,8 +2,7 @@ use crate::err::Error;
 use crate::key::change;
 use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
-use crate::vs;
-use crate::vs::Versionstamp;
+use crate::vs::VersionStamp;
 use std::str;
 
 // gc_all_at deletes all change feed entries that become stale at the given timestamp.
@@ -72,9 +71,9 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 
 // gc_db deletes all change feed entries in the given database that are older than the given watermark.
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
-pub async fn gc_range(tx: &Transaction, ns: &str, db: &str, vt: Versionstamp) -> Result<(), Error> {
+pub async fn gc_range(tx: &Transaction, ns: &str, db: &str, vt: VersionStamp) -> Result<(), Error> {
 	// Calculate the range
-	let beg = change::prefix_ts(ns, db, vs::u64_to_versionstamp(0));
+	let beg = change::prefix_ts(ns, db, VersionStamp::ZERO);
 	let end = change::prefix_ts(ns, db, vt);
 	// Trace for debugging
 	trace!(
