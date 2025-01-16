@@ -92,13 +92,6 @@ impl Config {
 		self
 	}
 
-	/// Get the capabilities for the database
-	/// Used internally in the CLI to pass on capabilities to the parser
-	#[doc(hidden)]
-	pub fn get_capabilities(&self) -> &CoreCapabilities {
-		&self.capabilities
-	}
-
 	#[cfg(storage)]
 	pub fn temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path;
