@@ -591,16 +591,6 @@ impl Capabilities {
 	}
 }
 
-// impl Into<Vec<ExperimentalTarget>> for Capabilities {
-// 	fn into(self) -> Vec<ExperimentalTarget> {
-// 		self.allow_experimental
-// 			.as_ref()
-// 			.into_iter()
-// 			.filter(|t| !self.deny_experimental.matches(t))
-// 			.collect()
-// 	}
-// }
-
 #[cfg(test)]
 mod tests {
 	use std::str::FromStr;
