@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
