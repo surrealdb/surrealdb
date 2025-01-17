@@ -269,7 +269,7 @@ impl Test {
 	/// Simulates restarting the Datastore
 	/// - Data are persistent (including memory store)
 	/// - Flushing caches (jwks, IndexStore, ...)
-	#[allow(dead_code)]
+	#[cfg(debug_assertions)]
 	pub async fn restart(self, sql: &str) -> Result<Self, Error> {
 		Self::new_ds(self.ds.restart(), sql).await
 	}

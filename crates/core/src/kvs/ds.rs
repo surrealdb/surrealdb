@@ -251,30 +251,6 @@ impl Datastore {
 		Self::new_with_clock(path, None).await
 	}
 
-	#[cfg(debug_assertions)]
-	/// Create a new datastore with the same persistent data (inner), with flushed cache.
-	/// Simulating a server restart
-	pub fn restart(self) -> Self {
-		Self {
-			id: self.id,
-			strict: self.strict,
-			auth_enabled: self.auth_enabled,
-			query_timeout: self.query_timeout,
-			transaction_timeout: self.transaction_timeout,
-			capabilities: self.capabilities,
-			notification_channel: self.notification_channel,
-			index_stores: Default::default(),
-			#[cfg(not(target_family = "wasm"))]
-			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
-			#[cfg(feature = "jwks")]
-			jwks_cache: Arc::new(Default::default()),
-			#[cfg(storage)]
-			temporary_directory: self.temporary_directory,
-			transaction_factory: self.transaction_factory,
-			cache: Arc::new(cache::ds::new()),
-		}
-	}
-
 	#[allow(unused_variables)]
 	pub async fn new_with_clock(
 		path: &str,
@@ -435,6 +411,30 @@ impl Datastore {
 				cache: Arc::new(cache::ds::new()),
 			}
 		})
+	}
+
+	/// Create a new datastore with the same persistent data (inner), with flushed cache.
+	/// Simulating a server restart
+	#[cfg(debug_assertions)]
+	pub fn restart(self) -> Self {
+		Self {
+			id: self.id,
+			strict: self.strict,
+			auth_enabled: self.auth_enabled,
+			query_timeout: self.query_timeout,
+			transaction_timeout: self.transaction_timeout,
+			capabilities: self.capabilities,
+			notification_channel: self.notification_channel,
+			index_stores: Default::default(),
+			#[cfg(not(target_family = "wasm"))]
+			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
+			#[cfg(feature = "jwks")]
+			jwks_cache: Arc::new(Default::default()),
+			#[cfg(storage)]
+			temporary_directory: self.temporary_directory,
+			transaction_factory: self.transaction_factory,
+			cache: Arc::new(cache::ds::new()),
+		}
 	}
 
 	/// Specify whether this Datastore should run in strict mode
