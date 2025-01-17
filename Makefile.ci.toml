@@ -1,6 +1,7 @@
 [tasks.ci-format]
 category = "CI - CHECK"
-dependencies = ["cargo-fmt", "--all", "--check"]
+command = "cargo"
+dependencies = ["fmt", "--all", "--check"]
 
 [tasks.ci-check]
 category = "CI - CHECK"
