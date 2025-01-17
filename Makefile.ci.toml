@@ -81,6 +81,10 @@ args = [
     "--skip",
     "ws_integration",
     "--skip",
+    "ml_integration",
+    "--skip",
+    "graphql_integration",
+    "--skip",
     "database_upgrade",
 ]
 
@@ -104,6 +108,10 @@ args = [
     "http_integration",
     "--skip",
     "ws_integration",
+    "--skip",
+    "ml_integration",
+    "--skip",
+    "graphql_integration",
     "--skip",
     "database_upgrade",
 ]

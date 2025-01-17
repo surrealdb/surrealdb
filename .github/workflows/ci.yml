@@ -189,7 +189,7 @@ jobs:
       - name: Check revision.lock
         run: revision-lock --check
 
-  check-cli:
+  cli-integration:
     name: CLI integration tests
     runs-on: ubuntu-latest
     steps:
@@ -210,7 +210,7 @@ jobs:
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
 
-  http-server:
+  http-integration:
     name: HTTP integration tests
     runs-on: ubuntu-latest
     steps:
@@ -231,7 +231,7 @@ jobs:
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
 
-  ws-server:
+  ws-integration:
     name: WebSocket integration tests
     runs-on: ubuntu-latest
     steps:
@@ -252,7 +252,7 @@ jobs:
       - name: Run WS integration tests
         run: cargo make ci-ws-integration
 
-  ml-support:
+  ml-integration:
     name: ML integration tests
     runs-on: ubuntu-latest
     steps:
@@ -354,7 +354,7 @@ jobs:
         run: cargo build
 
   any-engine:
-    name: Any engine
+    name: Test SDK Any engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -383,7 +383,7 @@ jobs:
           ps auxf
 
   ws-engine:
-    name: WebSocket engine
+    name: Test SDK WebSocket engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -412,7 +412,7 @@ jobs:
           ps auxf
 
   http-engine:
-    name: HTTP engine
+    name: Test SDK HTTP engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -441,7 +441,7 @@ jobs:
           ps auxf
 
   mem-engine:
-    name: Memory engine
+    name: Test SDK Memory engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -470,7 +470,7 @@ jobs:
           ps auxf
 
   file-engine:
-    name: File engine
+    name: Test SDK File engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -499,7 +499,7 @@ jobs:
           ps auxf
 
   rocksdb-engine:
-    name: RocksDB engine
+    name: Test SDK RocksDB engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -528,7 +528,7 @@ jobs:
           ps auxf
 
   surrealkv-engine:
-    name: SurrealKV engine
+    name: Test SDK SurrealKV engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -557,7 +557,7 @@ jobs:
           ps auxf
 
   tikv-engine:
-    name: TiKV engine
+    name: Test SDK TiKV engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -593,7 +593,7 @@ jobs:
           ps auxf
 
   fdb-engine-7-1:
-    name: FoundationDB engine 7.1
+    name: Test SDK FoundationDB engine 7.1
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -627,7 +627,7 @@ jobs:
           ps auxf
 
   fdb-engine-7-3:
-    name: FoundationDB engine 7.3
+    name: Test SDK FoundationDB engine 7.3
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -682,7 +682,7 @@ jobs:
         run: cargo make ci-database-upgrade
 
   lang-tests:
-    name: Run SurrealQL language tests.
+    name: Run SurrealQL language tests
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
