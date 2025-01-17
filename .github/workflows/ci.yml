@@ -60,7 +60,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: surreal-${{ matrix.name }}
-          path: target/${{ matrix.target }}/release/surreal
+          path: target/${{ matrix.target }}/debug/surreal
 
   # ----------------------------------------
   # Code quality checks
