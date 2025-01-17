@@ -1654,7 +1654,7 @@ impl Transaction {
 	) -> Result<Option<Uuid>, Error> {
 		let range = key::table::vl::range(ns, db, tb);
 		let keys = self.keys(range, 1, None).await?;
-		let v = keys.iter().next().map(|k| {
+		let v = keys.first().map(|k| {
 			let vl: Vl = k.into();
 			vl.v
 		});

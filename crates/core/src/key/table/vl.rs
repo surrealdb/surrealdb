@@ -21,6 +21,9 @@ pub struct Vl<'a> {
 	_d: u8,
 	_e: u8,
 	_f: u8,
+	/// The UUID must be a UUIDv7 so the serialized version preserved the order
+	/// This specialized serializer ensure that the natural order is descendant.
+	/// That way, the iterator will return the more recent UUID first.
 	#[serde(with = "crate::sql::uuid::reverse")]
 	pub v: Uuid,
 }
@@ -72,7 +75,7 @@ impl<'a> Vl<'a> {
 #[cfg(test)]
 mod tests {
 	use crate::kvs::Key;
-	use uuid::Timestamp;
+	use uuid::{ContextV7, Timestamp, Uuid};
 
 	#[test]
 	fn key() {
@@ -83,7 +86,7 @@ mod tests {
 		let enc = Vl::encode(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\x00*testdb\x00*testtb\x00!vl\x10\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04\x03\x02\x01"
+			b"/*testns\x00*testdb\x00*testtb\x00!vl\xfe\xfd\xfc\xfb\xfa\xf9\xf8\xf7\xf6\xf5\xf4\xf3\xf2\xf1\xf0\xef"
 		);
 
 		let dec = Vl::decode(&enc).unwrap();
@@ -104,13 +107,20 @@ mod tests {
 
 	#[test]
 	fn ascendant_uuid() {
-		// The more recent key should be first
-		let uuid_new = uuid::Uuid::new_v7(Timestamp::from_gregorian(1000001, 0));
-		// The older key should be last
-		let uuid_old = uuid::Uuid::new_v7(Timestamp::from_gregorian(1000000, 0));
-		let key_new: Key = super::new("testns", "testdb", "testtb", uuid_new).into();
-		let key_old: Key = super::new("testns", "testdb", "testtb", uuid_old).into();
+		// Create UUIDs
+		let context = ContextV7::new();
+		let u1 = Uuid::new_v7(Timestamp::now(&context));
+		let u2 = Uuid::new_v7(Timestamp::now(&context));
+		let u3 = Uuid::new_v7(Timestamp::now(&context));
+
+		// Convert to keys
+		let k1: Key = super::new("testns", "testdb", "testtb", u1).into();
+		let k2: Key = super::new("testns", "testdb", "testtb", u2).into();
+		let k3: Key = super::new("testns", "testdb", "testtb", u3).into();
+
 		// Check that the most recent key comes first
-		assert!(key_new < key_old);
+		assert!(k1 > k2, "{k1:?}\n{k2:?}");
+		assert!(k2 > k3, "{k2:?}\n{k3:?}");
+		assert!(k1 > k3, "{k1:?}\n{k3:?}");
 	}
 }

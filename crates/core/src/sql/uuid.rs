@@ -104,19 +104,21 @@ impl Display for Uuid {
 	}
 }
 
-/// This module implements a serializer/deserializer that ensure reverse order for UUID.
-/// More recent UUID comes first.
+/// This module implements a serializer/deserializer that ensure reverse order.
+/// Its works for UUIDv7 to get the more recent UUID first.
 pub(crate) mod reverse {
 	use serde::{Deserializer, Serializer};
-	use uuid::Uuid;
+	use uuid::{Bytes, Uuid};
 
 	/// Custom serializer that reverses the bytes before serialization
 	pub(crate) fn serialize<S>(u: &Uuid, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
-		let mut b = u.into_bytes();
-		b.reverse();
+		// To invert the sort order, we apply bitwise NOT to the u128 value.
+		// After that transformation,larger original values become smaller,
+		// which flips the ascending sort order.
+		let b = (!u.as_u128()).to_be_bytes();
 		serde::Serialize::serialize(&b, serializer)
 	}
 
@@ -125,8 +127,56 @@ pub(crate) mod reverse {
 	where
 		D: Deserializer<'de>,
 	{
-		let mut bytes: [u8; 16] = serde::Deserialize::deserialize(deserializer)?;
-		bytes.reverse();
-		Ok(Uuid::from_bytes(bytes))
+		let b: Bytes = serde::Deserialize::deserialize(deserializer)?;
+
+		Ok(Uuid::from_u128(!u128::from_be_bytes(b)))
+	}
+
+	#[cfg(test)]
+	mod tests {
+		use bincode::{DefaultOptions, Deserializer, Serializer};
+		use uuid::{ContextV7, Timestamp, Uuid};
+
+		#[test]
+		fn ascendant_uuid() {
+			let ser = |u: &Uuid| {
+				let mut vec = Vec::new();
+				let mut ser = Serializer::new(&mut vec, DefaultOptions::new());
+				super::serialize(u, &mut ser).unwrap();
+				vec
+			};
+
+			let de = |v: &Vec<u8>| {
+				let mut de = Deserializer::from_slice(v, DefaultOptions::new());
+				super::deserialize(&mut de).unwrap()
+			};
+
+			// Create the UUIDS
+			let context = ContextV7::new();
+			let u1 = Uuid::new_v7(Timestamp::now(&context));
+			let u2 = Uuid::new_v7(Timestamp::now(&context));
+			let u3 = Uuid::new_v7(Timestamp::now(&context));
+
+			// Check that the initial ascendant order is valid
+			assert!(u1 < u2, "u1: {u1}\nu2: {u2}");
+			assert!(u2 < u3, "u2: {u2}\nu3: {u3}");
+			assert!(u1 < u3, "u1: {u1}\nu3: {u3}");
+
+			// Serialize the UUIDs
+			let (v1, v2, v3) = (ser(&u1), ser(&u2), ser(&u3));
+
+			// Check that the order of the vectors is now descendant
+			assert!(v1 > v2, "v1: {v1:x?}\nv2: {v2:x?}");
+			assert!(v2 > v3, "v2: {v2:x?}\nv3: {v3:x?}");
+			assert!(v1 > v3, "v1: {v1:x?}\nv3: {v3:x?}");
+
+			// Deserialize back the UUIDS
+			let (uc1, uc2, uc3) = (de(&v1), de(&v2), de(&v3));
+
+			// Check that the UUID are correct
+			assert_eq!(u1, uc1);
+			assert_eq!(u2, uc2);
+			assert_eq!(u3, uc3);
+		}
 	}
 }
