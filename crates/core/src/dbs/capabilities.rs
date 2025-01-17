@@ -111,12 +111,14 @@ impl std::str::FromStr for FuncTarget {
 #[non_exhaustive]
 pub enum ExperimentalTarget {
 	RecordReferences,
+	GraphQL,
 }
 
 impl fmt::Display for ExperimentalTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::RecordReferences => write!(f, "record_references"),
+			Self::GraphQL => write!(f, "graphql"),
 		}
 	}
 }
@@ -131,6 +133,7 @@ impl Target<str> for ExperimentalTarget {
 	fn matches(&self, elem: &str) -> bool {
 		match self {
 			Self::RecordReferences => elem.eq_ignore_ascii_case("record_references"),
+			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
 		}
 	}
 }
@@ -155,12 +158,11 @@ impl std::str::FromStr for ExperimentalTarget {
 	type Err = ParseExperimentalTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match s.trim() {
-			s if s.eq_ignore_ascii_case("record_references") => {
-				Ok(ExperimentalTarget::RecordReferences)
-			}
+		match_insensitive!(s.trim(), {
+			"record_references" => Ok(ExperimentalTarget::RecordReferences),
+			"graphql" => Ok(ExperimentalTarget::GraphQL),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
-		}
+		})
 	}
 }
 

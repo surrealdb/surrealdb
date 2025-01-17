@@ -224,6 +224,15 @@ macro_rules! async_defer{
 	};
 }
 
+/// Works like a match statement, but matches &str insensitive
+macro_rules! match_insensitive {
+    ($s:expr, { $($p:literal => $e:expr,)* _ => $fe:expr $(,)? }) => {{
+        let s = $s.to_lowercase();
+        $(if s == $p.to_lowercase() { $e }
+        else)* { $fe }
+    }};
+}
+
 #[cfg(test)]
 mod test {
 	use crate::err::Error;
