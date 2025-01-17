@@ -48,6 +48,32 @@ jobs:
       - name: Check format
         run: cargo make ci-format
 
+  clippy:
+    name: Check clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Run clippy
+        run: cargo make ci-clippy
+
+      - name: Run clippy release
+        run: cargo make ci-clippy-release
+
   check:
     name: Check workspace
     runs-on: ubuntu-latest
@@ -63,10 +89,6 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
@@ -75,30 +97,6 @@ jobs:
 
       - name: Check workspace release
         run: cargo make ci-check-release
-
-  make-check:
-    name: Check `make check`
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: sudo apt-get -y update
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Check workspace
-        run: make check
 
   check-msrv:
     name: Check workspace MSRV
@@ -114,10 +112,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -178,9 +172,9 @@ jobs:
 
       - name: Check wasm
         run: cargo make ci-check-wasm
-  
-  check-revision-lock:
-    name: Check revision.lock
+
+  check-revision:
+    name: Check revision
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -191,34 +185,11 @@ jobs:
 
       - name: Install revision-lock
         run: cargo install revision-lock
-      
+
       - name: Check revision.lock
         run: revision-lock --check
 
-  clippy:
-    name: Check clippy
-    runs-on: [runner-arm64-large]
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Run clippy
-        run: cargo make ci-clippy
-
-  cli:
+  check-cli:
     name: CLI integration tests
     runs-on: ubuntu-latest
     steps:
@@ -233,24 +204,11 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-          cat /tmp/surrealdb.log || true
 
   http-server:
     name: HTTP integration tests
@@ -266,10 +224,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -292,10 +246,6 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
@@ -317,15 +267,32 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
+
+  graphql-integration:
+    name: GraphQL integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: run graphql integration test
+        run: cargo make ci-graphql-integration
 
   test:
     name: Test workspace
@@ -343,8 +310,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
-        run: |
-          sudo apt-get -y update
+        run: sudo apt-get -y update
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -364,70 +330,6 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 5
 
-  make-test:
-    name: Check `make test`
-    runs-on: [runner-arm64-2xlarge]
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Test workspace
-        run: |
-          npx -y concurrently \
-            --kill-others \
-            --success first \
-            --names "server,client" \
-            --prefix-colors "blue.bold,green.bold" \
-            "SURREAL_LOG=info make serve" \
-            "npx -y wait-on tcp:8000 && make test"
-
-  graphql-integration:
-    name: GraphQL integration
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: run graphql integration test
-        run: cargo make ci-graphql-integration
-
   test-sdk-build:
     name: Test SDK build
     runs-on: ubuntu-latest
@@ -443,10 +345,6 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
       - name: Build local
         working-directory: tests/sdk/local
         run: cargo build
@@ -454,6 +352,35 @@ jobs:
       - name: Build remote
         working-directory: tests/sdk/remote
         run: cargo build
+
+  any-engine:
+    name: Any engine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test any engine
+        run: cargo make ci-api-integration-any
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
 
   ws-engine:
     name: WebSocket engine
@@ -469,10 +396,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -503,48 +426,11 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
       - name: Test http engine
         run: cargo make ci-api-integration-http
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  any-engine:
-    name: Any engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test any engine
-        run: cargo make ci-api-integration-any
 
       - name: Debug info
         if: always()
@@ -684,10 +570,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
 
       - name: Install TiUP
         timeout-minutes: 10
