@@ -136,6 +136,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: crates/fuzz
 
       - name: Check fuzzers
         run: cargo build --manifest-path crates/fuzz/Cargo.toml
@@ -328,7 +329,7 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 5
 
-  test-sdk-build:
+  sdk-build:
     name: Test SDK build
     runs-on: ubuntu-latest
     steps:
@@ -352,7 +353,7 @@ jobs:
         run: cargo build
 
   any-engine:
-    name: Test SDK Any engine
+    name: Rust SDK - Any engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -381,7 +382,7 @@ jobs:
           ps auxf
 
   ws-engine:
-    name: Test SDK WebSocket engine
+    name: Rust SDK - WebSocket engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -410,7 +411,7 @@ jobs:
           ps auxf
 
   http-engine:
-    name: Test SDK HTTP engine
+    name: Rust SDK - HTTP engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -439,7 +440,7 @@ jobs:
           ps auxf
 
   mem-engine:
-    name: Test SDK Memory engine
+    name: Rust SDK - Memory engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -468,7 +469,7 @@ jobs:
           ps auxf
 
   file-engine:
-    name: Test SDK File engine
+    name: Rust SDK - File engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -497,7 +498,7 @@ jobs:
           ps auxf
 
   rocksdb-engine:
-    name: Test SDK RocksDB engine
+    name: Rust SDK - RocksDB engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -526,7 +527,7 @@ jobs:
           ps auxf
 
   surrealkv-engine:
-    name: Test SDK SurrealKV engine
+    name: Rust SDK - SurrealKV engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -555,7 +556,7 @@ jobs:
           ps auxf
 
   tikv-engine:
-    name: Test SDK TiKV engine
+    name: Rust SDK - TiKV engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -591,7 +592,7 @@ jobs:
           ps auxf
 
   fdb-engine-7-1:
-    name: Test SDK FoundationDB engine 7.1
+    name: Rust SDK - FoundationDB engine 7.1
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -625,7 +626,7 @@ jobs:
           ps auxf
 
   fdb-engine-7-3:
-    name: Test SDK FoundationDB engine 7.3
+    name: Rust SDK - FoundationDB engine 7.3
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
