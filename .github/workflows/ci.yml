@@ -800,12 +800,6 @@ jobs:
         with:
           bun-version: ${{ matrix.version }}
 
-      - name: Start SurrealDB
-        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
-
-      - name: Wait for startup
-        run: sleep 10
-
       - name: Install dependencies
         run: bun install
 
@@ -813,11 +807,13 @@ jobs:
         run: bun test
         env:
           SURREAL_PROTOCOL: http
+          SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
       - name: Run JavaScript WebSocket tests
         run: bun test
         env:
           SURREAL_PROTOCOL: ws
+          SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
   sdk-golang:
     name: Golang SDK tests (${{ matrix.version }})
