@@ -804,6 +804,8 @@ pub trait RpcContext {
 
 		use serde::Serialize;
 
+		use crate::gql;
+
 		if !Self::GQL_SUPPORT {
 			return Err(RpcError::BadGQLConfig);
 		}
