@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{kind::Literal, Duration, Kind, Strand},
+	sql::{kind::Literal, Duration, Idiom, Kind, Strand, Table},
 	syn::{
+		error::bail,
 		lexer::compound,
 		parser::mac::expected,
 		token::{t, Glued, Keyword, Span, TokenKind},
@@ -144,6 +145,31 @@ impl Parser<'_> {
 				} else {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
+			}
+			t!("REFERENCES") => {
+				if !self.settings.references_enabled {
+					bail!(
+						"Experimental capability `record_references` is not enabled",
+						@self.last_span() => "Use of `REFERENCES` keyword is still experimental"
+					)
+				}
+
+				let span = self.peek().span;
+				let (table, path) = if self.eat(t!("<")) {
+					let table: Option<Table> = Some(self.next_token_value()?);
+					let path: Option<Idiom> = if self.eat(t!(",")) {
+						Some(self.parse_local_idiom(ctx).await?)
+					} else {
+						None
+					};
+
+					self.expect_closing_delimiter(t!(">"), span)?;
+					(table, path)
+				} else {
+					(None, None)
+				};
+
+				Ok(Kind::References(table, path))
 			}
 			_ => unexpected!(self, next, "a kind name"),
 		}

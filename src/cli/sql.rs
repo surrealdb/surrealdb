@@ -11,10 +11,11 @@ use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
+use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{connect, IntoEndpoint};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::{capabilities::Capabilities, Config};
-use surrealdb::sql::{self, Param, Statement, Uuid as CoreUuid, Value as CoreValue};
+use surrealdb::sql::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::{Notification, Response, Value};
 
 #[derive(Args, Debug)]
@@ -63,6 +64,7 @@ pub async fn init(
 ) -> Result<(), Error> {
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
+	let capabilities = config.get_capabilities().clone();
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
 	let client = if username.is_some()
@@ -101,6 +103,7 @@ pub async fn init(
 	// Set custom input validation
 	rl.set_helper(Some(InputValidator {
 		multi,
+		capabilities: &capabilities,
 	}));
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
@@ -181,7 +184,7 @@ pub async fn init(
 			continue;
 		}
 		// Complete the request
-		match sql::parse(&line) {
+		match surrealdb_core::syn::parse_with_capabilities(&line, &capabilities) {
 			Ok(mut query) => {
 				let mut namespace = None;
 				let mut database = None;
@@ -396,13 +399,14 @@ fn print(result: Result<String, Error>) {
 }
 
 #[derive(Completer, Helper, Highlighter, Hinter)]
-struct InputValidator {
+struct InputValidator<'a> {
 	/// If omitting semicolon causes newline.
 	multi: bool,
+	capabilities: &'a CoreCapabilities,
 }
 
 #[allow(clippy::if_same_then_else)]
-impl Validator for InputValidator {
+impl Validator for InputValidator<'_> {
 	fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
 		use ValidationResult::{Incomplete, Invalid, Valid};
 		// Filter out all new line characters
@@ -418,7 +422,7 @@ impl Validator for InputValidator {
 			Incomplete // The line ends with a backslash
 		} else if input.is_empty() {
 			Valid(None) // Ignore empty lines
-		} else if let Err(e) = sql::parse(input) {
+		} else if let Err(e) = surrealdb::syn::parse_with_capabilities(input, self.capabilities) {
 			Invalid(Some(format!(" --< {e}")))
 		} else {
 			Valid(None)

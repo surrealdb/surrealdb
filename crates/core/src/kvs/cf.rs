@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::kvs::Datastore;
 use crate::kvs::{LockType::*, TransactionType::*};
-use crate::vs::Versionstamp;
+use crate::vs::VersionStamp;
 
 impl Datastore {
 	/// Saves the current timestamp for each database's current versionstamp.
@@ -9,9 +9,9 @@ impl Datastore {
 	pub(crate) async fn changefeed_versionstamp(
 		&self,
 		ts: u64,
-	) -> Result<Option<Versionstamp>, Error> {
+	) -> Result<Option<VersionStamp>, Error> {
 		// Store the latest versionstamp
-		let mut vs: Option<Versionstamp> = None;
+		let mut vs: Option<VersionStamp> = None;
 		// Create a new transaction
 		let txn = self.transaction(Write, Optimistic).await?;
 		// Fetch all namespaces

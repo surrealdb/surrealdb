@@ -5,7 +5,7 @@ use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::{batch::Batch, Key, Val, Version};
-use crate::vs::Versionstamp;
+use crate::vs::VersionStamp;
 use std::fmt::Debug;
 use std::ops::Range;
 
@@ -488,7 +488,7 @@ pub trait Transaction {
 	/// which should be done immediately before the transaction commit.
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
+	async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -499,22 +499,16 @@ pub trait Transaction {
 		// Calculate the version key
 		let key = key.into();
 		// Calculate the version number
-		let ver = match self.get(key.as_slice(), None).await? {
-			Some(prev) => {
-				let res: Result<[u8; 10], Error> = match prev.as_slice().try_into() {
-					Ok(ba) => Ok(ba),
-					Err(e) => Err(Error::Tx(e.to_string())),
-				};
-				crate::vs::try_to_u64_be(res?)? + 1
-			}
-			None => 1,
+		let ver = match self.get(key.clone(), None).await? {
+			Some(prev) => VersionStamp::from_slice(prev.as_slice())?
+				.next()
+				.expect("exhausted all possible timestamps"),
+			None => VersionStamp::from_u64(1),
 		};
-		// Convert the timestamp to a versionstamp
-		let verbytes = crate::vs::u64_to_versionstamp(ver);
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key.as_slice(), verbytes.to_vec(), None).await?;
+		self.set(key, &ver.as_bytes(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
-		Ok(verbytes)
+		Ok(ver)
 	}
 
 	/// Insert the versionstamped key into the datastore.
@@ -541,7 +535,7 @@ pub trait Transaction {
 		// Continue with function logic
 		let ts = self.get_timestamp(ts_key).await?;
 		let mut k: Vec<u8> = prefix.into();
-		k.append(&mut ts.to_vec());
+		k.extend_from_slice(&ts.as_bytes());
 		k.append(&mut suffix.into());
 		self.set(k, val, None).await
 	}

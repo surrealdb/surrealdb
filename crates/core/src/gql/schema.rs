@@ -76,13 +76,13 @@ pub async fn generate_schema(
 
 	match (&tbs, &fns) {
 		(None, None) => return Err(GqlError::NotConfigured),
-		(None, Some(fs)) if fs.len() == 0 => {
+		(None, Some(fs)) if fs.is_empty() => {
 			return Err(schema_error("no functions found in database"))
 		}
-		(Some(ts), None) if ts.len() == 0 => {
+		(Some(ts), None) if ts.is_empty() => {
 			return Err(schema_error("no tables found in database"))
 		}
-		(Some(ts), Some(fs)) if ts.len() == 0 && fs.len() == 0 => {
+		(Some(ts), Some(fs)) if ts.is_empty() && fs.is_empty() => {
 			return Err(schema_error("no items found in database"));
 		}
 		_ => {}
@@ -94,7 +94,7 @@ pub async fn generate_schema(
 	trace!(ns, db, ?tbs, ?fns, "generating schema");
 
 	match tbs {
-		Some(tbs) if tbs.len() > 0 => {
+		Some(tbs) if !tbs.is_empty() => {
 			query = process_tbs(tbs, query, &mut types, &tx, ns, db, session, datastore).await?;
 		}
 		_ => {}
@@ -317,6 +317,14 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		// TODO(raphaeldarley): check if union is of literals and generate enum
 		// generate custom scalar from other literals?
 		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
+		Kind::References(ft, _) => {
+			let inner = match ft.to_owned() {
+				Some(ft) => Kind::Record(vec![ft]),
+				None => Kind::Record(vec![]),
+			};
+
+			TypeRef::List(Box::new(kind_to_type(inner, types)?))
+		}
 	};
 
 	let out = match optional {
@@ -643,5 +651,6 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Function(_, _) => Err(resolver_error("Sets are not yet supported")),
 		Kind::Range => Err(resolver_error("Ranges are not yet supported")),
 		Kind::Literal(_) => Err(resolver_error("Literals are not yet supported")),
+		Kind::References(_, _) => Err(resolver_error("Cannot convert value into references")),
 	}
 }

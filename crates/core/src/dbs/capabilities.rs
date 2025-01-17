@@ -109,6 +109,63 @@ impl std::str::FromStr for FuncTarget {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 #[non_exhaustive]
+pub enum ExperimentalTarget {
+	RecordReferences,
+}
+
+impl fmt::Display for ExperimentalTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::RecordReferences => write!(f, "record_references"),
+		}
+	}
+}
+
+impl Target for ExperimentalTarget {
+	fn matches(&self, elem: &ExperimentalTarget) -> bool {
+		self == elem
+	}
+}
+
+impl Target<str> for ExperimentalTarget {
+	fn matches(&self, elem: &str) -> bool {
+		match self {
+			Self::RecordReferences => elem.eq_ignore_ascii_case("record_references"),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseExperimentalTargetError {
+	InvalidName,
+}
+
+impl std::error::Error for ParseExperimentalTargetError {}
+impl fmt::Display for ParseExperimentalTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match *self {
+			ParseExperimentalTargetError::InvalidName => {
+				write!(f, "invalid experimental target name")
+			}
+		}
+	}
+}
+
+impl std::str::FromStr for ExperimentalTarget {
+	type Err = ParseExperimentalTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s.trim() {
+			s if s.eq_ignore_ascii_case("record_references") => {
+				Ok(ExperimentalTarget::RecordReferences)
+			}
+			_ => Err(ParseExperimentalTargetError::InvalidName),
+		}
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
 	IPNet(ipnet::IpNet),
@@ -179,7 +236,7 @@ impl std::str::FromStr for NetTarget {
 		if let Ok(url) = Url::parse(format!("http://{s}").as_str()) {
 			if let Some(host) = url.host() {
 				// Url::parse will return port=None if the provided port was 80 (given we are using the http scheme). Get the original port from the string.
-				if let Some(Ok(port)) = s.split(':').last().map(|p| p.parse::<u16>()) {
+				if let Some(Ok(port)) = s.split(':').next_back().map(|p| p.parse::<u16>()) {
 					return Ok(NetTarget::Host(host.to_owned(), Some(port)));
 				} else {
 					return Ok(NetTarget::Host(host.to_owned(), None));
@@ -316,7 +373,7 @@ pub enum Targets<T: Hash + Eq + PartialEq> {
 }
 
 impl<T: Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
-	fn matches<S>(&self, elem: &S) -> bool
+	pub(crate) fn matches<S>(&self, elem: &S) -> bool
 	where
 		S: ?Sized,
 		T: Target<S>,
@@ -358,6 +415,8 @@ pub struct Capabilities {
 	deny_rpc: Arc<Targets<MethodTarget>>,
 	allow_http: Arc<Targets<RouteTarget>>,
 	deny_http: Arc<Targets<RouteTarget>>,
+	allow_experimental: Arc<Targets<ExperimentalTarget>>,
+	deny_experimental: Arc<Targets<ExperimentalTarget>>,
 }
 
 impl fmt::Display for Capabilities {
@@ -385,6 +444,8 @@ impl Default for Capabilities {
 			deny_rpc: Arc::new(Targets::None),
 			allow_http: Arc::new(Targets::All),
 			deny_http: Arc::new(Targets::None),
+			allow_experimental: Arc::new(Targets::None),
+			deny_experimental: Arc::new(Targets::None),
 		}
 	}
 }
@@ -404,6 +465,8 @@ impl Capabilities {
 			deny_rpc: Arc::new(Targets::None),
 			allow_http: Arc::new(Targets::All),
 			deny_http: Arc::new(Targets::None),
+			allow_experimental: Arc::new(Targets::All),
+			deny_experimental: Arc::new(Targets::None),
 		}
 	}
 
@@ -421,6 +484,8 @@ impl Capabilities {
 			deny_rpc: Arc::new(Targets::None),
 			allow_http: Arc::new(Targets::None),
 			deny_http: Arc::new(Targets::None),
+			allow_experimental: Arc::new(Targets::None),
+			deny_experimental: Arc::new(Targets::None),
 		}
 	}
 
@@ -446,6 +511,16 @@ impl Capabilities {
 
 	pub fn without_functions(mut self, deny_funcs: Targets<FuncTarget>) -> Self {
 		self.deny_funcs = Arc::new(deny_funcs);
+		self
+	}
+
+	pub fn with_experimental(mut self, allow_experimental: Targets<ExperimentalTarget>) -> Self {
+		self.allow_experimental = Arc::new(allow_experimental);
+		self
+	}
+
+	pub fn without_experimental(mut self, deny_experimental: Targets<ExperimentalTarget>) -> Self {
+		self.deny_experimental = Arc::new(deny_experimental);
 		self
 	}
 
@@ -493,6 +568,14 @@ impl Capabilities {
 
 	pub fn allows_function_name(&self, target: &str) -> bool {
 		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
+	}
+
+	pub fn allows_experimental(&self, target: &ExperimentalTarget) -> bool {
+		self.allow_experimental.matches(target) && !self.deny_experimental.matches(target)
+	}
+
+	pub fn allows_experimental_name(&self, target: &str) -> bool {
+		self.allow_experimental.matches(target) && !self.deny_experimental.matches(target)
 	}
 
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {

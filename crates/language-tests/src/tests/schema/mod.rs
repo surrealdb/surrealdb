@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, fmt, str::FromStr};
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use surrealdb_core::{
-	dbs::capabilities::{FuncTarget, MethodTarget, NetTarget, RouteTarget},
+	dbs::capabilities::{FuncTarget, MethodTarget, NetTarget, RouteTarget, ExperimentalTarget},
 	sql::Value as CoreValue,
 	syn,
 };
@@ -327,6 +327,9 @@ pub struct Capabilities {
 
 	pub allow_http: Option<BoolOr<Vec<SchemaTarget<RouteTarget>>>>,
 	pub deny_http: Option<BoolOr<Vec<SchemaTarget<RouteTarget>>>>,
+
+	pub allow_experimental: Option<BoolOr<Vec<SchemaTarget<ExperimentalTarget>>>>,
+	pub deny_experimental: Option<BoolOr<Vec<SchemaTarget<ExperimentalTarget>>>>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
