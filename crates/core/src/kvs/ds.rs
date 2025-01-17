@@ -249,7 +249,7 @@ impl Datastore {
 	pub async fn new(path: &str) -> Result<Self, Error> {
 		Self::new_with_clock(path, None).await
 	}
- 
+
 	#[allow(unused_variables)]
 	pub async fn new_with_clock(
 		path: &str,
@@ -432,7 +432,7 @@ impl Datastore {
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			transaction_factory: self.transaction_factory,
-			cache: Arc::new(cache::ds::new()),
+			cache: Arc::new(DatastoreCache::new(tf)),
 		}
 	}
 
