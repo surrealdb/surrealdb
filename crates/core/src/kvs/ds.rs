@@ -862,7 +862,7 @@ impl Datastore {
 						// the buffer already contained more or equal to parse_size bytes
 						// this means we are trying to parse a statement of more then buffer size.
 						// so we need to increase the buffer size.
-						parse_size = parse_size.next_power_of_two();
+						parse_size = (parse_size + 1).next_power_of_two();
 					}
 					// start filling the buffer again.
 					filling = true;
