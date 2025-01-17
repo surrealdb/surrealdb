@@ -9,6 +9,7 @@
 
 #![deny(clippy::mem_forget)]
 #![forbid(unsafe_code)]
+#![deny(warnings)]
 
 #[macro_use]
 extern crate tracing;
