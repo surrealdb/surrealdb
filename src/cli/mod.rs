@@ -175,12 +175,16 @@ pub async fn init() -> ExitCode {
 		// Drop the log guards
 		drop(outg);
 		drop(errg);
+		// Final message
+		println!("Goodbye!");
 		// Return failure
 		ExitCode::FAILURE
 	} else {
 		// Drop the log guards
 		drop(outg);
 		drop(errg);
+		// Final message
+		println!("Goodbye!");
 		// Return success
 		ExitCode::SUCCESS
 	}
