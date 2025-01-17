@@ -903,3 +903,46 @@ jobs:
         run: python -m unittest discover -s tests
         env:
           SURREALDB_URL: http://localhost:8000
+
+  sdk-php:
+    name: PHP SDK tests (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 8.2
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.php"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.version }}
+
+      - name: Setup Composer
+        uses: php-actions/composer@v6
+        with:
+          php_version: ${{ matrix.version }}
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        run: sleep 10
+
+      - name: Run PHP tests
+        run: composer test-coverage
