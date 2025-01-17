@@ -32,7 +32,7 @@ jobs:
   common:
     name: Bench common
     runs-on: [runner-arm64-2xlarge]
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
