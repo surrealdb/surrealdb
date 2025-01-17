@@ -25,6 +25,47 @@ env:
   RUSTFLAGS: "--cfg surrealdb_unstable"
 
 jobs:
+  # ----------------------------------------
+  # Server build
+  # ----------------------------------------
+
+  build:
+    name: Build binary (${{ matrix.name }})
+    strategy:
+      matrix:
+        include:
+          - name: amd64
+            runner: runner-amd64-large
+            target: x86_64-unknown-linux-gnu
+          - name: arm64
+            runner: runner-arm64-large
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build binary
+        run: cargo build --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: surreal-${{ matrix.name }}
+          path: target/${{ matrix.target }}/debug/surreal
+
+  # ----------------------------------------
+  # Code quality checks
+  # ----------------------------------------
+
   format:
     name: Check format
     runs-on: ubuntu-latest
@@ -188,6 +229,10 @@ jobs:
       - name: Check revision.lock
         run: revision-lock --check
 
+  # ----------------------------------------
+  # Integration tests
+  # ----------------------------------------
+
   cli-integration:
     name: CLI integration tests
     runs-on: ubuntu-latest
@@ -293,6 +338,10 @@ jobs:
       - name: Run GraphQL integration tests
         run: cargo make ci-graphql-integration
 
+  # ----------------------------------------
+  # Workspace tests
+  # ----------------------------------------
+
   test:
     name: Test workspace
     runs-on: [runner-arm64-2xlarge]
@@ -328,6 +377,10 @@ jobs:
           name: code-coverage-report
           path: target/llvm-cov/html/
           retention-days: 5
+
+  # ----------------------------------------
+  # Rust SDK tests
+  # ----------------------------------------
 
   sdk-build:
     name: Test SDK build
@@ -659,6 +712,10 @@ jobs:
           df -h
           ps auxf
 
+  # ----------------------------------------
+  # Database upgrade tests
+  # ----------------------------------------
+
   db-upgrade:
     name: Database Upgrade from previous versions
     runs-on: ubuntu-latest
@@ -679,6 +736,10 @@ jobs:
 
       - name: Test upgrade
         run: cargo make ci-database-upgrade
+
+  # ----------------------------------------
+  # SurrealQL language tests
+  # ----------------------------------------
 
   lang-tests:
     name: Run SurrealQL language tests
@@ -705,3 +766,179 @@ jobs:
         run: |
           cd crates/language-tests
           ./target/debug/surrealql-test --color always run
+
+  # ----------------------------------------
+  # Other SDK tests
+  # ----------------------------------------
+
+  sdk-javascript:
+    name: JavaScript SDK tests (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.js"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup JavaScript
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ matrix.version }}
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run JavaScript HTTP tests
+        run: bun test
+        env:
+          SURREAL_PROTOCOL: http
+          SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
+
+      - name: Run JavaScript WebSocket tests
+        run: bun test
+        env:
+          SURREAL_PROTOCOL: ws
+          SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
+
+  sdk-golang:
+    name: Golang SDK tests (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 1.23
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.go"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup Golang
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.version }}
+          check-latest: true
+          cache-dependency-path: go.sum
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        run: sleep 10
+
+      - name: Run Golang tests
+        run: go test -v -cover ./...
+        env:
+          SURREALDB_URL: ws://localhost:8000/rpc
+
+  sdk-python:
+    name: Python SDK tests (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 3.13
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.py"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.version }}
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        run: sleep 10
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Python tests
+        run: python -m unittest discover -s tests
+        env:
+          SURREALDB_URL: http://localhost:8000
+
+  sdk-php:
+    name: PHP SDK tests (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 8.2
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.php"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.version }}
+
+      - name: Setup Composer
+        uses: php-actions/composer@v6
+        with:
+          php_version: ${{ matrix.version }}
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        run: sleep 10
+
+      - name: Run PHP tests
+        run: composer test-coverage-v2
