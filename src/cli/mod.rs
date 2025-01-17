@@ -135,6 +135,8 @@ pub async fn init() -> ExitCode {
 			warn!("You can upgrade using the {} command", "surreal upgrade");
 		}
 	}
+	// Check if we are running the server
+	let server = matches!(args.command, Commands::Start(_));
 	// Initialize opentelemetry and logging
 	let telemetry = crate::telemetry::builder().with_log_level("info").with_filter(args.log);
 	// Extract the telemetry log guards
@@ -176,7 +178,9 @@ pub async fn init() -> ExitCode {
 		drop(outg);
 		drop(errg);
 		// Final message
-		println!("Goodbye!");
+		if server {
+			println!("Goodbye!");
+		}
 		// Return failure
 		ExitCode::FAILURE
 	} else {
@@ -184,7 +188,9 @@ pub async fn init() -> ExitCode {
 		drop(outg);
 		drop(errg);
 		// Final message
-		println!("Goodbye!");
+		if server {
+			println!("Goodbye!");
+		}
 		// Return success
 		ExitCode::SUCCESS
 	}
