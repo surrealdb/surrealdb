@@ -941,4 +941,4 @@ jobs:
         run: sleep 10
 
       - name: Run PHP tests
-        run: composer test-coverage
+        run: composer test-coverage-v2
