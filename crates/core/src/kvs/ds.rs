@@ -431,8 +431,8 @@ impl Datastore {
 			jwks_cache: Arc::new(Default::default()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
+			cache: Arc::new(DatastoreCache::new(self.transaction_factory.clone())),
 			transaction_factory: self.transaction_factory,
-			cache: Arc::new(DatastoreCache::new(tf)),
 		}
 	}
 
