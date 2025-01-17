@@ -139,7 +139,9 @@ jobs:
           workspaces: crates/fuzz
 
       - name: Check fuzzers
-        run: cargo build --manifest-path crates/fuzz/Cargo.toml
+        run: |
+          cd crates/fuzz
+          cargo build
 
       - name: Check OSS-Fuzz
         uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
@@ -696,8 +698,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: crates/language-tests
 
-      - name: Run Suite
+      - name: Build SurrealQL test tool
         run: |
           cd crates/language-tests
           cargo build
-          ./target/debug/surrealql-test --color always run
+
+      - name: Run SurrealQL test suite
+        run: ./target/debug/surrealql-test --color always run
