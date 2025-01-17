@@ -14,7 +14,6 @@ use surrealdb::kvs::{LockType, TransactionType};
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
 use surrealdb_core::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
-use surrealdb_core::key;
 use test_log::test;
 use tokio::time::sleep;
 use tracing::info;

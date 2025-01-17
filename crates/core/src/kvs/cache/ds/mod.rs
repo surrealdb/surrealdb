@@ -11,7 +11,6 @@ use crate::kvs::{Key, Transaction};
 use async_channel::{Receiver, Sender};
 pub(crate) use entry::Entry;
 pub(crate) use lookup::Lookup;
-use tokio::task;
 use uuid::Uuid;
 
 pub(crate) type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
@@ -21,6 +20,10 @@ pub(crate) struct DatastoreCache {
 	cache: Cache,
 	// Manage the eviction of old cache versions
 	sender: Sender<EvictionMessage>,
+	// Receives eviction messages
+	receiver: Receiver<EvictionMessage>,
+	// The transaction factory
+	tf: TransactionFactory,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -63,12 +66,11 @@ impl DatastoreCache {
 			weight::Weight,
 		);
 		let (sender, receiver) = channel::unbounded();
-		task::spawn(async move {
-			Self::cleanup(tf, receiver).await;
-		});
 		Self {
 			cache,
 			sender,
+			receiver,
+			tf,
 		}
 	}
 
@@ -121,19 +123,20 @@ impl DatastoreCache {
 		Ok(res)
 	}
 
-	async fn cleanup(tf: TransactionFactory, receiver: Receiver<EvictionMessage>) {
-		while let Ok(cleanup) = receiver.recv().await {
-			if let Err(e) = Self::evict(&tf, cleanup).await {
+	pub(crate) async fn apply_evictions(&self) {
+		while let Ok(e) = self.receiver.try_recv() {
+			if let Err(e) = self.evict(e).await {
 				warn!("failed to cleanup cache version: {e}");
 			}
 		}
 	}
 
-	async fn evict(tf: &TransactionFactory, e: EvictionMessage) -> Result<(), Error> {
+	async fn evict(&self, e: EvictionMessage) -> Result<(), Error> {
 		let range = match e.cache {
 			CacheVersion::Lq => vl::range_below(&e.ns, &e.db, &e.tb, e.keep),
 		};
-		let tx = tf
+		let tx = self
+			.tf
 			.transaction(crate::kvs::TransactionType::Write, crate::kvs::LockType::Optimistic)
 			.await?;
 		tx.delr(range).await?;
