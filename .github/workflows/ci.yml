@@ -394,6 +394,7 @@ jobs:
           node-version: 20
 
       - name: Test workspace
+        timeout-minutes: 60
         run: |
           npx -y concurrently \
             --kill-others \
