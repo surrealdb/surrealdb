@@ -337,6 +337,7 @@ pub enum Action {
 }
 
 impl Action {
+	#[allow(dead_code)] // Used by other engines except the HTTP one
 	pub(crate) fn from_core(action: CoreAction) -> Self {
 		match action {
 			CoreAction::Create => Self::Create,
