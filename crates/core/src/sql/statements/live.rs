@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Auth;
+use crate::kvs::cache::ds::CacheVersion;
 use crate::kvs::Live;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
@@ -128,12 +129,9 @@ impl LiveStatement {
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
 				txn.replace(key, stm).await?;
 				// Refresh the table cache for lives
-				txn.set(
-					crate::key::table::vl::new(ns, db, &tb, uuid::Uuid::now_v7()),
-					vec![],
-					None,
-				)
-				.await?;
+				if let Some(cache) = ctx.get_cache() {
+					cache.set_new_version(&txn, ns, db, &tb, CacheVersion::Lq).await?;
+				}
 				// Clear the cache
 				txn.clear();
 			}
