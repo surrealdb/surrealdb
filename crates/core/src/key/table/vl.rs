@@ -44,8 +44,14 @@ fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	k
 }
 
-pub fn range(ns: &str, db: &str, tb: &str) -> Range<Vec<u8>> {
+pub(crate) fn full_range(ns: &str, db: &str, tb: &str) -> Range<Vec<u8>> {
 	prefix(ns, db, tb)..suffix(ns, db, tb)
+}
+
+pub(crate) fn range_below(ns: &str, db: &str, tb: &str, uuid: Uuid) -> Range<Vec<u8>> {
+	let mut k = Vl::new(ns, db, tb, uuid).encode().unwrap();
+	k.extend_from_slice(b"\x00");
+	k..suffix(ns, db, tb)
 }
 
 impl Categorise for Vl<'_> {
@@ -74,8 +80,9 @@ impl<'a> Vl<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::key::table::vl::range_below;
 	use crate::kvs::Key;
-	use uuid::{ContextV7, Timestamp, Uuid};
+	use uuid::Uuid;
 
 	#[test]
 	fn key() {
@@ -108,10 +115,7 @@ mod tests {
 	#[test]
 	fn ascendant_uuid() {
 		// Create UUIDs
-		let context = ContextV7::new();
-		let u1 = Uuid::new_v7(Timestamp::now(&context));
-		let u2 = Uuid::new_v7(Timestamp::now(&context));
-		let u3 = Uuid::new_v7(Timestamp::now(&context));
+		let (u1, u2, u3) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
 
 		// Convert to keys
 		let k1: Key = super::new("testns", "testdb", "testtb", u1).into();
@@ -122,5 +126,12 @@ mod tests {
 		assert!(k1 > k2, "{k1:?}\n{k2:?}");
 		assert!(k2 > k3, "{k2:?}\n{k3:?}");
 		assert!(k1 > k3, "{k1:?}\n{k3:?}");
+	}
+
+	#[test]
+	fn test_range_bellow() {
+		let u = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+		let r = range_below("testns", "testdb", "testtb", u);
+		assert_eq!(r.start, b"/*testns\x00*testdb\x00*testtb\x00!vl\xfe\xfd\xfc\xfb\xfa\xf9\xf8\xf7\xf6\xf5\xf4\xf3\xf2\xf1\xf0\xef\x00", "{:x?}", r.start);
 	}
 }

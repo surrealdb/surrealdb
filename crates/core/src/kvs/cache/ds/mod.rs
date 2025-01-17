@@ -5,10 +5,13 @@ mod weight;
 
 use crate::channel;
 use crate::err::Error;
+use crate::key::table::vl;
+use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{Key, Transaction};
 use async_channel::{Receiver, Sender};
 pub(crate) use entry::Entry;
 pub(crate) use lookup::Lookup;
+use tokio::task;
 use uuid::Uuid;
 
 pub(crate) type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
@@ -17,11 +20,10 @@ pub(crate) struct DatastoreCache {
 	// Store the cache entries
 	cache: Cache,
 	// Manage the eviction of old cache versions
-	sender: Sender<(CacheVersion, Uuid)>,
-	_receiver: Receiver<(CacheVersion, Uuid)>,
+	sender: Sender<EvictionMessage>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum CacheVersion {
 	Lq,
 }
@@ -29,7 +31,7 @@ pub(crate) enum CacheVersion {
 impl CacheVersion {
 	fn get_key(&self, ns: &str, db: &str, tb: &str, version: Uuid) -> Key {
 		match self {
-			Self::Lq => crate::key::table::vl::new(ns, db, tb, version).into(),
+			Self::Lq => vl::new(ns, db, tb, version).into(),
 		}
 	}
 
@@ -45,23 +47,31 @@ impl CacheVersion {
 	}
 }
 
-impl Default for DatastoreCache {
-	fn default() -> Self {
+pub(crate) struct EvictionMessage {
+	ns: String,
+	db: String,
+	tb: String,
+	cache: CacheVersion,
+	keep: Uuid,
+}
+
+impl DatastoreCache {
+	pub(in crate::kvs) fn new(tf: TransactionFactory) -> Self {
 		let cache = Cache::with_weighter(
 			*crate::cnf::DATASTORE_CACHE_SIZE,
 			*crate::cnf::DATASTORE_CACHE_SIZE as u64,
 			weight::Weight,
 		);
-		let (sender, _receiver) = channel::unbounded();
+		let (sender, receiver) = channel::unbounded();
+		task::spawn(async move {
+			Self::cleanup(tf, receiver).await;
+		});
 		Self {
 			cache,
 			sender,
-			_receiver,
 		}
 	}
-}
 
-impl DatastoreCache {
 	pub(crate) fn get(&self, lookup: &Lookup) -> Option<Entry> {
 		self.cache.get(lookup)
 	}
@@ -76,14 +86,22 @@ impl DatastoreCache {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		cache_version: CacheVersion,
+		cache: CacheVersion,
 	) -> Result<(), Error> {
 		let new_version = Uuid::now_v7();
 		// Set the new version
-		let key = cache_version.get_key(ns, db, tb, new_version);
+		let key = cache.get_key(ns, db, tb, new_version);
 		txn.set(key, vec![], None).await?;
 		// Request cleaning old versions
-		self.sender.send((cache_version, new_version)).await?;
+		self.sender
+			.send(EvictionMessage {
+				ns: ns.to_owned(),
+				db: db.to_owned(),
+				tb: tb.to_owned(),
+				cache,
+				keep: new_version,
+			})
+			.await?;
 		Ok(())
 	}
 
@@ -101,5 +119,25 @@ impl DatastoreCache {
 			None => cache_version.lookup_default(ns, db, tb),
 		};
 		Ok(res)
+	}
+
+	async fn cleanup(tf: TransactionFactory, receiver: Receiver<EvictionMessage>) {
+		while let Ok(cleanup) = receiver.recv().await {
+			if let Err(e) = Self::evict(&tf, cleanup).await {
+				warn!("failed to cleanup cache version: {e}");
+			}
+		}
+	}
+
+	async fn evict(tf: &TransactionFactory, e: EvictionMessage) -> Result<(), Error> {
+		let range = match e.cache {
+			CacheVersion::Lq => vl::range_below(&e.ns, &e.db, &e.tb, e.keep),
+		};
+		let tx = tf
+			.transaction(crate::kvs::TransactionType::Write, crate::kvs::LockType::Optimistic)
+			.await?;
+		tx.delr(range).await?;
+		tx.commit().await?;
+		Ok(())
 	}
 }

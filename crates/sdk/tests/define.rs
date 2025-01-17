@@ -14,7 +14,9 @@ use surrealdb::kvs::{LockType, TransactionType};
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
 use surrealdb_core::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
+use surrealdb_core::key;
 use test_log::test;
+use tokio::time::sleep;
 use tracing::info;
 
 #[tokio::test]
@@ -1339,6 +1341,17 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
 	assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
 	assert_ne!(after_define_live_query_version, after_remove_live_query_version);
-	//
-	Ok(())
+	// After a short time, e should end up with a cache version queue equal to 1 for LiveQueries
+	for _ in 0..60 {
+		sleep(Duration::from_secs(1)).await;
+		let txn = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let prefix = b"/*test\x00*test\x00*test\x00!vl\x00".to_vec();
+		let suffix = b"/*test\x00*test\x00*test\x00!vl\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00".to_vec();
+		let keys = txn.keys(prefix..suffix, 1000, None).await?;
+		drop(txn);
+		if keys.len() == 1 {
+			return Ok(());
+		}
+	}
+	panic!("We should end up with a cache version queue equal to 1");
 }

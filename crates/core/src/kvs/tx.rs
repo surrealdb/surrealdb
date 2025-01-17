@@ -1652,7 +1652,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Option<Uuid>, Error> {
-		let range = key::table::vl::range(ns, db, tb);
+		let range = key::table::vl::full_range(ns, db, tb);
 		let keys = self.keys(range, 1, None).await?;
 		let v = keys.first().map(|k| {
 			let vl: Vl = k.into();

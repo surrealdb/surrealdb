@@ -135,7 +135,7 @@ pub(crate) mod reverse {
 	#[cfg(test)]
 	mod tests {
 		use bincode::{DefaultOptions, Deserializer, Serializer};
-		use uuid::{ContextV7, Timestamp, Uuid};
+		use uuid::Uuid;
 
 		#[test]
 		fn ascendant_uuid() {
@@ -152,10 +152,7 @@ pub(crate) mod reverse {
 			};
 
 			// Create the UUIDS
-			let context = ContextV7::new();
-			let u1 = Uuid::new_v7(Timestamp::now(&context));
-			let u2 = Uuid::new_v7(Timestamp::now(&context));
-			let u3 = Uuid::new_v7(Timestamp::now(&context));
+			let (u1, u2, u3) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
 
 			// Check that the initial ascendant order is valid
 			assert!(u1 < u2, "u1: {u1}\nu2: {u2}");
