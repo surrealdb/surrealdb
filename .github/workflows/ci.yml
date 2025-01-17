@@ -704,4 +704,6 @@ jobs:
           cargo build
 
       - name: Run SurrealQL test suite
-        run: ./target/debug/surrealql-test --color always run
+        run: |
+          cd crates/language-tests
+          ./target/debug/surrealql-test --color always run
