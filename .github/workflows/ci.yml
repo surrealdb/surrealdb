@@ -781,6 +781,11 @@ jobs:
         version:
           - latest
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.js"
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -789,11 +794,6 @@ jobs:
 
       - name: Set file permissions
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          repository: "surrealdb/surrealdb.js"
 
       - name: Setup JavaScript
         uses: oven-sh/setup-bun@v2
@@ -829,6 +829,11 @@ jobs:
         version:
           - 1.23
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.go"
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -837,11 +842,6 @@ jobs:
 
       - name: Set file permissions
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          repository: "surrealdb/surrealdb.go"
 
       - name: Setup Golang
         uses: actions/setup-go@v4
@@ -871,6 +871,11 @@ jobs:
         version:
           - 3.13
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.py"
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -879,11 +884,6 @@ jobs:
 
       - name: Set file permissions
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          repository: "surrealdb/surrealdb.py"
 
       - name: Setup Python
         uses: actions/setup-python@v4
