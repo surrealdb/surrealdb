@@ -248,7 +248,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Run WS integration tests
+      - name: Run WebSocket integration tests
         run: cargo make ci-ws-integration
 
   ml-integration:
@@ -290,7 +290,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: run graphql integration test
+      - name: Run GraphQL integration tests
         run: cargo make ci-graphql-integration
 
   test:
@@ -370,7 +370,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test any engine
+      - name: Test Any engine
         run: cargo make ci-api-integration-any
 
       - name: Debug info
@@ -399,7 +399,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test ws engine
+      - name: Test WS engine
         run: cargo make ci-api-integration-ws
 
       - name: Debug info
@@ -428,7 +428,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test http engine
+      - name: Test HTTP engine
         run: cargo make ci-api-integration-http
 
       - name: Debug info
@@ -457,7 +457,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test mem engine
+      - name: Test Memory engine
         run: cargo make ci-api-integration-mem
 
       - name: Debug info
@@ -486,7 +486,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test file engine
+      - name: Test File engine
         run: cargo make ci-api-integration-file
 
       - name: Debug info
@@ -515,7 +515,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test rocksdb engine
+      - name: Test RocksDB engine
         run: cargo make ci-api-integration-rocksdb
 
       - name: Debug info
@@ -544,7 +544,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test surrealkv engine
+      - name: Test SurrealKV engine
         run: cargo make ci-api-integration-surrealkv
 
       - name: Debug info
@@ -580,7 +580,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test tikv engine
+      - name: Test TiKV engine
         run: cargo make ci-api-integration-tikv
 
       - name: Debug info
@@ -614,7 +614,7 @@ jobs:
         with:
           version: "7.1.61"
 
-      - name: Test fdb engine
+      - name: Test FoundationDB engine
         run: cargo make ci-api-integration-fdb-7_1
 
       - name: Debug info
@@ -648,7 +648,7 @@ jobs:
         with:
           version: "7.3.47"
 
-      - name: Test fdb engine
+      - name: Test FoundationDB engine
         run: cargo make ci-api-integration-fdb-7_3
 
       - name: Debug info
