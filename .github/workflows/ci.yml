@@ -139,9 +139,7 @@ jobs:
           workspaces: crates/fuzz
 
       - name: Check fuzzers
-        run: |
-          cd crates/fuzz
-          cargo build
+        run: cargo build --manifest-path crates/fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
         uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
