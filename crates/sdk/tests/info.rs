@@ -436,9 +436,6 @@ async fn permissions_checks_info_user_db() {
 
 #[tokio::test]
 async fn access_info_redacted() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	// Symmetric
 	{
 		let sql = r#"
@@ -535,9 +532,6 @@ async fn access_info_redacted() {
 
 #[tokio::test]
 async fn access_info_redacted_structure() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	// Symmetric
 	{
 		let sql = r#"

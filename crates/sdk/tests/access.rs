@@ -18,9 +18,6 @@ struct TestLevel {
 
 #[tokio::test]
 async fn access_bearer_operations() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![
 		TestLevel {
 			base: Base::Root,
@@ -192,9 +189,6 @@ async fn access_bearer_operations() {
 
 #[tokio::test]
 async fn access_bearer_grant() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![
 		TestLevel {
 			base: Base::Root,
@@ -349,9 +343,6 @@ async fn access_bearer_grant() {
 
 #[tokio::test]
 async fn access_bearer_revoke() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![
 		TestLevel {
 			base: Base::Root,
@@ -492,9 +483,6 @@ async fn access_bearer_revoke() {
 
 #[tokio::test]
 async fn access_bearer_show() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![
 		TestLevel {
 			base: Base::Root,
@@ -652,9 +640,6 @@ async fn access_bearer_show() {
 
 #[tokio::test]
 async fn access_bearer_purge() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![
 		TestLevel {
 			base: Base::Root,
@@ -786,9 +771,6 @@ async fn access_bearer_purge() {
 
 #[tokio::test]
 async fn permissions_access_grant() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![Base::Root, Base::Ns, Base::Db];
 
 	for level in &test_levels {

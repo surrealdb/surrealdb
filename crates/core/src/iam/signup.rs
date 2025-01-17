@@ -1,5 +1,6 @@
 use super::access::{authenticate_record, create_refresh_token_record};
-use crate::cnf::{EXPERIMENTAL_BEARER_ACCESS, INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -137,7 +138,9 @@ pub async fn db_access(
 											let refresh = match &at.bearer {
 												Some(_) => {
 													// TODO(gguillemas): Remove this once bearer access is no longer experimental
-													if !*EXPERIMENTAL_BEARER_ACCESS {
+													if !kvs.get_capabilities().allows_experimental(
+														&ExperimentalTarget::BearerAccess,
+													) {
 														debug!("Will not create refresh token with disabled bearer access feature");
 														None
 													} else {
