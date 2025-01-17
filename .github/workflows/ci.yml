@@ -30,7 +30,7 @@ jobs:
   # ----------------------------------------
 
   build:
-    name: Build binary
+    name: Build binary ({{ matrix.name }})
     strategy:
       matrix:
         include:
