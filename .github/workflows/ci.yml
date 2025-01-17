@@ -696,8 +696,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: crates/language-tests
 
-      - name: Run Suite
+      - name: Build SurrealQL test tool
         run: |
           cd crates/language-tests
           cargo build
+
+      - name: Run SurrealQL test suite
+        run: |
+          cd crates/language-tests
           ./target/debug/surrealql-test --color always run
