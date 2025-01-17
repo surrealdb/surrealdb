@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
@@ -269,7 +271,7 @@ impl Test {
 	/// Simulates restarting the Datastore
 	/// - Data are persistent (including memory store)
 	/// - Flushing caches (jwks, IndexStore, ...)
-	#[cfg(debug_assertions)]
+	#[allow(dead_code)]
 	pub async fn restart(self, sql: &str) -> Result<Self, Error> {
 		Self::new_ds(self.ds.restart(), sql).await
 	}

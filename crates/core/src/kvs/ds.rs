@@ -415,7 +415,7 @@ impl Datastore {
 
 	/// Create a new datastore with the same persistent data (inner), with flushed cache.
 	/// Simulating a server restart
-	#[cfg(debug_assertions)]
+	#[allow(dead_code)]
 	pub fn restart(self) -> Self {
 		Self {
 			id: self.id,
