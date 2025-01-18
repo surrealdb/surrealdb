@@ -1,5 +1,5 @@
 [env]
-RUSTFLAGS = { value = "-D warnings --cfg surrealdb_unstable --cfg docker", condition = { env_not_set = ["RUSTFLAGS"] } }
+RUSTFLAGS = { value = "-D warnings --cfg surrealdb_unstable", condition = { env_not_set = ["RUSTFLAGS"] } }
 
 # Setup
 [tasks.cargo-upgrade]

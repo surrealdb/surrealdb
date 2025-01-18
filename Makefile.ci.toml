@@ -1,5 +1,5 @@
 [env]
-RUSTFLAGS = { value = "-D warnings --cfg surrealdb_unstable --cfg docker", condition = { env_not_set = ["RUSTFLAGS"] } }
+RUSTFLAGS = { value = "-D warnings --cfg surrealdb_unstable", condition = { env_not_set = ["RUSTFLAGS"] } }
 BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = ["BENCH_WORKER_THREADS"] } }
 BENCH_NUM_OPS = { value = "1000", condition = { env_not_set = ["BENCH_NUM_OPS"] } }
 BENCH_DURATION = { value = "30", condition = { env_not_set = ["BENCH_DURATION"] } }
@@ -136,7 +136,7 @@ category = "CI - INTEGRATION TESTS"
 run_task = { name = ["start-surrealdb", "test-workspace-coverage-complete", "stop-surrealdb"], fork = true }
 
 [tasks.ci-database-upgrade]
-env = { _TEST_FEATURES = "storage-rocksdb" }
+env = { _TEST_FEATURES = "storage-rocksdb", RUSTFLAGS = "-D warnings --cfg surrealdb_unstable --cfg docker" }
 category = "CI - DATABASE UPGRADE TESTS"
 run_task = { name = ["test-database-upgrade"], fork = true }
 
