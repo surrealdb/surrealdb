@@ -452,6 +452,7 @@ allow_apis = ["net"]
 
 [pkg.httparse]
 allow_unsafe = true
+allow_apis = ["process"]
 
 [pkg.block-buffer]
 allow_unsafe = true
