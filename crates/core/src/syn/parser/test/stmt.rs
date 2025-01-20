@@ -40,7 +40,10 @@ use crate::{
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
-	syn::parser::mac::test_parse,
+	syn::parser::{
+		mac::{test_parse, test_parse_with_settings},
+		ParserSettings,
+	},
 };
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
 
@@ -1129,9 +1132,13 @@ fn parse_define_access_record() {
 	}
 	// With refresh token. Refresh token duration is set to 10 days.
 	{
-		let res = test_parse!(
+		let res = test_parse_with_settings!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH DURATION FOR GRANT 10d"#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH DURATION FOR GRANT 10d"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
 		)
 		.unwrap();
 
@@ -1326,9 +1333,13 @@ fn parse_define_access_record() {
 	}
 	// Verification and issuing with JWT are explicitly defined with two different keys. Refresh specified before JWT.
 	{
-		let res = test_parse!(
+		let res = test_parse_with_settings!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
 		)
 		.unwrap();
 		assert_eq!(
@@ -1378,11 +1389,13 @@ fn parse_define_access_record() {
 	}
 	// Verification and issuing with JWT are explicitly defined with two different keys. Refresh specified after JWT.
 	{
-		let res = test_parse!(
-			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" WITH REFRESH DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#
-		)
-		.unwrap();
+		let res = test_parse_with_settings!(parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" WITH REFRESH DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		).unwrap();
 		assert_eq!(
 			res,
 			Statement::Define(DefineStatement::Access(DefineAccessStatement {
@@ -1505,9 +1518,15 @@ fn parse_define_access_record() {
 fn parse_define_access_bearer() {
 	// For user on database.
 	{
-		let res =
-			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER COMMENT "foo""#)
-				.unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER COMMENT "foo""#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 
 		// Manually compare since DefineAccessStatement for bearer access
 		// without explicit JWT will create a random signing key during parsing.
@@ -1538,9 +1557,15 @@ fn parse_define_access_bearer() {
 	}
 	// For user on namespace.
 	{
-		let res =
-			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON NS TYPE BEARER FOR USER COMMENT "foo""#)
-				.unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR USER COMMENT "foo""#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 
 		// Manually compare since DefineAccessStatement for bearer access
 		// without explicit JWT will create a random signing key during parsing.
@@ -1571,9 +1596,13 @@ fn parse_define_access_bearer() {
 	}
 	// For user on root.
 	{
-		let res = test_parse!(
+		let res = test_parse_with_settings!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR USER COMMENT "foo""#
+			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR USER COMMENT "foo""#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
 		)
 		.unwrap();
 
@@ -1606,9 +1635,13 @@ fn parse_define_access_bearer() {
 	}
 	// For record on database.
 	{
-		let res = test_parse!(
+		let res = test_parse_with_settings!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD COMMENT "foo""#
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD COMMENT "foo""#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
 		)
 		.unwrap();
 
@@ -1640,9 +1673,13 @@ fn parse_define_access_bearer() {
 	}
 	// For record on namespace.
 	{
-		let res = test_parse!(
+		let res = test_parse_with_settings!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR RECORD COMMENT "foo""#
+			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR RECORD COMMENT "foo""#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
 		);
 		assert!(
 			res.is_err(),
@@ -1652,9 +1689,13 @@ fn parse_define_access_bearer() {
 	}
 	// For record on root.
 	{
-		let res = test_parse!(
+		let res = test_parse_with_settings!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR RECORD COMMENT "foo""#
+			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR RECORD COMMENT "foo""#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
 		);
 		assert!(
 			res.is_err(),
@@ -1664,11 +1705,13 @@ fn parse_define_access_bearer() {
 	}
 	// For user. Grant, session and token duration. With JWT.
 	{
-		let res = test_parse!(
-			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#
-		)
-		.unwrap();
+		let res = test_parse_with_settings!(parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		).unwrap();
 		assert_eq!(
 			res,
 			Statement::Define(DefineStatement::Access(DefineAccessStatement {
@@ -1703,11 +1746,13 @@ fn parse_define_access_bearer() {
 	}
 	// For record. Grant, session and token duration. With JWT.
 	{
-		let res = test_parse!(
-			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#
-		)
-		.unwrap();
+		let res = test_parse_with_settings!(parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		).unwrap();
 		assert_eq!(
 			res,
 			Statement::Define(DefineStatement::Access(DefineAccessStatement {
@@ -2906,7 +2951,15 @@ fn parse_upsert() {
 fn parse_access_grant() {
 	// User
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Grant(AccessStatementGrant {
@@ -2918,7 +2971,15 @@ fn parse_access_grant() {
 	}
 	// Record
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON NAMESPACE GRANT FOR RECORD b:c"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON NAMESPACE GRANT FOR RECORD b:c"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Grant(AccessStatementGrant {
@@ -2937,7 +2998,15 @@ fn parse_access_grant() {
 fn parse_access_show() {
 	// All
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW ALL"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE SHOW ALL"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Show(AccessStatementShow {
@@ -2950,7 +3019,15 @@ fn parse_access_show() {
 	}
 	// Grant
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW GRANT b"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE SHOW GRANT b"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Show(AccessStatementShow {
@@ -2963,7 +3040,15 @@ fn parse_access_show() {
 	}
 	// Condition
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE SHOW WHERE true"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE SHOW WHERE true"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Show(AccessStatementShow {
@@ -2980,7 +3065,15 @@ fn parse_access_show() {
 fn parse_access_revoke() {
 	// All
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE ALL"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE REVOKE ALL"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
@@ -2993,7 +3086,15 @@ fn parse_access_revoke() {
 	}
 	// Grant
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE GRANT b"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE REVOKE GRANT b"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
@@ -3006,7 +3107,15 @@ fn parse_access_revoke() {
 	}
 	// Condition
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE REVOKE WHERE true"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE REVOKE WHERE true"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Revoke(AccessStatementRevoke {
@@ -3023,8 +3132,15 @@ fn parse_access_revoke() {
 fn parse_access_purge() {
 	// All
 	{
-		let res =
-			test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED, REVOKED"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE PURGE EXPIRED, REVOKED"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
@@ -3038,7 +3154,15 @@ fn parse_access_purge() {
 	}
 	// Expired
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE PURGE EXPIRED"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
@@ -3052,7 +3176,15 @@ fn parse_access_purge() {
 	}
 	// Revoked
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE PURGE REVOKED"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
@@ -3066,7 +3198,15 @@ fn parse_access_purge() {
 	}
 	// Expired for 90 days
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE EXPIRED FOR 90d"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE PURGE EXPIRED FOR 90d"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
@@ -3080,7 +3220,15 @@ fn parse_access_purge() {
 	}
 	// Revoked for 90 days
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED FOR 90d"#).unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE PURGE REVOKED FOR 90d"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Purge(AccessStatementPurge {
@@ -3094,8 +3242,15 @@ fn parse_access_purge() {
 	}
 	// Invalid for 90 days
 	{
-		let res = test_parse!(parse_stmt, r#"ACCESS a ON DATABASE PURGE REVOKED, EXPIRED FOR 90d"#)
-			.unwrap();
+		let res = test_parse_with_settings!(
+			parse_stmt,
+			r#"ACCESS a ON DATABASE PURGE REVOKED, EXPIRED FOR 90d"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
+		)
+		.unwrap();
 		assert_eq!(
 			res,
 			Statement::Access(AccessStatement::Purge(AccessStatementPurge {

@@ -111,12 +111,16 @@ impl std::str::FromStr for FuncTarget {
 #[non_exhaustive]
 pub enum ExperimentalTarget {
 	RecordReferences,
+	GraphQL,
+	BearerAccess,
 }
 
 impl fmt::Display for ExperimentalTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::RecordReferences => write!(f, "record_references"),
+			Self::GraphQL => write!(f, "graphql"),
+			Self::BearerAccess => write!(f, "bearer_access"),
 		}
 	}
 }
@@ -131,6 +135,8 @@ impl Target<str> for ExperimentalTarget {
 	fn matches(&self, elem: &str) -> bool {
 		match self {
 			Self::RecordReferences => elem.eq_ignore_ascii_case("record_references"),
+			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
+			Self::BearerAccess => elem.eq_ignore_ascii_case("bearer_access"),
 		}
 	}
 }
@@ -155,12 +161,12 @@ impl std::str::FromStr for ExperimentalTarget {
 	type Err = ParseExperimentalTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match s.trim() {
-			s if s.eq_ignore_ascii_case("record_references") => {
-				Ok(ExperimentalTarget::RecordReferences)
-			}
+		match_insensitive!(s.trim(), {
+			"record_references" => Ok(ExperimentalTarget::RecordReferences),
+			"graphql" => Ok(ExperimentalTarget::GraphQL),
+			"bearer_access" => Ok(ExperimentalTarget::BearerAccess),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
-		}
+		})
 	}
 }
 
@@ -372,6 +378,14 @@ pub enum Targets<T: Hash + Eq + PartialEq> {
 	All,
 }
 
+impl<T: Target + Hash + Eq + PartialEq> From<T> for Targets<T> {
+	fn from(t: T) -> Self {
+		let mut set = HashSet::new();
+		set.insert(t);
+		Self::Some(set)
+	}
+}
+
 impl<T: Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
 	pub(crate) fn matches<S>(&self, elem: &S) -> bool
 	where
@@ -423,8 +437,8 @@ impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
             f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http,
+            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}",
+            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http, self.allow_experimental, self.deny_experimental,
         )
 	}
 }
@@ -465,7 +479,7 @@ impl Capabilities {
 			deny_rpc: Arc::new(Targets::None),
 			allow_http: Arc::new(Targets::All),
 			deny_http: Arc::new(Targets::None),
-			allow_experimental: Arc::new(Targets::All),
+			allow_experimental: Arc::new(Targets::None),
 			deny_experimental: Arc::new(Targets::None),
 		}
 	}
