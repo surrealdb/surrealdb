@@ -38,19 +38,6 @@ pub struct Transaction {
 	_db: Pin<Arc<OptimisticTransactionDB>>,
 }
 
-impl Drop for Datastore {
-	fn drop(&mut self) {
-		// Create new flush options
-		let mut opts = FlushOptions::default();
-		// Wait for the sync to finish
-		opts.set_wait(true);
-		// Flush the WAL to storage
-		let _ = self.db.flush_wal(true);
-		// Flush the memtables to SST
-		let _ = self.db.flush_opt(&opts);
-	}
-}
-
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if !self.done && self.write {
@@ -175,7 +162,19 @@ impl Datastore {
 	}
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
-		// Nothing to do here
+		// Create new flush options
+		let mut opts = FlushOptions::default();
+		// Wait for the sync to finish
+		opts.set_wait(true);
+		// Flush the WAL to storage
+		if let Err(e) = self.db.flush_wal(true) {
+			error!("An error occured flushing the WAL buffer to disk: {e}");
+		}
+		// Flush the memtables to SST
+		if let Err(e) = self.db.flush_opt(&opts) {
+			error!("An error occured flushing memtables to SST files: {e}");
+		}
+		// All good
 		Ok(())
 	}
 	/// Start a new transaction

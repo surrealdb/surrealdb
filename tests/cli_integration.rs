@@ -103,7 +103,9 @@ mod cli_integration {
 		info!("* Export to stdout");
 		{
 			let args = format!("export --conn http://{addr} {creds} --ns {ns} --db {db} -");
-			let output = common::run(&args).output().expect("failed to run stdout export: {args}");
+			let output = common::run(&args)
+				.output()
+				.unwrap_or_else(|_| panic!("failed to run stdout export: {args}"));
 			assert!(output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"));
 			assert!(output.contains("INSERT [ { id: thing:one } ];"));
 		}
@@ -113,7 +115,9 @@ mod cli_integration {
 			let exported = common::tmp_file("exported.surql");
 			let args =
 				format!("export --conn http://{addr} {creds} --ns {ns} --db {db} {exported}");
-			common::run(&args).output().expect("failed to run file export: {args}");
+			common::run(&args)
+				.output()
+				.unwrap_or_else(|_| panic!("failed to run file export: {args}"));
 			exported
 		};
 
@@ -123,7 +127,7 @@ mod cli_integration {
 		{
 			let args =
 				format!("import --conn http://{addr} {creds} --ns {ns} --db {db2} {exported}");
-			common::run(&args).output().expect("failed to run import: {args}");
+			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run import: {args}"));
 		}
 
 		info!("* Query from the import (pretty-printed this time)");
@@ -253,7 +257,7 @@ mod cli_integration {
 		.await
 		.unwrap();
 
-		std::thread::sleep(std::time::Duration::from_millis(5000));
+		std::thread::sleep(std::time::Duration::from_millis(10000));
 		let output = server.kill().output().err().unwrap();
 
 		// Test the crt/key args but the keys are self signed so don't actually connect.

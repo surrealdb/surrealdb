@@ -5,7 +5,7 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Operation;
-use crate::vs::to_u128_be;
+use crate::vs::VersionStamp;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -77,7 +77,7 @@ impl Default for DatabaseMutation {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[non_exhaustive]
-pub struct ChangeSet(pub [u8; 10], pub DatabaseMutation);
+pub struct ChangeSet(pub VersionStamp, pub DatabaseMutation);
 
 impl TableMutation {
 	/// Convert a stored change feed table mutation (record change) into a
@@ -150,8 +150,7 @@ impl DatabaseMutation {
 impl ChangeSet {
 	pub fn into_value(self) -> Value {
 		let mut m = BTreeMap::<String, Value>::new();
-		let vs = to_u128_be(self.0);
-		m.insert("versionstamp".to_string(), Value::from(vs));
+		m.insert("versionstamp".to_string(), Value::from(self.0.into_u128()));
 		m.insert("changes".to_string(), self.1.into_value());
 		let so: Object = m.into();
 		Value::Object(so)
@@ -220,7 +219,7 @@ mod tests {
 		use super::*;
 		use std::collections::HashMap;
 		let cs = ChangeSet(
-			[0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+			VersionStamp::from_u64(1),
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
@@ -255,7 +254,7 @@ mod tests {
 		use super::*;
 		use std::collections::HashMap;
 		let cs = ChangeSet(
-			[0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+			VersionStamp::from_u64(1),
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
