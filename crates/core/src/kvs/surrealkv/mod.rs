@@ -86,6 +86,10 @@ impl Datastore {
 	}
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+		// Shutdown the database
+		if let Err(e) = self.db.close().await {
+			error!("An error occured closing the database: {e}");
+		}
 		// Nothing to do here
 		Ok(())
 	}
