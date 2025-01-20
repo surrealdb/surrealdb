@@ -3,6 +3,7 @@ use helpers::*;
 
 use regex::Regex;
 use std::collections::HashMap;
+use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::Session;
 use surrealdb::iam::Role;
 
