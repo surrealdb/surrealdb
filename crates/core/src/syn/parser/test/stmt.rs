@@ -1333,9 +1333,13 @@ fn parse_define_access_record() {
 	}
 	// Verification and issuing with JWT are explicitly defined with two different keys. Refresh specified before JWT.
 	{
-		let res = test_parse!(
+		let res = test_parse_with_settings!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#,
+			ParserSettings {
+				bearer_access_enabled: true,
+				..Default::default()
+			}
 		)
 		.unwrap();
 		assert_eq!(
