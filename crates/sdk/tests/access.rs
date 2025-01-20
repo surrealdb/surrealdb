@@ -63,8 +63,8 @@ async fn access_bearer_operations() {
 		"
 		);
 		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
-		);;
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -229,7 +229,7 @@ async fn access_bearer_grant() {
 		"
 		);
 		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
 		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
@@ -382,7 +382,7 @@ async fn access_bearer_revoke() {
 		"
 		);
 		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
 		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
@@ -524,7 +524,7 @@ async fn access_bearer_show() {
 		"
 		);
 		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
 		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
@@ -685,7 +685,7 @@ async fn access_bearer_purge() {
 		"
 		);
 		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
 		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
@@ -845,7 +845,8 @@ async fn permissions_access_grant() {
 
 			{
 				let ds = new_ds().await.unwrap().with_auth_enabled(true).with_capabilities(
-					Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
 				);
 
 				let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();

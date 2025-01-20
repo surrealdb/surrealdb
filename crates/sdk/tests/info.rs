@@ -443,7 +443,7 @@ async fn access_info_redacted() {
 			INFO FOR NS
 		"#;
 		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
 		);
 		let ses = Session::owner().with_ns("ns");
 
@@ -541,7 +541,7 @@ async fn access_info_redacted_structure() {
 			INFO FOR NS STRUCTURE
 		"#;
 		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
 		);
 		let ses = Session::owner().with_ns("ns");
 
