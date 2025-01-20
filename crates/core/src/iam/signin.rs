@@ -981,7 +981,9 @@ mod tests {
 		}
 		// Test with refresh
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
@@ -1114,7 +1116,9 @@ mod tests {
 		}
 		// Test with expired refresh
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
@@ -1185,7 +1189,9 @@ mod tests {
 		}
 		// Test that only the hash of the refresh token is stored
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"

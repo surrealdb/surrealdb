@@ -222,7 +222,7 @@ pub async fn db_access(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::iam::Role;
+	use crate::{dbs::Capabilities, iam::Role};
 	use chrono::Duration;
 	use std::collections::HashMap;
 
@@ -401,7 +401,9 @@ mod tests {
 		}
 		// Test with refresh
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
