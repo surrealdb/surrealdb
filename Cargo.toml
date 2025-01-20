@@ -37,7 +37,7 @@ ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
 allocation-tracking = ["surrealdb/allocation-tracking"]
 performance-profiler = ["dep:pprof"]
-# Special features
+# FoundationDB features
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
 storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 

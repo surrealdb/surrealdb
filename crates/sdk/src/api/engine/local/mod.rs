@@ -328,8 +328,8 @@ pub struct TiKv;
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(feature = "kv-fdb")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb")))]
+#[cfg(kv_fdb)]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb-7_3")))]
 #[derive(Debug)]
 pub struct FDb;
 

@@ -39,8 +39,8 @@ allocator = ["dep:jemallocator", "dep:mimalloc"]
 arbitrary = ["dep:arbitrary", "dep:regex-syntax", "rust_decimal/rust-fuzz", "geo-types/arbitrary", "uuid/arbitrary"]
 allocation-tracking = []
 # Special features
-kv-fdb-7_1 = ["foundationdb/fdb-7_1"]
-kv-fdb-7_3 = ["foundationdb/fdb-7_3"]
+kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
+kv-fdb-7_3 = ["foundationdb/fdb-7_3", "kv-fdb"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]

@@ -48,7 +48,7 @@ impl Connection for Any {
 
 			match EndpointKind::from(address.url.scheme()) {
 				EndpointKind::FoundationDb => {
-					#[cfg(feature = "kv-fdb")]
+					#[cfg(kv_fdb)]
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
@@ -56,7 +56,7 @@ impl Connection for Any {
 						conn_rx.recv().await??
 					}
 
-					#[cfg(not(feature = "kv-fdb"))]
+					#[cfg(not(kv_fdb))]
 					return Err(
 						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
 					);

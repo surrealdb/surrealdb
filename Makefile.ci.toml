@@ -216,12 +216,12 @@ run_task = { name = ["start-tikv", "test-kvs", "test-api-integration", "stop-tik
 
 [tasks.ci-api-integration-fdb-7_1]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb,kv-fdb-7_1" }
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 [tasks.ci-api-integration-fdb-7_3]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb,kv-fdb-7_3" }
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_3" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 #
