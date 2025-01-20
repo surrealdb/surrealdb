@@ -41,7 +41,7 @@ pub static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
 		// Divide the total system memory by 2
 		let memory = memory.saturating_div(2);
 		// Subtract 1 GiB from the memory size
-		let memory = memory.saturating_sub(1 * 1024 * 1024 * 1024);
+		let memory = memory.saturating_sub(1024 * 1024 * 1024);
 		// Take the larger of 512MiB or available memory
 		max(memory as usize, 512 * 1024 * 1024)
 	});
