@@ -1,3 +1,11 @@
+[env]
+RUSTFLAGS = { value = "-D warnings --cfg surrealdb_unstable", condition = { env_not_set = ["RUSTFLAGS"] } }
+BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = ["BENCH_WORKER_THREADS"] } }
+BENCH_NUM_OPS = { value = "1000", condition = { env_not_set = ["BENCH_NUM_OPS"] } }
+BENCH_DURATION = { value = "30", condition = { env_not_set = ["BENCH_DURATION"] } }
+BENCH_SAMPLE_SIZE = { value = "10", condition = { env_not_set = ["BENCH_SAMPLE_SIZE"] } }
+BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", condition = { env_not_set = ["BENCH_FEATURES"] } }
+
 [tasks.ci-format]
 category = "CI - CHECK"
 command = "cargo"
@@ -59,7 +67,7 @@ args = ["test", "--locked", "--features", "storage-mem,ml", "--workspace", "--te
 [tasks.ci-graphql-integration]
 category = "GRAPHQL - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } }, SURREAL_CAPS_ALLOW_EXPERIMENTAL = "graphql", RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } }, SURREAL_CAPS_ALLOW_EXPERIMENTAL = "graphql" }
 args = ["test", "--locked", "--features", "storage-mem", "--workspace", "--test", "graphql_integration", "--", "graphql_integration", "--nocapture"]
 
 [tasks.ci-test-workspace]
@@ -128,7 +136,7 @@ category = "CI - INTEGRATION TESTS"
 run_task = { name = ["start-surrealdb", "test-workspace-coverage-complete", "stop-surrealdb"], fork = true }
 
 [tasks.ci-database-upgrade]
-env = { _TEST_FEATURES = "storage-rocksdb" }
+env = { _TEST_FEATURES = "storage-rocksdb", RUSTFLAGS = "-D warnings --cfg surrealdb_unstable --cfg docker" }
 category = "CI - DATABASE UPGRADE TESTS"
 run_task = { name = ["test-database-upgrade"], fork = true }
 
@@ -156,7 +164,7 @@ run_task = { name = ["start-surrealdb", "test-api-integration", "stop-surrealdb"
 [tasks.test-database-upgrade]
 private = true
 command = "cargo"
-env = { RUST_LOG = "info", RUSTFLAGS = "--cfg docker" }
+env = { RUST_LOG = "info" }
 args = ["test", "--locked", "--no-default-features", "--features", "${_TEST_FEATURES}", "--workspace", "--test", "database_upgrade", "--", "database_upgrade", "--show-output"]
 
 #
@@ -303,12 +311,6 @@ args = ["bench", "--quiet", "--package", "surrealdb", "--no-default-features", "
 #
 # Benchmarks - SDB - Per Target
 #
-[env]
-BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = ["BENCH_WORKER_THREADS"] } }
-BENCH_NUM_OPS = { value = "1000", condition = { env_not_set = ["BENCH_NUM_OPS"] } }
-BENCH_DURATION = { value = "30", condition = { env_not_set = ["BENCH_DURATION"] } }
-BENCH_SAMPLE_SIZE = { value = "10", condition = { env_not_set = ["BENCH_SAMPLE_SIZE"] } }
-BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", condition = { env_not_set = ["BENCH_FEATURES"] } }
 
 [tasks.bench-target]
 private = true

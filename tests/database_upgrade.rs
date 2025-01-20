@@ -1,6 +1,6 @@
 mod common;
 
-#[cfg(docker)]
+#[cfg(all(docker, feature = "storage-rocksdb"))]
 mod database_upgrade {
 	use super::common::docker::DockerContainer;
 	use std::net::Ipv4Addr;
@@ -65,49 +65,41 @@ mod database_upgrade {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
 	async fn upgrade_test_from_2_0_0() {
 		run!(upgrade_test_from_2_0("v2.0.0"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
 	async fn upgrade_test_from_2_0_1() {
 		run!(upgrade_test_from_2_0("v2.0.1"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
 	async fn upgrade_test_from_2_0_2() {
 		run!(upgrade_test_from_2_0("v2.0.2"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
 	async fn upgrade_test_from_2_0_3() {
 		run!(upgrade_test_from_2_0("v2.0.3"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
 	async fn upgrade_test_from_2_0_4() {
 		run!(upgrade_test_from_2_0("v2.0.4"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
 	async fn upgrade_test_from_2_1_0() {
 		run!(upgrade_test_from_2_0("v2.1.0"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
 	async fn upgrade_test_from_2_1_1() {
 		run!(upgrade_test_from_2_0("v2.1.1"));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
 	async fn upgrade_test_from_2_1_2() {
 		run!(upgrade_test_from_2_0("v2.1.2"));
 	}
