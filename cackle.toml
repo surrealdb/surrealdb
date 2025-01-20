@@ -279,6 +279,7 @@ allow_apis = ["fs"]
 [pkg.proc-macro2]
 build.allow_apis = ["process"]
 allow_unsafe = true
+allow_apis = ["fs"]
 
 [pkg.libc]
 build.allow_apis = ["process"]
