@@ -82,6 +82,18 @@ macro_rules! test_parse {
 	}};
 }
 
+#[cfg(test)]
+macro_rules! test_parse_with_settings {
+	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:expr, $s:expr) => {{
+		let mut parser = $crate::syn::parser::Parser::new_with_settings(
+			$t.as_bytes(),
+			$s,
+		);
+		let mut stack = reblessive::Stack::new();
+		stack.enter(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
+	}};
+}
+
 macro_rules! enter_object_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{
 		if $this.settings.object_recursion_limit == 0 {
@@ -196,3 +208,5 @@ pub(crate) use unexpected;
 
 #[cfg(test)]
 pub(crate) use test_parse;
+#[cfg(test)]
+pub(crate) use test_parse_with_settings;

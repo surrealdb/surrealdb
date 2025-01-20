@@ -141,7 +141,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@1.80.1
+        uses: dtolnay/rust-toolchain@1.81.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -152,7 +152,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make@0.37.23
+        run: cargo install --debug --locked cargo-make
 
       - name: Check workspace on MSRV
         run: cargo make ci-check
