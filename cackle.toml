@@ -545,7 +545,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.anyhow]
-build.allow_apis = ["process"]
+build.allow_apis = ["fs", "process"]
 allow_unsafe = true
 
 [pkg.siphasher]
