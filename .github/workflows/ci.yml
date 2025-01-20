@@ -141,7 +141,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@1.80.1
+        uses: dtolnay/rust-toolchain@1.81.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
