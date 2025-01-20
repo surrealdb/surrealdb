@@ -155,7 +155,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+        run: cargo install --debug --locked cargo-make@0.37.23
 
       - name: Check workspace on MSRV
         run: cargo make ci-check
