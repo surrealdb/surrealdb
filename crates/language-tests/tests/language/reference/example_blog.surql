@@ -63,6 +63,9 @@ value = "[]"
 
 [[test.results]]
 value = "[]"
+
+[env.capabilities.allow_experimental]
+value = "record_references"
 */
 
 DEFINE TABLE tag;
