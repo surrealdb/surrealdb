@@ -31,7 +31,6 @@ kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
 kv-indxdb = ["surrealdb-core/kv-indxdb"]
 kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
 kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
-kv-fdb = ["surrealdb-core/kv-fdb", "tokio/time"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
 kv-surrealcs = ["surrealdb-core/kv-surrealcs", "tokio/time"]
 scripting = ["surrealdb-core/scripting"]
@@ -50,9 +49,11 @@ ml = ["surrealdb-core/ml"]
 jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
 allocation-tracking = ["surrealdb-core/allocation-tracking"]
-# Special features
+# FoundationDB features
 kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
 kv-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]
+# Deprecated features
+kv-fdb = [] # Use a version specific `kv-fdb-*` feature instead
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -162,6 +163,7 @@ uuid = { version = "1.10.0", features = ["serde", "v4", "v7"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(kv_fdb)',
     'cfg(storage)',
     'cfg(surrealdb_unstable)',
 ] }

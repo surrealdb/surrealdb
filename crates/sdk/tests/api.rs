@@ -391,7 +391,7 @@ mod api_integration {
 		include!("api/backup.rs");
 	}
 
-	#[cfg(feature = "kv-fdb")]
+	#[cfg(kv_fdb)]
 	mod fdb {
 		use super::*;
 		use surrealdb::engine::local::Db;

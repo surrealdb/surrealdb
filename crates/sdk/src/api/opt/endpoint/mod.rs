@@ -3,7 +3,7 @@ mod http;
 #[cfg(feature = "protocol-ws")]
 mod ws;
 
-#[cfg(feature = "kv-fdb")]
+#[cfg(kv_fdb)]
 mod fdb;
 #[cfg(feature = "kv-indxdb")]
 mod indxdb;
