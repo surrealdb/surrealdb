@@ -6,7 +6,7 @@ use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::capabilities::{MethodTarget, RouteTarget};
+use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget, RouteTarget};
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
@@ -26,7 +26,7 @@ use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
-use crate::syn::parser::StatementStream;
+use crate::syn::parser::{ParserSettings, StatementStream};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
@@ -51,7 +51,7 @@ use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
-const LQ_CHANNEL_SIZE: usize = 100;
+const LQ_CHANNEL_SIZE: usize = 15_000;
 
 // The role assigned to the initial user created when starting the server with credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
@@ -251,30 +251,6 @@ impl Datastore {
 		Self::new_with_clock(path, None).await
 	}
 
-	#[cfg(debug_assertions)]
-	/// Create a new datastore with the same persistent data (inner), with flushed cache.
-	/// Simulating a server restart
-	pub fn restart(self) -> Self {
-		Self {
-			id: self.id,
-			strict: self.strict,
-			auth_enabled: self.auth_enabled,
-			query_timeout: self.query_timeout,
-			transaction_timeout: self.transaction_timeout,
-			capabilities: self.capabilities,
-			notification_channel: self.notification_channel,
-			index_stores: Default::default(),
-			#[cfg(not(target_family = "wasm"))]
-			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
-			#[cfg(feature = "jwks")]
-			jwks_cache: Arc::new(Default::default()),
-			#[cfg(storage)]
-			temporary_directory: self.temporary_directory,
-			transaction_factory: self.transaction_factory,
-			cache: Arc::new(cache::ds::new()),
-		}
-	}
-
 	#[allow(unused_variables)]
 	pub async fn new_with_clock(
 		path: &str,
@@ -437,6 +413,30 @@ impl Datastore {
 		})
 	}
 
+	/// Create a new datastore with the same persistent data (inner), with flushed cache.
+	/// Simulating a server restart
+	#[allow(dead_code)]
+	pub fn restart(self) -> Self {
+		Self {
+			id: self.id,
+			strict: self.strict,
+			auth_enabled: self.auth_enabled,
+			query_timeout: self.query_timeout,
+			transaction_timeout: self.transaction_timeout,
+			capabilities: self.capabilities,
+			notification_channel: self.notification_channel,
+			index_stores: Default::default(),
+			#[cfg(not(target_family = "wasm"))]
+			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
+			#[cfg(feature = "jwks")]
+			jwks_cache: Arc::new(Default::default()),
+			#[cfg(storage)]
+			temporary_directory: self.temporary_directory,
+			transaction_factory: self.transaction_factory,
+			cache: Arc::new(cache::ds::new()),
+		}
+	}
+
 	/// Specify whether this Datastore should run in strict mode
 	pub fn with_node_id(mut self, id: Uuid) -> Self {
 		self.id = id;
@@ -514,6 +514,11 @@ impl Datastore {
 	#[cfg(feature = "jwks")]
 	pub(crate) fn allows_network_target(&self, net_target: &NetTarget) -> bool {
 		self.capabilities.allows_network_target(net_target)
+	}
+
+	/// Set specific capabilities for this Datastore
+	pub fn get_capabilities(&self) -> &Capabilities {
+		&self.capabilities
 	}
 
 	#[cfg(feature = "jwks")]
@@ -778,7 +783,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Parse the SQL query text
-		let ast = syn::parse(txt)?;
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -817,7 +822,13 @@ impl Datastore {
 		vars.attach(&mut ctx)?;
 		// Process all statements
 
-		let mut statements_stream = StatementStream::new();
+		let parser_settings = ParserSettings {
+			references_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			..Default::default()
+		};
+		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
 		let mut buffer = BytesMut::new();
 		let mut parse_size = 4096;
 		let mut bytes_stream = pin!(query);
@@ -862,7 +873,7 @@ impl Datastore {
 						// the buffer already contained more or equal to parse_size bytes
 						// this means we are trying to parse a statement of more then buffer size.
 						// so we need to increase the buffer size.
-						parse_size = parse_size.next_power_of_two();
+						parse_size = (parse_size + 1).next_power_of_two();
 					}
 					// start filling the buffer again.
 					filling = true;

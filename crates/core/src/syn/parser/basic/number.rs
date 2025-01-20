@@ -99,10 +99,12 @@ impl TokenValue for Number {
 						.map(Number::Int)
 						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
 					NumberKind::Float => number_str
+						.trim_end_matches("f")
 						.parse()
 						.map(Number::Float)
 						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
 					NumberKind::Decimal => {
+						let number_str = number_str.trim_end_matches("dec");
 						let decimal = if number_str.contains(['e', 'E']) {
 							Decimal::from_scientific(number_str).map_err(
 								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),

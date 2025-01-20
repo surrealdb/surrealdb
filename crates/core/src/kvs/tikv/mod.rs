@@ -6,7 +6,7 @@ use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepar
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use crate::vs::Versionstamp;
+use crate::vs::VersionStamp;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::pin::Pin;
@@ -499,7 +499,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Obtain a new change timestamp for a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
+	async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp, Error>
 	where
 		K: Into<Key> + Sprintable + Debug,
 	{
@@ -513,21 +513,17 @@ impl super::api::Transaction for Transaction {
 		let ver = self.inner.current_timestamp().await?.version();
 		// Calculate the previous version value
 		if let Some(prev) = self.get(key.as_slice(), None).await? {
-			let res: Result<[u8; 10], Error> = match prev.as_slice().try_into() {
-				Ok(ba) => Ok(ba),
-				Err(e) => Err(Error::Tx(e.to_string())),
-			};
-			let prev = crate::vs::try_to_u64_be(res?)?;
+			let prev = VersionStamp::from_slice(prev.as_slice())?.try_into_u64()?;
 			if prev >= ver {
 				return Err(Error::TxFailure);
 			}
 		};
 		// Convert the timestamp to a versionstamp
-		let verbytes = crate::vs::u64_to_versionstamp(ver);
+		let ver = VersionStamp::from_u64(ver);
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key.as_slice(), verbytes.to_vec(), None).await?;
+		self.set(key.as_slice(), ver.as_bytes(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
-		Ok(verbytes)
+		Ok(ver)
 	}
 }
 

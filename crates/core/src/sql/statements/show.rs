@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Datetime, Table, Value};
-use crate::vs::{conv, Versionstamp};
+use crate::vs::VersionStamp;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -20,14 +20,14 @@ pub enum ShowSince {
 }
 
 impl ShowSince {
-	pub fn versionstamp(vs: &Versionstamp) -> ShowSince {
-		ShowSince::Versionstamp(conv::versionstamp_to_u64(vs))
+	pub fn versionstamp(vs: &VersionStamp) -> ShowSince {
+		ShowSince::Versionstamp(vs.into_u64_lossy())
 	}
 
-	pub fn as_versionstamp(&self) -> Option<Versionstamp> {
+	pub fn as_versionstamp(&self) -> Option<VersionStamp> {
 		match self {
 			ShowSince::Timestamp(_) => None,
-			ShowSince::Versionstamp(v) => Some(conv::u64_to_versionstamp(*v)),
+			ShowSince::Versionstamp(v) => Some(VersionStamp::from_u64(*v)),
 		}
 	}
 }
