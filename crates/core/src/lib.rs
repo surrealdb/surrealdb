@@ -12,6 +12,9 @@
 //! </section>
 //!
 
+#![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
+#![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
+
 #[macro_use]
 extern crate tracing;
 
