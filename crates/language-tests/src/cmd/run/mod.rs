@@ -307,7 +307,9 @@ async fn run_test_with_dbs(
 
 	let source = &set[id].source;
 	let settings = syn::parser::ParserSettings {
-		references_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences),
+		references_enabled: dbs
+			.get_capabilities()
+			.allows_experimental(&ExperimentalTarget::RecordReferences),
 		..Default::default()
 	};
 	let mut parser = syn::parser::Parser::new_with_settings(source, settings);
