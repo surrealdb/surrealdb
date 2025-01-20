@@ -727,6 +727,7 @@ allow_unsafe = true
 
 [pkg.mime_guess]
 build.allow_apis = ["fs"]
+build.allow_build_instructions = ["cargo:rustc-env=MIME_TYPES_GENERATED_PATH=*"]
 
 [pkg.term]
 from.build.allow_apis = ["fs"]
