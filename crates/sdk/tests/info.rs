@@ -4,7 +4,7 @@ use helpers::*;
 use regex::Regex;
 use std::collections::HashMap;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
-use surrealdb::dbs::Session;
+use surrealdb::dbs::{Capabilities, Session};
 use surrealdb::iam::Role;
 
 #[tokio::test]
