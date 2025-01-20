@@ -468,7 +468,9 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private';
 			INFO FOR NS
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -491,7 +493,9 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
 			INFO FOR DB
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = Session::owner().with_ns("ns").with_db("test");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -514,7 +518,9 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
 			INFO FOR DB
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = Session::owner().with_ns("ns").with_db("test");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -566,7 +572,9 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private' DURATION FOR TOKEN 15m, FOR SESSION 6h;
 			INFO FOR NS STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -589,7 +597,9 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h;
 			INFO FOR DB STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = Session::owner().with_ns("ns").with_db("db");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -612,7 +622,9 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR GRANT 1w, FOR TOKEN 15m, FOR SESSION 6h;
 			INFO FOR DB STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = Session::owner().with_ns("ns").with_db("db");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
