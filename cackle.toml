@@ -210,6 +210,7 @@ allow_proc_macro = true
 
 [pkg.zerocopy-derive]
 allow_proc_macro = true
+allow_unsafe = true
 
 [pkg.revision-derive]
 allow_proc_macro = true
