@@ -1308,3 +1308,6 @@ allow_proc_macro = true
 [pkg.sysinfo]
 allow_unsafe = true
 allow_apis = ["fs"]
+
+[pkg.foldhash]
+allow_unsafe = true
