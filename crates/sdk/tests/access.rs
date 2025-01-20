@@ -5,7 +5,8 @@ use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use regex::Regex;
-use surrealdb::dbs::Session;
+use surrealdb::dbs::capabilities::ExperimentalTarget;
+use surrealdb::dbs::{Capabilities, Session};
 use surrealdb::iam::Role;
 use surrealdb::sql::{Base, Value};
 use tokio::time::Duration;
@@ -61,7 +62,9 @@ async fn access_bearer_operations() {
 			ACCESS invalid SHOW ALL;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+		);;
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -225,7 +228,9 @@ async fn access_bearer_grant() {
 			ACCESS srv GRANT FOR RECORD user:tobie;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -376,7 +381,9 @@ async fn access_bearer_revoke() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -516,7 +523,9 @@ async fn access_bearer_show() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -675,7 +684,9 @@ async fn access_bearer_purge() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -833,7 +844,9 @@ async fn permissions_access_grant() {
 				format!("DEFINE ACCESS api ON {base} TYPE BEARER FOR USER; DEFINE USER tobie ON {base} ROLES OWNER");
 
 			{
-				let ds = new_ds().await.unwrap().with_auth_enabled(true);
+				let ds = new_ds().await.unwrap().with_auth_enabled(true).with_capabilities(
+					Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+				);
 
 				let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();
 				let res = resp.remove(0).output();

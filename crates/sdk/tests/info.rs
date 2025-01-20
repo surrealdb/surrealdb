@@ -442,7 +442,9 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
 			INFO FOR NS
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+		);
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -538,7 +540,9 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h;
 			INFO FOR NS STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into())
+		);
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();

@@ -479,7 +479,7 @@ impl Capabilities {
 			deny_rpc: Arc::new(Targets::None),
 			allow_http: Arc::new(Targets::All),
 			deny_http: Arc::new(Targets::None),
-			allow_experimental: Arc::new(Targets::All),
+			allow_experimental: Arc::new(Targets::None),
 			deny_experimental: Arc::new(Targets::None),
 		}
 	}
