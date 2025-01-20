@@ -78,22 +78,6 @@ pub static INSECURE_FORWARD_ACCESS_ERRORS: LazyLock<bool> =
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
 
-/// Specifies whether GraphQL querying and schema definition is enabled.
-pub static GRAPHQL_ENABLE: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_EXPERIMENTAL_GRAPHQL", bool, false);
-
-/// Enable experimental bearer access and stateful access grant management.
-///
-/// Still under active development. Using this experimental feature may introduce risks related
-/// to breaking changes and security issues.
-#[cfg(not(test))]
-pub static EXPERIMENTAL_BEARER_ACCESS: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_EXPERIMENTAL_BEARER_ACCESS", bool, false);
-
-/// Run tests with bearer access enabled as it introduces new functionality that needs to be tested.
-#[cfg(test)]
-pub static EXPERIMENTAL_BEARER_ACCESS: LazyLock<bool> = LazyLock::new(|| true);
-
 /// Used to limit allocation for builtin functions
 pub static GENERATION_ALLOCATION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 	let n = std::env::var("SURREAL_GENERATION_ALLOCATION_LIMIT")

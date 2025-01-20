@@ -73,6 +73,8 @@ pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
 			references_enabled: capabilities
 				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			bearer_access_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::BearerAccess),
 			..Default::default()
 		},
 	);
@@ -107,6 +109,8 @@ pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
 			references_enabled: capabilities
 				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			bearer_access_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::BearerAccess),
 			..Default::default()
 		},
 	);

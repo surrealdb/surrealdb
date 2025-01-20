@@ -49,6 +49,8 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 				.without_rpc_methods(extract_targets(&schema_cap.deny_rpc, true))
 				.with_http_routes(extract_targets(&schema_cap.allow_http, false))
 				.without_http_routes(extract_targets(&schema_cap.deny_http, true))
+				.with_experimental(extract_targets(&schema_cap.allow_experimental, false))
+				.without_experimental(extract_targets(&schema_cap.deny_experimental, true))
 		})
 		.unwrap_or_else(Capabilities::all)
 }
