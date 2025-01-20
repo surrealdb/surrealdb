@@ -786,7 +786,7 @@ pub fn verify_grant_bearer(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::iam::Role;
+	use crate::{dbs::Capabilities, iam::Role};
 	use chrono::Duration;
 	use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 	use regex::Regex;
@@ -2091,7 +2091,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with correct bearer key
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2202,7 +2205,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with correct bearer key and AUTHENTICATE clause succeeding
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2316,7 +2322,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with correct bearer key and AUTHENTICATE clause failing
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2402,7 +2411,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with expired grant
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2486,7 +2498,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with revoked grant
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2579,7 +2594,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with removed access method
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2665,7 +2683,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with missing key
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2749,7 +2770,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key prefix part
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2835,7 +2859,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key length
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2921,7 +2948,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key identifier part
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -3007,7 +3037,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key value
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -3093,7 +3126,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test that only the key hash is stored
 			{
-				let ds = Datastore::new("memory").await.unwrap();
+				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -3170,7 +3206,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	async fn test_signin_bearer_for_record() {
 		// Test with correct bearer key and existing record
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3244,7 +3282,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 		// Test with correct bearer key and non-existing record
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3318,7 +3358,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 		// Test with correct bearer key and AUTHENTICATE clause succeeding
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3396,7 +3438,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with correct bearer key and AUTHENTICATE clause failing
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3462,7 +3506,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with expired grant
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3526,7 +3572,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with revoked grant
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3595,7 +3643,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with removed access method
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3659,7 +3709,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with missing key
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3721,7 +3773,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key prefix part
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3787,7 +3841,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key length
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3853,7 +3909,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key identifier part
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3919,7 +3977,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key value
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3985,7 +4045,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test that only the key hash is stored
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(

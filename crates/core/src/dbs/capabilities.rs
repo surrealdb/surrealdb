@@ -378,6 +378,14 @@ pub enum Targets<T: Hash + Eq + PartialEq> {
 	All,
 }
 
+impl<T: Target + Hash + Eq + PartialEq> From<T> for Targets<T> {
+	fn from(t: T) -> Self {
+		let mut set = HashSet::new();
+		set.insert(t);
+		Self::Some(set)
+	}
+}
+
 impl<T: Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
 	pub(crate) fn matches<S>(&self, elem: &S) -> bool
 	where
