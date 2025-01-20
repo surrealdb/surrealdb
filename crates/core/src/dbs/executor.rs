@@ -216,6 +216,11 @@ impl Executor {
 							});
 						}
 
+						// Operates cache evictions
+						if let Some(cache) = self.ctx.get_cache() {
+							cache.apply_evictions().await;
+						}
+
 						// flush notifications.
 						if let Some(recv) = receiver {
 							self.opt.sender = None;
@@ -400,6 +405,11 @@ impl Executor {
 					} else if let Err(e) = lock.commit().await {
 						e
 					} else {
+						// Operates cache evictions
+						if let Some(cache) = self.ctx.get_cache() {
+							cache.apply_evictions().await;
+						}
+
 						// Successfully commited. everything is fine.
 
 						// flush notifications.
