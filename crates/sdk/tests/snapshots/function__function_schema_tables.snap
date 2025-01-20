@@ -1,0 +1,69 @@
+---
+source: crates/sdk/tests/function.rs
+expression: tmp
+snapshot_kind: text
+---
+Array(r#$surrealdb::private::sql::Array([
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": Strand(r#$surrealdb::private::sql::Strand("This is a comment on a table")),
+    "computed": Bool(false),
+    "drop": Bool(false),
+    "name": Table(r#$surrealdb::private::sql::Table("commented")),
+    "relation": None,
+    "schemafull": Bool(false),
+    "type": Strand(r#$surrealdb::private::sql::Strand("ANY")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": None,
+    "computed": Bool(true),
+    "drop": Bool(false),
+    "name": Table(r#$surrealdb::private::sql::Table("computed")),
+    "relation": None,
+    "schemafull": Bool(false),
+    "type": Strand(r#$surrealdb::private::sql::Strand("ANY")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": None,
+    "computed": Bool(false),
+    "drop": Bool(true),
+    "name": Table(r#$surrealdb::private::sql::Table("dropped")),
+    "relation": None,
+    "schemafull": Bool(false),
+    "type": Strand(r#$surrealdb::private::sql::Strand("ANY")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": None,
+    "computed": Bool(false),
+    "drop": Bool(false),
+    "name": Table(r#$surrealdb::private::sql::Table("post")),
+    "relation": None,
+    "schemafull": Bool(false),
+    "type": Strand(r#$surrealdb::private::sql::Strand("ANY")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": None,
+    "computed": Bool(false),
+    "drop": Bool(false),
+    "name": Table(r#$surrealdb::private::sql::Table("road_to")),
+    "relation": Object(r#$surrealdb::private::sql::Object({
+      "enforced": Bool(true),
+      "in": Array(r#$surrealdb::private::sql::Array([
+        Table(r#$surrealdb::private::sql::Table("city")),
+      ])),
+      "out": Array(r#$surrealdb::private::sql::Array([
+        Table(r#$surrealdb::private::sql::Table("city")),
+      ])),
+    })),
+    "schemafull": Bool(false),
+    "type": Strand(r#$surrealdb::private::sql::Strand("RELATION")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": None,
+    "computed": Bool(false),
+    "drop": Bool(false),
+    "name": Table(r#$surrealdb::private::sql::Table("user")),
+    "relation": None,
+    "schemafull": Bool(true),
+    "type": Strand(r#$surrealdb::private::sql::Strand("NORMAL")),
+  })),
+]))

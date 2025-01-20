@@ -1,0 +1,13 @@
+---
+source: crates/sdk/tests/function.rs
+expression: tmp
+snapshot_kind: text
+---
+Object(r#$surrealdb::private::sql::Object({
+  "comment": None,
+  "computed": Bool(false),
+  "flexible": Bool(false),
+  "name": Strand(r#$surrealdb::private::sql::Strand("name")),
+  "readonly": Bool(false),
+  "type": Strand(r#$surrealdb::private::sql::Strand("string")),
+}))

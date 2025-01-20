@@ -1,0 +1,13 @@
+---
+source: crates/sdk/tests/function.rs
+expression: tmp
+snapshot_kind: text
+---
+Object(r#$surrealdb::private::sql::Object({
+  "actions": Array(r#$surrealdb::private::sql::Array([
+    Strand(r#$surrealdb::private::sql::Strand("(CREATE log SET `table` = \'user\', event = $event, happened_at = time::now())")),
+  ])),
+  "comment": None,
+  "condition": Strand(r#$surrealdb::private::sql::Strand("$event = \'CREATE\' OR $event = \'UPDATE\' OR $event = \'DELETE\'")),
+  "name": Strand(r#$surrealdb::private::sql::Strand("user_event")),
+}))

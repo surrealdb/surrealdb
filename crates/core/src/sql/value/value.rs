@@ -580,6 +580,15 @@ impl From<Option<String>> for Value {
 	}
 }
 
+impl From<Option<Strand>> for Value {
+	fn from(v: Option<Strand>) -> Self {
+		match v {
+			Some(v) => Value::from(v),
+			None => Value::None,
+		}
+	}
+}
+
 impl From<Option<i64>> for Value {
 	fn from(v: Option<i64>) -> Self {
 		match v {
@@ -1921,6 +1930,20 @@ impl Value {
 				}),
 				_ => Ok(v),
 			})
+	}
+
+	/// Try to coerce this value to a `Table`
+	pub(crate) fn coerce_to_table(self) -> Result<Table, Error> {
+		match self {
+			// String and Table are allowed
+			Value::Table(v) => Ok(v),
+			Value::Strand(v) => Ok(v.0.into()),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "table".into(),
+			}),
+		}
 	}
 
 	// -----------------------------------

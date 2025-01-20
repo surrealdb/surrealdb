@@ -24,6 +24,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod record;
+pub mod schema;
 pub mod script;
 pub mod search;
 pub mod session;
@@ -65,6 +66,7 @@ pub async fn run(
 		|| name.eq("value::diff")
 		|| name.eq("value::patch")
 		|| name.starts_with("http")
+		|| name.starts_with("schema")
 		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
@@ -514,6 +516,17 @@ pub async fn asynchronous(
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
 		"record::refs" => record::refs((stk, ctx, opt, doc)).await,
 		//
+		"schema::event" => schema::event((ctx, opt)).await,
+		"schema::events" => schema::events((ctx, opt)).await,
+		"schema::field" => schema::field((ctx, opt)).await,
+		"schema::fields" => schema::fields((ctx, opt)).await,
+		"schema::function" => schema::function((ctx, opt)).await,
+		"schema::functions" => schema::functions((ctx, opt)).await,
+		"schema::index" => schema::index((ctx, opt)).await,
+		"schema::indexes" => schema::indexes((ctx, opt)).await,
+		"schema::table" => schema::table((ctx, opt)).await,
+		"schema::tables" => schema::tables((ctx, opt)).await,
+		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
@@ -812,6 +825,20 @@ pub async fn idiom(
 				"week" => time::week,
 				"yday" => time::yday,
 				"year" => time::year,
+			)
+		}
+		Value::Table(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the table type",
+				//
+				"event" => schema::event((ctx, opt)).await,
+				"events" => schema::events((ctx, opt)).await,
+				"field" => schema::field((ctx, opt)).await,
+				"fields" => schema::fields((ctx, opt)).await,
+				"index" => schema::index((ctx, opt)).await,
+				"indexes" => schema::indexes((ctx, opt)).await,
 			)
 		}
 		_ => Err(Error::InvalidFunction {

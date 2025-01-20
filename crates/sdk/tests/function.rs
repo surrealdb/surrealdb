@@ -3419,6 +3419,368 @@ async fn function_record_table() -> Result<(), Error> {
 }
 
 // --------------------------------------------------
+// schema
+// --------------------------------------------------
+
+#[tokio::test]
+async fn function_schema_event() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::event("user", "user_event");
+
+		DEFINE EVENT user_event ON TABLE user
+			WHEN $event = "CREATE" OR $event = "UPDATE" OR $event = "DELETE"
+			THEN (
+				CREATE log SET
+					table = "user",
+					event = $event,
+					happened_at = time::now()
+			);
+
+		RETURN schema::event("user", "user_event");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_events() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::events("user");
+		
+		DEFINE EVENT user_updated ON TABLE user
+			WHEN $event = "UPDATE"
+			THEN (
+				CREATE notification SET message = "User updated", user_id = $after.id, created_at = time::now()
+			);
+		DEFINE EVENT user_deleted ON TABLE user
+			WHEN $event = "DELETE"
+			THEN (
+				CREATE notification SET message = "User deleted", user_id = $before.id, created_at = time::now()
+			);
+		DEFINE EVENT user_event ON TABLE user
+			WHEN $event = "CREATE" OR $event = "UPDATE" OR $event = "DELETE"
+			THEN (
+				CREATE log SET
+					table = "user",
+					event = $event,
+					happened_at = time::now()
+			);
+		DEFINE EVENT user_comment ON TABLE user
+			WHEN $event = "CREATE" OR $event = "UPDATE" OR $event = "DELETE"
+			THEN (
+				CREATE log SET
+					table = "user",
+					event = $event,
+					happened_at = time::now()
+			)
+			COMMENT "This is a comment on a user event";
+
+		RETURN schema::events("user");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(Vec::<Value>::new());
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_field() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::field("user", "name");
+
+		DEFINE FIELD name ON user TYPE string;
+
+		RETURN schema::field("user", "name");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_fields() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::fields("user");
+
+		DEFINE FIELD name ON user TYPE string;
+		DEFINE FIELD object ON post FLEXIBLE TYPE object;
+		DEFINE FIELD created_at ON user TYPE datetime READONLY; 
+		DEFINE FIELD computed ON user TYPE string VALUE firstname + " " + lastname;
+		DEFINE FIELD comment ON post COMMENT "This is a comment on a post";
+
+		RETURN schema::fields("user");
+		RETURN schema::fields("post");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(Vec::<Value>::new());
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_function() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::function("greet");
+
+		DEFINE FUNCTION fn::greet($name: string) {
+			RETURN "Hello, " + $name + "!";
+		};
+
+		RETURN schema::function("greet");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_functions() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::functions();
+
+		DEFINE FUNCTION fn::greet($name: string) -> string {
+			RETURN "Hello, " + $name + "!";
+		};
+		DEFINE FUNCTION fn::relation_exists(
+			$in: record,
+			$tb: string,
+			$out: record
+		) {
+			-- Check if a relation exists between the two nodes.
+			LET $results = SELECT VALUE id FROM type::table($tb) WHERE in = $in AND out = $out;
+			-- Return true if a relation exists, false otherwise
+			RETURN array::len($results) > 0;
+		};
+		DEFINE FUNCTION fn::last_option($required: number, $optional: option<number>) {
+			RETURN {
+				required_present: type::is::number($required),
+				optional_present: type::is::number($optional),
+			}
+		};
+		DEFINE FUNCTION fn::comment($name: string) {
+			RETURN "comment";
+		} COMMENT "This is a comment on a function";
+
+		RETURN schema::functions();
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(Vec::<Value>::new());
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_index() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::index("user", "nameIndex");
+
+		DEFINE INDEX nameIndex ON user COLUMNS name;
+
+		RETURN schema::index("user", "nameIndex");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_indexes() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::indexes("user");
+
+		DEFINE INDEX nameIndex ON user COLUMNS name;
+		DEFINE INDEX userEmailIndex ON TABLE user COLUMNS email UNIQUE;
+		DEFINE INDEX userNameIndex ON TABLE user COLUMNS name SEARCH ANALYZER ascii BM25 HIGHLIGHTS;
+		DEFINE INDEX multiColumnIndex ON user COLUMNS firstname, lastname, birth_date;
+		DEFINE INDEX commentIndex ON user COMMENT "This is an index";
+
+		RETURN schema::indexes("user");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(Vec::<Value>::new());
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_table() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::table("user");
+
+		DEFINE TABLE user SCHEMAFULL;
+		DEFINE TABLE post SCHEMALESS;
+		DEFINE TABLE computed AS
+			SELECT * FROM user; 
+		DEFINE TABLE dropped DROP;
+		DEFINE TABLE commented COMMENT "This is a comment on a table";
+
+		RETURN schema::table("user");
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_schema_tables() -> Result<(), Error> {
+	let sql = r#"
+		RETURN schema::tables();
+
+		DEFINE TABLE user SCHEMAFULL;
+		DEFINE TABLE post SCHEMALESS;
+		DEFINE TABLE computed AS
+			SELECT * FROM user; 
+		DEFINE TABLE dropped DROP;
+		DEFINE TABLE commented COMMENT "This is a comment on a table";
+		DEFINE TABLE road_to TYPE RELATION IN city OUT city ENFORCED;
+
+		RETURN schema::tables();
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from(Vec::<Value>::new());
+	assert_eq!(tmp, val);
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let _ = test.next()?.result?; // skip
+	//
+	let tmp = test.next()?.result?;
+	insta::assert_ron_snapshot!(tmp);
+	//
+	Ok(())
+}
+
+// --------------------------------------------------
 // string
 // --------------------------------------------------
 

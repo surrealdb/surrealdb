@@ -278,6 +278,17 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("record::tb") => PathKind::Function,
 		UniCase::ascii("record::refs") => PathKind::Function,
 		//
+		UniCase::ascii("schema::event") => PathKind::Function,
+		UniCase::ascii("schema::events") => PathKind::Function,
+		UniCase::ascii("schema::field") => PathKind::Function,
+		UniCase::ascii("schema::fields") => PathKind::Function,
+		UniCase::ascii("schema::function") => PathKind::Function,
+		UniCase::ascii("schema::functions") => PathKind::Function,
+		UniCase::ascii("schema::index") => PathKind::Function,
+		UniCase::ascii("schema::indexes") => PathKind::Function,
+		UniCase::ascii("schema::table") => PathKind::Function,
+		UniCase::ascii("schema::tables") => PathKind::Function,
+		//
 		UniCase::ascii("search::analyze") => PathKind::Function,
 		UniCase::ascii("search::score") => PathKind::Function,
 		UniCase::ascii("search::highlight") => PathKind::Function,

@@ -1,0 +1,67 @@
+---
+source: crates/sdk/tests/function.rs
+expression: tmp
+snapshot_kind: text
+---
+Array(r#$surrealdb::private::sql::Array([
+  Object(r#$surrealdb::private::sql::Object({
+    "args": Array(r#$surrealdb::private::sql::Array([
+      Object(r#$surrealdb::private::sql::Object({
+        "name": Strand(r#$surrealdb::private::sql::Strand("name")),
+        "type": Strand(r#$surrealdb::private::sql::Strand("string")),
+      })),
+    ])),
+    "body": Strand(r#$surrealdb::private::sql::Strand("{ RETURN \'comment\'; }")),
+    "comment": Strand(r#$surrealdb::private::sql::Strand("This is a comment on a function")),
+    "name": Strand(r#$surrealdb::private::sql::Strand("comment")),
+    "returns": None,
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "args": Array(r#$surrealdb::private::sql::Array([
+      Object(r#$surrealdb::private::sql::Object({
+        "name": Strand(r#$surrealdb::private::sql::Strand("name")),
+        "type": Strand(r#$surrealdb::private::sql::Strand("string")),
+      })),
+    ])),
+    "body": Strand(r#$surrealdb::private::sql::Strand("{ RETURN \'Hello, \' + $name + \'!\'; }")),
+    "comment": None,
+    "name": Strand(r#$surrealdb::private::sql::Strand("greet")),
+    "returns": Strand(r#$surrealdb::private::sql::Strand("string")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "args": Array(r#$surrealdb::private::sql::Array([
+      Object(r#$surrealdb::private::sql::Object({
+        "name": Strand(r#$surrealdb::private::sql::Strand("required")),
+        "type": Strand(r#$surrealdb::private::sql::Strand("number")),
+      })),
+      Object(r#$surrealdb::private::sql::Object({
+        "name": Strand(r#$surrealdb::private::sql::Strand("optional")),
+        "type": Strand(r#$surrealdb::private::sql::Strand("option<number>")),
+      })),
+    ])),
+    "body": Strand(r#$surrealdb::private::sql::Strand("{ RETURN { optional_present: type::is::number($optional), required_present: type::is::number($required) }; }")),
+    "comment": None,
+    "name": Strand(r#$surrealdb::private::sql::Strand("last_option")),
+    "returns": None,
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "args": Array(r#$surrealdb::private::sql::Array([
+      Object(r#$surrealdb::private::sql::Object({
+        "name": Strand(r#$surrealdb::private::sql::Strand("in")),
+        "type": Strand(r#$surrealdb::private::sql::Strand("record")),
+      })),
+      Object(r#$surrealdb::private::sql::Object({
+        "name": Strand(r#$surrealdb::private::sql::Strand("tb")),
+        "type": Strand(r#$surrealdb::private::sql::Strand("string")),
+      })),
+      Object(r#$surrealdb::private::sql::Object({
+        "name": Strand(r#$surrealdb::private::sql::Strand("out")),
+        "type": Strand(r#$surrealdb::private::sql::Strand("record")),
+      })),
+    ])),
+    "body": Strand(r#$surrealdb::private::sql::Strand("{\nLET $results = (SELECT VALUE id FROM type::table($tb) WHERE in = $in AND out = $out);\nRETURN array::len($results) > 0;\n}")),
+    "comment": None,
+    "name": Strand(r#$surrealdb::private::sql::Strand("relation_exists")),
+    "returns": None,
+  })),
+]))

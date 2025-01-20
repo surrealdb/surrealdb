@@ -1,0 +1,47 @@
+---
+source: crates/sdk/tests/function.rs
+expression: tmp
+snapshot_kind: text
+---
+Array(r#$surrealdb::private::sql::Array([
+  Object(r#$surrealdb::private::sql::Object({
+    "columns": Array(r#$surrealdb::private::sql::Array([])),
+    "comment": Strand(r#$surrealdb::private::sql::Strand("This is an index")),
+    "name": Strand(r#$surrealdb::private::sql::Strand("commentIndex")),
+    "type": Strand(r#$surrealdb::private::sql::Strand("INDEX")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "columns": Array(r#$surrealdb::private::sql::Array([
+      Strand(r#$surrealdb::private::sql::Strand("firstname")),
+      Strand(r#$surrealdb::private::sql::Strand("lastname")),
+      Strand(r#$surrealdb::private::sql::Strand("birth_date")),
+    ])),
+    "comment": None,
+    "name": Strand(r#$surrealdb::private::sql::Strand("multiColumnIndex")),
+    "type": Strand(r#$surrealdb::private::sql::Strand("INDEX")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "columns": Array(r#$surrealdb::private::sql::Array([
+      Strand(r#$surrealdb::private::sql::Strand("name")),
+    ])),
+    "comment": None,
+    "name": Strand(r#$surrealdb::private::sql::Strand("nameIndex")),
+    "type": Strand(r#$surrealdb::private::sql::Strand("INDEX")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "columns": Array(r#$surrealdb::private::sql::Array([
+      Strand(r#$surrealdb::private::sql::Strand("email")),
+    ])),
+    "comment": None,
+    "name": Strand(r#$surrealdb::private::sql::Strand("userEmailIndex")),
+    "type": Strand(r#$surrealdb::private::sql::Strand("UNIQUE")),
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "columns": Array(r#$surrealdb::private::sql::Array([
+      Strand(r#$surrealdb::private::sql::Strand("name")),
+    ])),
+    "comment": None,
+    "name": Strand(r#$surrealdb::private::sql::Strand("userNameIndex")),
+    "type": Strand(r#$surrealdb::private::sql::Strand("SEARCH")),
+  })),
+]))

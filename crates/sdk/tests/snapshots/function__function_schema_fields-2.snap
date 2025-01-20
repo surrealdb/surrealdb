@@ -1,0 +1,23 @@
+---
+source: crates/sdk/tests/function.rs
+expression: tmp
+snapshot_kind: text
+---
+Array(r#$surrealdb::private::sql::Array([
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": Strand(r#$surrealdb::private::sql::Strand("This is a comment on a post")),
+    "computed": Bool(false),
+    "flexible": Bool(false),
+    "name": Strand(r#$surrealdb::private::sql::Strand("comment")),
+    "readonly": Bool(false),
+    "type": None,
+  })),
+  Object(r#$surrealdb::private::sql::Object({
+    "comment": None,
+    "computed": Bool(false),
+    "flexible": Bool(true),
+    "name": Strand(r#$surrealdb::private::sql::Strand("object")),
+    "readonly": Bool(false),
+    "type": Strand(r#$surrealdb::private::sql::Strand("object")),
+  })),
+]))
