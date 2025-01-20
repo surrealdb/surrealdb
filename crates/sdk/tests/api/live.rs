@@ -419,6 +419,56 @@ async fn live_select_query() {
 		assert_eq!(notification.action, Action::Create);
 	}
 
+	// receive CREATE event if selected in filters
+	{
+		let table = format!("table_{}", Ulid::new());
+		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
+
+		// Start listening
+		let mut users = db
+			.query("BEGIN")
+			.query(format!("LIVE<CREATE> SELECT * FROM {table}"))
+			.query("COMMIT")
+			.await
+			.unwrap()
+			.stream::<Value>(())
+			.unwrap();
+
+		// Create a record
+		db.create(Resource::from(&table)).await.unwrap();
+		// Pull the notification
+		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
+		// The returned record should be an object
+		assert!(notification.data.into_inner().is_object());
+		// It should be newly created
+		assert_eq!(notification.action, Action::Create);
+	}
+
+	// fails to receive CREATE event if not selected in filters
+	{
+		let table = format!("table_{}", Ulid::new());
+		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
+
+		// Start listening
+		let mut users = db
+			.query("BEGIN")
+			.query(format!("LIVE<UPDATE | DELETE> SELECT * FROM {table}"))
+			.query("COMMIT")
+			.await
+			.unwrap()
+			.stream::<Value>(())
+			.unwrap();
+
+		// Create a record
+		db.create(Resource::from(&table)).await.unwrap();
+		// Pull the notification
+		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
+		// The returned record should be an object
+		assert!(notification.data.into_inner().is_object());
+		// It should be newly created
+		assert_eq!(notification.action, Action::Create);
+	}
+
 	drop(permit);
 }
 

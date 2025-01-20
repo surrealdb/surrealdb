@@ -1,5 +1,5 @@
 use crate::{
-	sql::{
+	kvs::LiveFilters, sql::{
 		access::AccessDuration,
 		access_type::{
 			AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess,
@@ -39,8 +39,7 @@ use crate::{
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
-	},
-	syn::parser::mac::test_parse,
+	}, syn::parser::mac::test_parse
 };
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
 
@@ -2586,19 +2585,32 @@ fn parse_kill() {
 
 #[test]
 fn parse_live() {
+	//
 	let res = test_parse!(parse_stmt, r#"LIVE SELECT DIFF FROM $foo"#).unwrap();
 	let Statement::Live(stmt) = res else {
 		panic!()
 	};
+	assert_eq!(stmt.filters, None);
 	assert_eq!(stmt.expr, Fields::default());
 	assert_eq!(stmt.what, Value::Param(Param(Ident("foo".to_owned()))));
 
+	//
+	let res = test_parse!(parse_stmt, r#"LIVE<CREATE | DELETE> SELECT * FROM table"#).unwrap();
+	let Statement::Live(stmt) = res else {
+		panic!()
+	};
+	assert_eq!(stmt.filters, Some(LiveFilters::Create | LiveFilters::Delete));
+	assert_eq!(stmt.expr, Fields::all());
+	assert_eq!(stmt.what, Value::Table("table".into()));
+
+	//
 	let res =
 		test_parse!(parse_stmt, r#"LIVE SELECT foo FROM table WHERE true FETCH a[where foo],b"#)
 			.unwrap();
 	let Statement::Live(stmt) = res else {
 		panic!()
 	};
+	assert_eq!(stmt.filters, None);
 	assert_eq!(
 		stmt.expr,
 		Fields(

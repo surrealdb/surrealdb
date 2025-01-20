@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Auth;
-use crate::kvs::Live;
+use crate::kvs::{Live, LiveFilters};
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
@@ -19,6 +19,7 @@ use std::fmt;
 #[non_exhaustive]
 pub struct LiveStatement {
 	pub id: Uuid,
+	pub filters: Option<LiveFilters>,
 	pub node: Uuid,
 	pub expr: Fields,
 	pub what: Value,
@@ -60,6 +61,7 @@ impl LiveStatement {
 
 	/// Creates a live statement from parts that can be set during a query.
 	pub(crate) fn from_source_parts(
+		filters: Option<LiveFilters>,
 		expr: Fields,
 		what: Value,
 		cond: Option<Cond>,
@@ -68,6 +70,7 @@ impl LiveStatement {
 		LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
+			filters,
 			expr,
 			what,
 			cond,
@@ -117,6 +120,7 @@ impl LiveStatement {
 					ns: ns.to_string(),
 					db: db.to_string(),
 					tb: tb.to_string(),
+					filters: stm.filters.clone(),
 				};
 				// Get the transaction
 				let txn = ctx.tx();
@@ -156,7 +160,11 @@ impl LiveStatement {
 
 impl fmt::Display for LiveStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LIVE SELECT {} FROM {}", self.expr, self.what)?;
+		write!(f, "LIVE")?;
+		if let Some(filters) = &self.filters {
+			write!(f, "{}", filters)?;
+		}
+		write!(f, " SELECT {} FROM {}", self.expr, self.what)?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}

@@ -1,6 +1,7 @@
 use reblessive::Stk;
 
 use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
+use crate::kvs::LiveFilters;
 use crate::sql::block::Entry;
 use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
@@ -643,6 +644,16 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `LIVE` to already be consumed.
 	pub(super) async fn parse_live_stmt(&mut self, stk: &mut Stk) -> ParseResult<LiveStatement> {
+		let filters = match self.peek_kind() {
+			t!("<") => {
+				self.pop_peek();
+				let filters = self.parse_live_filters()?;
+				expected!(self, t!(">"));
+				Some(filters)
+			},
+			_ => None,
+		};
+
 		expected!(self, t!("SELECT"));
 
 		let expr = match self.peek_kind() {
@@ -660,7 +671,29 @@ impl Parser<'_> {
 		let cond = self.try_parse_condition(stk).await?;
 		let fetch = self.try_parse_fetch(stk).await?;
 
-		Ok(LiveStatement::from_source_parts(expr, what, cond, fetch))
+		Ok(LiveStatement::from_source_parts(filters, expr, what, cond, fetch))
+	}
+
+	fn parse_live_filters(&mut self) -> ParseResult<LiveFilters> {
+		let mut value = LiveFilters::default();
+
+		loop {
+			let token = self.next();
+			let filter = match token.kind {
+				t!("CREATE") => LiveFilters::Create,
+				t!("DELETE") => LiveFilters::Delete,
+				t!("UPDATE") => LiveFilters::Update,
+				_ => unexpected!(self, token, "one of CREATE, DELETE or UPDATE"),
+			};
+
+			value = value | filter;
+
+			if !self.eat(t!("|")) {
+				break;
+			}
+		}
+
+		Ok(value)
 	}
 
 	/// Parsers a OPTION statement.
