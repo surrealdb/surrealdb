@@ -296,7 +296,6 @@ fn statements() -> Vec<Statement> {
 			cache_events_ts: uuid::Uuid::default(),
 			cache_tables_ts: uuid::Uuid::default(),
 			cache_indexes_ts: uuid::Uuid::default(),
-			cache_lives_ts: uuid::Uuid::default(),
 		})),
 		Statement::Define(DefineStatement::Event(DefineEventStatement {
 			name: Ident("event".to_owned()),
