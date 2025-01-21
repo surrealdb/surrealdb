@@ -463,8 +463,7 @@ impl Value {
 								};
 
 								if last_part {
-									stk
-										.run(|stk| stm.compute(stk, ctx, opt, None))
+									stk.run(|stk| stm.compute(stk, ctx, opt, None))
 										.await?
 										.all()
 										.ok()
