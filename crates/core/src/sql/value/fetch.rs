@@ -41,7 +41,7 @@ impl Value {
 					}
 					Value::Thing(x) => {
 						let stm = SelectStatement {
-							expr: g.expr.clone().unwrap_or(Fields::value_id()),
+							expr: g.expr.clone().unwrap_or(Fields::all()),
 							what: Values(vec![Value::from(Edges {
 								from: x.clone(),
 								dir: g.dir.clone(),
