@@ -7,8 +7,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::{Check, Key, Val};
 use rocksdb::{
 	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
-	LruCacheOptions, OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions,
-	WriteOptions,
+	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
 };
 use std::fmt::Debug;
 use std::ops::Range;
@@ -113,17 +112,12 @@ impl Datastore {
 		// Set the block cache size in bytes
 		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		// Configure the in-memory cache options
-		let mut cache_opts = LruCacheOptions::default();
-		cache_opts.set_capacity(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
-		cache_opts.set_num_shard_bits(8);
+		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		// Create the in-memory LRU cache
-		let cache = Cache::new_lru_cache_opts(&cache_opts);
 		// Configure the block based file options
 		let mut block_opts = BlockBasedOptions::default();
-		block_opts.set_pin_top_level_index_and_filter(true);
 		block_opts.set_hybrid_ribbon_filter(10.0, 2);
 		block_opts.set_block_cache(&cache);
-		block_opts.set_block_size(4 * 1024);
 		// Configure the database with the cache
 		opts.set_block_based_table_factory(&block_opts);
 		opts.set_blob_cache(&cache);
