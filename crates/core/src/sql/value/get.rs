@@ -454,7 +454,6 @@ impl Value {
 									start: g.start.clone(),
 									..SelectStatement::default()
 								};
-								println!("path.len() {}", path.len());
 								match path.len() {
 									1 => stk
 										.run(|stk| stm.compute(stk, ctx, opt, None))
