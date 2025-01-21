@@ -354,11 +354,12 @@ impl Response {
 	///
 	/// ```no_run
 	/// use serde::Deserialize;
+	/// use surrealdb::RecordId;
 	///
 	/// #[derive(Debug, Deserialize)]
 	/// # #[allow(dead_code)]
 	/// struct User {
-	///     id: String,
+	///     id: RecordId,
 	///     balance: String
 	/// }
 	///
@@ -422,12 +423,13 @@ impl Response {
 	/// ```no_run
 	/// use serde::Deserialize;
 	/// use surrealdb::Notification;
+	/// use surrealdb::RecordId;
 	/// use surrealdb::Value;
 	///
 	/// #[derive(Debug, Deserialize)]
 	/// # #[allow(dead_code)]
 	/// struct User {
-	///     id: String,
+	///     id: RecordId,
 	///     balance: String
 	/// }
 	///
@@ -553,11 +555,12 @@ impl WithStats<Response> {
 	///
 	/// ```no_run
 	/// use serde::Deserialize;
+	/// use surrealdb::RecordId;
 	///
 	/// #[derive(Debug, Deserialize)]
 	/// # #[allow(dead_code)]
 	/// struct User {
-	///     id: String,
+	///     id: RecordId,
 	///     balance: String
 	/// }
 	///
