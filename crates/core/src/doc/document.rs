@@ -8,7 +8,6 @@ use crate::iam::ResourceKind;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::idx::planner::RecordStrategy;
 use crate::kvs::cache;
-use crate::kvs::cache::ds::CacheVersion;
 use crate::sql::permission::Permission;
 use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
@@ -419,7 +418,7 @@ impl Document {
 				None => {
 					let val = ctx.tx().all_tb_views(ns, db, &tb.name).await?;
 					let val = cache::ds::Entry::Fts(val.clone());
-					cache.insert(key, val.clone());
+					cache.insert(key.into(), val.clone());
 					val
 				}
 			}
@@ -450,7 +449,7 @@ impl Document {
 				None => {
 					let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
 					let val = cache::ds::Entry::Evs(val.clone());
-					cache.insert(key, val.clone());
+					cache.insert(key.into(), val.clone());
 					val
 				}
 			}
@@ -481,7 +480,7 @@ impl Document {
 				None => {
 					let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
 					let val = cache::ds::Entry::Fds(val.clone());
-					cache.insert(key, val.clone());
+					cache.insert(key.into(), val.clone());
 					val
 				}
 			}
@@ -512,7 +511,7 @@ impl Document {
 				None => {
 					let val = ctx.tx().all_tb_indexes(ns, db, &tb.name).await?;
 					let val = cache::ds::Entry::Ixs(val.clone());
-					cache.insert(key, val.clone());
+					cache.insert(key.into(), val.clone());
 					val
 				}
 			}
@@ -529,26 +528,21 @@ impl Document {
 		let db = opt.db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
-		// Extract the transaction
-		let txn = ctx.tx();
+		// Get or update the cache entry
+		let key = cache::ds::Lookup::Lvs(ns, db, &tb.name, tb.cache_lives_ts);
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
-			Some(cache) => {
-				// Get the current cache key
-				let cache_lookup =
-					cache.get_cache_lookup(&txn, ns, db, &tb.name, CacheVersion::Lq).await?;
-				match cache.get(&cache_lookup) {
-					Some(val) => val,
-					None => {
-						let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Lvs(val.clone());
-						cache.insert(cache_lookup, val.clone());
-						val
-					}
+			Some(cache) => match cache.get(&key) {
+				Some(val) => val,
+				None => {
+					let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
+					let val = cache::ds::Entry::Lvs(val.clone());
+					cache.insert(key.into(), val.clone());
+					val
 				}
-				.try_into_lvs()
 			}
+			.try_into_lvs(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_lives(ns, db, &tb.name).await,
 		}

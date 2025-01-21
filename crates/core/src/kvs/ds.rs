@@ -16,7 +16,8 @@ use crate::err::Error;
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::cache;
+use crate::kvs::cache::ds::Cache;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
@@ -77,7 +78,7 @@ pub struct Datastore {
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
-	cache: Arc<DatastoreCache>,
+	cache: Arc<Cache>,
 	// The index asynchronous builder
 	#[cfg(not(target_family = "wasm"))]
 	index_builder: IndexBuilder,
@@ -402,12 +403,12 @@ impl Datastore {
 				capabilities: Capabilities::default(),
 				index_stores: IndexStores::default(),
 				#[cfg(not(target_family = "wasm"))]
-				index_builder: IndexBuilder::new(tf.clone()),
+				index_builder: IndexBuilder::new(tf),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 				#[cfg(storage)]
 				temporary_directory: None,
-				cache: Arc::new(DatastoreCache::new(tf)),
+				cache: Arc::new(cache::ds::new()),
 			}
 		})
 	}
@@ -431,8 +432,8 @@ impl Datastore {
 			jwks_cache: Arc::new(Default::default()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
-			cache: Arc::new(DatastoreCache::new(self.transaction_factory.clone())),
 			transaction_factory: self.transaction_factory,
+			cache: Arc::new(cache::ds::new()),
 		}
 	}
 
