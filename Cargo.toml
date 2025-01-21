@@ -27,7 +27,6 @@ allocator = ["surrealdb/allocator"]
 storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-tikv = ["surrealdb/kv-tikv"]
-storage-fdb = ["surrealdb/kv-fdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv"]
 storage-surrealcs = ["surrealdb/kv-surrealcs"]
 scripting = ["surrealdb/scripting"]
@@ -40,6 +39,9 @@ performance-profiler = ["dep:pprof"]
 # FoundationDB features
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
 storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
+# Deprecated features
+# Doesn't do anything. Use a version specific `storage-fdb-*` feature instead.
+storage-fdb = ["surrealdb/kv-fdb"]
 
 [profile.release]
 lto = true
