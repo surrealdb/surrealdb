@@ -13,7 +13,6 @@ use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
 use crate::sql::part::{FindRecursionPlan, Next, NextMethod, SplitByRepeatRecurse};
 use crate::sql::part::{Part, Skip};
-use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
@@ -441,26 +440,27 @@ impl Value {
 							// This is a graph traversal expression
 							Part::Graph(g) => {
 								let stm = SelectStatement {
-									expr: Fields(vec![Field::All], false),
+									expr: g.expr.clone().unwrap_or(Fields::value_id()),
 									what: Values(vec![Value::from(Edges {
 										from: val,
 										dir: g.dir.clone(),
 										what: g.what.clone(),
 									})]),
 									cond: g.cond.clone(),
+									limit: g.limit.clone(),
+									order: g.order.clone(),
+									split: g.split.clone(),
+									group: g.group.clone(),
+									start: g.start.clone(),
 									..SelectStatement::default()
 								};
+								println!("path.len() {}", path.len());
 								match path.len() {
-									1 => {
-										let v = stk
-											.run(|stk| stm.compute(stk, ctx, opt, None))
-											.await?
-											.all();
-										stk.run(|stk| v.get(stk, ctx, opt, None, ID.as_ref()))
-											.await?
-											.flatten()
-											.ok()
-									}
+									1 => stk
+										.run(|stk| stm.compute(stk, ctx, opt, None))
+										.await?
+										.all()
+										.ok(),
 									_ => {
 										let v = stk
 											.run(|stk| stm.compute(stk, ctx, opt, None))
