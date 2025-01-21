@@ -1267,6 +1267,7 @@ async fn define_table_type_normal() -> Result<(), Error> {
 #[tokio::test]
 async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	let ds = new_ds().await?;
+	let cache = ds.get_cache();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
 	// Define the table, set the initial uuids
@@ -1277,6 +1278,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	// Obtain the initial uuids
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let initial = txn.get_tb("test", "test", "test").await?;
+	let initial_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
 	drop(txn);
 
 	// Define some resources to refresh the UUIDs
@@ -1299,13 +1301,14 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let after_define = txn.get_tb("test", "test", "test").await?;
+	let after_define_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
 	assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
 	assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
 	assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
-	assert_ne!(initial.cache_lives_ts, after_define.cache_lives_ts);
+	assert_ne!(initial_live_query_version, after_define_live_query_version);
 
 	// Remove the defined resources to refresh the UUIDs
 	let sql = r"
@@ -1327,13 +1330,14 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let after_remove = txn.get_tb("test", "test", "test").await?;
+	let after_remove_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
 	assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
 	assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
 	assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
-	assert_ne!(after_define.cache_lives_ts, after_remove.cache_lives_ts);
+	assert_ne!(after_define_live_query_version, after_remove_live_query_version);
 	//
 	Ok(())
 }

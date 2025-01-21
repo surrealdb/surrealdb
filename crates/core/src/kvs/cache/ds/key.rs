@@ -13,6 +13,8 @@ pub(crate) enum Key {
 	Ixs(String, String, String, Uuid),
 	/// A cache key for live queries (on a table)
 	Lvs(String, String, String, Uuid),
+	/// A cache key for live queries version (on a table)
+	Lvv(String, String, String),
 }
 
 impl<'a> From<Lookup<'a>> for Key {
@@ -24,6 +26,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Fts(a, b, c, d) => Key::Fts(a.to_string(), b.to_string(), c.to_string(), d),
 			Lookup::Ixs(a, b, c, d) => Key::Ixs(a.to_string(), b.to_string(), c.to_string(), d),
 			Lookup::Lvs(a, b, c, d) => Key::Lvs(a.to_string(), b.to_string(), c.to_string(), d),
+			Lookup::Lvv(a, b, c) => Key::Lvv(a.to_string(), b.to_string(), c.to_string()),
 		}
 	}
 }

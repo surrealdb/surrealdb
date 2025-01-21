@@ -5,6 +5,7 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::LiveStatement;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Clone)]
 #[non_exhaustive]
@@ -19,6 +20,8 @@ pub(crate) enum Entry {
 	Ixs(Arc<[DefineIndexStatement]>),
 	/// A slice of LiveStatement specified on a table.
 	Lvs(Arc<[LiveStatement]>),
+	/// An Uuid.
+	Lvv(Uuid),
 }
 
 impl Entry {
@@ -60,6 +63,15 @@ impl Entry {
 		match self {
 			Entry::Lvs(v) => Ok(v),
 			_ => Err(fail!("Unable to convert type into Entry::Lvs")),
+		}
+	}
+
+	/// Converts this cache entry into a slice of [`LiveStatement`].
+	/// This panics if called on a cache entry that is not an [`Entry::Lvs`].
+	pub(crate) fn try_info_lvv(self) -> Result<Uuid, Error> {
+		match self {
+			Entry::Lvv(v) => Ok(v),
+			_ => Err(fail!("Unable to convert type into Entry::Lvv")),
 		}
 	}
 }
