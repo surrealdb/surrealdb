@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::kvs::cache::ds::CacheVersion;
 use crate::kvs::Live;
+use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::Value;
 use derive::Store;
 use reblessive::tree::Stk;
@@ -62,12 +62,18 @@ impl KillStatement {
 				// Delete the table live query
 				let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
 				txn.clr(key).await?;
-				// Refresh the table cache for live queries
-				if let Some(cache) = ctx.get_cache() {
-					cache
-						.set_new_version(&txn, &val.ns, &val.db, &val.tb, CacheVersion::Lq)
-						.await?;
-				}
+				// Refresh the table cache for lives
+				let key = crate::key::database::tb::new(&val.ns, &val.db, &val.tb);
+				let tb = txn.get_tb(&val.ns, &val.db, &val.tb).await?;
+				txn.set(
+					key,
+					DefineTableStatement {
+						cache_lives_ts: uuid::Uuid::now_v7(),
+						..tb.as_ref().clone()
+					},
+					None,
+				)
+				.await?;
 				// Clear the cache
 				txn.clear();
 			}

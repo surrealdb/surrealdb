@@ -101,8 +101,6 @@ pub enum Category {
 	IndexDefinition,
 	/// crate::key::table::lq                /*{ns}*{db}*{tb}!lq{lq}
 	TableLiveQuery,
-	/// crate::key::table::vl                /*{ns}*{db}*{tb}!vl{uuid}
-	TableVersionsLiveQueries,
 	///
 	/// ------------------------------
 	///
@@ -207,7 +205,6 @@ impl Display for Category {
 			Self::TableView => "TableView",
 			Self::IndexDefinition => "IndexDefinition",
 			Self::TableLiveQuery => "TableLiveQuery",
-			Self::TableVersionsLiveQueries => "TableVersionsLiveQueries",
 			Self::IndexRoot => "IndexRoot",
 			Self::IndexTermDocList => "IndexTermDocList",
 			Self::IndexBTreeNode => "IndexBTreeNode",
