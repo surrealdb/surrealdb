@@ -402,12 +402,12 @@ impl Datastore {
 				capabilities: Capabilities::default(),
 				index_stores: IndexStores::default(),
 				#[cfg(not(target_family = "wasm"))]
-				index_builder: IndexBuilder::new(tf),
+				index_builder: IndexBuilder::new(tf.clone()),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 				#[cfg(storage)]
 				temporary_directory: None,
-				cache: Arc::new(DatastoreCache::new()),
+				cache: Arc::new(DatastoreCache::new(tf)),
 			}
 		})
 	}
@@ -431,8 +431,8 @@ impl Datastore {
 			jwks_cache: Arc::new(Default::default()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
+			cache: Arc::new(DatastoreCache::new(self.transaction_factory.clone())),
 			transaction_factory: self.transaction_factory,
-			cache: Arc::new(DatastoreCache::new()),
 		}
 	}
 

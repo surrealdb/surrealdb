@@ -216,6 +216,11 @@ impl Executor {
 							});
 						}
 
+						// Operates cache evictions
+						if let Some(cache) = self.ctx.get_cache() {
+							cache.apply_evictions().await;
+						}
+
 						// flush notifications.
 						if let Some(recv) = receiver {
 							self.opt.sender = None;
