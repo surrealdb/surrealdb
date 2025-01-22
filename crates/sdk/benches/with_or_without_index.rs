@@ -46,7 +46,7 @@ async fn prepare_data() -> Input {
 		"rocksdb:///tmp/bench-rocksdb-{}.db",
 		std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()
 	);
-	let dbs = Datastore::new(&path).await.unwrap().with_capabilities(
+	let dbs = Datastore::new(path).await.unwrap().with_capabilities(
 		Capabilities::default().with_functions(Targets::<FuncTarget>::All).with_scripting(true),
 	);
 	//

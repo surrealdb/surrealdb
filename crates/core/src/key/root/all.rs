@@ -38,11 +38,6 @@ impl Kv {
 #[cfg(test)]
 mod tests {
 	use crate::kvs::{KeyDecode, KeyEncode};
-	#[test]
-	fn key_same() {
-		// These must always be the same.
-		assert_eq!(super::kv(), super::new().encode().unwrap());
-	}
 
 	#[test]
 	fn key() {

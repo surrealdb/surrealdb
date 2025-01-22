@@ -64,7 +64,7 @@ impl Lq {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use crate::kvs::KeyDecode;
 
 	#[test]
 	fn key() {

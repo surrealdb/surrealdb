@@ -61,7 +61,7 @@ impl<'a> Thing<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use crate::kvs::KeyDecode;
 	use crate::syn;
 
 	#[test]
