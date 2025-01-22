@@ -1209,7 +1209,7 @@ async fn function_array_transpose() -> Result<(), Error> {
 		"[[0, 2, 4], [1, 3, 5]]",
 		"[[0, \"oops\", NULL], [1, NONE, \"sorry\"], [2, NONE, NONE]]",
 		"[[1, 1, 1], [NONE, 2, 2], [NONE, NONE, 3]]",
-		"[[1, NONE, NONE], [1, 2, NONE], [1, 2, 3]]"
+		"[[1, NONE, NONE], [1, 2, NONE], [1, 2, 3]]",
 	];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
