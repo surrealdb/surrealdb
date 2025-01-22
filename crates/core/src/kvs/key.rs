@@ -60,7 +60,7 @@ impl KeyEncode for Vec<u8> {
 	}
 
 	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
-		buffer.extend_from_slice(&self);
+		buffer.extend_from_slice(self);
 		Ok(())
 	}
 
@@ -96,7 +96,7 @@ impl KeyEncode for &[u8] {
 	}
 }
 
-impl<'a> KeyDecode<'a> for Vec<u8> {
+impl KeyDecode<'_> for Vec<u8> {
 	fn decode(bytes: &[u8]) -> Result<Self, crate::err::Error>
 	where
 		Self: Sized,

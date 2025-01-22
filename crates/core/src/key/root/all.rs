@@ -15,10 +15,6 @@ pub fn kv() -> Vec<u8> {
 	vec![b'/']
 }
 
-pub fn new() -> Kv {
-	Kv::new()
-}
-
 impl Default for Kv {
 	fn default() -> Self {
 		Self::new()

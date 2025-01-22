@@ -1,7 +1,6 @@
 //! Stores MTree state and nodes
 use crate::idx::trees::store::NodeId;
 use crate::kvs::impl_key;
-use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

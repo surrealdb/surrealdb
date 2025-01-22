@@ -6,7 +6,6 @@ use crate::kvs::{impl_key, KeyEncode};
 use crate::sql::dir::Dir;
 use crate::sql::id::Id;
 use crate::sql::thing::Thing;
-use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

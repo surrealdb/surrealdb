@@ -3,7 +3,6 @@ use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::{impl_key, KeyEncode};
-use derive::Key;
 use serde::{Deserialize, Serialize};
 
 // Ts stands for Database Timestamps that corresponds to Versionstamps.

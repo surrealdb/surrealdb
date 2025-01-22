@@ -1,7 +1,6 @@
 //! Stores the DocIds -> Thing of an HNSW index
 use crate::idx::docids::DocId;
 use crate::kvs::impl_key;
-use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

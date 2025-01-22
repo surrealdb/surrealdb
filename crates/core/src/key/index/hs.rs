@@ -1,6 +1,5 @@
 //! Store state of an HNSW index
 use crate::kvs::impl_key;
-use derive::Key;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 

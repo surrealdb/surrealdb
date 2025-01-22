@@ -290,13 +290,14 @@ impl IndexStores {
 	) -> Result<(), Error> {
 		if matches!(ix.index, Index::Hnsw(_)) {
 			let ikb = IndexKeyBase::new(ns, db, ix)?;
-			self.remove_hnsw_index(ikb).await;
+			self.remove_hnsw_index(ikb).await?;
 		}
 		Ok(())
 	}
 
-	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) {
-		self.0.hnsw_indexes.remove(&ikb).await;
+	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) -> Result<(), Error> {
+		self.0.hnsw_indexes.remove(&ikb).await?;
+		Ok(())
 	}
 
 	pub(crate) fn mappers(&self) -> &Mappers {

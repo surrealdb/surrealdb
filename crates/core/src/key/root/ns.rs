@@ -1,8 +1,7 @@
 //! Stores a DEFINE NAMESPACE config definition
-use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

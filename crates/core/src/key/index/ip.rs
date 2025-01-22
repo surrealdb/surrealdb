@@ -1,7 +1,6 @@
 //! Stores the previous value of record for concurrent index building
 use crate::kvs::impl_key;
 use crate::sql::Id;
-use derive::Key;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
