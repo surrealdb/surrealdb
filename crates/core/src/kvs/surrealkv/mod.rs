@@ -463,6 +463,18 @@ impl super::api::Transaction for Transaction {
 		}
 	}
 
+	async fn scanr<K>(
+		&mut self,
+		_rng: Range<K>,
+		_limit: u32,
+		_version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		todo!()
+	}
+
 	/// Retrieve all the versions from a range of keys from the databases
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan_all_versions<K>(

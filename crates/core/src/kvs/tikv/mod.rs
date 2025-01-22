@@ -415,6 +415,61 @@ impl super::api::Transaction for Transaction {
 		Ok(())
 	}
 
+	/// Retrieve a range of keys from the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keys<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		let rng = self.prepare_scan(rng, version)?;
+		// Scan the keys
+		let res = self.inner.scan_keys(rng, limit).await?.map(Key::from).collect();
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of keys from the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		let rng = self.prepare_scan(rng, version)?;
+		// Scan the keys
+		let res = self.inner.scan(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of keys from the database in reverse order
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scanr<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		let rng = self.prepare_scan(rng, version)?;
+		// Scan the keys
+		let res =
+			self.inner.scan_reverse(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		// Return result
+		Ok(res)
+	}
+
 	/// Delete a range of keys from the databases
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
@@ -435,66 +490,6 @@ impl super::api::Transaction for Transaction {
 		self.db.unsafe_destroy_range(rng.start.into()..rng.end.into()).await?;
 		// Return result
 		Ok(())
-	}
-
-	/// Delete a range of keys from the database
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys<K>(
-		&mut self,
-		rng: Range<K>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<Key>, Error>
-	where
-		K: Into<Key> + Sprintable + Debug,
-	{
-		// TiKV does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
-		};
-		// Scan the keys
-		let res = self.inner.scan_keys(rng, limit).await?.map(Key::from).collect();
-		// Return result
-		Ok(res)
-	}
-
-	/// Retrieve a range of keys from the database
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scan<K>(
-		&mut self,
-		rng: Range<K>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: Into<Key> + Sprintable + Debug,
-	{
-		// TiKV does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
-		};
-		// Scan the keys
-		let res = self.inner.scan(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
-		// Return result
-		Ok(res)
 	}
 
 	/// Obtain a new change timestamp for a key
@@ -530,5 +525,27 @@ impl super::api::Transaction for Transaction {
 impl SavePointImpl for Transaction {
 	fn get_save_points(&mut self) -> &mut SavePoints {
 		&mut self.save_points
+	}
+}
+
+impl Transaction {
+	fn prepare_scan<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<Range<Key>, Error>
+	where
+		K: Into<Key> + Sprintable + Debug,
+	{
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Convert the range to bytes
+		let rng: Range<Key> = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
+		Ok(rng)
 	}
 }
