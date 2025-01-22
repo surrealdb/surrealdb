@@ -57,7 +57,10 @@ pub mod key {
 	use derive::Key;
 	use serde::{Deserialize, Serialize};
 
-	use crate::sql::{id::Id as NewId, Dir};
+	use crate::{
+		kvs::impl_key,
+		sql::{id::Id as NewId, Dir},
+	};
 
 	use super::Id;
 
@@ -77,6 +80,7 @@ pub mod key {
 		pub ft: &'a str,
 		pub fk: Id,
 	}
+	impl_key!(Graph<'a>);
 
 	impl<'a> Graph<'a> {
 		pub fn new(
@@ -153,6 +157,7 @@ pub mod key {
 		_d: u8,
 		pub id: Id,
 	}
+	impl_key!(Thing<'a>);
 
 	impl<'a> Thing<'a> {
 		pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {

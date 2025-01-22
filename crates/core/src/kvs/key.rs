@@ -50,47 +50,6 @@ pub trait KeyDecodeOwned: for<'a> KeyDecode<'a> {
 	}
 }
 
-/// Implements KeyEncode and KeyDecode uusing storekey and deserialize and serialize
-/// implementations.
-macro_rules! impl_key {
-	($name:ident$(<$l:lifetime>)?) => {
-		impl$(<$l>)? crate::kvs::KeyEncode for $name $(<$l>)?{
-			fn encode(&self) -> Result<Vec<u8>, crate::err::Error> {
-				Ok(storekey::serialize(self)?)
-			}
-
-			fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
-				Ok(storekey::serialize_into(buffer, self)?)
-			}
-		}
-
-		impl_key!(@decode $name $(,$l)?);
-	};
-
-	(@decode $name:ident, $l:lifetime) => {
-		impl<$l> crate::kvs::KeyDecode<$l> for $name<$l>{
-			fn decode(bytes: &$l[u8]) -> Result<Self, crate::err::Error> {
-				Ok(storekey::deserialize(bytes)?)
-			}
-		}
-	};
-
-	(@decode $name:ident) => {
-		impl<'a> crate::kvs::KeyDecode<'a> for $name{
-			fn decode(bytes: &'a[u8]) -> Result<Self, crate::err::Error> {
-				Ok(storekey::deserialize(bytes)?)
-			}
-		}
-
-		impl crate::kvs::KeyDecodeOwned for $name {
-			fn decode_from_vec(bytes: Vec<u8>) -> Result<Self, crate::err::Error> {
-				Ok(storekey::deserialize(bytes.as_slice())?)
-			}
-		}
-	};
-}
-pub(crate) use impl_key;
-
 impl KeyEncode for Vec<u8> {
 	fn encode(&self) -> Result<Vec<u8>, crate::err::Error> {
 		Ok(self.clone())
@@ -169,3 +128,44 @@ impl KeyDecodeOwned for () {
 		Ok(())
 	}
 }
+
+/// Implements KeyEncode and KeyDecode uusing storekey and deserialize and serialize
+/// implementations.
+macro_rules! impl_key {
+	($name:ident$(<$l:lifetime>)?) => {
+		impl$(<$l>)? crate::kvs::KeyEncode for $name $(<$l>)?{
+			fn encode(&self) -> Result<Vec<u8>, crate::err::Error> {
+				Ok(storekey::serialize(self)?)
+			}
+
+			fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
+				Ok(storekey::serialize_into(buffer, self)?)
+			}
+		}
+
+		impl_key!(@decode $name $(,$l)?);
+	};
+
+	(@decode $name:ident, $l:lifetime) => {
+		impl<$l> crate::kvs::KeyDecode<$l> for $name<$l>{
+			fn decode(bytes: &$l[u8]) -> Result<Self, crate::err::Error> {
+				Ok(storekey::deserialize(bytes)?)
+			}
+		}
+	};
+
+	(@decode $name:ident) => {
+		impl<'a> crate::kvs::KeyDecode<'a> for $name{
+			fn decode(bytes: &'a[u8]) -> Result<Self, crate::err::Error> {
+				Ok(storekey::deserialize(bytes)?)
+			}
+		}
+
+		impl crate::kvs::KeyDecodeOwned for $name {
+			fn decode_from_vec(bytes: Vec<u8>) -> Result<Self, crate::err::Error> {
+				Ok(storekey::deserialize(bytes.as_slice())?)
+			}
+		}
+	};
+}
+pub(crate) use impl_key;

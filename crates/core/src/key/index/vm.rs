@@ -1,9 +1,10 @@
 //! Stores MTree state and nodes
 use crate::idx::trees::store::NodeId;
+use crate::kvs::impl_key;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Vm<'a> {
 	__: u8,
@@ -20,6 +21,7 @@ pub struct Vm<'a> {
 	_g: u8,
 	pub node_id: Option<NodeId>,
 }
+impl_key!(Vm<'a>);
 
 impl<'a> Vm<'a> {
 	pub fn new(
@@ -49,6 +51,7 @@ impl<'a> Vm<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

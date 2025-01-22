@@ -1,10 +1,11 @@
 //! Stores a database ID generator state
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::impl_key;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Di {
 	__: u8,
@@ -14,6 +15,7 @@ pub struct Di {
 	_c: u8,
 	_d: u8,
 }
+impl_key!(Di);
 
 pub fn new(ns: u32) -> Di {
 	Di::new(ns)
@@ -39,6 +41,7 @@ impl Di {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

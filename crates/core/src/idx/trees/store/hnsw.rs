@@ -27,7 +27,7 @@ impl HnswIndexes {
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex, Error> {
-		let key = ikb.new_vm_key(None);
+		let key = ikb.new_vm_key(None)?;
 		let h = self.0.read().await.get(&key).cloned();
 		if let Some(h) = h {
 			return Ok(h);
@@ -46,8 +46,9 @@ impl HnswIndexes {
 		Ok(ix)
 	}
 
-	pub(super) async fn remove(&self, ikb: &IndexKeyBase) {
-		let key = ikb.new_vm_key(None);
+	pub(super) async fn remove(&self, ikb: &IndexKeyBase) -> Result<(), Error> {
+		let key = ikb.new_vm_key(None)?;
 		self.0.write().await.remove(&key);
+		Ok(())
 	}
 }

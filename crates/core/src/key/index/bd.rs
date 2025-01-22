@@ -2,10 +2,11 @@
 use crate::idx::trees::store::NodeId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::impl_key;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Bd<'a> {
 	__: u8,
@@ -22,6 +23,7 @@ pub struct Bd<'a> {
 	_g: u8,
 	pub node_id: Option<NodeId>,
 }
+impl_key!(Bd<'a>);
 
 impl Categorise for Bd<'_> {
 	fn categorise(&self) -> Category {
@@ -57,6 +59,7 @@ impl<'a> Bd<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

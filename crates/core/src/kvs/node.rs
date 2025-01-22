@@ -2,6 +2,7 @@ use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::kvs::Datastore;
+use crate::kvs::KeyDecode as _;
 use crate::kvs::Live;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
@@ -149,14 +150,14 @@ impl Datastore {
 		// Loop over the archived nodes
 		for id in archived.iter() {
 			// Open a writeable transaction
+			let beg = crate::key::node::lq::prefix(*id)?;
+			let end = crate::key::node::lq::suffix(*id)?;
+			let mut next = Some(beg..end);
 			let txn = self.transaction(Write, Optimistic).await?;
 			{
 				// Log the live query scanning
 				trace!(target: TARGET, id = %id, "Deleting live queries for node");
 				// Scan the live queries for this node
-				let beg = crate::key::node::lq::prefix(*id);
-				let end = crate::key::node::lq::suffix(*id);
-				let mut next = Some(beg..end);
 				while let Some(rng) = next {
 					// Pause and yield execution
 					yield_now!();
@@ -245,10 +246,10 @@ impl Datastore {
 					// Log the namespace
 					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
 					// Iterate over the table live queries
-					let txn = self.transaction(Write, Optimistic).await?;
-					let beg = crate::key::table::lq::prefix(&ns.name, &db.name, &tb.name);
-					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name);
+					let beg = crate::key::table::lq::prefix(&ns.name, &db.name, &tb.name)?;
+					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name)?;
 					let mut next = Some(beg..end);
+					let txn = self.transaction(Write, Optimistic).await?;
 					while let Some(rng) = next {
 						// Pause and yield execution
 						yield_now!();

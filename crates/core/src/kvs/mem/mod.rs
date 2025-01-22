@@ -2,12 +2,14 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::{Check, Key, Val, Version};
+use crate::kvs::{Key, Val, Version};
 use std::fmt::Debug;
 use std::ops::Range;
 use surrealkv::Options;
 use surrealkv::Store;
 use surrealkv::Transaction as Tx;
+
+use super::{Check, KeyEncode};
 
 pub struct Datastore {
 	db: Store,
@@ -138,7 +140,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Memory does not support versioned queries.
 		if version.is_some() {
@@ -149,7 +151,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.inner.get(&key.into())?.is_some();
+		let res = self.inner.get(&key.encode()?)?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -158,7 +160,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Memory does not support versioned queries.
 		if version.is_some() {
@@ -170,8 +172,8 @@ impl super::api::Transaction for Transaction {
 		}
 		// Fetch the value from the database.
 		let res = match version {
-			Some(ts) => self.inner.get_at_version(&key.into(), ts)?,
-			None => self.inner.get(&key.into())?,
+			Some(ts) => self.inner.get_at_version(&key.encode()?, ts)?,
+			None => self.inner.get(&key.encode()?)?,
 		};
 		// Return result
 		Ok(res)
@@ -181,7 +183,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Memory does not support versioned queries.
@@ -198,8 +200,8 @@ impl super::api::Transaction for Transaction {
 		}
 		// Set the key
 		match version {
-			Some(ts) => self.inner.set_at_ts(&key.into(), &val.into(), ts)?,
-			None => self.inner.set(&key.into(), &val.into())?,
+			Some(ts) => self.inner.set_at_ts(&key.encode()?, &val.into(), ts)?,
+			None => self.inner.set(&key.encode()?, &val.into())?,
 		}
 		// Return result
 		Ok(())
@@ -209,7 +211,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Memory does not support versioned queries.
@@ -225,7 +227,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the arguments
-		let key = key.into();
+		let key = key.encode_owned()?;
 		let val = val.into();
 		// Set the key if empty
 		if let Some(ts) = version {
@@ -244,7 +246,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -256,7 +258,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the arguments
-		let key = key.into();
+		let key = key.encode_owned()?;
 		let val = val.into();
 		let chk = chk.map(Into::into);
 		// Set the key if valid
@@ -273,7 +275,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -284,7 +286,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		self.inner.delete(&key.into())?;
+		self.inner.delete(&key.encode()?)?;
 		// Return result
 		Ok(())
 	}
@@ -293,7 +295,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -305,7 +307,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the arguments
-		let key = key.into();
+		let key = key.encode()?;
 		let chk = chk.map(Into::into);
 		// Delete the key if valid
 		match (self.inner.get(&key)?, chk) {
@@ -326,7 +328,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<Key>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Memory does not support versioned queries.
 		if version.is_some() {
@@ -337,8 +339,8 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Set the key range
-		let beg = rng.start.into();
-		let end = rng.end.into();
+		let beg = rng.start.encode()?;
+		let end = rng.end.encode()?;
 		// Retrieve the scan range
 		let res = self.inner.keys(beg.as_slice()..end.as_slice(), Some(limit as usize));
 		// Convert the keys and values
@@ -356,7 +358,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Memory does not support versioned queries.
 		if version.is_some() {
@@ -367,8 +369,8 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Set the key range
-		let beg = rng.start.into();
-		let end = rng.end.into();
+		let beg = rng.start.encode()?;
+		let end = rng.end.encode()?;
 		let range = beg.as_slice()..end.as_slice();
 
 		// Retrieve the scan range
@@ -393,15 +395,15 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		if self.done {
 			return Err(Error::TxFinished);
 		}
 
 		// Set the key range
-		let beg = rng.start.into();
-		let end = rng.end.into();
+		let beg = rng.start.encode()?;
+		let end = rng.end.encode()?;
 		let range = beg.as_slice()..end.as_slice();
 
 		// Retrieve the scan range

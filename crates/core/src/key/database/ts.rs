@@ -1,13 +1,15 @@
 //! Stores database timestamps
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::{impl_key, KeyEncode};
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 // Ts stands for Database Timestamps that corresponds to Versionstamps.
 // Each Ts key is suffixed by a timestamp.
 // The value is the versionstamp that corresponds to the timestamp.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Ts<'a> {
 	__: u8,
@@ -20,23 +22,24 @@ pub struct Ts<'a> {
 	_e: u8,
 	pub ts: u64,
 }
+impl_key!(Ts<'a>);
 
 pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64) -> Ts<'a> {
 	Ts::new(ns, db, ts)
 }
 
 /// Returns the prefix for the whole database timestamps
-pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db).encode().unwrap();
+pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!ts\x00");
-	k
+	Ok(k)
 }
 
 /// Returns the prefix for the whole database timestamps
-pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db).encode().unwrap();
+pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!ts\xff");
-	k
+	Ok(k)
 }
 
 impl Categorise for Ts<'_> {
@@ -63,6 +66,7 @@ impl<'a> Ts<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

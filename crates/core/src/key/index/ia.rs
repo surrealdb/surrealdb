@@ -1,9 +1,10 @@
 //! Store appended records for concurrent index building
+use crate::kvs::impl_key;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Key)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Ia<'a> {
 	__: u8,
@@ -20,6 +21,7 @@ pub struct Ia<'a> {
 	_g: u8,
 	pub i: u32,
 }
+impl_key!(Ia<'a>);
 
 impl<'a> Ia<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, i: u32) -> Self {
@@ -43,6 +45,7 @@ impl<'a> Ia<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {

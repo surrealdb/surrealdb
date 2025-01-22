@@ -1,9 +1,10 @@
 //! Store state of an HNSW index
+use crate::kvs::impl_key;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Key)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Hs<'a> {
 	__: u8,
@@ -19,6 +20,7 @@ pub struct Hs<'a> {
 	_f: u8,
 	_g: u8,
 }
+impl_key!(Hs<'a>);
 
 impl<'a> Hs<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
@@ -41,6 +43,7 @@ impl<'a> Hs<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {

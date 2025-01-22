@@ -1,11 +1,12 @@
 //! Stores the key prefix for all nodes
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::impl_key;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct All {
 	__: u8,
@@ -13,6 +14,7 @@ pub struct All {
 	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 }
+impl_key!(All);
 
 pub fn new(nd: Uuid) -> All {
 	All::new(nd)
@@ -36,6 +38,7 @@ impl All {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

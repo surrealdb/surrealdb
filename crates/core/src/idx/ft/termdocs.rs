@@ -28,7 +28,7 @@ impl TermDocs {
 	) -> Result<(), Error> {
 		let mut docs = self.get_docs(tx, term_id).await?.unwrap_or_else(RoaringTreemap::new);
 		if docs.insert(doc_id) {
-			let key = self.index_key_base.new_bc_key(term_id);
+			let key = self.index_key_base.new_bc_key(term_id)?;
 			let mut val = Vec::new();
 			docs.serialize_into(&mut val)?;
 			tx.set(key, val, None).await?;
@@ -41,7 +41,7 @@ impl TermDocs {
 		tx: &Transaction,
 		term_id: TermId,
 	) -> Result<Option<RoaringTreemap>, Error> {
-		let key = self.index_key_base.new_bc_key(term_id);
+		let key = self.index_key_base.new_bc_key(term_id)?;
 		if let Some(val) = tx.get(key, None).await? {
 			let docs = RoaringTreemap::deserialize_from(&mut val.as_slice())?;
 			Ok(Some(docs))
@@ -59,7 +59,7 @@ impl TermDocs {
 		if let Some(mut docs) = self.get_docs(tx, term_id).await? {
 			if docs.contains(doc_id) {
 				docs.remove(doc_id);
-				let key = self.index_key_base.new_bc_key(term_id);
+				let key = self.index_key_base.new_bc_key(term_id)?;
 				if docs.is_empty() {
 					tx.del(key).await?;
 				} else {

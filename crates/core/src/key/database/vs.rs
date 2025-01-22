@@ -1,11 +1,12 @@
 //! Stores database versionstamps
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::{impl_key, KeyEncode};
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
 // Vs stands for Database Versionstamp
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Vs<'a> {
 	__: u8,
@@ -17,6 +18,7 @@ pub struct Vs<'a> {
 	_d: u8,
 	_e: u8,
 }
+impl_key!(Vs<'a>);
 
 #[allow(unused)]
 pub fn new<'a>(ns: &'a str, db: &'a str) -> Vs<'a> {
@@ -46,6 +48,7 @@ impl<'a> Vs<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

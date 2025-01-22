@@ -167,8 +167,8 @@ impl Thing {
 			}
 		};
 
+		let range = prefix?..suffix?;
 		let txn = ctx.tx();
-		let range = prefix..suffix;
 		let mut stream = txn.stream_keys(range);
 
 		// Collect the keys from the stream into a vec

@@ -1089,7 +1089,8 @@ mod tests {
 		let st = tx
 			.index_caches()
 			.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
-			.await;
+			.await
+			.unwrap();
 		(tx, st)
 	}
 
@@ -1106,7 +1107,8 @@ mod tests {
 		let st = tx
 			.index_caches()
 			.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
-			.await;
+			.await
+			.unwrap();
 		(tx, st)
 	}
 

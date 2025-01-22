@@ -8,6 +8,7 @@ use crate::kvs::LockType::*;
 use crate::kvs::Transaction;
 use crate::kvs::TransactionType;
 use crate::kvs::TransactionType::*;
+use crate::kvs::{KeyDecode, KeyEncode};
 use serial_test::serial;
 use std::sync::Arc;
 use uuid::Uuid;

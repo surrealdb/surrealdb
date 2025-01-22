@@ -1,10 +1,11 @@
 //! Stores the previous value of record for concurrent index building
+use crate::kvs::impl_key;
 use crate::sql::Id;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Key)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Ip<'a> {
 	__: u8,
@@ -21,6 +22,7 @@ pub struct Ip<'a> {
 	_g: u8,
 	pub id: Id,
 }
+impl_key!(Ip<'a>);
 
 impl<'a> Ip<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: Id) -> Self {
@@ -44,6 +46,7 @@ impl<'a> Ip<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {
