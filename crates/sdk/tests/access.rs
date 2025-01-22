@@ -5,7 +5,8 @@ use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use regex::Regex;
-use surrealdb::dbs::Session;
+use surrealdb::dbs::capabilities::ExperimentalTarget;
+use surrealdb::dbs::{Capabilities, Session};
 use surrealdb::iam::Role;
 use surrealdb::sql::{Base, Value};
 use tokio::time::Duration;
@@ -18,9 +19,6 @@ struct TestLevel {
 
 #[tokio::test]
 async fn access_bearer_operations() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![
 		TestLevel {
 			base: Base::Root,
@@ -64,7 +62,9 @@ async fn access_bearer_operations() {
 			ACCESS invalid SHOW ALL;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -192,9 +192,6 @@ async fn access_bearer_operations() {
 
 #[tokio::test]
 async fn access_bearer_grant() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![
 		TestLevel {
 			base: Base::Root,
@@ -231,7 +228,9 @@ async fn access_bearer_grant() {
 			ACCESS srv GRANT FOR RECORD user:tobie;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -349,9 +348,6 @@ async fn access_bearer_grant() {
 
 #[tokio::test]
 async fn access_bearer_revoke() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![
 		TestLevel {
 			base: Base::Root,
@@ -385,7 +381,9 @@ async fn access_bearer_revoke() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -492,9 +490,6 @@ async fn access_bearer_revoke() {
 
 #[tokio::test]
 async fn access_bearer_show() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![
 		TestLevel {
 			base: Base::Root,
@@ -528,7 +523,9 @@ async fn access_bearer_show() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -652,9 +649,6 @@ async fn access_bearer_show() {
 
 #[tokio::test]
 async fn access_bearer_purge() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![
 		TestLevel {
 			base: Base::Root,
@@ -690,7 +684,9 @@ async fn access_bearer_purge() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds().await.unwrap().with_capabilities(
+			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+		);
 		let ses = match level.base {
 			Base::Root => Session::owner(),
 			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
@@ -786,9 +782,6 @@ async fn access_bearer_purge() {
 
 #[tokio::test]
 async fn permissions_access_grant() {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	std::env::set_var("SURREAL_EXPERIMENTAL_BEARER_ACCESS", "true");
-
 	let test_levels = vec![Base::Root, Base::Ns, Base::Db];
 
 	for level in &test_levels {
@@ -851,7 +844,10 @@ async fn permissions_access_grant() {
 				format!("DEFINE ACCESS api ON {base} TYPE BEARER FOR USER; DEFINE USER tobie ON {base} ROLES OWNER");
 
 			{
-				let ds = new_ds().await.unwrap().with_auth_enabled(true);
+				let ds = new_ds().await.unwrap().with_auth_enabled(true).with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::BearerAccess.into()),
+				);
 
 				let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();
 				let res = resp.remove(0).output();

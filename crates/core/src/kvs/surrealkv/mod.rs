@@ -64,7 +64,6 @@ impl Datastore {
 		opts.max_segment_size = *cnf::SURREALKV_MAX_SEGMENT_SIZE;
 		// Set the maximum value cache size
 		opts.max_value_cache_size = *cnf::SURREALKV_MAX_VALUE_CACHE_SIZE;
-
 		// Create a new datastore
 		match Store::new(opts) {
 			Ok(db) => Ok(Datastore {

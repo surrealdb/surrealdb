@@ -21,7 +21,7 @@ mod tracer;
 mod version;
 
 use crate::cli::CF;
-use crate::cnf::{self, GRAPHQL_ENABLE};
+use crate::cnf::{self};
 use crate::err::Error;
 use crate::net::signals::graceful_shutdown;
 use crate::rpc::{notifications, RpcState};
@@ -36,6 +36,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
@@ -175,7 +176,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.merge(key::router())
 		.merge(ml::router());
 
-	let axum_app = if *GRAPHQL_ENABLE {
+	let axum_app = if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 		#[cfg(surrealdb_unstable)]
 		{
 			warn!("❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌");

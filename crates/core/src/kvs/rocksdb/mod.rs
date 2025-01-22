@@ -108,12 +108,19 @@ impl Datastore {
 		// Avoid unnecessary blocking io, preferring background threads
 		debug!(target: TARGET, "Avoid unnecessary blocking IO: true");
 		opts.set_avoid_unnecessary_blocking_io(true);
+		// Improve concurrency from write batch mutex
+		debug!(target: TARGET, "Allow adaptive write thread yielding: true");
+		opts.set_enable_write_thread_adaptive_yield(true);
 		// Set the block cache size in bytes
 		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
-		let mut block_opts = BlockBasedOptions::default();
+		// Configure the in-memory cache options
 		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
+		// Create the in-memory LRU cache
+		// Configure the block based file options
+		let mut block_opts = BlockBasedOptions::default();
 		block_opts.set_hybrid_ribbon_filter(10.0, 2);
 		block_opts.set_block_cache(&cache);
+		// Configure the database with the cache
 		opts.set_block_based_table_factory(&block_opts);
 		opts.set_blob_cache(&cache);
 		opts.set_row_cache(&cache);

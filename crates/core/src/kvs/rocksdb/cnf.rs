@@ -1,4 +1,6 @@
+use std::cmp::max;
 use std::sync::LazyLock;
+use sysinfo::System;
 
 pub static ROCKSDB_THREAD_COUNT: LazyLock<i32> =
 	lazy_env_parse_or_else!("SURREAL_ROCKSDB_THREAD_COUNT", i32, |_| num_cpus::get() as i32);
@@ -31,7 +33,18 @@ pub static ROCKSDB_MIN_BLOB_SIZE: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_MIN_BLOB_SIZE", u64, 4 * 1024);
 
 pub static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BLOCK_CACHE_SIZE", usize, 512 * 1024 * 1024);
+	lazy_env_parse_or_else!("SURREAL_ROCKSDB_BLOCK_CACHE_SIZE", usize, |_| {
+		// Load the system attributes
+		let system = System::new_all();
+		// Get the total system memory
+		let memory = system.total_memory();
+		// Divide the total system memory by 2
+		let memory = memory.saturating_div(2);
+		// Subtract 1 GiB from the memory size
+		let memory = memory.saturating_sub(1024 * 1024 * 1024);
+		// Take the larger of 512MiB or available memory
+		max(memory as usize, 512 * 1024 * 1024)
+	});
 
 pub static ROCKSDB_KEEP_LOG_FILE_NUM: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_ROCKSDB_KEEP_LOG_FILE_NUM", usize, 20);

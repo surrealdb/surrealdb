@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, fmt, str::FromStr};
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use surrealdb_core::{
-	dbs::capabilities::{FuncTarget, MethodTarget, NetTarget, RouteTarget, ExperimentalTarget},
+	dbs::capabilities::{ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget},
 	sql::Value as CoreValue,
 	syn,
 };

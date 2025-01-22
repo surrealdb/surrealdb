@@ -373,6 +373,22 @@ impl DbsCapabilities {
 			None => Targets::None,
 		}
 	}
+
+	fn get_allow_experimental(&self) -> Targets<ExperimentalTarget> {
+		match &self.allow_experimental {
+			Some(t @ Targets::Some(_)) => t.clone(),
+			Some(_) => Targets::None,
+			None => Targets::None,
+		}
+	}
+
+	fn get_deny_experimental(&self) -> Targets<ExperimentalTarget> {
+		match &self.deny_experimental {
+			Some(t @ Targets::Some(_)) => t.clone(),
+			Some(_) => Targets::None,
+			None => Targets::None,
+		}
+	}
 }
 
 impl From<DbsCapabilities> for Capabilities {
@@ -388,6 +404,8 @@ impl From<DbsCapabilities> for Capabilities {
 			.without_rpc_methods(caps.get_deny_rpc())
 			.with_http_routes(caps.get_allow_http())
 			.without_http_routes(caps.get_deny_http())
+			.with_experimental(caps.get_allow_experimental())
+			.without_experimental(caps.get_deny_experimental())
 	}
 }
 

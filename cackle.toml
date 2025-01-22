@@ -210,6 +210,7 @@ allow_proc_macro = true
 
 [pkg.zerocopy-derive]
 allow_proc_macro = true
+allow_unsafe = true
 
 [pkg.revision-derive]
 allow_proc_macro = true
@@ -279,6 +280,7 @@ allow_apis = ["fs"]
 [pkg.proc-macro2]
 build.allow_apis = ["process"]
 allow_unsafe = true
+allow_apis = ["fs"]
 
 [pkg.libc]
 build.allow_apis = ["process"]
@@ -450,6 +452,7 @@ allow_apis = ["net"]
 
 [pkg.httparse]
 allow_unsafe = true
+allow_apis = ["process"]
 
 [pkg.block-buffer]
 allow_unsafe = true
@@ -542,7 +545,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.anyhow]
-build.allow_apis = ["process"]
+build.allow_apis = ["fs", "process"]
 allow_unsafe = true
 
 [pkg.siphasher]
@@ -724,6 +727,7 @@ allow_unsafe = true
 
 [pkg.mime_guess]
 build.allow_apis = ["fs"]
+build.allow_build_instructions = ["cargo:rustc-env=MIME_TYPES_GENERATED_PATH=*"]
 
 [pkg.term]
 from.build.allow_apis = ["fs"]
@@ -1307,3 +1311,6 @@ allow_proc_macro = true
 [pkg.sysinfo]
 allow_unsafe = true
 allow_apis = ["fs"]
+
+[pkg.foldhash]
+allow_unsafe = true

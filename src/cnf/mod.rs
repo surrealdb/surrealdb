@@ -119,6 +119,3 @@ pub static PKG_VERSION: LazyLock<String> =
 		}
 		_ => env!("CARGO_PKG_VERSION").to_owned(),
 	});
-
-pub static GRAPHQL_ENABLE: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_EXPERIMENTAL_GRAPHQL", bool, false);

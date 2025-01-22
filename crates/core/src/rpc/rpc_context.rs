@@ -6,6 +6,8 @@ use async_graphql::BatchRequest;
 use uuid::Uuid;
 
 #[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+use crate::dbs::capabilities::ExperimentalTarget;
+#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 use crate::gql::SchemaCache;
 use crate::{
 	dbs::{capabilities::MethodTarget, QueryType, Response, Session},
@@ -796,13 +798,13 @@ pub trait RpcContext {
 
 	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 	async fn graphql(&self, params: Array) -> Result<Data, RpcError> {
-		if !*GRAPHQL_ENABLE {
+		if !self.kvs().get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 			return Err(RpcError::BadGQLConfig);
 		}
 
 		use serde::Serialize;
 
-		use crate::{cnf::GRAPHQL_ENABLE, gql};
+		use crate::gql;
 
 		if !Self::GQL_SUPPORT {
 			return Err(RpcError::BadGQLConfig);
