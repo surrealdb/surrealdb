@@ -108,10 +108,12 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
+	IndexRangeReverse(IndexRangeReverseThingIterator),
 	IndexUnion(IndexUnionThingIterator),
 	IndexJoin(Box<IndexJoinThingIterator>),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
+	UniqueRangeReverse(UniqueRangeReverseThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
 	Matches(MatchesThingIterator),
@@ -130,7 +132,9 @@ impl ThingIterator {
 			Self::IndexEqual(i) => i.next_batch(txn, size).await,
 			Self::UniqueEqual(i) => i.next_batch(txn).await,
 			Self::IndexRange(i) => i.next_batch(txn, size).await,
+			Self::IndexRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::UniqueRange(i) => i.next_batch(txn, size).await,
+			Self::UniqueRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::IndexUnion(i) => i.next_batch(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_batch(ctx, txn, size).await,
 			Self::Matches(i) => i.next_batch(ctx, txn, size).await,
@@ -151,7 +155,9 @@ impl ThingIterator {
 			Self::IndexEqual(i) => i.next_count(txn, size).await,
 			Self::UniqueEqual(i) => i.next_count(txn).await,
 			Self::IndexRange(i) => i.next_count(txn, size).await,
+			Self::IndexRangeReverse(i) => i.next_count(txn, size).await,
 			Self::UniqueRange(i) => i.next_count(txn, size).await,
+			Self::UniqueRangeReverse(i) => i.next_count(txn, size).await,
 			Self::IndexUnion(i) => i.next_count(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_count(ctx, txn, size).await,
 			Self::Matches(i) => i.next_count(ctx, txn, size).await,
@@ -512,6 +518,34 @@ impl IndexRangeThingIterator {
 		let res = self.next_scan(tx, limit).await?;
 		let count = res.into_iter().filter(|(k, _)| self.r.matches(k)).count();
 		Ok(count)
+	}
+}
+
+pub(crate) struct IndexRangeReverseThingIterator {
+	_irf: IteratorRef,
+	_r: RangeScan,
+}
+
+impl IndexRangeReverseThingIterator {
+	pub(super) fn full_range(
+		_irf: IteratorRef,
+		_ns: &str,
+		_db: &str,
+		_ix: &DefineIndexStatement,
+	) -> Self {
+		todo!()
+	}
+
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		_tx: &Transaction,
+		_limit: u32,
+	) -> Result<B, Error> {
+		todo!()
+	}
+
+	async fn next_count(&mut self, _tx: &Transaction, _limit: u32) -> Result<usize, Error> {
+		todo!()
 	}
 }
 
@@ -935,6 +969,35 @@ impl UniqueRangeThingIterator {
 		}
 		self.done = true;
 		Ok(count)
+	}
+}
+
+pub(crate) struct UniqueRangeReverseThingIterator {
+	_irf: IteratorRef,
+	_r: RangeScan,
+	_done: bool,
+}
+
+impl UniqueRangeReverseThingIterator {
+	pub(super) fn full_range(
+		_irf: IteratorRef,
+		_ns: &str,
+		_db: &str,
+		_ix: &DefineIndexStatement,
+	) -> Self {
+		todo!()
+	}
+
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		_tx: &Transaction,
+		mut _limit: u32,
+	) -> Result<B, Error> {
+		todo!()
+	}
+
+	async fn next_count(&mut self, _tx: &Transaction, mut _limit: u32) -> Result<usize, Error> {
+		todo!()
 	}
 }
 

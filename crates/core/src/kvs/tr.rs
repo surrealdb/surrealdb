@@ -467,6 +467,26 @@ impl Transactor {
 		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit, version).await })
 	}
 
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn scanr<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Scan");
+		if beg > end {
+			return Ok(vec![]);
+		}
+		expand_inner!(&mut self.inner, v => { v.scanr(beg..end, limit, version).await })
+	}
+
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches keys, in batches, with multiple requests to the underlying datastore.

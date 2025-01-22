@@ -306,6 +306,19 @@ impl Transaction {
 		self.lock().await.scan(rng, limit, version).await
 	}
 
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn scanr<K>(
+		&self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.scanr(rng, limit, version).await
+	}
+
 	/// Count the total number of keys within a range in the datastore.
 	///
 	/// This function fetches the total count, in batches, with multiple requests to the underlying datastore.

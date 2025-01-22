@@ -144,18 +144,16 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn eval_order(&mut self) -> Result<(), Error> {
 		if let Some(o) = self.first_order {
-			if o.direction {
-				if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
-					for (ixr, id_col) in &irf {
-						if *id_col == 0 {
-							self.index_map.order_limit = Some(IndexOption::new(
-								ixr.clone(),
-								Some(id),
-								IdiomPosition::None,
-								IndexOperator::Order,
-							));
-							break;
-						}
+			if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
+				for (ixr, id_col) in &irf {
+					if *id_col == 0 {
+						self.index_map.order_limit = Some(IndexOption::new(
+							ixr.clone(),
+							Some(id),
+							IdiomPosition::None,
+							IndexOperator::Order(!o.direction),
+						));
+						break;
 					}
 				}
 			}

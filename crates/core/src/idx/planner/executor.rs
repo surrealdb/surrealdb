@@ -11,11 +11,11 @@ use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef, KnnIterator,
-	KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
-	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
-	UniqueUnionThingIterator, ValueType,
+	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeReverseThingIterator,
+	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef,
+	KnnIterator, KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
+	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeReverseThingIterator,
+	UniqueRangeThingIterator, UniqueUnionThingIterator, ValueType,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -379,9 +379,20 @@ impl QueryExecutor {
 					Box::new(IndexJoinThingIterator::new(ir, opt, ix.clone(), iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
-			IndexOperator::Order => Some(ThingIterator::IndexRange(
-				IndexRangeThingIterator::full_range(ir, opt.ns()?, opt.db()?, ix),
-			)),
+			IndexOperator::Order(reverse) => {
+				if *reverse {
+					Some(ThingIterator::IndexRangeReverse(
+						IndexRangeReverseThingIterator::full_range(ir, opt.ns()?, opt.db()?, ix),
+					))
+				} else {
+					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
+						ir,
+						opt.ns()?,
+						opt.db()?,
+						ix,
+					)))
+				}
+			}
 			_ => None,
 		})
 	}
@@ -819,9 +830,20 @@ impl QueryExecutor {
 					Box::new(UniqueJoinThingIterator::new(irf, opt, ixr.clone(), iterators)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
-			IndexOperator::Order => Some(ThingIterator::UniqueRange(
-				UniqueRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, ixr),
-			)),
+			IndexOperator::Order(reverse) => {
+				if *reverse {
+					Some(ThingIterator::UniqueRangeReverse(
+						UniqueRangeReverseThingIterator::full_range(irf, opt.ns()?, opt.db()?, ixr),
+					))
+				} else {
+					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
+						irf,
+						opt.ns()?,
+						opt.db()?,
+						ixr,
+					)))
+				}
+			}
 			_ => None,
 		})
 	}

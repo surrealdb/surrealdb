@@ -267,7 +267,8 @@ pub(super) enum IndexOperator {
 	Matches(String, Option<MatchRef>),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
-	Order,
+	/// false = ascending, true = descending
+	Order(bool),
 }
 
 impl IndexOption {
@@ -358,8 +359,15 @@ impl IndexOption {
 				e.insert("operator", op);
 				e.insert("value", val);
 			}
-			IndexOperator::Order => {
-				e.insert("operator", Value::from("Order"));
+			IndexOperator::Order(reverse) => {
+				e.insert(
+					"operator",
+					Value::from(if *reverse {
+						"ReverseOrder"
+					} else {
+						"Order"
+					}),
+				);
 			}
 		};
 		Value::from(e)
