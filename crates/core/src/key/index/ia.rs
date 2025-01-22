@@ -23,6 +23,7 @@ pub struct Ia<'a> {
 impl_key!(Ia<'a>);
 
 impl<'a> Ia<'a> {
+	#[cfg_attr(target_family = "wasm", allow(dead_code))]
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, i: u32) -> Self {
 		Self {
 			__: b'/',
