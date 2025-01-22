@@ -5,7 +5,7 @@ mod cnf;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
-use crate::kvs::{Check, Key, Val};
+use crate::kvs::{Check, Key, KeyEncode, Val};
 use crate::vs::VersionStamp;
 use foundationdb::options::DatabaseOption;
 use foundationdb::options::MutationType;

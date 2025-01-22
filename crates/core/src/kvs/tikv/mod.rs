@@ -5,6 +5,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
 use crate::kvs::Check;
 use crate::kvs::Key;
+use crate::kvs::KeyEncode;
 use crate::kvs::Val;
 use crate::vs::VersionStamp;
 use std::fmt::Debug;
