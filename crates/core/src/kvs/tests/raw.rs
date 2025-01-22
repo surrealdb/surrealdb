@@ -1,18 +1,29 @@
-#[tokio::test]
-#[serial]
-async fn initialise() {
-	let mut tx = new_tx(Write, Optimistic).await.inner();
+use std::sync::Arc;
+
+use uuid::Uuid;
+
+use crate::{
+	dbs::node::Timestamp,
+	kvs::{
+		clock::{FakeClock, SizedClock},
+		LockType::*,
+		TransactionType::*,
+	},
+};
+
+use super::{CreateDs, CreateTx};
+
+pub async fn initialise(new_tx: impl CreateTx) {
+	let mut tx = new_tx.create_tx(Write, Optimistic).await.inner();
 	assert!(tx.put("test", "ok", None).await.is_ok());
 	tx.commit().await.unwrap();
 }
 
-#[tokio::test]
-#[serial]
-async fn exists() {
+pub async fn exists(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("463a5008-ee1d-43db-9662-5e752b6ea3f9").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	assert!(tx.put("test", "ok", None).await.is_ok());
@@ -26,13 +37,11 @@ async fn exists() {
 	tx.cancel().await.unwrap();
 }
 
-#[tokio::test]
-#[serial]
-async fn get() {
+pub async fn get(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("477e2895-8c98-4606-a827-0add82eb466b").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	assert!(tx.put("test", "ok", None).await.is_ok());
@@ -46,13 +55,11 @@ async fn get() {
 	tx.cancel().await.unwrap();
 }
 
-#[tokio::test]
-#[serial]
-async fn set() {
+pub async fn set(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("32b80d8b-dd16-4f6f-a687-1192f6cfc6f1").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	assert!(tx.set("test", "one", None).await.is_ok());
@@ -73,13 +80,11 @@ async fn set() {
 	tx.cancel().await.unwrap();
 }
 
-#[tokio::test]
-#[serial]
-async fn put() {
+pub async fn put(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("80149655-db34-451c-8711-6fa662a44b70").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	assert!(tx.put("test", "one", None).await.is_ok());
@@ -100,13 +105,11 @@ async fn put() {
 	tx.cancel().await.unwrap();
 }
 
-#[tokio::test]
-#[serial]
-async fn putc() {
+pub async fn putc(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("705bb520-bc2b-4d52-8e64-d1214397e408").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	assert!(tx.put("test", "one", None).await.is_ok());
@@ -136,13 +139,11 @@ async fn putc() {
 	tx.cancel().await.unwrap();
 }
 
-#[tokio::test]
-#[serial]
-async fn del() {
+pub async fn del(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("e0acb360-9187-401f-8192-f870b09e2c9e").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	assert!(tx.put("test", "one", None).await.is_ok());
@@ -158,13 +159,11 @@ async fn del() {
 	tx.cancel().await.unwrap();
 }
 
-#[tokio::test]
-#[serial]
-async fn delc() {
+pub async fn delc(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("0985488e-cf2f-417a-bd10-7f4aa9c99c15").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	assert!(tx.put("test", "one", None).await.is_ok());
@@ -189,13 +188,11 @@ async fn delc() {
 	tx.cancel().await.unwrap();
 }
 
-#[tokio::test]
-#[serial]
-async fn keys() {
+pub async fn keys(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("83b81cc2-9609-4533-bede-c170ab9f7bbe").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	assert!(tx.put("test1", "1", None).await.is_ok());
@@ -230,13 +227,11 @@ async fn keys() {
 	tx.cancel().await.unwrap();
 }
 
-#[tokio::test]
-#[serial]
-async fn scan() {
+pub async fn scan(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("83b81cc2-9609-4533-bede-c170ab9f7bbe").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	assert!(tx.put("test1", "1", None).await.is_ok());
@@ -280,13 +275,11 @@ async fn scan() {
 	tx.cancel().await.unwrap();
 }
 
-#[tokio::test]
-#[serial]
-async fn batch() {
+pub async fn batch(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("6572a13c-a7a0-4e19-be62-18acb4e854f5").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	assert!(tx.put("test1", "1", None).await.is_ok());
@@ -335,3 +328,74 @@ async fn batch() {
 	assert_eq!(val[1].1, b"3");
 	tx.cancel().await.unwrap();
 }
+
+macro_rules! define_tests {
+	($new_ds:ident, $new_tx:ident) => {
+		#[tokio::test]
+		#[serial]
+		async fn initialise() {
+			super::raw::initialise($new_tx).await;
+		}
+
+		#[tokio::test]
+		#[serial]
+		async fn exists() {
+			super::raw::exists($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial]
+		async fn get() {
+			super::raw::get($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial]
+		async fn set() {
+			super::raw::set($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial]
+		async fn put() {
+			super::raw::put($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial]
+		async fn putc() {
+			super::raw::putc($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial]
+		async fn del() {
+			super::raw::del($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial]
+		async fn delc() {
+			super::raw::delc($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial]
+		async fn keys() {
+			super::raw::keys($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial]
+		async fn scan() {
+			super::raw::scan($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial]
+		async fn batch() {
+			super::raw::batch($new_ds).await;
+		}
+	};
+}
+pub(crate) use define_tests;

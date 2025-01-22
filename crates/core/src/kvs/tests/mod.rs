@@ -9,7 +9,17 @@
 ))]
 
 use crate::kvs::clock::SizedClock;
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
+use uuid::Uuid;
+
+use super::{Datastore, LockType, Transaction, TransactionType};
+
+mod multireader;
+mod multiwriter_different_keys;
+mod multiwriter_same_keys_allow;
+mod raw;
+mod snapshot;
+mod timestamp_to_versionstamp;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Kvs {
@@ -25,12 +35,62 @@ pub(crate) enum Kvs {
 	SurrealKV,
 }
 
+macro_rules! define_tests {
+	($new_ds:ident, $new_tx:ident) => {
+		super::raw::define_tests!($new_ds, $new_tx);
+		super::snapshot::define_tests!($new_ds, $new_tx);
+		super::multireader::define_tests!($new_ds, $new_tx);
+		super::multiwriter_different_keys::define_tests!($new_ds, $new_tx);
+		super::multiwriter_same_keys_allow::define_tests!($new_ds, $new_tx);
+		super::timestamp_to_versionstamp::define_tests!($new_ds, $new_tx);
+	};
+}
+
 // This type is unsused when no store is enabled.
 #[allow(dead_code)]
 type ClockType = Arc<SizedClock>;
 
+trait CreateTx {
+	async fn create_tx(&self, ty: TransactionType, lock_ty: LockType) -> Transaction;
+}
+
+impl<F, Fut> CreateTx for F
+where
+	F: Fn(TransactionType, LockType) -> Fut,
+	Fut: Future<Output = Transaction>,
+{
+	async fn create_tx(&self, tx_ty: TransactionType, lock_ty: LockType) -> Transaction {
+		(self)(tx_ty, lock_ty).await
+	}
+}
+
+trait CreateDs {
+	async fn create_ds(&self, id: Uuid, ty: ClockType) -> (Datastore, Kvs);
+}
+
+impl<F, Fut> CreateDs for F
+where
+	F: Fn(Uuid, ClockType) -> Fut,
+	Fut: Future<Output = (Datastore, Kvs)>,
+{
+	async fn create_ds(&self, id: Uuid, ty: ClockType) -> (Datastore, Kvs) {
+		(self)(id, ty).await
+	}
+}
+
 #[cfg(feature = "kv-mem")]
 mod mem {
+	use super::{ClockType, Kvs};
+	use crate::{
+		dbs::node::Timestamp,
+		kvs::{
+			clock::{FakeClock, SizedClock},
+			Datastore, LockType, Transaction, TransactionType,
+		},
+	};
+	use serial_test::serial;
+	use std::sync::Arc;
+	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Use a memory datastore instance
@@ -47,17 +107,22 @@ mod mem {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	include!("helper.rs");
-	include!("raw.rs");
-	include!("snapshot.rs");
-	include!("multireader.rs");
-	include!("multiwriter_different_keys.rs");
-	include!("multiwriter_same_keys_conflict.rs");
-	include!("timestamp_to_versionstamp.rs");
+	define_tests!(new_ds, new_tx);
 }
 
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb {
+	use super::{ClockType, Kvs};
+	use crate::{
+		dbs::node::Timestamp,
+		kvs::{
+			clock::{FakeClock, SizedClock},
+			Datastore, LockType, Transaction, TransactionType,
+		},
+	};
+	use serial_test::serial;
+	use std::sync::Arc;
+	use uuid::Uuid;
 
 	use temp_dir::TempDir;
 
@@ -77,17 +142,22 @@ mod rocksdb {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	include!("helper.rs");
-	include!("raw.rs");
-	include!("snapshot.rs");
-	include!("multireader.rs");
-	include!("multiwriter_different_keys.rs");
-	include!("multiwriter_same_keys_conflict.rs");
-	include!("timestamp_to_versionstamp.rs");
+	define_tests!(new_ds, new_tx);
 }
 
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
+	use super::{ClockType, Kvs};
+	use crate::{
+		dbs::node::Timestamp,
+		kvs::{
+			clock::{FakeClock, SizedClock},
+			Datastore, LockType, Transaction, TransactionType,
+		},
+	};
+	use serial_test::serial;
+	use std::sync::Arc;
+	use uuid::Uuid;
 
 	use temp_dir::TempDir;
 
@@ -108,17 +178,22 @@ mod surrealkv {
 		ds.transaction(write, lock).await.unwrap()
 	}
 
-	include!("raw.rs");
-	include!("helper.rs");
-	include!("snapshot.rs");
-	include!("multireader.rs");
-	include!("multiwriter_different_keys.rs");
-	include!("multiwriter_same_keys_conflict.rs");
-	include!("timestamp_to_versionstamp.rs");
+	define_tests!(new_ds, new_tx);
 }
 
 #[cfg(feature = "kv-tikv")]
 mod tikv {
+	use super::{ClockType, Kvs};
+	use crate::{
+		dbs::node::Timestamp,
+		kvs::{
+			clock::{FakeClock, SizedClock},
+			Datastore, LockType, Transaction, TransactionType,
+		},
+	};
+	use serial_test::serial;
+	use std::sync::Arc;
+	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
@@ -139,17 +214,22 @@ mod tikv {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	include!("helper.rs");
-	include!("raw.rs");
-	include!("snapshot.rs");
-	include!("multireader.rs");
-	include!("multiwriter_different_keys.rs");
-	include!("multiwriter_same_keys_conflict.rs");
-	include!("timestamp_to_versionstamp.rs");
+	define_tests!(new_ds, new_tx);
 }
 
 #[cfg(feature = "kv-fdb")]
 mod fdb {
+	use super::{ClockType, Kvs};
+	use crate::{
+		dbs::node::Timestamp,
+		kvs::{
+			clock::{FakeClock, SizedClock},
+			Datastore, LockType, Transaction, TransactionType,
+		},
+	};
+	use serial_test::serial;
+	use std::sync::Arc;
+	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
@@ -170,11 +250,5 @@ mod fdb {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	include!("helper.rs");
-	include!("raw.rs");
-	include!("snapshot.rs");
-	include!("multireader.rs");
-	include!("multiwriter_different_keys.rs");
-	include!("multiwriter_same_keys_allow.rs");
-	include!("timestamp_to_versionstamp.rs");
+	define_tests!(new_ds, new_tx);
 }

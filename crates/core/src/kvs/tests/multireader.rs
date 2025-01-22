@@ -1,10 +1,21 @@
-#[tokio::test]
-#[serial]
-async fn multireader() {
+use super::CreateDs;
+use std::sync::Arc;
+use uuid::Uuid;
+
+use crate::{
+	dbs::node::Timestamp,
+	kvs::{
+		clock::{FakeClock, SizedClock},
+		LockType::*,
+		TransactionType::*,
+	},
+};
+
+pub async fn multireader(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("b7afc077-2123-476f-bee0-43d7504f1e0a").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Insert an initial key
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tx.set("test", "some text", None).await.unwrap();
@@ -26,3 +37,14 @@ async fn multireader() {
 	tx2.cancel().await.unwrap();
 	tx3.cancel().await.unwrap();
 }
+
+macro_rules! define_tests {
+	($new_ds:ident, $new_tx:ident) => {
+		#[tokio::test]
+		#[serial]
+		async fn multireader() {
+			super::multireader::multireader($new_ds).await;
+		}
+	};
+}
+pub(crate) use define_tests;
