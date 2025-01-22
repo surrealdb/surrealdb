@@ -213,7 +213,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// FoundationDB does not support versioned queries.
 		if version.is_some() {
@@ -224,7 +224,13 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.inner.as_ref().unwrap().get(&key.into(), self.snapshot()).await?.is_some();
+		let res = self
+			.inner
+			.as_ref()
+			.unwrap()
+			.get(&key.encode_owned()?, self.snapshot())
+			.await?
+			.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -233,7 +239,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// FoundationDB does not support versioned queries.
 		if version.is_some() {
@@ -248,7 +254,7 @@ impl super::api::Transaction for Transaction {
 			.inner
 			.as_ref()
 			.unwrap()
-			.get(&key.into(), self.snapshot())
+			.get(&key.encode_owned()?, self.snapshot())
 			.await?
 			.map(|v| v.to_vec());
 		// Return result
@@ -259,7 +265,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// FoundationDB does not support versioned queries.
@@ -275,7 +281,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Extract the key
-		let key = key.into();
+		let key = key.encode_owned()?;
 		// Prepare the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, version, SaveOperation::Set).await?
@@ -296,7 +302,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// FoundationDB does not support versioned queries.
@@ -312,7 +318,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the arguments
-		let key = key.into();
+		let key = key.encode_owned()?;
 		let val = val.into();
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
@@ -346,7 +352,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -358,7 +364,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the arguments
-		let key = key.into();
+		let key = key.encode_owned()?;
 		let val = val.into();
 		let chk = chk.map(Into::into);
 		// Hydrate the savepoint if any
@@ -393,7 +399,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -404,7 +410,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Extract the key
-		let key = key.into();
+		let key = key.encode_owned()?;
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, None, SaveOperation::Del).await?
@@ -425,7 +431,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -437,7 +443,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the arguments
-		let key = key.into();
+		let key = key.encode_owned()?;
 		let chk = chk.map(Into::into);
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
@@ -471,7 +477,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -484,7 +490,10 @@ impl super::api::Transaction for Transaction {
 		// TODO: Check if we need savepoint with ranges
 
 		// Delete the key range
-		self.inner.as_ref().unwrap().clear_range(&rng.start.into(), &rng.end.into());
+		self.inner
+			.as_ref()
+			.unwrap()
+			.clear_range(&rng.start.encode_owned()?, &rng.end.encode_owned()?);
 		// Return result
 		Ok(())
 	}
@@ -498,7 +507,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<Key>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// FoundationDB does not support versioned queries.
 		if version.is_some() {
@@ -512,8 +521,8 @@ impl super::api::Transaction for Transaction {
 		let inner = self.inner.as_ref().unwrap();
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+			start: rng.start.encode_owned()?,
+			end: rng.end.encode_owned()?,
 		};
 		// Create result set
 		let mut res = vec![];
@@ -543,7 +552,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// FoundationDB does not support versioned queries.
 		if version.is_some() {
@@ -557,8 +566,8 @@ impl super::api::Transaction for Transaction {
 		let inner = self.inner.as_ref().unwrap();
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+			start: rng.start.encode_owned()?,
+			end: rng.end.encode_owned()?,
 		};
 		// Create result set
 		let mut res = vec![];
@@ -583,7 +592,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -607,7 +616,7 @@ impl super::api::Transaction for Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -619,13 +628,13 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Build the key starting with the prefix
-		let mut key: Vec<u8> = prefix.into();
+		let mut key: Vec<u8> = prefix.encode_owned()?;
 		// Get the position of the timestamp
 		let pos = key.len() as u32;
 		// Append the timestamp placeholder
 		key.extend_from_slice(&TIMESTAMP);
 		// Append the suffix to the key
-		key.extend(suffix.into());
+		key.extend(suffix.encode_owned()?);
 		// Append the 4 byte placeholder position in little endian
 		key.append(&mut pos.to_le_bytes().to_vec());
 		// Convert the value
