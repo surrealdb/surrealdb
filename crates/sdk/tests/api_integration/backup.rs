@@ -1,13 +1,23 @@
+#![cfg(any(
+	feature = "kv-mem",
+	feature = "kv-rocksdb",
+	feature = "kv-tikv",
+	feature = "kv-fdb",
+	feature = "kv-surrealkv",
+	feature = "protocol-http",
+))]
+
 // Tests for exporting and importing data
 // Supported by the storage engines and the HTTP protocol
 
-use surrealdb::sql::Array;
-use surrealdb_core::sql::Table;
+use surrealdb::{Error, Value};
 use tokio::fs::remove_file;
+use ulid::Ulid;
 
-#[tokio::test]
-async fn export_import() {
-	let (permit, db) = new_db().await;
+use super::{ApiRecordId, CreateDb, Record, NS};
+
+pub async fn export_import(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	let db_name = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&db_name).await.unwrap();
 
@@ -54,9 +64,8 @@ async fn export_import() {
 	}
 }
 
-#[tokio::test]
-async fn export_with_config() {
-	let (permit, db) = new_db().await;
+pub async fn export_with_config(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	let db_name = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&db_name).await.unwrap();
 
@@ -118,9 +127,8 @@ async fn export_with_config() {
 	}
 }
 
-#[test_log::test(tokio::test)]
 #[cfg(feature = "ml")]
-async fn ml_export_import() {
+pub async fn ml_export_import() {
 	let (permit, db) = new_db().await;
 	let db_name = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&db_name).await.unwrap();
@@ -131,3 +139,15 @@ async fn ml_export_import() {
 	db.import(&file).ml().await.unwrap();
 	remove_file(file).await.unwrap();
 }
+
+define_include_tests!(backup => {
+	#[tokio::test]
+	export_import,
+
+	#[tokio::test]
+	export_with_config,
+
+	#[test_log::test(tokio::test)]
+	#[cfg(feature = "ml")]
+	ml_export_import
+});

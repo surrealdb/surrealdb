@@ -3,21 +3,32 @@
 
 use futures::Stream;
 use futures::StreamExt;
-use futures::TryStreamExt;
-use std::ops::DerefMut;
+use serde_json::json;
+use std::sync::Arc;
+use std::time::Duration;
+use surrealdb::fflags::FFLAGS;
 use surrealdb::method::QueryStream;
+use surrealdb::opt::Resource;
 use surrealdb::Action;
+use surrealdb::Error;
 use surrealdb::Notification;
-use surrealdb_core::sql::Object;
+use surrealdb::RecordId;
+use surrealdb::Value;
+use surrealdb_core::sql::Value as CoreValue;
 use tokio::sync::RwLock;
 use tracing::info;
+use ulid::Ulid;
+
+use crate::api_integration::ApiRecordId;
+
+use super::CreateDb;
+use super::NS;
 
 const LQ_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_NOTIFICATIONS: usize = 100;
 
-#[test_log::test(tokio::test)]
-async fn live_select_table() {
-	let (permit, db) = new_db().await;
+pub async fn live_select_table(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
@@ -87,9 +98,8 @@ async fn live_select_table() {
 	drop(permit);
 }
 
-#[test_log::test(tokio::test)]
-async fn live_select_record_id() {
-	let (permit, db) = new_db().await;
+pub async fn live_select_record_id(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
@@ -163,9 +173,8 @@ async fn live_select_record_id() {
 	drop(permit);
 }
 
-#[test_log::test(tokio::test)]
-async fn live_select_record_ranges() {
-	let (permit, db) = new_db().await;
+pub async fn live_select_record_ranges(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
@@ -264,9 +273,8 @@ async fn live_select_record_ranges() {
 	drop(permit);
 }
 
-#[test_log::test(tokio::test)]
-async fn live_select_query() {
-	let (permit, db) = new_db().await;
+pub async fn live_select_query(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	{
@@ -442,3 +450,14 @@ async fn receive_all_pending_notifications<
 	assert!(we_expect_timeout.is_err());
 	results
 }
+
+define_include_tests!(live => {
+	#[test_log::test(tokio::test)]
+	live_select_table,
+	#[test_log::test(tokio::test)]
+	live_select_record_id,
+	#[test_log::test(tokio::test)]
+	live_select_record_ranges,
+	#[test_log::test(tokio::test)]
+	live_select_query,
+});
