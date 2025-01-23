@@ -29,7 +29,7 @@ impl Fields {
 	pub fn is_all(&self) -> bool {
 		self.0.iter().any(|v| matches!(v, Field::All))
 	}
-	/// `VALUE id`
+	/// Create a new `VALUE id` field projection
 	pub(crate) fn value_id() -> Self {
 		Self(
 			vec![Field::Single {
