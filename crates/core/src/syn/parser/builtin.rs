@@ -527,10 +527,10 @@ impl Parser<'_> {
 				.map(|x| Value::Function(Box::new(x))),
 			None => {
 				if let Some(suggest) = find_suggestion(str) {
-					return Err(SyntaxError::new(format_args!(
+					Err(SyntaxError::new(format_args!(
 						"Invalid function/constant path, did you maybe mean `{suggest}`"
 					))
-					.with_span(span, MessageKind::Error));
+					.with_span(span, MessageKind::Error))
 				} else {
 					Err(SyntaxError::new("Invalid function/constant path")
 						.with_span(span, MessageKind::Error))
