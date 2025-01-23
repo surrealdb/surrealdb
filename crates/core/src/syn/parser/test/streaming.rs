@@ -675,7 +675,6 @@ fn statements() -> Vec<Statement> {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					}),
 				])),
@@ -688,7 +687,6 @@ fn statements() -> Vec<Statement> {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					}),
 				]),
@@ -709,7 +707,6 @@ fn statements() -> Vec<Statement> {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					}),
 				])),
@@ -722,7 +719,6 @@ fn statements() -> Vec<Statement> {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					}),
 				]),
