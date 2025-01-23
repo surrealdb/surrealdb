@@ -4,7 +4,7 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::{Check, Key, Val, Version};
+use crate::kvs::{Check, Key, KeyEncode, Val, Version};
 use std::fmt::Debug;
 use std::ops::Range;
 use surrealkv::Mode;
@@ -12,7 +12,7 @@ use surrealkv::Options;
 use surrealkv::Store;
 use surrealkv::Transaction as Tx;
 
-use super::KeyEncode;
+const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
 pub struct Datastore {
 	db: Store,
@@ -58,11 +58,14 @@ impl Datastore {
 		opts.disk_persistence = true;
 		// Set the data storage directory
 		opts.dir = path.to_string().into();
-		// Set the maximum value threshold
-		opts.max_value_threshold = *cnf::SURREALKV_MAX_VALUE_THRESHOLD;
 		// Set the maximum segment size
+		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
 		opts.max_segment_size = *cnf::SURREALKV_MAX_SEGMENT_SIZE;
+		// Set the maximum value threshold
+		info!(target: TARGET, "Setting maximum value threshold: {}", *cnf::SURREALKV_MAX_VALUE_THRESHOLD);
+		opts.max_value_threshold = *cnf::SURREALKV_MAX_VALUE_THRESHOLD;
 		// Set the maximum value cache size
+		info!(target: TARGET, "Setting maximum value cache size: {}", *cnf::SURREALKV_MAX_VALUE_CACHE_SIZE);
 		opts.max_value_cache_size = *cnf::SURREALKV_MAX_VALUE_CACHE_SIZE;
 		// Create a new datastore
 		match Store::new(opts) {

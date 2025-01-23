@@ -13,7 +13,6 @@ use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
 use crate::sql::part::{FindRecursionPlan, Next, NextMethod, SplitByRepeatRecurse};
 use crate::sql::part::{Part, Skip};
-use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
@@ -440,46 +439,52 @@ impl Value {
 						_ => match p {
 							// This is a graph traversal expression
 							Part::Graph(g) => {
+								let last_part = path.len() == 1;
+								let expr = g.expr.clone().unwrap_or(if last_part {
+									Fields::value_id()
+								} else {
+									Fields::all()
+								});
+
 								let stm = SelectStatement {
-									expr: Fields(vec![Field::All], false),
+									expr,
 									what: Values(vec![Value::from(Edges {
 										from: val,
 										dir: g.dir.clone(),
 										what: g.what.clone(),
 									})]),
 									cond: g.cond.clone(),
+									limit: g.limit.clone(),
+									order: g.order.clone(),
+									split: g.split.clone(),
+									group: g.group.clone(),
+									start: g.start.clone(),
 									..SelectStatement::default()
 								};
-								match path.len() {
-									1 => {
-										let v = stk
-											.run(|stk| stm.compute(stk, ctx, opt, None))
-											.await?
-											.all();
-										stk.run(|stk| v.get(stk, ctx, opt, None, ID.as_ref()))
-											.await?
-											.flatten()
-											.ok()
-									}
-									_ => {
-										let v = stk
-											.run(|stk| stm.compute(stk, ctx, opt, None))
-											.await?
-											.all();
-										let res = stk
-											.run(|stk| v.get(stk, ctx, opt, None, path.next()))
-											.await?;
-										// We only want to flatten the results if the next part
-										// is a graph or where part. Reason being that if we flatten
-										// fields, the results of those fields (which could be arrays)
-										// will be merged into each other. So [1, 2, 3], [4, 5, 6] would
-										// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
-										// as we have already checked the length of the path.
-										Ok(match path[1] {
-											Part::Graph(_) | Part::Where(_) => res.flatten(),
-											_ => res,
-										})
-									}
+
+								if last_part {
+									stk.run(|stk| stm.compute(stk, ctx, opt, None))
+										.await?
+										.all()
+										.ok()
+								} else {
+									let v = stk
+										.run(|stk| stm.compute(stk, ctx, opt, None))
+										.await?
+										.all();
+									let res = stk
+										.run(|stk| v.get(stk, ctx, opt, None, path.next()))
+										.await?;
+									// We only want to flatten the results if the next part
+									// is a graph or where part. Reason being that if we flatten
+									// fields, the results of those fields (which could be arrays)
+									// will be merged into each other. So [1, 2, 3], [4, 5, 6] would
+									// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
+									// as we have already checked the length of the path.
+									Ok(match path[1] {
+										Part::Graph(_) | Part::Where(_) => res.flatten(),
+										_ => res,
+									})
 								}
 							}
 							Part::Method(name, args) => {

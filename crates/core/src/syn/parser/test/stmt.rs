@@ -2875,7 +2875,6 @@ fn parse_update() {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					})
 				]))
@@ -2888,7 +2887,6 @@ fn parse_update() {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					})
 				]),
@@ -2921,7 +2919,6 @@ fn parse_upsert() {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					})
 				]))
@@ -2934,7 +2931,6 @@ fn parse_upsert() {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					})
 				]),

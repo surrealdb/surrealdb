@@ -12,6 +12,8 @@ use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
+use super::paths::ID;
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -26,6 +28,16 @@ impl Fields {
 	/// Check to see if this field is a `*` projection
 	pub fn is_all(&self) -> bool {
 		self.0.iter().any(|v| matches!(v, Field::All))
+	}
+	/// Create a new `VALUE id` field projection
+	pub(crate) fn value_id() -> Self {
+		Self(
+			vec![Field::Single {
+				expr: Value::Idiom(Idiom(ID.to_vec())),
+				alias: None,
+			}],
+			true,
+		)
 	}
 	/// Get all fields which are not an `*` projection
 	pub fn other(&self) -> impl Iterator<Item = &Field> {
