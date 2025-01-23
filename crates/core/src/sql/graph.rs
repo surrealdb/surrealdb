@@ -12,13 +12,16 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Graph {
 	pub dir: Dir,
-	pub expr: Fields,
+	#[revision(end = 3, convert_fn = "convert_old_expr")]
+	pub old_expr: Fields,
+	#[revision(start = 3)]
+	pub expr: Option<Fields>,
 	pub what: Tables,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
@@ -60,6 +63,13 @@ impl Graph {
 
 		self.order = Some(Ordering::Order(OrderList(new_ord)));
 
+		Ok(())
+	}
+
+	fn convert_old_expr(&mut self, _rev: u16, _old_value: Fields) -> Result<(), revision::Error> {
+		// Before this change, users would not have been able to set the value of the `expr` field, it's always `Fields(vec![Field::All], false)`.
+		// None is the new default value, mimmicking that behaviour.
+		self.expr = None;
 		Ok(())
 	}
 
