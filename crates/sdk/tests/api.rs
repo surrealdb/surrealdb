@@ -53,6 +53,12 @@ mod api_integration {
 		id: RecordId,
 	}
 
+	#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+	struct ApiRecordIdWithFetchedLink {
+		id: RecordId,
+		link: Option<ApiRecordId>,
+	}
+
 	#[derive(Debug, Deserialize)]
 	struct RecordName {
 		name: String,
