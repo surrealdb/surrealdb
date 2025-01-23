@@ -53,7 +53,7 @@ pub static ROCKSDB_STORAGE_LOG_LEVEL: LazyLock<String> =
 	lazy_env_parse!("SURREAL_ROCKSDB_STORAGE_LOG_LEVEL", String, "warn".to_string());
 
 pub static ROCKSDB_COMPACTION_STYLE: LazyLock<String> =
-	lazy_env_parse!("SURREAL_ROCKSDB_COMPACTION_STYLE", String);
+	lazy_env_parse!("SURREAL_ROCKSDB_COMPACTION_STYLE", String, "level".to_string());
 
 pub static ROCKSDB_DELETION_FACTORY_WINDOW_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_ROCKSDB_DELETION_FACTORY_WINDOW_SIZE", usize, 1000);
