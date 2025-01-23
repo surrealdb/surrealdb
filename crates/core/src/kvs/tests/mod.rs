@@ -201,7 +201,7 @@ mod tikv {
 		// Setup the TiKV datastore
 		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
 		// Clear any previous test entries
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delp(vec![]).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
@@ -237,7 +237,7 @@ mod fdb {
 		// Setup the FoundationDB datastore
 		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
 		// Clear any previous test entries
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delp(vec![]).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore

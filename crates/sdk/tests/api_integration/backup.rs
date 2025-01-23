@@ -128,14 +128,14 @@ pub async fn export_with_config(new_db: impl CreateDb) {
 }
 
 #[cfg(feature = "ml")]
-pub async fn ml_export_import() {
-	let (permit, db) = new_db().await;
+pub async fn ml_export_import(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	let db_name = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&db_name).await.unwrap();
 	db.import("../../tests/linear_test.surml").ml().await.unwrap();
 	drop(permit);
 	let file = format!("{db_name}.surml");
-	db.export(&file).ml("Prediction", Version::new(0, 0, 1)).await.unwrap();
+	db.export(&file).ml("Prediction", semver::Version::new(0, 0, 1)).await.unwrap();
 	db.import(&file).ml().await.unwrap();
 	remove_file(file).await.unwrap();
 }

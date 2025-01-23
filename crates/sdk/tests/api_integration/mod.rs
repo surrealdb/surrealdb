@@ -181,9 +181,6 @@ mod http {
 	use surrealdb::engine::remote::http::Client;
 	use surrealdb::engine::remote::http::Http;
 
-	use futures::poll;
-	use std::pin::pin;
-	use std::task::Poll;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::Surreal;
 	use tokio::sync::Semaphore;
@@ -227,9 +224,6 @@ mod mem {
 	use surrealdb::RecordIdKey;
 	use surrealdb::{error::Db as DbError, Error};
 
-	use futures::poll;
-	use std::pin::pin;
-	use std::task::Poll;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::Surreal;
 	use tokio::sync::Semaphore;
@@ -331,9 +325,6 @@ mod file {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::File;
 
-	use futures::poll;
-	use std::pin::pin;
-	use std::task::Poll;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::Config;
 	use surrealdb::Surreal;
@@ -384,9 +375,6 @@ mod rocksdb {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::RocksDb;
 
-	use futures::poll;
-	use std::pin::pin;
-	use std::task::Poll;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::Config;
 	use surrealdb::Surreal;
@@ -437,10 +425,9 @@ mod tikv {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::TiKv;
 
-	use futures::poll;
-	use std::pin::pin;
-	use std::task::Poll;
 	use surrealdb::opt::auth::Root;
+	use surrealdb::opt::capabilities::Capabilities;
+	use surrealdb::opt::Config;
 	use surrealdb::Surreal;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
@@ -471,15 +458,14 @@ mod tikv {
 	include_tests!(new_db => basic, serialisation, live, backup);
 }
 
-#[cfg(kv_fdb)]
+#[cfg(feature = "kv-fdb")]
 mod fdb {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::FDb;
 
-	use futures::poll;
-	use std::pin::pin;
-	use std::task::Poll;
+	use surrealdb::dbs::Capabilities;
 	use surrealdb::opt::auth::Root;
+	use surrealdb::opt::Config;
 	use surrealdb::Surreal;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
@@ -511,9 +497,6 @@ mod surrealkv {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::SurrealKv;
 
-	use futures::poll;
-	use std::pin::pin;
-	use std::task::Poll;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::Config;
 	use surrealdb::Surreal;
@@ -567,9 +550,6 @@ mod surrealkv_versioned {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::SurrealKv;
 
-	use futures::poll;
-	use std::pin::pin;
-	use std::task::Poll;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::Config;
 	use surrealdb::Surreal;
@@ -620,8 +600,6 @@ mod surrealkv_versioned {
 mod any {
 	use surrealdb::engine::any::Any;
 
-	use std::pin::pin;
-	use std::task::Poll;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::Surreal;
 	use tokio::sync::Semaphore;
