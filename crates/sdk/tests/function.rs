@@ -1199,13 +1199,17 @@ async fn function_array_transpose() -> Result<(), Error> {
 		RETURN array::transpose([[0, 1], [2, 3, 4]]);
 		RETURN array::transpose([[0, 1], [2, 3], [4, 5]]);
 		RETURN array::transpose([[0, 1, 2], "oops", [null, "sorry"]]);
+		RETURN [[1],[1,2],[1,2,3]].transpose();
+		RETURN [[1],[1,2],[1,2,3]].transpose().transpose();
 	"#;
 	let desired_responses = [
 		"[[0, 2], [1, 3]]",
-		"[[0, 3], [1, 4], [2]]",
-		"[[0, 2], [1, 3], [4]]",
+		"[[0, 3], [1, 4], [2, NONE]]",
+		"[[0, 2], [1, 3], [NONE, 4]]",
 		"[[0, 2, 4], [1, 3, 5]]",
-		"[[0, \"oops\", null], [1, \"sorry\"], [2]]",
+		"[[0, \"oops\", NULL], [1, NONE, \"sorry\"], [2, NONE, NONE]]",
+		"[[1, 1, 1], [NONE, 2, 2], [NONE, NONE, 3]]",
+		"[[1, NONE, NONE], [1, 2, NONE], [1, 2, 3]]",
 	];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
