@@ -500,7 +500,7 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 		return None;
 	}
 
-	return possibly;
+	possibly
 }
 
 impl Parser<'_> {
