@@ -1,21 +1,19 @@
-use super::common::{self, Format, Socket, StartServerArguments, DB, NS, PASS, USER};
+use crate::common::{self, Format, Socket, StartServerArguments, DB, NS, PASS, USER};
 use assert_fs::TempDir;
 use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
-use test_log::test;
 
 const HDR_SURREAL: &str = "surreal-id";
 const HDR_REQUEST: &str = "x-request-id";
 
-#[test(tokio::test)]
-async fn ping() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn ping(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Send INFO command
 	let res = socket.send_request("ping", json!([])).await;
 	assert!(res.is_ok(), "result: {res:?}");
@@ -25,21 +23,19 @@ async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn info() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn info(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Define a user table
-	socket.send_message_query("DEFINE TABLE user PERMISSIONS FULL").await?;
+	socket.send_message_query("DEFINE TABLE user PERMISSIONS FULL").await.unwrap();
 	// Define a user record access method
 	socket
 		.send_message_query(
@@ -51,7 +47,8 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 			;
 			"#,
 		)
-		.await?;
+		.await
+		.unwrap();
 	// Create a user record
 	socket
 		.send_message_query(
@@ -62,29 +59,28 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 			};
 			"#,
 		)
-		.await?;
+		.await
+		.unwrap();
 	// Sign in as record user
-	socket.send_message_signin("user", "pass", Some(NS), Some(DB), Some("user")).await?;
+	socket.send_message_signin("user", "pass", Some(NS), Some(DB), Some("user")).await.unwrap();
 	// Send INFO command
-	let res = socket.send_request("info", json!([])).await?;
+	let res = socket.send_request("info", json!([])).await.unwrap();
 	assert!(res["result"].is_object(), "result: {res:?}");
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["user"], "user", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn signup() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn signup(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Define a user record access method
 	socket
 		.send_message_query(
@@ -95,7 +91,8 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 				DURATION FOR SESSION 24h
 			;"#,
 		)
-		.await?;
+		.await
+		.unwrap();
 	// Send SIGNUP command
 	let res = socket
 		.send_request(
@@ -121,19 +118,17 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {res}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn signin() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn signin(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Define a user record access method
 	socket
 		.send_message_query(
@@ -144,7 +139,8 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 				DURATION FOR SESSION 24h
 			;"#,
 		)
-		.await?;
+		.await
+		.unwrap();
 	// Send SIGNUP command
 	let res = socket
 		.send_request(
@@ -196,26 +192,24 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {res}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn invalidate(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Verify we have an authenticated session
-	let res = socket.send_message_query("DEFINE NAMESPACE test").await?;
+	let res = socket.send_message_query("DEFINE NAMESPACE test").await.unwrap();
 	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
 	// Send INVALIDATE command
-	socket.send_request("invalidate", json!([])).await?;
+	socket.send_request("invalidate", json!([])).await.unwrap();
 	// Verify we have an invalidated session
-	let res = socket.send_request("query", json!(["DEFINE NAMESPACE test"])).await?;
+	let res = socket.send_request("query", json!(["DEFINE NAMESPACE test"])).await.unwrap();
 	assert_eq!(
 		res["error"]["message"],
 		"There was a problem with the database: IAM error: Not enough permissions to perform this action",
@@ -223,91 +217,83 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	);
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn authenticate(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	let token = socket.send_message_signin(USER, PASS, None, None, None).await?;
+	let token = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Disconnect the connection
-	socket.close().await?;
+	socket.close().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Send AUTHENTICATE command
-	socket.send_request("authenticate", json!([token,])).await?;
+	socket.send_request("authenticate", json!([token,])).await.unwrap();
 	// Verify we have an authenticated session
-	let res = socket.send_message_query("DEFINE NAMESPACE test").await?;
+	let res = socket.send_message_query("DEFINE NAMESPACE test").await.unwrap();
 	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn letset() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn letset(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Send LET command
-	socket.send_request("let", json!(["let_var", "let_value",])).await?;
+	socket.send_request("let", json!(["let_var", "let_value",])).await.unwrap();
 	// Send SET command
-	socket.send_request("set", json!(["set_var", "set_value",])).await?;
+	socket.send_request("set", json!(["set_var", "set_value",])).await.unwrap();
 	// Verify the variables are set
-	let res = socket.send_message_query("SELECT * FROM $let_var, $set_var").await?;
+	let res = socket.send_message_query("SELECT * FROM $let_var, $set_var").await.unwrap();
 	assert_eq!(res[0]["result"], json!(["let_value", "set_value"]), "result: {res:?}");
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn unset() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database server
-	let (addr, mut server) = common::start_server_with_defaults().await?;
-	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
-	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
-	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
-	// Send LET command
-	socket.send_request("let", json!(["let_var", "let_value",])).await?;
-	// Verify the variable is set
-	let res = socket.send_message_query("RETURN $let_var").await?;
-	assert_eq!(res[0]["result"], json!("let_value"), "result: {res:?}");
-	// Send UNSET command
-	socket.send_request("unset", json!(["let_var"])).await?;
-	// Verify the variable is unset
-	let res = socket.send_message_query("RETURN $let_var").await?;
-	assert_eq!(res[0]["result"], json!(null), "result: {res:?}");
-	// Test passed
-	server.finish()?;
-	Ok(())
-}
-
-#[test(tokio::test)]
-async fn select() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn unset(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Send LET command
+	socket.send_request("let", json!(["let_var", "let_value",])).await.unwrap();
+	// Verify the variable is set
+	let res = socket.send_message_query("RETURN $let_var").await.unwrap();
+	assert_eq!(res[0]["result"], json!("let_value"), "result: {res:?}");
+	// Send UNSET command
+	socket.send_request("unset", json!(["let_var"])).await.unwrap();
+	// Verify the variable is unset
+	let res = socket.send_message_query("RETURN $let_var").await.unwrap();
+	assert_eq!(res[0]["result"], json!(null), "result: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+pub async fn select(cfg_server: Option<Format>, cfg_format: Format) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Create a test record
-	socket.send_message_query("CREATE tester SET name = 'foo', value = 'bar'").await?;
+	socket.send_message_query("CREATE tester SET name = 'foo', value = 'bar'").await.unwrap();
 	// Send SELECT command
-	let res = socket.send_request("select", json!(["tester",])).await?;
+	let res = socket.send_request("select", json!(["tester",])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
@@ -316,19 +302,17 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn insert() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn insert(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Send INSERT command
 	let res = socket
 		.send_request(
@@ -341,7 +325,8 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 				}
 			]),
 		)
-		.await?;
+		.await
+		.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
@@ -366,7 +351,8 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 				]
 			]),
 		)
-		.await?;
+		.await
+		.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
@@ -376,7 +362,7 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[1]["name"], "foo", "result: {res:?}");
 	assert_eq!(res[1]["value"], "bar", "result: {res:?}");
 	// Verify the data was inserted and can be queried
-	let res = socket.send_message_query("SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await.unwrap();
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 3, "result: {res:?}");
@@ -388,19 +374,17 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[2]["value"], "bar", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn create() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn create(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Send CREATE command
 	let res = socket
 		.send_request(
@@ -412,34 +396,33 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 				}
 			]),
 		)
-		.await?;
+		.await
+		.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_object(), "result: {res:?}");
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["value"], "bar", "result: {res:?}");
 	// Verify the data was created
-	let res = socket.send_message_query("SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await.unwrap();
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn update() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn update(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Create a test record
-	socket.send_message_query("CREATE tester SET name = 'foo'").await?;
+	socket.send_message_query("CREATE tester SET name = 'foo'").await.unwrap();
 	// Send UPDATE command
 	let res = socket
 		.send_request(
@@ -451,14 +434,15 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 				}
 			]),
 		)
-		.await?;
+		.await
+		.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
 	// Verify the data was updated
-	let res = socket.send_message_query("SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await.unwrap();
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
@@ -466,21 +450,19 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn merge() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn merge(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Create a test record
-	socket.send_message_query("CREATE tester SET name = 'foo'").await?;
+	socket.send_message_query("CREATE tester SET name = 'foo'").await.unwrap();
 	// Send UPDATE command
 	let res = socket
 		.send_request(
@@ -492,7 +474,8 @@ async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 				}
 			]),
 		)
-		.await?;
+		.await
+		.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
@@ -500,7 +483,7 @@ async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], "foo", "result: {res:?}");
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
 	// Verify the data was merged
-	let res = socket.send_message_query("SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await.unwrap();
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
@@ -508,21 +491,19 @@ async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn patch() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn patch(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Create a test record
-	socket.send_message_query("CREATE tester:id SET name = 'foo'").await?;
+	socket.send_message_query("CREATE tester:id SET name = 'foo'").await.unwrap();
 	// Send PATCH command
 	let res = socket
 		.send_request(
@@ -542,12 +523,13 @@ async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 				]
 			]),
 		)
-		.await?;
+		.await
+		.unwrap();
 	assert!(res["result"].is_object(), "result: {res:?}");
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res.get("value"), Some(json!("bar")).as_ref(), "result: {res:?}");
 	// Verify the data was patched
-	let res = socket.send_message_query("SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await.unwrap();
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
@@ -555,100 +537,94 @@ async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["value"], "bar", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn delete() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn delete(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Create a test record
-	socket.send_message_query("CREATE tester:id").await?;
+	socket.send_message_query("CREATE tester:id").await.unwrap();
 	// Send DELETE command
-	let res = socket.send_request("delete", json!(["tester"])).await?;
+	let res = socket.send_request("delete", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert_eq!(res[0]["id"], "tester:id", "result: {res:?}");
 	// Create a test record
-	socket.send_message_query("CREATE tester:id").await?;
+	socket.send_message_query("CREATE tester:id").await.unwrap();
 	// Send DELETE command
-	let res = socket.send_request("delete", json!(["tester:id"])).await?;
+	let res = socket.send_request("delete", json!(["tester:id"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_object(), "result: {res:?}");
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:id", "result: {res:?}");
 	// Verify the data was merged
-	let res = socket.send_message_query("SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await.unwrap();
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 0, "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn query() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn query(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Send QUERY command
-	let res =
-		socket.send_request("query", json!(["CREATE tester; SELECT * FROM tester;",])).await?;
+	let res = socket
+		.send_request("query", json!(["CREATE tester; SELECT * FROM tester;",]))
+		.await
+		.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 2, "result: {res:?}");
 	// Verify the data was created
-	let res = socket.send_message_query("SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await.unwrap();
 	assert!(res[0]["result"].is_array(), "result: {res:?}");
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn version() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn version(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Send version command
-	let res = socket.send_request("version", json!([])).await?;
+	let res = socket.send_request("version", json!([])).await.unwrap();
 	assert!(res["result"].is_string(), "result: {res:?}");
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("surrealdb-"), "result: {res}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
 // Validate that the WebSocket is able to process multiple queries concurrently
-#[test(tokio::test)]
-async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn concurrency(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Send 5 long-running queries and verify they run concurrently
 
 	let mut futures = Vec::<Pin<Box<dyn Future<Output = _>>>>::new();
@@ -663,32 +639,30 @@ async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 		panic!("future timed-out");
 	};
 
-	let res = res.into_iter().try_fold(
-		Vec::new(),
-		|mut acc, x| -> Result<_, Box<dyn std::error::Error>> {
+	let res = res
+		.into_iter()
+		.try_fold(Vec::new(), |mut acc, x| -> Result<_, Box<dyn std::error::Error>> {
 			acc.push(x?);
 			Ok(acc)
-		},
-	)?;
+		})
+		.unwrap();
 
 	assert!(res.iter().all(|v| v["error"].is_null()), "Unexpected error received: {res:#?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn live_query() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn live_query(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Send LIVE command
-	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await?;
+	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
@@ -696,7 +670,7 @@ async fn live_query() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res[0]["result"].is_string(), "result: {res:?}");
 	let live1 = res[0]["result"].as_str().unwrap();
 	// Send LIVE command
-	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await?;
+	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
@@ -704,7 +678,8 @@ async fn live_query() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res[0]["result"].is_string(), "result: {res:?}");
 	let live2 = res[0]["result"].as_str().unwrap();
 	// Create a new test record
-	let res = socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
+	let res =
+		socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
@@ -712,10 +687,14 @@ async fn live_query() -> Result<(), Box<dyn std::error::Error>> {
 	// Wait some time for all messages to arrive, and then search for the notification message
 	let msgs: Result<_, Box<dyn std::error::Error>> =
 		tokio::time::timeout(Duration::from_secs(1), async {
-			Ok(vec![socket.receive_other_message().await?, socket.receive_other_message().await?])
+			Ok(vec![
+				socket.receive_other_message().await.unwrap(),
+				socket.receive_other_message().await.unwrap(),
+			])
 		})
-		.await?;
-	let msgs = msgs?;
+		.await
+		.unwrap();
+	let msgs = msgs.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for first live query notifcation
 	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live1));
@@ -744,34 +723,33 @@ async fn live_query() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res["id"], "tester:id", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
 /// Same as live but uses the RPC for both methods.
-#[test(tokio::test)]
-async fn live_rpc() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn live_rpc(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Send LIVE command
-	let res = socket.send_request("live", json!(["tester"])).await?;
+	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
 	let live1 = res["result"].as_str().unwrap();
 
 	// Send LIVE command
-	let res = socket.send_request("live", json!(["tester"])).await?;
+	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
 	let live2 = res["result"].as_str().unwrap();
 
 	// Create a new test record
-	let res = socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
+	let res =
+		socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
@@ -779,10 +757,14 @@ async fn live_rpc() -> Result<(), Box<dyn std::error::Error>> {
 	// Wait some time for all messages to arrive, and then search for the notification message
 	let msgs: Result<_, Box<dyn std::error::Error>> =
 		tokio::time::timeout(Duration::from_secs(1), async {
-			Ok(vec![socket.receive_other_message().await?, socket.receive_other_message().await?])
+			Ok(vec![
+				socket.receive_other_message().await.unwrap(),
+				socket.receive_other_message().await.unwrap(),
+			])
 		})
-		.await?;
-	let msgs = msgs?;
+		.await
+		.unwrap();
+	let msgs = msgs.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for first live query notifcation
 	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live1));
@@ -811,26 +793,24 @@ async fn live_rpc() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res["id"], "tester:id", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn kill() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Send LIVE command
-	let res = socket.send_request("live", json!(["tester"])).await?;
+	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
 	let live1 = res["result"].as_str().unwrap();
 	// Send QUERY command
-	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await?;
+	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
@@ -838,13 +818,14 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res[0]["result"].is_string(), "result: {res:?}");
 	let live2 = res[0]["result"].as_str().unwrap();
 	// Create a new test record
-	let res = socket.send_request("query", json!(["CREATE tester:one SET name = 'one'"])).await?;
+	let res =
+		socket.send_request("query", json!(["CREATE tester:one SET name = 'one'"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket.receive_all_other_messages(2, Duration::from_secs(1)).await?;
+	let msgs = socket.receive_all_other_messages(2, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for first live query notifcation
 	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live1));
@@ -872,17 +853,18 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:one", "result: {res:?}");
 	// Send KILL command
-	let res = socket.send_request("kill", json!([live1])).await?;
+	let res = socket.send_request("kill", json!([live1])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_null(), "result: {res:?}");
 	// Create a new test record
-	let res = socket.send_request("query", json!(["CREATE tester:two SET name = 'two'"])).await?;
+	let res =
+		socket.send_request("query", json!(["CREATE tester:two SET name = 'two'"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await?;
+	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for second live query notifcation
 	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live2));
@@ -897,55 +879,55 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:two", "result: {res:?}");
 	// Send QUERY command
-	let res = socket.send_request("query", json!([format!("KILL u'{live2}'")])).await?;
+	let res = socket.send_request("query", json!([format!("KILL u'{live2}'")])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_null(), "result: {res:?}");
 	// Create a new test record
-	let res = socket.send_request("query", json!(["CREATE tester:tre SET name = 'two'"])).await?;
+	let res =
+		socket.send_request("query", json!(["CREATE tester:tre SET name = 'two'"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await?;
+	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn live_second_connection(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket1 = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket1 = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket1.send_message_signin(USER, PASS, None, None, None).await?;
+	socket1.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket1.send_message_use(Some(NS), Some(DB)).await?;
+	socket1.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Send LIVE command
-	let res = socket1.send_request("live", json!(["tester"])).await?;
+	let res = socket1.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
 	let liveid = res["result"].as_str().unwrap();
 	// Connect to WebSocket
-	let mut socket2 = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket2 = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket2.send_message_signin(USER, PASS, None, None, None).await?;
+	socket2.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket2.send_message_use(Some(NS), Some(DB)).await?;
+	socket2.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Create a new test record
-	let res = socket2.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
+	let res =
+		socket2.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket1.receive_all_other_messages(1, Duration::from_secs(1)).await?;
+	let msgs = socket1.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Check for live query notifcation
 	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, liveid));
@@ -962,19 +944,17 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res["id"], "tester:id", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn variable_auth_live_query(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket_permanent = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket_permanent = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
-	socket_permanent.send_message_signin(USER, PASS, None, None, None).await?;
+	socket_permanent.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
-	socket_permanent.send_message_use(Some(NS), Some(DB)).await?;
+	socket_permanent.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Define a user record access method
 	socket_permanent
 		.send_message_query(
@@ -985,9 +965,10 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 				DURATION FOR SESSION 1s, FOR TOKEN 24h
 			;"#,
 		)
-		.await?;
+		.await
+		.unwrap();
 	// Send SIGNUP command
-	let mut socket_expiring_auth = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket_expiring_auth = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 
 	let res = socket_expiring_auth
 		.send_request(
@@ -1008,9 +989,9 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	// Verify response contains no error
 	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {res:?}");
 	// Authenticate the connection
-	socket_expiring_auth.send_message_signin(USER, PASS, None, None, None).await?;
+	socket_expiring_auth.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Send LIVE command
-	let res = socket_expiring_auth.send_request("live", json!(["tester"])).await?;
+	let res = socket_expiring_auth.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
 	// Wait 2 seconds for auth to expire
@@ -1018,25 +999,25 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	// Create a new test record
 	let res = socket_permanent
 		.send_request("query", json!(["CREATE tester:id SET name = 'foo'"]))
-		.await?;
+		.await
+		.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_array(), "result: {res:?}");
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket_expiring_auth.receive_all_other_messages(0, Duration::from_secs(1)).await?;
+	let msgs =
+		socket_expiring_auth.receive_all_other_messages(0, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
 	// Test passed
 	server.finish().unwrap();
-	Ok(())
 }
 
-#[test(tokio::test)]
-async fn session_expiration() {
+pub async fn session_expiration(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
@@ -1141,12 +1122,11 @@ async fn session_expiration() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_expiration_operations() {
+pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	// We store the root token to test reauthentication later
 	let root_token = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
@@ -1397,12 +1377,11 @@ async fn session_expiration_operations() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_reauthentication() {
+pub async fn session_reauthentication(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection and store the root level token
 	let root_token = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Check that we have root access
@@ -1485,12 +1464,11 @@ async fn session_reauthentication() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_reauthentication_expired() {
+pub async fn session_reauthentication_expired(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection and store the root level token
 	let root_token = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Check that we have root access
@@ -1575,12 +1553,11 @@ async fn session_reauthentication_expired() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_failed_reauthentication() {
+pub async fn session_failed_reauthentication(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server without authentication
 	let (addr, mut server) = common::start_server_without_auth().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Specify a namespace and database to use
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Check that we have are have a database and namespace selected
@@ -1594,12 +1571,11 @@ async fn session_failed_reauthentication() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_use_change_database() {
+pub async fn session_use_change_database(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection as a root level system user
 	let _ = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Check that we have root access
@@ -1687,12 +1663,11 @@ async fn session_use_change_database() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_use_change_database_scope() {
+pub async fn session_use_change_database_scope(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection as a root level system user
 	let _ = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Check that we have root access
@@ -1788,12 +1763,11 @@ async fn session_use_change_database_scope() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn run_functions() {
+pub async fn run_functions(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
@@ -1834,12 +1808,11 @@ async fn run_functions() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn relate_rpc() {
+pub async fn relate_rpc(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
@@ -1864,8 +1837,7 @@ async fn relate_rpc() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn temporary_directory() {
+pub async fn temporary_directory(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let temp_dir = TempDir::new().unwrap();
 	let (addr, mut server) =
@@ -1873,7 +1845,7 @@ async fn temporary_directory() {
 			.await
 			.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
@@ -1907,15 +1879,15 @@ async fn temporary_directory() {
 	temp_dir.close().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_id_defined() {
+pub async fn session_id_defined(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a specific SurrealDB header
 	let mut headers = HeaderMap::new();
 	headers.insert(HDR_SURREAL, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	// Connect to WebSocket
-	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
+	let mut socket =
+		Socket::connect_with_headers(&addr, cfg_server, cfg_format, headers).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
@@ -1929,15 +1901,15 @@ async fn session_id_defined() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_id_defined_generic() {
+pub async fn session_id_defined_generic(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a generic header
 	let mut headers = HeaderMap::new();
 	headers.insert(HDR_REQUEST, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	// Connect to WebSocket
-	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
+	let mut socket =
+		Socket::connect_with_headers(&addr, cfg_server, cfg_format, headers).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
@@ -1951,8 +1923,7 @@ async fn session_id_defined_generic() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_id_defined_both() {
+pub async fn session_id_defined_both(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via both headers
@@ -1960,7 +1931,8 @@ async fn session_id_defined_both() {
 	headers.insert(HDR_SURREAL, HeaderValue::from_static("00000000-0000-0000-0000-000000000000"));
 	headers.insert(HDR_REQUEST, HeaderValue::from_static("aaaaaaaa-aaaa-0000-0000-000000000000"));
 	// Connect to WebSocket
-	let mut socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await.unwrap();
+	let mut socket =
+		Socket::connect_with_headers(&addr, cfg_server, cfg_format, headers).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
@@ -1975,8 +1947,7 @@ async fn session_id_defined_both() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_id_invalid() {
+pub async fn session_id_invalid(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// We specify a request identifier via a specific SurrealDB header
@@ -1984,19 +1955,18 @@ async fn session_id_invalid() {
 	// Not a valid UUIDv4
 	headers.insert(HDR_SURREAL, HeaderValue::from_static("123"));
 	// Connect to WebSocket
-	let socket = Socket::connect_with_headers(&addr, SERVER, FORMAT, headers).await;
+	let socket = Socket::connect_with_headers(&addr, cfg_server, cfg_format, headers).await;
 	assert!(socket.is_err(), "unexpected success using connecting with invalid id header");
 
 	// Test passed
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn session_id_undefined() {
+pub async fn session_id_undefined(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
@@ -2011,8 +1981,7 @@ async fn session_id_undefined() {
 	server.finish().unwrap();
 }
 
-#[test(tokio::test)]
-async fn rpc_capability() {
+pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 	// Deny some
 	{
 		// Start server disallowing some RPC methods
@@ -2026,7 +1995,7 @@ async fn rpc_capability() {
 		.await
 		.unwrap();
 		// Connect to WebSocket
-		let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+		let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 		// Specify a namespace and database
 		socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 
@@ -2135,7 +2104,7 @@ async fn rpc_capability() {
 		.await
 		.unwrap();
 		// Connect to WebSocket
-		let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+		let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 		// Specify a namespace and database
 		socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 
@@ -2231,4 +2200,102 @@ async fn rpc_capability() {
 		// Test passed
 		server.finish().unwrap();
 	}
+}
+
+macro_rules! define_include_tests {
+	( $( $( #[$m:meta] )* $test_name:ident),* $(,)? ) => {
+		macro_rules! include_tests {
+			($server:expr, $format:expr) => {
+				$(
+					$(#[$m])*
+					async fn $test_name(){
+						crate::ws_tests::$test_name($server,$format).await
+					}
+				)*
+
+			};
+		}
+		pub(crate) use include_tests;
+	};
+}
+
+define_include_tests! {
+	#[test_log::test(tokio::test)]
+	ping,
+	#[test_log::test(tokio::test)]
+	info,
+	#[test_log::test(tokio::test)]
+	signup,
+	#[test_log::test(tokio::test)]
+	signin,
+	#[test_log::test(tokio::test)]
+	invalidate,
+	#[test_log::test(tokio::test)]
+	authenticate,
+	#[test_log::test(tokio::test)]
+	letset,
+	#[test_log::test(tokio::test)]
+	unset,
+	#[test_log::test(tokio::test)]
+	select,
+	#[test_log::test(tokio::test)]
+	insert,
+	#[test_log::test(tokio::test)]
+	create,
+	#[test_log::test(tokio::test)]
+	update,
+	#[test_log::test(tokio::test)]
+	merge,
+	#[test_log::test(tokio::test)]
+	patch,
+	#[test_log::test(tokio::test)]
+	delete,
+	#[test_log::test(tokio::test)]
+	query,
+	#[test_log::test(tokio::test)]
+	version,
+	#[test_log::test(tokio::test)]
+	concurrency,
+	#[test_log::test(tokio::test)]
+	live_query,
+	#[test_log::test(tokio::test)]
+	live_rpc,
+	#[test_log::test(tokio::test)]
+	kill,
+	#[test_log::test(tokio::test)]
+	live_second_connection,
+	#[test_log::test(tokio::test)]
+	variable_auth_live_query,
+	#[test_log::test(tokio::test)]
+	session_expiration,
+	#[test_log::test(tokio::test)]
+	session_expiration_operations,
+	#[test_log::test(tokio::test)]
+	session_reauthentication,
+	#[test_log::test(tokio::test)]
+	session_reauthentication_expired,
+	#[test_log::test(tokio::test)]
+	session_failed_reauthentication,
+	#[test_log::test(tokio::test)]
+	session_use_change_database,
+	#[test_log::test(tokio::test)]
+	session_use_change_database_scope,
+	#[test_log::test(tokio::test)]
+	run_functions,
+	#[test_log::test(tokio::test)]
+	relate_rpc,
+	#[test_log::test(tokio::test)]
+	temporary_directory,
+	#[test_log::test(tokio::test)]
+	session_id_defined,
+	#[test_log::test(tokio::test)]
+	session_id_defined_generic,
+	#[test_log::test(tokio::test)]
+	session_id_defined_both,
+	#[test_log::test(tokio::test)]
+	session_id_invalid,
+	#[test_log::test(tokio::test)]
+	session_id_undefined,
+	#[test_log::test(tokio::test)]
+	rpc_capability,
 }
