@@ -454,30 +454,46 @@ async fn live_select_with_fetch() {
 		let linktwo = link.unwrap().id;
 
 		// Create a record
-		let created: Option<ApiRecordIdWithFetchedLink> = db.create(table)
-			.content(json!({"link": linkone}))
+		let created: Option<ApiRecordIdWithUnfetchedLink> = db.create(table)
+			.content(LinkContent {
+				link: linkone.clone(),
+			})
 			.await.unwrap();
 		// Pull the notification
 		let notification: Notification<ApiRecordIdWithFetchedLink> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
-		// The returned record should match the created record
-		assert_eq!(created, Some(notification.data.clone()));
+		// // The returned record should match the created record
+		assert_eq!(ApiRecordIdWithFetchedLink {
+			id: created.unwrap().id,
+			link: Some(ApiRecordId {
+				id: linkone,
+			}),
+		}, notification.data.clone());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 
 		// Update the record
-		let _: Option<ApiRecordIdWithFetchedLink> =
+		let updated: Option<ApiRecordIdWithUnfetchedLink> =
 			db.update(&notification.data.id)
-				.content(json!({"link": linktwo}))
+				.content(LinkContent {
+					link: linktwo.clone(),
+				})
 				.await.unwrap();
 		// Pull the notification
 		let notification: Notification<ApiRecordIdWithFetchedLink> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+		// The returned record should match the updated record
+		assert_eq!(ApiRecordIdWithFetchedLink {
+			id: updated.unwrap().id,
+			link: Some(ApiRecordId {
+				id: linktwo,
+			}),
+		}, notification.data.clone());
 		// It should be updated
 		assert_eq!(notification.action, Action::Update);
 
 		// Delete the record
-		let _: Option<ApiRecordIdWithFetchedLink> = db.delete(&notification.data.id).await.unwrap();
+		let _: Option<ApiRecordIdWithUnfetchedLink> = db.delete(&notification.data.id).await.unwrap();
 		// Pull the notification
 		let notification: Notification<ApiRecordIdWithFetchedLink> = users.next().await.unwrap().unwrap();
 		// It should be deleted

@@ -59,6 +59,17 @@ mod api_integration {
 		link: Option<ApiRecordId>,
 	}
 
+	#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+	struct ApiRecordIdWithUnfetchedLink {
+		id: RecordId,
+		link: RecordId,
+	}
+
+	#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, PartialOrd)]
+	struct LinkContent {
+		link: RecordId,
+	}
+
 	#[derive(Debug, Deserialize)]
 	struct RecordName {
 		name: String,
