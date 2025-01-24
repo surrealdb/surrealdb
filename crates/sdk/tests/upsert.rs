@@ -709,9 +709,6 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
 
-			// Select always succeeds, but the result may be empty
-			res.unwrap();
-
 			if should_succeed {
 				assert!(res.unwrap() != Value::parse("[]"), "{}", msg);
 

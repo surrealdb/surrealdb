@@ -58,7 +58,7 @@ pub async fn snapshot(new_ds: impl CreateDs) {
 macro_rules! define_tests {
 	($new_ds:ident, $new_tx:ident) => {
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn snapshot() {
 			super::snapshot::snapshot($new_ds).await;
 		}

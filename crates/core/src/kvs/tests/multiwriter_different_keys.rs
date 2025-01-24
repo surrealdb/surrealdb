@@ -49,7 +49,7 @@ pub async fn multiwriter_different_keys(new_ds: impl CreateDs) {
 macro_rules! define_tests {
 	($new_ds:ident, $new_tx:ident) => {
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn multiwriter_different_keys() {
 			super::multiwriter_different_keys::multiwriter_different_keys($new_ds).await;
 		}

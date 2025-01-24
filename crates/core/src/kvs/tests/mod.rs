@@ -14,9 +14,18 @@ use uuid::Uuid;
 
 use super::{Datastore, LockType, Transaction, TransactionType};
 
+macro_rules! include_tests {
+	($new_ds:ident, $new_tx:ident => $($name:ident),* $(,)?) => {
+		$(
+			super::$name::define_tests!($new_ds, $new_tx);
+		)*
+	};
+}
+
 mod multireader;
 mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
+mod multiwriter_same_keys_conflict;
 mod raw;
 mod snapshot;
 mod timestamp_to_versionstamp;
@@ -33,17 +42,6 @@ pub(crate) enum Kvs {
 	Fdb,
 	#[allow(dead_code)]
 	SurrealKV,
-}
-
-macro_rules! define_tests {
-	($new_ds:ident, $new_tx:ident) => {
-		super::raw::define_tests!($new_ds, $new_tx);
-		super::snapshot::define_tests!($new_ds, $new_tx);
-		super::multireader::define_tests!($new_ds, $new_tx);
-		super::multiwriter_different_keys::define_tests!($new_ds, $new_tx);
-		super::multiwriter_same_keys_allow::define_tests!($new_ds, $new_tx);
-		super::timestamp_to_versionstamp::define_tests!($new_ds, $new_tx);
-	};
 }
 
 // This type is unsused when no store is enabled.
@@ -88,7 +86,6 @@ mod mem {
 			Datastore, LockType, Transaction, TransactionType,
 		},
 	};
-	use serial_test::serial;
 	use std::sync::Arc;
 	use uuid::Uuid;
 
@@ -107,7 +104,7 @@ mod mem {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	define_tests!(new_ds, new_tx);
+	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -142,7 +139,7 @@ mod rocksdb {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	define_tests!(new_ds, new_tx);
+	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -178,7 +175,7 @@ mod surrealkv {
 		ds.transaction(write, lock).await.unwrap()
 	}
 
-	define_tests!(new_ds, new_tx);
+	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -214,7 +211,7 @@ mod tikv {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	define_tests!(new_ds, new_tx);
+	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
 }
 
 #[cfg(feature = "kv-fdb")]
@@ -250,5 +247,5 @@ mod fdb {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	define_tests!(new_ds, new_tx);
+	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp);
 }

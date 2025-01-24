@@ -136,7 +136,9 @@ fn ok_graph_traversal_depth() -> Result<(), Error> {
 			// Remove the last result
 			let tmp = res.next_back().unwrap();
 			// Check all other queries
-			res.all(|r| r.unwrap());
+			for r in res {
+				r.unwrap();
+			}
 			//
 			match tmp {
 				Ok(res) => {

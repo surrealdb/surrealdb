@@ -332,67 +332,67 @@ pub async fn batch(new_ds: impl CreateDs) {
 macro_rules! define_tests {
 	($new_ds:ident, $new_tx:ident) => {
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn initialise() {
 			super::raw::initialise($new_tx).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn exists() {
 			super::raw::exists($new_ds).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn get() {
 			super::raw::get($new_ds).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn set() {
 			super::raw::set($new_ds).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn put() {
 			super::raw::put($new_ds).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn putc() {
 			super::raw::putc($new_ds).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn del() {
 			super::raw::del($new_ds).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn delc() {
 			super::raw::delc($new_ds).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn keys() {
 			super::raw::keys($new_ds).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn scan() {
 			super::raw::scan($new_ds).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn batch() {
 			super::raw::batch($new_ds).await;
 		}

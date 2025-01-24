@@ -112,13 +112,13 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 macro_rules! define_tests {
 	($new_ds:ident, $new_tx:ident) => {
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn timestamp_to_versionstamp() {
 			super::timestamp_to_versionstamp::timestamp_to_versionstamp($new_ds).await;
 		}
 
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn writing_ts_again_results_in_following_ts() {
 			super::timestamp_to_versionstamp::writing_ts_again_results_in_following_ts($new_ds)
 				.await;

@@ -909,12 +909,12 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			// Select always succeeds, but the result may be empty
-			res.unwrap();
+			let res = res.unwrap();
 
 			if should_succeed {
-				assert!(res.unwrap() != empty_array, "{}", msg);
+				assert!(res != empty_array, "{}", msg);
 			} else {
-				assert!(res.unwrap() == empty_array, "{}", msg);
+				assert!(res == empty_array, "{}", msg);
 			}
 		}
 	}

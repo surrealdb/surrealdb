@@ -1,3 +1,5 @@
+#![cfg(feature = "kv-fdb")]
+
 use super::CreateDs;
 use std::sync::Arc;
 use uuid::Uuid;

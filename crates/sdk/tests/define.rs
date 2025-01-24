@@ -391,35 +391,41 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 		INFO FOR USER test ON NAMESPACE;
 		INFO FOR USER test ON ROOT;
 	";
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = dbs.execute(sql, &ses, None).await?;
 
-	res[1].result.unwrap();
-	res[2].result.unwrap();
-	res[3].result.unwrap();
-	res[4].result.unwrap();
+	let mut res = res.into_iter();
+	res.next().unwrap().result.unwrap();
+	res.next().unwrap().result.unwrap();
+
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+
 	assert_eq!(
-		res[5].result.as_ref().unwrap_err().to_string(),
+		res.next().unwrap().result.as_ref().unwrap_err().to_string(),
 		"The root user 'test' does not exist"
 	); // User doesn't exist at the NS level
-
-	assert!(res[2]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[3]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[4]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
 
 	// If it tries to create a NS user without specifying a NS, it should fail
 	let sql = "
@@ -450,10 +456,10 @@ async fn define_statement_user_db() -> Result<(), Error> {
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	res[2].result.unwrap();
-	res[3].result.unwrap();
-	res[4].result.unwrap();
-	res[5].result.unwrap();
+	res[2].result.as_ref().unwrap();
+	res[3].result.as_ref().unwrap();
+	res[4].result.as_ref().unwrap();
+	res[5].result.as_ref().unwrap();
 	assert_eq!(
 		res[6].result.as_ref().unwrap_err().to_string(),
 		"The user 'test' does not exist in the namespace 'ns'"
