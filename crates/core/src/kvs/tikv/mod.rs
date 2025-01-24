@@ -155,7 +155,7 @@ impl super::api::Transaction for Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Commit this transaction
-		if let Err(err) = dbg!(self.inner.commit().await) {
+		if let Err(err) = self.inner.commit().await {
 			if let Err(inner_err) = self.inner.rollback().await {
 				error!("Transaction commit failed {} and rollback failed: {}", err, inner_err);
 			}
@@ -228,13 +228,12 @@ impl super::api::Transaction for Transaction {
 		let key = key.into();
 		// Prepare the savepoint if any
 		let prep = if self.save_points.is_some() {
-			dbg!("save point");
 			self.save_point_prepare(&key, version, SaveOperation::Set).await?
 		} else {
 			None
 		};
 		// Set the key
-		dbg!(self.inner.put(key, val.into()).await)?;
+		self.inner.put(key, val.into()).await?;
 		// Confirm the save point
 		if let Some(prep) = prep {
 			self.save_points.save(prep);
