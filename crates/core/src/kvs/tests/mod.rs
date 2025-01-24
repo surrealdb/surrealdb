@@ -117,7 +117,6 @@ mod rocksdb {
 			Datastore, LockType, Transaction, TransactionType,
 		},
 	};
-	use serial_test::serial;
 	use std::sync::Arc;
 	use uuid::Uuid;
 
@@ -152,7 +151,6 @@ mod surrealkv {
 			Datastore, LockType, Transaction, TransactionType,
 		},
 	};
-	use serial_test::serial;
 	use std::sync::Arc;
 	use uuid::Uuid;
 
@@ -188,7 +186,6 @@ mod tikv {
 			Datastore, LockType, Transaction, TransactionType,
 		},
 	};
-	use serial_test::serial;
 	use std::sync::Arc;
 	use uuid::Uuid;
 
@@ -224,7 +221,6 @@ mod fdb {
 			Datastore, LockType, Transaction, TransactionType,
 		},
 	};
-	use serial_test::serial;
 	use std::sync::Arc;
 	use uuid::Uuid;
 
