@@ -209,7 +209,7 @@ mod http {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, live);
+	include_tests!(new_db => basic, serialisation, backup);
 }
 
 #[cfg(feature = "kv-mem")]

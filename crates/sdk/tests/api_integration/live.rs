@@ -1,3 +1,12 @@
+#![cfg(any(
+	feature = "protocol-ws",
+	feature = "kv-mem",
+	feature = "kv-rocksdb",
+	feature = "kv-tikv",
+	feature = "kv-fdb",
+	feature = "kv-surrealkv",
+))]
+
 // Tests for running live queries
 // Supported by the storage engines and the WS protocol
 
