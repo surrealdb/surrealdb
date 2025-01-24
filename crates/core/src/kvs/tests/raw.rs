@@ -15,7 +15,7 @@ use super::{CreateDs, CreateTx};
 
 pub async fn initialise(new_tx: impl CreateTx) {
 	let mut tx = new_tx.create_tx(Write, Optimistic).await.inner();
-	assert!(tx.put("test", "ok", None).await.is_ok());
+	tx.put("test", "ok", None).await.unwrap();
 	tx.commit().await.unwrap();
 }
 
@@ -26,7 +26,7 @@ pub async fn exists(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.put("test", "ok", None).await.is_ok());
+	tx.put("test", "ok", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -44,7 +44,7 @@ pub async fn get(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.put("test", "ok", None).await.is_ok());
+	tx.put("test", "ok", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -62,7 +62,7 @@ pub async fn set(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.set("test", "one", None).await.is_ok());
+	tx.set("test", "one", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -71,7 +71,7 @@ pub async fn set(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.set("test", "two", None).await.is_ok());
+	tx.set("test", "two", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -87,7 +87,7 @@ pub async fn put(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.put("test", "one", None).await.is_ok());
+	tx.put("test", "one", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -112,7 +112,7 @@ pub async fn putc(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.put("test", "one", None).await.is_ok());
+	tx.put("test", "one", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -121,7 +121,7 @@ pub async fn putc(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.putc("test", "two", Some("one")).await.is_ok());
+	tx.putc("test", "two", Some("one")).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -146,11 +146,11 @@ pub async fn del(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.put("test", "one", None).await.is_ok());
+	tx.put("test", "one", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.del("test").await.is_ok());
+	tx.del("test").await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -166,7 +166,7 @@ pub async fn delc(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.put("test", "one", None).await.is_ok());
+	tx.put("test", "one", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
@@ -179,7 +179,7 @@ pub async fn delc(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.delc("test", Some("one")).await.is_ok());
+	tx.delc("test", Some("one")).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -195,11 +195,11 @@ pub async fn keys(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.put("test1", "1", None).await.is_ok());
-	assert!(tx.put("test2", "2", None).await.is_ok());
-	assert!(tx.put("test3", "3", None).await.is_ok());
-	assert!(tx.put("test4", "4", None).await.is_ok());
-	assert!(tx.put("test5", "5", None).await.is_ok());
+	tx.put("test1", "1", None).await.unwrap();
+	tx.put("test2", "2", None).await.unwrap();
+	tx.put("test3", "3", None).await.unwrap();
+	tx.put("test4", "4", None).await.unwrap();
+	tx.put("test5", "5", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -234,11 +234,11 @@ pub async fn scan(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.put("test1", "1", None).await.is_ok());
-	assert!(tx.put("test2", "2", None).await.is_ok());
-	assert!(tx.put("test3", "3", None).await.is_ok());
-	assert!(tx.put("test4", "4", None).await.is_ok());
-	assert!(tx.put("test5", "5", None).await.is_ok());
+	tx.put("test1", "1", None).await.unwrap();
+	tx.put("test2", "2", None).await.unwrap();
+	tx.put("test3", "3", None).await.unwrap();
+	tx.put("test4", "4", None).await.unwrap();
+	tx.put("test5", "5", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -282,11 +282,11 @@ pub async fn batch(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.put("test1", "1", None).await.is_ok());
-	assert!(tx.put("test2", "2", None).await.is_ok());
-	assert!(tx.put("test3", "3", None).await.is_ok());
-	assert!(tx.put("test4", "4", None).await.is_ok());
-	assert!(tx.put("test5", "5", None).await.is_ok());
+	tx.put("test1", "1", None).await.unwrap();
+	tx.put("test2", "2", None).await.unwrap();
+	tx.put("test3", "3", None).await.unwrap();
+	tx.put("test4", "4", None).await.unwrap();
+	tx.put("test5", "5", None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();

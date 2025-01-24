@@ -71,6 +71,11 @@ struct AuthParams<'a> {
 	pass: &'a str,
 }
 
+/// Trait for creating a database.
+///
+/// Implemented for functions which return a future of a database.
+///
+/// Used to be able to define tests on multiple types of databases only once.
 trait CreateDb {
 	type Con: Connection;
 

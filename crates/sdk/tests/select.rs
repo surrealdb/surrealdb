@@ -274,7 +274,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -329,7 +329,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -342,7 +342,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -373,7 +373,7 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -386,14 +386,14 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[tester:test]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("tester:test");
@@ -909,7 +909,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			// Select always succeeds, but the result may be empty
-			assert!(res.is_ok());
+			res.unwrap();
 
 			if should_succeed {
 				assert!(res.unwrap() != empty_array, "{}", msg);

@@ -1521,56 +1521,56 @@ pub async fn multi_take(new_db: impl CreateDb) {
 }
 
 define_include_tests!(basic => {
-#[test_log::test(tokio::test)]
-connect,
-#[test_log::test(tokio::test)]
-yuse,
-#[test_log::test(tokio::test)]
-invalidate,
-#[test_log::test(tokio::test)]
-signup_record,
-#[test_log::test(tokio::test)]
-signin_ns,
-#[test_log::test(tokio::test)]
-signin_db,
-#[test_log::test(tokio::test)]
-signin_record,
-#[test_log::test(tokio::test)]
-record_access_throws_error,
-#[test_log::test(tokio::test)]
-record_access_invalid_query,
-#[test_log::test(tokio::test)]
-authenticate,
-#[test_log::test(tokio::test)]
-query,
-#[test_log::test(tokio::test)]
-query_decimals,
-#[test_log::test(tokio::test)]
-query_binds,
-#[test_log::test(tokio::test)]
-query_with_stats,
-#[test_log::test(tokio::test)]
-query_chaining,
-#[test_log::test(tokio::test)]
-mixed_results_query,
-#[test_log::test(tokio::test)]
-create_record_no_id,
-#[test_log::test(tokio::test)]
-create_record_with_id,
-#[test_log::test(tokio::test)]
-create_record_no_id_with_content,
-#[test_log::test(tokio::test)]
-create_record_with_id_with_content,
-#[test_log::test(tokio::test)]
-create_record_with_id_in_content,
-#[test_log::test(tokio::test)]
-insert_table,
-#[test_log::test(tokio::test)]
-insert_thing,
-#[test_log::test(tokio::test)]
-insert_unspecified,
-#[test_log::test(tokio::test)]
-insert_relation_table,
+	#[test_log::test(tokio::test)]
+	connect,
+	#[test_log::test(tokio::test)]
+	yuse,
+	#[test_log::test(tokio::test)]
+	invalidate,
+	#[test_log::test(tokio::test)]
+	signup_record,
+	#[test_log::test(tokio::test)]
+	signin_ns,
+	#[test_log::test(tokio::test)]
+	signin_db,
+	#[test_log::test(tokio::test)]
+	signin_record,
+	#[test_log::test(tokio::test)]
+	record_access_throws_error,
+	#[test_log::test(tokio::test)]
+	record_access_invalid_query,
+	#[test_log::test(tokio::test)]
+	authenticate,
+	#[test_log::test(tokio::test)]
+	query,
+	#[test_log::test(tokio::test)]
+	query_decimals,
+	#[test_log::test(tokio::test)]
+	query_binds,
+	#[test_log::test(tokio::test)]
+	query_with_stats,
+	#[test_log::test(tokio::test)]
+	query_chaining,
+	#[test_log::test(tokio::test)]
+	mixed_results_query,
+	#[test_log::test(tokio::test)]
+	create_record_no_id,
+	#[test_log::test(tokio::test)]
+	create_record_with_id,
+	#[test_log::test(tokio::test)]
+	create_record_no_id_with_content,
+	#[test_log::test(tokio::test)]
+	create_record_with_id_with_content,
+	#[test_log::test(tokio::test)]
+	create_record_with_id_in_content,
+	#[test_log::test(tokio::test)]
+	insert_table,
+	#[test_log::test(tokio::test)]
+	insert_thing,
+	#[test_log::test(tokio::test)]
+	insert_unspecified,
+	#[test_log::test(tokio::test)]
+	insert_relation_table,
 	#[test_log::test(tokio::test)]
 	select_table,
 	#[test_log::test(tokio::test)]

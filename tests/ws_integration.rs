@@ -2232,6 +2232,8 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 	}
 }
 
+/// A macro which defines a macro which can be used to define tests running the above functions
+/// with a set of given paramenters.
 macro_rules! define_include_tests {
 	( $( $( #[$m:meta] )* $test_name:ident),* $(,)? ) => {
 		macro_rules! include_tests {

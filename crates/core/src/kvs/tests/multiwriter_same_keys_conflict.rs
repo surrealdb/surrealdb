@@ -19,7 +19,7 @@ async fn multiwriter_same_keys_conflict() {
 	let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tx3.set("test", "other text 3", None).await.unwrap();
 	// Cancel both writeable transactions
-	assert!(tx1.commit().await.is_ok());
+	tx1.commit().await.unwrap();
 	assert!(tx2.commit().await.is_err());
 	assert!(tx3.commit().await.is_err());
 	// Check that the key was updated ok

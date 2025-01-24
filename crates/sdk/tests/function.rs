@@ -3572,7 +3572,7 @@ async fn function_search_analyzer() -> Result<(), Error> {
 	//
 	for _ in 0..2 {
 		let tmp = test.next()?.result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	//
 	let tmp = test.next()?.result?;
@@ -3595,7 +3595,7 @@ async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
 	//
 	for _ in 0..2 {
 		let tmp = test.next()?.result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	//
 	match test.next()?.result {
@@ -3625,7 +3625,7 @@ async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
 	//
 	for _ in 0..2 {
 		let tmp = test.next()?.result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	//
 	match test.next()?.result {
@@ -3650,7 +3650,7 @@ async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	match test.next()?.result {
 		Err(Error::FcNotFound {
