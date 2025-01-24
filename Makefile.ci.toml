@@ -148,7 +148,7 @@ run_task = { name = ["test-database-upgrade"], fork = true }
 private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
-args = ["test", "--locked", "--package", "surrealdb", "--no-default-features", "--features", "${_TEST_FEATURES}", "--lib", "kvs"]
+args = ["test", "--locked", "--package", "surrealdb-core", "--no-default-features", "--features", "${_TEST_FEATURES}", "--lib", "kvs::tests"]
 
 [tasks.test-api-integration]
 private = true
