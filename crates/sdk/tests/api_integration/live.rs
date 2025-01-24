@@ -11,11 +11,11 @@
 // Tests for running live queries
 // Supported by the storage engines and the WS protocol
 
-use futures::Stream;
-use futures::StreamExt;
-use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
+
+use futures::Stream;
+use futures::StreamExt;
 use surrealdb::fflags::FFLAGS;
 use surrealdb::method::QueryStream;
 use surrealdb::opt::Resource;
@@ -440,6 +440,108 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+struct ApiRecordIdWithFetchedLink {
+	id: RecordId,
+	link: Option<ApiRecordId>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+struct ApiRecordIdWithUnfetchedLink {
+	id: RecordId,
+	link: RecordId,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, PartialOrd)]
+struct LinkContent {
+	link: RecordId,
+}
+
+async fn live_select_with_fetch(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	let linktb = format!("link_{}", Ulid::new());
+	if FFLAGS.change_feed_live_queries.enabled() {
+		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
+	} else {
+		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+	}
+
+	// Start listening
+	let mut users = db
+		.query(format!("LIVE SELECT * FROM {table} FETCH link"))
+		.await
+		.unwrap()
+		.stream::<Notification<_>>(())
+		.unwrap();
+
+	let link: Option<ApiRecordId> = db.create(&linktb).await.unwrap();
+	let linkone = link.unwrap().id;
+	let link: Option<ApiRecordId> = db.create(&linktb).await.unwrap();
+	let linktwo = link.unwrap().id;
+
+	// Create a record
+	let created: Option<ApiRecordIdWithUnfetchedLink> = db
+		.create(table)
+		.content(LinkContent {
+			link: linkone.clone(),
+		})
+		.await
+		.unwrap();
+	// Pull the notification
+	let notification: Notification<ApiRecordIdWithFetchedLink> =
+		tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+	// // The returned record should match the created record
+	assert_eq!(
+		ApiRecordIdWithFetchedLink {
+			id: created.unwrap().id,
+			link: Some(ApiRecordId {
+				id: linkone,
+			}),
+		},
+		notification.data.clone()
+	);
+	// It should be newly created
+	assert_eq!(notification.action, Action::Create);
+
+	// Update the record
+	let updated: Option<ApiRecordIdWithUnfetchedLink> = db
+		.update(&notification.data.id)
+		.content(LinkContent {
+			link: linktwo.clone(),
+		})
+		.await
+		.unwrap();
+	// Pull the notification
+	let notification: Notification<ApiRecordIdWithFetchedLink> =
+		tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+	// The returned record should match the updated record
+	assert_eq!(
+		ApiRecordIdWithFetchedLink {
+			id: updated.unwrap().id,
+			link: Some(ApiRecordId {
+				id: linktwo,
+			}),
+		},
+		notification.data.clone()
+	);
+	// It should be updated
+	assert_eq!(notification.action, Action::Update);
+
+	// Delete the record
+	let _: Option<ApiRecordIdWithUnfetchedLink> = db.delete(&notification.data.id).await.unwrap();
+	// Pull the notification
+	let notification: Notification<ApiRecordIdWithFetchedLink> =
+		users.next().await.unwrap().unwrap();
+	// It should be deleted
+	assert_eq!(notification.action, Action::Delete);
+
+	drop(permit);
+}
+
 async fn receive_all_pending_notifications<
 	S: Stream<Item = Result<Notification<I>, Error>> + Unpin,
 	I,
@@ -470,4 +572,6 @@ define_include_tests!(live => {
 	live_select_record_ranges,
 	#[test_log::test(tokio::test)]
 	live_select_query,
+	#[test_log::test(tokio::test)]
+	live_select_with_fetch,
 });
