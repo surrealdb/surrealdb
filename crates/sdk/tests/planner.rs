@@ -1996,6 +1996,101 @@ async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn select_with_in_and_not_valid_compound_index() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX idx_account_type ON test FIELDS account, type;
+		DEFINE INDEX idx_type_value ON test FIELDS type, value;
+		CREATE test:1 CONTENT {
+			account: accounts:1,
+			type: 'password',
+			value: '$argon2id$v=19$m=19456,t=2,p=1$qP0Y6ApAaFyeDsGySVD0DQ$Bp/Jv2uwapFUl5NKYk3uMsT5DZV0XPpMMVm3F2ZVfSM'
+		};
+		CREATE test:2 CONTENT {
+			account: accounts:2,
+			type: 'password',
+			value: '$argon2id$v=19$m=19456,t=2,p=1$nwwBkmNrUjjfD1ny3W50Ow$ZyZcp9GaH5iQx3k8YUmR/R3nguJR9feFO1cewEGGjcM'
+		};
+		CREATE test:3 CONTENT {
+			account: accounts:3,
+			type: 'password',
+			value: 'notAValidPassword'
+		};
+		SELECT * FROM test WITH INDEX idx_type_value WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
+		SELECT * FROM test WITH INDEX idx_account_type WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
+		SELECT * FROM test WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
+		SELECT * FROM test WITH INDEX idx_account_type WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
+		SELECT * FROM test WITH INDEX idx_type_value WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
+		SELECT * FROM test WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
+		SELECT * FROM test WITH NOINDEX WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
+	";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(12)?;
+	t.skip_ok(5)?;
+	t.expect_val(
+		"[
+			{
+				detail: {
+					plan: {
+						index: 'idx_type_value',
+						operator: 'union',
+						value: [
+							'password',
+							'firebasePassword'
+						]
+					},
+					table: 'test'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)?;
+	for i in 0..2 {
+		t.expect_val_info(
+			"[
+				{
+					detail: {
+						plan: {
+							index: 'idx_account_type',
+							operator: 'union',
+							value: [
+								[ accounts:1, 'password' ],
+								[ accounts:1, 'firebasePassword' ]
+							]
+						},
+						table: 'test'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]",
+			i,
+		)?;
+	}
+	for i in 0..4 {
+		t.expect_val_info("[
+			{
+				account: accounts:1,
+				id: test:1,
+				type: 'password',
+				value: '$argon2id$v=19$m=19456,t=2,p=1$qP0Y6ApAaFyeDsGySVD0DQ$Bp/Jv2uwapFUl5NKYk3uMsT5DZV0XPpMMVm3F2ZVfSM'
+			}
+		]", i)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
 async fn select_with_record_id_link_no_index() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");

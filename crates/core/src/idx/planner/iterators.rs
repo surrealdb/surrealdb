@@ -211,7 +211,16 @@ impl IndexEqualThingIterator {
 		ix: &DefineIndexStatement,
 		a: &Array,
 	) -> Self {
-		let (beg, end) = if ix.cols.len() == 1 {
+		let (beg, end) = Self::get_beg_end(ns, db, ix, a);
+		Self {
+			irf,
+			beg,
+			end,
+		}
+	}
+
+	fn get_beg_end(ns: &str, db: &str, ix: &DefineIndexStatement, a: &Array) -> (Vec<u8>, Vec<u8>) {
+		if ix.cols.len() == 1 {
 			(
 				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, a),
 				Index::prefix_ids_end(ns, db, &ix.what, &ix.name, a),
@@ -221,11 +230,6 @@ impl IndexEqualThingIterator {
 				Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, a),
 				Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, a),
 			)
-		};
-		Self {
-			irf,
-			beg,
-			end,
 		}
 	}
 
@@ -534,9 +538,7 @@ impl IndexUnionThingIterator {
 			a.0.iter()
 				.map(|v| {
 					let a = Array::from(v.clone());
-					let beg = Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, &a);
-					let end = Index::prefix_ids_end(ns, db, &ix.what, &ix.name, &a);
-					(beg, end)
+					IndexEqualThingIterator::get_beg_end(ns, db, ix, &a)
 				})
 				.collect()
 		} else {
