@@ -4,6 +4,7 @@
 use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
+use surrealdb::RecordId;
 use std::ops::DerefMut;
 use surrealdb::method::QueryStream;
 use surrealdb::Action;
@@ -417,6 +418,86 @@ async fn live_select_query() {
 		assert!(notification.data.into_inner().is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
+	}
+
+	drop(permit);
+}
+
+#[test_log::test(tokio::test)]
+async fn live_select_with_fetch() {
+	let (permit, db) = new_db().await;
+
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+
+	{
+		let table = format!("table_{}", Ulid::new());
+		let linktb = format!("link_{}", Ulid::new());
+		if FFLAGS.change_feed_live_queries.enabled() {
+			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
+				.await
+				.unwrap();
+		} else {
+			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+		}
+
+		// Start listening
+		let mut users = db
+			.query(format!("LIVE SELECT * FROM {table} FETCH link"))
+			.await
+			.unwrap()
+			.stream::<Notification<_>>(())
+			.unwrap();
+
+		let link: Option<ApiRecordId> = db.create(&linktb).await.unwrap();
+		let linkone = link.unwrap().id;
+		let link: Option<ApiRecordId> = db.create(&linktb).await.unwrap();
+		let linktwo = link.unwrap().id;
+
+		// Create a record
+		let created: Option<ApiRecordIdWithUnfetchedLink> = db.create(table)
+			.content(LinkContent {
+				link: linkone.clone(),
+			})
+			.await.unwrap();
+		// Pull the notification
+		let notification: Notification<ApiRecordIdWithFetchedLink> =
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+		// // The returned record should match the created record
+		assert_eq!(ApiRecordIdWithFetchedLink {
+			id: created.unwrap().id,
+			link: Some(ApiRecordId {
+				id: linkone,
+			}),
+		}, notification.data.clone());
+		// It should be newly created
+		assert_eq!(notification.action, Action::Create);
+
+		// Update the record
+		let updated: Option<ApiRecordIdWithUnfetchedLink> =
+			db.update(&notification.data.id)
+				.content(LinkContent {
+					link: linktwo.clone(),
+				})
+				.await.unwrap();
+		// Pull the notification
+		let notification: Notification<ApiRecordIdWithFetchedLink> =
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+		// The returned record should match the updated record
+		assert_eq!(ApiRecordIdWithFetchedLink {
+			id: updated.unwrap().id,
+			link: Some(ApiRecordId {
+				id: linktwo,
+			}),
+		}, notification.data.clone());
+		// It should be updated
+		assert_eq!(notification.action, Action::Update);
+
+		// Delete the record
+		let _: Option<ApiRecordIdWithUnfetchedLink> = db.delete(&notification.data.id).await.unwrap();
+		// Pull the notification
+		let notification: Notification<ApiRecordIdWithFetchedLink> = users.next().await.unwrap().unwrap();
+		// It should be deleted
+		assert_eq!(notification.action, Action::Delete);
 	}
 
 	drop(permit);

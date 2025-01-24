@@ -59,7 +59,9 @@ impl Document {
 				Value::from("UPDATE")
 			};
 			// Get the record if of this docunent
-			let rid = self.id.as_ref().unwrap();
+			let rid = self.id.clone().ok_or(Error::Unreachable(
+				"Processing live query for record without a Record ID".into(),
+			))?;
 			// Get the current and initial docs
 			let current = self.current.doc.as_arc();
 			let initial = self.initial.doc.as_arc();
@@ -124,11 +126,11 @@ impl Document {
 				Err(e) => return Err(e),
 				Ok(_) => (),
 			}
-			// Finally, let's check what type of statement
-			// caused this LIVE query to run, and send the
-			// relevant notification based on the statement.
-			if stm.is_delete() {
-				// Send a DELETE notification
+			// Let's check what type of statement
+			// caused this LIVE query to run, and obtain
+			// the relevant result.
+			let (action, mut result) = if stm.is_delete() {
+				// Prepare a DELETE notification
 				if opt.id()? == lv.node.0 {
 					// Ensure futures are run
 					let lqopt: &Options = &lqopt.new_with_futures(true);
@@ -137,64 +139,57 @@ impl Document {
 						doc.doc.as_ref().compute(stk, &lqctx, lqopt, Some(doc)).await?;
 					// Remove metadata fields on output
 					result.del(stk, &lqctx, lqopt, &*META).await?;
-					let res = chn
-						.send(Notification {
-							id: lv.id,
-							action: Action::Delete,
-							record: Value::Thing(rid.as_ref().clone()),
-							result,
-						})
-						.await;
-
-					if res.is_err() {
-						// channel was closed, that means a transaction probably failed.
-						// just return as nothing can be send.
-						return Ok(());
-					}
+					(Action::Delete, result)
 				} else {
 					// TODO: Send to message broker
+					continue;
 				}
 			} else if self.is_new() {
-				// Send a CREATE notification
+				// Prepare a CREATE notification
 				if opt.id()? == lv.node.0 {
-					let res = chn
-						.send(Notification {
-							id: lv.id,
-							action: Action::Create,
-							record: Value::Thing(rid.as_ref().clone()),
-							result: self.pluck(stk, &lqctx, &lqopt, &lq).await?,
-						})
-						.await;
-
-					if res.is_err() {
-						// channel was closed, that means a transaction probably failed.
-						// just return as nothing can be send.
-						return Ok(());
-					}
+					let result = self.pluck(stk, &lqctx, &lqopt, &lq).await?;
+					(Action::Create, result)
 				} else {
 					// TODO: Send to message broker
+					continue;
 				}
 			} else {
-				// Send a UPDATE notification
+				// Prepare a UPDATE notification
 				if opt.id()? == lv.node.0 {
-					let res = chn
-						.send(Notification {
-							id: lv.id,
-							action: Action::Update,
-							record: Value::Thing(rid.as_ref().clone()),
-							result: self.pluck(stk, &lqctx, &lqopt, &lq).await?,
-						})
-						.await;
-
-					if res.is_err() {
-						// channel was closed, that means a transaction probably failed.
-						// just return as nothing can be send.
-						return Ok(());
-					}
+					let result = self.pluck(stk, &lqctx, &lqopt, &lq).await?;
+					(Action::Update, result)
 				} else {
 					// TODO: Send to message broker
+					continue;
 				}
 			};
+
+			// Process any potential `FETCH` clause on the live statement
+			if let Some(fetchs) = &lv.fetch {
+				let mut idioms = Vec::with_capacity(fetchs.0.len());
+				for fetch in fetchs.iter() {
+					fetch.compute(stk, ctx, opt, &mut idioms).await?;
+				}
+				for i in &idioms {
+					stk.run(|stk| result.fetch(stk, ctx, opt, i)).await?;
+				}
+			}
+
+			// Send the notification
+			let res = chn
+				.send(Notification {
+					id: lv.id,
+					action,
+					record: Value::Thing(rid.as_ref().clone()),
+					result,
+				})
+				.await;
+
+			if res.is_err() {
+				// channel was closed, that means a transaction probably failed.
+				// just return as nothing can be send.
+				return Ok(());
+			}
 		}
 		// Carry on
 		Ok(())
