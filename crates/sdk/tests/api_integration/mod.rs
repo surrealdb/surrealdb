@@ -214,11 +214,10 @@ mod http {
 
 #[cfg(feature = "kv-mem")]
 mod mem {
-	use surrealdb::dbs::Capabilities;
-	use surrealdb::engine::any;
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::Mem;
 	use surrealdb::iam;
+	use surrealdb::opt::capabilities::Capabilities;
 	use surrealdb::opt::Config;
 	use surrealdb::opt::Resource;
 	use surrealdb::RecordIdKey;
@@ -321,9 +320,9 @@ mod mem {
 #[cfg(feature = "kv-rocksdb")]
 #[allow(deprecated)]
 mod file {
-	use surrealdb::dbs::Capabilities;
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::File;
+	use surrealdb::opt::capabilities::Capabilities;
 
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::Config;
@@ -371,9 +370,9 @@ mod file {
 
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb {
-	use surrealdb::dbs::Capabilities;
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::RocksDb;
+	use surrealdb::opt::capabilities::Capabilities;
 
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::Config;
@@ -463,8 +462,8 @@ mod fdb {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::FDb;
 
-	use surrealdb::dbs::Capabilities;
 	use surrealdb::opt::auth::Root;
+	use surrealdb::opt::capabilities::Capabilities;
 	use surrealdb::opt::Config;
 	use surrealdb::Surreal;
 	use tokio::sync::Semaphore;
@@ -493,9 +492,9 @@ mod fdb {
 
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
-	use surrealdb::dbs::Capabilities;
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::SurrealKv;
+	use surrealdb::opt::capabilities::Capabilities;
 
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::Config;
@@ -546,9 +545,9 @@ mod surrealkv {
 
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv_versioned {
-	use surrealdb::dbs::Capabilities;
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::SurrealKv;
+	use surrealdb::opt::capabilities::Capabilities;
 
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::Config;
