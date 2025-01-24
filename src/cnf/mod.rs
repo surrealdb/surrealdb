@@ -28,6 +28,10 @@ pub const PKG_NAME: &str = "surrealdb";
 /// The public endpoint for the administration interface
 pub const APP_ENDPOINT: &str = "https://surrealdb.com/surrealist";
 
+/// How many concurrent network requests can be handled at once (defaults to 1,048,576)
+pub static NET_MAX_CONCURRENT_REQUESTS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_NET_MAX_CONCURRENT_REQUESTS", usize, 1 << 20);
+
 /// The maximum HTTP body size of the HTTP /ml endpoints (defaults to 4 GiB)
 pub static HTTP_MAX_ML_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_HTTP_MAX_ML_BODY_SIZE", usize, 4 << 30);
