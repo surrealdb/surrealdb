@@ -1,4 +1,4 @@
-#![cfg(feature = "kv-fdb")]
+#![cfg(any(feature = "kv-tikv", feature = "kv-fdb"))]
 
 use super::CreateDs;
 use std::sync::Arc;

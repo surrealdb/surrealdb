@@ -1,9 +1,4 @@
-#![cfg(any(
-	feature = "kv-mem",
-	feature = "kv-rocksdb",
-	feature = "kv-surrealkv",
-	feature = "kv-tikv",
-))]
+#![cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv",))]
 
 use super::CreateDs;
 use std::sync::Arc;
