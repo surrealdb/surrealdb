@@ -212,7 +212,7 @@ run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel 
 [tasks.ci-api-integration-tikv]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
-run_task = { name = ["start-tikv", "test-kvs", "test-api-integration", "stop-tikv"], fork = true, parallel = false }
+run_task = { name = ["start-tikv", "test-kvs", "stop-tikv", "start-tikv","test-api-integration", "stop-tikv"], fork = true, parallel = false }
 
 [tasks.ci-api-integration-fdb-7_1]
 category = "CI - INTEGRATION TESTS"
