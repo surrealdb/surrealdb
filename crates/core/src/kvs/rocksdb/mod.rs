@@ -68,52 +68,51 @@ impl Datastore {
 		// Create column families if missing
 		opts.create_missing_column_families(true);
 		// Increase the background thread count
-		debug!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
+		info!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
 		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
 		// Specify the max concurrent background jobs
-		debug!(target: TARGET, "Maximum background jobs count: {}", *cnf::ROCKSDB_JOBS_COUNT);
+		info!(target: TARGET, "Maximum background jobs count: {}", *cnf::ROCKSDB_JOBS_COUNT);
 		opts.set_max_background_jobs(*cnf::ROCKSDB_JOBS_COUNT);
 		// Set the maximum number of open files that can be used by the database
-		debug!(target: TARGET, "Maximum number of open files: {}", *cnf::ROCKSDB_MAX_OPEN_FILES);
+		info!(target: TARGET, "Maximum number of open files: {}", *cnf::ROCKSDB_MAX_OPEN_FILES);
 		opts.set_max_open_files(*cnf::ROCKSDB_MAX_OPEN_FILES);
 		// Set the maximum number of write buffers
-		debug!(target: TARGET, "Maximum write buffers: {}", *cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
+		info!(target: TARGET, "Maximum write buffers: {}", *cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
 		opts.set_max_write_buffer_number(*cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
 		// Set the number of log files to keep
-		debug!(target: TARGET, "Number of log files to keep: {}", *cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
+		info!(target: TARGET, "Number of log files to keep: {}", *cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		// Set the amount of data to build up in memory
-		debug!(target: TARGET, "Write buffer size: {}", *cnf::ROCKSDB_WRITE_BUFFER_SIZE);
+		info!(target: TARGET, "Write buffer size: {}", *cnf::ROCKSDB_WRITE_BUFFER_SIZE);
 		opts.set_write_buffer_size(*cnf::ROCKSDB_WRITE_BUFFER_SIZE);
 		// Set the target file size for compaction
-		debug!(target: TARGET, "Target file size for compaction: {}", *cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
+		info!(target: TARGET, "Target file size for compaction: {}", *cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		opts.set_target_file_size_base(*cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		// Set minimum number of write buffers to merge
-		debug!(target: TARGET, "Minimum write buffers to merge: {}", *cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
+		info!(target: TARGET, "Minimum write buffers to merge: {}", *cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
 		opts.set_min_write_buffer_number_to_merge(*cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
 		// Use separate write thread queues
-		debug!(target: TARGET, "Use separate thread queues: {}", *cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
+		info!(target: TARGET, "Use separate thread queues: {}", *cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		opts.set_enable_pipelined_write(*cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		// Enable separation of keys and values
-		debug!(target: TARGET, "Enable separation of keys and values: {}", *cnf::ROCKSDB_ENABLE_BLOB_FILES);
+		info!(target: TARGET, "Enable separation of keys and values: {}", *cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		opts.set_enable_blob_files(*cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		// Store 4KB values separate from keys
-		debug!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
+		info!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
 		// Allow multiple writers to update memtables in parallel
-		debug!(target: TARGET, "Allow concurrent memtable writes: true");
+		info!(target: TARGET, "Allow concurrent memtable writes: true");
 		opts.set_allow_concurrent_memtable_write(true);
 		// Avoid unnecessary blocking io, preferring background threads
-		debug!(target: TARGET, "Avoid unnecessary blocking IO: true");
+		info!(target: TARGET, "Avoid unnecessary blocking IO: true");
 		opts.set_avoid_unnecessary_blocking_io(true);
 		// Improve concurrency from write batch mutex
-		debug!(target: TARGET, "Allow adaptive write thread yielding: true");
+		info!(target: TARGET, "Allow adaptive write thread yielding: true");
 		opts.set_enable_write_thread_adaptive_yield(true);
 		// Set the block cache size in bytes
-		debug!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
+		info!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		// Configure the in-memory cache options
 		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
-		// Create the in-memory LRU cache
 		// Configure the block based file options
 		let mut block_opts = BlockBasedOptions::default();
 		block_opts.set_hybrid_ribbon_filter(10.0, 2);
@@ -123,7 +122,7 @@ impl Datastore {
 		opts.set_blob_cache(&cache);
 		opts.set_row_cache(&cache);
 		// Set the delete compaction factory
-		debug!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
+		info!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
 			*cnf::ROCKSDB_DELETION_FACTORY_DELETE_COUNT,
 			*cnf::ROCKSDB_DELETION_FACTORY_RATIO,
@@ -134,7 +133,7 @@ impl Datastore {
 			*cnf::ROCKSDB_DELETION_FACTORY_RATIO,
 		);
 		// Set the datastore compaction style
-		debug!(target: TARGET, "Setting compaction style: {}", *cnf::ROCKSDB_COMPACTION_STYLE);
+		info!(target: TARGET, "Setting compaction style: {}", *cnf::ROCKSDB_COMPACTION_STYLE);
 		opts.set_compaction_style(
 			match cnf::ROCKSDB_COMPACTION_STYLE.to_ascii_lowercase().as_str() {
 				"universal" => DBCompactionStyle::Universal,
@@ -142,7 +141,7 @@ impl Datastore {
 			},
 		);
 		// Set specific compression levels
-		debug!(target: TARGET, "Setting compression level");
+		info!(target: TARGET, "Setting compression level");
 		opts.set_compression_per_level(&[
 			DBCompressionType::None,
 			DBCompressionType::None,
@@ -151,7 +150,7 @@ impl Datastore {
 			DBCompressionType::Snappy,
 		]);
 		// Set specific storage log level
-		debug!(target: TARGET, "Setting storage engine log level: {}", *cnf::ROCKSDB_STORAGE_LOG_LEVEL);
+		info!(target: TARGET, "Setting storage engine log level: {}", *cnf::ROCKSDB_STORAGE_LOG_LEVEL);
 		opts.set_log_level(match cnf::ROCKSDB_STORAGE_LOG_LEVEL.to_ascii_lowercase().as_str() {
 			"debug" => LogLevel::Debug,
 			"info" => LogLevel::Info,

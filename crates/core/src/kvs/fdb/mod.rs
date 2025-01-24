@@ -18,6 +18,8 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+const TARGET: &str = "surrealdb::core::kvs::fdb";
+
 const TIMESTAMP: [u8; 10] = [0x00; 10];
 
 pub struct Datastore {
@@ -86,16 +88,19 @@ impl Datastore {
 		match foundationdb::Database::from_path(path) {
 			Ok(db) => {
 				// Set the transaction timeout
+				info!(target: TARGET, "Setting transaction timeout: {}", *cnf::FOUNDATIONDB_TRANSACTION_TIMEOUT);
 				db.set_option(DatabaseOption::TransactionTimeout(
 					*cnf::FOUNDATIONDB_TRANSACTION_TIMEOUT,
 				))
 				.map_err(|e| Error::Ds(format!("Unable to set transaction timeout: {e}")))?;
 				// Set the transaction retry liimt
+				info!(target: TARGET, "Setting transaction retry limit: {}", *cnf::FOUNDATIONDB_TRANSACTION_RETRY_LIMIT);
 				db.set_option(DatabaseOption::TransactionRetryLimit(
 					*cnf::FOUNDATIONDB_TRANSACTION_RETRY_LIMIT,
 				))
 				.map_err(|e| Error::Ds(format!("Unable to set transaction retry limit: {e}")))?;
 				// Set the transaction max retry delay
+				info!(target: TARGET, "Setting maximum transaction retry delay: {}", *cnf::FOUNDATIONDB_TRANSACTION_MAX_RETRY_DELAY);
 				db.set_option(DatabaseOption::TransactionMaxRetryDelay(
 					*cnf::FOUNDATIONDB_TRANSACTION_MAX_RETRY_DELAY,
 				))
