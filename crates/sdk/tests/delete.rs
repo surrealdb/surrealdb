@@ -442,16 +442,16 @@ async fn delete_with_permissions_no_select() -> Result<(), Error> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let sql = "
 		DELETE friends_with:1 RETURN BEFORE;
@@ -486,16 +486,16 @@ async fn delete_with_permissions_with_select() -> Result<(), Error> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let sql = "
 		DELETE friends_with:1 RETURN BEFORE;

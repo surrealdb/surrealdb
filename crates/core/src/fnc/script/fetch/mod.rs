@@ -121,11 +121,11 @@ mod test {
 	async fn test_tests() {
 		create_test_context!(ctx => {
 			assert!(ctx.eval::<(),_>("assert(false)").is_err());
-			assert!(ctx.eval::<(),_>("assert(true)").is_ok());
+			ctx.eval::<(),_>("assert(true)").unwrap();
 			assert!(ctx.eval::<(),_>("assert.eq(1,2)").is_err());
-			assert!(ctx.eval::<(),_>("assert.eq(1,1)").is_ok());
-			assert!(ctx.eval::<(),_>("assert.eq(1,'1')").is_ok());
-			assert!(ctx.eval::<(),_>("assert.seq(1,1)").is_ok());
+			ctx.eval::<(),_>("assert.eq(1,1)").unwrap();
+			ctx.eval::<(),_>("assert.eq(1,'1')").unwrap();
+			ctx.eval::<(),_>("assert.seq(1,1)").unwrap();
 			assert!(ctx.eval::<(),_>("assert.seq(1,2)").is_err());
 			assert!(ctx.eval::<(),_>("assert.seq(1,'1')").is_err());
 			assert!(ctx.eval::<(),_>("assert.mustThrow(() => {
