@@ -54,7 +54,7 @@ pub async fn multiwriter_same_keys_allow(new_ds: impl CreateDs) {
 macro_rules! define_tests {
 	($new_ds:ident, $new_tx:ident) => {
 		#[tokio::test]
-		#[serial]
+		#[serial_test::serial]
 		async fn multiwriter_same_keys_allow() {
 			super::multiwriter_same_keys_allow::multiwriter_same_keys_allow($new_ds).await;
 		}
