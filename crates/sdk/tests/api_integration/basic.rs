@@ -1,22 +1,41 @@
 // Tests common to all protocols and storage engines
 
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json::json;
+use std::borrow::Cow;
+use std::ops::Bound;
+use std::time::Duration;
 use surrealdb::fflags::FFLAGS;
-use surrealdb::value;
+use surrealdb::opt::auth::Database;
+use surrealdb::opt::auth::Namespace;
+use surrealdb::opt::auth::Record as RecordAccess;
+use surrealdb::opt::PatchOp;
+use surrealdb::opt::Resource;
+use surrealdb::sql::statements::BeginStatement;
+use surrealdb::sql::statements::CommitStatement;
+use surrealdb::RecordId;
 use surrealdb::Response;
+use surrealdb::Value;
+use surrealdb::{error::Api as ApiError, error::Db as DbError, Error};
 use surrealdb_core::sql::{Id, Value as CoreValue};
+use ulid::Ulid;
 
-static PERMITS: Semaphore = Semaphore::const_new(1);
+use crate::api_integration::RecordName;
+use crate::api_integration::NS;
+use crate::api_integration::{ApiRecordId, Record, RecordBuf};
 
-#[test_log::test(tokio::test)]
-async fn connect() {
-	let (permit, db) = new_db().await;
+use super::AuthParams;
+use super::CreateDb;
+
+pub async fn connect(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	drop(permit);
 	db.health().await.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn yuse() {
-	let (permit, db) = new_db().await;
+pub async fn yuse(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	let item = Ulid::new().to_string();
 	match db.create(Resource::from(item.as_str())).await.unwrap_err() {
 		// Local engines return this error
@@ -38,9 +57,8 @@ async fn yuse() {
 	drop(permit);
 }
 
-#[test_log::test(tokio::test)]
-async fn invalidate() {
-	let (permit, db) = new_db().await;
+pub async fn invalidate(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	db.invalidate().await.unwrap();
@@ -52,9 +70,8 @@ async fn invalidate() {
 	);
 }
 
-#[test_log::test(tokio::test)]
-async fn signup_record() {
-	let (permit, db) = new_db().await;
+pub async fn signup_record(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let access = Ulid::new().to_string();
@@ -82,9 +99,8 @@ async fn signup_record() {
 	.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn signin_ns() {
-	let (permit, db) = new_db().await;
+pub async fn signin_ns(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
@@ -101,9 +117,8 @@ async fn signin_ns() {
 	.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn signin_db() {
-	let (permit, db) = new_db().await;
+pub async fn signin_db(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let user = Ulid::new().to_string();
@@ -122,9 +137,8 @@ async fn signin_db() {
 	.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn signin_record() {
-	let (permit, db) = new_db().await;
+pub async fn signin_record(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let access = Ulid::new().to_string();
@@ -165,9 +179,8 @@ async fn signin_record() {
 	.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn record_access_throws_error() {
-	let (permit, db) = new_db().await;
+pub async fn record_access_throws_error(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let access = Ulid::new().to_string();
@@ -228,9 +241,8 @@ async fn record_access_throws_error() {
 	};
 }
 
-#[test_log::test(tokio::test)]
-async fn record_access_invalid_query() {
-	let (permit, db) = new_db().await;
+pub async fn record_access_invalid_query(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let access = Ulid::new().to_string();
@@ -301,9 +313,8 @@ async fn record_access_invalid_query() {
 	};
 }
 
-#[test_log::test(tokio::test)]
-async fn authenticate() {
-	let (permit, db) = new_db().await;
+pub async fn authenticate(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
@@ -322,9 +333,8 @@ async fn authenticate() {
 	db.authenticate(token).await.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn query() {
-	let (permit, db) = new_db().await;
+pub async fn query(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let _ = db
@@ -345,9 +355,8 @@ async fn query() {
 	assert_eq!(name, "John Doe");
 }
 
-#[test_log::test(tokio::test)]
-async fn query_decimals() {
-	let (permit, db) = new_db().await;
+pub async fn query_decimals(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let sql = "
 	    DEFINE TABLE foo;
@@ -358,9 +367,8 @@ async fn query_decimals() {
 	drop(permit);
 }
 
-#[test_log::test(tokio::test)]
-async fn query_binds() {
-	let (permit, db) = new_db().await;
+pub async fn query_binds(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let mut response =
@@ -391,9 +399,8 @@ async fn query_binds() {
 	assert_eq!(record.name, "John Doe");
 }
 
-#[test_log::test(tokio::test)]
-async fn query_with_stats() {
-	let (permit, db) = new_db().await;
+pub async fn query_with_stats(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "CREATE foo; SELECT * FROM foo";
@@ -408,9 +415,8 @@ async fn query_with_stats() {
 	let _: Vec<ApiRecordId> = result.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn query_chaining() {
-	let (permit, db) = new_db().await;
+pub async fn query_chaining(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let response = db
@@ -425,9 +431,8 @@ async fn query_chaining() {
 	response.check().unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn mixed_results_query() {
-	let (permit, db) = new_db().await;
+pub async fn mixed_results_query(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "CREATE bar SET baz = rand('a'); CREATE foo;";
@@ -436,18 +441,16 @@ async fn mixed_results_query() {
 	let _: Option<ApiRecordId> = response.take(1).unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn create_record_no_id() {
-	let (permit, db) = new_db().await;
+pub async fn create_record_no_id(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let _: Option<ApiRecordId> = db.create("user").await.unwrap();
 	let _: Value = db.create(Resource::from("user")).await.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn create_record_with_id() {
-	let (permit, db) = new_db().await;
+pub async fn create_record_with_id(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let _: Option<ApiRecordId> = db.create(("user", "jane")).await.unwrap();
@@ -455,9 +458,8 @@ async fn create_record_with_id() {
 	let _: Value = db.create(Resource::from("user:doe")).await.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn create_record_no_id_with_content() {
-	let (permit, db) = new_db().await;
+pub async fn create_record_no_id_with_content(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let _: Option<ApiRecordId> = db
@@ -476,9 +478,8 @@ async fn create_record_no_id_with_content() {
 		.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn create_record_with_id_with_content() {
-	let (permit, db) = new_db().await;
+pub async fn create_record_with_id_with_content(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record: Option<ApiRecordId> = db
@@ -502,8 +503,7 @@ async fn create_record_with_id_with_content() {
 	);
 }
 
-#[test_log::test(tokio::test)]
-async fn create_record_with_id_in_content() {
+pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 	#[derive(Debug, Serialize, Deserialize)]
 	pub struct Person {
 		pub id: u32,
@@ -517,7 +517,7 @@ async fn create_record_with_id_in_content() {
 		pub id: RecordId,
 	}
 
-	let (permit, db) = new_db().await;
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -570,9 +570,8 @@ async fn create_record_with_id_in_content() {
 		.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn insert_table() {
-	let (permit, db) = new_db().await;
+pub async fn insert_table(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -587,9 +586,8 @@ async fn insert_table() {
 	assert!(!users.is_empty());
 }
 
-#[test_log::test(tokio::test)]
-async fn insert_thing() {
-	let (permit, db) = new_db().await;
+pub async fn insert_thing(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -608,9 +606,8 @@ async fn insert_thing() {
 	);
 }
 
-#[test_log::test(tokio::test)]
-async fn insert_unspecified() {
-	let (permit, db) = new_db().await;
+pub async fn insert_unspecified(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let tmp: Result<Vec<RecordId>, _> = db.insert(()).await;
@@ -643,9 +640,8 @@ async fn insert_unspecified() {
 	assert_eq!(tmp, val);
 }
 
-#[test_log::test(tokio::test)]
-async fn insert_relation_table() {
-	let (permit, db) = new_db().await;
+pub async fn insert_relation_table(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let tmp: Result<Vec<ApiRecordId>, _> =
@@ -664,9 +660,8 @@ async fn insert_relation_table() {
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(vals).await.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn select_table() {
-	let (permit, db) = new_db().await;
+pub async fn select_table(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -677,9 +672,8 @@ async fn select_table() {
 	assert_eq!(users.len(), 3);
 }
 
-#[test_log::test(tokio::test)]
-async fn select_record_id() {
-	let (permit, db) = new_db().await;
+pub async fn select_record_id(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record_id = ("user", "john");
@@ -695,9 +689,8 @@ async fn select_record_id() {
 	);
 }
 
-#[test_log::test(tokio::test)]
-async fn select_record_ranges() {
-	let (permit, db) = new_db().await;
+pub async fn select_record_ranges(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -738,9 +731,8 @@ async fn select_record_ranges() {
 	assert_eq!(convert(users), vec!["john"]);
 }
 
-#[test_log::test(tokio::test)]
-async fn select_records_order_by_start_limit() {
-	let (permit, db) = new_db().await;
+pub async fn select_records_order_by_start_limit(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
@@ -774,9 +766,8 @@ async fn select_records_order_by_start_limit() {
 	check_start_limit(response, vec!["Zoey", "John", "Jane", "Amos"]);
 }
 
-#[test_log::test(tokio::test)]
-async fn select_records_order_by() {
-	let (permit, db) = new_db().await;
+pub async fn select_records_order_by(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
@@ -795,9 +786,8 @@ async fn select_records_order_by() {
 	assert_eq!(convert(users), vec!["Zoey", "John", "Jane", "Amos"]);
 }
 
-#[test_log::test(tokio::test)]
-async fn select_records_fetch() {
-	let (permit, db) = new_db().await;
+pub async fn select_records_fetch(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
@@ -892,9 +882,8 @@ async fn select_records_fetch() {
 	);
 }
 
-#[test_log::test(tokio::test)]
-async fn update_table() {
-	let (permit, db) = new_db().await;
+pub async fn update_table(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -905,9 +894,8 @@ async fn update_table() {
 	assert_eq!(users.len(), 2);
 }
 
-#[test_log::test(tokio::test)]
-async fn update_record_id() {
-	let (permit, db) = new_db().await;
+pub async fn update_record_id(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -917,9 +905,8 @@ async fn update_record_id() {
 	assert_eq!(users.len(), 2);
 }
 
-#[test_log::test(tokio::test)]
-async fn update_table_with_content() {
-	let (permit, db) = new_db().await;
+pub async fn update_table_with_content(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
@@ -961,9 +948,8 @@ async fn update_table_with_content() {
 	assert_eq!(users, expected);
 }
 
-#[test_log::test(tokio::test)]
-async fn update_record_range_with_content() {
-	let (permit, db) = new_db().await;
+pub async fn update_record_range_with_content(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
@@ -1020,9 +1006,8 @@ async fn update_record_range_with_content() {
 	);
 }
 
-#[test_log::test(tokio::test)]
-async fn update_record_id_with_content() {
-	let (permit, db) = new_db().await;
+pub async fn update_record_id_with_content(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record_id = ("user", "john");
@@ -1061,9 +1046,8 @@ struct Person {
 	marketing: bool,
 }
 
-#[test_log::test(tokio::test)]
-async fn merge_record_id() {
-	let (permit, db) = new_db().await;
+pub async fn merge_record_id(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record_id = ("person", "jaime");
@@ -1098,8 +1082,7 @@ async fn merge_record_id() {
 	);
 }
 
-#[test_log::test(tokio::test)]
-async fn patch_record_id() {
+pub async fn patch_record_id(new_db: impl CreateDb) {
 	#[derive(Debug, Deserialize, PartialEq)]
 	struct Record {
 		id: RecordId,
@@ -1107,7 +1090,7 @@ async fn patch_record_id() {
 		hello: Vec<String>,
 	}
 
-	let (permit, db) = new_db().await;
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let id = "john";
@@ -1137,9 +1120,8 @@ async fn patch_record_id() {
 	);
 }
 
-#[test_log::test(tokio::test)]
-async fn delete_table() {
-	let (permit, db) = new_db().await;
+pub async fn delete_table(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -1154,9 +1136,8 @@ async fn delete_table() {
 	assert!(users.is_empty());
 }
 
-#[test_log::test(tokio::test)]
-async fn delete_record_id() {
-	let (permit, db) = new_db().await;
+pub async fn delete_record_id(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record_id = ("user", "john");
@@ -1173,9 +1154,8 @@ async fn delete_record_id() {
 	assert_eq!(value.into_inner(), CoreValue::None);
 }
 
-#[test_log::test(tokio::test)]
-async fn delete_record_range() {
-	let (permit, db) = new_db().await;
+pub async fn delete_record_range(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
@@ -1217,90 +1197,89 @@ async fn delete_record_range() {
 	);
 }
 
-#[test_log::test(tokio::test)]
-async fn changefeed() {
-    let (permit, db) = new_db().await;
-    db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-    // Enable change feeds
-    let sql = "
+pub async fn changefeed(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	// Enable change feeds
+	let sql = "
     DEFINE TABLE testuser CHANGEFEED 1h;
     ";
-    let response = db.query(sql).await.unwrap();
-    response.check().unwrap();
-    // Create and update records
-    let sql = "
+	let response = db.query(sql).await.unwrap();
+	response.check().unwrap();
+	// Create and update records
+	let sql = "
         CREATE testuser:amos SET name = 'Amos';
         CREATE testuser:jane SET name = 'Jane';
         UPDATE testuser:amos SET name = 'AMOS';
     ";
-    let table = "testuser";
-    let response = db.query(sql).await.unwrap();
-    response.check().unwrap();
-    let users: Vec<RecordBuf> = db
-        .update(table)
-        .content(Record {
-            name: "Doe".to_owned(),
-        })
-        .await
-        .unwrap();
-    let expected = &[
-        RecordBuf {
-            id: "testuser:amos".parse().unwrap(),
-            name: "Doe".to_owned(),
-        },
-        RecordBuf {
-            id: "testuser:jane".parse().unwrap(),
-            name: "Doe".to_owned(),
-        },
-    ];
-    assert_eq!(users, expected);
-    let users: Vec<RecordBuf> = db.select(table).await.unwrap();
-    assert_eq!(users, expected);
-    let sql = "
+	let table = "testuser";
+	let response = db.query(sql).await.unwrap();
+	response.check().unwrap();
+	let users: Vec<RecordBuf> = db
+		.update(table)
+		.content(Record {
+			name: "Doe".to_owned(),
+		})
+		.await
+		.unwrap();
+	let expected = &[
+		RecordBuf {
+			id: "testuser:amos".parse().unwrap(),
+			name: "Doe".to_owned(),
+		},
+		RecordBuf {
+			id: "testuser:jane".parse().unwrap(),
+			name: "Doe".to_owned(),
+		},
+	];
+	assert_eq!(users, expected);
+	let users: Vec<RecordBuf> = db.select(table).await.unwrap();
+	assert_eq!(users, expected);
+	let sql = "
         SHOW CHANGES FOR TABLE testuser SINCE 0 LIMIT 10;
     ";
-    let mut response = db.query(sql).await.unwrap();
-    drop(permit);
-    let v: Value = response.take(0).unwrap();
-    let CoreValue::Array(array) = v.into_inner() else {
-        panic!()
-    };
-    assert_eq!(array.len(), 5);
-    // DEFINE TABLE
-    let a = array.first().unwrap();
-    let CoreValue::Object(a) = a.clone() else {
-        unreachable!()
-    };
-    let CoreValue::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
-        unreachable!()
-    };
-    let changes = a.get("changes").unwrap().clone().to_owned();
-    assert_eq!(
-        Value::from_inner(changes),
-        "[
+	let mut response = db.query(sql).await.unwrap();
+	drop(permit);
+	let v: Value = response.take(0).unwrap();
+	let CoreValue::Array(array) = v.into_inner() else {
+		panic!()
+	};
+	assert_eq!(array.len(), 5);
+	// DEFINE TABLE
+	let a = array.first().unwrap();
+	let CoreValue::Object(a) = a.clone() else {
+		unreachable!()
+	};
+	let CoreValue::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	let changes = a.get("changes").unwrap().clone().to_owned();
+	assert_eq!(
+		Value::from_inner(changes),
+		"[
         {
             define_table: {
                 name: 'testuser'
             }
         }
     ]"
-        .parse()
-        .unwrap()
-    );
-    // UPDATE testuser:amos
-    let a = array.get(1).unwrap();
-    let CoreValue::Object(a) = a.clone() else {
-        unreachable!()
-    };
-    let CoreValue::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
-        unreachable!()
-    };
-    let changes = a.get("changes").unwrap().to_owned();
-    match FFLAGS.change_feed_live_queries.enabled() {
-        true => {
-            assert_eq!(
-                Value::from_inner(changes),
-                r#"[
+		.parse()
+		.unwrap()
+	);
+	// UPDATE testuser:amos
+	let a = array.get(1).unwrap();
+	let CoreValue::Object(a) = a.clone() else {
+		unreachable!()
+	};
+	let CoreValue::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	let changes = a.get("changes").unwrap().to_owned();
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				Value::from_inner(changes),
+				r#"[
                  {
                       create: {
                           id: testuser:amos,
@@ -1308,14 +1287,14 @@ async fn changefeed() {
                       }
                  }
             ]"#
-                .parse()
-                .unwrap()
-            );
-        }
-        false => {
-            assert_eq!(
-                Value::from_inner(changes),
-                r#"[
+				.parse()
+				.unwrap()
+			);
+		}
+		false => {
+			assert_eq!(
+				Value::from_inner(changes),
+				r#"[
                  {
                       update: {
                           id: testuser:amos,
@@ -1323,26 +1302,26 @@ async fn changefeed() {
                       }
                  }
             ]"#
-                .parse()
-                .unwrap()
-            );
-        }
-    }
-    // UPDATE testuser:jane
-    let a = array.get(2).unwrap();
-    let CoreValue::Object(a) = a.clone() else {
-        unreachable!()
-    };
-    let CoreValue::Number(versionstamp2) = a.get("versionstamp").unwrap().clone() else {
-        unreachable!()
-    };
-    assert!(*versionstamp1 < versionstamp2);
-    let changes = a.get("changes").unwrap().to_owned();
-    match FFLAGS.change_feed_live_queries.enabled() {
-        true => {
-            assert_eq!(
-                Value::from_inner(changes),
-                "[
+				.parse()
+				.unwrap()
+			);
+		}
+	}
+	// UPDATE testuser:jane
+	let a = array.get(2).unwrap();
+	let CoreValue::Object(a) = a.clone() else {
+		unreachable!()
+	};
+	let CoreValue::Number(versionstamp2) = a.get("versionstamp").unwrap().clone() else {
+		unreachable!()
+	};
+	assert!(*versionstamp1 < versionstamp2);
+	let changes = a.get("changes").unwrap().to_owned();
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				Value::from_inner(changes),
+				"[
                     {
                          create: {
                              id: testuser:jane,
@@ -1350,14 +1329,14 @@ async fn changefeed() {
                          }
                     }
                 ]"
-                .parse()
-                .unwrap()
-            );
-        }
-        false => {
-            assert_eq!(
-                Value::from_inner(changes),
-                "[
+				.parse()
+				.unwrap()
+			);
+		}
+		false => {
+			assert_eq!(
+				Value::from_inner(changes),
+				"[
                     {
                          update: {
                              id: testuser:jane,
@@ -1365,26 +1344,26 @@ async fn changefeed() {
                          }
                     }
                 ]"
-                .parse()
-                .unwrap()
-            );
-        }
-    }
-    // UPDATE testuser:amos
-    let a = array.get(3).unwrap();
-    let CoreValue::Object(a) = a.clone() else {
-        unreachable!()
-    };
-    let CoreValue::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
-        unreachable!()
-    };
-    assert!(versionstamp2 < *versionstamp3);
-    let changes = a.get("changes").unwrap().to_owned();
-    match FFLAGS.change_feed_live_queries.enabled() {
-        true => {
-            assert_eq!(
-                Value::from_inner(changes),
-                "[
+				.parse()
+				.unwrap()
+			);
+		}
+	}
+	// UPDATE testuser:amos
+	let a = array.get(3).unwrap();
+	let CoreValue::Object(a) = a.clone() else {
+		unreachable!()
+	};
+	let CoreValue::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	assert!(versionstamp2 < *versionstamp3);
+	let changes = a.get("changes").unwrap().to_owned();
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				Value::from_inner(changes),
+				"[
                     {
                         create: {
                             id: testuser:amos,
@@ -1392,14 +1371,14 @@ async fn changefeed() {
                         }
                     }
                 ]"
-                .parse()
-                .unwrap()
-            );
-        }
-        false => {
-            assert_eq!(
-                Value::from_inner(changes),
-                "[
+				.parse()
+				.unwrap()
+			);
+		}
+		false => {
+			assert_eq!(
+				Value::from_inner(changes),
+				"[
                     {
                         update: {
                             id: testuser:amos,
@@ -1407,24 +1386,24 @@ async fn changefeed() {
                         }
                     }
                 ]"
-                .parse()
-                .unwrap()
-            );
-        }
-    };
-    // UPDATE table
-    let a = array.get(4).unwrap();
-    let CoreValue::Object(a) = a.clone() else {
-        unreachable!()
-    };
-    let CoreValue::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
-        unreachable!()
-    };
-    assert!(versionstamp3 < versionstamp4);
-    let changes = a.get("changes").unwrap().to_owned();
-    assert_eq!(
-        Value::from_inner(changes),
-        "[
+				.parse()
+				.unwrap()
+			);
+		}
+	};
+	// UPDATE table
+	let a = array.get(4).unwrap();
+	let CoreValue::Object(a) = a.clone() else {
+		unreachable!()
+	};
+	let CoreValue::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	assert!(versionstamp3 < versionstamp4);
+	let changes = a.get("changes").unwrap().to_owned();
+	assert_eq!(
+		Value::from_inner(changes),
+		"[
         {
             update: {
                 id: testuser:amos,
@@ -1438,21 +1417,19 @@ async fn changefeed() {
             }
         }
     ]"
-        .parse()
-        .unwrap()
-    );
+		.parse()
+		.unwrap()
+	);
 }
 
-#[test_log::test(tokio::test)]
-async fn version() {
-	let (permit, db) = new_db().await;
+pub async fn version(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	drop(permit);
 	db.version().await.unwrap();
 }
 
-#[test_log::test(tokio::test)]
-async fn set_unset() {
-	let (permit, db) = new_db().await;
+pub async fn set_unset(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let (key, value) = ("name", "Doe");
@@ -1473,9 +1450,8 @@ async fn set_unset() {
 	assert!(name.is_none());
 }
 
-#[test_log::test(tokio::test)]
-async fn return_bool() {
-	let (permit, db) = new_db().await;
+pub async fn return_bool(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	let mut response = db.query("RETURN true").await.unwrap();
 	drop(permit);
 	let Some(boolean): Option<bool> = response.take(0).unwrap() else {
@@ -1487,9 +1463,8 @@ async fn return_bool() {
 	assert_eq!(value.into_inner(), CoreValue::Bool(false));
 }
 
-#[test_log::test(tokio::test)]
-async fn run() {
-	let (permit, db) = new_db().await;
+pub async fn run(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
@@ -1526,9 +1501,8 @@ async fn run() {
 	assert_eq!(tmp, 7);
 }
 
-#[test_log::test(tokio::test)]
-async fn multi_take() {
-	let (permit, db) = new_db().await;
+pub async fn multi_take(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -1545,3 +1519,100 @@ async fn multi_take() {
 	addresses.sort();
 	assert_eq!(addresses, vec!["UK".to_owned(), "USA".to_owned()]);
 }
+
+define_include_tests!(basic => {
+	#[test_log::test(tokio::test)]
+	connect,
+	#[test_log::test(tokio::test)]
+	yuse,
+	#[test_log::test(tokio::test)]
+	invalidate,
+	#[test_log::test(tokio::test)]
+	signup_record,
+	#[test_log::test(tokio::test)]
+	signin_ns,
+	#[test_log::test(tokio::test)]
+	signin_db,
+	#[test_log::test(tokio::test)]
+	signin_record,
+	#[test_log::test(tokio::test)]
+	record_access_throws_error,
+	#[test_log::test(tokio::test)]
+	record_access_invalid_query,
+	#[test_log::test(tokio::test)]
+	authenticate,
+	#[test_log::test(tokio::test)]
+	query,
+	#[test_log::test(tokio::test)]
+	query_decimals,
+	#[test_log::test(tokio::test)]
+	query_binds,
+	#[test_log::test(tokio::test)]
+	query_with_stats,
+	#[test_log::test(tokio::test)]
+	query_chaining,
+	#[test_log::test(tokio::test)]
+	mixed_results_query,
+	#[test_log::test(tokio::test)]
+	create_record_no_id,
+	#[test_log::test(tokio::test)]
+	create_record_with_id,
+	#[test_log::test(tokio::test)]
+	create_record_no_id_with_content,
+	#[test_log::test(tokio::test)]
+	create_record_with_id_with_content,
+	#[test_log::test(tokio::test)]
+	create_record_with_id_in_content,
+	#[test_log::test(tokio::test)]
+	insert_table,
+	#[test_log::test(tokio::test)]
+	insert_thing,
+	#[test_log::test(tokio::test)]
+	insert_unspecified,
+	#[test_log::test(tokio::test)]
+	insert_relation_table,
+	#[test_log::test(tokio::test)]
+	select_table,
+	#[test_log::test(tokio::test)]
+	select_record_id,
+	#[test_log::test(tokio::test)]
+	select_record_ranges,
+	#[test_log::test(tokio::test)]
+	select_records_order_by_start_limit,
+	#[test_log::test(tokio::test)]
+	select_records_order_by,
+	#[test_log::test(tokio::test)]
+	select_records_fetch,
+	#[test_log::test(tokio::test)]
+	update_table,
+	#[test_log::test(tokio::test)]
+	update_record_id,
+	#[test_log::test(tokio::test)]
+	update_table_with_content,
+	#[test_log::test(tokio::test)]
+	update_record_range_with_content,
+	#[test_log::test(tokio::test)]
+	update_record_id_with_content,
+	#[test_log::test(tokio::test)]
+	merge_record_id,
+	#[test_log::test(tokio::test)]
+	patch_record_id,
+	#[test_log::test(tokio::test)]
+	delete_table,
+	#[test_log::test(tokio::test)]
+	delete_record_id,
+	#[test_log::test(tokio::test)]
+	delete_record_range,
+	#[test_log::test(tokio::test)]
+	changefeed,
+	#[test_log::test(tokio::test)]
+	version,
+	#[test_log::test(tokio::test)]
+	set_unset,
+	#[test_log::test(tokio::test)]
+	return_bool,
+	#[test_log::test(tokio::test)]
+	run,
+	#[test_log::test(tokio::test)]
+	multi_take,
+});

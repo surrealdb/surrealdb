@@ -26,10 +26,10 @@ async fn remove_statement_table() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -66,10 +66,10 @@ async fn remove_statement_namespace() -> Result<(), Error> {
 		assert!(tmp.is_err());
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	// Namespace selected
 	{
@@ -88,10 +88,10 @@ async fn remove_statement_namespace() -> Result<(), Error> {
 		assert!(tmp.is_err());
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	Ok(())
 }
@@ -114,10 +114,10 @@ async fn remove_statement_database() -> Result<(), Error> {
 		assert!(tmp.is_err());
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	// Database selected
 	{
@@ -136,10 +136,10 @@ async fn remove_statement_database() -> Result<(), Error> {
 		assert!(tmp.is_err());
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	Ok(())
 }
@@ -157,10 +157,10 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	// Analyzer is defined
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	// Analyzer is removed
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	// Check infos output
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -198,7 +198,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 	assert_eq!(res.len(), 9);
 	for _ in 0..8 {
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;

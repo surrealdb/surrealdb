@@ -181,7 +181,6 @@ mod tests {
 
 		let expected_output: Vec<Number> = vec![2, 4, 6, 8].into_iter().map(Number::Int).collect();
 
-		assert!(result.is_ok());
 		assert_eq!(result.unwrap(), expected_output.into());
 	}
 
@@ -193,7 +192,6 @@ mod tests {
 		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_float));
 		let expected_output: Vec<Number> =
 			vec![1.51, 3.02, 4.53, 6.04].into_iter().map(Number::Float).collect();
-		assert!(result.is_ok());
 		assert_eq!(result.unwrap(), expected_output.into());
 	}
 
@@ -209,7 +207,6 @@ mod tests {
 			Number::Decimal(Decimal::new(9423, 3)),  // 3.141 * 3
 			Number::Decimal(Decimal::new(12564, 3)), // 3.141 * 4
 		];
-		assert!(result.is_ok());
 		assert_eq!(result.unwrap(), expected_output.into());
 	}
 }

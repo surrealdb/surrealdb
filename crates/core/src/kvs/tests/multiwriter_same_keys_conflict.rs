@@ -1,10 +1,23 @@
-#[tokio::test]
-#[serial]
-async fn multiwriter_same_keys_conflict() {
+#![cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv",))]
+
+use super::CreateDs;
+use std::sync::Arc;
+use uuid::Uuid;
+
+use crate::{
+	dbs::node::Timestamp,
+	kvs::{
+		clock::{FakeClock, SizedClock},
+		LockType::*,
+		TransactionType::*,
+	},
+};
+
+pub async fn multiwriter_same_keys_conflict(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("96ebbb5c-8040-497a-9459-838e4931aca7").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Insert an initial key
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tx.set("test", "some text", None).await.unwrap();
@@ -19,9 +32,9 @@ async fn multiwriter_same_keys_conflict() {
 	let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tx3.set("test", "other text 3", None).await.unwrap();
 	// Cancel both writeable transactions
-	assert!(tx1.commit().await.is_ok());
-	assert!(tx2.commit().await.is_err());
-	assert!(tx3.commit().await.is_err());
+	tx1.commit().await.unwrap();
+	tx2.commit().await.unwrap_err();
+	tx3.commit().await.unwrap_err();
 	// Check that the key was updated ok
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
 	let val = tx.get("test", None).await.unwrap().unwrap();
@@ -37,3 +50,14 @@ async fn multiwriter_same_keys_conflict() {
 	assert_eq!(val, b"original text");
 	tx.cancel().await.unwrap();
 }
+
+macro_rules! define_tests {
+	($new_ds:ident, $new_tx:ident) => {
+		#[tokio::test]
+		#[serial_test::serial]
+		async fn multiwriter_same_keys_conflict() {
+			super::multiwriter_same_keys_conflict::multiwriter_same_keys_conflict($new_ds).await;
+		}
+	};
+}
+pub(crate) use define_tests;
