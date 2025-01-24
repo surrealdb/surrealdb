@@ -2,7 +2,8 @@
 	feature = "kv-mem",
 	feature = "kv-rocksdb",
 	feature = "kv-tikv",
-	feature = "kv-fdb",
+	feature = "kv-fdb-7_3",
+	feature = "kv-fdb-7_1",
 	feature = "kv-surrealkv",
 	feature = "protocol-http",
 ))]
