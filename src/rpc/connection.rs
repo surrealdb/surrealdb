@@ -1,4 +1,7 @@
-use crate::cnf::{PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY};
+use crate::cnf::WEBSOCKET_PING_FREQUENCY;
+use crate::cnf::WEBSOCKET_RESPONSE_BUFFER_SIZE;
+use crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_SIZE;
+use crate::cnf::{PKG_NAME, PKG_VERSION};
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
 use crate::rpc::response::{failure, IntoRpcResponse};
@@ -85,7 +88,7 @@ impl Connection {
 			vars: BTreeMap::new(),
 			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
-			channel: channel::bounded(100),
+			channel: channel::bounded(*WEBSOCKET_RESPONSE_CHANNEL_SIZE),
 			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
@@ -102,8 +105,10 @@ impl Connection {
 		let state = rpc_lock.state.clone();
 		// Log the succesful WebSocket connection
 		trace!("WebSocket {} connected", id);
+		// Buffer the WebSocket response stream
+		let buffer = ws.buffer(*WEBSOCKET_RESPONSE_BUFFER_SIZE);
 		// Split the socket into sending and receiving streams
-		let (sender, receiver) = ws.buffer(100).split();
+		let (sender, receiver) = buffer.split();
 		// Create an internal channel for sending and receiving
 		let internal_sender = rpc_lock.channel.0.clone();
 		let internal_receiver = rpc_lock.channel.1.clone();

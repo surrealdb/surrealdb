@@ -67,6 +67,14 @@ pub static WEBSOCKET_MAX_FRAME_SIZE: LazyLock<usize> =
 pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", usize, 128 << 20);
 
+/// How many messages can be buffered while attempting to deliver to the client.
+pub static WEBSOCKET_RESPONSE_BUFFER_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_BUFFER_SIZE", usize, 100);
+
+/// How many messages can be queued for sending to the buffering WebSocket connection.
+pub static WEBSOCKET_RESPONSE_CHANNEL_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_CHANNEL_SIZE", usize, 100);
+
 /// The number of runtime worker threads to start (defaults to the number of CPU cores, minimum 4)
 pub static RUNTIME_WORKER_THREADS: LazyLock<usize> =
 	lazy_env_parse_or_else!("SURREAL_RUNTIME_WORKER_THREADS", usize, |_| {
