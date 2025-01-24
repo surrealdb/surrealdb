@@ -208,7 +208,7 @@ mod tikv {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp);
 }
 
 #[cfg(feature = "kv-fdb")]
