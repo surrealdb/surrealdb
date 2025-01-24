@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 use surrealdb::{Connection, RecordId, Surreal};
 use tokio::sync::SemaphorePermit;
 
+/// Tests for this module are defined using this macro.
+///
+/// Every module implementing tests uses this macro at the end of the file.
+/// This macro creates an `include_test` macro defined in that file which will generate a set of
+/// short functions to call all the test functions defined. in the file.
+///
+/// This macro is then called by the include test macro in this file for all the different versions
+/// of the tests.
 macro_rules! define_include_tests {
 	($crate_name:ident => { $( $( #[$m:meta] )* $test_name:ident),* $(,)? }) => {
 		macro_rules! include_tests {

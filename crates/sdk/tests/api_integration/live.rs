@@ -16,6 +16,8 @@ use std::time::Duration;
 
 use futures::Stream;
 use futures::StreamExt;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use surrealdb::fflags::FFLAGS;
 use surrealdb::method::QueryStream;
 use surrealdb::opt::Resource;
@@ -457,7 +459,7 @@ struct LinkContent {
 	link: RecordId,
 }
 
-async fn live_select_with_fetch(new_db: impl CreateDb) {
+pub async fn live_select_with_fetch(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
