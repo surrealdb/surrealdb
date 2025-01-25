@@ -90,7 +90,9 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		// Ensure a X-Request-Id header is specified
 		.set_x_request_id(MakeRequestUuid)
 		// Ensure the Request-Id is sent in the response
-		.propagate_x_request_id();
+		.propagate_x_request_id()
+		// Limit the number of requests handled at once
+		.concurrency_limit(*cnf::NET_MAX_CONCURRENT_REQUESTS);
 
 	#[cfg(feature = "http-compression")]
 	let service = service.layer(
@@ -162,9 +164,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 				// allow requests from any origin
 				.allow_origin(Any)
 				.max_age(Duration::from_secs(86400)),
-		)
-		// Limit the number of requests handled at once
-		.concurrency_limit(*cnf::NET_MAX_CONCURRENT_REQUESTS);
+		);
 
 	let axum_app = Router::<Arc<RpcState>>::new()
 		// Redirect until we provide a UI
