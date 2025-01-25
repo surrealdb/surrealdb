@@ -325,7 +325,7 @@ mod tests {
 			let (tx, mut t) = new_operation(&ds, BTREE_ORDER, Write).await;
 
 			// Check removing an non-existing term id returns None
-			assert!(t.remove_term_id(&tx, 0).await.is_ok());
+			t.remove_term_id(&tx, 0).await.unwrap();
 
 			// Create few terms
 			t.resolve_term_id(&tx, "A").await.unwrap();

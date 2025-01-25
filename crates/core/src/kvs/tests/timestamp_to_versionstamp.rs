@@ -1,3 +1,16 @@
+use super::CreateDs;
+use std::sync::Arc;
+use uuid::Uuid;
+
+use crate::{
+	dbs::{node::Timestamp, Session},
+	kvs::{
+		clock::{FakeClock, SizedClock},
+		LockType::*,
+		TransactionType::*,
+	},
+};
+
 // Timestamp to versionstamp tests
 // This translation mechanism is currently used by the garbage collector to determine which change feed entries to delete.
 //
@@ -9,13 +22,11 @@
 // A: The garbage collector needs to know which change feed entries to delete.
 //    However our SQL syntax `DEFINE DATABASE foo CHANGEFEED 1h` let the user specify the expiration in a duration, not a delta in the versionstamp.
 //    We need to translate the timestamp to the versionstamp due to that; `now - 1h` to a key suffixed by the versionstamp.
-#[tokio::test]
-#[serial]
-async fn timestamp_to_versionstamp() {
+pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("A905CA25-56ED-49FB-B759-696AEA87C342").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Give the current versionstamp a timestamp of 0
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tx.set_timestamp_for_versionstamp(0, "myns", "mydb").await.unwrap();
@@ -44,13 +55,11 @@ async fn timestamp_to_versionstamp() {
 	assert!(vs2 < vs3);
 }
 
-#[tokio::test]
-#[serial]
-async fn writing_ts_again_results_in_following_ts() {
+pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("A905CA25-56ED-49FB-B759-696AEA87C342").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 
 	// Declare ns/db
 	ds.execute("USE NS myns; USE DB mydb; CREATE record", &Session::owner(), None).await.unwrap();
@@ -99,3 +108,21 @@ async fn writing_ts_again_results_in_following_ts() {
 	assert_eq!(scanned[1].0, crate::key::database::ts::new("myns", "mydb", 1).encode().unwrap());
 	assert_eq!(scanned[2].0, crate::key::database::ts::new("myns", "mydb", 2).encode().unwrap());
 }
+
+macro_rules! define_tests {
+	($new_ds:ident, $new_tx:ident) => {
+		#[tokio::test]
+		#[serial_test::serial]
+		async fn timestamp_to_versionstamp() {
+			super::timestamp_to_versionstamp::timestamp_to_versionstamp($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial_test::serial]
+		async fn writing_ts_again_results_in_following_ts() {
+			super::timestamp_to_versionstamp::writing_ts_again_results_in_following_ts($new_ds)
+				.await;
+		}
+	};
+}
+pub(crate) use define_tests;

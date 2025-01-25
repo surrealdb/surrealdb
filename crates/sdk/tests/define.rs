@@ -70,7 +70,7 @@ async fn define_statement_database() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -364,7 +364,7 @@ async fn define_statement_user_root() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result;
 
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
@@ -391,35 +391,41 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 		INFO FOR USER test ON NAMESPACE;
 		INFO FOR USER test ON ROOT;
 	";
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = dbs.execute(sql, &ses, None).await?;
 
-	assert!(res[1].result.is_ok());
-	assert!(res[2].result.is_ok());
-	assert!(res[3].result.is_ok());
-	assert!(res[4].result.is_ok());
+	let mut res = res.into_iter();
+	res.next().unwrap().result.unwrap();
+	res.next().unwrap().result.unwrap();
+
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+
 	assert_eq!(
-		res[5].result.as_ref().unwrap_err().to_string(),
+		res.next().unwrap().result.as_ref().unwrap_err().to_string(),
 		"The root user 'test' does not exist"
 	); // User doesn't exist at the NS level
-
-	assert!(res[2]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[3]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[4]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
 
 	// If it tries to create a NS user without specifying a NS, it should fail
 	let sql = "
@@ -450,10 +456,10 @@ async fn define_statement_user_db() -> Result<(), Error> {
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	assert!(res[2].result.is_ok());
-	assert!(res[3].result.is_ok());
-	assert!(res[4].result.is_ok());
-	assert!(res[5].result.is_ok());
+	res[2].result.as_ref().unwrap();
+	res[3].result.as_ref().unwrap();
+	res[4].result.as_ref().unwrap();
+	res[5].result.as_ref().unwrap();
 	assert_eq!(
 		res[6].result.as_ref().unwrap_err().to_string(),
 		"The user 'test' does not exist in the namespace 'ns'"
@@ -1192,7 +1198,7 @@ async fn define_table_relation_in_out() -> Result<(), Error> {
 	//
 	for _ in 0..7 {
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	//
 	let tmp = res.remove(0).result;
@@ -1253,10 +1259,10 @@ async fn define_table_type_normal() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_err());
@@ -1273,7 +1279,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	let sql = r"DEFINE TABLE test;".to_owned();
 	let res = &mut ds.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	assert!(res.remove(0).result.is_ok());
+	res.remove(0).result.unwrap();
 	// Obtain the initial uuids
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let initial = txn.get_tb("test", "test", "test").await?;
@@ -1290,10 +1296,10 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	.to_owned();
 	let res = &mut ds.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
 	let lqid = res.remove(0).result?;
 	assert!(matches!(lqid, Value::Uuid(_)));
 	// Obtain the uuids after definitions
@@ -1319,11 +1325,11 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	let vars = map! { "lqid".to_string() => lqid };
 	let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 	assert_eq!(res.len(), 5);
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let after_remove = txn.get_tb("test", "test", "test").await?;
