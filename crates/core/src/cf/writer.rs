@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
-use crate::kvs::Key;
+use crate::err::Error;
+use crate::kvs::{Key, KeyEncode};
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::Idiom;
@@ -122,7 +123,7 @@ impl Writer {
 
 	// get returns all the mutations buffered for this transaction,
 	// that are to be written onto the key composed of the specified prefix + the current timestamp + the specified suffix.
-	pub(crate) fn get(&self) -> Vec<PreparedWrite> {
+	pub(crate) fn get(&self) -> Result<Vec<PreparedWrite>, Error> {
 		let mut r = Vec::<(Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val)>::new();
 		// Get the current timestamp
 		for (
@@ -134,13 +135,13 @@ impl Writer {
 			mutations,
 		) in self.buf.b.iter()
 		{
-			let ts_key: Key = crate::key::database::vs::new(ns, db).into();
-			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(ns, db);
+			let ts_key: Key = crate::key::database::vs::new(ns, db).encode()?;
+			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(ns, db)?;
 			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb.as_str());
 
 			r.push((ts_key, tc_key_prefix, tc_key_suffix, mutations.into()))
 		}
-		r
+		Ok(r)
 	}
 }
 

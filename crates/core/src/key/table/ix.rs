@@ -1,10 +1,11 @@
 //! Stores a DEFINE INDEX config definition
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Ix<'a> {
 	__: u8,
@@ -19,21 +20,22 @@ pub struct Ix<'a> {
 	_f: u8,
 	pub ix: &'a str,
 }
+impl_key!(Ix<'a>);
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Ix<'a> {
 	Ix::new(ns, db, tb, ix)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db, tb).encode().unwrap();
+pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db, tb).encode()?;
 	k.extend_from_slice(b"!ix\x00");
-	k
+	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db, tb).encode().unwrap();
+pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db, tb).encode()?;
 	k.extend_from_slice(b"!ix\xff");
-	k
+	Ok(k)
 }
 
 impl Categorise for Ix<'_> {
@@ -62,6 +64,7 @@ impl<'a> Ix<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KeyDecode;
 	#[test]
 	fn key() {
 		use super::*;

@@ -1,10 +1,11 @@
 //! Stores a DEFINE TABLE config definition
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Tb<'a> {
 	__: u8,
@@ -17,21 +18,22 @@ pub struct Tb<'a> {
 	_e: u8,
 	pub tb: &'a str,
 }
+impl_key!(Tb<'a>);
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Tb<'a> {
 	Tb::new(ns, db, tb)
 }
 
-pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db).encode().unwrap();
+pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!tb\x00");
-	k
+	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db).encode().unwrap();
+pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!tb\xff");
-	k
+	Ok(k)
 }
 
 impl Categorise for Tb<'_> {
@@ -58,6 +60,7 @@ impl<'a> Tb<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KeyDecode;
 	#[test]
 	fn key() {
 		use super::*;

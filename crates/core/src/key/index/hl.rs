@@ -1,9 +1,9 @@
 //! Store and chunked layers of an HNSW index
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Key)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Hl<'a> {
 	__: u8,
@@ -21,6 +21,7 @@ pub struct Hl<'a> {
 	pub layer: u16,
 	pub chunk: u32,
 }
+impl_key!(Hl<'a>);
 
 impl<'a> Hl<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, layer: u16, chunk: u32) -> Self {
@@ -45,6 +46,7 @@ impl<'a> Hl<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {

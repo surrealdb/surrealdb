@@ -371,7 +371,7 @@ impl QueryExecutor {
 				}
 			}
 			IndexOperator::Union(value) => Some(ThingIterator::IndexUnion(
-				IndexUnionThingIterator::new(ir, opt.ns()?, opt.db()?, ix, value),
+				IndexUnionThingIterator::new(ir, opt.ns()?, opt.db()?, ix, value)?,
 			)),
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, ir, ios).await?;
@@ -380,7 +380,7 @@ impl QueryExecutor {
 				Some(ThingIterator::IndexJoin(index_join))
 			}
 			IndexOperator::Order => Some(ThingIterator::IndexRange(
-				IndexRangeThingIterator::full_range(ir, opt.ns()?, opt.db()?, ix),
+				IndexRangeThingIterator::full_range(ir, opt.ns()?, opt.db()?, ix)?,
 			)),
 			_ => None,
 		})
@@ -435,7 +435,7 @@ impl QueryExecutor {
 			opt.db()?,
 			ix,
 			array,
-		)))
+		)?))
 	}
 
 	fn new_multiple_index_equal_iterators(
@@ -749,7 +749,7 @@ impl QueryExecutor {
 			opt.db()?,
 			ix,
 			range,
-		)))
+		)?))
 	}
 
 	fn new_unique_range_iterator(
@@ -765,7 +765,7 @@ impl QueryExecutor {
 			&ix.what,
 			&ix.name,
 			range,
-		)))
+		)?))
 	}
 
 	fn new_multiple_index_range_iterator(
@@ -820,7 +820,7 @@ impl QueryExecutor {
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
 			IndexOperator::Order => Some(ThingIterator::UniqueRange(
-				UniqueRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, ixr),
+				UniqueRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, ixr)?,
 			)),
 			_ => None,
 		})
@@ -842,7 +842,7 @@ impl QueryExecutor {
 				opt.db()?,
 				ix,
 				array,
-			)))
+			)?))
 		} else {
 			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
 				irf,
@@ -850,7 +850,7 @@ impl QueryExecutor {
 				opt.db()?,
 				ix,
 				array,
-			)))
+			)?))
 		}
 	}
 

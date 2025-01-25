@@ -1,4 +1,5 @@
 use super::CreateDs;
+use crate::kvs::KeyEncode;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -87,8 +88,8 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	assert!(vs1 < vs2);
 
 	// Scan range
-	let start = crate::key::database::ts::new("myns", "mydb", 0);
-	let end = crate::key::database::ts::new("myns", "mydb", u64::MAX);
+	let start = crate::key::database::ts::new("myns", "mydb", 0).encode_owned().unwrap();
+	let end = crate::key::database::ts::new("myns", "mydb", u64::MAX).encode_owned().unwrap();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	let scanned = tx.scan(start.clone()..end.clone(), u32::MAX, None).await.unwrap();
 	tx.commit().await.unwrap();

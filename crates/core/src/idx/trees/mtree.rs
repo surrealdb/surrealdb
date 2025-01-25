@@ -52,7 +52,7 @@ impl MTreeIndex {
 		let doc_ids = Arc::new(RwLock::new(
 			DocIds::new(txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
-		let state_key = ikb.new_vm_key(None);
+		let state_key = ikb.new_vm_key(None)?;
 		let state: MState = if let Some(val) = txn.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
 		} else {
@@ -66,7 +66,7 @@ impl MTreeIndex {
 				tt,
 				p.mtree_cache as usize,
 			)
-			.await;
+			.await?;
 		let mtree = Arc::new(RwLock::new(MTree::new(state, p.distance.clone())));
 		Ok(Self {
 			state_key,
@@ -1496,7 +1496,8 @@ mod tests {
 		let st = tx
 			.index_caches()
 			.get_store_mtree(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
-			.await;
+			.await
+			.unwrap();
 		let mut ctx = MutableContext::default();
 		ctx.set_transaction(tx);
 		(ctx.freeze(), st)

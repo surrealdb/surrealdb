@@ -1,10 +1,10 @@
 //! Stores the key prefix for all keys under a database access method
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Access<'a> {
 	__: u8,
@@ -15,6 +15,7 @@ pub struct Access<'a> {
 	_c: u8,
 	pub ac: &'a str,
 }
+impl_key!(Access<'a>);
 
 pub fn new<'a>(ns: &'a str, db: &'a str, ac: &'a str) -> Access<'a> {
 	Access::new(ns, db, ac)
@@ -42,6 +43,7 @@ impl<'a> Access<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

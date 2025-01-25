@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
 	err::Error,
-	kvs::Transaction,
+	kvs::{KeyEncode as _, Transaction},
 	sql::{
 		access_type::{JwtAccessVerify, JwtAccessVerifyKey},
 		statements::{

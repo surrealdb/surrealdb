@@ -14,6 +14,8 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use super::KeyEncode;
+
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
 pub struct Datastore {
@@ -291,7 +293,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// RocksDB does not support versioned queries.
 		if version.is_some() {
@@ -302,7 +304,8 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.inner.as_ref().unwrap().get_pinned_opt(key.into(), &self.ro)?.is_some();
+		let res =
+			self.inner.as_ref().unwrap().get_pinned_opt(key.encode_owned()?, &self.ro)?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -311,7 +314,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// RocksDB does not support versioned queries.
 		if version.is_some() {
@@ -322,7 +325,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let res = self.inner.as_ref().unwrap().get_opt(key.into(), &self.ro)?;
+		let res = self.inner.as_ref().unwrap().get_opt(key.encode_owned()?, &self.ro)?;
 		// Return result
 		Ok(res)
 	}
@@ -331,16 +334,19 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
 	async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Option<Val>>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
 		}
 		// Get the arguments
-		let keys: Vec<Key> = keys.into_iter().map(Into::into).collect();
+		let mut keys_encoded = Vec::new();
+		for k in keys {
+			keys_encoded.push(k.encode_owned()?);
+		}
 		// Get the keys
-		let res = self.inner.as_ref().unwrap().multi_get_opt(keys, &self.ro);
+		let res = self.inner.as_ref().unwrap().multi_get_opt(keys_encoded, &self.ro);
 		// Convert result
 		let res = res.into_iter().collect::<Result<_, _>>()?;
 		// Return result
@@ -351,7 +357,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// RocksDB does not support versioned queries.
@@ -367,7 +373,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.inner.as_ref().unwrap().put(key.into(), val.into())?;
+		self.inner.as_ref().unwrap().put(key.encode_owned()?, val.into())?;
 		// Return result
 		Ok(())
 	}
@@ -376,7 +382,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// RocksDB does not support versioned queries.
@@ -394,7 +400,7 @@ impl super::api::Transaction for Transaction {
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
-		let key = key.into();
+		let key = key.encode_owned()?;
 		let val = val.into();
 		// Set the key if empty
 		match inner.get_pinned_opt(&key, &self.ro)? {
@@ -409,7 +415,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -423,7 +429,7 @@ impl super::api::Transaction for Transaction {
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
-		let key = key.into();
+		let key = key.encode_owned()?;
 		let val = val.into();
 		let chk = chk.map(Into::into);
 		// Set the key if valid
@@ -440,7 +446,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -451,7 +457,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		self.inner.as_ref().unwrap().delete(key.into())?;
+		self.inner.as_ref().unwrap().delete(key.encode_owned()?)?;
 		// Return result
 		Ok(())
 	}
@@ -460,7 +466,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -474,7 +480,7 @@ impl super::api::Transaction for Transaction {
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
-		let key = key.into();
+		let key = key.encode_owned()?;
 		let chk = chk.map(Into::into);
 		// Delete the key if valid
 		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
@@ -495,7 +501,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<Key>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// RocksDB does not support versioned queries.
 		if version.is_some() {
@@ -509,8 +515,8 @@ impl super::api::Transaction for Transaction {
 		let inner = self.inner.as_ref().unwrap();
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+			start: rng.start.encode_owned()?,
+			end: rng.end.encode_owned()?,
 		};
 		// Create result set
 		let mut res = vec![];
@@ -555,7 +561,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// RocksDB does not support versioned queries.
 		if version.is_some() {
@@ -569,8 +575,8 @@ impl super::api::Transaction for Transaction {
 		let inner = self.inner.as_ref().unwrap();
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+			start: rng.start.encode_owned()?,
+			end: rng.end.encode_owned()?,
 		};
 		// Create result set
 		let mut res = vec![];

@@ -27,7 +27,7 @@ impl DocIds {
 		default_btree_order: u32,
 		cache_size: u32,
 	) -> Result<Self, Error> {
-		let state_key: Key = ikb.new_bd_key(None);
+		let state_key: Key = ikb.new_bd_key(None)?;
 		let state: State = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
 		} else {
@@ -41,7 +41,7 @@ impl DocIds {
 				tt,
 				cache_size as usize,
 			)
-			.await;
+			.await?;
 		Ok(Self {
 			state_key,
 			index_key_base: ikb,
@@ -90,7 +90,7 @@ impl DocIds {
 			}
 		}
 		let doc_id = self.get_next_doc_id();
-		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone(), None).await?;
+		tx.set(self.index_key_base.new_bi_key(doc_id)?, doc_key.clone(), None).await?;
 		self.btree.insert(tx, &mut self.store, doc_key, doc_id).await?;
 		Ok(Resolved::New(doc_id))
 	}
@@ -101,7 +101,7 @@ impl DocIds {
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
 		if let Some(doc_id) = self.btree.delete(tx, &mut self.store, doc_key).await? {
-			tx.del(self.index_key_base.new_bi_key(doc_id)).await?;
+			tx.del(self.index_key_base.new_bi_key(doc_id)?).await?;
 			if let Some(available_ids) = &mut self.available_ids {
 				available_ids.insert(doc_id);
 			} else {
@@ -120,7 +120,7 @@ impl DocIds {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<Key>, Error> {
-		let doc_id_key = self.index_key_base.new_bi_key(doc_id);
+		let doc_id_key = self.index_key_base.new_bi_key(doc_id)?;
 		if let Some(val) = tx.get(doc_id_key, None).await? {
 			Ok(Some(val))
 		} else {
