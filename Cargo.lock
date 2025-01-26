@@ -37,6 +37,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 
 [[package]]
+name = "affinitypool"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e869a06034ee71d14a3b7a77679f5d63a1a230918314139818fdb06dcf8a6d57"
+dependencies = [
+ "async-channel",
+ "num_cpus",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "ahash"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5632,6 +5644,7 @@ name = "surrealdb-core"
 version = "2.1.4"
 dependencies = [
  "addr",
+ "affinitypool",
  "ahash 0.8.11",
  "ammonia",
  "any_ascii",

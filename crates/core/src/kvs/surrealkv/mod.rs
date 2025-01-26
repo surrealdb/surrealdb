@@ -147,8 +147,14 @@ impl super::api::Transaction for Transaction {
 		}
 		// Mark the transaction as done.
 		self.done = true;
-		// Rollback the transaction.
-		self.inner.rollback();
+		// Execute on the blocking threadpool
+		affinitypool::execute(|| -> Result<_, Error> {
+			// Rollback this transaction
+			self.inner.rollback();
+			// Continue
+			Ok(())
+		})
+		.await?;
 		// Continue
 		Ok(())
 	}
@@ -166,7 +172,17 @@ impl super::api::Transaction for Transaction {
 		}
 		// Mark the transaction as done.
 		self.done = true;
-		// Commit the transaction.
+		/*
+		// Execute on the blocking threadpool
+		affinitypool::execute(|| -> Result<_, Error> {
+			// Commit this transaction
+			self.inner.commit();
+			// Continue
+			Ok(())
+		})
+		.await?;
+		*/
+		// Commit this transaction.
 		self.inner.commit().await?;
 		// Continue
 		Ok(())
@@ -182,8 +198,19 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Check the key
-		let res = self.inner.get(&key.encode_owned()?)?.is_some();
+		// Get the arguments
+		let key = key.encode_owned()?;
+		// Execute on the blocking threadpool
+		let res = affinitypool::execute(|| -> Result<_, Error> {
+			// Get the key
+			let res = match version {
+				Some(ts) => self.inner.get_at_version(&key, ts)?.is_some(),
+				None => self.inner.get(&key)?.is_some(),
+			};
+			// Continue
+			Ok(res)
+		})
+		.await?;
 		// Return result
 		Ok(res)
 	}
@@ -198,11 +225,19 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Fetch the value from the database.
-		let res = match version {
-			Some(ts) => self.inner.get_at_version(&key.encode_owned()?, ts)?,
-			None => self.inner.get(&key.encode_owned()?)?,
-		};
+		// Get the arguments
+		let key = key.encode_owned()?;
+		// Execute on the blocking threadpool
+		let res = affinitypool::execute(|| -> Result<_, Error> {
+			// Get the key
+			let res = match version {
+				Some(ts) => self.inner.get_at_version(&key, ts)?,
+				None => self.inner.get(&key)?,
+			};
+			// Return result
+			Ok(res)
+		})
+		.await?;
 		// Return result
 		Ok(res)
 	}
@@ -222,11 +257,20 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Set the key
-		match version {
-			Some(ts) => self.inner.set_at_ts(&key.encode_owned()?, &val.into(), ts)?,
-			None => self.inner.set(&key.encode_owned()?, &val.into())?,
-		}
+		// Get the arguments
+		let key = key.encode_owned()?;
+		let val = val.into();
+		// Execute on the blocking threadpool
+		affinitypool::execute(|| -> Result<_, Error> {
+			// Set the key
+			match version {
+				Some(ts) => self.inner.set_at_ts(&key, &val, ts)?,
+				None => self.inner.set(&key, &val)?,
+			}
+			// Return result
+			Ok(())
+		})
+		.await?;
 		// Return result
 		Ok(())
 	}
@@ -246,9 +290,17 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Replace the key
-		self.inner.insert_or_replace(&key.encode_owned()?, &val.into())?;
-
+		// Get the arguments
+		let key = key.encode_owned()?;
+		let val = val.into();
+		// Execute on the blocking threadpool
+		affinitypool::execute(|| -> Result<_, Error> {
+			// Replace the key
+			self.inner.insert_or_replace(&key, &val)?;
+			// Return result
+			Ok(())
+		})
+		.await?;
 		// Return result
 		Ok(())
 	}
@@ -271,15 +323,21 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let val = val.into();
-		// Set the key if empty
-		if let Some(ts) = version {
-			self.inner.set_at_ts(&key, &val, ts)?;
-		} else {
-			match self.inner.get(&key)? {
-				None => self.inner.set(&key, &val)?,
-				_ => return Err(Error::TxKeyAlreadyExists),
+		// Execute on the blocking threadpool
+		affinitypool::execute(|| -> Result<_, Error> {
+			// Set the key if empty
+			if let Some(ts) = version {
+				self.inner.set_at_ts(&key, &val, ts)?;
+			} else {
+				match self.inner.get(&key)? {
+					None => self.inner.set(&key, &val)?,
+					_ => return Err(Error::TxKeyAlreadyExists),
+				}
 			}
-		}
+			// Return result
+			Ok(())
+		})
+		.await?;
 		// Return result
 		Ok(())
 	}
@@ -303,12 +361,18 @@ impl super::api::Transaction for Transaction {
 		let key = key.encode_owned()?;
 		let val = val.into();
 		let chk = chk.map(Into::into);
-		// Set the key if valid
-		match (self.inner.get(&key)?, chk) {
-			(Some(v), Some(w)) if v == w => self.inner.set(&key, &val)?,
-			(None, None) => self.inner.set(&key, &val)?,
-			_ => return Err(Error::TxConditionNotMet),
-		};
+		// Execute on the blocking threadpool
+		affinitypool::execute(|| -> Result<_, Error> {
+			// Set the key if valid
+			match (self.inner.get(&key)?, chk) {
+				(Some(v), Some(w)) if v == w => self.inner.set(&key, &val)?,
+				(None, None) => self.inner.set(&key, &val)?,
+				_ => return Err(Error::TxConditionNotMet),
+			};
+			// Return result
+			Ok(())
+		})
+		.await?;
 		// Return result
 		Ok(())
 	}
@@ -327,8 +391,16 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Remove the key
-		self.inner.soft_delete(&key.encode_owned()?)?;
+		// Get the arguments
+		let key = key.encode_owned()?;
+		// Execute on the blocking threadpool
+		affinitypool::execute(|| -> Result<_, Error> {
+			// Remove the key
+			self.inner.soft_delete(&key)?;
+			// Return result
+			Ok(())
+		})
+		.await?;
 		// Return result
 		Ok(())
 	}
@@ -351,12 +423,18 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let chk = chk.map(Into::into);
-		// Delete the key if valid
-		match (self.inner.get(&key)?, chk) {
-			(Some(v), Some(w)) if v == w => self.inner.soft_delete(&key)?,
-			(None, None) => self.inner.soft_delete(&key)?,
-			_ => return Err(Error::TxConditionNotMet),
-		};
+		// Execute on the blocking threadpool
+		affinitypool::execute(|| -> Result<_, Error> {
+			// Set the key if valid
+			match (self.inner.get(&key)?, chk) {
+				(Some(v), Some(w)) if v == w => self.inner.soft_delete(&key)?,
+				(None, None) => self.inner.soft_delete(&key)?,
+				_ => return Err(Error::TxConditionNotMet),
+			};
+			// Return result
+			Ok(())
+		})
+		.await?;
 		// Return result
 		Ok(())
 	}
@@ -375,8 +453,16 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Remove the key
-		self.inner.delete(&key.encode_owned()?)?;
+		// Get the arguments
+		let key = key.encode_owned()?;
+		// Execute on the blocking threadpool
+		affinitypool::execute(|| -> Result<_, Error> {
+			// Remove the key
+			self.inner.delete(&key)?;
+			// Return result
+			Ok(())
+		})
+		.await?;
 		// Return result
 		Ok(())
 	}
@@ -399,12 +485,18 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let chk = chk.map(Into::into);
-		// Delete the key if valid
-		match (self.inner.get(&key)?, chk) {
-			(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
-			(None, None) => self.inner.delete(&key)?,
-			_ => return Err(Error::TxConditionNotMet),
-		};
+		// Execute on the blocking threadpool
+		affinitypool::execute(|| -> Result<_, Error> {
+			// Set the key if valid
+			match (self.inner.get(&key)?, chk) {
+				(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
+				(None, None) => self.inner.delete(&key)?,
+				_ => return Err(Error::TxConditionNotMet),
+			};
+			// Return result
+			Ok(())
+		})
+		.await?;
 		// Return result
 		Ok(())
 	}
@@ -427,10 +519,25 @@ impl super::api::Transaction for Transaction {
 		// Set the key range
 		let beg = rng.start.encode_owned()?;
 		let end = rng.end.encode_owned()?;
-		// Retrieve the scan range
-		let res = self.inner.keys(beg.as_slice()..end.as_slice(), Some(limit as usize));
-		// Convert the keys and values
-		let res = res.map(Key::from).collect();
+		// Execute on the blocking threadpool
+		let res = affinitypool::execute(|| -> Result<_, Error> {
+			// Retrieve the scan range
+			let res = match version {
+				Some(ts) => self
+					.inner
+					.keys_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
+					.map(Key::from)
+					.collect(),
+				None => self
+					.inner
+					.keys(beg.as_slice()..end.as_slice(), Some(limit as usize))
+					.map(Key::from)
+					.collect(),
+			};
+			// Return result
+			Ok(res)
+		})
+		.await?;
 		// Return result
 		Ok(res)
 	}
@@ -453,19 +560,27 @@ impl super::api::Transaction for Transaction {
 		// Set the key range
 		let beg = rng.start.encode_owned()?;
 		let end = rng.end.encode_owned()?;
-		let range = beg.as_slice()..end.as_slice();
-		// Retrieve the scan range
-		if let Some(ts) = version {
-			self.inner
-				.scan_at_version(range, ts, Some(limit as usize))
-				.map(|r| r.map(|(k, v)| (k.to_vec(), v)).map_err(Into::into))
-				.collect()
-		} else {
-			self.inner
-				.scan(range, Some(limit as usize))
-				.map(|r| r.map(|(k, v, _)| (k.to_vec(), v)).map_err(Into::into))
-				.collect()
-		}
+		// Execute on the blocking threadpool
+		let res = affinitypool::execute(|| -> Result<_, Error> {
+			// Retrieve the scan range
+			let res = match version {
+				Some(ts) => self
+					.inner
+					.scan_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
+					.map(|r| r.map(|(k, v)| (k.to_vec(), v)).map_err(Into::<Error>::into))
+					.collect::<Result<_, Error>>()?,
+				None => self
+					.inner
+					.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))
+					.map(|r| r.map(|(k, v, _)| (k.to_vec(), v)).map_err(Into::into))
+					.collect::<Result<_, Error>>()?,
+			};
+			// Return result
+			Ok(res)
+		})
+		.await?;
+		// Return result
+		Ok(res)
 	}
 
 	/// Retrieve all the versions from a range of keys from the databases
@@ -481,28 +596,32 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-
 		// Set the key range
 		let beg = rng.start.encode_owned()?;
 		let end = rng.end.encode_owned()?;
-		let range = beg.as_slice()..end.as_slice();
-
-		// Retrieve the scan range
-		self.inner
-			.scan_all_versions(range, Some(limit as usize))
-			.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
-			.collect()
+		// Execute on the blocking threadpool
+		let res = affinitypool::execute(|| -> Result<_, Error> {
+			// Retrieve the scan range
+			let res = self
+				.inner
+				.scan_all_versions(beg.as_slice()..end.as_slice(), Some(limit as usize))
+				.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
+				.collect::<Result<_, Error>>()?;
+			// Return result
+			Ok(res)
+		})
+		.await?;
+		// Return result
+		Ok(res)
 	}
 }
 
 impl Transaction {
 	pub(crate) fn new_save_point(&mut self) {
-		// Set the save point, the errors are ignored.
 		let _ = self.inner.set_savepoint();
 	}
 
 	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
-		// Rollback
 		self.inner.rollback_to_savepoint()?;
 		Ok(())
 	}

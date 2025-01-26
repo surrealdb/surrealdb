@@ -1314,3 +1314,6 @@ allow_apis = ["fs"]
 
 [pkg.foldhash]
 allow_unsafe = true
+
+[pkg.affinitypool]
+allow_unsafe = true
