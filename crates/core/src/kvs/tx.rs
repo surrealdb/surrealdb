@@ -10,7 +10,7 @@ use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::kvs::cache;
-use crate::kvs::cache::tx::Cache;
+use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
 use crate::sql::statements::define::DefineConfigStatement;
@@ -44,7 +44,7 @@ pub struct Transaction {
 	/// The underlying transactor
 	tx: Mutex<Transactor>,
 	/// The query cache for this store
-	cache: Cache,
+	cache: TransactionCache,
 	/// Cache the index updates
 	index_caches: IndexTreeCaches,
 }
@@ -54,7 +54,7 @@ impl Transaction {
 	pub fn new(tx: Transactor) -> Transaction {
 		Transaction {
 			tx: Mutex::new(tx),
-			cache: cache::tx::new(),
+			cache: TransactionCache::new(),
 			index_caches: IndexTreeCaches::default(),
 		}
 	}
@@ -1492,7 +1492,7 @@ impl Transaction {
 		self.del(&key).await?;
 		// Set the value in the cache
 		let key = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.remove(&key);
+		self.cache.remove(key);
 		// Return nothing
 		Ok(())
 	}
