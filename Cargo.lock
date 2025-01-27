@@ -38,9 +38,9 @@ checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 
 [[package]]
 name = "affinitypool"
-version = "0.1.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e869a06034ee71d14a3b7a77679f5d63a1a230918314139818fdb06dcf8a6d57"
+checksum = "62dd4f9df9516ac93ed44c0fb7e50a3da34ea5347dd411e676dc95e8e2e0190d"
 dependencies = [
  "async-channel",
  "num_cpus",
