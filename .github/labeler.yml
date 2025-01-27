@@ -1,0 +1,22 @@
+# Add the `sdk-issue` label if the issue is concerning the 'SurrealDB Rust SDK'
+sdk-issue:
+  - "SurrealDB Rust SDK"
+
+# Add the `topic:rust` label if the issue is concerning the 'SurrealDB Rust SDK' or if the content contains 'rust'
+topic:rust:
+  - "SurrealDB Rust SDK"
+  - "(?i)(rust)"
+
+# Add the `topic:wasm` label if the issue content contains 'security' or 'secure'
+topic:security:
+  - "(?i)(security)"
+  - "(?i)(secure)"
+
+# Add the `topic:surrealkv` label if the issue content contains 'surrealkv'
+topic:surrealkv:
+  - "(?i)(surrealkv)"
+
+# Add the `topic:wasm` label if the issue content contains 'webassembly' or 'wasm'
+topic:wasm:
+  - "(?i)(webassembly)"
+  - "(?i)(wasm)"
