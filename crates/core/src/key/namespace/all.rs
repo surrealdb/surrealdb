@@ -1,16 +1,17 @@
 //! Stores the key prefix for all keys under a namespace
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct All<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
 }
+impl_key!(All<'a>);
 
 pub fn new(ns: &str) -> All<'_> {
 	All::new(ns)
@@ -34,6 +35,7 @@ impl<'a> All<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

@@ -1,10 +1,10 @@
 //! Stores the key prefix for all keys under a table
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Table<'a> {
 	__: u8,
@@ -15,6 +15,7 @@ pub struct Table<'a> {
 	_c: u8,
 	pub tb: &'a str,
 }
+impl_key!(Table<'a>);
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Table<'a> {
 	Table::new(ns, db, tb)
@@ -42,6 +43,7 @@ impl<'a> Table<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

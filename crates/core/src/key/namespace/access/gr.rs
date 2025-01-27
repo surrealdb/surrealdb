@@ -1,10 +1,11 @@
 //! Stores a grant associated with an access method
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Gr<'a> {
 	__: u8,
@@ -17,21 +18,22 @@ pub struct Gr<'a> {
 	_e: u8,
 	pub gr: &'a str,
 }
+impl_key!(Gr<'a>);
 
 pub fn new<'a>(ns: &'a str, ac: &'a str, gr: &'a str) -> Gr<'a> {
 	Gr::new(ns, ac, gr)
 }
 
-pub fn prefix(ns: &str, ac: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, ac).encode().unwrap();
+pub fn prefix(ns: &str, ac: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, ac).encode()?;
 	k.extend_from_slice(b"!gr\x00");
-	k
+	Ok(k)
 }
 
-pub fn suffix(ns: &str, ac: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, ac).encode().unwrap();
+pub fn suffix(ns: &str, ac: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, ac).encode()?;
 	k.extend_from_slice(b"!gr\xff");
-	k
+	Ok(k)
 }
 
 impl Categorise for Gr<'_> {
@@ -58,6 +60,7 @@ impl<'a> Gr<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KeyDecode;
 	#[test]
 	fn key() {
 		use super::*;
@@ -76,13 +79,13 @@ mod tests {
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns", "testac");
+		let val = super::prefix("testns", "testac").unwrap();
 		assert_eq!(val, b"/*testns\0&testac\0!gr\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns", "testac");
+		let val = super::suffix("testns", "testac").unwrap();
 		assert_eq!(val, b"/*testns\0&testac\0!gr\xff");
 	}
 }

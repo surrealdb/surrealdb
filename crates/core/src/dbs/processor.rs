@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy};
 use crate::key::{graph, thing};
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
 use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
 use crate::sql::{Edges, Table, Thing, Value};
@@ -109,7 +109,7 @@ impl Collected {
 			Self::Value(value) => Ok(Self::process_value(value)),
 			Self::Defer(key) => Self::process_defer(opt, txn, key).await,
 			Self::Mergeable(v, o) => Self::process_mergeable(opt, txn, v, o).await,
-			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)),
+			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)?),
 			Self::Count(c) => Ok(Self::process_count(c)),
 			Self::IndexItem(i) => Self::process_index_item(opt, txn, i).await,
 			Self::IndexItemKey(i) => Ok(Self::process_index_item_key(i)),
@@ -135,7 +135,7 @@ impl Collected {
 	}
 
 	async fn process_range_key(key: Key) -> Result<Processed, Error> {
-		let key: thing::Thing = (&key).into();
+		let key = thing::Thing::decode(&key)?;
 		let val = Value::Null;
 		let rid = Thing::from((key.tb, key.id));
 		// Create a new operable value
@@ -152,7 +152,7 @@ impl Collected {
 	}
 
 	async fn process_table_key(key: Key) -> Result<Processed, Error> {
-		let key: thing::Thing = (&key).into();
+		let key = thing::Thing::decode(&key)?;
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record
 		let pro = Processed {
@@ -268,20 +268,20 @@ impl Collected {
 		Ok(pro)
 	}
 
-	fn process_key_val(key: Key, val: Val) -> Processed {
-		let key: thing::Thing = (&key).into();
+	fn process_key_val(key: Key, val: Val) -> Result<Processed, Error> {
+		let key = thing::Thing::decode(&key)?;
 		let val: Value = (&val).into();
 		let rid = Thing::from((key.tb, key.id));
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
-		Processed {
+		Ok(Processed {
 			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
 			val,
-		}
+		})
 	}
 
 	fn process_count(count: usize) -> Processed {
@@ -448,8 +448,8 @@ pub(super) trait Collector {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
-		let end = thing::suffix(opt.ns()?, opt.db()?, v);
+		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
+		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
 		// Create a new iterable range
 		let mut stream = txn.stream(beg..end, opt.version);
 		// Loop until no more entries
@@ -477,8 +477,8 @@ pub(super) trait Collector {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
-		let end = thing::suffix(opt.ns()?, opt.db()?, v);
+		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
+		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
 		// Create a new iterable range
 		let mut stream = txn.stream_keys(beg..end);
 		// Loop until no more entries
@@ -507,8 +507,8 @@ pub(super) trait Collector {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
-		let end = thing::suffix(opt.ns()?, opt.db()?, v);
+		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
+		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
 		// Create a new iterable range
 		let count = txn.count(beg..end).await?;
 		// Collect the count
@@ -527,20 +527,20 @@ pub(super) trait Collector {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, tb, opt.strict).await?;
 		// Prepare the range start key
 		let beg = match &r.beg {
-			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, tb),
-			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap(),
+			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, tb)?,
+			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode()?,
 			Bound::Excluded(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode()?;
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
 		let end = match &r.end {
-			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, tb),
-			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap(),
+			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, tb)?,
+			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode()?,
 			Bound::Included(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode()?;
 				key.push(0x00);
 				key
 			}
@@ -677,7 +677,7 @@ pub(super) trait Collector {
 					.iter()
 					.map(|v| v.0.to_owned())
 					.flat_map(|v| {
-						vec![
+						[
 							(
 								graph::ftprefix(ns, db, tb, id, &Dir::In, &v),
 								graph::ftsuffix(ns, db, tb, id, &Dir::In, &v),
@@ -698,7 +698,7 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
-			let mut stream = txn.stream(beg..end, None);
+			let mut stream = txn.stream(beg?..end?, None);
 			// Loop until no more entries
 			while let Some(res) = stream.next().await {
 				// Check if the context is finished

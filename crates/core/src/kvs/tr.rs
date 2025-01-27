@@ -1,6 +1,7 @@
 #[allow(unused_imports)] // not used when non of the storage backends are enabled.
 use super::api::Transaction;
 use super::Key;
+use super::KeyEncode;
 use super::Val;
 use super::Version;
 use crate::cf;
@@ -19,6 +20,7 @@ use crate::kvs::clock::SizedClock;
 ))]
 use crate::kvs::savepoint::SavePointImpl;
 use crate::kvs::stash::Stash;
+use crate::kvs::KeyDecode as _;
 use crate::sql;
 use crate::sql::thing::Thing;
 use crate::vs::VersionStamp;
@@ -210,9 +212,9 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Exists");
 		expand_inner!(&mut self.inner, v => { v.exists(key, version).await })
 	}
@@ -221,9 +223,9 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Get");
 		expand_inner!(&mut self.inner, v => { v.get(key, version).await })
 	}
@@ -232,11 +234,14 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Option<Val>>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let keys = keys.into_iter().map(Into::into).collect::<Vec<Key>>();
-		trace!(target: TARGET, keys = keys.sprint(), "GetM");
-		expand_inner!(&mut self.inner, v => { v.getm(keys).await })
+		let mut keys_encoded = Vec::new();
+		for k in keys {
+			keys_encoded.push(k.encode_owned()?);
+		}
+		trace!(target: TARGET, keys = keys_encoded.sprint(), "GetM");
+		expand_inner!(&mut self.inner, v => { v.getm(keys_encoded).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -249,10 +254,10 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "GetR");
 		expand_inner!(&mut self.inner, v => { v.getr(beg..end, version).await })
@@ -264,9 +269,9 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn getp<K>(&mut self, key: K) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let key: Key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "GetP");
 		expand_inner!(&mut self.inner, v => { v.getp(key).await })
 	}
@@ -275,10 +280,10 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 		V: Into<Val> + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Set");
 		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })
 	}
@@ -287,10 +292,10 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 		V: Into<Val> + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "Replace");
 		expand_inner!(&mut self.inner, v => { v.replace(key, val).await })
 	}
@@ -299,10 +304,10 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 		V: Into<Val> + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Put");
 		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })
 	}
@@ -311,10 +316,10 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 		V: Into<Val> + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "PutC");
 		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
 	}
@@ -323,9 +328,9 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "Del");
 		expand_inner!(&mut self.inner, v => { v.del(key).await })
 	}
@@ -334,10 +339,10 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 		V: Into<Val> + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "DelC");
 		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
 	}
@@ -348,10 +353,10 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), "DelR");
 		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await })
@@ -363,9 +368,9 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn delp<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let key: Key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "DelP");
 		expand_inner!(&mut self.inner, v => { v.delp(key).await })
 	}
@@ -374,9 +379,9 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn clr<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "Clr");
 		expand_inner!(&mut self.inner, v => { v.clr(key).await })
 	}
@@ -385,10 +390,10 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn clrc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 		V: Into<Val> + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "ClrC");
 		expand_inner!(&mut self.inner, v => { v.clrc(key, chk).await })
 	}
@@ -399,10 +404,10 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn clrr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), "ClrR");
 		expand_inner!(&mut self.inner, v => { v.clrr(beg..end).await })
@@ -414,9 +419,9 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn clrp<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let key: Key = key.into();
+		let key: Key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "ClrP");
 		expand_inner!(&mut self.inner, v => { v.clrp(key).await })
 	}
@@ -432,10 +437,10 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<Vec<Key>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Keys");
 		if beg > end {
@@ -455,10 +460,10 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Scan");
 		if beg > end {
@@ -478,10 +483,10 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<Batch<Key>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
 		expand_inner!(&mut self.inner, v => { v.batch_keys(beg..end, batch, version).await })
@@ -493,10 +498,10 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn count<K>(&mut self, rng: Range<K>) -> Result<usize, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), "Count");
 		expand_inner!(&mut self.inner, v => { v.count(beg..end).await })
@@ -513,10 +518,10 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<Batch<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
 		expand_inner!(&mut self.inner, v => { v.batch_keys_vals(beg..end, batch, version).await })
@@ -532,10 +537,10 @@ impl Transactor {
 		batch: u32,
 	) -> Result<Batch<(Key, Val, Version, bool)>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let beg: Key = rng.start.into();
-		let end: Key = rng.end.into();
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), "BatchVersions");
 		expand_inner!(&mut self.inner, v => { v.batch_keys_vals_versions(beg..end, batch).await })
@@ -548,9 +553,9 @@ impl Transactor {
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
 	pub async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp, Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 	{
-		let key = key.into();
+		let key = key.encode_owned()?;
 		expand_inner!(&mut self.inner, v => { v.get_timestamp(key).await })
 	}
 
@@ -563,12 +568,12 @@ impl Transactor {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: KeyEncode + Debug,
 		V: Into<Val> + Debug,
 	{
-		let ts_key = ts_key.into();
-		let prefix = prefix.into();
-		let suffix = suffix.into();
+		let ts_key = ts_key.encode_owned()?;
+		let prefix = prefix.encode_owned()?;
+		let suffix = suffix.encode_owned()?;
 		expand_inner!(&mut self.inner, v => { v.set_versionstamp(ts_key, prefix, suffix, val).await })
 	}
 
@@ -631,7 +636,7 @@ impl Transactor {
 
 	/// Gets the next namespace id
 	pub(crate) async fn get_next_ns_id(&mut self) -> Result<u32, Error> {
-		let key = crate::key::root::ni::Ni::default().encode().unwrap();
+		let key = crate::key::root::ni::Ni::default().encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
@@ -642,7 +647,7 @@ impl Transactor {
 
 	/// Gets the next database id for the given namespace
 	pub(crate) async fn get_next_db_id(&mut self, ns: u32) -> Result<u32, Error> {
-		let key = crate::key::namespace::di::new(ns).encode().unwrap();
+		let key = crate::key::namespace::di::new(ns).encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
@@ -653,7 +658,7 @@ impl Transactor {
 
 	/// Gets the next table id for the given namespace and database
 	pub(crate) async fn get_next_tb_id(&mut self, ns: u32, db: u32) -> Result<u32, Error> {
-		let key = crate::key::database::ti::new(ns, db).encode().unwrap();
+		let key = crate::key::database::ti::new(ns, db).encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
@@ -665,7 +670,7 @@ impl Transactor {
 	/// Removes the given namespace from the sequence.
 	#[allow(unused)]
 	pub(crate) async fn remove_ns_id(&mut self, ns: u32) -> Result<(), Error> {
-		let key = crate::key::root::ni::Ni::default().encode().unwrap();
+		let key = crate::key::root::ni::Ni::default().encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		seq.remove_id(ns);
 		self.stash.set(key, seq.clone());
@@ -677,7 +682,7 @@ impl Transactor {
 	/// Removes the given database from the sequence.
 	#[allow(unused)]
 	pub(crate) async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<(), Error> {
-		let key = crate::key::namespace::di::new(ns).encode().unwrap();
+		let key = crate::key::namespace::di::new(ns).encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		seq.remove_id(db);
 		self.stash.set(key, seq.clone());
@@ -689,7 +694,7 @@ impl Transactor {
 	/// Removes the given table from the sequence.
 	#[allow(unused)]
 	pub(crate) async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<(), Error> {
-		let key = crate::key::database::ti::new(ns, db).encode().unwrap();
+		let key = crate::key::database::ti::new(ns, db).encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		seq.remove_id(tb);
 		self.stash.set(key, seq.clone());
@@ -715,7 +720,7 @@ impl Transactor {
 	// Lastly, you should set lock=true if you want the changefeed to be correctly ordered for
 	// non-FDB backends.
 	pub(crate) async fn complete_changes(&mut self, _lock: bool) -> Result<(), Error> {
-		let changes = self.cf.get();
+		let changes = self.cf.get()?;
 		for (tskey, prefix, suffix, v) in changes {
 			self.set_versionstamped(tskey, prefix, suffix, v).await?
 		}
@@ -747,7 +752,7 @@ impl Transactor {
 		// Otherwise we can go back in time!
 		let mut ts_key = crate::key::database::ts::new(ns, db, ts);
 		let begin = ts_key.encode()?;
-		let end = crate::key::database::ts::suffix(ns, db);
+		let end = crate::key::database::ts::suffix(ns, db)?;
 		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {
@@ -776,9 +781,9 @@ impl Transactor {
 		ns: &str,
 		db: &str,
 	) -> Result<Option<VersionStamp>, Error> {
-		let start = crate::key::database::ts::prefix(ns, db);
-		let ts_key = crate::key::database::ts::new(ns, db, ts + 1);
-		let end = ts_key.encode()?;
+		let start = crate::key::database::ts::prefix(ns, db)?;
+		let ts_key = crate::key::database::ts::new(ns, db, ts + 1).encode_owned()?;
+		let end = ts_key.encode_owned()?;
 		let ts_pairs = self.getr(start..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((_, v)) = latest_ts_pair {

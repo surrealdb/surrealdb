@@ -1,10 +1,10 @@
 //! Stores a DEFINE USER ON ROOT config definition
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Us<'a> {
 	__: u8,
@@ -13,19 +13,20 @@ pub struct Us<'a> {
 	_c: u8,
 	pub user: &'a str,
 }
+impl_key!(Us<'a>);
 
 pub fn new(user: &str) -> Us<'_> {
 	Us::new(user)
 }
 
 pub fn prefix() -> Vec<u8> {
-	let mut k = super::all::new().encode().unwrap();
+	let mut k = super::all::kv();
 	k.extend_from_slice(b"!us\x00");
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
-	let mut k = super::all::new().encode().unwrap();
+	let mut k = super::all::kv();
 	k.extend_from_slice(b"!us\xff");
 	k
 }
@@ -50,6 +51,7 @@ impl<'a> Us<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

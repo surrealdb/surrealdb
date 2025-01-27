@@ -1,9 +1,9 @@
 //! Stores Things of an HNSW index
+use crate::kvs::impl_key;
 use crate::sql::Id;
-use derive::Key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Hi<'a> {
 	__: u8,
@@ -20,6 +20,7 @@ pub struct Hi<'a> {
 	_g: u8,
 	pub id: Id,
 }
+impl_key!(Hi<'a>);
 
 impl<'a> Hi<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: Id) -> Self {
@@ -43,6 +44,7 @@ impl<'a> Hi<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {

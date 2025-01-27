@@ -1,13 +1,14 @@
 //! Stores change feeds
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::{impl_key, KeyEncode};
 use crate::vs::VersionStamp;
-use derive::Key;
 use serde::{Deserialize, Serialize};
 use std::str;
 
 // Cf stands for change feeds
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Cf<'a> {
 	__: u8,
@@ -21,6 +22,7 @@ pub struct Cf<'a> {
 	_c: u8,
 	pub tb: &'a str,
 }
+impl_key!(Cf<'a>);
 
 #[allow(unused)]
 pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
@@ -28,10 +30,10 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
 }
 
 #[allow(unused)]
-pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
+pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
-	k
+	Ok(k)
 }
 
 #[allow(unused)]
@@ -47,27 +49,27 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.
 #[allow(unused)]
-pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Vec<u8> {
-	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
+pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
 	k.extend_from_slice(&vs.as_bytes());
-	k
+	Ok(k)
 }
 
 /// Returns the prefix for the whole database change feeds
 #[allow(unused)]
-pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
+pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
-	k
+	Ok(k)
 }
 
 /// Returns the suffix for the whole database change feeds
 #[allow(unused)]
-pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
+pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(&[b'#', 0xff]);
-	k
+	Ok(k)
 }
 
 impl Categorise for Cf<'_> {
@@ -94,6 +96,7 @@ impl<'a> Cf<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KeyDecode;
 	use crate::vs::*;
 	use std::ascii::escape_default;
 

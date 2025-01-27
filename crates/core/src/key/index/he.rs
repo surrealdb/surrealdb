@@ -1,9 +1,9 @@
 //! Stores Vector of an HNSW index
 use crate::idx::trees::hnsw::ElementId;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct He<'a> {
 	__: u8,
@@ -20,6 +20,7 @@ pub struct He<'a> {
 	_g: u8,
 	pub element_id: ElementId,
 }
+impl_key!(He<'a>);
 
 impl<'a> He<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, element_id: ElementId) -> Self {
@@ -43,6 +44,7 @@ impl<'a> He<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {

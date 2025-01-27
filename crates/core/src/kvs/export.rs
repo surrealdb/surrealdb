@@ -1,3 +1,4 @@
+use super::KeyDecode as _;
 use super::Transaction;
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
@@ -328,8 +329,8 @@ impl Transaction {
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
 
-		let beg = crate::key::thing::prefix(ns, db, &table.name);
-		let end = crate::key::thing::suffix(ns, db, &table.name);
+		let beg = crate::key::thing::prefix(ns, db, &table.name)?;
+		let end = crate::key::thing::suffix(ns, db, &table.name)?;
 		let mut next = Some(beg..end);
 
 		while let Some(rng) = next {
@@ -451,7 +452,7 @@ impl Transaction {
 				chn.send(bytes!("BEGIN;")).await?;
 			}
 
-			let k: thing::Thing = (&k).into();
+			let k = thing::Thing::decode(&k)?;
 			let v: Value = if v.is_empty() {
 				Value::None
 			} else {
@@ -532,7 +533,7 @@ impl Transaction {
 
 		// Process each regular value.
 		for (k, v) in regular_values {
-			let k: thing::Thing = (&k).into();
+			let k = thing::Thing::decode(&k)?;
 			let v: Value = (&v).into();
 			// Process the value and categorize it into records_relate or records_normal.
 			Self::process_value(k, v, &mut records_relate, &mut records_normal, None, None);
