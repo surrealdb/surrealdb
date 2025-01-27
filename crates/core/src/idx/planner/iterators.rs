@@ -219,7 +219,12 @@ impl IndexEqualThingIterator {
 		})
 	}
 
-	fn get_beg_end(ns: &str, db: &str, ix: &DefineIndexStatement, a: &Array) -> Result<(Vec<u8>, Vec<u8>), Error> {
+	fn get_beg_end(
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		a: &Array,
+	) -> Result<(Vec<u8>, Vec<u8>), Error> {
 		Ok(if ix.cols.len() == 1 {
 			(
 				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, a)?,
