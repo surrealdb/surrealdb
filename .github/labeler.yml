@@ -7,7 +7,7 @@ topic:rust:
   - "SurrealDB Rust SDK"
   - "(?i)(rust)"
 
-# Add the `topic:wasm` label if the issue content contains 'security' or 'secure'
+# Add the `topic:security` label if the issue content contains 'security' or 'secure'
 topic:security:
   - "(?i)(security)"
   - "(?i)(secure)"
