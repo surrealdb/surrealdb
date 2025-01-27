@@ -1471,6 +1471,14 @@ criteria = "safe-to-deploy"
 version = "2.0.11"
 criteria = "safe-to-deploy"
 
+[[exemptions.tikv-jemalloc-sys]]
+version = "0.6.0+5.3.0-1-ge13ca993e8ccb9ba9847cc330696e02839f328f7"
+criteria = "safe-to-deploy"
+
+[[exemptions.tikv-jemallocator]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.time]]
 version = "0.3.37"
 criteria = "safe-to-deploy"
