@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use uuid::Uuid;
 
-#[revisioned(revision = 5)]
+#[revisioned(revision = 6)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -39,6 +39,8 @@ pub struct DefineFieldStatement {
 	pub overwrite: bool,
 	#[revision(start = 5)]
 	pub reference: Option<Reference>,
+	#[revision(start = 6)]
+	pub default_always: bool,
 }
 
 impl DefineFieldStatement {
@@ -366,7 +368,12 @@ impl Display for DefineFieldStatement {
 			write!(f, " TYPE {v}")?
 		}
 		if let Some(ref v) = self.default {
-			write!(f, " DEFAULT {v}")?
+			write!(f, " DEFAULT")?;
+			if self.default_always {
+				write!(f, " ALWAYS")?
+			}
+
+			write!(f, " {v}")?
 		}
 		if self.readonly {
 			write!(f, " READONLY")?

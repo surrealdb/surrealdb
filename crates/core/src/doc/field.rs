@@ -216,10 +216,13 @@ impl Document {
 					if !skipped {
 						// Process any DEFAULT clause
 						val = field.process_default_clause(val).await?;
-						// Process any TYPE clause
-						val = field.process_type_clause(val).await?;
-						// Process any VALUE clause
-						val = field.process_value_clause(val).await?;
+						// Check for the existance of a VALUE clause
+						if field.def.value.is_some() {
+							// Process any TYPE clause
+							val = field.process_type_clause(val).await?;
+							// Process any VALUE clause
+							val = field.process_value_clause(val).await?;
+						}
 						// Process any TYPE clause
 						val = field.process_type_clause(val).await?;
 						// Process any ASSERT clause
@@ -348,7 +351,7 @@ impl FieldEditContext<'_> {
 			return Ok(val);
 		}
 		// The document is not being created
-		if !self.doc.is_new() {
+		if !self.doc.is_new() && !self.def.default_always {
 			return Ok(val);
 		}
 		// Get the default value
