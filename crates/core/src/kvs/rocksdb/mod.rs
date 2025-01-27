@@ -361,6 +361,10 @@ impl super::api::Transaction for Transaction {
 		if self.closed() {
 			return Err(Error::TxFinished);
 		}
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
 		// Get the arguments
 		let keys: Vec<Key> = keys.into_iter().map(K::encode_owned).collect::<Result<_, _>>()?;
 		// Execute on the blocking threadpool
