@@ -2018,8 +2018,8 @@ async fn select_with_in_and_not_valid_compound_index() -> Result<(), Error> {
 		SELECT * FROM test WITH INDEX idx_type_value WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
 		SELECT * FROM test WITH INDEX idx_account_type WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
 		SELECT * FROM test WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
-		SELECT * FROM test WITH INDEX idx_account_type WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
 		SELECT * FROM test WITH INDEX idx_type_value WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
+		SELECT * FROM test WITH INDEX idx_account_type WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
 		SELECT * FROM test WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
 		SELECT * FROM test WITH NOINDEX WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
 	";
@@ -2059,8 +2059,14 @@ async fn select_with_in_and_not_valid_compound_index() -> Result<(), Error> {
 							index: 'idx_account_type',
 							operator: 'union',
 							value: [
-								[ accounts:1, 'password' ],
-								[ accounts:1, 'firebasePassword' ]
+								[
+									accounts:1,
+									'password'
+								],
+								[
+									accounts:1,
+									'firebasePassword'
+								]
 							]
 						},
 						table: 'test'
