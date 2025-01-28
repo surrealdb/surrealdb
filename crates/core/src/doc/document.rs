@@ -9,6 +9,7 @@ use crate::idx::planner::iterators::IteratorRecord;
 use crate::idx::planner::RecordStrategy;
 use crate::kvs::cache;
 use crate::sql::permission::Permission;
+use crate::sql::statements::define::DefineDatabaseStatement;
 use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
 use crate::sql::statements::define::DefineIndexStatement;
@@ -364,6 +365,40 @@ impl Document {
 		match self.id.clone() {
 			Some(id) => Ok(Arc::unwrap_or_clone(id)),
 			_ => Err(fail!("Expected a document id to be present")),
+		}
+	}
+
+	/// Get the database for this document
+	pub async fn db(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<DefineDatabaseStatement>, Error> {
+		// Get the NS + DB
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		// Get transaction
+		let txn = ctx.tx();
+		// Get the table definition
+		match ctx.get_cache() {
+			// A cache is present on the context
+			Some(cache) if txn.local() => {
+				// Get the cache entry key
+				let key = cache::ds::Lookup::Db(ns, db);
+				// Get or update the cache entry
+				match cache.get(&key) {
+					Some(val) => val,
+					None => {
+						let val = txn.get_or_add_db(ns, db, opt.strict).await?;
+						let val = cache::ds::Entry::Any(val.clone());
+						cache.insert(key, val.clone());
+						val
+					}
+				}
+				.try_into_type()
+			}
+			// No cache is present on the context
+			_ => txn.get_or_add_db(ns, db, opt.strict).await,
 		}
 	}
 
