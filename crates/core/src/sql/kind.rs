@@ -203,30 +203,35 @@ impl Kind {
 			return true;
 		}
 
-		// We reached the end of the path
-		// Check if the kinds are equal
-		if path.is_empty() {
-			return self == kind;
+		if !path.is_empty() {
+			match self {
+				Kind::Object => return matches!(path.first(), Some(Part::Field(_) | Part::All)),
+				Kind::Either(kinds) => {
+					return kinds.iter().all(|k| k.allows_nested_kind(path, kind))
+				}
+				Kind::Array(inner, len) | Kind::Set(inner, len) => {
+					return match path.first() {
+						Some(Part::All) => inner.allows_nested_kind(&path[1..], kind),
+						Some(Part::Index(i)) => {
+							if let Some(len) = len {
+								if i.as_usize() >= *len as usize {
+									return false;
+								}
+							}
+
+							inner.allows_nested_kind(&path[1..], kind)
+						}
+						_ => false,
+					}
+				}
+				_ => (),
+			}
 		}
 
 		match self {
-			Kind::Object => matches!(path.first(), Some(Part::Field(_) | Part::All)),
-			Kind::Either(kinds) => kinds.iter().all(|k| k.allows_nested_kind(path, kind)),
 			Kind::Literal(lit) => lit.allows_nested_kind(path, kind),
 			Kind::Option(inner) => inner.allows_nested_kind(path, kind),
-			Kind::Array(inner, len) | Kind::Set(inner, len) => match path.first() {
-				Some(Part::All) => inner.allows_nested_kind(&path[1..], kind),
-				Some(Part::Index(i)) => {
-					if let Some(len) = len {
-						if i.as_usize() >= *len as usize {
-							return false;
-						}
-					}
-
-					inner.allows_nested_kind(&path[1..], kind)
-				}
-				_ => false,
-			},
+			_ if path.is_empty() => self == kind,
 			_ => false,
 		}
 	}
@@ -422,17 +427,17 @@ impl Literal {
 		// Check if the literal is equal to the kind
 		if path.is_empty() {
 			return match kind {
-				Kind::Literal(lit) => return self == lit,
+				Kind::Literal(lit) => self == lit,
 				_ => &self.to_kind() == kind,
 			};
 		}
 
 		match self {
 			Literal::Array(x) => match path.first() {
-				Some(Part::All) => x.iter().all(|k| k.allows_nested_kind(&path[1..], kind)),
+				Some(Part::All) => x.iter().all(|y| y.allows_nested_kind(&path[1..], kind)),
 				Some(Part::Index(i)) => {
-					if let Some(kind) = x.get(i.as_usize()) {
-						kind.allows_nested_kind(&path[1..], kind)
+					if let Some(y) = x.get(i.as_usize()) {
+						y.allows_nested_kind(&path[1..], kind)
 					} else {
 						false
 					}
@@ -440,10 +445,10 @@ impl Literal {
 				_ => false,
 			},
 			Literal::Object(x) => match path.first() {
-				Some(Part::All) => x.iter().all(|(_, v)| v.allows_nested_kind(&path[1..], kind)),
+				Some(Part::All) => x.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind)),
 				Some(Part::Field(k)) => {
-					if let Some(kind) = x.get(&k.0) {
-						kind.allows_nested_kind(&path[1..], kind)
+					if let Some(y) = x.get(&k.0) {
+						y.allows_nested_kind(&path[1..], kind)
 					} else {
 						false
 					}
@@ -453,14 +458,14 @@ impl Literal {
 			Literal::DiscriminatedObject(_, discriminants) => match path.first() {
 				Some(Part::All) => discriminants
 					.iter()
-					.all(|o| o.iter().all(|(_, v)| v.allows_nested_kind(&path[1..], kind))),
-				Some(Part::Field(k)) => {
-					if let Some(kind) = discriminants.iter().find_map(|o| o.get(&k.0)) {
-						kind.allows_nested_kind(&path[1..], kind)
+					.all(|o| o.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind))),
+				Some(Part::Field(k)) => discriminants.iter().all(|o| {
+					if let Some(y) = o.get(&k.0) {
+						y.allows_nested_kind(&path[1..], kind)
 					} else {
 						false
 					}
-				}
+				}),
 				_ => false,
 			},
 			_ => false,
