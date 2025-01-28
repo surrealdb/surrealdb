@@ -108,7 +108,7 @@ pub(crate) struct Iterator {
 	limit: Option<u32>,
 	/// Iterator start value
 	start: Option<u32>,
-	/// Skip processing
+	/// Counter of remaining documents that can be skipped processing
 	start_skip: Option<usize>,
 	/// Iterator runtime error
 	error: Option<Error>,
@@ -455,6 +455,7 @@ impl Iterator {
 					self.cancel_on_limit = Some(l);
 				}
 			}
+			// Check if we can skip processing the document below "start".
 			if matches!(rs, RecordStrategy::KeysOnly | RecordStrategy::Count) {
 				let s = self.start.unwrap_or(0) as usize;
 				if s > 0 {
@@ -464,10 +465,12 @@ impl Iterator {
 		}
 	}
 
+	/// Check if we can skip processing the upcoming record
 	pub(super) fn is_skippable(&self) -> bool {
 		self.start_skip.map(|s| s > 0).unwrap_or(false)
 	}
 
+	/// Confirm that the record has been skipped
 	pub(super) fn skipped(&mut self) {
 		if let Some(s) = &mut self.start_skip {
 			*s -= 1;

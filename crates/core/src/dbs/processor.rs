@@ -93,10 +93,10 @@ impl Collected {
 		self,
 		opt: &Options,
 		txn: &Transaction,
-		skippable: bool,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
 		match self {
-			Self::Edge(key) => Self::process_edge(opt, txn, key, skippable).await,
+			Self::Edge(key) => Self::process_edge(opt, txn, key, rid_only).await,
 			Self::RangeKey(key) => Self::process_range_key(key).await,
 			Self::TableKey(key) => Self::process_table_key(key).await,
 			Self::Relatable {
@@ -104,15 +104,15 @@ impl Collected {
 				v,
 				w,
 				o,
-			} => Self::process_relatable(opt, txn, f, v, w, o, skippable).await,
-			Self::Thing(thing) => Self::process_thing(opt, txn, thing, skippable).await,
-			Self::Yield(table) => Self::process_yield(opt, txn, table, skippable).await,
+			} => Self::process_relatable(opt, txn, f, v, w, o, rid_only).await,
+			Self::Thing(thing) => Self::process_thing(opt, txn, thing, rid_only).await,
+			Self::Yield(table) => Self::process_yield(opt, txn, table, rid_only).await,
 			Self::Value(value) => Ok(Self::process_value(value)),
-			Self::Defer(key) => Self::process_defer(opt, txn, key, skippable).await,
-			Self::Mergeable(v, o) => Self::process_mergeable(opt, txn, v, o, skippable).await,
+			Self::Defer(key) => Self::process_defer(opt, txn, key, rid_only).await,
+			Self::Mergeable(v, o) => Self::process_mergeable(opt, txn, v, o, rid_only).await,
 			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)?),
 			Self::Count(c) => Ok(Self::process_count(c)),
-			Self::IndexItem(i) => Self::process_index_item(opt, txn, i, skippable).await,
+			Self::IndexItem(i) => Self::process_index_item(opt, txn, i, rid_only).await,
 			Self::IndexItemKey(i) => Ok(Self::process_index_item_key(i)),
 		}
 	}
@@ -121,12 +121,12 @@ impl Collected {
 		opt: &Options,
 		txn: &Transaction,
 		key: Key,
-		skippable: bool,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
 		// Parse the data from the store
 		let gra: graph::Graph = graph::Graph::decode(&key)?;
 		// Fetch the data from the store
-		let val = if skippable {
+		let val = if rid_only {
 			Arc::new(Value::Null)
 		} else {
 			txn.get_record(opt.ns()?, opt.db()?, gra.ft, &gra.fk, None).await?
@@ -182,9 +182,10 @@ impl Collected {
 		v: Thing,
 		w: Thing,
 		o: Option<Value>,
-		skippable: bool,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
-		let val = if skippable {
+		// if it is skippable we only need the record id
+		let val = if rid_only {
 			Operable::Value(Arc::new(Value::Null))
 		} else {
 			// Check that the table exists
@@ -209,13 +210,14 @@ impl Collected {
 		opt: &Options,
 		txn: &Transaction,
 		v: Thing,
-		skippable: bool,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
-		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
-		let val = if skippable {
+		// if it is skippable we only need the record id
+		let val = if rid_only {
 			Arc::new(Value::Null)
 		} else {
+			// Check that the table exists
+			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 			// Fetch the data from the store
 			txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version).await?
 		};
@@ -237,10 +239,11 @@ impl Collected {
 		opt: &Options,
 		txn: &Transaction,
 		v: Table,
-		skippable: bool,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
-		// Check that the table exists
-		if !skippable {
+		// if it is skippable we only need the record id
+		if !rid_only {
+			// Check that the table exists
 			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v, opt.strict).await?;
 		}
 		// Pass the value through
@@ -269,10 +272,11 @@ impl Collected {
 		opt: &Options,
 		txn: &Transaction,
 		v: Thing,
-		skippable: bool,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
-		// Check that the table exists
-		if !skippable {
+		// if it is skippable we only need the record id
+		if !rid_only {
+			// Check that the table exists
 			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		}
 		// Process the document record
@@ -291,10 +295,11 @@ impl Collected {
 		txn: &Transaction,
 		v: Thing,
 		o: Value,
-		skippable: bool,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
-		// Check that the table exists
-		if !skippable {
+		// if it is skippable we only need the record id
+		if !rid_only {
+			// Check that the table exists
 			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
 		}
 		// Process the document record
@@ -350,13 +355,14 @@ impl Collected {
 		opt: &Options,
 		txn: &Transaction,
 		i: IndexItemRecord,
-		skippable: bool,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
 		let (t, v, ir) = i.consume();
 		let v = if let Some(v) = v {
 			// The value may already be fetched by the KNN iterator to evaluate the condition
 			v
-		} else if skippable {
+		} else if rid_only {
+			// if it is skippable we only need the record id
 			Value::Null.into()
 		} else {
 			Iterable::fetch_thing(txn, opt, &t).await?
@@ -382,6 +388,7 @@ pub(super) struct ConcurrentCollector<'a> {
 }
 impl Collector for ConcurrentCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
+		// if it is skippable don't need to process the document
 		if !self.ite.is_skippable() {
 			let pro = collected.process(self.opt, self.txn, false).await?;
 			self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
@@ -400,6 +407,8 @@ pub(super) struct ConcurrentDistinctCollector<'a> {
 impl Collector for ConcurrentDistinctCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
 		let skippable = self.coll.ite.is_skippable();
+		// If it is skippable, we just need to collect the record id (if any)
+		// to ensure that distinct can be checked.
 		let pro = collected.process(self.coll.opt, self.coll.txn, skippable).await?;
 		if !self.dis.check_already_processed(&pro) {
 			if !skippable {
