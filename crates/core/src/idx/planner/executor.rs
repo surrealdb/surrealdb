@@ -421,7 +421,8 @@ impl QueryExecutor {
 		if let Value::Array(a) = value {
 			Self::generate_variants_from_array(a, variants);
 		} else {
-			variants.push(Array::from(value.clone()));
+			let a = Array(vec![value.clone()]);
+			Self::generate_variants_from_array(&a, variants)
 		}
 	}
 
@@ -453,8 +454,7 @@ impl QueryExecutor {
 				Self::generate_variant(col, current_variant, cols_values, variants);
 			}
 		} else {
-			let variant = Array(variant.iter().map(|v| v.clone()).collect());
-			variants.push(variant);
+			variants.push(Array(variant));
 		}
 	}
 
