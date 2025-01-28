@@ -10,8 +10,18 @@ impl Value {
 			});
 		}
 		// Otherwise loop through every object field
-		for k in val.every(None, false, false).iter() {
-			match val.pick(k) {
+		for k in val.every(None, true, false).iter() {
+			// Because we iterate every step, we need to this check
+			// If old & new are both objects, we do not want to completely
+			// replace the old object with the new object as that will drop
+			// all the fields in the old object that are not in the new object
+			let old = self.pick(k);
+			let new = val.pick(k);
+			if old.is_object() && new.is_object() {
+				continue;
+			}
+			
+			match new {
 				Value::None => self.cut(k),
 				v => self.put(k, v),
 			}
