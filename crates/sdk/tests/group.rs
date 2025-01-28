@@ -681,13 +681,8 @@ async fn select_array_count_subquery_group_by() -> Result<(), Error> {
 async fn select_aggregate_mean_update() -> Result<(), Error> {
 	let sql = "
 		CREATE test:a SET a = 3;
-		DEFINE TABLE foo AS SELECT
-			math::mean(a) AS avg
-		FROM test
-		GROUP ALL;
-
+		DEFINE TABLE foo AS SELECT math::mean(a) AS avg FROM test GROUP ALL;
 		UPDATE test:a SET a = 2;
-
 		SELECT avg FROM foo;
 	";
 	let dbs = new_ds().await?;
@@ -698,20 +693,18 @@ async fn select_aggregate_mean_update() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
-		{
-			id: test:a,
-			a: 3
-		}
-	]",
+			{
+				id: test:a,
+				a: 3
+			}
+		]",
 	);
-
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("None");
-
 	assert_eq!(tmp, val);
-
+	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -721,9 +714,8 @@ async fn select_aggregate_mean_update() -> Result<(), Error> {
 			}
 		]",
 	);
-
 	assert_eq!(tmp, val);
-
+	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -733,7 +725,7 @@ async fn select_aggregate_mean_update() -> Result<(), Error> {
 		]",
 	);
 	assert_eq!(tmp, val);
-
+	//
 	Ok(())
 }
 

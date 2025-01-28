@@ -138,6 +138,10 @@ impl DefineTableStatement {
 				)
 				.await?;
 				// Clear the cache
+				if let Some(cache) = ctx.get_cache() {
+					cache.clear_tb(ns, db, ft);
+				}
+				// Clear the cache
 				txn.clear();
 				// Process the view data
 				let stm = UpdateStatement {

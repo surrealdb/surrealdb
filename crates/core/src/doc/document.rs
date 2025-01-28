@@ -381,7 +381,7 @@ impl Document {
 		// Get transaction
 		let txn = ctx.tx();
 		// Get the table definition
-		let tb = match ctx.get_cache() {
+		match ctx.get_cache() {
 			// A cache is present on the context
 			Some(cache) if txn.local() => {
 				// Get the cache entry key
@@ -413,23 +413,24 @@ impl Document {
 				.try_into_type()
 			}
 			// No cache is present on the context
-			_ => txn.get_tb(ns, db, &id.tb).await,
-		};
-		// Return the table or attempt to define it
-		match tb {
-			// The table doesn't exist
-			Err(Error::TbNotFound {
-				value: _,
-			}) => {
-				// Allowed to run?
-				opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-				// We can create the table automatically
-				txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
+			_ => {
+				// Return the table or attempt to define it
+				match txn.get_tb(ns, db, &id.tb).await {
+					// The table doesn't exist
+					Err(Error::TbNotFound {
+						value: _,
+					}) => {
+						// Allowed to run?
+						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+						// We can create the table automatically
+						txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
+					}
+					// There was an error
+					Err(err) => Err(err),
+					// The table exists
+					Ok(tb) => Ok(tb),
+				}
 			}
-			// There was an error
-			Err(err) => Err(err),
-			// The table exists
-			Ok(tb) => Ok(tb),
 		}
 	}
 
