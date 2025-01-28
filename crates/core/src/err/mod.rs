@@ -1260,6 +1260,14 @@ pub enum Error {
 	/// Cannot process `Value::Refs` as there is no Record ID in the context for the operation
 	#[error("Cannot obtain a list of references as there is no Record ID in the context for the operation")]
 	InvalidRefsContext,
+
+	#[error("Cannot set field `{name}` with type `{kind}` as it mismatched with field `{existing_name}` with type `{existing_kind}`")]
+	MismatchedFieldTypes {
+		name: String,
+		kind: String,
+		existing_name: String,
+		existing_kind: String,
+	},
 }
 
 impl From<Error> for String {
