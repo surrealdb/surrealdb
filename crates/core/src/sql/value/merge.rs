@@ -126,6 +126,10 @@ mod tests {
 			"{
 				test: true,
 				name: 'Tobie',
+				obj: {
+					a: 1,
+					b: 2,
+				}
 			}",
 		);
 		let mrg = Value::parse(
@@ -134,6 +138,10 @@ mod tests {
 					title: 'Mr',
 					initials: NONE,
 				},
+				obj: {
+					a: 2,
+					b: NONE,
+				}
 			}",
 		);
 		let val = Value::parse(
@@ -141,6 +149,9 @@ mod tests {
 				test: true,
 				name: {
 					title: 'Mr',
+				},
+				obj: {
+					a: 2,
 				},
 			}",
 		);
