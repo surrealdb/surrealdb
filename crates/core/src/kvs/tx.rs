@@ -41,6 +41,8 @@ use uuid::Uuid;
 
 #[non_exhaustive]
 pub struct Transaction {
+	/// Is this is a local datastore transaction
+	local: bool,
 	/// The underlying transactor
 	tx: Mutex<Transactor>,
 	/// The query cache for this store
@@ -51,8 +53,9 @@ pub struct Transaction {
 
 impl Transaction {
 	/// Create a new query store
-	pub fn new(tx: Transactor) -> Transaction {
+	pub fn new(local: bool, tx: Transactor) -> Transaction {
 		Transaction {
+			local,
 			tx: Mutex::new(tx),
 			cache: TransactionCache::new(),
 			index_caches: IndexTreeCaches::default(),
@@ -72,6 +75,11 @@ impl Transaction {
 	/// Retrieve the underlying transaction
 	pub async fn lock(&self) -> MutexGuard<'_, Transactor> {
 		self.tx.lock().await
+	}
+
+	/// Check if the transaction is local or distributed
+	pub fn local(&self) -> bool {
+		self.local
 	}
 
 	/// Check if the transaction is finished.

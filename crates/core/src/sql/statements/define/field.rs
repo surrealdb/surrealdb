@@ -106,6 +106,10 @@ impl DefineFieldStatement {
 		)
 		.await?;
 		// Clear the cache
+		if let Some(cache) = ctx.get_cache() {
+			cache.clear_tb(ns, db, &self.what);
+		}
+		// Clear the cache
 		txn.clear();
 		// Find all existing field definitions
 		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
@@ -190,6 +194,10 @@ impl DefineFieldStatement {
 						};
 						txn.set(key, val, None).await?;
 						// Clear the cache
+						if let Some(cache) = ctx.get_cache() {
+							cache.clear_tb(ns, db, &self.what);
+						}
+						// Clear the cache
 						txn.clear();
 					}
 				}
@@ -221,6 +229,10 @@ impl DefineFieldStatement {
 							..tb.as_ref().to_owned()
 						};
 						txn.set(key, val, None).await?;
+						// Clear the cache
+						if let Some(cache) = ctx.get_cache() {
+							cache.clear_tb(ns, db, &self.what);
+						}
 						// Clear the cache
 						txn.clear();
 					}

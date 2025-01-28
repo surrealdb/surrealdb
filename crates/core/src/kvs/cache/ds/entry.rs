@@ -4,12 +4,15 @@ use crate::sql::statements::DefineFieldStatement;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::LiveStatement;
+use std::any::Any;
 use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Clone)]
 #[non_exhaustive]
 pub(crate) enum Entry {
+	/// A cached entry of any type
+	Any(Arc<dyn Any + Send + Sync>),
 	/// A slice of DefineEventStatement specified on a table.
 	Evs(Arc<[DefineEventStatement]>),
 	/// A slice of DefineFieldStatement specified on a table.
@@ -25,6 +28,16 @@ pub(crate) enum Entry {
 }
 
 impl Entry {
+	/// Converts this cache entry into a single entry of arbitrary type.
+	/// This panics if called on a cache entry that is not an [`Entry::Any`].
+	pub(crate) fn try_into_type<T: Send + Sync + 'static>(self: Entry) -> Result<Arc<T>, Error> {
+		match self {
+			Entry::Any(v) => {
+				v.downcast::<T>().map_err(|_| fail!("Unable to convert type into Entry::Any"))
+			}
+			_ => Err(fail!("Unable to convert type into Entry::Any")),
+		}
+	}
 	/// Converts this cache entry into a slice of [`DefineEventStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Evs`].
 	pub(crate) fn try_into_evs(self) -> Result<Arc<[DefineEventStatement]>, Error> {

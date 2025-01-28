@@ -27,16 +27,19 @@ impl RemoveEventStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
+			// Get the NS and DB
+			let ns = opt.ns()?;
+			let db = opt.db()?;
 			// Get the transaction
 			let txn = ctx.tx();
 			// Get the definition
-			let ev = txn.get_tb_event(opt.ns()?, opt.db()?, &self.what, &self.name).await?;
+			let ev = txn.get_tb_event(ns, db, &self.what, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::table::ev::new(opt.ns()?, opt.db()?, &ev.what, &ev.name);
+			let key = crate::key::table::ev::new(ns, db, &ev.what, &ev.name);
 			txn.del(key).await?;
 			// Refresh the table cache for events
-			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
-			let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
+			let key = crate::key::database::tb::new(ns, db, &self.what);
+			let tb = txn.get_tb(ns, db, &self.what).await?;
 			txn.set(
 				key,
 				DefineTableStatement {
@@ -46,6 +49,10 @@ impl RemoveEventStatement {
 				None,
 			)
 			.await?;
+			// Clear the cache
+			if let Some(cache) = ctx.get_cache() {
+				cache.clear_tb(ns, db, &self.what);
+			}
 			// Clear the cache
 			txn.clear();
 			// Ok all good
