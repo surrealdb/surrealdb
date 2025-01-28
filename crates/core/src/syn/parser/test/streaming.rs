@@ -333,6 +333,7 @@ fn statements() -> Vec<Statement> {
 			if_not_exists: false,
 			overwrite: false,
 			reference: None,
+			default_always: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),

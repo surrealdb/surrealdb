@@ -889,6 +889,10 @@ impl Parser<'_> {
 				}
 				t!("DEFAULT") => {
 					self.pop_peek();
+					if self.eat(t!("ALWAYS")) {
+						res.default_always = true;
+					}
+
 					res.default = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
