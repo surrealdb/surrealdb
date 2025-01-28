@@ -1,5 +1,5 @@
 use super::escape::escape_key;
-use super::{Duration, Idiom, Number, Strand};
+use super::{Duration, Idiom, Number, Part, Strand};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
@@ -196,6 +196,40 @@ impl Kind {
 			_ => self,
 		}
 	}
+
+	pub(crate) fn allows_nested_kind(&self, path: &[Part], kind: &Kind) -> bool {
+		// ANY type won't cause a mismatch
+		if self.is_any() || kind.is_any() {
+			return true;
+		}
+
+		// We reached the end of the path
+		// Check if the kinds are equal
+		if path.is_empty() {
+			return self == kind;
+		}
+
+		match self {
+			Kind::Object => matches!(path.first(), Some(Part::Field(_) | Part::All)),
+			Kind::Either(kinds) => kinds.iter().all(|k| k.allows_nested_kind(path, kind)),
+			Kind::Literal(lit) => lit.allows_nested_kind(path, kind),
+			Kind::Option(inner) => inner.allows_nested_kind(path, kind),
+			Kind::Array(inner, len) | Kind::Set(inner, len) => match path.first() {
+				Some(Part::All) => inner.allows_nested_kind(&path[1..], kind),
+				Some(Part::Index(i)) => {
+					if let Some(len) = len {
+						if i.as_usize() >= *len as usize {
+							return false;
+						}
+					}
+
+					inner.allows_nested_kind(&path[1..], kind)
+				}
+				_ => false,
+			},
+			_ => false,
+		}
+	}
 }
 
 impl From<&Kind> for Box<Kind> {
@@ -375,6 +409,61 @@ impl Literal {
 				}
 				_ => false,
 			},
+		}
+	}
+
+	pub(crate) fn allows_nested_kind(&self, path: &[Part], kind: &Kind) -> bool {
+		// ANY type won't cause a mismatch
+		if kind.is_any() {
+			return true;
+		}
+
+		// We reached the end of the path
+		// Check if the literal is equal to the kind
+		if path.is_empty() {
+			return match kind {
+				Kind::Literal(lit) => return self == lit,
+				_ => &self.to_kind() == kind,
+			};
+		}
+
+		match self {
+			Literal::Array(x) => match path.first() {
+				Some(Part::All) => x.iter().all(|k| k.allows_nested_kind(&path[1..], kind)),
+				Some(Part::Index(i)) => {
+					if let Some(kind) = x.get(i.as_usize()) {
+						kind.allows_nested_kind(&path[1..], kind)
+					} else {
+						false
+					}
+				}
+				_ => false,
+			},
+			Literal::Object(x) => match path.first() {
+				Some(Part::All) => x.iter().all(|(_, v)| v.allows_nested_kind(&path[1..], kind)),
+				Some(Part::Field(k)) => {
+					if let Some(kind) = x.get(&k.0) {
+						kind.allows_nested_kind(&path[1..], kind)
+					} else {
+						false
+					}
+				}
+				_ => false,
+			},
+			Literal::DiscriminatedObject(_, discriminants) => match path.first() {
+				Some(Part::All) => discriminants
+					.iter()
+					.all(|o| o.iter().all(|(_, v)| v.allows_nested_kind(&path[1..], kind))),
+				Some(Part::Field(k)) => {
+					if let Some(kind) = discriminants.iter().find_map(|o| o.get(&k.0)) {
+						kind.allows_nested_kind(&path[1..], kind)
+					} else {
+						false
+					}
+				}
+				_ => false,
+			},
+			_ => false,
 		}
 	}
 }
