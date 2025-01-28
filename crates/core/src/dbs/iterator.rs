@@ -332,12 +332,12 @@ impl Iterator {
 					c.set_iteration_stage(s);
 					cancel_ctx = c.freeze();
 					if !is_last {
-						self.clone().iterate(stk, &cancel_ctx, opt, stm).await?;
+						self.clone().iterate(stk, &cancel_ctx, opt, stm, rs).await?;
 					};
 				}
 			}
 			// Process all documents
-			self.iterate(stk, &cancel_ctx, opt, stm).await?;
+			self.iterate(stk, &cancel_ctx, opt, stm, rs).await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
@@ -349,7 +349,7 @@ impl Iterator {
 					// Ingest the pre-defined guaranteed record yield
 					self.ingest(guaranteed);
 					// Process the pre-defined guaranteed document
-					self.iterate(stk, &cancel_ctx, opt, stm).await?;
+					self.iterate(stk, &cancel_ctx, opt, stm, rs).await?;
 				}
 			}
 			// Process any SPLIT AT clause
@@ -446,7 +446,7 @@ impl Iterator {
 		false
 	}
 
-	fn compute_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) {
+	fn compute_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>, rs: RecordStrategy) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {
 				if let Some(s) = self.start {
@@ -455,7 +455,7 @@ impl Iterator {
 					self.cancel_on_limit = Some(l);
 				}
 			}
-			if stm.cond().is_none() {
+			if matches!(rs, RecordStrategy::KeysOnly | RecordStrategy::Count) {
 				let s = self.start.unwrap_or(0) as usize;
 				if s > 0 {
 					self.start_skip = Some(s);
@@ -564,9 +564,10 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
+		rs: RecordStrategy,
 	) -> Result<(), Error> {
 		// Compute iteration limits
-		self.compute_start_limit(ctx, stm);
+		self.compute_start_limit(ctx, stm, rs);
 		// Prevent deep recursion
 		let opt = opt.dive(4)?;
 		// If any iterator requires distinct, we need to create a global distinct instance
