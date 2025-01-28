@@ -1,7 +1,7 @@
 use super::MlExportConfig;
 use crate::{opt::Resource, value::Notification, Result};
+use async_channel::Sender;
 use bincode::Options;
-use channel::Sender;
 use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
 use std::io::Read;

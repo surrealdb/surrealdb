@@ -8,7 +8,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
-use channel::{Receiver, Sender};
+use async_channel::{Receiver, Sender};
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
@@ -26,11 +26,11 @@ impl Connection for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
-				0 => channel::unbounded(),
-				capacity => channel::bounded(capacity),
+				0 => async_channel::unbounded(),
+				capacity => async_channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = channel::bounded(1);
+			let (conn_tx, conn_rx) = async_channel::bounded(1);
 
 			spawn_local(run_router(address, conn_tx, route_rx));
 

@@ -11,7 +11,7 @@ use crate::{
 	value::Notification,
 	Action,
 };
-use channel::{Receiver, Sender};
+use async_channel::{Receiver, Sender};
 use futures::{stream::poll_fn, StreamExt};
 use std::{
 	collections::{BTreeMap, HashMap, HashSet},
@@ -28,11 +28,11 @@ impl Connection for Db {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
-				0 => channel::unbounded(),
-				capacity => channel::bounded(capacity),
+				0 => async_channel::unbounded(),
+				capacity => async_channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = channel::bounded(1);
+			let (conn_tx, conn_rx) = async_channel::bounded(1);
 
 			tokio::spawn(run_router(address, conn_tx, route_rx));
 

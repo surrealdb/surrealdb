@@ -7,8 +7,8 @@ use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::Value;
-use channel::Receiver;
-use channel::Sender;
+use async_channel::Receiver;
+use async_channel::Sender;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
@@ -53,7 +53,7 @@ impl Router {
 	) -> BoxFuture<'_, Result<Receiver<Result<DbResponse>>>> {
 		Box::pin(async move {
 			let id = self.next_id();
-			let (sender, receiver) = channel::bounded(1);
+			let (sender, receiver) = async_channel::bounded(1);
 			let route = Route {
 				request: RequestData {
 					id,

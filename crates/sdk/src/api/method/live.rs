@@ -14,7 +14,7 @@ use crate::opt::Resource;
 use crate::value::Notification;
 use crate::Surreal;
 use crate::Value;
-use channel::Receiver;
+use async_channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use std::future::IntoFuture;
@@ -108,7 +108,7 @@ pub(crate) async fn register(
 	router: &Router,
 	id: Uuid,
 ) -> Result<Receiver<Notification<CoreValue>>> {
-	let (tx, rx) = channel::unbounded();
+	let (tx, rx) = async_channel::unbounded();
 	router
 		.execute_unit(Command::SubscribeLive {
 			uuid: id,
