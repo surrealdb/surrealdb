@@ -20,3 +20,8 @@ topic:surrealkv:
 topic:wasm:
   - "/(webassembly)/i"
   - "/(wasm)/i"
+
+# Add the `topic:stability` label if the issue content contains 'crash' or 'panic'
+topic:stability:
+  - "/(crash)/i"
+  - "/(panic)/i"
