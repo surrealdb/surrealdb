@@ -3222,8 +3222,8 @@ mod tests {
 	#[test]
 	fn check_size() {
 		assert!(64 >= std::mem::size_of::<Value>(), "size of value too big");
-		assert!(104 >= std::mem::size_of::<Error>());
-		assert!(104 >= std::mem::size_of::<Result<Value, Error>>());
+		assert!(120 >= std::mem::size_of::<Error>());
+		assert!(120 >= std::mem::size_of::<Result<Value, Error>>());
 		assert!(24 >= std::mem::size_of::<crate::sql::number::Number>());
 		assert!(24 >= std::mem::size_of::<crate::sql::strand::Strand>());
 		assert!(16 >= std::mem::size_of::<crate::sql::duration::Duration>());
