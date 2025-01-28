@@ -108,6 +108,8 @@ pub(crate) struct Iterator {
 	limit: Option<u32>,
 	/// Iterator start value
 	start: Option<u32>,
+	/// skip processing
+	skip: usize,
 	/// Iterator runtime error
 	error: Option<Error>,
 	/// Iterator output results
@@ -127,6 +129,7 @@ impl Clone for Iterator {
 			count: 0,
 			limit: self.limit,
 			start: self.start,
+			skip: self.start.unwrap_or(0) as usize,
 			error: None,
 			results: Results::default(),
 			entries: self.entries.clone(),
@@ -416,16 +419,17 @@ impl Iterator {
 	}
 
 	/// Check if the iteration can be limited per iterator
-	#[cfg(not(target_family = "wasm"))]
-	fn check_set_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) -> bool {
+	fn check_set_start_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
 		// If there are groups we can't
 		if stm.group().is_some() {
 			return false;
 		}
+
 		// If there is no specified order, we can
 		if stm.order().is_none() {
 			return true;
 		}
+
 		// If there is more than 1 iterator, we can't
 		if self.entries.len() != 1 {
 			return false;
@@ -442,7 +446,6 @@ impl Iterator {
 		false
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	fn compute_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {
@@ -452,6 +455,18 @@ impl Iterator {
 					self.cancel_on_limit = Some(l);
 				}
 			}
+			if stm.cond().is_none() {
+				self.skip = self.start.unwrap_or(0) as usize;
+			}
+		}
+	}
+
+	pub(super) fn skipped(&mut self) -> bool {
+		if self.skip > 0 {
+			self.skip -= 1;
+			true
+		} else {
+			false
 		}
 	}
 
@@ -539,27 +554,6 @@ impl Iterator {
 		Ok(())
 	}
 
-	#[cfg(target_family = "wasm")]
-	async fn iterate(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		stm: &Statement<'_>,
-	) -> Result<(), Error> {
-		// Prevent deep recursion
-		let opt = &opt.dive(4)?;
-		// If any iterator requires distinct, we need to create a global distinct instance
-		let mut distinct = SyncDistinct::new(ctx);
-		// Process all prepared values
-		for v in mem::take(&mut self.entries) {
-			v.iterate(stk, ctx, opt, stm, self, distinct.as_mut()).await?;
-		}
-		// Everything processed ok
-		Ok(())
-	}
-
-	#[cfg(not(target_family = "wasm"))]
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,

@@ -336,11 +336,12 @@ pub(super) struct ConcurrentCollector<'a> {
 	stm: &'a Statement<'a>,
 	ite: &'a mut Iterator,
 }
-
 impl Collector for ConcurrentCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
 		let pro = collected.process(self.opt, self.txn).await?;
-		self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
+		if !self.ite.skipped() {
+			self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
+		}
 		Ok(())
 	}
 }
@@ -354,10 +355,12 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
 		let pro = collected.process(self.coll.opt, self.coll.txn).await?;
 		if !self.dis.check_already_processed(&pro) {
-			self.coll
-				.ite
-				.process(self.coll.stk, self.coll.ctx, self.coll.opt, self.coll.stm, pro)
-				.await?;
+			if !self.coll.ite.skipped() {
+				self.coll
+					.ite
+					.process(self.coll.stk, self.coll.ctx, self.coll.opt, self.coll.stm, pro)
+					.await?;
+			}
 		}
 		Ok(())
 	}

@@ -3269,10 +3269,10 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 async fn select_limit_start() -> Result<(), Error> {
 	let sql = r"
 		CREATE |item:1000|;
-		SELECT * FROM item LIMIT 10 START 0 PARALLEL EXPLAIN;
-		SELECT * FROM item LIMIT 10 START 0 PARALLEL;
-		SELECT * FROM item LIMIT 10 START 0 EXPLAIN;
-		SELECT * FROM item LIMIT 10 START 0;";
+		SELECT * FROM item LIMIT 10 START 2 PARALLEL EXPLAIN;
+		SELECT * FROM item LIMIT 10 START 2 PARALLEL;
+		SELECT * FROM item LIMIT 10 START 2 EXPLAIN;
+		SELECT * FROM item LIMIT 10 START 2;";
 	let mut t = Test::new(sql).await?;
 	t.expect_size(5)?;
 	t.skip_ok(1)?;
