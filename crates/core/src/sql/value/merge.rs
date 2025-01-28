@@ -119,4 +119,32 @@ mod tests {
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}
+
+	#[tokio::test]
+	async fn merge_new_object() {
+		let mut res = Value::parse(
+			"{
+				test: true,
+				name: 'Tobie',
+			}",
+		);
+		let mrg = Value::parse(
+			"{
+				name: {
+					title: 'Mr',
+					initials: NONE,
+				},
+			}",
+		);
+		let val = Value::parse(
+			"{
+				test: true,
+				name: {
+					title: 'Mr',
+				},
+			}",
+		);
+		res.merge(mrg).unwrap();
+		assert_eq!(res, val);
+	}
 }
