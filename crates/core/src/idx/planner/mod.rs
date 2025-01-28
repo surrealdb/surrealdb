@@ -167,7 +167,7 @@ impl<'a> StatementContext<'a> {
 		// If there are specific permissions
 		// defined on the table, then we need
 		// to process record values.
-		if matches!(granted_permission, GrantedPermission::None | GrantedPermission::Full) {
+		if matches!(granted_permission, GrantedPermission::Specific) {
 			return Ok(RecordStrategy::KeysAndValues);
 		}
 

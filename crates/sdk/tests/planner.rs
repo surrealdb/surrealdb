@@ -210,6 +210,12 @@ fn table_explain(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
+					type: 'KeysAndValues'
+				}},
+				operation: 'RecordStrategy'
+			}},
+			{{
+				detail: {{
 					count: {fetch_count}
 				}},
 				operation: 'Fetch'
@@ -241,6 +247,12 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
+					type: 'KeysAndValues'
+				}},
+				operation: 'RecordStrategy'
+			}},
+			{{
+				detail: {{
 					count: {fetch_count}
 				}},
 				operation: 'Fetch'
@@ -268,6 +280,12 @@ fn three_table_explain(parallel: bool) -> String {
 					type: '{collector}'
 				}},
 				operation: 'Collector'
+			}},
+			{{
+				detail: {{
+					type: 'KeysAndValues'
+				}},
+				operation: 'RecordStrategy'
 			}},
 			{{
 				detail: {{
@@ -321,6 +339,12 @@ const THREE_MULTI_INDEX_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 3
 					},
 					operation: 'Fetch'
@@ -344,6 +368,12 @@ const SINGLE_INDEX_FT_EXPLAIN: &str = "[
 						type: 'MemoryOrdered'
 					},
 					operation: 'Collector'
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
 				},
 				{
 					detail: {
@@ -373,6 +403,12 @@ const SINGLE_INDEX_UNIQ_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 1
 					},
 					operation: 'Fetch'
@@ -396,6 +432,12 @@ const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 			type: 'MemoryOrdered'
 		},
 		operation: 'Collector'
+	},
+	{
+		detail: {
+			type: 'KeysAndValues'
+		},
+		operation: 'RecordStrategy'
 	},
 	{
 		detail: {
@@ -433,6 +475,12 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
 				},
 				{
 					detail: {
