@@ -1471,8 +1471,8 @@ impl Transaction {
 		let key = crate::key::thing::new(ns, db, tb, id);
 		self.set(&key, &val, None).await?;
 		// Set the value in the cache
-		let key = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(key.into(), cache::tx::Entry::Val(Arc::new(val)));
+		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+		self.cache.insert(qey, cache::tx::Entry::Val(Arc::new(val)));
 		// Return nothing
 		Ok(())
 	}
@@ -1487,8 +1487,8 @@ impl Transaction {
 		val: Arc<Value>,
 	) -> Result<(), Error> {
 		// Set the value in the cache
-		let key = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(key.into(), cache::tx::Entry::Val(val));
+		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+		self.cache.insert(qey, cache::tx::Entry::Val(val));
 		// Return nothing
 		Ok(())
 	}
@@ -1499,8 +1499,8 @@ impl Transaction {
 		let key = crate::key::thing::new(ns, db, tb, id);
 		self.del(&key).await?;
 		// Set the value in the cache
-		let key = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.remove(key);
+		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+		self.cache.remove(qey);
 		// Return nothing
 		Ok(())
 	}
