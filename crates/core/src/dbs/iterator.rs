@@ -455,18 +455,19 @@ impl Iterator {
 					self.cancel_on_limit = Some(l);
 				}
 			}
-			if stm.cond().is_none() {
+			if stm.cond().is_none() && stm.fetch().is_none() {
 				self.skip = self.start.unwrap_or(0) as usize;
 			}
 		}
 	}
 
-	pub(super) fn skipped(&mut self) -> bool {
+	pub(super) fn is_skippable(&self) -> bool {
+		self.skip > 0
+	}
+
+	pub(super) fn skipped(&mut self) {
 		if self.skip > 0 {
 			self.skip -= 1;
-			true
-		} else {
-			false
 		}
 	}
 

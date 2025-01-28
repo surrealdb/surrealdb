@@ -289,7 +289,6 @@ impl QueryPlanner {
 		&self.fallbacks
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn is_order(&self, irf: &IteratorRef) -> bool {
 		self.orders.contains(irf)
 	}
