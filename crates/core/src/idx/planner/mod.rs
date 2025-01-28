@@ -34,6 +34,7 @@ pub(crate) struct StatementContext<'a> {
 	pub(crate) order: Option<&'a Ordering>,
 	pub(crate) cond: Option<&'a Cond>,
 	pub(crate) group: Option<&'a Groups>,
+	is_perm: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -43,12 +44,20 @@ pub(crate) enum RecordStrategy {
 	KeysAndValues,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum GrantedPermission {
+	None,
+	Full,
+	Specific,
+}
+
 impl<'a> StatementContext<'a> {
 	pub(crate) fn new(
 		ctx: &'a Context,
 		opt: &'a Options,
 		stm: &'a Statement<'a>,
 	) -> Result<Self, Error> {
+		let is_perm = opt.check_perms(stm.into())?;
 		Ok(Self {
 			ctx,
 			opt,
@@ -60,13 +69,55 @@ impl<'a> StatementContext<'a> {
 			order: stm.order(),
 			cond: stm.cond(),
 			group: stm.group(),
+			is_perm,
 		})
+	}
+
+	pub(crate) async fn check_table_permission(
+		&self,
+		tb: &str,
+	) -> Result<GrantedPermission, Error> {
+		if !self.is_perm {
+			return Ok(GrantedPermission::Full);
+		}
+		if self.opt.check_perms(self.stm.into())? {
+			// Get the table for this planner
+			match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
+				Ok(table) => {
+					// TODO(tobiemh): we should really
+					// not even get here if the table
+					// permissions are NONE, because
+					// there is no point in processing
+					// a table which we can't access.
+					let perms = self.stm.permissions(&table, false);
+					// If permissions are specific, we
+					// need to fetch the record content.
+					if perms.is_specific() {
+						return Ok(GrantedPermission::Specific);
+					}
+					// If permissions are NONE, we also
+					// need to fetch the record content.
+					if perms.is_none() {
+						return Ok(GrantedPermission::None);
+					}
+				}
+				Err(Error::TbNotFound {
+					..
+				}) => {
+					// We can safely ignore this error,
+					// as it just means that there is no
+					// table and no permissions defined.
+				}
+				Err(e) => return Err(e),
+			}
+		}
+		Ok(GrantedPermission::Full)
 	}
 
 	pub(crate) async fn check_record_strategy(
 		&self,
 		with_all_indexes: bool,
-		tb: &str,
+		granted_permission: GrantedPermission,
 	) -> Result<RecordStrategy, Error> {
 		// If there is a WHERE clause, then
 		// we need to fetch and process
@@ -116,38 +167,11 @@ impl<'a> StatementContext<'a> {
 		// If there are specific permissions
 		// defined on the table, then we need
 		// to process record values.
-		if self.opt.check_perms(self.stm.into())? {
-			// Get the table for this planner
-			match self.ctx.tx().get_tb(self.ns, self.db, tb).await {
-				Ok(table) => {
-					// TODO(tobiemh): we should really
-					// not even get here if the table
-					// permissions are NONE, because
-					// there is no point in processing
-					// a table which we can't access.
-					let perms = self.stm.permissions(&table, false);
-					// If permissions are specific, we
-					// need to fetch the record content.
-					if perms.is_specific() {
-						return Ok(RecordStrategy::KeysAndValues);
-					}
-					// If permissions are NONE, we also
-					// need to fetch the record content.
-					if perms.is_none() {
-						return Ok(RecordStrategy::KeysAndValues);
-					}
-				}
-				Err(Error::TbNotFound {
-					..
-				}) => {
-					// We can safely ignore this error,
-					// as it just means that there is no
-					// table and no permissions defined.
-				}
-				Err(e) => return Err(e),
-			}
+		if matches!(granted_permission, GrantedPermission::None | GrantedPermission::Full) {
+			return Ok(RecordStrategy::KeysAndValues);
 		}
 
+		// We just want to count
 		if is_count_all && is_group_all {
 			return Ok(RecordStrategy::Count);
 		}
@@ -164,6 +188,8 @@ pub(crate) struct QueryPlanner {
 	iteration_workflow: Vec<IterationStage>,
 	iteration_index: AtomicU8,
 	orders: Vec<IteratorRef>,
+	granted_permissions: HashMap<String, GrantedPermission>,
+	any_specific_permission: bool,
 }
 
 impl QueryPlanner {
@@ -175,7 +201,30 @@ impl QueryPlanner {
 			iteration_workflow: Vec::default(),
 			iteration_index: AtomicU8::new(0),
 			orders: vec![],
+			granted_permissions: HashMap::default(),
+			any_specific_permission: false,
 		}
+	}
+
+	/// Check the table permissions and cache the result.
+	/// Keep track of any specific permission.
+	pub(crate) async fn check_table_permission(
+		&mut self,
+		ctx: &StatementContext<'_>,
+		tb: &str,
+	) -> Result<GrantedPermission, Error> {
+		if ctx.is_perm {
+			if let Some(p) = self.granted_permissions.get(tb) {
+				return Ok(*p);
+			}
+			let p = ctx.check_table_permission(tb).await?;
+			self.granted_permissions.insert(tb.to_string(), p);
+			if matches!(p, GrantedPermission::Specific) {
+				self.any_specific_permission = true;
+			}
+			return Ok(p);
+		}
+		Ok(GrantedPermission::Full)
 	}
 
 	pub(crate) async fn add_iterables(
@@ -183,6 +232,7 @@ impl QueryPlanner {
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
 		t: Table,
+		gp: GrantedPermission,
 		it: &mut Iterator,
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
@@ -202,7 +252,7 @@ impl QueryPlanner {
 		)
 		.await?;
 		match PlanBuilder::build(
-			&t,
+			gp,
 			tree.root,
 			ctx,
 			tree.with_indexes,
@@ -291,6 +341,10 @@ impl QueryPlanner {
 
 	pub(crate) fn is_order(&self, irf: &IteratorRef) -> bool {
 		self.orders.contains(irf)
+	}
+
+	pub(crate) fn is_any_specific_permission(&self) -> bool {
+		self.any_specific_permission
 	}
 
 	pub(crate) async fn next_iteration_stage(&self) -> Option<IterationStage> {

@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::ctx::{Canceller, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
-use crate::dbs::plan::Plan;
+use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
 use crate::dbs::Options;
 use crate::dbs::Statement;
@@ -324,20 +324,27 @@ impl Iterator {
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
 		// Check if we actually need to process and iterate over the results
 		if plan.do_iterate {
+			if let Some(e) = &mut plan.explanation {
+				e.add_record_strategy(rs);
+			}
 			// Process prepared values
-			if let Some(qp) = ctx.get_query_planner() {
+			let sp = if let Some(qp) = ctx.get_query_planner() {
+				let sp = Some(qp.is_any_specific_permission());
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
 					let mut c = MutableContext::unfreeze(cancel_ctx)?;
 					c.set_iteration_stage(s);
 					cancel_ctx = c.freeze();
 					if !is_last {
-						self.clone().iterate(stk, &cancel_ctx, opt, stm, rs).await?;
+						self.clone().iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
 					};
 				}
-			}
+				sp
+			} else {
+				None
+			};
 			// Process all documents
-			self.iterate(stk, &cancel_ctx, opt, stm, rs).await?;
+			self.iterate(stk, &cancel_ctx, opt, stm, sp, plan.explanation.as_mut()).await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
@@ -349,7 +356,7 @@ impl Iterator {
 					// Ingest the pre-defined guaranteed record yield
 					self.ingest(guaranteed);
 					// Process the pre-defined guaranteed document
-					self.iterate(stk, &cancel_ctx, opt, stm, rs).await?;
+					self.iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
 				}
 			}
 			// Process any SPLIT AT clause
@@ -446,7 +453,12 @@ impl Iterator {
 		false
 	}
 
-	fn compute_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>, rs: RecordStrategy) {
+	fn compute_start_limit(
+		&mut self,
+		ctx: &Context,
+		stm: &Statement<'_>,
+		is_specific_permission: Option<bool>,
+	) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {
 				if let Some(s) = self.start {
@@ -456,7 +468,7 @@ impl Iterator {
 				}
 			}
 			// Check if we can skip processing the document below "start".
-			if matches!(rs, RecordStrategy::KeysOnly | RecordStrategy::Count) {
+			if let Some(false) = is_specific_permission {
 				let s = self.start.unwrap_or(0) as usize;
 				if s > 0 {
 					self.start_skip = Some(s);
@@ -567,10 +579,16 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-		rs: RecordStrategy,
+		is_specific_permission: Option<bool>,
+		exp: Option<&mut Explanation>,
 	) -> Result<(), Error> {
 		// Compute iteration limits
-		self.compute_start_limit(ctx, stm, rs);
+		self.compute_start_limit(ctx, stm, is_specific_permission);
+		if let Some(e) = exp {
+			if self.start_skip.is_some() || self.cancel_on_limit.is_some() {
+				e.add_start_limit(self.start_skip, self.cancel_on_limit);
+			}
+		}
 		// Prevent deep recursion
 		let opt = opt.dive(4)?;
 		// If any iterator requires distinct, we need to create a global distinct instance

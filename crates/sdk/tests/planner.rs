@@ -3269,9 +3269,9 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 async fn select_limit_start() -> Result<(), Error> {
 	let sql = r"
 		CREATE |item:1000|;
-		SELECT * FROM item LIMIT 10 START 2 PARALLEL EXPLAIN;
+		SELECT * FROM item LIMIT 10 START 2 PARALLEL EXPLAIN FULL;
 		SELECT * FROM item LIMIT 10 START 2 PARALLEL;
-		SELECT * FROM item LIMIT 10 START 2 EXPLAIN;
+		SELECT * FROM item LIMIT 10 START 2 EXPLAIN FULL;
 		SELECT * FROM item LIMIT 10 START 2;";
 	let mut t = Test::new(sql).await?;
 	t.expect_size(5)?;
@@ -3290,6 +3290,25 @@ async fn select_limit_start() -> Result<(), Error> {
 							type: 'Memory'
 						},
 						operation: 'Collector'
+					},
+					{
+						detail: {
+							type: 'KeysAndValues'
+						},
+						operation: 'RecordStrategy'
+					},
+					{
+						detail: {
+							CancelOnLimit: 12,
+							SkipStart: 2
+						},
+						operation: 'StartLimitStrategy'
+					},
+					{
+						detail: {
+							count: 10
+						},
+						operation: 'Fetch'
 					}
 				]",
 		)?;
