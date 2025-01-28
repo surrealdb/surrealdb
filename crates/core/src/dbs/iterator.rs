@@ -108,8 +108,8 @@ pub(crate) struct Iterator {
 	limit: Option<u32>,
 	/// Iterator start value
 	start: Option<u32>,
-	/// skip processing
-	skip: usize,
+	/// Skip processing
+	start_skip: Option<usize>,
 	/// Iterator runtime error
 	error: Option<Error>,
 	/// Iterator output results
@@ -129,7 +129,7 @@ impl Clone for Iterator {
 			count: 0,
 			limit: self.limit,
 			start: self.start,
-			skip: self.start.unwrap_or(0) as usize,
+			start_skip: self.start_skip.map(|_| self.start.unwrap_or(0) as usize),
 			error: None,
 			results: Results::default(),
 			entries: self.entries.clone(),
@@ -364,7 +364,7 @@ impl Iterator {
 				self.results.sort(orders);
 			}
 			// Process any START & LIMIT clause
-			self.results.start_limit(self.start, self.limit).await?;
+			self.results.start_limit(self.start_skip, self.start, self.limit).await?;
 			// Process any FETCH clause
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());
@@ -455,19 +455,22 @@ impl Iterator {
 					self.cancel_on_limit = Some(l);
 				}
 			}
-			if stm.cond().is_none() && stm.fetch().is_none() {
-				self.skip = self.start.unwrap_or(0) as usize;
+			if stm.cond().is_none() {
+				let s = self.start.unwrap_or(0) as usize;
+				if s > 0 {
+					self.start_skip = Some(s);
+				}
 			}
 		}
 	}
 
 	pub(super) fn is_skippable(&self) -> bool {
-		self.skip > 0
+		self.start_skip.map(|s| s > 0).unwrap_or(false)
 	}
 
 	pub(super) fn skipped(&mut self) {
-		if self.skip > 0 {
-			self.skip -= 1;
+		if let Some(s) = &mut self.start_skip {
+			*s -= 1;
 		}
 	}
 
