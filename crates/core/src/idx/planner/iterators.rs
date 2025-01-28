@@ -554,8 +554,7 @@ impl IndexUnionThingIterator {
 		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(arrays.len());
 
 		for a in arrays {
-			let beg = Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, a)?;
-			let end = Index::prefix_ids_end(ns, db, &ix.what, &ix.name, a)?;
+			let (beg, end) = IndexEqualThingIterator::get_beg_end(ns, db, ix, a)?;
 			values.push_back((beg, end));
 		}
 		let current = values.pop_front();
