@@ -367,13 +367,7 @@ impl QueryExecutor {
 				if variants.len() == 1 {
 					Some(Self::new_index_equal_iterator(ir, opt, ix, &variants[0])?)
 				} else {
-					Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(
-						ir,
-						opt.ns()?,
-						opt.db()?,
-						ix,
-						&variants,
-					)?))
+					Some(Self::new_multiple_index_equal_iterators(ir, opt, ix, variants)?)
 				}
 			}
 			IndexOperator::Union(values) => {
@@ -455,6 +449,19 @@ impl QueryExecutor {
 		} else {
 			variants.push(Array(variant));
 		}
+	}
+
+	fn new_multiple_index_equal_iterators(
+		irf: IteratorRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		values: Vec<Array>,
+	) -> Result<ThingIterator, Error> {
+		let mut iterators = VecDeque::with_capacity(values.len());
+		for value in values {
+			iterators.push_back(Self::new_index_equal_iterator(irf, opt, ix, &value)?);
+		}
+		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
 	}
 
 	fn new_index_equal_iterator(
@@ -828,9 +835,7 @@ impl QueryExecutor {
 				if variants.len() == 1 {
 					Some(Self::new_unique_equal_iterator(irf, opt, ixr, &variants[0])?)
 				} else {
-					Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
-						irf, opt, ixr, &variants,
-					)?))
+					Some(Self::new_multiple_unique_equal_iterators(irf, opt, ixr, variants)?)
 				}
 			}
 			IndexOperator::Union(values) => {
@@ -878,6 +883,18 @@ impl QueryExecutor {
 				array,
 			)?))
 		}
+	}
+	fn new_multiple_unique_equal_iterators(
+		irf: IteratorRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		values: Vec<Array>,
+	) -> Result<ThingIterator, Error> {
+		let mut iterators = VecDeque::with_capacity(values.len());
+		for value in values {
+			iterators.push_back(Self::new_unique_equal_iterator(irf, opt, ix, &value)?);
+		}
+		Ok(ThingIterator::Multiples(Box::new(MultipleIterators::new(iterators))))
 	}
 
 	async fn new_search_index_iterator(
