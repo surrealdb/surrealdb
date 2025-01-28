@@ -20,7 +20,7 @@ impl Value {
 			if old.is_object() && new.is_object() {
 				continue;
 			}
-			
+
 			match new {
 				Value::None => self.cut(k),
 				v => self.put(k, v),
