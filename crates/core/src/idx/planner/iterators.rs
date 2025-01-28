@@ -211,7 +211,21 @@ impl IndexEqualThingIterator {
 		ix: &DefineIndexStatement,
 		a: &Array,
 	) -> Result<Self, Error> {
-		let (beg, end) = if ix.cols.len() == 1 {
+		let (beg, end) = Self::get_beg_end(ns, db, ix, a)?;
+		Ok(Self {
+			irf,
+			beg,
+			end,
+		})
+	}
+
+	fn get_beg_end(
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		a: &Array,
+	) -> Result<(Vec<u8>, Vec<u8>), Error> {
+		Ok(if ix.cols.len() == 1 {
 			(
 				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, a)?,
 				Index::prefix_ids_end(ns, db, &ix.what, &ix.name, a)?,
@@ -221,11 +235,6 @@ impl IndexEqualThingIterator {
 				Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, a)?,
 				Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, a)?,
 			)
-		};
-		Ok(Self {
-			irf,
-			beg,
-			end,
 		})
 	}
 
@@ -539,23 +548,15 @@ impl IndexUnionThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-		a: &Value,
+		arrays: &[Array],
 	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
-		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = if let Value::Array(a) = a {
-			let mut res = VecDeque::new();
+		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(arrays.len());
 
-			for v in a.0.iter() {
-				let a = Array::from(v.clone());
-				let beg = Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, &a)?;
-				let end = Index::prefix_ids_end(ns, db, &ix.what, &ix.name, &a)?;
-				res.push_back((beg, end));
-			}
-
-			res
-		} else {
-			VecDeque::new()
-		};
+		for a in arrays {
+			let (beg, end) = IndexEqualThingIterator::get_beg_end(ns, db, ix, a)?;
+			values.push_back((beg, end));
+		}
 		let current = values.pop_front();
 		Ok(Self {
 			irf,
@@ -958,21 +959,14 @@ impl UniqueUnionThingIterator {
 		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		a: &Value,
+		vals: &[Array],
 	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the key for each value in the array.
-		let keys: VecDeque<Key> = if let Value::Array(a) = a {
-			let mut res = VecDeque::new();
-			for v in a.0.iter() {
-				let a = Array::from(v.clone());
-				let key =
-					Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, &a, None).encode()?;
-				res.push_back(key);
-			}
-			res
-		} else {
-			VecDeque::with_capacity(0)
-		};
+		let mut keys = VecDeque::with_capacity(vals.len());
+		for a in vals {
+			let key = Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, a, None).encode()?;
+			keys.push_back(key);
+		}
 		Ok(Self {
 			irf,
 			keys,
