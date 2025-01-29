@@ -10,8 +10,8 @@ use surrealdb::fflags::FFLAGS;
 use surrealdb::opt::auth::Database;
 use surrealdb::opt::auth::Namespace;
 use surrealdb::opt::auth::Record as RecordAccess;
-use surrealdb::opt::PatchOp;
 use surrealdb::opt::Resource;
+use surrealdb::opt::{PatchOp, PatchOps};
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
 use surrealdb::RecordId;
@@ -1120,6 +1120,42 @@ pub async fn patch_record_id(new_db: impl CreateDb) {
 	);
 }
 
+pub async fn patch_record_id_ops(new_db: impl CreateDb) {
+	#[derive(Debug, Deserialize, PartialEq)]
+	struct Record {
+		id: RecordId,
+		baz: String,
+		hello: Vec<String>,
+	}
+
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let id = "john";
+	let _: Option<ApiRecordId> = db
+		.create(("user", id))
+		.content(json!({
+			"baz": "qux",
+			"foo": "bar"
+		}))
+		.await
+		.unwrap();
+	let _: Option<Record> = db
+		.update(("user", id))
+		.patch(PatchOps::new().replace("/baz", "boo").add("/hello", ["world"]).remove("/foo"))
+		.await
+		.unwrap();
+	let value: Option<Record> = db.select(("user", id)).await.unwrap();
+	assert_eq!(
+		value,
+		Some(Record {
+			id: format!("user:{id}").parse().unwrap(),
+			baz: "boo".to_owned(),
+			hello: vec!["world".to_owned()],
+		})
+	);
+}
+
 pub async fn delete_table(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -1597,6 +1633,8 @@ define_include_tests!(basic => {
 	merge_record_id,
 	#[test_log::test(tokio::test)]
 	patch_record_id,
+	#[test_log::test(tokio::test)]
+	patch_record_id_ops,
 	#[test_log::test(tokio::test)]
 	delete_table,
 	#[test_log::test(tokio::test)]
