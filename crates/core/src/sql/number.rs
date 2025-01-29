@@ -1191,6 +1191,7 @@ impl Sum<Self> for Number {
 	where
 		I: Iterator<Item = Self>,
 	{
+		println!("sum");
 		iter.fold(Number::Int(0), |a, b| a + b)
 	}
 }
@@ -1200,6 +1201,7 @@ impl<'a> Sum<&'a Self> for Number {
 	where
 		I: Iterator<Item = &'a Self>,
 	{
+		println!("sum &");
 		iter.fold(Number::Int(0), |a, b| &a + b)
 	}
 }
