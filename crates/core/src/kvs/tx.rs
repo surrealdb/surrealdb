@@ -381,18 +381,18 @@ impl Transaction {
 		&self,
 		rng: Range<Vec<u8>>,
 		version: Option<u64>,
-		skip: usize,
+		limit: Option<usize>,
 	) -> impl Stream<Item = Result<(Key, Val), Error>> + '_ {
-		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version, skip)
+		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version, limit)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream_keys(
 		&self,
 		rng: Range<Vec<u8>>,
-		skip: usize,
+		limit: Option<usize>,
 	) -> impl Stream<Item = Result<Key, Error>> + '_ {
-		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, skip)
+		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, limit)
 	}
 
 	// --------------------------------------------------

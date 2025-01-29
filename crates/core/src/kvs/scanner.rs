@@ -29,8 +29,8 @@ pub(super) struct Scanner<'a, I> {
 	exhausted: bool,
 	/// Version as timestamp, 0 means latest.
 	version: Option<u64>,
-	/// Skip
-	_skip: usize,
+	/// Maximum number of results left to collect
+	left: Option<usize>,
 }
 
 impl<'a, I> Scanner<'a, I> {
@@ -39,7 +39,7 @@ impl<'a, I> Scanner<'a, I> {
 		batch: u32,
 		range: Range<Key>,
 		version: Option<u64>,
-		skip: usize,
+		limit: Option<usize>,
 	) -> Self {
 		Scanner {
 			store,
@@ -49,7 +49,7 @@ impl<'a, I> Scanner<'a, I> {
 			results: VecDeque::new(),
 			exhausted: false,
 			version,
-			_skip: skip,
+			left: limit,
 		}
 	}
 
@@ -75,8 +75,13 @@ impl<'a, I> Scanner<'a, I> {
 		if self.future.is_none() {
 			// Clone the range to use when scanning
 			let range = self.range.clone();
+			// Compute the batch size. It can't be more what is left to collect
+			let batch = self
+				.left
+				.map(|left| (self.batch as usize).min(left) as u32)
+				.unwrap_or_else(|| self.batch);
 			// Prepare a future to scan for results
-			self.future = Some(scan(range, self.batch));
+			self.future = Some(scan(range, batch));
 		}
 		// Try to resolve the future
 		match self.future.as_mut().unwrap().poll_unpin(cx) {
@@ -95,6 +100,9 @@ impl<'a, I> Scanner<'a, I> {
 						}
 						// There are results which need streaming
 						false => {
+							if let Some(l) = &mut self.left {
+								*l -= v.len();
+							}
 							// We fetched the last elements in the range
 							if v.len() < self.batch as usize {
 								self.exhausted = true;

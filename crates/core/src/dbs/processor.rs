@@ -13,7 +13,7 @@ use crate::sql::{Edges, Table, Thing, Value};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use std::borrow::Cow;
-use std::ops::Bound;
+use std::ops::{Bound, Range};
 use std::sync::Arc;
 use std::vec;
 
@@ -520,10 +520,14 @@ pub(super) trait Collector {
 		// Prepare the start and end keys
 		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
 		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
-		// Extract option skippable records
-		let skip = self.iterator().skippable();
+		// Optionally skip keys
+		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end).await? {
+			r
+		} else {
+			return Ok(());
+		};
 		// Create a new iterable range
-		let mut stream = txn.stream(beg..end, opt.version, skip);
+		let mut stream = txn.stream(rng, opt.version, None);
 
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
@@ -552,10 +556,15 @@ pub(super) trait Collector {
 		// Prepare the start and end keys
 		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
 		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
-		// Collect the skippable records
-		let skip = self.iterator().skippable();
+		// Optionally skip keys
+		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end).await? {
+			r
+		} else {
+			// Start skipping already noticed that there is no key left
+			return Ok(());
+		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(beg..end, skip);
+		let mut stream = txn.stream_keys(rng, None);
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
@@ -635,9 +644,14 @@ pub(super) trait Collector {
 		// Prepare
 		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
 		// Get the skippable records
-		let skip = self.iterator().skippable();
+		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end).await? {
+			r
+		} else {
+			// Start skipping already noticed that there is no key left
+			return Ok(());
+		};
 		// Create a new iterable range
-		let mut stream = txn.stream(beg..end, None, skip);
+		let mut stream = txn.stream(rng, None, None);
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
@@ -652,6 +666,41 @@ pub(super) trait Collector {
 		// Everything ok
 		Ok(())
 	}
+	async fn start_skip(
+		&mut self,
+		ctx: &Context,
+		txn: &Transaction,
+		mut rng: Range<Key>,
+	) -> Result<Option<Range<Key>>, Error> {
+		let ite = self.iterator();
+		let skippable = ite.skippable();
+		if skippable == 0 {
+			// There is nothing to skip, we return the original range.
+			return Ok(Some(rng));
+		}
+		// For skipping, we only need to iterate over keys.
+		let mut stream = txn.stream_keys(rng.clone(), Some(skippable));
+		let mut skipped = 0;
+		let mut last_key = vec![];
+		while let Some(res) = stream.next().await {
+			// Check if the context is finished
+			if ctx.is_done() {
+				break;
+			}
+			last_key = res?;
+			skipped += 1;
+		}
+		ite.skipped(skipped);
+		// If we don't have a last key we're done
+		if last_key.is_empty() {
+			return Ok(None);
+		}
+		// We want the next iteration to go on
+		last_key.push(0xFF);
+		// We return the next range
+		rng.start = last_key;
+		Ok(Some(rng))
+	}
 
 	async fn collect_range_keys(
 		&mut self,
@@ -665,9 +714,14 @@ pub(super) trait Collector {
 		// Prepare
 		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
 		// Get the skippable records
-		let skip = self.iterator().skippable();
+		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end).await? {
+			r
+		} else {
+			// Start skipping already noticed that there is no key left
+			return Ok(());
+		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(beg..end, skip);
+		let mut stream = txn.stream_keys(rng, None);
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
@@ -777,7 +831,7 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
-			let mut stream = txn.stream(beg?..end?, None, 0);
+			let mut stream = txn.stream(beg?..end?, None, None);
 			// Loop until no more entries
 			while let Some(res) = stream.next().await {
 				// Check if the context is finished

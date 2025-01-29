@@ -477,12 +477,12 @@ impl Iterator {
 		}
 	}
 
-	/// Check if we can skip processing the upcoming record
+	/// Return the number of record that should be skipped
 	pub(super) fn skippable(&self) -> usize {
 		self.start_skip.unwrap_or(0)
 	}
 
-	/// Confirm that the records have been skipped
+	/// Confirm the number of records that have been skipped
 	pub(super) fn skipped(&mut self, skipped: usize) {
 		if let Some(s) = &mut self.start_skip {
 			*s -= skipped;
