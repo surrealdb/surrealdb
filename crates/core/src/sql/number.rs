@@ -1201,8 +1201,17 @@ impl<'a> Sum<&'a Self> for Number {
 	where
 		I: Iterator<Item = &'a Self>,
 	{
-		println!("sum &");
-		iter.fold(Number::Int(0), |a, b| &a + b)
+		let mut iter = iter.peekable();
+		match iter.peek() {
+			Some(Number::Felt252(_)) => {
+				println!("Summing Felt252");
+				iter.fold(Number::Felt252(0.into()), |a, b| a + *b)
+			}
+			_ => {
+				println!("Summing Int");
+				iter.fold(Number::Int(0), |a, b| a + *b)
+			}
+		}
 	}
 }
 
@@ -1211,7 +1220,17 @@ impl Product<Self> for Number {
 	where
 		I: Iterator<Item = Self>,
 	{
-		iter.fold(Number::Int(1), |a, b| a * b)
+		let mut iter = iter.peekable();
+		match iter.peek() {
+			Some(Number::Felt252(_)) => {
+				println!("Summing Felt252");
+				iter.fold(Number::Felt252(0.into()), |a, b| a + b)
+			}
+			_ => {
+				println!("Summing Int");
+				iter.fold(Number::Int(0), |a, b| a + b)
+			}
+		}
 	}
 }
 
