@@ -33,6 +33,14 @@ pub(super) struct Scanner<'a, I> {
 	left: Option<usize>,
 }
 
+#[cfg(not(target_family = "wasm"))]
+type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a + Send>>;
+
+#[cfg(target_family = "wasm")]
+type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a>>;
+#[cfg(target_family = "wasm")]
+type FutureResult<'a, I> = impl Future<Output = Result<Vec<I>, Error>> + 'a;
+
 impl<'a, I> Scanner<'a, I> {
 	pub fn new(
 		store: &'a Transaction,
@@ -60,7 +68,7 @@ impl<'a, I> Scanner<'a, I> {
 		key: K,
 	) -> Poll<Option<Result<I, Error>>>
 	where
-		S: Fn(Range<Key>, u32) -> Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a + Send>>,
+		S: Fn(Range<Key>, u32) -> FutureResult<'a, I>,
 		K: Fn(&I) -> &Key,
 	{
 		// If we have results, return the first one
