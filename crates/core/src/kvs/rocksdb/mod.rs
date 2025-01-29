@@ -177,6 +177,8 @@ impl Datastore {
 			// means that the WAL will be flushed
 			// whenever a transaction is committed.
 			false => {
+				// Dispay the configuration setting
+				info!(target: TARGET, "Background write-ahead-log flushing: disabled");
 				// Enable manual WAL flush
 				opts.set_manual_wal_flush(false);
 				// Create the optimistic datastore
@@ -186,6 +188,8 @@ impl Datastore {
 			// spawn a background worker thread to
 			// flush the WAL to disk periodically.
 			true => {
+				// Dispay the configuration setting
+				info!(target: TARGET, "Background write-ahead-log flushing: enabled every {}ms", *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL);
 				// Enable manual WAL flush
 				opts.set_manual_wal_flush(true);
 				// Create the optimistic datastore
