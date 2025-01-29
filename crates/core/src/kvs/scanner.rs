@@ -10,21 +10,23 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+#[cfg(not(target_family = "wasm"))]
+type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a + Send>>;
+
+#[cfg(target_family = "wasm")]
+type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a>>;
+
 pub(super) struct Scanner<'a, I> {
 	/// The store which started this range scan
 	store: &'a Transaction,
 	/// The number of keys to fetch at once
 	batch: u32,
-	// The key range for this range scan
+	/// The key range for this range scan
 	range: Range<Key>,
-	// The results from the last range scan
+	/// The results from the last range scan
 	results: VecDeque<I>,
-	#[allow(clippy::type_complexity)]
 	/// The currently running future to be polled
-	#[cfg(not(target_family = "wasm"))]
-	future: Option<Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a + Send>>>,
-	#[cfg(target_family = "wasm")]
-	future: Option<Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a>>>,
+	future: Option<FutureResult<'a, I>>,
 	/// Whether this stream should try to fetch more
 	exhausted: bool,
 	/// Version as timestamp, 0 means latest.
@@ -32,14 +34,6 @@ pub(super) struct Scanner<'a, I> {
 	/// Maximum number of results left to collect
 	left: Option<usize>,
 }
-
-#[cfg(not(target_family = "wasm"))]
-type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a + Send>>;
-
-#[cfg(target_family = "wasm")]
-type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a>>;
-#[cfg(target_family = "wasm")]
-type FutureResult<'a, I> = impl Future<Output = Result<Vec<I>, Error>> + 'a;
 
 impl<'a, I> Scanner<'a, I> {
 	pub fn new(
