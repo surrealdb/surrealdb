@@ -13,6 +13,8 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use super::KeyEncode;
 
@@ -69,8 +71,6 @@ impl Datastore {
 		opts.create_if_missing(true);
 		// Create column families if missing
 		opts.create_missing_column_families(true);
-		// Log if writes should be synced
-		info!(target: TARGET, "Enabling data durability: {}", *cnf::ROCKSDB_SYNC_DATA);
 		// Increase the background thread count
 		info!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
 		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
@@ -116,6 +116,8 @@ impl Datastore {
 		// Improve concurrency from write batch mutex
 		info!(target: TARGET, "Allow adaptive write thread yielding: true");
 		opts.set_enable_write_thread_adaptive_yield(true);
+		// Log if writes should be synced
+		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", *cnf::SYNC_DATA);
 		// Set the block cache size in bytes
 		info!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
 		// Configure the in-memory cache options
@@ -169,9 +171,45 @@ impl Datastore {
 				return Err(Error::Ds(format!("Invalid storage engine log level specified: {l}")));
 			}
 		});
-		// Create the datastore
+		// Configure background WAL flush behaviour
+		let db = match *cnf::ROCKSDB_BACKGROUND_FLUSH {
+			// Beckground flush is disabled which
+			// means that the WAL will be flushed
+			// whenever a transaction is committed.
+			false => {
+				// Enable manual WAL flush
+				opts.set_manual_wal_flush(false);
+				// Create the optimistic datastore
+				Arc::pin(OptimisticTransactionDB::open(&opts, path)?)
+			}
+			// Background flush is enabled so we
+			// spawn a background worker thread to
+			// flush the WAL to disk periodically.
+			true => {
+				// Enable manual WAL flush
+				opts.set_manual_wal_flush(true);
+				// Create the optimistic datastore
+				let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
+				// Clone the database reference
+				let dbc = db.clone();
+				// Create a new background thread
+				thread::spawn(move || loop {
+					// Get the specified flush interval
+					let wait = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
+					// Wait for the specified interval
+					thread::sleep(Duration::from_millis(wait));
+					// Flush the WAL to disk periodically
+					if let Err(err) = dbc.flush_wal(true) {
+						error!("Failed to flush WAL: {err}");
+					}
+				});
+				// Return the datastore
+				db
+			}
+		};
+		// Return the datastore
 		Ok(Datastore {
-			db: Arc::pin(OptimisticTransactionDB::open(&opts, path)?),
+			db,
 		})
 	}
 	/// Shutdown the database
@@ -198,7 +236,7 @@ impl Datastore {
 		to.set_snapshot(true);
 		// Set the write options
 		let mut wo = WriteOptions::default();
-		wo.set_sync(*cnf::ROCKSDB_SYNC_DATA);
+		wo.set_sync(*cnf::SYNC_DATA);
 		// Create a new transaction
 		let inner = self.db.transaction_opt(&wo, &to);
 		// The database reference must always outlive
