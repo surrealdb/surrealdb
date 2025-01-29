@@ -227,6 +227,12 @@ async fn select_expression_value() -> Result<(), Error> {
 				},
 				{
 					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 2,
 					},
 					operation: 'Fetch'
@@ -561,6 +567,12 @@ async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 				},
 				{
 					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 2,
 					},
 					operation: 'Fetch'
@@ -809,6 +821,12 @@ async fn select_where_explain() -> Result<(), Error> {
 						type: 'Memory'
 					},
 					operation: 'Collector'
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
 				},
 				{
 					detail: {

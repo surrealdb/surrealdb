@@ -210,6 +210,12 @@ fn table_explain(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
+					type: 'KeysAndValues'
+				}},
+				operation: 'RecordStrategy'
+			}},
+			{{
+				detail: {{
 					count: {fetch_count}
 				}},
 				operation: 'Fetch'
@@ -241,6 +247,12 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
+					type: 'KeysAndValues'
+				}},
+				operation: 'RecordStrategy'
+			}},
+			{{
+				detail: {{
 					count: {fetch_count}
 				}},
 				operation: 'Fetch'
@@ -268,6 +280,12 @@ fn three_table_explain(parallel: bool) -> String {
 					type: '{collector}'
 				}},
 				operation: 'Collector'
+			}},
+			{{
+				detail: {{
+					type: 'KeysAndValues'
+				}},
+				operation: 'RecordStrategy'
 			}},
 			{{
 				detail: {{
@@ -321,6 +339,12 @@ const THREE_MULTI_INDEX_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 3
 					},
 					operation: 'Fetch'
@@ -344,6 +368,12 @@ const SINGLE_INDEX_FT_EXPLAIN: &str = "[
 						type: 'MemoryOrdered'
 					},
 					operation: 'Collector'
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
 				},
 				{
 					detail: {
@@ -373,6 +403,12 @@ const SINGLE_INDEX_UNIQ_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 1
 					},
 					operation: 'Fetch'
@@ -396,6 +432,12 @@ const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 			type: 'MemoryOrdered'
 		},
 		operation: 'Collector'
+	},
+	{
+		detail: {
+			type: 'KeysAndValues'
+		},
+		operation: 'RecordStrategy'
 	},
 	{
 		detail: {
@@ -433,6 +475,12 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
 				},
 				{
 					detail: {
@@ -3370,10 +3418,10 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 async fn select_limit_start() -> Result<(), Error> {
 	let sql = r"
 		CREATE |item:1000|;
-		SELECT * FROM item LIMIT 10 START 0 PARALLEL EXPLAIN;
-		SELECT * FROM item LIMIT 10 START 0 PARALLEL;
-		SELECT * FROM item LIMIT 10 START 0 EXPLAIN;
-		SELECT * FROM item LIMIT 10 START 0;";
+		SELECT * FROM item LIMIT 10 START 2 PARALLEL EXPLAIN FULL;
+		SELECT * FROM item LIMIT 10 START 2 PARALLEL;
+		SELECT * FROM item LIMIT 10 START 2 EXPLAIN FULL;
+		SELECT * FROM item LIMIT 10 START 2;";
 	let mut t = Test::new(sql).await?;
 	t.expect_size(5)?;
 	t.skip_ok(1)?;
@@ -3391,6 +3439,25 @@ async fn select_limit_start() -> Result<(), Error> {
 							type: 'Memory'
 						},
 						operation: 'Collector'
+					},
+					{
+						detail: {
+							type: 'KeysAndValues'
+						},
+						operation: 'RecordStrategy'
+					},
+					{
+						detail: {
+							CancelOnLimit: 12,
+							SkipStart: 2
+						},
+						operation: 'StartLimitStrategy'
+					},
+					{
+						detail: {
+							count: 10
+						},
+						operation: 'Fetch'
 					}
 				]",
 		)?;

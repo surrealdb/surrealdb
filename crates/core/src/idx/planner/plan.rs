@@ -3,7 +3,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
-use crate::idx::planner::{RecordStrategy, StatementContext};
+use crate::idx::planner::{GrantedPermission, RecordStrategy, StatementContext};
 use crate::sql::with::With;
 use crate::sql::{Array, Expression, Idiom, Number, Object};
 use crate::sql::{Operator, Value};
@@ -28,7 +28,7 @@ impl PlanBuilder {
 	#[allow(clippy::too_many_arguments)]
 	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn build(
-		tb: &str,
+		granted_permission: GrantedPermission,
 		root: Option<Node>,
 		ctx: &StatementContext<'_>,
 		with_indexes: Option<Vec<IndexReference>>,
@@ -46,13 +46,13 @@ impl PlanBuilder {
 		};
 
 		if let Some(With::NoIndex) = ctx.with {
-			return Self::table_iterator(ctx, Some("WITH NOINDEX"), tb).await;
+			return Self::table_iterator(ctx, Some("WITH NOINDEX"), granted_permission).await;
 		}
 
 		// Browse the AST and collect information
 		if let Some(root) = &root {
 			if let Err(e) = b.eval_node(root) {
-				return Self::table_iterator(ctx, Some(&e), tb).await;
+				return Self::table_iterator(ctx, Some(&e), granted_permission).await;
 			}
 		}
 
@@ -74,7 +74,7 @@ impl PlanBuilder {
 			}
 			if let Some((_, io)) = compound_index {
 				// Evaluate if we can use keys only
-				let record_strategy = ctx.check_record_strategy(true, tb).await?;
+				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
@@ -83,7 +83,8 @@ impl PlanBuilder {
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
-					let record_strategy = ctx.check_record_strategy(true, tb).await?;
+					let record_strategy =
+						ctx.check_record_strategy(true, granted_permission).await?;
 					// Return the plan
 					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy));
 				}
@@ -92,14 +93,14 @@ impl PlanBuilder {
 			// Otherwise, we try to find the most interesting (todo: TBD) single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, tb).await?;
+				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
 			}
 			// If there is an order option
 			if let Some(o) = order {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, tb).await?;
+				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
 			}
@@ -115,20 +116,20 @@ impl PlanBuilder {
 				}
 			}
 			// Evaluate the record strategy
-			let record_strategy = ctx.check_record_strategy(true, tb).await?;
+			let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
-		Self::table_iterator(ctx, None, tb).await
+		Self::table_iterator(ctx, None, granted_permission).await
 	}
 
 	async fn table_iterator(
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
-		tb: &str,
+		granted_permission: GrantedPermission,
 	) -> Result<Plan, Error> {
 		// Evaluate the record strategy
-		let record_strategy = ctx.check_record_strategy(false, tb).await?;
+		let record_strategy = ctx.check_record_strategy(false, granted_permission).await?;
 		// Collect the reason if any
 		let reason = reason.map(|s| s.to_string());
 		Ok(Plan::TableIterator(reason, record_strategy))
