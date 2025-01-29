@@ -58,8 +58,6 @@ impl Datastore {
 		opts.disk_persistence = true;
 		// Set the data storage directory
 		opts.dir = path.to_string().into();
-		// Log if writes should be synced
-		info!(target: TARGET, "Enabling data durability: {}", *cnf::SURREALKV_SYNC_DATA);
 		// Set the maximum segment size
 		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
 		opts.max_segment_size = *cnf::SURREALKV_MAX_SEGMENT_SIZE;
@@ -69,6 +67,8 @@ impl Datastore {
 		// Set the maximum value cache size
 		info!(target: TARGET, "Setting maximum value cache size: {}", *cnf::SURREALKV_MAX_VALUE_CACHE_SIZE);
 		opts.max_value_cache_size = *cnf::SURREALKV_MAX_VALUE_CACHE_SIZE;
+		// Log if writes should be synced
+		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", *cnf::SYNC_DATA);
 		// Create a new datastore
 		match Store::new(opts) {
 			Ok(db) => Ok(Datastore {
@@ -112,7 +112,7 @@ impl Datastore {
 			false => self.db.begin_with_mode(Mode::ReadOnly),
 		}?;
 		// Set the transaction durability
-		match *cnf::SURREALKV_SYNC_DATA {
+		match *cnf::SYNC_DATA {
 			true => txn.set_durability(Durability::Immediate),
 			false => txn.set_durability(Durability::Eventual),
 		};

@@ -2,8 +2,13 @@ use std::cmp::max;
 use std::sync::LazyLock;
 use sysinfo::System;
 
-pub static ROCKSDB_SYNC_DATA: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_ROCKSDB_SYNC_DATA", bool, false);
+pub static SYNC_DATA: LazyLock<bool> = lazy_env_parse!("SURREAL_SYNC_DATA", bool, false);
+
+pub static ROCKSDB_BACKGROUND_FLUSH: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH", bool, false);
+
+pub static ROCKSDB_BACKGROUND_FLUSH_INTERVAL: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH_INTERVAL", u64, 100);
 
 pub static ROCKSDB_THREAD_COUNT: LazyLock<i32> =
 	lazy_env_parse_or_else!("SURREAL_ROCKSDB_THREAD_COUNT", i32, |_| num_cpus::get() as i32);
