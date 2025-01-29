@@ -69,6 +69,8 @@ impl Datastore {
 		opts.create_if_missing(true);
 		// Create column families if missing
 		opts.create_missing_column_families(true);
+		// Log if writes should be synced
+		info!(target: TARGET, "Enabling data durability: {}", *cnf::ROCKSDB_SYNC_DATA);
 		// Increase the background thread count
 		info!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
 		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
@@ -196,7 +198,7 @@ impl Datastore {
 		to.set_snapshot(true);
 		// Set the write options
 		let mut wo = WriteOptions::default();
-		wo.set_sync(false);
+		wo.set_sync(*cnf::ROCKSDB_SYNC_DATA);
 		// Create a new transaction
 		let inner = self.db.transaction_opt(&wo, &to);
 		// The database reference must always outlive
