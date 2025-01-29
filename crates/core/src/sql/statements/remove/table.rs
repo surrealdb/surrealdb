@@ -89,11 +89,11 @@ impl RemoveTableStatement {
 						None,
 					)
 					.await?;
-					// Clear the cache
-					if let Some(cache) = ctx.get_cache() {
-						cache.clear_tb(ns, db, &self.name);
-					}
 				}
+			}
+			// Clear the cache
+			if let Some(cache) = ctx.get_cache() {
+				cache.clear_tb(ns, db, &self.name);
 			}
 			// Clear the cache
 			txn.clear();

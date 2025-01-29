@@ -38,16 +38,15 @@ impl DatastoreCache {
 		self.cache.insert(lookup.into(), entry);
 	}
 
-	/// Clear the cache entry for a database
-	pub(crate) fn clear_db(&self, ns: &str, db: &str) {
-		let key = Lookup::Db(ns, db);
-		self.cache.remove(&key);
-	}
-
 	/// Clear the cache entry for a table
 	pub(crate) fn clear_tb(&self, ns: &str, db: &str, tb: &str) {
 		let key = Lookup::Tb(ns, db, tb);
 		self.cache.remove(&key);
+	}
+
+	/// Clear all items from the datastore cache
+	pub(crate) fn clear(&self) {
+		self.cache.clear();
 	}
 
 	pub fn get_live_queries_version(&self, ns: &str, db: &str, tb: &str) -> Result<Uuid, Error> {

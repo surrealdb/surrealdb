@@ -70,7 +70,7 @@ impl DefineDatabaseStatement {
 		.await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_db(ns, &self.name);
+			cache.clear();
 		}
 		// Clear the cache
 		txn.clear();

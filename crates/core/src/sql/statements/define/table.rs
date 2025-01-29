@@ -153,6 +153,10 @@ impl DefineTableStatement {
 			}
 		}
 		// Clear the cache
+		if let Some(cache) = ctx.get_cache() {
+			cache.clear_tb(ns, db, &self.name);
+		}
+		// Clear the cache
 		txn.clear();
 		// Ok all good
 		Ok(Value::None)
