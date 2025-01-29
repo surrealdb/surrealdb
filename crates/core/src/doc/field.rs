@@ -303,13 +303,13 @@ impl FieldEditContext<'_> {
 							},
 							Error::NestedCoerceTo {
 								from,
+								path,
 								into,
 								..
-							} => Error::FieldCheckNested {
+							} => Error::FieldCheck {
 								thing: self.rid.to_string(),
-								field: self.def.name.clone(),
+								field: self.def.name.clone().extend(path),
 								check: into,
-								parent: kind.to_string(),
 								value: from.to_string(),
 							},
 							// There was a different error
@@ -344,13 +344,13 @@ impl FieldEditContext<'_> {
 					},
 					Error::NestedCoerceTo {
 						from,
+						path,
 						into,
 						..
-					} => Error::FieldCheckNested {
+					} => Error::FieldCheck {
 						thing: self.rid.to_string(),
-						field: self.def.name.clone(),
+						field: self.def.name.clone().extend(path),
 						check: into,
-						parent: kind.to_string(),
 						value: from.to_string(),
 					},
 					// There was a different error

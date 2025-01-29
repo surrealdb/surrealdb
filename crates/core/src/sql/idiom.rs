@@ -102,6 +102,11 @@ impl Idiom {
 		self.0.push(n);
 		self
 	}
+	/// Appends a part to the end of this Idiom
+	pub(crate) fn extend(mut self, n: Idiom) -> Idiom {
+		self.0.extend(n.0);
+		self
+	}
 	/// Convert this Idiom to a unique hash
 	pub(crate) fn to_hash(&self) -> String {
 		let mut hasher = Md5::new();
