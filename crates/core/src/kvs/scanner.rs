@@ -31,8 +31,8 @@ pub(super) struct Scanner<'a, I> {
 	exhausted: bool,
 	/// Version as timestamp, 0 means latest.
 	version: Option<u64>,
-	/// Maximum number of results left to collect
-	left: Option<usize>,
+	/// An optional maximum number of keys to scan
+	limit: Option<usize>,
 }
 
 impl<'a, I> Scanner<'a, I> {
@@ -51,7 +51,7 @@ impl<'a, I> Scanner<'a, I> {
 			results: VecDeque::new(),
 			exhausted: false,
 			version,
-			left: limit,
+			limit,
 		}
 	}
 
@@ -79,8 +79,8 @@ impl<'a, I> Scanner<'a, I> {
 			let range = self.range.clone();
 			// Compute the batch size. It can't be more what is left to collect
 			let batch = self
-				.left
-				.map(|left| (self.batch as usize).min(left) as u32)
+				.limit
+				.map(|l| (self.batch as usize).min(l) as u32)
 				.unwrap_or_else(|| self.batch);
 			// Prepare a future to scan for results
 			self.future = Some(scan(range, batch));
@@ -102,7 +102,7 @@ impl<'a, I> Scanner<'a, I> {
 						}
 						// There are results which need streaming
 						false => {
-							if let Some(l) = &mut self.left {
+							if let Some(l) = &mut self.limit {
 								*l -= v.len();
 							}
 							// We fetched the last elements in the range

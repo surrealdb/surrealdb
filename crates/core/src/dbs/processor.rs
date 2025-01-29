@@ -507,6 +507,42 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	async fn start_skip(
+		&mut self,
+		ctx: &Context,
+		txn: &Transaction,
+		mut rng: Range<Key>,
+	) -> Result<Option<Range<Key>>, Error> {
+		let ite = self.iterator();
+		let skippable = ite.skippable();
+		if skippable == 0 {
+			// There is nothing to skip, we return the original range.
+			return Ok(Some(rng));
+		}
+		// We only need to iterate over keys.
+		let mut stream = txn.stream_keys(rng.clone(), Some(skippable));
+		let mut skipped = 0;
+		let mut last_key = vec![];
+		while let Some(res) = stream.next().await {
+			// Check if the context is finished
+			if ctx.is_done() {
+				break;
+			}
+			last_key = res?;
+			skipped += 1;
+		}
+		// Update the iterator about the number of skipped keys
+		ite.skipped(skipped);
+		// If we don't have a last key we're done
+		if last_key.is_empty() {
+			return Ok(None);
+		}
+		// We set the range for the next iteration
+		last_key.push(0xFF);
+		rng.start = last_key;
+		Ok(Some(rng))
+	}
+
 	async fn collect_table(
 		&mut self,
 		ctx: &Context,
@@ -557,10 +593,11 @@ pub(super) trait Collector {
 		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
 		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
 		// Optionally skip keys
-		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end).await? {
-			r
+		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end).await? {
+			// Returns the next range of keys
+			rng
 		} else {
-			// Start skipping already noticed that there is no key left
+			// There is nothing left to iterate
 			return Ok(());
 		};
 		// Create a new iterable range
@@ -644,10 +681,11 @@ pub(super) trait Collector {
 		// Prepare
 		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end).await? {
-			r
+		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end).await? {
+			// Returns the next range of keys
+			rng
 		} else {
-			// Start skipping already noticed that there is no key left
+			// There is nothing left to iterate
 			return Ok(());
 		};
 		// Create a new iterable range
@@ -666,41 +704,6 @@ pub(super) trait Collector {
 		// Everything ok
 		Ok(())
 	}
-	async fn start_skip(
-		&mut self,
-		ctx: &Context,
-		txn: &Transaction,
-		mut rng: Range<Key>,
-	) -> Result<Option<Range<Key>>, Error> {
-		let ite = self.iterator();
-		let skippable = ite.skippable();
-		if skippable == 0 {
-			// There is nothing to skip, we return the original range.
-			return Ok(Some(rng));
-		}
-		// For skipping, we only need to iterate over keys.
-		let mut stream = txn.stream_keys(rng.clone(), Some(skippable));
-		let mut skipped = 0;
-		let mut last_key = vec![];
-		while let Some(res) = stream.next().await {
-			// Check if the context is finished
-			if ctx.is_done() {
-				break;
-			}
-			last_key = res?;
-			skipped += 1;
-		}
-		ite.skipped(skipped);
-		// If we don't have a last key we're done
-		if last_key.is_empty() {
-			return Ok(None);
-		}
-		// We want the next iteration to go on
-		last_key.push(0xFF);
-		// We return the next range
-		rng.start = last_key;
-		Ok(Some(rng))
-	}
 
 	async fn collect_range_keys(
 		&mut self,
@@ -714,10 +717,11 @@ pub(super) trait Collector {
 		// Prepare
 		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end).await? {
-			r
+		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end).await? {
+			// Returns the next range of keys
+			rng
 		} else {
-			// Start skipping already noticed that there is no key left
+			// There is nothing left to iterate
 			return Ok(());
 		};
 		// Create a new iterable range
