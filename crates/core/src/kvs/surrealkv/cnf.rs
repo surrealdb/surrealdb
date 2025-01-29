@@ -1,5 +1,8 @@
 use std::sync::LazyLock;
 
+pub static SURREALKV_SYNC_DATA: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_SURREALKV_SYNC_DATA", bool, false);
+
 pub static SURREALKV_MAX_VALUE_THRESHOLD: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SURREALKV_MAX_VALUE_THRESHOLD", usize, 64);
 

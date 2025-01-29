@@ -7,10 +7,10 @@ use crate::key::debug::Sprintable;
 use crate::kvs::{Check, Key, KeyEncode, Val, Version};
 use std::fmt::Debug;
 use std::ops::Range;
-use surrealkv::Mode;
 use surrealkv::Options;
 use surrealkv::Store;
 use surrealkv::Transaction as Tx;
+use surrealkv::{Durability, Mode};
 
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
@@ -58,6 +58,8 @@ impl Datastore {
 		opts.disk_persistence = true;
 		// Set the data storage directory
 		opts.dir = path.to_string().into();
+		// Log if writes should be synced
+		info!(target: TARGET, "Enabling data durability: {}", *cnf::SURREALKV_SYNC_DATA);
 		// Set the maximum segment size
 		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
 		opts.max_segment_size = *cnf::SURREALKV_MAX_SEGMENT_SIZE;
@@ -105,20 +107,22 @@ impl Datastore {
 		#[cfg(debug_assertions)]
 		let check = Check::Error;
 		// Create a new transaction
-		let txn = match write {
+		let mut txn = match write {
 			true => self.db.begin_with_mode(Mode::ReadWrite),
 			false => self.db.begin_with_mode(Mode::ReadOnly),
+		}?;
+		// Set the transaction durability
+		match *cnf::SURREALKV_SYNC_DATA {
+			true => txn.set_durability(Durability::Immediate),
+			false => txn.set_durability(Durability::Eventual),
 		};
 		// Return the new transaction
-		match txn {
-			Ok(inner) => Ok(Transaction {
-				done: false,
-				check,
-				write,
-				inner,
-			}),
-			Err(e) => Err(Error::Tx(e.to_string())),
-		}
+		Ok(Transaction {
+			done: false,
+			check,
+			write,
+			inner: txn,
+		})
 	}
 }
 
