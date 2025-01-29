@@ -81,11 +81,9 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
-      - name: Install a TOML parser
+      - name: Install a cargo-edit
         run: |
-          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
-          chmod +x taplo
-          sudo mv taplo /usr/bin/taplo
+          cargo install cargo-edit
 
       - name: Configure git
         run: |
@@ -98,7 +96,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
 
           if [[ $currentVersion == *"-beta"* ]]; then
             git push origin --delete releases/stable || true
@@ -106,6 +104,8 @@ jobs:
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
             version=${major}.${minor}.0
+
+            cargo set-version "${version}"
 
             # Bump the crate version
             sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
