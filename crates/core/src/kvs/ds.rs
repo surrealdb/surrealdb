@@ -118,51 +118,54 @@ impl TransactionFactory {
 		};
 		// Create a new transaction on the datastore
 		#[allow(unused_variables)]
-		let inner = match self.flavor.as_ref() {
+		let (inner, local) = match self.flavor.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::Mem(tx)
+				(super::tr::Inner::Mem(tx), true)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::RocksDB(tx)
+				(super::tr::Inner::RocksDB(tx), true)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			DatastoreFlavor::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::IndxDB(tx)
+				(super::tr::Inner::IndxDB(tx), true)
 			}
 			#[cfg(feature = "kv-tikv")]
 			DatastoreFlavor::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::TiKV(tx)
+				(super::tr::Inner::TiKV(tx), false)
 			}
 			#[cfg(feature = "kv-fdb")]
 			DatastoreFlavor::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::FoundationDB(tx)
+				(super::tr::Inner::FoundationDB(tx), false)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::SurrealKV(tx)
+				(super::tr::Inner::SurrealKV(tx), true)
 			}
 			#[cfg(feature = "kv-surrealcs")]
 			DatastoreFlavor::SurrealCS(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::SurrealCS(tx)
+				(super::tr::Inner::SurrealCS(tx), false)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
-		Ok(Transaction::new(Transactor {
-			inner,
-			stash: super::stash::Stash::default(),
-			cf: cf::Writer::new(),
-			clock: self.clock.clone(),
-		}))
+		Ok(Transaction::new(
+			local,
+			Transactor {
+				inner,
+				stash: super::stash::Stash::default(),
+				cf: cf::Writer::new(),
+				clock: self.clock.clone(),
+			},
+		))
 	}
 }
 

@@ -45,6 +45,10 @@ impl RemoveDatabaseStatement {
 				false => txn.delp(key).await?,
 			};
 			// Clear the cache
+			if let Some(cache) = ctx.get_cache() {
+				cache.clear();
+			}
+			// Clear the cache
 			txn.clear();
 			// Ok all good
 			Ok(Value::None)
