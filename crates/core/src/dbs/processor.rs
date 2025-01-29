@@ -389,13 +389,17 @@ pub(super) struct ConcurrentCollector<'a> {
 impl Collector for ConcurrentCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
 		// if it is skippable don't need to process the document
-		if !self.ite.is_skippable() {
+		if self.ite.skippable() == 0 {
 			let pro = collected.process(self.opt, self.txn, false).await?;
 			self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
 		} else {
-			self.ite.skipped();
+			self.ite.skipped(1);
 		}
 		Ok(())
+	}
+
+	fn iterator(&mut self) -> &mut Iterator {
+		self.ite
 	}
 }
 
@@ -406,7 +410,7 @@ pub(super) struct ConcurrentDistinctCollector<'a> {
 
 impl Collector for ConcurrentDistinctCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
-		let skippable = self.coll.ite.is_skippable();
+		let skippable = self.coll.ite.skippable() > 0;
 		// If it is skippable, we just need to collect the record id (if any)
 		// to ensure that distinct can be checked.
 		let pro = collected.process(self.coll.opt, self.coll.txn, skippable).await?;
@@ -417,16 +421,21 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 					.process(self.coll.stk, self.coll.ctx, self.coll.opt, self.coll.stm, pro)
 					.await?;
 			} else {
-				self.coll.ite.skipped();
+				self.coll.ite.skipped(1);
 			}
 		}
 		Ok(())
+	}
+
+	fn iterator(&mut self) -> &mut Iterator {
+		self.coll.ite
 	}
 }
 
 pub(super) trait Collector {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error>;
 
+	fn iterator(&mut self) -> &mut Iterator;
 	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Table) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
 			if let Some(exe) = qp.get_query_executor(&table.0) {
@@ -511,8 +520,11 @@ pub(super) trait Collector {
 		// Prepare the start and end keys
 		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
 		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
+		// Extract option skippable records
+		let skip = self.iterator().skippable();
 		// Create a new iterable range
-		let mut stream = txn.stream(beg..end, opt.version);
+		let mut stream = txn.stream(beg..end, opt.version, skip);
+
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
@@ -540,8 +552,10 @@ pub(super) trait Collector {
 		// Prepare the start and end keys
 		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
 		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
+		// Collect the skippable records
+		let skip = self.iterator().skippable();
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(beg..end);
+		let mut stream = txn.stream_keys(beg..end, skip);
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
@@ -620,8 +634,10 @@ pub(super) trait Collector {
 		let txn = ctx.tx();
 		// Prepare
 		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
+		// Get the skippable records
+		let skip = self.iterator().skippable();
 		// Create a new iterable range
-		let mut stream = txn.stream(beg..end, None);
+		let mut stream = txn.stream(beg..end, None, skip);
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
@@ -648,8 +664,10 @@ pub(super) trait Collector {
 		let txn = ctx.tx();
 		// Prepare
 		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
+		// Get the skippable records
+		let skip = self.iterator().skippable();
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(beg..end);
+		let mut stream = txn.stream_keys(beg..end, skip);
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
@@ -759,7 +777,7 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
-			let mut stream = txn.stream(beg?..end?, None);
+			let mut stream = txn.stream(beg?..end?, None, 0);
 			// Loop until no more entries
 			while let Some(res) = stream.next().await {
 				// Check if the context is finished

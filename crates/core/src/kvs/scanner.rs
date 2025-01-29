@@ -29,6 +29,8 @@ pub(super) struct Scanner<'a, I> {
 	exhausted: bool,
 	/// Version as timestamp, 0 means latest.
 	version: Option<u64>,
+	/// Skip
+	skip: usize,
 }
 
 impl<'a, I> Scanner<'a, I> {
@@ -37,6 +39,7 @@ impl<'a, I> Scanner<'a, I> {
 		batch: u32,
 		range: Range<Key>,
 		version: Option<u64>,
+		skip: usize,
 	) -> Self {
 		Scanner {
 			store,
@@ -46,6 +49,7 @@ impl<'a, I> Scanner<'a, I> {
 			results: VecDeque::new(),
 			exhausted: false,
 			version,
+			skip,
 		}
 	}
 }
