@@ -643,7 +643,7 @@ pub(super) trait Collector {
 		let txn = ctx.tx();
 		// Prepare
 		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
-		// Get the skippable records
+		// Optionally skip keys
 		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end).await? {
 			r
 		} else {
@@ -713,7 +713,7 @@ pub(super) trait Collector {
 		let txn = ctx.tx();
 		// Prepare
 		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
-		// Get the skippable records
+		// Optionally skip keys
 		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end).await? {
 			r
 		} else {
