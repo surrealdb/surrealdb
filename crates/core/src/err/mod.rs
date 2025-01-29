@@ -592,16 +592,6 @@ pub enum Error {
 		check: String,
 	},
 
-	/// The specified field did not conform to the field type check
-	#[error("Found {value} for field `{field}`, with record `{thing}`, but expected a {check} whilst validating against {parent}")]
-	FieldCheckNested {
-		thing: String,
-		value: String,
-		field: Idiom,
-		check: String,
-		parent: String,
-	},
-
 	/// The specified field did not conform to the field ASSERT clause
 	#[error("Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}")]
 	FieldValue {
