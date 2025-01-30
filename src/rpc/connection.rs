@@ -127,13 +127,13 @@ impl Connection {
 				// Split the socket into sending and receiving streams
 				let (sender, receiver) = buffer.split();
 				tasks.spawn(Self::read(rpc.clone(), receiver, internal_sender.clone()));
-				tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver.clone()));
+				tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver));
 			}
 			false => {
 				// Split the socket into sending and receiving streams
 				let (sender, receiver) = ws.split();
 				tasks.spawn(Self::read(rpc.clone(), receiver, internal_sender.clone()));
-				tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver.clone()));
+				tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver));
 			}
 		}
 		// Wait for all tasks to finish
