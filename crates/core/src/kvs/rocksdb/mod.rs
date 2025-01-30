@@ -98,15 +98,27 @@ impl Datastore {
 		// Set minimum number of write buffers to merge
 		info!(target: TARGET, "Minimum write buffers to merge: {}", *cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
 		opts.set_min_write_buffer_number_to_merge(*cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
+		// Delay compaction until the minimum number of files accumulate
+		info!(target: TARGET, "Number of files to trigger compaction: {}", *cnf::ROCKSDB_FILE_COMPACTION_TRIGGER);
+		opts.set_level_zero_file_num_compaction_trigger(*cnf::ROCKSDB_FILE_COMPACTION_TRIGGER);
+		// Set the compaction readahead size
+		info!(target: TARGET, "Compaction readahead size: {}", *cnf::ROCKSDB_COMPACTION_READAHEAD_SIZE);
+		opts.set_compaction_readahead_size(*cnf::ROCKSDB_COMPACTION_READAHEAD_SIZE);
+		// Set the max number of subcompactions
+		info!(target: TARGET, "Maximum concurrent subcompactions: {}", *cnf::ROCKSDB_MAX_CONCURRENT_SUBCOMPACTIONS);
+		opts.set_max_subcompactions(*cnf::ROCKSDB_MAX_CONCURRENT_SUBCOMPACTIONS);
 		// Use separate write thread queues
 		info!(target: TARGET, "Use separate thread queues: {}", *cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		opts.set_enable_pipelined_write(*cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		// Enable separation of keys and values
 		info!(target: TARGET, "Enable separation of keys and values: {}", *cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		opts.set_enable_blob_files(*cnf::ROCKSDB_ENABLE_BLOB_FILES);
-		// Store 4KB values separate from keys
+		// Store large values separate from keys
 		info!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
+		// Set the write-ahead-log size limit in MB
+		info!(target: TARGET, "Write-ahead-log file size limit: {}MB", *cnf::ROCKSDB_WAL_SIZE_LIMIT);
+		opts.set_wal_size_limit_mb(*cnf::ROCKSDB_WAL_SIZE_LIMIT);
 		// Allow multiple writers to update memtables in parallel
 		info!(target: TARGET, "Allow concurrent memtable writes: true");
 		opts.set_allow_concurrent_memtable_write(true);
@@ -125,7 +137,9 @@ impl Datastore {
 		// Configure the block based file options
 		let mut block_opts = BlockBasedOptions::default();
 		block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
-		block_opts.set_hybrid_ribbon_filter(10.0, 2);
+		block_opts.set_pin_top_level_index_and_filter(true);
+		block_opts.set_bloom_filter(10.0, false);
+		block_opts.set_block_size(*cnf::ROCKSDB_BLOCK_SIZE);
 		block_opts.set_block_cache(&cache);
 		// Configure the database with the cache
 		opts.set_block_based_table_factory(&block_opts);
