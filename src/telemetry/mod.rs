@@ -166,7 +166,7 @@ mod tests {
 
 	static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
-	fn with_vars<K, V, F, R>(vars: &[(K, V)], f: F) -> R
+	fn with_vars<K, V, F, R>(vars: &[(K, Option<V>)], f: F) -> R
 	where
 		F: FnOnce() -> R,
 		K: AsRef<str>,
@@ -177,8 +177,12 @@ mod tests {
 		let mut restore = Vec::new();
 
 		for (k, v) in vars {
-			restore.push((k.as_ref().to_string(), std::env::var_os(k)));
-			std::env::set_var(k, v);
+			restore.push((k.as_ref().to_string(), std::env::var_os(k.as_ref())));
+			if let Some(x) = v {
+				std::env::set_var(k.as_ref(), x.as_ref());
+			} else {
+				std::env::remove_var(k.as_ref());
+			}
 		}
 
 		struct Dropper(Vec<(String, Option<OsString>)>);
