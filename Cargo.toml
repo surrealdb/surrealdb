@@ -105,6 +105,9 @@ ring = "0.17.7"
 rmpv = "1.0.1"
 roaring = "0.10.6"
 rustls = { version = "0.23.12", default-features = false }
+# Sub dependency of the rustls dependency, should be updated whenever rustls is.
+# Defined so we can enable features on this dependency.
+rustls-pki-types = "1.7.0"
 rust_decimal = "1.36.0"
 # TODO: Look at dependency, 5 years old seems unmaintained.
 rust-stemmers = "1.2.0"

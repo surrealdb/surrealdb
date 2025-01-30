@@ -97,8 +97,6 @@ indexmap = { workspace = true, features = ["serde"] }
 path-clean.workspace = true
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 serde-content.workspace = true
-# TODO: check why this was specified.
-#rustls-pki-types = { version = "1.7.0", features = ["web"] }
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -124,6 +122,7 @@ trice = { workspace = true, optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 pharos.workspace = true
+rustls-pki-types = { version = "1.7.0", features = ["web"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
