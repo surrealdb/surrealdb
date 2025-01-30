@@ -1532,19 +1532,19 @@ version = "0.23.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs]]
-version = "0.8.1"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-core]]
-version = "0.8.1"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-macro]]
-version = "0.8.1"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-sys]]
-version = "0.8.1"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rstar]]
@@ -1793,10 +1793,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.temp-dir]]
 version = "0.1.14"
-criteria = "safe-to-run"
-
-[[exemptions.temp-env]]
-version = "0.3.6"
 criteria = "safe-to-run"
 
 [[exemptions.tempfile]]

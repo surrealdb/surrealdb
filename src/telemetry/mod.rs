@@ -156,11 +156,46 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 
 #[cfg(test)]
 mod tests {
+	use std::{ffi::OsString, sync::Mutex};
+
 	use opentelemetry::global::shutdown_tracer_provider;
 	use tracing::{span, Level};
 	use tracing_subscriber::util::SubscriberInitExt;
 
 	use crate::telemetry;
+
+	static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+	fn with_vars<K, V, F, R>(vars: &[(K, V)], f: F) -> R
+	where
+		F: FnOnce() -> R,
+		K: AsRef<str>,
+		V: AsRef<str>,
+	{
+		let _guard = ENV_MUTEX.lock();
+
+		let mut restore = Vec::new();
+
+		for (k, v) in vars {
+			restore.push((k.as_ref().to_string(), std::env::var_os(k)));
+			std::env::set_var(k, v);
+		}
+
+		struct Dropper(Vec<(String, Option<OsString>)>);
+		impl Drop for Dropper {
+			fn drop(&mut self) {
+				for (k, v) in self.0.drain(..) {
+					if let Some(v) = v {
+						std::env::set_var(k, v);
+					} else {
+						std::env::remove_var(k);
+					}
+				}
+			}
+		}
+		let _drop_gaurd = Dropper(restore);
+		f()
+	}
 
 	#[tokio::test(flavor = "multi_thread")]
 	async fn test_otlp_tracer() {
@@ -169,8 +204,8 @@ mod tests {
 
 		{
 			let otlp_endpoint = format!("http://{addr}");
-			temp_env::with_vars(
-				vec![
+			with_vars(
+				&[
 					("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
@@ -215,8 +250,8 @@ mod tests {
 
 		{
 			let otlp_endpoint = format!("http://{addr}");
-			temp_env::with_vars(
-				vec![
+			with_vars(
+				&[
 					("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
