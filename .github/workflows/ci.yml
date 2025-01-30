@@ -895,6 +895,7 @@ jobs:
       - name: Run Python tests
         run: python -m unittest discover -s tests
         env:
+          PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
 
   sdk-php:
