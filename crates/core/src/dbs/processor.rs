@@ -436,6 +436,7 @@ pub(super) trait Collector {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error>;
 
 	fn iterator(&mut self) -> &mut Iterator;
+
 	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Table) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
 			if let Some(exe) = qp.get_query_executor(&table.0) {
