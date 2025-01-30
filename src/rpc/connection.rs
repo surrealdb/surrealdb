@@ -10,6 +10,8 @@ use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
 use axum::extract::ws::{close_code::AGAIN, CloseFrame, Message, WebSocket};
+use core::fmt;
+use futures::Sink;
 use futures_util::{SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
@@ -103,19 +105,6 @@ impl Connection {
 		let state = rpc_lock.state.clone();
 		// Log the succesful WebSocket connection
 		trace!("WebSocket {} connected", id);
-		// Buffer the WebSocket response stream
-		let (sender, receiver) = match *WEBSOCKET_RESPONSE_BUFFER_SIZE > 0 {
-			true => {
-				// Buffer the WebSocket response stream
-				let buffer = ws.buffer(*WEBSOCKET_RESPONSE_BUFFER_SIZE);
-				// Split the socket into sending and receiving streams
-				buffer.split()
-			}
-			false => {
-				// Split the socket into sending and receiving streams
-				ws.split()
-			}
-		};
 		// Create an internal channel for sending and receiving
 		let internal_sender = rpc_lock.channel.0.clone();
 		let internal_receiver = rpc_lock.channel.1.clone();
@@ -130,8 +119,23 @@ impl Connection {
 		// Spawn async tasks for the WebSocket
 		let mut tasks = JoinSet::new();
 		tasks.spawn(Self::ping(rpc.clone(), internal_sender.clone()));
-		tasks.spawn(Self::read(rpc.clone(), receiver, internal_sender.clone()));
-		tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver.clone()));
+		// Buffer the WebSocket response stream
+		match *WEBSOCKET_RESPONSE_BUFFER_SIZE > 0 {
+			true => {
+				// Buffer the WebSocket response stream
+				let buffer = ws.buffer(*WEBSOCKET_RESPONSE_BUFFER_SIZE);
+				// Split the socket into sending and receiving streams
+				let (sender, receiver) = buffer.split();
+				tasks.spawn(Self::read(rpc.clone(), receiver, internal_sender.clone()));
+				tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver.clone()));
+			}
+			false => {
+				// Split the socket into sending and receiving streams
+				let (sender, receiver) = ws.split();
+				tasks.spawn(Self::read(rpc.clone(), receiver, internal_sender.clone()));
+				tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver.clone()));
+			}
+		}
 		// Wait for all tasks to finish
 		while let Some(res) = tasks.join_next().await {
 			if let Err(err) = res {
@@ -186,11 +190,13 @@ impl Connection {
 	}
 
 	/// Write messages to the client
-	async fn write(
+	async fn write<S: SinkExt<Message> + Unpin>(
 		rpc: Arc<RwLock<Connection>>,
-		mut sender: impl SinkExt<Message> + Unpin,
+		mut sender: S,
 		internal_receiver: Receiver<Message>,
-	) {
+	) where
+		<S as Sink<Message>>::Error: fmt::Display,
+	{
 		// Pin the internal receiving channel
 		let mut internal_receiver = Box::pin(internal_receiver);
 		// Clone the WebSocket cancellation token
