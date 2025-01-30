@@ -72,6 +72,12 @@ pub static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
 		max(memory as usize, 512 * 1024 * 1024)
 	});
 
+pub static ROCKSDB_ENABLE_MEMORY_MAPPED_READS: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_ROCKSDB_ENABLE_MEMORY_MAPPED_READS", bool, false);
+
+pub static ROCKSDB_ENABLE_MEMORY_MAPPED_WRITES: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_ROCKSDB_ENABLE_MEMORY_MAPPED_WRITES", bool, false);
+
 pub static ROCKSDB_KEEP_LOG_FILE_NUM: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_ROCKSDB_KEEP_LOG_FILE_NUM", usize, 20);
 

@@ -145,6 +145,12 @@ impl Datastore {
 		opts.set_block_based_table_factory(&block_opts);
 		opts.set_blob_cache(&cache);
 		opts.set_row_cache(&cache);
+		// Configure memory-mapped reads
+		info!(target: TARGET, "Enable memory-mapped reads: {}", *cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_READS);
+		opts.set_allow_mmap_reads(true);
+		// Configure memory-mapped writes
+		info!(target: TARGET, "Enable memory-mapped writes: {}", *cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_WRITES);
+		opts.set_allow_mmap_writes(true);
 		// Set the delete compaction factory
 		info!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
