@@ -261,18 +261,21 @@ impl Transaction {
 		cfg: &Config,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<(), Error> {
+		// Check if tables are included in the export config
 		if !cfg.tables.is_any() {
 			return Ok(());
 		}
-
+		// Fetch all of the tables for this NS / DB
 		let tables = self.all_tb(ns, db, None).await?;
+		// Loop over all of the tables in order
 		for table in tables.iter() {
+			// Check if this table is included in the export config
 			if !cfg.tables.includes(&table.name) {
 				continue;
 			}
-
+			// Export the table definition structure first
 			self.export_table_structure(ns, db, table, chn).await?;
-
+			// Then export the table data if its desired
 			if cfg.records {
 				self.export_table_data(ns, db, table, cfg, chn).await?;
 			}
@@ -294,25 +297,25 @@ impl Transaction {
 		chn.send(bytes!("")).await?;
 		chn.send(bytes!(format!("{};", table))).await?;
 		chn.send(bytes!("")).await?;
-
+		// Export all table field definitions for this table
 		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
 		for field in fields.iter() {
 			chn.send(bytes!(format!("{};", field))).await?;
 		}
 		chn.send(bytes!("")).await?;
-
+		// Export all table index definitions for this table
 		let indexes = self.all_tb_indexes(ns, db, &table.name).await?;
 		for index in indexes.iter() {
 			chn.send(bytes!(format!("{};", index))).await?;
 		}
 		chn.send(bytes!("")).await?;
-
+		// Export all table event definitions for this table
 		let events = self.all_tb_events(ns, db, &table.name).await?;
 		for event in events.iter() {
 			chn.send(bytes!(format!("{};", event))).await?;
 		}
 		chn.send(bytes!("")).await?;
-
+		// Everything ok
 		Ok(())
 	}
 

@@ -1,0 +1,73 @@
+name: Improvement
+description: Suggest an improvement to a feature.
+type: "Improvement"
+labels: ["triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest an improvement for SurrealDB!
+  - id: kind
+    type: dropdown
+    attributes:
+      label: What component does this affect?
+      description: Is this a suggestion for the Server or the Rust SDK?
+      options:
+        - SurrealDB Server
+        - SurrealDB Rust SDK
+    validations:
+      required: true
+  - id: problem
+    type: textarea
+    attributes:
+      label: Is this improvement related to a problem?
+      description: What is the usecase in which this improvement is relevant?
+      placeholder: A clear and concise description of what the problem is.
+    validations:
+      required: true
+  - id: solution
+    type: textarea
+    attributes:
+      label: Suggest a solution
+      description: Suggest a solution and how it might work.
+      placeholder: A clear and concise description of what you want to happen.
+    validations:
+      required: true
+  - id: alternatives
+    type: textarea
+    attributes:
+      label: Alternative methods
+      description: Describe alternatives you've considered.
+      placeholder: A clear and concise description of any alternative solutions or features you've considered.
+    validations:
+      required: true
+  - id: version
+    type: input
+    attributes:
+      label: SurrealDB version
+      description: Copy and paste the output of `surreal version`
+      placeholder: surreal 0.0.0 for macOS on aarch64
+    validations:
+      required: true
+  - id: contact
+    type: input
+    attributes:
+      label: Contact Details
+      description: How can we get in touch with you if we need more info?
+      placeholder: discord:username or email@example.com
+    validations:
+      required: false
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search [our issues](https://github.com/surrealdb/surrealdb/issues) to see if this bug already exists.
+      options:
+        - label: I have searched the existing issues
+          required: true
+  - type: checkboxes
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/surrealdb/surrealdb).
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true

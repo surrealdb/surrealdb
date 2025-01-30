@@ -3,6 +3,10 @@ use uuid::Uuid;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub(crate) enum Key {
+	/// A cache key for a database
+	Db(String, String),
+	/// A cache key for a table
+	Tb(String, String, String),
 	/// A cache key for events (on a table)
 	Evs(String, String, String, Uuid),
 	/// A cache key for fieds (on a table)
@@ -21,6 +25,8 @@ impl<'a> From<Lookup<'a>> for Key {
 	#[rustfmt::skip]
 	fn from(value: Lookup<'a>) -> Self {
 		match value {
+			Lookup::Db(a, b) => Key::Db(a.to_string(), b.to_string()),
+			Lookup::Tb(a, b, c) => Key::Tb(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Evs(a, b, c, d) => Key::Evs(a.to_string(), b.to_string(), c.to_string(), d),
 			Lookup::Fds(a, b, c, d) => Key::Fds(a.to_string(), b.to_string(), c.to_string(), d),
 			Lookup::Fts(a, b, c, d) => Key::Fts(a.to_string(), b.to_string(), c.to_string(), d),

@@ -123,9 +123,15 @@ impl Results {
 
 	pub(super) async fn start_limit(
 		&mut self,
+		skip: Option<usize>,
 		start: Option<u32>,
 		limit: Option<u32>,
 	) -> Result<(), Error> {
+		let start = if skip.is_some() {
+			None
+		} else {
+			start
+		};
 		match self {
 			Self::Memory(m) => m.start_limit(start, limit),
 			Self::MemoryOrdered(m) => m.start_limit(start, limit),

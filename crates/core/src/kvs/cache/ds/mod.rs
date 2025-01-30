@@ -8,7 +8,7 @@ pub(crate) use entry::Entry;
 pub(crate) use lookup::Lookup;
 use uuid::Uuid;
 
-pub type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
+pub(crate) type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
 
 pub struct DatastoreCache {
 	/// Store the cache entries
@@ -16,6 +16,7 @@ pub struct DatastoreCache {
 }
 
 impl DatastoreCache {
+	/// Creates a new datastore cache
 	pub(in crate::kvs) fn new() -> Self {
 		let cache = Cache::with_weighter(
 			*crate::cnf::DATASTORE_CACHE_SIZE,
@@ -27,12 +28,25 @@ impl DatastoreCache {
 		}
 	}
 
+	/// Fetches an item from the datastore cache
 	pub(crate) fn get(&self, lookup: &Lookup) -> Option<Entry> {
 		self.cache.get(lookup)
 	}
 
+	/// Inserts an item into the datastore cache
 	pub(crate) fn insert(&self, lookup: Lookup, entry: Entry) {
 		self.cache.insert(lookup.into(), entry);
+	}
+
+	/// Clear the cache entry for a table
+	pub(crate) fn clear_tb(&self, ns: &str, db: &str, tb: &str) {
+		let key = Lookup::Tb(ns, db, tb);
+		self.cache.remove(&key);
+	}
+
+	/// Clear all items from the datastore cache
+	pub(crate) fn clear(&self) {
+		self.cache.clear();
 	}
 
 	pub fn get_live_queries_version(&self, ns: &str, db: &str, tb: &str) -> Result<Uuid, Error> {
