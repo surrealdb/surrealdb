@@ -156,11 +156,17 @@ where
 	}
 
 	/// Patches the current document / record data with the specified JSON Patch data
-	pub fn patch(self, PatchOp(patch): PatchOp) -> Patch<'r, C, R> {
+	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
+		let PatchOp(result) = patch.into();
+		let patches = match result {
+			Ok(serde_content::Value::Seq(values)) => values.into_iter().map(Ok).collect(),
+			Ok(value) => vec![Ok(value)],
+			Err(error) => vec![Err(error)],
+		};
 		Patch {
+			patches,
 			client: self.client,
 			resource: self.resource,
-			patches: vec![patch],
 			response_type: PhantomData,
 		}
 	}
