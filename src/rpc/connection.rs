@@ -180,7 +180,7 @@ impl Connection {
 							trace!("WebSocket error: {err}");
 						}
 						// Cancel the WebSocket tasks
-						rpc.read().await.canceller.cancel();
+						canceller.cancel();
 						// Exit out of the loop
 						break;
 					}
@@ -217,7 +217,7 @@ impl Connection {
 							trace!("WebSocket error: {err}");
 						}
 						// Cancel the WebSocket tasks
-						rpc.read().await.canceller.cancel();
+						canceller.cancel();
 						// Exit out of the loop
 						break;
 					}
@@ -261,7 +261,7 @@ impl Connection {
 						// There was an error with the task
 						error!("WebSocket request error: {err}");
 						// Cancel the WebSocket tasks
-						rpc.read().await.canceller.cancel();
+						canceller.cancel();
 						// Exit out of the loop
 						break;
 					},
@@ -308,7 +308,7 @@ impl Connection {
 								trace!("WebSocket error when replying to the close message: {err}");
 							};
 							// Cancel the WebSocket tasks
-							rpc.read().await.canceller.cancel();
+							canceller.cancel();
 							// Exit out of the loop
 							break;
 						}
@@ -323,7 +323,7 @@ impl Connection {
 						// There was an error with the WebSocket
 						trace!("WebSocket error: {err}");
 						// Cancel the WebSocket tasks
-						rpc.read().await.canceller.cancel();
+						canceller.cancel();
 						// Exit out of the loop
 						break;
 					}
@@ -341,7 +341,7 @@ impl Connection {
 			}
 		}
 		// Cancel the WebSocket tasks
-		rpc.read().await.canceller.cancel();
+		canceller.cancel();
 		// Ensure everything is aborted
 		tasks.shutdown().await;
 	}
@@ -363,7 +363,7 @@ impl Connection {
 			// Return the required values
 			(id, format, shutdown, canceller)
 		};
-		// Calculate the message lenght and format
+		// Calculate the message length and format
 		let (len, fmt) = match msg {
 			Message::Text(ref msg) => match fmt.is_none() {
 				true => {
