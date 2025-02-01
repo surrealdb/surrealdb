@@ -98,19 +98,12 @@ impl Session {
 			"tk".to_string() => self.tk.to_owned().into(),
 		});
 
-		vec![
-			("access", access),
-			("auth", auth),
-			("token", token),
-			("session", session),
-		]
+		vec![("access", access), ("auth", auth), ("token", token), ("session", session)]
 	}
 
 	/// Convert a session into a runtime
 	pub(crate) fn context(&self, ctx: &mut MutableContext) {
-		let vars = self
-			.values()
-			.into_iter();
+		let vars = self.values().into_iter();
 
 		ctx.add_values(vars);
 	}

@@ -1,10 +1,10 @@
 //! Stores a DEFINE API definition
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Ap<'a> {
 	__: u8,
@@ -17,6 +17,7 @@ pub struct Ap<'a> {
 	_e: u8,
 	pub ap: &'a str,
 }
+impl_key!(Ap<'a>);
 
 pub fn new<'a>(ns: &'a str, db: &'a str, ap: &'a str) -> Ap<'a> {
 	Ap::new(ns, db, ap)
@@ -58,6 +59,8 @@ impl<'a> Ap<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KeyDecode;
+
 	#[test]
 	fn key() {
 		use super::*;

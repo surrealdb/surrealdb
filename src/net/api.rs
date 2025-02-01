@@ -23,11 +23,11 @@ use surrealdb::dbs::Session;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
 use surrealdb::rpc::format::Format;
-use surrealdb::sql::Object;
-use surrealdb::ApiMethod;
 use surrealdb::sql::statements::FindApi;
-use surrealdb::ApiInvocation;
+use surrealdb::sql::Object;
 use surrealdb::sql::Value;
+use surrealdb::ApiInvocation;
+use surrealdb::ApiMethod;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
@@ -39,7 +39,6 @@ where
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_API_BODY_SIZE))
 }
-
 
 async fn handler(
 	Extension(state): Extension<AppState>,
@@ -76,13 +75,12 @@ async fn handler(
 	}
 
 	let body = match fmt {
-		Format::None => {
-			Value::Bytes(surrealdb::sql::Bytes::from(body.to_vec()))
-		},
+		Format::None => Value::Bytes(surrealdb::sql::Bytes::from(body.to_vec())),
 		fmt => fmt.parse_value(body).map_err(Error::from)?,
 	};
 
-	let query: Object = query.inner
+	let query: Object = query
+		.inner
 		.into_iter()
 		.map(|(k, v)| (k, Value::from(v)))
 		.collect::<BTreeMap<String, Value>>()
@@ -98,10 +96,12 @@ async fn handler(
 		_ => return Err(Error::NotFound(url)),
 	};
 
-	let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.map_err(Error::from)?);
+	let tx = Arc::new(
+		ds.transaction(TransactionType::Write, LockType::Optimistic).await.map_err(Error::from)?,
+	);
 	let apis = tx.all_db_apis(&ns, &db).await.map_err(Error::from)?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
-	
+
 	let res = if let Some((api, params)) = apis.as_ref().find_api(segments) {
 		let invocation = ApiInvocation {
 			params,
@@ -109,16 +109,16 @@ async fn handler(
 			method,
 			query,
 			session: Some(session),
-			values: vec![]
+			values: vec![],
 		};
 
 		match api.invoke_with_transaction(ns, db, tx.clone(), ds.clone(), invocation).await {
 			Ok(Some(v)) => v,
 			Err(e) => return Err(Error::from(e)),
-			_ => return Err(Error::NotFound(url))
+			_ => return Err(Error::NotFound(url)),
 		}
 	} else {
-		return Err(Error::NotFound(url))
+		return Err(Error::NotFound(url));
 	};
 
 	// Commit the transaction

@@ -250,11 +250,11 @@ impl MutableContext {
 	pub(crate) fn add_values<T, K, V>(&mut self, iter: T)
 	where
 		T: IntoIterator<Item = (K, V)>,
-		K: Into<Cow<'static, str>>, 
+		K: Into<Cow<'static, str>>,
 		V: Into<Arc<Value>>,
 	{
-        self.values.extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
-    }
+		self.values.extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
+	}
 
 	/// Add cancellation to the context. The value that is returned will cancel
 	/// the context and it's children once called.
@@ -395,8 +395,9 @@ impl MutableContext {
 		match (self.values.get(key), &self.isolation) {
 			(Some(v), _) => Some(v.as_ref()),
 			(_, None) => self.parent.as_ref().and_then(|p| p.value(key)),
-			(_, Some(ContextIsolation::User)) if PROTECTED_PARAM_NAMES.contains(&key) => 
-				self.parent.as_ref().and_then(|p| p.value(key)),
+			(_, Some(ContextIsolation::User)) if PROTECTED_PARAM_NAMES.contains(&key) => {
+				self.parent.as_ref().and_then(|p| p.value(key))
+			}
 			_ => None,
 		}
 	}

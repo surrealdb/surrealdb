@@ -16,8 +16,8 @@ use crate::kvs::Transactor;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
-use crate::sql::statements::DefineApiStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
+use crate::sql::statements::DefineApiStatement;
 use crate::sql::statements::DefineDatabaseStatement;
 use crate::sql::statements::DefineEventStatement;
 use crate::sql::statements::DefineFieldStatement;
@@ -664,7 +664,7 @@ impl Transaction {
 				let beg = crate::key::database::ap::prefix(ns, db);
 				let end = crate::key::database::ap::suffix(ns, db);
 				let val = self.getr(beg..end, None).await?;
-				let val = val.convert().into();
+				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
 				let val = cache::tx::Entry::Aps(Arc::clone(&val));
 				self.cache.insert(qey.into(), val.clone());
 				val

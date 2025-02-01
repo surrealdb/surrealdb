@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
-use crate::api::path::Path;
 use crate::api::method::Method;
+use crate::api::path::Path;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
@@ -823,7 +823,7 @@ impl Parser<'_> {
 				t!("ANY") => {
 					self.pop_peek();
 					res.fallback = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
-				},
+				}
 				t!("DELETE") | t!("GET") | t!("PATCH") | t!("POST") | t!("PUT") | t!("TRACE") => {
 					let mut methods: Vec<Method> = vec![];
 					'methods: loop {
@@ -850,7 +850,7 @@ impl Parser<'_> {
 					let action = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 					res.actions.push(ApiAction {
 						methods,
-						action
+						action,
 					});
 				}
 				_ => {

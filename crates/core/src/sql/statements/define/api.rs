@@ -6,9 +6,9 @@ use crate::err::Error;
 use crate::iam::{Action, Level, ResourceKind, Role};
 use crate::kvs::{Datastore, Transaction};
 use crate::sql::fmt::Fmt;
+use crate::sql::{Base, Object, Value};
 use crate::ApiInvocation;
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
-use crate::sql::{Base, Object, Value};
 use derive::Store;
 use reblessive::tree::Stk;
 use reblessive::TreeStack;
@@ -80,21 +80,20 @@ impl DefineApiStatement {
 		ds: Arc<Datastore>,
 		invocation: ApiInvocation<'static>,
 	) -> Result<Option<Value>, Error> {
-		let sess = Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Owner).with_ns(&ns).with_db(&db);
+		let sess = Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Owner)
+			.with_ns(&ns)
+			.with_db(&db);
 		let opt = ds.setup_options(&sess);
-		
+
 		let mut ctx = ds.setup_ctx()?;
 		ctx.set_transaction(tx);
 		let ctx = &ctx.freeze();
 
 		let mut stack = TreeStack::new();
-		stack
-			.enter(|stk| self.invoke_with_context(stk, ctx, &opt, invocation))
-			.finish()
-			.await
+		stack.enter(|stk| self.invoke_with_context(stk, ctx, &opt, invocation)).finish().await
 	}
 
-	// The `invoke` method accepting a parameter like `Option<&mut Stk>` 
+	// The `invoke` method accepting a parameter like `Option<&mut Stk>`
 	// causes issues with axum, hence the separation
 	pub async fn invoke_with_context(
 		&self,
@@ -107,8 +106,8 @@ impl DefineApiStatement {
 			Some(v) => &v.action,
 			None => match &self.fallback {
 				Some(v) => v,
-				None => return Ok(None)
-			}
+				None => return Ok(None),
+			},
 		};
 
 		let mut ctx = MutableContext::new_isolated(ctx, ContextIsolation::Full);
@@ -167,7 +166,7 @@ impl<'a> FindApi<'a> for &'a [DefineApiStatement] {
 	fn find_api(&'a self, segments: Vec<&'a str>) -> Option<(&'a DefineApiStatement, Object)> {
 		for api in self.iter() {
 			if let Some(params) = api.path.fit(segments.as_slice()) {
-				return Some((api, params))
+				return Some((api, params));
 			}
 		}
 

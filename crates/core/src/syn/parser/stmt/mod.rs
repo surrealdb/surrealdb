@@ -34,6 +34,7 @@ mod create;
 mod define;
 mod delete;
 mod r#if;
+mod impersonate;
 mod insert;
 mod parts;
 mod relate;
@@ -41,7 +42,6 @@ mod remove;
 mod select;
 mod update;
 mod upsert;
-mod impersonate;
 
 impl Parser<'_> {
 	pub(super) async fn parse_stmt_list(&mut self, ctx: &mut Stk) -> ParseResult<Statements> {

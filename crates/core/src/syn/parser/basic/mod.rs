@@ -1,9 +1,11 @@
 use crate::{
-	api::path::Path, sql::{language::Language, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid}, syn::{
+	api::path::Path,
+	sql::{language::Language, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid},
+	syn::{
 		lexer::compound,
 		parser::{mac::unexpected, ParseResult, Parser},
 		token::{self, t, TokenKind},
-	}
+	},
 };
 
 use super::mac::pop_glued;

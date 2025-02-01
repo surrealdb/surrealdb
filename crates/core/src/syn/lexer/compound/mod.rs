@@ -8,9 +8,9 @@ mod datetime;
 mod ident;
 mod js;
 mod number;
+mod path;
 mod regex;
 mod strand;
-mod path;
 mod uuid;
 
 pub use datetime::{datetime, datetime_inner};
@@ -19,9 +19,9 @@ pub use js::javascript;
 pub use number::{
 	duration, float, integer, number, numeric, numeric_kind, NumberKind, Numeric, NumericKind,
 };
+pub use path::path;
 pub use regex::regex;
 pub use strand::strand;
-pub use path::path;
 pub use uuid::uuid;
 
 #[derive(Debug)]

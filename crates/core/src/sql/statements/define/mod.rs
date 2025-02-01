@@ -15,8 +15,8 @@ mod table;
 mod user;
 
 pub use access::DefineAccessStatement;
-pub use api::DefineApiStatement;
 pub use analyzer::DefineAnalyzerStatement;
+pub use api::DefineApiStatement;
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
 pub use event::DefineEventStatement;

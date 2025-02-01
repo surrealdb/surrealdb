@@ -8,12 +8,12 @@ use crate::sql::value::Value;
 use crate::sql::Thing;
 use reblessive::tree::Stk;
 
+pub mod api;
 pub mod args;
 pub mod array;
 pub mod bytes;
 pub mod count;
 pub mod crypto;
-pub mod api;
 pub mod duration;
 pub mod encoding;
 pub mod geo;

@@ -32,8 +32,7 @@ impl Parser<'_> {
 				| t!("THROW")
 				| t!("UPDATE")
 				| t!("UPSERT")
-				| t!("USE")
-				| t!("IMPERSONATE")
+				| t!("USE") | t!("IMPERSONATE")
 		)
 	}
 
@@ -88,8 +87,7 @@ impl Parser<'_> {
 				| t!("DEFINE")
 				| t!("REMOVE")
 				| t!("REBUILD")
-				| t!("IF")
-				| t!("IMPERSONATE")
+				| t!("IF") | t!("IMPERSONATE")
 		)
 	}
 

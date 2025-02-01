@@ -2,11 +2,19 @@ use std::sync::Arc;
 
 use reblessive::tree::Stk;
 
-use crate::{api::method::Method, ctx::Context, dbs::Options, err::Error, iam::{Auth, Role}, sql::{statements::FindApi, Object, Value}, ApiInvocation};
+use crate::{
+	api::method::Method,
+	ctx::Context,
+	dbs::Options,
+	err::Error,
+	iam::{Auth, Role},
+	sql::{statements::FindApi, Object, Value},
+	ApiInvocation,
+};
 
 pub async fn invoke(
 	(stk, ctx, opt): (&mut Stk, &Context, &Options),
-	(path, opts,): (String, Option<Object>),
+	(path, opts): (String, Option<Object>),
 ) -> Result<Value, Error> {
 	let (body, method, query) = if let Some(opts) = opts {
 		let body = match opts.get("body") {
@@ -31,12 +39,12 @@ pub async fn invoke(
 		(Value::None, Method::Get, Object::default())
 	};
 
-    let ns = opt.ns()?;
-    let db = opt.db()?;
+	let ns = opt.ns()?;
+	let db = opt.db()?;
 	let tx = ctx.tx();
 	let apis = tx.all_db_apis(&ns, &db).await?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
-	
+
 	if let Some((api, params)) = apis.as_ref().find_api(segments) {
 		let values = vec![
 			("access", ctx.value("access").map(|v| v.to_owned()).unwrap_or_default()),

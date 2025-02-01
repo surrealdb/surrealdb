@@ -1,9 +1,9 @@
-use crate::ctx::MutableContext;
-use crate::iam::{Action, Auth, ResourceKind};
 use crate::ctx::Context;
+use crate::ctx::MutableContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::{Action, Auth, ResourceKind};
 use crate::sql::{Base, Block, Value};
 use derive::Store;
 use reblessive::tree::Stk;
@@ -77,13 +77,13 @@ impl fmt::Display for ImpersonateStatement {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum ImpersonationTarget {
-	Record(Value, String)
+	Record(Value, String),
 }
 
 impl fmt::Display for ImpersonationTarget {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Record(thing, access) => write!(f, "RECORD {thing} VIA {access}")
+			Self::Record(thing, access) => write!(f, "RECORD {thing} VIA {access}"),
 		}
 	}
 }

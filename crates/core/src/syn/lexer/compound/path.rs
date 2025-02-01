@@ -44,29 +44,29 @@ pub fn path(lexer: &mut Lexer, start: Token) -> Result<Vec<Segment>, SyntaxError
 					} else {
 						bail!("Expected an instruction symbol `:` or `*` to follow", @lexer.current_span());
 					}
-				},
+				}
 
 				// Valid segment characters
 				x if x.is_ascii_alphanumeric() => (),
-				b'.' | b'-' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':' | b'@' => (),
-				
+				b'.' | b'-' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*'
+				| b'+' | b',' | b';' | b'=' | b':' | b'@' => (),
+
 				// We found a kind
 				b'<' if lexer.scratch.starts_with(':') => {
 					if lexer.scratch.len() == 1 {
 						bail!("Expected a name or content for this segment", @lexer.current_span());
 					}
-					
+
 					lexer.reader.advance(1);
 					let mut parser = Parser::new(&lexer.reader.remaining());
 					let mut stack = Stack::new();
 					let span = parser.last_span();
-					let res = stack
-						.enter(|stk| parser.parse_kind(stk, span))
-						.finish()
-						.map_err(|mut e| {
+					let res = stack.enter(|stk| parser.parse_kind(stk, span)).finish().map_err(
+						|mut e| {
 							e.advance_span_offset(lexer.reader.offset());
 							e
-						})?;
+						},
+					)?;
 
 					kind = Some(res);
 					lexer.reader.advance(parser.last_span().offset as usize + 1);
@@ -87,11 +87,11 @@ pub fn path(lexer: &mut Lexer, start: Token) -> Result<Vec<Segment>, SyntaxError
 		let (segment, done) = if lexer.scratch.is_empty() {
 			lexer.advance_span();
 			break;
-		} else if (
-			lexer.scratch.starts_with(':') ||
-			lexer.scratch.starts_with('*') ||
-			lexer.scratch.starts_with('\\')
-		) && lexer.scratch[1..].is_empty() {
+		} else if (lexer.scratch.starts_with(':')
+			|| lexer.scratch.starts_with('*')
+			|| lexer.scratch.starts_with('\\'))
+			&& lexer.scratch[1..].is_empty()
+		{
 			// We encountered a segment which starts with an instruction, but is empty
 			// Let's error
 			bail!("Expected a name or content for this segment", @lexer.current_span());
@@ -116,6 +116,6 @@ pub fn path(lexer: &mut Lexer, start: Token) -> Result<Vec<Segment>, SyntaxError
 			break;
 		}
 	}
-	
+
 	Ok(segments)
 }

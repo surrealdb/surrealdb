@@ -11,6 +11,7 @@ pub(crate) mod define;
 pub(crate) mod delete;
 pub(crate) mod foreach;
 pub(crate) mod ifelse;
+pub(crate) mod impersonate;
 pub(crate) mod info;
 pub(crate) mod insert;
 pub(crate) mod kill;
@@ -28,7 +29,6 @@ pub(crate) mod throw;
 pub(crate) mod update;
 pub(crate) mod upsert;
 pub(crate) mod r#use;
-pub(crate) mod impersonate;
 
 pub use self::access::{AccessGrant, AccessStatement};
 pub use self::analyze::AnalyzeStatement;
@@ -39,6 +39,7 @@ pub use self::create::CreateStatement;
 pub use self::delete::DeleteStatement;
 pub use self::foreach::ForeachStatement;
 pub use self::ifelse::IfelseStatement;
+pub use self::impersonate::ImpersonateStatement;
 pub use self::info::InfoStatement;
 pub use self::insert::InsertStatement;
 pub use self::kill::KillStatement;
@@ -56,15 +57,14 @@ pub use self::sleep::SleepStatement;
 pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
 pub use self::upsert::UpsertStatement;
-pub use self::impersonate::ImpersonateStatement;
 
 pub use self::alter::{AlterStatement, AlterTableStatement};
 
 pub use self::define::{
-	DefineAccessStatement, DefineApiStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
-	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
-	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
-	DefineUserStatement,
+	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement, DefineUserStatement,
 };
 
 pub use self::remove::{

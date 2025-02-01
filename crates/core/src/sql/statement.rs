@@ -9,10 +9,10 @@ use crate::sql::{
 	statements::{
 		AlterStatement, AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
 		CommitStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
-		ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-		LiveStatement, OptionStatement, OutputStatement, RelateStatement, RemoveStatement,
-		SelectStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
-		UpdateStatement, UpsertStatement, UseStatement, ImpersonateStatement,
+		ForeachStatement, IfelseStatement, ImpersonateStatement, InfoStatement, InsertStatement,
+		KillStatement, LiveStatement, OptionStatement, OutputStatement, RelateStatement,
+		RemoveStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
+		ThrowStatement, UpdateStatement, UpsertStatement, UseStatement,
 	},
 	value::Value,
 };
