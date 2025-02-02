@@ -5,6 +5,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
 use crate::kvs::Check;
 use crate::kvs::Key;
+use crate::kvs::KeyEncode;
 use crate::kvs::Val;
 use crate::vs::VersionStamp;
 use std::fmt::Debug;
@@ -169,7 +170,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// TiKV does not support versioned queries.
 		if version.is_some() {
@@ -180,7 +181,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.inner.key_exists(key.into()).await?;
+		let res = self.inner.key_exists(key.encode_owned()?).await?;
 		// Return result
 		Ok(res)
 	}
@@ -189,7 +190,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// TiKV does not support versioned queries.
 		if version.is_some() {
@@ -200,7 +201,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let res = self.inner.get(key.into()).await?;
+		let res = self.inner.get(key.encode_owned()?).await?;
 		// Return result
 		Ok(res)
 	}
@@ -209,7 +210,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// TiKV does not support versioned queries.
@@ -225,7 +226,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Extract the key
-		let key = key.into();
+		let key = key.encode_owned()?;
 		// Prepare the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, version, SaveOperation::Set).await?
@@ -246,7 +247,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// TiKV does not support versioned queries.
@@ -262,7 +263,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the key
-		let key = key.into();
+		let key = key.encode_owned()?;
 		// Get the val
 		let val = val.into();
 		// Hydrate the savepoint if any
@@ -295,7 +296,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -307,7 +308,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the key
-		let key = key.into();
+		let key = key.encode_owned()?;
 		// Get the val
 		let val = val.into();
 		// Get the check
@@ -342,7 +343,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -353,7 +354,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Extract the key
-		let key = key.into();
+		let key = key.encode_owned()?;
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, None, SaveOperation::Del).await?
@@ -374,7 +375,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -386,7 +387,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the key
-		let key = key.into();
+		let key = key.encode_owned()?;
 		// Get the check
 		let chk = chk.map(Into::into);
 		// Hydrate the savepoint if any
@@ -419,7 +420,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -432,7 +433,7 @@ impl super::api::Transaction for Transaction {
 		// TODO: Check if we need savepoint with ranges
 
 		// Delete the key range
-		self.db.unsafe_destroy_range(rng.start.into()..rng.end.into()).await?;
+		self.db.unsafe_destroy_range(rng.start.encode_owned()?..rng.end.encode_owned()?).await?;
 		// Return result
 		Ok(())
 	}
@@ -446,7 +447,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<Key>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// TiKV does not support versioned queries.
 		if version.is_some() {
@@ -458,8 +459,8 @@ impl super::api::Transaction for Transaction {
 		}
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+			start: rng.start.encode_owned()?,
+			end: rng.end.encode_owned()?,
 		};
 		// Scan the keys
 		let res = self.inner.scan_keys(rng, limit).await?.map(Key::from).collect();
@@ -476,7 +477,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// TiKV does not support versioned queries.
 		if version.is_some() {
@@ -488,8 +489,8 @@ impl super::api::Transaction for Transaction {
 		}
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+			start: rng.start.encode_owned()?,
+			end: rng.end.encode_owned()?,
 		};
 		// Scan the keys
 		let res = self.inner.scan(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
@@ -501,14 +502,14 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Calculate the version key
-		let key = key.into();
+		let key = key.encode_owned()?;
 		// Get the transaction version
 		let ver = self.inner.current_timestamp().await?.version();
 		// Calculate the previous version value

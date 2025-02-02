@@ -1,13 +1,13 @@
 //! Stores cluster membership information
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // Represents cluster information.
 // In the future, this could also include broadcast addresses and other information.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Nd {
 	__: u8,
@@ -17,19 +17,20 @@ pub struct Nd {
 	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 }
+impl_key!(Nd);
 
 pub fn new(nd: Uuid) -> Nd {
 	Nd::new(nd)
 }
 
 pub fn prefix() -> Vec<u8> {
-	let mut k = crate::key::root::all::new().encode().unwrap();
+	let mut k = crate::key::root::all::kv();
 	k.extend_from_slice(b"!nd\x00");
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
-	let mut k = crate::key::root::all::new().encode().unwrap();
+	let mut k = crate::key::root::all::kv();
 	k.extend_from_slice(b"!nd\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	k
 }
@@ -54,11 +55,12 @@ impl Nd {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;
 		let val = Nd::new(Uuid::default());
-		let enc = Nd::encode(&val).unwrap();
+		let enc = val.encode().unwrap();
 		let dec = Nd::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}

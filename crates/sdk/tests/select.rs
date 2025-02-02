@@ -227,6 +227,12 @@ async fn select_expression_value() -> Result<(), Error> {
 				},
 				{
 					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 2,
 					},
 					operation: 'Fetch'
@@ -274,7 +280,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -329,7 +335,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -342,7 +348,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -373,7 +379,7 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -386,14 +392,14 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[tester:test]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("tester:test");
@@ -558,6 +564,12 @@ async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 						type: 'Memory'
 					},
 					operation: 'Collector'
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
 				},
 				{
 					detail: {
@@ -812,6 +824,12 @@ async fn select_where_explain() -> Result<(), Error> {
 				},
 				{
 					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 3,
 					},
 					operation: 'Fetch'
@@ -909,12 +927,12 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			// Select always succeeds, but the result may be empty
-			assert!(res.is_ok());
+			let res = res.unwrap();
 
 			if should_succeed {
-				assert!(res.unwrap() != empty_array, "{}", msg);
+				assert!(res != empty_array, "{}", msg);
 			} else {
-				assert!(res.unwrap() == empty_array, "{}", msg);
+				assert!(res == empty_array, "{}", msg);
 			}
 		}
 	}

@@ -1,17 +1,18 @@
 //! Stores the key prefix for all keys
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Kv {
 	__: u8,
 }
+impl_key!(Kv);
 
-pub fn new() -> Kv {
-	Kv::new()
+pub fn kv() -> Vec<u8> {
+	vec![b'/']
 }
 
 impl Default for Kv {
@@ -36,6 +37,8 @@ impl Kv {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;

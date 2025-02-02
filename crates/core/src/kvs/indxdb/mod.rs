@@ -3,7 +3,7 @@
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SavePointImpl, SavePoints};
-use crate::kvs::{Check, Key, Val};
+use crate::kvs::{Check, Key, KeyEncode, Val};
 use std::fmt::Debug;
 use std::ops::Range;
 
@@ -132,7 +132,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
@@ -143,7 +143,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.inner.exi(key.into()).await?;
+		let res = self.inner.exi(key.encode_owned()?).await?;
 		// Return result
 		Ok(res)
 	}
@@ -152,7 +152,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
@@ -163,7 +163,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let res = self.inner.get(key.into()).await?;
+		let res = self.inner.get(key.encode_owned()?).await?;
 		// Return result
 		Ok(res)
 	}
@@ -172,7 +172,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// IndxDB does not support versioned queries.
@@ -188,7 +188,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.inner.set(key.into(), val.into()).await?;
+		self.inner.set(key.encode_owned()?, val.into()).await?;
 		// Return result
 		Ok(())
 	}
@@ -197,7 +197,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// IndxDB does not support versioned queries.
@@ -213,7 +213,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.inner.put(key.into(), val.into()).await?;
+		self.inner.put(key.encode_owned()?, val.into()).await?;
 		// Return result
 		Ok(())
 	}
@@ -222,7 +222,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -234,7 +234,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.inner.putc(key.into(), val.into(), chk.map(Into::into)).await?;
+		self.inner.putc(key.encode_owned()?, val.into(), chk.map(Into::into)).await?;
 		// Return result
 		Ok(())
 	}
@@ -243,7 +243,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -254,7 +254,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let res = self.inner.del(key.into()).await?;
+		let res = self.inner.del(key.encode_owned()?).await?;
 		// Return result
 		Ok(res)
 	}
@@ -263,7 +263,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
@@ -275,7 +275,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let res = self.inner.delc(key.into(), chk.map(Into::into)).await?;
+		let res = self.inner.delc(key.encode_owned()?, chk.map(Into::into)).await?;
 		// Return result
 		Ok(res)
 	}
@@ -289,7 +289,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<Key>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
@@ -301,8 +301,8 @@ impl super::api::Transaction for Transaction {
 		}
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+			start: rng.start.encode_owned()?,
+			end: rng.end.encode_owned()?,
 		};
 		// Scan the keys
 		let res = self.inner.keys(rng, limit).await?;
@@ -319,7 +319,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Sprintable + Debug,
+		K: KeyEncode + Sprintable + Debug,
 	{
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
@@ -331,8 +331,8 @@ impl super::api::Transaction for Transaction {
 		}
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+			start: rng.start.encode_owned()?,
+			end: rng.end.encode_owned()?,
 		};
 		// Scan the keys
 		let res = self.inner.scan(rng, limit).await?;

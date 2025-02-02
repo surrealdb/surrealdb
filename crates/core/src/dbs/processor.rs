@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy};
 use crate::key::{graph, thing};
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
 use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
 use crate::sql::{Edges, Table, Thing, Value};
@@ -93,9 +93,10 @@ impl Collected {
 		self,
 		opt: &Options,
 		txn: &Transaction,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
 		match self {
-			Self::Edge(key) => Self::process_edge(opt, txn, key).await,
+			Self::Edge(key) => Self::process_edge(opt, txn, key, rid_only).await,
 			Self::RangeKey(key) => Self::process_range_key(key).await,
 			Self::TableKey(key) => Self::process_table_key(key).await,
 			Self::Relatable {
@@ -103,24 +104,33 @@ impl Collected {
 				v,
 				w,
 				o,
-			} => Self::process_relatable(opt, txn, f, v, w, o).await,
-			Self::Thing(thing) => Self::process_thing(opt, txn, thing).await,
-			Self::Yield(table) => Self::process_yield(opt, txn, table).await,
+			} => Self::process_relatable(opt, txn, f, v, w, o, rid_only).await,
+			Self::Thing(thing) => Self::process_thing(opt, txn, thing, rid_only).await,
+			Self::Yield(table) => Self::process_yield(opt, txn, table, rid_only).await,
 			Self::Value(value) => Ok(Self::process_value(value)),
-			Self::Defer(key) => Self::process_defer(opt, txn, key).await,
-			Self::Mergeable(v, o) => Self::process_mergeable(opt, txn, v, o).await,
-			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)),
+			Self::Defer(key) => Self::process_defer(opt, txn, key, rid_only).await,
+			Self::Mergeable(v, o) => Self::process_mergeable(opt, txn, v, o, rid_only).await,
+			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)?),
 			Self::Count(c) => Ok(Self::process_count(c)),
-			Self::IndexItem(i) => Self::process_index_item(opt, txn, i).await,
+			Self::IndexItem(i) => Self::process_index_item(opt, txn, i, rid_only).await,
 			Self::IndexItemKey(i) => Ok(Self::process_index_item_key(i)),
 		}
 	}
 
-	async fn process_edge(opt: &Options, txn: &Transaction, key: Key) -> Result<Processed, Error> {
+	async fn process_edge(
+		opt: &Options,
+		txn: &Transaction,
+		key: Key,
+		rid_only: bool,
+	) -> Result<Processed, Error> {
 		// Parse the data from the store
 		let gra: graph::Graph = graph::Graph::decode(&key)?;
 		// Fetch the data from the store
-		let val = txn.get_record(opt.ns()?, opt.db()?, gra.ft, &gra.fk, None).await?;
+		let val = if rid_only {
+			Arc::new(Value::Null)
+		} else {
+			txn.get_record(opt.ns()?, opt.db()?, gra.ft, &gra.fk, None).await?
+		};
 		let rid = Thing::from((gra.ft, gra.fk));
 		// Parse the data from the store
 		let val = Operable::Value(val);
@@ -135,7 +145,7 @@ impl Collected {
 	}
 
 	async fn process_range_key(key: Key) -> Result<Processed, Error> {
-		let key: thing::Thing = (&key).into();
+		let key = thing::Thing::decode(&key)?;
 		let val = Value::Null;
 		let rid = Thing::from((key.tb, key.id));
 		// Create a new operable value
@@ -152,7 +162,7 @@ impl Collected {
 	}
 
 	async fn process_table_key(key: Key) -> Result<Processed, Error> {
-		let key: thing::Thing = (&key).into();
+		let key = thing::Thing::decode(&key)?;
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record
 		let pro = Processed {
@@ -172,13 +182,19 @@ impl Collected {
 		v: Thing,
 		w: Thing,
 		o: Option<Value>,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
-		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
-		// Fetch the data from the store
-		let val = txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, None).await?;
-		// Create a new operable value
-		let val = Operable::Relate(f, val, w, o.map(|v| v.into()));
+		// if it is skippable we only need the record id
+		let val = if rid_only {
+			Operable::Value(Arc::new(Value::Null))
+		} else {
+			// Check that the table exists
+			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+			// Fetch the data from the store
+			let val = txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, None).await?;
+			// Create a new operable value
+			Operable::Relate(f, val, w, o.map(|v| v.into()))
+		};
 		// Process the document record
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -190,11 +206,21 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_thing(opt: &Options, txn: &Transaction, v: Thing) -> Result<Processed, Error> {
-		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
-		// Fetch the data from the store
-		let val = txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version).await?;
+	async fn process_thing(
+		opt: &Options,
+		txn: &Transaction,
+		v: Thing,
+		rid_only: bool,
+	) -> Result<Processed, Error> {
+		// if it is skippable we only need the record id
+		let val = if rid_only {
+			Arc::new(Value::Null)
+		} else {
+			// Check that the table exists
+			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+			// Fetch the data from the store
+			txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version).await?
+		};
 		// Parse the data from the store
 		let val = Operable::Value(val);
 		// Process the document record
@@ -209,9 +235,17 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_yield(opt: &Options, txn: &Transaction, v: Table) -> Result<Processed, Error> {
-		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v, opt.strict).await?;
+	async fn process_yield(
+		opt: &Options,
+		txn: &Transaction,
+		v: Table,
+		rid_only: bool,
+	) -> Result<Processed, Error> {
+		// if it is skippable we only need the record id
+		if !rid_only {
+			// Check that the table exists
+			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v, opt.strict).await?;
+		}
 		// Pass the value through
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -234,9 +268,17 @@ impl Collected {
 		}
 	}
 
-	async fn process_defer(opt: &Options, txn: &Transaction, v: Thing) -> Result<Processed, Error> {
-		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+	async fn process_defer(
+		opt: &Options,
+		txn: &Transaction,
+		v: Thing,
+		rid_only: bool,
+	) -> Result<Processed, Error> {
+		// if it is skippable we only need the record id
+		if !rid_only {
+			// Check that the table exists
+			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		}
 		// Process the document record
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -253,9 +295,13 @@ impl Collected {
 		txn: &Transaction,
 		v: Thing,
 		o: Value,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
-		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		// if it is skippable we only need the record id
+		if !rid_only {
+			// Check that the table exists
+			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+		}
 		// Process the document record
 		let pro = Processed {
 			rs: RecordStrategy::KeysAndValues,
@@ -268,20 +314,20 @@ impl Collected {
 		Ok(pro)
 	}
 
-	fn process_key_val(key: Key, val: Val) -> Processed {
-		let key: thing::Thing = (&key).into();
+	fn process_key_val(key: Key, val: Val) -> Result<Processed, Error> {
+		let key = thing::Thing::decode(&key)?;
 		let val: Value = (&val).into();
 		let rid = Thing::from((key.tb, key.id));
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
-		Processed {
+		Ok(Processed {
 			rs: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
 			val,
-		}
+		})
 	}
 
 	fn process_count(count: usize) -> Processed {
@@ -309,11 +355,15 @@ impl Collected {
 		opt: &Options,
 		txn: &Transaction,
 		i: IndexItemRecord,
+		rid_only: bool,
 	) -> Result<Processed, Error> {
 		let (t, v, ir) = i.consume();
 		let v = if let Some(v) = v {
 			// The value may already be fetched by the KNN iterator to evaluate the condition
 			v
+		} else if rid_only {
+			// if it is skippable we only need the record id
+			Value::Null.into()
 		} else {
 			Iterable::fetch_thing(txn, opt, &t).await?
 		};
@@ -336,11 +386,15 @@ pub(super) struct ConcurrentCollector<'a> {
 	stm: &'a Statement<'a>,
 	ite: &'a mut Iterator,
 }
-
 impl Collector for ConcurrentCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
-		let pro = collected.process(self.opt, self.txn).await?;
-		self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
+		// if it is skippable don't need to process the document
+		if !self.ite.is_skippable() {
+			let pro = collected.process(self.opt, self.txn, false).await?;
+			self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
+		} else {
+			self.ite.skipped();
+		}
 		Ok(())
 	}
 }
@@ -352,12 +406,19 @@ pub(super) struct ConcurrentDistinctCollector<'a> {
 
 impl Collector for ConcurrentDistinctCollector<'_> {
 	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
-		let pro = collected.process(self.coll.opt, self.coll.txn).await?;
+		let skippable = self.coll.ite.is_skippable();
+		// If it is skippable, we just need to collect the record id (if any)
+		// to ensure that distinct can be checked.
+		let pro = collected.process(self.coll.opt, self.coll.txn, skippable).await?;
 		if !self.dis.check_already_processed(&pro) {
-			self.coll
-				.ite
-				.process(self.coll.stk, self.coll.ctx, self.coll.opt, self.coll.stm, pro)
-				.await?;
+			if !skippable {
+				self.coll
+					.ite
+					.process(self.coll.stk, self.coll.ctx, self.coll.opt, self.coll.stm, pro)
+					.await?;
+			} else {
+				self.coll.ite.skipped();
+			}
 		}
 		Ok(())
 	}
@@ -448,8 +509,8 @@ pub(super) trait Collector {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
-		let end = thing::suffix(opt.ns()?, opt.db()?, v);
+		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
+		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
 		// Create a new iterable range
 		let mut stream = txn.stream(beg..end, opt.version);
 		// Loop until no more entries
@@ -477,8 +538,8 @@ pub(super) trait Collector {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
-		let end = thing::suffix(opt.ns()?, opt.db()?, v);
+		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
+		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
 		// Create a new iterable range
 		let mut stream = txn.stream_keys(beg..end);
 		// Loop until no more entries
@@ -507,8 +568,8 @@ pub(super) trait Collector {
 		// Check that the table exists
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns()?, opt.db()?, v);
-		let end = thing::suffix(opt.ns()?, opt.db()?, v);
+		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
+		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
 		// Create a new iterable range
 		let count = txn.count(beg..end).await?;
 		// Collect the count
@@ -527,20 +588,20 @@ pub(super) trait Collector {
 		txn.check_ns_db_tb(opt.ns()?, opt.db()?, tb, opt.strict).await?;
 		// Prepare the range start key
 		let beg = match &r.beg {
-			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, tb),
-			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap(),
+			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, tb)?,
+			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode()?,
 			Bound::Excluded(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode()?;
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
 		let end = match &r.end {
-			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, tb),
-			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap(),
+			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, tb)?,
+			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode()?,
 			Bound::Included(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode().unwrap();
+				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode()?;
 				key.push(0x00);
 				key
 			}
@@ -677,7 +738,7 @@ pub(super) trait Collector {
 					.iter()
 					.map(|v| v.0.to_owned())
 					.flat_map(|v| {
-						vec![
+						[
 							(
 								graph::ftprefix(ns, db, tb, id, &Dir::In, &v),
 								graph::ftsuffix(ns, db, tb, id, &Dir::In, &v),
@@ -698,7 +759,7 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
-			let mut stream = txn.stream(beg..end, None);
+			let mut stream = txn.stream(beg?..end?, None);
 			// Loop until no more entries
 			while let Some(res) = stream.next().await {
 				// Check if the context is finished

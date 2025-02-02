@@ -78,10 +78,10 @@ where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
-	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Self {
+	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Result<Self, Error> {
 		let m0 = p.m0 as usize;
-		let state_key = ikb.new_hs_key();
-		Self {
+		let state_key = ikb.new_hs_key()?;
+		Ok(Self {
 			state_key,
 			state: Default::default(),
 			m: p.m as usize,
@@ -93,7 +93,7 @@ where
 			rng: SmallRng::from_entropy(),
 			heuristic: p.into(),
 			ikb,
-		}
+		})
 	}
 
 	async fn check_state(&mut self, tx: &Transaction) -> Result<(), Error> {
@@ -529,7 +529,7 @@ mod tests {
 
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut h = HnswFlavor::new(IndexKeyBase::default(), p);
+		let mut h = HnswFlavor::new(IndexKeyBase::default(), p).unwrap();
 		let map = {
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 			let map = insert_collection_hnsw(&tx, &mut h, collection).await;
@@ -810,7 +810,7 @@ mod tests {
 		]);
 		let ikb = IndexKeyBase::default();
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
-		let mut h = HnswFlavor::new(ikb, &p);
+		let mut h = HnswFlavor::new(ikb, &p).unwrap();
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		{
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();

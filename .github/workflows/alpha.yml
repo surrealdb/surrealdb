@@ -32,7 +32,7 @@ permissions:
 jobs:
   release:
     name: Prepare alpha release
-    uses: ./.github/workflows/reusable_publish_version.yml
+    uses: ./.github/workflows/publish-version.yml
     with:
       environment: alpha
       extra-features: storage-surrealkv,ml

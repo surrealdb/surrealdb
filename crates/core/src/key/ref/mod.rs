@@ -1,4 +1,5 @@
 //! Stores a graph edge pointer
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::sql::id::Id;
@@ -132,40 +133,54 @@ pub fn new<'a>(
 	Ref::new(ns, db, tb, id.to_owned(), ft, ff, fk.to_owned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Vec<u8> {
-	let mut k = Prefix::new(ns, db, tb, id).encode().unwrap();
+pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>, Error> {
+	let mut k = Prefix::new(ns, db, tb, id).encode()?;
 	k.extend_from_slice(&[0x00]);
-	k
+	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Vec<u8> {
-	let mut k = Prefix::new(ns, db, tb, id).encode().unwrap();
+pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>, Error> {
+	let mut k = Prefix::new(ns, db, tb, id).encode()?;
 	k.extend_from_slice(&[0xff]);
-	k
+	Ok(k)
 }
 
-pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Vec<u8> {
-	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode().unwrap();
+pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>, Error> {
+	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode()?;
 	k.extend_from_slice(&[0x00]);
-	k
+	Ok(k)
 }
 
-pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Vec<u8> {
-	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode().unwrap();
+pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>, Error> {
+	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode()?;
 	k.extend_from_slice(&[0xff]);
-	k
+	Ok(k)
 }
 
-pub fn ffprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Vec<u8> {
-	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode().unwrap();
+pub fn ffprefix(
+	ns: &str,
+	db: &str,
+	tb: &str,
+	id: &Id,
+	ft: &str,
+	ff: &str,
+) -> Result<Vec<u8>, Error> {
+	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode()?;
 	k.extend_from_slice(&[0x00]);
-	k
+	Ok(k)
 }
 
-pub fn ffsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Vec<u8> {
-	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode().unwrap();
+pub fn ffsuffix(
+	ns: &str,
+	db: &str,
+	tb: &str,
+	id: &Id,
+	ft: &str,
+	ff: &str,
+) -> Result<Vec<u8>, Error> {
+	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode()?;
 	k.extend_from_slice(&[0xff]);
-	k
+	Ok(k)
 }
 
 impl Categorise for Ref<'_> {

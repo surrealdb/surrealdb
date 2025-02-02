@@ -73,8 +73,8 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
 pub async fn gc_range(tx: &Transaction, ns: &str, db: &str, vt: VersionStamp) -> Result<(), Error> {
 	// Calculate the range
-	let beg = change::prefix_ts(ns, db, VersionStamp::ZERO);
-	let end = change::prefix_ts(ns, db, vt);
+	let beg = change::prefix_ts(ns, db, VersionStamp::ZERO)?;
+	let end = change::prefix_ts(ns, db, vt)?;
 	// Trace for debugging
 	trace!(
 		"Performing garbage collection on {ns}:{db} for watermark {vt:?}, between {} and {}",

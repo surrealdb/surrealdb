@@ -1,11 +1,11 @@
 //! Stores Things of an HNSW index
 use crate::idx::trees::vector::SerializedVector;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Key)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Hv<'a> {
 	__: u8,
@@ -22,6 +22,7 @@ pub struct Hv<'a> {
 	_g: u8,
 	pub vec: Arc<SerializedVector>,
 }
+impl_key!(Hv<'a>);
 
 impl<'a> Hv<'a> {
 	pub fn new(
@@ -51,6 +52,7 @@ impl<'a> Hv<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {

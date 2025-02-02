@@ -28,9 +28,9 @@ impl IndexTreeCaches {
 		generation: StoreGeneration,
 		tt: TransactionType,
 		cache_size: usize,
-	) -> BTreeStore<FstKeys> {
-		let cache = self.btree_fst_caches.get_cache(generation, &keys, cache_size).await;
-		TreeStore::new(keys, cache, tt).await
+	) -> Result<BTreeStore<FstKeys>, Error> {
+		let cache = self.btree_fst_caches.get_cache(generation, &keys, cache_size).await?;
+		Ok(TreeStore::new(keys, cache, tt).await)
 	}
 
 	pub(crate) fn advance_store_btree_fst(&self, new_cache: TreeCache<BTreeNode<FstKeys>>) {
@@ -43,9 +43,9 @@ impl IndexTreeCaches {
 		generation: StoreGeneration,
 		tt: TransactionType,
 		cache_size: usize,
-	) -> BTreeStore<TrieKeys> {
-		let cache = self.btree_trie_caches.get_cache(generation, &keys, cache_size).await;
-		TreeStore::new(keys, cache, tt).await
+	) -> Result<BTreeStore<TrieKeys>, Error> {
+		let cache = self.btree_trie_caches.get_cache(generation, &keys, cache_size).await?;
+		Ok(TreeStore::new(keys, cache, tt).await)
 	}
 
 	pub(crate) fn advance_store_btree_trie(&self, new_cache: TreeCache<BTreeNode<TrieKeys>>) {
@@ -58,9 +58,9 @@ impl IndexTreeCaches {
 		generation: StoreGeneration,
 		tt: TransactionType,
 		cache_size: usize,
-	) -> MTreeStore {
-		let cache = self.mtree_caches.get_cache(generation, &keys, cache_size).await;
-		TreeStore::new(keys, cache, tt).await
+	) -> Result<MTreeStore, Error> {
+		let cache = self.mtree_caches.get_cache(generation, &keys, cache_size).await?;
+		Ok(TreeStore::new(keys, cache, tt).await)
 	}
 
 	pub(crate) fn advance_store_mtree(&self, new_cache: TreeCache<MTreeNode>) {
@@ -81,11 +81,11 @@ where
 		generation: StoreGeneration,
 		keys: &TreeNodeProvider,
 		cache_size: usize,
-	) -> Arc<TreeCache<N>> {
+	) -> Result<Arc<TreeCache<N>>, Error> {
 		#[cfg(debug_assertions)]
 		debug!("get_cache {generation}");
 		// We take the key from the node 0 as the key identifier for the cache
-		let cache_key = keys.get_key(0);
+		let cache_key = keys.get_key(0)?;
 		match self.0.entry(cache_key.clone()) {
 			Entry::Occupied(mut e) => {
 				let c = e.get_mut();
@@ -94,9 +94,14 @@ where
 					Ordering::Less => {
 						// The store generation is older than the current cache,
 						// we return an empty cache, but we don't hold it
-						Arc::new(TreeCache::new(generation, cache_key, keys.clone(), cache_size))
+						Ok(Arc::new(TreeCache::new(
+							generation,
+							cache_key,
+							keys.clone(),
+							cache_size,
+						)))
 					}
-					Ordering::Equal => c.clone(),
+					Ordering::Equal => Ok(c.clone()),
 					Ordering::Greater => {
 						// The store generation is more recent than the cache,
 						// we create a new one and hold it
@@ -107,7 +112,7 @@ where
 							cache_size,
 						));
 						e.insert(c.clone());
-						c
+						Ok(c)
 					}
 				}
 			}
@@ -115,7 +120,7 @@ where
 				// There is no cache for index, we create one and hold it
 				let c = Arc::new(TreeCache::new(generation, cache_key, keys.clone(), cache_size));
 				e.insert(c.clone());
-				c
+				Ok(c)
 			}
 		}
 	}

@@ -89,8 +89,8 @@ impl Document {
 			}
 			// Process any record references
 			if ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-				let prefix = crate::key::r#ref::prefix(ns, db, &rid.tb, &rid.id);
-				let suffix = crate::key::r#ref::suffix(ns, db, &rid.tb, &rid.id);
+				let prefix = crate::key::r#ref::prefix(ns, db, &rid.tb, &rid.id)?;
+				let suffix = crate::key::r#ref::suffix(ns, db, &rid.tb, &rid.id)?;
 				let range = prefix..suffix;
 
 				// Obtain a transaction

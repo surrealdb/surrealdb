@@ -49,7 +49,7 @@ jobs:
   release:
     name: Prepare beta release
     needs: [checks]
-    uses: ./.github/workflows/reusable_publish_version.yml
+    uses: ./.github/workflows/publish-version.yml
     with:
       environment: beta
       git-ref: ${{ needs.checks.outputs.branch }}

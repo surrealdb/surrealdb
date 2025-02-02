@@ -1,6 +1,14 @@
-#[test_log::test(tokio::test)]
-async fn select_with_version() {
-	let (permit, db) = new_db().await;
+#![cfg(feature = "kv-surrealkv")]
+
+use surrealdb::Value;
+use ulid::Ulid;
+
+use crate::api_integration::NS;
+
+use super::CreateDb;
+
+pub async fn select_with_version(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -54,9 +62,8 @@ async fn select_with_version() {
 	assert_eq!(name, "John v1");
 }
 
-#[test_log::test(tokio::test)]
-async fn create_with_version() {
-	let (permit, db) = new_db().await;
+pub async fn create_with_version(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -98,9 +105,8 @@ async fn create_with_version() {
 	assert!(response.is_none());
 }
 
-#[test_log::test(tokio::test)]
-async fn insert_with_version() {
-	let (permit, db) = new_db().await;
+pub async fn insert_with_version(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -142,9 +148,8 @@ async fn insert_with_version() {
 	assert!(response.is_none());
 }
 
-#[test_log::test(tokio::test)]
-async fn info_for_db_with_versioned_tables() {
-	let (permit, db) = new_db().await;
+pub async fn info_for_db_with_versioned_tables(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -172,9 +177,8 @@ async fn info_for_db_with_versioned_tables() {
 	));
 }
 
-#[test_log::test(tokio::test)]
-async fn info_for_table_with_versioned_fields() {
-	let (permit, db) = new_db().await;
+pub async fn info_for_table_with_versioned_fields(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -207,3 +211,16 @@ async fn info_for_table_with_versioned_fields() {
 		"fields: { firstName: 'DEFINE FIELD firstName ON person TYPE string PERMISSIONS FULL' }"
 	));
 }
+
+define_include_tests!(version => {
+	#[test_log::test(tokio::test)]
+	select_with_version,
+	#[test_log::test(tokio::test)]
+	create_with_version,
+	#[test_log::test(tokio::test)]
+	insert_with_version,
+	#[test_log::test(tokio::test)]
+	info_for_db_with_versioned_tables,
+	#[test_log::test(tokio::test)]
+	info_for_table_with_versioned_fields,
+});

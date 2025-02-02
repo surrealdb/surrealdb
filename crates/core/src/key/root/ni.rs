@@ -1,10 +1,10 @@
 //! Stores namespace ID generator state
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Ni {
 	__: u8,
@@ -12,6 +12,7 @@ pub struct Ni {
 	_b: u8,
 	_c: u8,
 }
+impl_key!(Ni);
 
 impl Default for Ni {
 	fn default() -> Self {
@@ -38,6 +39,7 @@ impl Ni {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

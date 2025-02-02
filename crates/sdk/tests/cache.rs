@@ -44,7 +44,7 @@ async fn clear_transaction_cache_table() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -105,7 +105,7 @@ async fn clear_transaction_cache_field() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(

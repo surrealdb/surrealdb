@@ -800,13 +800,13 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Run JavaScript HTTP tests
+      - name: Run JavaScript tests (HTTP)
         run: bun test
         env:
           SURREAL_PROTOCOL: http
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
-      - name: Run JavaScript WebSocket tests
+      - name: Run JavaScript tests (WebSocket)
         run: bun test
         env:
           SURREAL_PROTOCOL: ws
@@ -849,7 +849,12 @@ jobs:
       - name: Wait for startup
         run: sleep 10
 
-      - name: Run Golang tests
+      - name: Run Golang tests (HTTP)
+        run: go test -v -cover ./...
+        env:
+          SURREALDB_URL: http://localhost:8000/rpc
+
+      - name: Run Golang tests (WebSocket)
         run: go test -v -cover ./...
         env:
           SURREALDB_URL: ws://localhost:8000/rpc
@@ -892,10 +897,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Python tests
+      - name: Run Python tests (HTTP)
         run: python -m unittest discover -s tests
         env:
+          PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
+
+      - name: Run Python tests (WebSocket)
+        run: python -m unittest discover -s tests
+        env:
+          PYTHONPATH: ./src
+          SURREALDB_URL: ws://localhost:8000
 
   sdk-php:
     name: PHP SDK tests (${{ matrix.version }})

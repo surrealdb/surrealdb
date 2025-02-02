@@ -1199,13 +1199,17 @@ async fn function_array_transpose() -> Result<(), Error> {
 		RETURN array::transpose([[0, 1], [2, 3, 4]]);
 		RETURN array::transpose([[0, 1], [2, 3], [4, 5]]);
 		RETURN array::transpose([[0, 1, 2], "oops", [null, "sorry"]]);
+		RETURN [[1],[1,2],[1,2,3]].transpose();
+		RETURN [[1],[1,2],[1,2,3]].transpose().transpose();
 	"#;
 	let desired_responses = [
 		"[[0, 2], [1, 3]]",
-		"[[0, 3], [1, 4], [2]]",
-		"[[0, 2], [1, 3], [4]]",
+		"[[0, 3], [1, 4], [2, NONE]]",
+		"[[0, 2], [1, 3], [NONE, 4]]",
 		"[[0, 2, 4], [1, 3, 5]]",
-		"[[0, \"oops\", null], [1, \"sorry\"], [2]]",
+		"[[0, \"oops\", NULL], [1, NONE, \"sorry\"], [2, NONE, NONE]]",
+		"[[1, 1, 1], [NONE, 2, 2], [NONE, NONE, 3]]",
+		"[[1, NONE, NONE], [1, 2, NONE], [1, 2, 3]]",
 	];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
@@ -3568,7 +3572,7 @@ async fn function_search_analyzer() -> Result<(), Error> {
 	//
 	for _ in 0..2 {
 		let tmp = test.next()?.result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	//
 	let tmp = test.next()?.result?;
@@ -3591,7 +3595,7 @@ async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
 	//
 	for _ in 0..2 {
 		let tmp = test.next()?.result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	//
 	match test.next()?.result {
@@ -3621,7 +3625,7 @@ async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
 	//
 	for _ in 0..2 {
 		let tmp = test.next()?.result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	//
 	match test.next()?.result {
@@ -3646,7 +3650,7 @@ async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	match test.next()?.result {
 		Err(Error::FcNotFound {

@@ -23,7 +23,7 @@ async fn use_statement_set_ns() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("['my_ns', 'my_ns', 'test', 'test']");
@@ -49,7 +49,7 @@ async fn use_statement_set_db() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("['test', 'test', 'my_db', 'my_db']");
@@ -75,7 +75,7 @@ async fn use_statement_set_both() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("['my_ns', 'my_ns', 'my_db', 'my_db']");

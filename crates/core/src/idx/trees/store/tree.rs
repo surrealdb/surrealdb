@@ -74,11 +74,11 @@ where
 		Ok(())
 	}
 
-	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> StoredNode<N> {
+	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
 		#[cfg(debug_assertions)]
 		self.out.insert(id);
 
-		StoredNode::new(node, id, self.np.get_key(id), 0)
+		Ok(StoredNode::new(node, id, self.np.get_key(id)?, 0))
 	}
 
 	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {

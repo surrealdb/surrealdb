@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use uuid::Uuid;
 
-#[revisioned(revision = 5)]
+#[revisioned(revision = 6)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -39,6 +39,8 @@ pub struct DefineFieldStatement {
 	pub overwrite: bool,
 	#[revision(start = 5)]
 	pub reference: Option<Reference>,
+	#[revision(start = 6)]
+	pub default_always: bool,
 }
 
 impl DefineFieldStatement {
@@ -59,6 +61,8 @@ impl DefineFieldStatement {
 		} else {
 			self.kind.clone()
 		};
+		// Disallow mismatched types
+		self.disallow_mismatched_types(ctx, opt).await?;
 		// Get the NS and DB
 		let ns = opt.ns()?;
 		let db = opt.db()?;
@@ -105,6 +109,10 @@ impl DefineFieldStatement {
 			None,
 		)
 		.await?;
+		// Clear the cache
+		if let Some(cache) = ctx.get_cache() {
+			cache.clear_tb(ns, db, &self.what);
+		}
 		// Clear the cache
 		txn.clear();
 		// Find all existing field definitions
@@ -190,6 +198,10 @@ impl DefineFieldStatement {
 						};
 						txn.set(key, val, None).await?;
 						// Clear the cache
+						if let Some(cache) = ctx.get_cache() {
+							cache.clear_tb(ns, db, &self.what);
+						}
+						// Clear the cache
 						txn.clear();
 					}
 				}
@@ -221,6 +233,10 @@ impl DefineFieldStatement {
 							..tb.as_ref().to_owned()
 						};
 						txn.set(key, val, None).await?;
+						// Clear the cache
+						if let Some(cache) = ctx.get_cache() {
+							cache.clear_tb(ns, db, &self.what);
+						}
 						// Clear the cache
 						txn.clear();
 					}
@@ -347,6 +363,30 @@ impl DefineFieldStatement {
 
 		Ok(None)
 	}
+
+	async fn disallow_mismatched_types(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
+		let fds = ctx.tx().all_tb_fields(opt.ns()?, opt.db()?, &self.what, None).await?;
+
+		if let Some(self_kind) = &self.kind {
+			for fd in fds.iter() {
+				if self.name.starts_with(&fd.name) && self.name != fd.name {
+					if let Some(fd_kind) = &fd.kind {
+						let path = self.name[fd.name.len()..].to_vec();
+						if !fd_kind.allows_nested_kind(&path, self_kind) {
+							return Err(Error::MismatchedFieldTypes {
+								name: self.name.to_string(),
+								kind: self_kind.to_string(),
+								existing_name: fd.name.to_string(),
+								existing_kind: fd_kind.to_string(),
+							});
+						}
+					}
+				}
+			}
+		}
+
+		Ok(())
+	}
 }
 
 impl Display for DefineFieldStatement {
@@ -366,7 +406,12 @@ impl Display for DefineFieldStatement {
 			write!(f, " TYPE {v}")?
 		}
 		if let Some(ref v) = self.default {
-			write!(f, " DEFAULT {v}")?
+			write!(f, " DEFAULT")?;
+			if self.default_always {
+				write!(f, " ALWAYS")?
+			}
+
+			write!(f, " {v}")?
 		}
 		if self.readonly {
 			write!(f, " READONLY")?

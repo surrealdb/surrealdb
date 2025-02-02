@@ -45,13 +45,13 @@ async fn return_subquery_only() -> Result<(), Error> {
 	assert_eq!(res.len(), 27);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[{ name: 'Jaime' }, { name: 'Tobie' }]");
@@ -196,7 +196,7 @@ async fn return_breaks_nested_execution() -> Result<(), Error> {
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("1");

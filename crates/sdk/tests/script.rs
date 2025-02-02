@@ -119,10 +119,10 @@ async fn script_function_arguments() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -199,7 +199,7 @@ async fn script_function_module_os() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	Ok(())
 }

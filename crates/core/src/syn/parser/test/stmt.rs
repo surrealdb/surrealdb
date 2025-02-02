@@ -1862,7 +1862,6 @@ fn parse_define_table() {
 			cache_events_ts: uuid::Uuid::default(),
 			cache_tables_ts: uuid::Uuid::default(),
 			cache_indexes_ts: uuid::Uuid::default(),
-			cache_lives_ts: uuid::Uuid::default(),
 		}))
 	);
 }
@@ -1925,6 +1924,7 @@ fn parse_define_field() {
 				if_not_exists: false,
 				overwrite: false,
 				reference: None,
+				default_always: false,
 			}))
 		)
 	}
@@ -1958,6 +1958,7 @@ fn parse_define_field() {
 				if_not_exists: false,
 				overwrite: false,
 				reference: None,
+				default_always: false,
 			}))
 		)
 	}
@@ -2875,7 +2876,6 @@ fn parse_update() {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					})
 				]))
@@ -2888,7 +2888,6 @@ fn parse_update() {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					})
 				]),
@@ -2921,7 +2920,6 @@ fn parse_upsert() {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					})
 				]))
@@ -2934,7 +2932,6 @@ fn parse_upsert() {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					})
 				]),

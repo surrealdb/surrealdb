@@ -26,10 +26,10 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -128,10 +128,10 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 		assert_eq!(res.len(), 7);
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(
@@ -231,16 +231,16 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -312,10 +312,10 @@ async fn field_definition_readonly() -> Result<(), Error> {
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(

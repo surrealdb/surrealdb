@@ -1465,7 +1465,7 @@ mod tests {
 		let hash = Argon2::default().hash_password("test".as_bytes(), &salt).unwrap().to_string();
 
 		// Verify with the matching password
-		assert!(verify_pass("test", &hash).is_ok());
+		verify_pass("test", &hash).unwrap();
 
 		// Verify with a non matching password
 		assert!(verify_pass("nonmatching", &hash).is_err());
@@ -1516,19 +1516,19 @@ mod tests {
 		// Accept ROOT user
 		{
 			let res = verify_root_creds(&ds, "root", "root").await;
-			assert!(res.is_ok());
+			res.unwrap();
 		}
 
 		// Accept NS user
 		{
 			let res = verify_ns_creds(&ds, &ns, "ns", "ns").await;
-			assert!(res.is_ok());
+			res.unwrap();
 		}
 
 		// Accept DB user
 		{
 			let res = verify_db_creds(&ds, &ns, &db, "db", "db").await;
-			assert!(res.is_ok());
+			res.unwrap();
 		}
 	}
 

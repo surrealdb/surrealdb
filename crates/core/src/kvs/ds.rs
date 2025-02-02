@@ -16,8 +16,7 @@ use crate::err::Error;
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::cache;
-use crate::kvs::cache::ds::Cache;
+use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
@@ -78,7 +77,7 @@ pub struct Datastore {
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
-	cache: Arc<Cache>,
+	cache: Arc<DatastoreCache>,
 	// The index asynchronous builder
 	#[cfg(not(target_family = "wasm"))]
 	index_builder: IndexBuilder,
@@ -119,51 +118,54 @@ impl TransactionFactory {
 		};
 		// Create a new transaction on the datastore
 		#[allow(unused_variables)]
-		let inner = match self.flavor.as_ref() {
+		let (inner, local) = match self.flavor.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::Mem(tx)
+				(super::tr::Inner::Mem(tx), true)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::RocksDB(tx)
+				(super::tr::Inner::RocksDB(tx), true)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			DatastoreFlavor::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::IndxDB(tx)
+				(super::tr::Inner::IndxDB(tx), true)
 			}
 			#[cfg(feature = "kv-tikv")]
 			DatastoreFlavor::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::TiKV(tx)
+				(super::tr::Inner::TiKV(tx), false)
 			}
 			#[cfg(feature = "kv-fdb")]
 			DatastoreFlavor::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::FoundationDB(tx)
+				(super::tr::Inner::FoundationDB(tx), false)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::SurrealKV(tx)
+				(super::tr::Inner::SurrealKV(tx), true)
 			}
 			#[cfg(feature = "kv-surrealcs")]
 			DatastoreFlavor::SurrealCS(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::SurrealCS(tx)
+				(super::tr::Inner::SurrealCS(tx), false)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
-		Ok(Transaction::new(Transactor {
-			inner,
-			stash: super::stash::Stash::default(),
-			cf: cf::Writer::new(),
-			clock: self.clock.clone(),
-		}))
+		Ok(Transaction::new(
+			local,
+			Transactor {
+				inner,
+				stash: super::stash::Stash::default(),
+				cf: cf::Writer::new(),
+				clock: self.clock.clone(),
+			},
+		))
 	}
 }
 
@@ -408,7 +410,7 @@ impl Datastore {
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 				#[cfg(storage)]
 				temporary_directory: None,
-				cache: Arc::new(cache::ds::new()),
+				cache: Arc::new(DatastoreCache::new()),
 			}
 		})
 	}
@@ -433,7 +435,7 @@ impl Datastore {
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			transaction_factory: self.transaction_factory,
-			cache: Arc::new(cache::ds::new()),
+			cache: Arc::new(DatastoreCache::new()),
 		}
 	}
 
@@ -528,6 +530,12 @@ impl Datastore {
 
 	pub(super) async fn clock_now(&self) -> Timestamp {
 		self.transaction_factory.clock.now().await
+	}
+
+	// Used for testing live queries
+	#[allow(dead_code)]
+	pub fn get_cache(&self) -> Arc<DatastoreCache> {
+		self.cache.clone()
 	}
 
 	// Initialise the cluster and run bootstrap utilities

@@ -94,7 +94,7 @@ where
 
 	pub(in crate::idx) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
 		match self {
-			Self::Write(w) => Ok(w.new_node(id, node)),
+			Self::Write(w) => Ok(w.new_node(id, node)?),
 			_ => Err(fail!("TreeStore::new_node")),
 		}
 	}
@@ -130,14 +130,14 @@ pub enum TreeNodeProvider {
 }
 
 impl TreeNodeProvider {
-	pub fn get_key(&self, node_id: NodeId) -> Key {
+	pub fn get_key(&self, node_id: NodeId) -> Result<Key, Error> {
 		match self {
 			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(Some(node_id)),
 			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(Some(node_id)),
 			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(Some(node_id)),
 			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(Some(node_id)),
 			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(Some(node_id)),
-			TreeNodeProvider::Debug => node_id.to_be_bytes().to_vec(),
+			TreeNodeProvider::Debug => Ok(node_id.to_be_bytes().to_vec()),
 		}
 	}
 
@@ -145,7 +145,7 @@ impl TreeNodeProvider {
 	where
 		N: TreeNode + Clone,
 	{
-		let key = self.get_key(id);
+		let key = self.get_key(id)?;
 		if let Some(val) = tx.get(key.clone(), None).await? {
 			let size = val.len() as u32;
 			let node = N::try_from_val(val)?;
@@ -290,13 +290,14 @@ impl IndexStores {
 	) -> Result<(), Error> {
 		if matches!(ix.index, Index::Hnsw(_)) {
 			let ikb = IndexKeyBase::new(ns, db, ix)?;
-			self.remove_hnsw_index(ikb).await;
+			self.remove_hnsw_index(ikb).await?;
 		}
 		Ok(())
 	}
 
-	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) {
-		self.0.hnsw_indexes.remove(&ikb).await;
+	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) -> Result<(), Error> {
+		self.0.hnsw_indexes.remove(&ikb).await?;
+		Ok(())
 	}
 
 	pub(crate) fn mappers(&self) -> &Mappers {

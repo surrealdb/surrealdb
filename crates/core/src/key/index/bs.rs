@@ -1,10 +1,10 @@
 //! Stores FullText index states
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Bs<'a> {
 	__: u8,
@@ -19,6 +19,7 @@ pub struct Bs<'a> {
 	_f: u8,
 	pub ix: &'a str,
 }
+impl_key!(Bs<'a>);
 
 impl Categorise for Bs<'_> {
 	fn categorise(&self) -> Category {
@@ -46,6 +47,7 @@ impl<'a> Bs<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

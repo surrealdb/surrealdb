@@ -29,6 +29,7 @@ keyword! {
 	Algorithm => "ALGORITHM",
 	All => "ALL",
 	Alter => "ALTER",
+	Always => "ALWAYS",
 	Analyze => "ANALYZE",
 	Analyzer => "ANALYZER",
 	As => "AS",
