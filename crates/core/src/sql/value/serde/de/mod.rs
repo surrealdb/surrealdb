@@ -16,14 +16,10 @@ impl Value {
 			Value::Null => Ok(Content::Option(None)),
 			Value::Bool(v) => Ok(Content::Bool(v)),
 			Value::Number(v) => match v {
-				sql::Number::Int(v) => {
-					Ok(Content::Number(Number::I64(v)))
-				}
+				sql::Number::Int(v) => Ok(Content::Number(Number::I64(v))),
 				sql::Number::Float(v) => Ok(Content::Number(Number::F64(v))),
 				sql::Number::Decimal(v) => serializer.serialize(v).map_err(Into::into),
-				sql::Number::Felt252(v) => {
-					serializer.serialize(v).map_err(Into::into)
-				}
+				sql::Number::Felt252(v) => serializer.serialize(v).map_err(Into::into),
 			},
 			Value::Strand(sql::Strand(v)) => Ok(Content::String(Cow::Owned(v))),
 			Value::Duration(sql::Duration(v)) => serializer.serialize(v).map_err(Into::into),

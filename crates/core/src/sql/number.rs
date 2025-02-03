@@ -582,8 +582,8 @@ impl Number {
 			Number::Felt252(v) => {
 				if v == Felt::ZERO {
 					0.into()
-				} else if v < *HALF_PRIME {
-					1.into()
+				} else if v * Felt::from(2) >= *HALF_PRIME {
+					Number::Int(-1)
 				} else {
 					Number::Int(-1)
 				}
