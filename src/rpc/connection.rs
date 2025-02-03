@@ -346,21 +346,9 @@ impl Connection {
 		};
 		// Calculate the message length and format
 		let (len, fmt) = match msg {
-			Message::Text(ref msg) => match fmt.is_none() {
-				true => {
-					rpc.write().await.format = Format::Json;
-					(msg.len(), Format::Json)
-				}
-				false => (msg.len(), fmt),
-			},
-			Message::Binary(ref msg) => match fmt.is_none() {
-				true => {
-					rpc.write().await.format = Format::Bincode;
-					(msg.len(), Format::Bincode)
-				}
-				false => (msg.len(), fmt),
-			},
-			_ => unreachable!(),
+			Message::Text(ref msg) => (msg.len(), fmt),
+			Message::Binary(ref msg) => (msg.len(), fmt),
+			_ => (0, fmt),
 		};
 		// Prepare span and otel context
 		let span = span_for_request(&id);

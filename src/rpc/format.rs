@@ -13,7 +13,7 @@ use surrealdb::rpc::RpcError;
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {
 		match value {
-			Accept::TextPlain => Format::None,
+			Accept::TextPlain => Format::Unsupported,
 			Accept::ApplicationJson => Format::Json,
 			Accept::ApplicationCbor => Format::Cbor,
 			Accept::ApplicationPack => Format::Msgpack,
@@ -26,7 +26,7 @@ impl From<&Accept> for Format {
 impl From<&ContentType> for Format {
 	fn from(value: &ContentType) -> Self {
 		match value {
-			ContentType::TextPlain => Format::None,
+			ContentType::TextPlain => Format::Unsupported,
 			ContentType::ApplicationJson => Format::Json,
 			ContentType::ApplicationCbor => Format::Cbor,
 			ContentType::ApplicationPack => Format::Msgpack,

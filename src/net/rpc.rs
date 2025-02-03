@@ -135,10 +135,10 @@ async fn handle_socket(
 ) {
 	// Check if there is a WebSocket protocol specified
 	let format = match ws.protocol().and_then(|h| h.to_str().ok()) {
-		// Any selected protocol will always be a valie value
+		// Any selected protocol will always be a valid value
 		Some(protocol) => protocol.into(),
 		// No protocol format was specified
-		_ => Format::None,
+		_ => Format::Unsupported,
 	};
 	// Create a new connection instance
 	let rpc = Connection::new(datastore, state, id, sess, format);
@@ -163,7 +163,7 @@ async fn post_handler(
 	// Get the input format from the Content-Type header
 	let fmt: Format = content_type.deref().into();
 	// Check that the input format is a valid format
-	if matches!(fmt, Format::Unsupported | Format::None) {
+	if matches!(fmt, Format::Unsupported) {
 		return Err(Error::InvalidType);
 	}
 	// Get the output format from the Accept header
