@@ -585,7 +585,7 @@ impl Number {
 				} else if v * Felt::from(2) >= *HALF_PRIME {
 					Number::Int(-1)
 				} else {
-					Number::Int(-1)
+					Number::Int(1)
 				}
 			}
 		}
