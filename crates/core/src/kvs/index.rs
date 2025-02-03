@@ -20,7 +20,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task;
 use tokio::task::JoinHandle;
 
@@ -139,7 +139,8 @@ impl IndexBuilder {
 
 	pub(crate) async fn get_status(&self, ix: &DefineIndexStatement) -> Option<BuildingStatus> {
 		if let Some(a) = self.indexes.get(ix) {
-			Some(a.value().0.status.lock().await.clone())
+			let status = a.value().0.status.read().await.clone();
+			Some(status)
 		} else {
 			None
 		}
@@ -201,7 +202,7 @@ struct Building {
 	tf: TransactionFactory,
 	ix: Arc<DefineIndexStatement>,
 	tb: String,
-	status: Arc<Mutex<BuildingStatus>>,
+	status: Arc<RwLock<BuildingStatus>>,
 	// Should be stored on a temporary table
 	queue: Arc<Mutex<QueueSequences>>,
 }
@@ -219,13 +220,13 @@ impl Building {
 			tf,
 			tb: ix.what.to_string(),
 			ix,
-			status: Arc::new(Mutex::new(BuildingStatus::Started)),
+			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
 		})
 	}
 
 	async fn set_status(&self, status: BuildingStatus) {
-		let mut s = self.status.lock().await;
+		let mut s = self.status.write().await;
 		// We want to keep only the first error
 		if !s.is_error() {
 			*s = status;
@@ -243,7 +244,8 @@ impl Building {
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
 		if queue.is_empty() {
 			// If the appending queue is empty and the index is built...
-			if self.status.lock().await.is_built() {
+			let is_build = self.status.read().await.is_built();
+			if is_build {
 				// ... we return the values back, so the document can be updated the usual way
 				return Ok(ConsumeResult::Ignored(old_values, new_values));
 			}

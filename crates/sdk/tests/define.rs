@@ -161,8 +161,10 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 	Ok(())
 }
 
-#[test(tokio::test)]
-async fn define_statement_index_concurrently_building_status() -> Result<(), Error> {
+async fn define_statement_index_concurrently_building_status(
+	def_index: &str,
+	skip_def: usize,
+) -> Result<(), Error> {
 	let session = Session::owner().with_ns("test").with_db("test");
 	let ds = new_ds().await?;
 	// Populate initial records
@@ -180,9 +182,9 @@ async fn define_statement_index_concurrently_building_status() -> Result<(), Err
 	}
 	// Create the index concurrently
 	info!("Indexing starts");
-	let mut r =
-		ds.execute("DEFINE INDEX test ON user FIELDS email CONCURRENTLY", &session, None).await?;
-	skip_ok(&mut r, 1)?;
+	let mut r = ds.execute(def_index, &session, None).await?;
+	assert_eq!(r.len(), 2);
+	skip_ok(&mut r, skip_def)?;
 	//
 	let mut appending_count = *NORMAL_FETCH_SIZE * 3 / 2;
 	info!("Appending: {}", appending_count);
@@ -234,10 +236,10 @@ async fn define_statement_index_concurrently_building_status() -> Result<(), Err
 					}
 					let val = Value::parse(
 						"{
-										building: {
-											status: 'built'
-										}
-									}",
+								building: {
+									status: 'built'
+								}
+							}",
 					);
 					assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 					break;
@@ -247,6 +249,25 @@ async fn define_statement_index_concurrently_building_status() -> Result<(), Err
 		panic!("Unexpected value {tmp:#}");
 	}
 	Ok(())
+}
+
+#[test(tokio::test)]
+async fn define_statement_index_concurrently_building_status_standard() -> Result<(), Error> {
+	define_statement_index_concurrently_building_status(
+		"DEFINE INDEX test ON user FIELDS email CONCURRENTLY",
+		1,
+	)
+	.await
+}
+
+#[test(tokio::test)]
+async fn define_statement_index_concurrently_building_status_full_text() -> Result<(), Error> {
+	define_statement_index_concurrently_building_status(
+		"DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
+		2,
+	)
+	.await
 }
 
 #[tokio::test]
