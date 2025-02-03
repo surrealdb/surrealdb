@@ -11,8 +11,8 @@ use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
 use axum::extract::ws::{close_code::AGAIN, CloseFrame, Message, WebSocket};
 use core::fmt;
-use futures::Sink;
-use futures_util::{SinkExt, StreamExt};
+use futures::stream::FuturesUnordered;
+use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
 use std::collections::BTreeMap;
@@ -244,7 +244,7 @@ impl Connection {
 			(shutdown, canceller)
 		};
 		// Store spawned tasks so we can wait for them
-		let mut tasks = JoinSet::new();
+		let mut tasks = FuturesUnordered::new();
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
@@ -255,19 +255,7 @@ impl Connection {
 				// Check if we should teardown
 				_ = canceller.cancelled() => break,
 				// Remove any completed tasks
-				Some(out) = tasks.join_next() => match out {
-					// There was an uncaught panic in the task
-					Err(err) if err.is_panic() => {
-						// There was an error with the task
-						error!("WebSocket request error: {err}");
-						// Cancel the WebSocket tasks
-						canceller.cancel();
-						// Exit out of the loop
-						break;
-					},
-					// The task completed successfully
-					_ => continue,
-				},
+				Some(_) = tasks.next() => continue,
 				// Wait for the next received message
 				Some(msg) = receiver.next() => match msg {
 					// We've received a message from the client
@@ -279,13 +267,11 @@ impl Connection {
 							if ALLOC.is_beyond_threshold() {
 								// Reject the message
 								Self::close_socket(rpc.clone(), chn).await;
-								// Abort all tasks
-								tasks.abort_all();
 								// Exit out of the loop
 								break;
 							}
 							// Otherwise spawn and handle the message
-							tasks.spawn(Self::handle_message(rpc.clone(), msg, chn));
+							tasks.push(Self::handle_message(rpc.clone(), msg, chn));
 						}
 						Message::Binary(_) => {
 							// Clone the response sending channel
@@ -294,13 +280,11 @@ impl Connection {
 							if ALLOC.is_beyond_threshold() {
 								// Reject the message
 								Self::close_socket(rpc.clone(), chn).await;
-								// Abort all tasks
-								tasks.abort_all();
 								// Exit out of the loop
 								break;
 							}
 							// Otherwise spawn and handle the message
-							tasks.spawn(Self::handle_message(rpc.clone(), msg, chn));
+							tasks.push(Self::handle_message(rpc.clone(), msg, chn));
 						}
 						Message::Close(_) => {
 							// Respond with a close message
@@ -330,20 +314,17 @@ impl Connection {
 				}
 			}
 		}
-		// Wait for all tasks to finish
-		while let Some(res) = tasks.join_next().await {
-			// There was an error with the task
-			if let Err(err) = res {
-				// There was an uncaught panic in the task
-				if err.is_panic() {
-					error!("WebSocket request error: {err}");
-				}
+		// Check if we are shutting down
+		if shutdown.is_cancelled() {
+			// Wait for all tasks to finish
+			while let Some(_) = tasks.next().await {
+				// Do nothing
 			}
 		}
 		// Cancel the WebSocket tasks
 		canceller.cancel();
-		// Ensure everything is aborted
-		tasks.shutdown().await;
+		// Ensure everything is dropped
+		std::mem::drop(tasks);
 	}
 
 	/// Handle an individual WebSocket message
@@ -441,7 +422,7 @@ impl Connection {
 								}
 								// Otherwise process the request message
 								else {
-									// Process the message when the semaphore is acquired
+									// Process the message
 									Self::process_message(rpc.clone(), method, req.params).await
 										.into_response(req.id)
 										.send(otel_cx.clone(), fmt, chn)
