@@ -167,7 +167,7 @@ impl Datastore {
 					next = res.next;
 					for (k, v) in res.result.iter() {
 						// Decode the data for this live query
-						let val: Live = revision::from_slice(&v)?;
+						let val: Live = revision::from_slice(v)?;
 						// Get the key for this node live query
 						let nlq = catch!(txn, crate::key::node::lq::Lq::decode(k));
 						// Check that the node for this query is archived
