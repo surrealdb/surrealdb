@@ -24,7 +24,7 @@ value = "NONE"
 value = "{ events: {  }, fields: {  }, indexes: { test: 'DEFINE INDEX test ON user FIELDS email' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = "{ building: { initial: 3, pending: 0, status: 'built', updated: 0 } }"
+value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
 value = "[{ detail: { plan: { index: 'test', operator: '=', value: 'testA@surrealdb.com' }, table: 'user' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"

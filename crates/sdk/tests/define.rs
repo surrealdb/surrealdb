@@ -249,7 +249,7 @@ async fn define_statement_index_concurrently_building_status(
 							}
 							continue;
 						}
-						"built" => {
+						"ready" => {
 							let initial = new_initial.unwrap().coerce_to_i64()? as usize;
 							let pending = new_pending.unwrap().coerce_to_i64()?;
 							let updated = new_updated.unwrap().coerce_to_i64()? as usize;

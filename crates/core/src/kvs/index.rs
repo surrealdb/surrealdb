@@ -34,7 +34,7 @@ pub(crate) enum BuildingStatus {
 		updated: Option<usize>,
 		pending: Option<usize>,
 	},
-	Built {
+	Ready {
 		initial: Option<usize>,
 		updated: Option<usize>,
 		pending: Option<usize>,
@@ -44,7 +44,7 @@ pub(crate) enum BuildingStatus {
 
 impl Default for BuildingStatus {
 	fn default() -> Self {
-		Self::Built {
+		Self::Ready {
 			initial: None,
 			updated: None,
 			pending: None,
@@ -63,8 +63,8 @@ impl BuildingStatus {
 		matches!(self, Self::Error(_))
 	}
 
-	fn is_built(&self) -> bool {
-		matches!(self, Self::Built { .. })
+	fn is_ready(&self) -> bool {
+		matches!(self, Self::Ready { .. })
 	}
 }
 
@@ -89,7 +89,7 @@ impl From<BuildingStatus> for Value {
 				}
 				"indexing"
 			}
-			BuildingStatus::Built {
+			BuildingStatus::Ready {
 				initial,
 				pending,
 				updated,
@@ -103,7 +103,7 @@ impl From<BuildingStatus> for Value {
 				if let Some(c) = updated {
 					o.insert("updated".to_string(), c.into());
 				}
-				"built"
+				"ready"
 			}
 			BuildingStatus::Error(error) => {
 				o.insert("error".to_string(), error.to_string().into());
@@ -285,7 +285,7 @@ impl Building {
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
 		if queue.is_empty() {
 			// If the appending queue is empty and the index is built...
-			if self.status.read().await.is_built() {
+			if self.status.read().await.is_ready() {
 				// ... we return the values back, so the document can be updated the usual way
 				return Ok(ConsumeResult::Ignored(old_values, new_values));
 			}
@@ -393,7 +393,7 @@ impl Building {
 				if queue.is_empty() {
 					// If the batch is empty, we are done.
 					// Due to the lock on self.queue, we know that no external process can add an item to the queue.
-					self.set_status(BuildingStatus::Built {
+					self.set_status(BuildingStatus::Ready {
 						initial: Some(initial_count),
 						pending: Some(queue.pending() as usize),
 						updated: Some(updates_count),
