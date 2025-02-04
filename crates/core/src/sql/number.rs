@@ -418,7 +418,7 @@ impl Number {
 				if v < *HALF_PRIME {
 					Number::Felt252(v)
 				} else {
-					Number::Felt252((Felt::MAX - v) + Felt::ONE)
+					Number::Felt252(-v)
 				}
 			}
 		}
