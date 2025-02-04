@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use surrealdb_core::sql::to_value as to_core_value;
+use surrealdb_core::sql::Value as CoreValue;
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -1411,5 +1412,13 @@ where
 			is_ml: false,
 			import_type: PhantomData,
 		}
+	}
+}
+
+fn validate_data(data: &CoreValue, error_message: &str) -> crate::Result<()> {
+	match data {
+		CoreValue::Object(_) => Ok(()),
+		CoreValue::Array(v) if v.iter().all(CoreValue::is_object) => Ok(()),
+		_ => Err(crate::api::err::Error::InvalidParams(error_message.to_owned()).into()),
 	}
 }

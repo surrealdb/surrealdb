@@ -1,3 +1,4 @@
+use super::validate_data;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
@@ -49,7 +50,10 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let content = match content? {
 					CoreValue::None | CoreValue::Null => None,
-					x => Some(x),
+					data => {
+						validate_data(&data, "Tried to merge non-object-like data, only structs and objects are supported")?;
+						Some(data)
+					},
 				};
 
 				let router = client.router.extract()?;
