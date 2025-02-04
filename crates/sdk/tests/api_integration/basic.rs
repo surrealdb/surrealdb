@@ -1105,6 +1105,84 @@ pub async fn update_merge_record_id(new_db: impl CreateDb) {
 	);
 }
 
+pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	// Create a new record using upsert
+	let record_id = ("person", "jaime");
+	let mut jaime: Option<Person> = db
+		.upsert(record_id)
+		.content(Person {
+			id: None,
+			title: "Founder & COO".into(),
+			name: Name {
+				first: "Jaime".into(),
+				last: "Morgan Hitchcock".into(),
+			},
+			marketing: false,
+		})
+		.await
+		.unwrap();
+	assert_eq!(jaime.unwrap().id.unwrap(), "person:jaime".parse().unwrap());
+	// Update the record using merge
+	jaime = db.upsert(record_id).merge(json!({ "marketing": true })).await.unwrap();
+	assert!(jaime.as_ref().unwrap().marketing);
+	jaime = db.select(record_id).await.unwrap();
+	assert_eq!(
+		jaime,
+		Some(Person {
+			id: Some("person:jaime".parse().unwrap()),
+			title: "Founder & COO".into(),
+			name: Name {
+				first: "Jaime".into(),
+				last: "Morgan Hitchcock".into(),
+			},
+			marketing: true,
+		})
+	);
+	// Call upsert.merge on a new record
+	let mut tobie: Option<Person> = db
+		.upsert(("person", "tobie"))
+		.merge(Person {
+			id: None,
+			title: "Founder & CEO".into(),
+			name: Name {
+				first: "Tobie".into(),
+				last: "Morgan Hitchcock".into(),
+			},
+			marketing: true,
+		})
+		.await
+		.unwrap();
+	assert_eq!(
+		tobie,
+		Some(Person {
+			id: Some("person:tobie".parse().unwrap()),
+			title: "Founder & CEO".into(),
+			name: Name {
+				first: "Tobie".into(),
+				last: "Morgan Hitchcock".into(),
+			},
+			marketing: true,
+		})
+	);
+	// Ensure the record is saved
+	tobie = db.select(("person", "tobie")).await.unwrap();
+	assert_eq!(
+		tobie,
+		Some(Person {
+			id: Some("person:tobie".parse().unwrap()),
+			title: "Founder & CEO".into(),
+			name: Name {
+				first: "Tobie".into(),
+				last: "Morgan Hitchcock".into(),
+			},
+			marketing: true,
+		})
+	);
+}
+
 pub async fn patch_record_id(new_db: impl CreateDb) {
 	#[derive(Debug, Deserialize, PartialEq)]
 	struct Record {
@@ -1656,6 +1734,8 @@ define_include_tests!(basic => {
 	update_record_id_with_content,
 	#[test_log::test(tokio::test)]
 	update_merge_record_id,
+	#[test_log::test(tokio::test)]
+	upsert_merge_record_id,
 	#[test_log::test(tokio::test)]
 	patch_record_id,
 	#[test_log::test(tokio::test)]
