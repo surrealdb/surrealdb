@@ -313,11 +313,10 @@ impl InfoStatement {
 				if let Some(ib) = ctx.get_index_builder() {
 					// Obtain the index
 					let res = txn.get_tb_index(opt.ns()?, opt.db()?, table, index).await?;
-					if let Some(status) = ib.get_status(&res).await {
-						let mut out = Object::default();
-						out.insert("building".to_string(), status.into());
-						return Ok(out.into());
-					}
+					let status = ib.get_status(&res).await;
+					let mut out = Object::default();
+					out.insert("building".to_string(), status.into());
+					return Ok(out.into());
 				}
 				Ok(Object::default().into())
 			}

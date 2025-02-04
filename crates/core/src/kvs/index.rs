@@ -20,21 +20,37 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tokio::task;
 use tokio::task::JoinHandle;
 
 use super::KeyDecode;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
 	Started,
-	InitialIndexing(usize),
-	UpdatesIndexing(usize),
+	Indexing {
+		initial: Option<usize>,
+		updated: Option<usize>,
+		pending: Option<usize>,
+	},
+	Built {
+		initial: Option<usize>,
+		updated: Option<usize>,
+		pending: Option<usize>,
+	},
 	Error(Arc<Error>),
-	Built,
 }
 
+impl Default for BuildingStatus {
+	fn default() -> Self {
+		Self::Built {
+			initial: None,
+			updated: None,
+			pending: None,
+		}
+	}
+}
 pub(crate) enum ConsumeResult {
 	/// The document has been enqueued to be indexed
 	Enqueued,
@@ -48,7 +64,7 @@ impl BuildingStatus {
 	}
 
 	fn is_built(&self) -> bool {
-		matches!(self, Self::Built)
+		matches!(self, Self::Built { .. })
 	}
 }
 
@@ -57,19 +73,42 @@ impl From<BuildingStatus> for Value {
 		let mut o = Object::default();
 		let s = match st {
 			BuildingStatus::Started => "started",
-			BuildingStatus::InitialIndexing(count) => {
-				o.insert("count".to_string(), count.into());
-				"initial"
+			BuildingStatus::Indexing {
+				initial,
+				pending,
+				updated,
+			} => {
+				if let Some(c) = initial {
+					o.insert("initial".to_string(), c.into());
+				}
+				if let Some(c) = pending {
+					o.insert("pending".to_string(), c.into());
+				}
+				if let Some(c) = updated {
+					o.insert("updated".to_string(), c.into());
+				}
+				"indexing"
 			}
-			BuildingStatus::UpdatesIndexing(count) => {
-				o.insert("count".to_string(), count.into());
-				"updates"
+			BuildingStatus::Built {
+				initial,
+				pending,
+				updated,
+			} => {
+				if let Some(c) = initial {
+					o.insert("initial".to_string(), c.into());
+				}
+				if let Some(c) = pending {
+					o.insert("pending".to_string(), c.into());
+				}
+				if let Some(c) = updated {
+					o.insert("updated".to_string(), c.into());
+				}
+				"built"
 			}
 			BuildingStatus::Error(error) => {
 				o.insert("error".to_string(), error.to_string().into());
 				"error"
 			}
-			BuildingStatus::Built => "built",
 		};
 		o.insert("status".to_string(), s.into());
 		o.into()
@@ -112,7 +151,7 @@ impl IndexBuilder {
 				let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, e.key().clone())?);
 				let b = building.clone();
 				let jh = task::spawn(async move {
-					if let Err(err) = b.compute().await {
+					if let Err(err) = b.run().await {
 						b.set_status(BuildingStatus::Error(err.into())).await;
 					}
 				});
@@ -137,11 +176,11 @@ impl IndexBuilder {
 		Ok(ConsumeResult::Ignored(old_values, new_values))
 	}
 
-	pub(crate) async fn get_status(&self, ix: &DefineIndexStatement) -> Option<BuildingStatus> {
+	pub(crate) async fn get_status(&self, ix: &DefineIndexStatement) -> BuildingStatus {
 		if let Some(a) = self.indexes.get(ix) {
-			Some(a.value().0.status.read().await.clone())
+			a.value().0.status.read().await.clone()
 		} else {
-			None
+			BuildingStatus::default()
 		}
 	}
 }
@@ -184,6 +223,10 @@ impl QueueSequences {
 		self.next = 0;
 	}
 
+	fn pending(&self) -> u32 {
+		self.next - self.to_index
+	}
+
 	fn set_to_index(&mut self, i: u32) {
 		self.to_index = i;
 	}
@@ -202,8 +245,7 @@ struct Building {
 	ix: Arc<DefineIndexStatement>,
 	tb: String,
 	status: Arc<RwLock<BuildingStatus>>,
-	// Should be stored on a temporary table
-	queue: Arc<Mutex<QueueSequences>>,
+	queue: Arc<RwLock<QueueSequences>>,
 }
 
 impl Building {
@@ -239,7 +281,7 @@ impl Building {
 		new_values: Option<Vec<Value>>,
 		rid: &Thing,
 	) -> Result<ConsumeResult, Error> {
-		let mut queue = self.queue.lock().await;
+		let mut queue = self.queue.write().await;
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
 		if queue.is_empty() {
 			// If the appending queue is empty and the index is built...
@@ -263,9 +305,10 @@ impl Building {
 		// Do we already have a primary appending?
 		let ip = self.new_ip_key(rid.id.clone())?;
 		if tx.get(ip.clone(), None).await?.is_none() {
-			// If not we set it
+			// If not, we set it
 			tx.set(ip, PrimaryAppending(idx), None).await?;
 		}
+		drop(queue);
 		Ok(ConsumeResult::Enqueued)
 	}
 
@@ -292,22 +335,27 @@ impl Building {
 		Ok(ctx.freeze())
 	}
 
-	async fn compute(&self) -> Result<(), Error> {
-		// Set the initial status
-		self.set_status(BuildingStatus::InitialIndexing(0)).await;
+	async fn run(&self) -> Result<(), Error> {
 		// First iteration, we index every keys
 		let ns = self.opt.ns()?;
 		let db = self.opt.db()?;
 		let beg = thing::prefix(ns, db, &self.tb)?;
 		let end = thing::suffix(ns, db, &self.tb)?;
 		let mut next = Some(beg..end);
-		let mut count = 0;
+		let mut initial_count = 0;
+		// Set the initial status
+		self.set_status(BuildingStatus::Indexing {
+			initial: Some(initial_count),
+			pending: Some(self.queue.read().await.pending() as usize),
+			updated: None,
+		})
+		.await;
 		while let Some(rng) = next {
 			// Get the next batch of records
-			let tx = self.new_read_tx().await?;
-			let batch = catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await);
-			// We can release the read transaction
-			drop(tx);
+			let batch = {
+				let tx = self.new_read_tx().await?;
+				catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await)
+			};
 			// Set the next scan range
 			next = batch.next;
 			// Check there are records
@@ -316,36 +364,62 @@ impl Building {
 				break;
 			}
 			// Create a new context with a write transaction
-			let ctx = self.new_write_tx_ctx().await?;
-			let tx = ctx.tx();
-			// Index the batch
-			catch!(tx, self.index_initial_batch(&ctx, &tx, batch.result, &mut count).await);
-			tx.commit().await?;
+			{
+				let ctx = self.new_write_tx_ctx().await?;
+				let tx = ctx.tx();
+				// Index the batch
+				catch!(
+					tx,
+					self.index_initial_batch(&ctx, &tx, batch.result, &mut initial_count).await
+				);
+				tx.commit().await?;
+			}
 		}
 		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
-		self.set_status(BuildingStatus::UpdatesIndexing(0)).await;
+		self.set_status(BuildingStatus::Indexing {
+			initial: Some(initial_count),
+			pending: Some(self.queue.read().await.pending() as usize),
+			updated: Some(0),
+		})
+		.await;
+		let mut updates_count = 0;
+		let mut next_to_index = None;
 		loop {
-			let mut queue = self.queue.lock().await;
-			if queue.is_empty() {
-				// If the batch is empty, we are done.
-				// Due to the lock on self.appended, we know that no external process can add an item to the queue.
-				self.set_status(BuildingStatus::Built).await;
-				// This is here to be sure the lock on back is not released early
-				queue.clear();
-				break;
-			}
-			let range = queue.next_indexing_batch(*NORMAL_FETCH_SIZE);
+			let range = {
+				let mut queue = self.queue.write().await;
+				if let Some(ni) = next_to_index {
+					queue.set_to_index(ni);
+				}
+				if queue.is_empty() {
+					// If the batch is empty, we are done.
+					// Due to the lock on self.queue, we know that no external process can add an item to the queue.
+					self.set_status(BuildingStatus::Built {
+						initial: Some(initial_count),
+						pending: Some(queue.pending() as usize),
+						updated: Some(updates_count),
+					})
+					.await;
+					// This is here to be sure the lock on back is not released early
+					queue.clear();
+					break;
+				}
+				queue.next_indexing_batch(*NORMAL_FETCH_SIZE)
+			};
 			if range.is_empty() {
 				continue;
 			}
-			let next_to_index = range.end;
-
+			next_to_index = Some(range.end);
 			// Create a new context with a write transaction
-			let ctx = self.new_write_tx_ctx().await?;
-			let tx = ctx.tx();
-			catch!(tx, self.index_appending_range(&ctx, &tx, range, &mut count).await);
-			tx.commit().await?;
-			queue.set_to_index(next_to_index);
+			{
+				let ctx = self.new_write_tx_ctx().await?;
+				let tx = ctx.tx();
+				catch!(
+					tx,
+					self.index_appending_range(&ctx, &tx, range, initial_count, &mut updates_count)
+						.await
+				);
+				tx.commit().await?;
+			}
 		}
 		Ok(())
 	}
@@ -395,7 +469,12 @@ impl Building {
 
 			// Increment the count and update the status
 			*count += 1;
-			self.set_status(BuildingStatus::InitialIndexing(*count)).await;
+			self.set_status(BuildingStatus::Indexing {
+				initial: Some(*count),
+				pending: Some(self.queue.read().await.pending() as usize),
+				updated: None,
+			})
+			.await;
 		}
 		Ok(())
 	}
@@ -405,6 +484,7 @@ impl Building {
 		ctx: &Context,
 		tx: &Transaction,
 		range: Range<u32>,
+		initial: usize,
 		count: &mut usize,
 	) -> Result<(), Error> {
 		let mut stack = TreeStack::new();
@@ -423,7 +503,12 @@ impl Building {
 				tx.del(ip).await?;
 
 				*count += 1;
-				self.set_status(BuildingStatus::UpdatesIndexing(*count)).await;
+				self.set_status(BuildingStatus::Indexing {
+					initial: Some(initial),
+					pending: Some(self.queue.read().await.pending() as usize),
+					updated: Some(*count),
+				})
+				.await;
 			}
 		}
 		Ok(())
