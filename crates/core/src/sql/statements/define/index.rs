@@ -58,6 +58,8 @@ impl DefineIndexStatement {
 					value: self.name.to_string(),
 				});
 			}
+			// Clear the index store cache
+			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
 		}
 		// Does the table exists?
 		match txn.get_tb(ns, db, &self.what).await {
@@ -88,9 +90,10 @@ impl DefineIndexStatement {
 		txn.set(
 			key,
 			DefineIndexStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
+				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
 				if_not_exists: false,
 				overwrite: false,
+				concurrently: false,
 				..self.clone()
 			},
 			None,

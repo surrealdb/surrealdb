@@ -139,8 +139,7 @@ impl IndexBuilder {
 
 	pub(crate) async fn get_status(&self, ix: &DefineIndexStatement) -> Option<BuildingStatus> {
 		if let Some(a) = self.indexes.get(ix) {
-			let status = a.value().0.status.read().await.clone();
-			Some(status)
+			Some(a.value().0.status.read().await.clone())
 		} else {
 			None
 		}
@@ -244,8 +243,7 @@ impl Building {
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
 		if queue.is_empty() {
 			// If the appending queue is empty and the index is built...
-			let is_build = self.status.read().await.is_built();
-			if is_build {
+			if self.status.read().await.is_built() {
 				// ... we return the values back, so the document can be updated the usual way
 				return Ok(ConsumeResult::Ignored(old_values, new_values));
 			}
