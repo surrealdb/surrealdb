@@ -32,7 +32,7 @@ async fn rebuild_index_statement() -> Result<(), Error> {
 	assert_eq!(res.len(), 14);
 	for _ in 0..3 {
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;
@@ -50,7 +50,7 @@ async fn rebuild_index_statement() -> Result<(), Error> {
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	for _ in 0..8 {
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;

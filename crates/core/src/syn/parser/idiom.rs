@@ -3,7 +3,7 @@ use reblessive::Stk;
 use crate::{
 	sql::{
 		part::{DestructurePart, Recurse, RecurseInstruction},
-		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value,
+		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Tables, Value,
 	},
 	syn::{
 		error::bail,
@@ -217,7 +217,16 @@ impl Parser<'_> {
 		let graph = ctx.run(|ctx| self.parse_graph(ctx, dir)).await?;
 		// the production `Thing Graph` is reparsed as an edge if the graph does not contain an
 		// alias or a condition.
-		if res.len() == 1 && graph.alias.is_none() && graph.cond.is_none() {
+		if res.len() == 1
+			&& graph.alias.is_none()
+			&& graph.cond.is_none()
+			&& graph.group.is_none()
+			&& graph.limit.is_none()
+			&& graph.order.is_none()
+			&& graph.split.is_none()
+			&& graph.start.is_none()
+			&& graph.expr.is_none()
+		{
 			match std::mem::replace(&mut res[0], Part::All) {
 				Part::Value(Value::Thing(t)) | Part::Start(Value::Thing(t)) => {
 					let edge = Edges {
@@ -445,7 +454,18 @@ impl Parser<'_> {
 			},
 			"shortest" => {
 				expected!(self, t!("="));
-				let expects = Value::from(self.parse_thing(ctx).await?);
+				let token = self.peek();
+				let expects = match token.kind {
+					TokenKind::Parameter => {
+						Value::from(self.next_token_value::<Param>()?)
+					},
+					x if Parser::kind_is_identifier(x) => {
+						Value::from(self.parse_thing(ctx).await?)
+					}
+					_ => {
+						unexpected!(self, token, "a param or thing");
+					}
+				};
 				let mut inclusive = false;
 				loop {
 					parse_option!(
@@ -672,6 +692,16 @@ impl Parser<'_> {
 			}
 			t!("(") => {
 				let span = self.pop_peek().span;
+				let expr = if self.eat(t!("SELECT")) {
+					let before = self.peek().span;
+					let expr = self.parse_fields(ctx).await?;
+					let fields_span = before.covers(self.last_span());
+					expected!(self, t!("FROM"));
+					Some((expr, fields_span))
+				} else {
+					None
+				};
+
 				let token = self.peek();
 				let what = match token.kind {
 					t!("?") => {
@@ -692,6 +722,25 @@ impl Parser<'_> {
 				};
 
 				let cond = self.try_parse_condition(ctx).await?;
+				let (split, group, order) = if let Some((ref expr, fields_span)) = expr {
+					let split = self.try_parse_split(ctx, expr, fields_span).await?;
+					let group = self.try_parse_group(ctx, expr, fields_span).await?;
+					let order = self.try_parse_orders(ctx, expr, fields_span).await?;
+					(split, group, order)
+				} else {
+					(None, None, None)
+				};
+
+				let (limit, start) = if let t!("START") = self.peek_kind() {
+					let start = self.try_parse_start(ctx).await?;
+					let limit = self.try_parse_limit(ctx).await?;
+					(limit, start)
+				} else {
+					let limit = self.try_parse_limit(ctx).await?;
+					let start = self.try_parse_start(ctx).await?;
+					(limit, start)
+				};
+
 				let alias = if self.eat(t!("AS")) {
 					Some(self.parse_plain_idiom(ctx).await?)
 				} else {
@@ -705,7 +754,12 @@ impl Parser<'_> {
 					what,
 					cond,
 					alias,
-					expr: Fields::all(),
+					expr: expr.map(|(x, _)| x),
+					split,
+					group,
+					order,
+					limit,
+					start,
 					..Default::default()
 				})
 			}
@@ -715,7 +769,6 @@ impl Parser<'_> {
 				let table = self.next_token_value().unwrap();
 				Ok(Graph {
 					dir,
-					expr: Fields::all(),
 					what: Tables(vec![table]),
 					..Default::default()
 				})
@@ -928,27 +981,13 @@ mod tests {
 				Part::from("friend"),
 				Part::Graph(Graph {
 					dir: Dir::Out,
-					expr: Fields::all(),
 					what: Table::from("like").into(),
-					cond: None,
-					alias: None,
-					split: None,
-					group: None,
-					order: None,
-					limit: None,
-					start: None,
+					..Default::default()
 				}),
 				Part::Graph(Graph {
 					dir: Dir::Out,
-					expr: Fields::all(),
 					what: Table::from("person").into(),
-					cond: None,
-					alias: None,
-					split: None,
-					group: None,
-					order: None,
-					limit: None,
-					start: None,
+					..Default::default()
 				}),
 			]))
 		);

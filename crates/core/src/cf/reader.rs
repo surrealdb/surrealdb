@@ -3,9 +3,9 @@ use crate::err::Error;
 use crate::key::change;
 #[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
-use crate::kvs::Transaction;
+use crate::kvs::{KeyDecode, Transaction};
 use crate::sql::statements::show::ShowSince;
-use crate::vs;
+use crate::vs::VersionStamp;
 
 // Reads the change feed for a specific database or a table,
 // starting from a specific versionstamp.
@@ -25,12 +25,12 @@ pub async fn read(
 ) -> Result<Vec<ChangeSet>, Error> {
 	// Calculate the start of the changefeed range
 	let beg = match start {
-		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, vs::u64_to_versionstamp(x)),
+		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, VersionStamp::from_u64(x))?,
 		ShowSince::Timestamp(x) => {
 			let ts = x.0.timestamp() as u64;
 			let vs = tx.lock().await.get_versionstamp_from_timestamp(ts, ns, db).await?;
 			match vs {
-				Some(vs) => change::prefix_ts(ns, db, vs),
+				Some(vs) => change::prefix_ts(ns, db, vs)?,
 				None => {
 					return Err(Error::Internal(
 						"no versionstamp associated to this timestamp exists yet".to_string(),
@@ -40,11 +40,11 @@ pub async fn read(
 		}
 	};
 	// Calculate the end of the changefeed range
-	let end = change::suffix(ns, db);
+	let end = change::suffix(ns, db)?;
 	// Limit the changefeed results with a default
 	let limit = limit.unwrap_or(100).min(1000);
 	// Create an empty buffer for the versionstamp
-	let mut vs: Option<[u8; 10]> = None;
+	let mut vs: Option<VersionStamp> = None;
 	// Create an empty buffer for the table mutations
 	let mut buf: Vec<TableMutations> = Vec::new();
 	// Create an empty buffer for the final changesets

@@ -2,6 +2,7 @@ use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::kvs::Datastore;
+use crate::kvs::KeyDecode as _;
 use crate::kvs::Live;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
@@ -149,21 +150,22 @@ impl Datastore {
 		// Loop over the archived nodes
 		for id in archived.iter() {
 			// Open a writeable transaction
+			let beg = crate::key::node::lq::prefix(*id)?;
+			let end = crate::key::node::lq::suffix(*id)?;
+			let mut next = Some(beg..end);
 			let txn = self.transaction(Write, Optimistic).await?;
 			{
 				// Log the live query scanning
 				trace!(target: TARGET, id = %id, "Deleting live queries for node");
 				// Scan the live queries for this node
-				let beg = crate::key::node::lq::prefix(*id);
-				let end = crate::key::node::lq::suffix(*id);
-				let mut next = Some(beg..end);
 				while let Some(rng) = next {
 					// Pause and yield execution
 					yield_now!();
 					// Fetch the next batch of keys and values
-					let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true, None).await);
+					let max = *NORMAL_FETCH_SIZE;
+					let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
 					next = res.next;
-					for (k, v) in res.values.iter() {
+					for (k, v) in res.result.iter() {
 						// Decode the data for this live query
 						let val: Live = v.into();
 						// Get the key for this node live query
@@ -244,14 +246,18 @@ impl Datastore {
 					// Log the namespace
 					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
 					// Iterate over the table live queries
-					let txn = self.transaction(Write, Optimistic).await?;
-					let beg = crate::key::table::lq::prefix(&ns.name, &db.name, &tb.name);
-					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name);
+					let beg = crate::key::table::lq::prefix(&ns.name, &db.name, &tb.name)?;
+					let end = crate::key::table::lq::suffix(&ns.name, &db.name, &tb.name)?;
 					let mut next = Some(beg..end);
+					let txn = self.transaction(Write, Optimistic).await?;
 					while let Some(rng) = next {
-						let res = catch!(txn, txn.batch(rng, *NORMAL_FETCH_SIZE, true, None).await);
+						// Pause and yield execution
+						yield_now!();
+						// Fetch the next batch of keys and values
+						let max = *NORMAL_FETCH_SIZE;
+						let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
 						next = res.next;
-						for (k, v) in res.values.iter() {
+						for (k, v) in res.result.iter() {
 							// Decode the LIVE query statement
 							let stm: LiveStatement = v.into();
 							// Get the node id and the live query id

@@ -1,10 +1,11 @@
 //! Stores a DEFINE CONFIG definition
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Cg<'a> {
 	__: u8,
@@ -17,21 +18,22 @@ pub struct Cg<'a> {
 	_e: u8,
 	pub ty: &'a str,
 }
+impl_key!(Cg<'a>);
 
 pub fn new<'a>(ns: &'a str, db: &'a str, ty: &'a str) -> Cg<'a> {
 	Cg::new(ns, db, ty)
 }
 
-pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db).encode().unwrap();
+pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(&[b'!', b'c', b'g', 0x00]);
-	k
+	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db).encode().unwrap();
+pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(&[b'!', b'c', b'g', 0xff]);
-	k
+	Ok(k)
 }
 
 impl Categorise for Cg<'_> {
@@ -58,6 +60,7 @@ impl<'a> Cg<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KeyDecode;
 	#[test]
 	fn key() {
 		use super::*;
@@ -75,13 +78,13 @@ mod tests {
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns", "testdb");
+		let val = super::prefix("testns", "testdb").unwrap();
 		assert_eq!(val, b"/*testns\0*testdb\0!cg\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns", "testdb");
+		let val = super::suffix("testns", "testdb").unwrap();
 		assert_eq!(val, b"/*testns\0*testdb\0!cg\xff");
 	}
 }

@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
-use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
+use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use revision::{revisioned, Revisioned};
@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 pub type DocId = u64;
 
 pub struct DocIds {
-	ixs: IndexStores,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
@@ -22,29 +21,28 @@ pub struct DocIds {
 
 impl DocIds {
 	pub async fn new(
-		ixs: &IndexStores,
 		tx: &Transaction,
 		tt: TransactionType,
 		ikb: IndexKeyBase,
 		default_btree_order: u32,
 		cache_size: u32,
 	) -> Result<Self, Error> {
-		let state_key: Key = ikb.new_bd_key(None);
+		let state_key: Key = ikb.new_bd_key(None)?;
 		let state: State = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
 		} else {
 			State::new(default_btree_order)
 		};
-		let store = ixs
+		let store = tx
+			.index_caches()
 			.get_store_btree_trie(
 				TreeNodeProvider::DocIds(ikb.clone()),
 				state.btree.generation(),
 				tt,
 				cache_size as usize,
 			)
-			.await;
+			.await?;
 		Ok(Self {
-			ixs: ixs.clone(),
 			state_key,
 			index_key_base: ikb,
 			btree: BTree::new(state.btree),
@@ -92,7 +90,7 @@ impl DocIds {
 			}
 		}
 		let doc_id = self.get_next_doc_id();
-		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone(), None).await?;
+		tx.set(self.index_key_base.new_bi_key(doc_id)?, doc_key.clone(), None).await?;
 		self.btree.insert(tx, &mut self.store, doc_key, doc_id).await?;
 		Ok(Resolved::New(doc_id))
 	}
@@ -103,7 +101,7 @@ impl DocIds {
 		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
 		if let Some(doc_id) = self.btree.delete(tx, &mut self.store, doc_key).await? {
-			tx.del(self.index_key_base.new_bi_key(doc_id)).await?;
+			tx.del(self.index_key_base.new_bi_key(doc_id)?).await?;
 			if let Some(available_ids) = &mut self.available_ids {
 				available_ids.insert(doc_id);
 			} else {
@@ -122,7 +120,7 @@ impl DocIds {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<Key>, Error> {
-		let doc_id_key = self.index_key_base.new_bi_key(doc_id);
+		let doc_id_key = self.index_key_base.new_bi_key(doc_id)?;
 		if let Some(val) = tx.get(doc_id_key, None).await? {
 			Ok(Some(val))
 		} else {
@@ -143,7 +141,7 @@ impl DocIds {
 				next_doc_id: self.next_doc_id,
 			};
 			tx.set(self.state_key.clone(), VersionedStore::try_into(&state)?, None).await?;
-			self.ixs.advance_cache_btree_trie(new_cache);
+			tx.index_caches().advance_store_btree_trie(new_cache);
 		}
 		Ok(())
 	}
@@ -258,9 +256,7 @@ mod tests {
 
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Transaction, DocIds) {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let d = DocIds::new(ds.index_store(), &tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100)
-			.await
-			.unwrap();
+		let d = DocIds::new(&tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100).await.unwrap();
 		(tx, d)
 	}
 

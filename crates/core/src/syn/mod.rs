@@ -2,6 +2,7 @@
 
 use crate::{
 	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
+	dbs::{capabilities::ExperimentalTarget, Capabilities},
 	err::Error,
 	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
 };
@@ -20,7 +21,7 @@ pub trait Parse<T> {
 mod test;
 
 use lexer::{compound, Lexer};
-use parser::Parser;
+use parser::{Parser, ParserSettings};
 use reblessive::Stack;
 use token::t;
 
@@ -43,15 +44,40 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Query, Error> {
+	let capabilities = Capabilities::all();
+	parse_with_capabilities(input, &capabilities)
+}
+
+/// Parses a SurrealQL [`Query`]
+///
+/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
+/// functions, objects, sub-queries), Javascript values, and geometry collections count against
+/// a computation depth limit. If the limit is reached, parsing will return
+/// [`Error::ComputationDepthExceeded`], as opposed to spending more time and potentially
+/// overflowing the call stack.
+///
+/// If you encounter this limit and believe that it should be increased,
+/// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Query, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
 	if input.len() > u32::MAX as usize {
 		return Err(Error::QueryTooLarge);
 	}
 
-	let mut parser = Parser::new(input.as_bytes())
-		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
-		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			references_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			bearer_access_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_query(stk))
@@ -63,15 +89,31 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn value(input: &str) -> Result<Value, Error> {
+	let capabilities = Capabilities::all();
+	value_with_capabilities(input, &capabilities)
+}
+
+/// Parses a SurrealQL [`Value`].
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
 	if input.len() > u32::MAX as usize {
 		return Err(Error::QueryTooLarge);
 	}
 
-	let mut parser = Parser::new(input.as_bytes())
-		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
-		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			references_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			bearer_access_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_value_field(stk))
@@ -90,9 +132,14 @@ pub fn json(input: &str) -> Result<Value, Error> {
 		return Err(Error::QueryTooLarge);
 	}
 
-	let mut parser = Parser::new(input.as_bytes())
-		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
-		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_json(stk))
@@ -111,9 +158,14 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 		return Err(Error::QueryTooLarge);
 	}
 
-	let mut parser = Parser::new(input.as_bytes())
-		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
-		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_full_subquery(stk))
@@ -132,9 +184,14 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 		return Err(Error::QueryTooLarge);
 	}
 
-	let mut parser = Parser::new(input.as_bytes())
-		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
-		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			..Default::default()
+		},
+	);
 	parser.table_as_field = true;
 	let mut stack = Stack::new();
 	stack
@@ -207,9 +264,14 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 		return Err(Error::QueryTooLarge);
 	}
 
-	let mut parser = Parser::new(input.as_bytes())
-		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
-		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_thing(stk))
@@ -228,9 +290,14 @@ pub fn thing_with_range(input: &str) -> Result<Thing, Error> {
 		return Err(Error::QueryTooLarge);
 	}
 
-	let mut parser = Parser::new(input.as_bytes())
-		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
-		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_thing_with_range(stk))
@@ -249,9 +316,14 @@ pub fn block(input: &str) -> Result<Block, Error> {
 		return Err(Error::QueryTooLarge);
 	}
 
-	let mut parser = Parser::new(input.as_bytes())
-		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
-		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
 	let token = parser.peek();
 	match token.kind {
@@ -281,11 +353,16 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 		return Err(Error::QueryTooLarge);
 	}
 
-	let mut parser = Parser::new(input.as_bytes())
-		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
-		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			legacy_strands: true,
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
-	parser.allow_legacy_strand(true);
 	stack
 		.enter(|stk| parser.parse_value_field(stk))
 		.finish()
@@ -303,11 +380,16 @@ pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 		return Err(Error::QueryTooLarge);
 	}
 
-	let mut parser = Parser::new(input.as_bytes())
-		.with_object_recursion_limit(*MAX_OBJECT_PARSING_DEPTH as usize)
-		.with_query_recursion_limit(*MAX_QUERY_PARSING_DEPTH as usize);
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			legacy_strands: true,
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
-	parser.allow_legacy_strand(true);
 	stack
 		.enter(|stk| parser.parse_json(stk))
 		.finish()

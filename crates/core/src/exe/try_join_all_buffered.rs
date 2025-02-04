@@ -31,10 +31,10 @@ where
 	I: IntoIterator,
 	I::Item: TryFuture,
 {
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	let limit: usize = 1;
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	let limit: usize = *crate::cnf::MAX_CONCURRENT_TASKS;
 
 	let mut input = iter.into_iter();

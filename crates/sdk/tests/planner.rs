@@ -16,10 +16,10 @@ async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
 	skip_ok(&mut res, 8)?;
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
 	// OR results
-	check_result(&mut res, &three_multi_index_explain(false))?;
+	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &single_index_ft_explain(false))?;
+	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
 	Ok(())
 }
 
@@ -30,10 +30,10 @@ async fn select_where_iterate_three_multi_index_parallel() -> Result<(), Error> 
 	skip_ok(&mut res, 8)?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
-	check_result(&mut res, &three_multi_index_explain(true))?;
+	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &single_index_ft_explain(true))?;
+	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
 	Ok(())
 }
 
@@ -49,10 +49,10 @@ async fn select_where_iterate_three_multi_index_with_all_index() -> Result<(), E
 	skip_ok(&mut res, 8)?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
-	check_result(&mut res, &three_multi_index_explain(false))?;
+	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &single_index_ft_explain(false))?;
+	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
 	Ok(())
 }
 
@@ -68,7 +68,7 @@ async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()
 	check_result(&mut res, &three_table_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &single_index_ft_explain(false))?;
+	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
 	Ok(())
 }
 
@@ -84,7 +84,7 @@ async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), E
 	check_result(&mut res, &three_table_explain(false))?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, &single_index_uniq_explain(false))?;
+	check_result(&mut res, SINGLE_INDEX_UNIQ_EXPLAIN)?;
 	Ok(())
 }
 
@@ -210,6 +210,12 @@ fn table_explain(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
+					type: 'KeysAndValues'
+				}},
+				operation: 'RecordStrategy'
+			}},
+			{{
+				detail: {{
 					count: {fetch_count}
 				}},
 				operation: 'Fetch'
@@ -238,6 +244,12 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 					type: 'MemoryOrdered'
 				}},
 				operation: 'Collector'
+			}},
+			{{
+				detail: {{
+					type: 'KeysAndValues'
+				}},
+				operation: 'RecordStrategy'
 			}},
 			{{
 				detail: {{
@@ -271,6 +283,12 @@ fn three_table_explain(parallel: bool) -> String {
 			}},
 			{{
 				detail: {{
+					type: 'KeysAndValues'
+				}},
+				operation: 'RecordStrategy'
+			}},
+			{{
+				detail: {{
 					count: 3
 				}},
 				operation: 'Fetch'
@@ -279,132 +297,123 @@ fn three_table_explain(parallel: bool) -> String {
 	)
 }
 
-fn three_multi_index_explain(parallel: bool) -> String {
-	let collector = if parallel {
-		"AsyncMemoryOrdered"
-	} else {
-		"MemoryOrdered"
-	};
-	format!(
-		"[
-				{{
-					detail: {{
-						plan: {{
+const THREE_MULTI_INDEX_EXPLAIN: &str = "[
+				{
+					detail: {
+						plan: {
 							index: 'uniq_name',
 							operator: '=',
 							value: 'Jaime'
-						}},
+						},
 						table: 'person',
-					}},
+					},
 					operation: 'Iterate Index'
-				}},
-                {{
-					detail: {{
-						plan: {{
+				},
+                {
+					detail: {
+						plan: {
 							index: 'idx_genre',
 							operator: '=',
 							value: 'm'
-						}},
+						},
 						table: 'person',
-					}},
+					},
 					operation: 'Iterate Index'
-				}},
-				{{
-					detail: {{
-						plan: {{
+				},
+				{
+					detail: {
+						plan: {
 							index: 'ft_company',
 							operator: '@@',
 							value: 'surrealdb'
-						}},
+						},
 						table: 'person',
-					}},
+					},
 					operation: 'Iterate Index'
-				}},
-				{{
-					detail: {{
-						type: '{collector}'
-					}},
+				},
+				{
+					detail: {
+						type: 'MemoryOrdered'
+					},
 					operation: 'Collector'
-				}},
-				{{
-					detail: {{
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 3
-					}},
+					},
 					operation: 'Fetch'
-				}}
-			]"
-	)
-}
+				}
+			]";
 
-fn single_index_ft_explain(parallel: bool) -> String {
-	let collector = if parallel {
-		"AsyncMemoryOrdered"
-	} else {
-		"MemoryOrdered"
-	};
-	format!(
-		"[
-				{{
-					detail: {{
-						plan: {{
+const SINGLE_INDEX_FT_EXPLAIN: &str = "[
+				{
+					detail: {
+						plan: {
 							index: 'ft_company',
 							operator: '@@',
 							value: 'surrealdb'
-						}},
+						},
 						table: 'person',
-					}},
+					},
 					operation: 'Iterate Index'
-				}},
-				{{
-					detail: {{
-						type: '{collector}'
-					}},
+				},
+				{
+					detail: {
+						type: 'MemoryOrdered'
+					},
 					operation: 'Collector'
-				}},
-				{{
-					detail: {{
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 1
-					}},
+					},
 					operation: 'Fetch'
-				}}
-			]"
-	)
-}
+				}
+			]";
 
-fn single_index_uniq_explain(parallel: bool) -> String {
-	let collector = if parallel {
-		"AsyncMemoryOrdered"
-	} else {
-		"MemoryOrdered"
-	};
-	format!(
-		"[
-				{{
-					detail: {{
-						plan: {{
+const SINGLE_INDEX_UNIQ_EXPLAIN: &str = "[
+				{
+					detail: {
+						plan: {
 							index: 'uniq_name',
 							operator: '=',
 							value: 'Jaime'
-						}},
+						},
 						table: 'person',
-					}},
+					},
 					operation: 'Iterate Index'
-				}},
-				{{
-					detail: {{
-						type: '{collector}'
-					}},
+				},
+				{
+					detail: {
+						type: 'MemoryOrdered'
+					},
 					operation: 'Collector'
-				}},
-				{{
-					detail: {{
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 1
-					}},
+					},
 					operation: 'Fetch'
-				}}
-			]"
-	)
-}
+				}
+			]";
 
 const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 	{
@@ -423,6 +432,12 @@ const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 			type: 'MemoryOrdered'
 		},
 		operation: 'Collector'
+	},
+	{
+		detail: {
+			type: 'KeysAndValues'
+		},
+		operation: 'RecordStrategy'
 	},
 	{
 		detail: {
@@ -460,6 +475,12 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 							type: 'MemoryOrdered'
 						},
 						operation: 'Collector'
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
 				},
 				{
 					detail: {
@@ -2023,6 +2044,107 @@ async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn select_with_in_and_not_valid_compound_index() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX idx_account_type ON test FIELDS account, type;
+		DEFINE INDEX idx_type_value ON test FIELDS type, value;
+		CREATE test:1 CONTENT {
+			account: accounts:1,
+			type: 'password',
+			value: '$argon2id$v=19$m=19456,t=2,p=1$qP0Y6ApAaFyeDsGySVD0DQ$Bp/Jv2uwapFUl5NKYk3uMsT5DZV0XPpMMVm3F2ZVfSM'
+		};
+		CREATE test:2 CONTENT {
+			account: accounts:2,
+			type: 'password',
+			value: '$argon2id$v=19$m=19456,t=2,p=1$nwwBkmNrUjjfD1ny3W50Ow$ZyZcp9GaH5iQx3k8YUmR/R3nguJR9feFO1cewEGGjcM'
+		};
+		CREATE test:3 CONTENT {
+			account: accounts:3,
+			type: 'password',
+			value: 'notAValidPassword'
+		};
+		SELECT * FROM test WITH INDEX idx_type_value WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
+		SELECT * FROM test WITH INDEX idx_account_type WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
+		SELECT * FROM test WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
+		SELECT * FROM test WITH INDEX idx_type_value WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
+		SELECT * FROM test WITH INDEX idx_account_type WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
+		SELECT * FROM test WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
+		SELECT * FROM test WITH NOINDEX WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
+	";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(12)?;
+	t.skip_ok(5)?;
+	t.expect_val(
+		"[
+			{
+				detail: {
+					plan: {
+						index: 'idx_type_value',
+						operator: 'union',
+						value: [
+							'password',
+							'firebasePassword'
+						]
+					},
+					table: 'test'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Memory'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)?;
+	for i in 0..2 {
+		t.expect_val_info(
+			"[
+				{
+					detail: {
+						plan: {
+							index: 'idx_account_type',
+							operator: 'union',
+							value: [
+								[
+									accounts:1,
+									'password'
+								],
+								[
+									accounts:1,
+									'firebasePassword'
+								]
+							]
+						},
+						table: 'test'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]",
+			i,
+		)?;
+	}
+	for i in 0..4 {
+		t.expect_val_info("[
+			{
+				account: accounts:1,
+				id: test:1,
+				type: 'password',
+				value: '$argon2id$v=19$m=19456,t=2,p=1$qP0Y6ApAaFyeDsGySVD0DQ$Bp/Jv2uwapFUl5NKYk3uMsT5DZV0XPpMMVm3F2ZVfSM'
+			}
+		]", i)?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
 async fn select_with_record_id_link_no_index() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2723,7 +2845,8 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 4,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -2828,7 +2951,8 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 3,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -2917,7 +3041,8 @@ async fn select_from_standard_index_descending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 4,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -3014,7 +3139,8 @@ async fn select_from_unique_index_descending() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					limit: 3,
+					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
 			}
@@ -3224,8 +3350,9 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 	t.expect_size(9)?;
 	t.skip_ok(1)?;
 	// Check explain plans
-	t.expect_val(
-		"[
+	for _ in 0..2 {
+		t.expect_val(
+			"[
 				{
 					detail: {
 						table: 'i'
@@ -3239,24 +3366,7 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 					operation: 'Collector'
 				}
 			]",
-	)?;
-	t.expect_val(
-		"[
-				{
-					detail: {
-						table: 'i'
-					},
-					operation: 'Iterate Table'
-				},
-				{
-					detail: {
-						type: 'MemoryOrdered'
-					},
-					operation: 'Collector'
-				}
-			]",
-	)?;
-	for _ in 0..2 {
+		)?;
 		t.expect_val(
 			"[
 				{
@@ -3267,7 +3377,7 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'AsyncMemoryOrdered'
+						type: 'MemoryOrdered'
 					},
 					operation: 'Collector'
 				}
@@ -3305,18 +3415,185 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_limit_start_parallel() -> Result<(), Error> {
+async fn select_limit_start() -> Result<(), Error> {
 	let sql = r"
 		CREATE |item:1000|;
-		SELECT * FROM item LIMIT 10 START 0 PARALLEL;";
+		SELECT * FROM item LIMIT 10 START 2 PARALLEL EXPLAIN FULL;
+		SELECT * FROM item LIMIT 10 START 2 PARALLEL;
+		SELECT * FROM item LIMIT 10 START 2 EXPLAIN FULL;
+		SELECT * FROM item LIMIT 10 START 2;";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(2)?;
+	t.expect_size(5)?;
 	t.skip_ok(1)?;
-	let r = t.next()?.result?;
-	if let Value::Array(a) = r {
-		assert_eq!(a.len(), 10);
-	} else {
-		panic!("Unexpected value: {r:#}");
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+					{
+						detail: {
+							table: 'item'
+						},
+						operation: 'Iterate Table'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					},
+					{
+						detail: {
+							type: 'KeysAndValues'
+						},
+						operation: 'RecordStrategy'
+					},
+					{
+						detail: {
+							CancelOnLimit: 12,
+							SkipStart: 2
+						},
+						operation: 'StartLimitStrategy'
+					},
+					{
+						detail: {
+							count: 10
+						},
+						operation: 'Fetch'
+					}
+				]",
+		)?;
+		let r = t.next()?.result?;
+		if let Value::Array(a) = r {
+			assert_eq!(a.len(), 10);
+		} else {
+			panic!("Unexpected value: {r:#}");
+		}
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_limit_start_order() -> Result<(), Error> {
+	let sql = r"
+		CREATE |item:1000| RETURN NONE;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL EXPLAIN;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2 EXPLAIN;
+		SELECT * FROM item ORDER BY id LIMIT 10 START 2;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(5)?;
+	t.skip_ok(1)?;
+	for _ in 0..2 {
+		t.expect_val(
+			"[
+					{
+						detail: {
+							table: 'item'
+						},
+						operation: 'Iterate Table'
+					},
+					{
+						detail: {
+							limit: 12,
+							type: 'MemoryOrderedLimit'
+						},
+						operation: 'Collector'
+					}
+				]",
+		)?;
+		let r = t.next()?.result?;
+		if let Value::Array(a) = r {
+			assert_eq!(a.len(), 10);
+		} else {
+			panic!("Unexpected value: {r:#}");
+		}
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_count_group_all_with_or_without_index() -> Result<(), Error> {
+	let sql = r"
+		FOR $i IN 0..10000 {
+			 CREATE indexPerformance3 CONTENT {
+				something: $i
+			};
+		};
+		DEFINE INDEX somethingIndex ON TABLE indexPerformance3 COLUMNS something;
+		SELECT count() FROM indexPerformance3 WITH NOINDEX WHERE something >= 5000 GROUP ALL EXPLAIN;
+		SELECT count() FROM indexPerformance3 WHERE something >= 5000 GROUP ALL EXPLAIN;
+		SELECT count() FROM indexPerformance3 WITH NOINDEX WHERE something >= 5000 GROUP ALL;
+		SELECT count() FROM indexPerformance3 WHERE something >= 5000 GROUP ALL;";
+	let mut t = Test::new(sql).await?;
+	t.expect_size(6)?;
+	t.skip_ok(2)?;
+	t.expect_val(
+		"[
+			{
+				detail: {
+					table: 'indexPerformance3'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					reason: 'WITH NOINDEX'
+				},
+				operation: 'Fallback'
+			},
+			{
+				detail: {
+					idioms: {
+						count: [
+							'count'
+						]
+					},
+					type: 'Group'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)?;
+	t.expect_val(
+		"[
+			{
+				detail: {
+					plan: {
+						from: {
+							inclusive: true,
+							value: 5000
+						},
+						index: 'somethingIndex',
+						to: {
+							inclusive: false,
+							value: NONE
+						}
+					},
+					table: 'indexPerformance3'
+				},
+				operation: 'Iterate Index Count'
+			},
+			{
+				detail: {
+					idioms: {
+						count: [
+							'count'
+						]
+					},
+					type: 'Group'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)?;
+	for i in 0..2 {
+		t.expect_val_info(
+			"[
+					{
+						count: 5000
+					}
+				]",
+			i,
+		)?;
 	}
 	Ok(())
 }

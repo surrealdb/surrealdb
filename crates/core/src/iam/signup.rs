@@ -1,5 +1,6 @@
 use super::access::{authenticate_record, create_refresh_token_record};
-use crate::cnf::{EXPERIMENTAL_BEARER_ACCESS, INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -137,7 +138,9 @@ pub async fn db_access(
 											let refresh = match &at.bearer {
 												Some(_) => {
 													// TODO(gguillemas): Remove this once bearer access is no longer experimental
-													if !*EXPERIMENTAL_BEARER_ACCESS {
+													if !kvs.get_capabilities().allows_experimental(
+														&ExperimentalTarget::BearerAccess,
+													) {
 														debug!("Will not create refresh token with disabled bearer access feature");
 														None
 													} else {
@@ -190,7 +193,7 @@ pub async fn db_access(
 									Error::Thrown(_) => Err(e),
 									// If the SIGNUP clause failed due to an unexpected error, be more specific
 									// This allows clients to handle these errors, which may be retryable
-									Error::Tx(_) | Error::TxFailure => {
+									Error::Tx(_) | Error::TxFailure | Error::TxRetryable => {
 										debug!("Unexpected error found while executing a SIGNUP clause: {e}");
 										Err(Error::UnexpectedAuth)
 									}
@@ -219,7 +222,7 @@ pub async fn db_access(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::iam::Role;
+	use crate::{dbs::Capabilities, iam::Role};
 	use chrono::Duration;
 	use std::collections::HashMap;
 
@@ -398,7 +401,9 @@ mod tests {
 		}
 		// Test with refresh
 		{
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
+			);
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"

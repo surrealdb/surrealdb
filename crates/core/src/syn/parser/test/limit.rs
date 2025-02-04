@@ -1,6 +1,6 @@
 use reblessive::Stack;
 
-use crate::syn::parser::Parser;
+use crate::syn::parser::{Parser, ParserSettings};
 
 #[test]
 fn object_depth() {
@@ -18,7 +18,13 @@ fn object_depth() {
 			}
 		}
 	"#;
-	let mut parser = Parser::new(source.as_bytes()).with_object_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -38,7 +44,13 @@ fn object_depth() {
 			}
 		}
 	"#;
-	let mut parser = Parser::new(source.as_bytes()).with_object_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -52,7 +64,13 @@ fn array_depth() {
 	let source = r#"
 		RETURN [ [ [ [ [ ] ] ] ] ]
 	"#;
-	let mut parser = Parser::new(source.as_bytes()).with_object_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -61,7 +79,13 @@ fn array_depth() {
 	let source = r#"
 		RETURN [ [ [ [ [ [ ] ] ] ] ] ]
 	"#;
-	let mut parser = Parser::new(source.as_bytes()).with_object_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -94,7 +118,13 @@ fn object_depth_succeed_then_fail() {
 	};
 	"#;
 
-	let mut parser = Parser::new(source.as_bytes()).with_object_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -126,7 +156,13 @@ fn object_depth_succeed_then_fail() {
 	};
 	"#;
 
-	let mut parser = Parser::new(source.as_bytes()).with_object_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -140,7 +176,13 @@ fn query_depth_subquery() {
 	let source = r#"
 		RETURN select (select (select ( select foo from bar ) from bar ) from bar) from bar
 		"#;
-	let mut parser = Parser::new(source.as_bytes()).with_query_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			query_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -149,7 +191,13 @@ fn query_depth_subquery() {
 	let source = r#"
 		RETURN select (select (select ( select (select foo from bar) from bar ) from bar ) from bar) from bar
 		"#;
-	let mut parser = Parser::new(source.as_bytes()).with_query_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			query_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -171,7 +219,13 @@ fn query_depth_block() {
 		}
 	}
 	"#;
-	let mut parser = Parser::new(source.as_bytes()).with_query_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			query_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -190,7 +244,13 @@ fn query_depth_block() {
 		}
 	}
 	"#;
-	let mut parser = Parser::new(source.as_bytes()).with_query_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			query_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -204,7 +264,13 @@ fn query_depth_if() {
 	let source = r#"
 		IF IF IF IF IF true THEN false END { false } { false } { false } { false }
 	"#;
-	let mut parser = Parser::new(source.as_bytes()).with_query_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			query_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()
@@ -213,7 +279,13 @@ fn query_depth_if() {
 	let source = r#"
 		IF IF IF IF IF IF true THEN false END { false } { false } { false } { false } { false }
 	"#;
-	let mut parser = Parser::new(source.as_bytes()).with_query_recursion_limit(5);
+	let mut parser = Parser::new_with_settings(
+		source.as_bytes(),
+		ParserSettings {
+			query_recursion_limit: 5,
+			..Default::default()
+		},
+	);
 	stack
 		.enter(|stk| parser.parse_query(stk))
 		.finish()

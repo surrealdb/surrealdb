@@ -1,13 +1,14 @@
 //! Stores change feeds
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::vs;
-use derive::Key;
+use crate::kvs::{impl_key, KeyEncode};
+use crate::vs::VersionStamp;
 use serde::{Deserialize, Serialize};
 use std::str;
 
 // Cf stands for change feeds
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Cf<'a> {
 	__: u8,
@@ -17,22 +18,22 @@ pub struct Cf<'a> {
 	pub db: &'a str,
 	_d: u8,
 	// vs is the versionstamp of the change feed entry that is encoded in big-endian.
-	// Use the to_u64_be function to convert it to a u128.
-	pub vs: [u8; 10],
+	pub vs: VersionStamp,
 	_c: u8,
 	pub tb: &'a str,
 }
+impl_key!(Cf<'a>);
 
 #[allow(unused)]
 pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
-	Cf::new(ns, db, vs::u64_to_versionstamp(ts), tb)
+	Cf::new(ns, db, VersionStamp::from_u64(ts), tb)
 }
 
 #[allow(unused)]
-pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
+pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
-	k
+	Ok(k)
 }
 
 #[allow(unused)]
@@ -48,27 +49,27 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.
 #[allow(unused)]
-pub fn prefix_ts(ns: &str, db: &str, vs: vs::Versionstamp) -> Vec<u8> {
-	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
+pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
-	k.extend_from_slice(&vs);
-	k
+	k.extend_from_slice(&vs.as_bytes());
+	Ok(k)
 }
 
 /// Returns the prefix for the whole database change feeds
 #[allow(unused)]
-pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
+pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
-	k
+	Ok(k)
 }
 
 /// Returns the suffix for the whole database change feeds
 #[allow(unused)]
-pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = crate::key::database::all::new(ns, db).encode().unwrap();
+pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(&[b'#', 0xff]);
-	k
+	Ok(k)
 }
 
 impl Categorise for Cf<'_> {
@@ -78,7 +79,7 @@ impl Categorise for Cf<'_> {
 }
 
 impl<'a> Cf<'a> {
-	pub fn new(ns: &'a str, db: &'a str, vs: [u8; 10], tb: &'a str) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, vs: VersionStamp, tb: &'a str) -> Self {
 		Cf {
 			__: b'/',
 			_a: b'*',
@@ -95,6 +96,7 @@ impl<'a> Cf<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KeyDecode;
 	use crate::vs::*;
 	use std::ascii::escape_default;
 
@@ -105,7 +107,7 @@ mod tests {
 		let val = Cf::new(
 			"test",
 			"test",
-			try_u128_to_versionstamp(12345).unwrap(),
+			VersionStamp::try_from_u128(12345).unwrap(),
 			"test",
 		);
 		let enc = Cf::encode(&val).unwrap();
@@ -116,12 +118,12 @@ mod tests {
 
 	#[test]
 	fn versionstamp_conversions() {
-		let a = u64_to_versionstamp(12345);
-		let b = try_to_u64_be(a).unwrap();
+		let a = VersionStamp::from_u64(12345);
+		let b = VersionStamp::try_into_u64(a).unwrap();
 		assert_eq!(12345, b);
 
-		let a = try_u128_to_versionstamp(12345).unwrap();
-		let b = to_u128_be(a);
+		let a = VersionStamp::try_from_u128(12345).unwrap();
+		let b = a.into_u128();
 		assert_eq!(12345, b);
 	}
 

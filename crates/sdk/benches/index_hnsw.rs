@@ -1,7 +1,6 @@
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use flate2::read::GzDecoder;
-use futures::executor::block_on;
 use reblessive::TreeStack;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -27,8 +26,8 @@ const M0: u8 = 48;
 
 const DIMENSION: u16 = 20;
 
-const INGESTING_SOURCE: &str = "../tests/data/hnsw-random-9000-20-euclidean.gz";
-const QUERYING_SOURCE: &str = "../tests/data/hnsw-random-5000-20-euclidean.gz";
+const INGESTING_SOURCE: &str = "../../tests/data/hnsw-random-9000-20-euclidean.gz";
+const QUERYING_SOURCE: &str = "../../tests/data/hnsw-random-5000-20-euclidean.gz";
 
 fn bench_hnsw_no_db(c: &mut Criterion) {
 	const GROUP_NAME: &str = "hnsw_no_db";
@@ -48,7 +47,8 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 	}
 
 	// Create an HNSW instance with data
-	let (ds, hnsw) = block_on(insert_objects(&samples));
+	let b = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+	let (ds, hnsw) = b.block_on(insert_objects(&samples));
 
 	let samples = new_vectors_from_file(QUERYING_SOURCE);
 	let samples: Vec<Vec<Number>> =

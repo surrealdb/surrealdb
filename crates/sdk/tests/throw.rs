@@ -34,7 +34,7 @@ async fn throw_param() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
@@ -59,7 +59,7 @@ async fn throw_value() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(

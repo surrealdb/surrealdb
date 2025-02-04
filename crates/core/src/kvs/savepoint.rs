@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Not used on Wasm
+
 use crate::err::Error;
 use crate::kvs::api::Transaction;
 use crate::kvs::{Key, Val};

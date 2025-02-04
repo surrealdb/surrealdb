@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{
-	Capabilities, FuncTarget, MethodTarget, NetTarget, RouteTarget, Targets,
+	Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget, Targets,
 };
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
@@ -75,6 +75,13 @@ Function names must be in the form <family>[::<name>]. For example:
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	allow_funcs: Option<Targets<FuncTarget>>,
 
+	#[arg(hide = true)]
+	#[arg(env = "SURREAL_CAPS_ALLOW_EXPERIMENTAL", long)]
+	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::experimental_targets)]
+	allow_experimental: Option<Targets<ExperimentalTarget>>,
+
 	#[arg(
 		help = "Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow",
 		long_help = r#"Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow
@@ -141,6 +148,13 @@ Function names must be in the form <family>[::<name>]. For example:
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	deny_funcs: Option<Targets<FuncTarget>>,
+
+	#[arg(hide = true)]
+	#[arg(env = "SURREAL_CAPS_DENY_EXPERIMENTAL", long)]
+	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::experimental_targets)]
+	deny_experimental: Option<Targets<ExperimentalTarget>>,
 
 	#[arg(
 		help = "Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",
@@ -359,6 +373,22 @@ impl DbsCapabilities {
 			None => Targets::None,
 		}
 	}
+
+	fn get_allow_experimental(&self) -> Targets<ExperimentalTarget> {
+		match &self.allow_experimental {
+			Some(t @ Targets::Some(_)) => t.clone(),
+			Some(_) => Targets::None,
+			None => Targets::None,
+		}
+	}
+
+	fn get_deny_experimental(&self) -> Targets<ExperimentalTarget> {
+		match &self.deny_experimental {
+			Some(t @ Targets::Some(_)) => t.clone(),
+			Some(_) => Targets::None,
+			None => Targets::None,
+		}
+	}
 }
 
 impl From<DbsCapabilities> for Capabilities {
@@ -374,6 +404,8 @@ impl From<DbsCapabilities> for Capabilities {
 			.without_rpc_methods(caps.get_deny_rpc())
 			.with_http_routes(caps.get_allow_http())
 			.without_http_routes(caps.get_deny_http())
+			.with_experimental(caps.get_allow_experimental())
+			.without_experimental(caps.get_deny_experimental())
 	}
 }
 

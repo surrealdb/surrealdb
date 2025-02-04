@@ -1,5 +1,5 @@
 #![cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
-#![cfg(not(target_arch = "wasm32"))]
+#![cfg(not(target_family = "wasm"))]
 
 mod protocol;
 mod server;

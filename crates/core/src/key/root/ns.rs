@@ -1,10 +1,10 @@
 //! Stores a DEFINE NAMESPACE config definition
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Ns<'a> {
 	__: u8,
@@ -13,19 +13,20 @@ pub struct Ns<'a> {
 	_c: u8,
 	pub ns: &'a str,
 }
+impl_key!(Ns<'a>);
 
 pub fn new(ns: &str) -> Ns<'_> {
 	Ns::new(ns)
 }
 
 pub fn prefix() -> Vec<u8> {
-	let mut k = super::all::new().encode().unwrap();
+	let mut k = super::all::kv();
 	k.extend_from_slice(b"!ns\x00");
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
-	let mut k = super::all::new().encode().unwrap();
+	let mut k = super::all::kv();
 	k.extend_from_slice(b"!ns\xff");
 	k
 }
@@ -50,6 +51,7 @@ impl<'a> Ns<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

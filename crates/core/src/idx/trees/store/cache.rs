@@ -1,13 +1,72 @@
 use crate::err::Error;
+use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
+use crate::idx::trees::btree::{BTreeNode, BTreeStore};
+use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
 use crate::idx::trees::store::lru::{CacheKey, ConcurrentLru};
-use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeNodeProvider};
-use crate::kvs::{Key, Transaction};
+use crate::idx::trees::store::{
+	NodeId, StoreGeneration, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
+};
+use crate::kvs::{Key, Transaction, TransactionType};
 use ahash::{HashMap, HashSet};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
+
+#[derive(Default)]
+pub(crate) struct IndexTreeCaches {
+	btree_fst_caches: TreeCaches<BTreeNode<FstKeys>>,
+	btree_trie_caches: TreeCaches<BTreeNode<TrieKeys>>,
+	mtree_caches: TreeCaches<MTreeNode>,
+}
+
+impl IndexTreeCaches {
+	pub(crate) async fn get_store_btree_fst(
+		&self,
+		keys: TreeNodeProvider,
+		generation: StoreGeneration,
+		tt: TransactionType,
+		cache_size: usize,
+	) -> Result<BTreeStore<FstKeys>, Error> {
+		let cache = self.btree_fst_caches.get_cache(generation, &keys, cache_size).await?;
+		Ok(TreeStore::new(keys, cache, tt).await)
+	}
+
+	pub(crate) fn advance_store_btree_fst(&self, new_cache: TreeCache<BTreeNode<FstKeys>>) {
+		self.btree_fst_caches.new_cache(new_cache);
+	}
+
+	pub(crate) async fn get_store_btree_trie(
+		&self,
+		keys: TreeNodeProvider,
+		generation: StoreGeneration,
+		tt: TransactionType,
+		cache_size: usize,
+	) -> Result<BTreeStore<TrieKeys>, Error> {
+		let cache = self.btree_trie_caches.get_cache(generation, &keys, cache_size).await?;
+		Ok(TreeStore::new(keys, cache, tt).await)
+	}
+
+	pub(crate) fn advance_store_btree_trie(&self, new_cache: TreeCache<BTreeNode<TrieKeys>>) {
+		self.btree_trie_caches.new_cache(new_cache);
+	}
+
+	pub async fn get_store_mtree(
+		&self,
+		keys: TreeNodeProvider,
+		generation: StoreGeneration,
+		tt: TransactionType,
+		cache_size: usize,
+	) -> Result<MTreeStore, Error> {
+		let cache = self.mtree_caches.get_cache(generation, &keys, cache_size).await?;
+		Ok(TreeStore::new(keys, cache, tt).await)
+	}
+
+	pub(crate) fn advance_store_mtree(&self, new_cache: TreeCache<MTreeNode>) {
+		self.mtree_caches.new_cache(new_cache);
+	}
+}
 
 pub(super) struct TreeCaches<N>(Arc<DashMap<Key, Arc<TreeCache<N>>>>)
 where
@@ -22,11 +81,11 @@ where
 		generation: StoreGeneration,
 		keys: &TreeNodeProvider,
 		cache_size: usize,
-	) -> Arc<TreeCache<N>> {
+	) -> Result<Arc<TreeCache<N>>, Error> {
 		#[cfg(debug_assertions)]
 		debug!("get_cache {generation}");
 		// We take the key from the node 0 as the key identifier for the cache
-		let cache_key = keys.get_key(0);
+		let cache_key = keys.get_key(0)?;
 		match self.0.entry(cache_key.clone()) {
 			Entry::Occupied(mut e) => {
 				let c = e.get_mut();
@@ -35,9 +94,14 @@ where
 					Ordering::Less => {
 						// The store generation is older than the current cache,
 						// we return an empty cache, but we don't hold it
-						Arc::new(TreeCache::new(generation, cache_key, keys.clone(), cache_size))
+						Ok(Arc::new(TreeCache::new(
+							generation,
+							cache_key,
+							keys.clone(),
+							cache_size,
+						)))
 					}
-					Ordering::Equal => c.clone(),
+					Ordering::Equal => Ok(c.clone()),
 					Ordering::Greater => {
 						// The store generation is more recent than the cache,
 						// we create a new one and hold it
@@ -48,7 +112,7 @@ where
 							cache_size,
 						));
 						e.insert(c.clone());
-						c
+						Ok(c)
 					}
 				}
 			}
@@ -56,7 +120,7 @@ where
 				// There is no cache for index, we create one and hold it
 				let c = Arc::new(TreeCache::new(generation, cache_key, keys.clone(), cache_size));
 				e.insert(c.clone());
-				c
+				Ok(c)
 			}
 		}
 	}
@@ -74,15 +138,6 @@ where
 				e.insert(Arc::new(new_cache));
 			}
 		}
-	}
-
-	pub(super) fn remove_caches(&self, keys: &TreeNodeProvider) {
-		let key = keys.get_key(0);
-		self.0.remove(&key);
-	}
-
-	pub(crate) fn is_empty(&self) -> bool {
-		self.0.is_empty()
 	}
 }
 

@@ -8,10 +8,12 @@ use crate::sql::{
 	AccessType, Array, Base, Cond, Datetime, Duration, Ident, Object, Strand, Thing, Uuid, Value,
 };
 use derive::Store;
+use md5::Digest;
 use rand::Rng;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
@@ -246,8 +248,11 @@ pub struct GrantRecord {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantBearer {
-	pub id: Ident,   // Key ID
-	pub key: Strand, // Key. Will be stored but afterwards returned redacted.
+	pub id: Ident, // Key ID
+	// Key. Will not be stored and be returned as redacted.
+	// Immediately after generation, it will contain the plaintext key.
+	// Will be hashed before storage so that the plaintext key is not stored.
+	pub key: Strand,
 }
 
 impl GrantBearer {
@@ -263,6 +268,22 @@ impl GrantBearer {
 		Self {
 			id: id.clone().into(),
 			key: format!("{prefix}-{id}-{secret}").into(),
+		}
+	}
+
+	pub fn hashed(self) -> Self {
+		// The hash of the bearer key is stored to mitigate the impact of a read-only compromise.
+		// We use SHA-256 as the key needs to be verified performantly for every operation.
+		// Unlike with passwords, brute force and rainbow tables are infeasable due to the key length.
+		// When hashing the bearer keys, the prefix and key identifier are kept as salt.
+		let mut hasher = Sha256::new();
+		hasher.update(self.key.as_string());
+		let hash = hasher.finalize();
+		let hash_hex = format!("{hash:x}").into();
+
+		Self {
+			key: hash_hex,
+			..self
 		}
 	}
 }
@@ -343,18 +364,21 @@ pub async fn create_grant(
 				// Subject associated with the grant.
 				subject: stmt.subject.to_owned(),
 				// The contents of the grant.
-				grant: Grant::Bearer(grant),
+				grant: Grant::Bearer(grant.clone()),
 			};
 
 			// Create the grant.
 			// On the very unlikely event of a collision, "put" will return an error.
 			let res = match base {
 				Base::Db => {
+					// Create a hashed version of the grant for storage.
+					let mut gr_store = gr.clone();
+					gr_store.grant = Grant::Bearer(grant.hashed());
 					let key =
 						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &gr.ac, &gr.id);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.put(key, &gr, None).await
+					txn.put(key, &gr_store, None).await
 				}
 				_ => return Err(Error::AccessLevelMismatch),
 			};
@@ -375,6 +399,8 @@ pub async fn create_grant(
 				opt.auth.id()
 			);
 
+			// Return the original version of the grant.
+			// This is the only time the the plaintext key is returned.
 			Ok(gr)
 		}
 		AccessType::Bearer(at) => {
@@ -422,27 +448,30 @@ pub async fn create_grant(
 				// Subject associated with the grant.
 				subject: stmt.subject.to_owned(),
 				// The contents of the grant.
-				grant: Grant::Bearer(grant),
+				grant: Grant::Bearer(grant.clone()),
 			};
 
 			// Create the grant.
 			// On the very unlikely event of a collision, "put" will return an error.
+			// Create a hashed version of the grant for storage.
+			let mut gr_store = gr.clone();
+			gr_store.grant = Grant::Bearer(grant.hashed());
 			let res = match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
-					txn.put(key, &gr, None).await
+					txn.put(key, &gr_store, None).await
 				}
 				Base::Ns => {
 					let key = crate::key::namespace::access::gr::new(opt.ns()?, &gr.ac, &gr.id);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.put(key, &gr, None).await
+					txn.put(key, &gr_store, None).await
 				}
 				Base::Db => {
 					let key =
 						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &gr.ac, &gr.id);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.put(key, &gr, None).await
+					txn.put(key, &gr_store, None).await
 				}
 				_ => {
 					return Err(Error::Unimplemented(
@@ -468,6 +497,8 @@ pub async fn create_grant(
 				opt.auth.id()
 			);
 
+			// Return the original version of the grant.
+			// This is the only time the the plaintext key is returned.
 			Ok(gr)
 		}
 	}
@@ -820,15 +851,15 @@ async fn compute_purge(
 		// Grants expired or revoked at a future time will not be purged.
 		// Grants expired or revoked at exactly the current second will not be purged.
 		let purge_expired = stmt.expired
-			&& gr.expiration.as_ref().map_or(false, |exp| {
-				now.timestamp() >= exp.timestamp() // Prevent saturating when not expired yet.
-					&& (now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
-			});
+			&& gr.expiration.as_ref().is_some_and(|exp| {
+				                 now.timestamp() >= exp.timestamp() // Prevent saturating when not expired yet.
+				                     && (now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
+				             });
 		let purge_revoked = stmt.revoked
-			&& gr.revocation.as_ref().map_or(false, |rev| {
-				now.timestamp() >= rev.timestamp() // Prevent saturating when not revoked yet.
-					&& (now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
-			});
+			&& gr.revocation.as_ref().is_some_and(|rev| {
+				                 now.timestamp() >= rev.timestamp() // Prevent saturating when not revoked yet.
+				                     && (now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
+				             });
 		// If it should, delete the grant and append the redacted version to the result.
 		if purge_expired || purge_revoked {
 			match base {

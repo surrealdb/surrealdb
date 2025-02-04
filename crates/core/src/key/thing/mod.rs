@@ -1,11 +1,12 @@
 //! Stores a record document
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::{impl_key, KeyEncode};
 use crate::sql::Id;
-use derive::Key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Thing<'a> {
 	__: u8,
@@ -18,21 +19,22 @@ pub struct Thing<'a> {
 	_d: u8,
 	pub id: Id,
 }
+impl_key!(Thing<'a>);
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Thing<'a> {
 	Thing::new(ns, db, tb, id.to_owned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
-	let mut k = crate::key::table::all::new(ns, db, tb).encode().unwrap();
+pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::table::all::new(ns, db, tb).encode()?;
 	k.extend_from_slice(b"*\x00");
-	k
+	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
-	let mut k = crate::key::table::all::new(ns, db, tb).encode().unwrap();
+pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::table::all::new(ns, db, tb).encode()?;
 	k.extend_from_slice(b"*\xff");
-	k
+	Ok(k)
 }
 
 impl Categorise for Thing<'_> {
@@ -59,6 +61,7 @@ impl<'a> Thing<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KeyDecode;
 	use crate::syn;
 
 	#[test]

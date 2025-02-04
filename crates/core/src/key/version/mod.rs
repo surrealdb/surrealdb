@@ -1,16 +1,18 @@
 //! Stores a record document
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Version {
 	__: u8,
 	_a: u8,
 }
+
+impl_key!(Version);
 
 pub fn new() -> Version {
 	Version::new()
@@ -43,6 +45,8 @@ impl Default for Version {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;

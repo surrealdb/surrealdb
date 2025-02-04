@@ -8,6 +8,7 @@ use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::id::range::IdRange;
 use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
+use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Closure;
 use crate::sql::{
@@ -137,6 +138,7 @@ pub enum Value {
 	Query(Query),
 	Model(Box<Model>),
 	Closure(Box<Closure>),
+	Refs(Refs),
 	// Add new variants here
 }
 
@@ -1384,6 +1386,10 @@ impl Value {
 				})
 			}
 			Kind::Literal(lit) => self.coerce_to_literal(lit),
+			Kind::References(_, _) => Err(Error::CoerceTo {
+				from: self,
+				into: kind.to_string(),
+			}),
 		};
 		// Check for any conversion errors
 		match res {
@@ -1979,6 +1985,10 @@ impl Value {
 				})
 			}
 			Kind::Literal(lit) => self.convert_to_literal(lit),
+			Kind::References(_, _) => Err(Error::CoerceTo {
+				from: self,
+				into: kind.to_string(),
+			}),
 		};
 		// Check for any conversion errors
 		match res {
@@ -2890,6 +2900,7 @@ impl fmt::Display for Value {
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
+			Value::Refs(v) => write!(f, "{v}"),
 		}
 	}
 }
@@ -2974,6 +2985,7 @@ impl Value {
 			Value::Model(v) => v.compute(stk, ctx, opt, doc).await,
 			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Refs(v) => v.compute(ctx, opt, doc).await,
 			_ => Ok(self.to_owned()),
 		}
 	}

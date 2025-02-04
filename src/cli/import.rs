@@ -76,7 +76,9 @@ pub async fn init(
 	// Use the specified namespace / database
 	client.use_ns(namespace).use_db(database).await?;
 	// Import the data into the database
-	client.import(file).await?;
+	client.import(file).await.inspect_err(|_| {
+		error!("Surreal import failed, import might only be partially completed or have failed entirely.")
+	})?;
 	info!("The SurrealQL file was imported successfully");
 	// All ok
 	Ok(())

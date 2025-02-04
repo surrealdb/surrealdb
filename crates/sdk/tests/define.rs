@@ -32,12 +32,12 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(&format!(
-		"{{
-			accesses: {{}},
-			namespaces: {{ test: 'DEFINE NAMESPACE test' }},
-			nodes: {{}},
-			system: {{
+	let val = Value::parse(
+		"{
+			accesses: {},
+			namespaces: { test: 'DEFINE NAMESPACE test' },
+			nodes: {},
+			system: {
 				available_parallelism: 0,
 				cpu_usage: 0.0f,
 				load_average: [
@@ -47,11 +47,12 @@ async fn define_statement_namespace() -> Result<(), Error> {
 				],
 				memory_allocated: 0,
 				memory_usage: 0,
-				physical_cores: 0
-			}},
-			users: {{}},
-		}}"
-	));
+				physical_cores: 0,
+                threads: 0
+			},
+			users: {},
+		}",
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -69,7 +70,7 @@ async fn define_statement_database() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -363,7 +364,7 @@ async fn define_statement_user_root() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result;
 
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
@@ -390,35 +391,41 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 		INFO FOR USER test ON NAMESPACE;
 		INFO FOR USER test ON ROOT;
 	";
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = dbs.execute(sql, &ses, None).await?;
 
-	assert!(res[1].result.is_ok());
-	assert!(res[2].result.is_ok());
-	assert!(res[3].result.is_ok());
-	assert!(res[4].result.is_ok());
+	let mut res = res.into_iter();
+	res.next().unwrap().result.unwrap();
+	res.next().unwrap().result.unwrap();
+
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+
 	assert_eq!(
-		res[5].result.as_ref().unwrap_err().to_string(),
+		res.next().unwrap().result.as_ref().unwrap_err().to_string(),
 		"The root user 'test' does not exist"
 	); // User doesn't exist at the NS level
-
-	assert!(res[2]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[3]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res[4]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
 
 	// If it tries to create a NS user without specifying a NS, it should fail
 	let sql = "
@@ -449,10 +456,10 @@ async fn define_statement_user_db() -> Result<(), Error> {
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	assert!(res[2].result.is_ok());
-	assert!(res[3].result.is_ok());
-	assert!(res[4].result.is_ok());
-	assert!(res[5].result.is_ok());
+	res[2].result.as_ref().unwrap();
+	res[3].result.as_ref().unwrap();
+	res[4].result.as_ref().unwrap();
+	res[5].result.as_ref().unwrap();
 	assert_eq!(
 		res[6].result.as_ref().unwrap_err().to_string(),
 		"The user 'test' does not exist in the namespace 'ns'"
@@ -515,9 +522,9 @@ async fn permissions_checks_define_ns() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let access1 = format!("{{ accesses: {{  }}, namespaces: {{ NS: 'DEFINE NAMESPACE NS' }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let check_results = [vec![access1.as_str()], vec![access2.as_str()]];
+	let access1 = "{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let access2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let check_results = [vec![access1], vec![access2]];
 
 	let test_cases = [
 		// Root level
@@ -679,9 +686,9 @@ async fn permissions_checks_define_access_root() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let access1 = format!("{{ accesses: {{ access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let access2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let check_results = [vec![access1.as_str()], vec![access2.as_str()]];
+	let access1 = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#;
+	let access2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let check_results = [vec![access1], vec![access2]];
 
 	let test_cases = [
 		// Root level
@@ -804,9 +811,9 @@ async fn permissions_checks_define_user_root() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{ user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" }} }}");
-	let check2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let check_results = [vec![check1.as_str()], vec![check2.as_str()]];
+	let check1 = r#"{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#;
+	let check2 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let check_results = [vec![check1], vec![check2]];
 
 	let test_cases = [
 		// Root level
@@ -1191,7 +1198,7 @@ async fn define_table_relation_in_out() -> Result<(), Error> {
 	//
 	for _ in 0..7 {
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	//
 	let tmp = res.remove(0).result;
@@ -1252,10 +1259,10 @@ async fn define_table_type_normal() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_err());
@@ -1266,16 +1273,18 @@ async fn define_table_type_normal() -> Result<(), Error> {
 #[tokio::test]
 async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	let ds = new_ds().await?;
+	let cache = ds.get_cache();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
 	// Define the table, set the initial uuids
 	let sql = r"DEFINE TABLE test;".to_owned();
 	let res = &mut ds.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	assert!(res.remove(0).result.is_ok());
+	res.remove(0).result.unwrap();
 	// Obtain the initial uuids
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let initial = txn.get_tb("test", "test", "test").await?;
+	let initial_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
 	drop(txn);
 
 	// Define some resources to refresh the UUIDs
@@ -1289,22 +1298,23 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	.to_owned();
 	let res = &mut ds.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
 	let lqid = res.remove(0).result?;
 	assert!(matches!(lqid, Value::Uuid(_)));
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let after_define = txn.get_tb("test", "test", "test").await?;
+	let after_define_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
 	assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
 	assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
 	assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
-	assert_ne!(initial.cache_lives_ts, after_define.cache_lives_ts);
+	assert_ne!(initial_live_query_version, after_define_live_query_version);
 
 	// Remove the defined resources to refresh the UUIDs
 	let sql = r"
@@ -1318,21 +1328,22 @@ async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	let vars = map! { "lqid".to_string() => lqid };
 	let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 	assert_eq!(res.len(), 5);
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
-	assert!(res.remove(0).result.is_ok());
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let after_remove = txn.get_tb("test", "test", "test").await?;
+	let after_remove_live_query_version = cache.get_live_queries_version("test", "test", "test")?;
 	drop(txn);
 	// Compare uuids after definitions
 	assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
 	assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
 	assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
 	assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
-	assert_ne!(after_define.cache_lives_ts, after_remove.cache_lives_ts);
+	assert_ne!(after_define_live_query_version, after_remove_live_query_version);
 	//
 	Ok(())
 }

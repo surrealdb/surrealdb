@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
-use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
+use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use revision::{revisioned, Revisioned};
@@ -12,7 +12,6 @@ pub(crate) type TermId = u64;
 pub(crate) type TermLen = u32;
 
 pub(in crate::idx) struct Terms {
-	ixs: IndexStores,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<FstKeys>,
@@ -23,29 +22,28 @@ pub(in crate::idx) struct Terms {
 
 impl Terms {
 	pub(super) async fn new(
-		ixs: &IndexStores,
 		tx: &Transaction,
 		index_key_base: IndexKeyBase,
 		default_btree_order: u32,
 		tt: TransactionType,
 		cache_size: u32,
 	) -> Result<Self, Error> {
-		let state_key: Key = index_key_base.new_bt_key(None);
+		let state_key: Key = index_key_base.new_bt_key(None)?;
 		let state: State = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
 		} else {
 			State::new(default_btree_order)
 		};
-		let store = ixs
+		let store = tx
+			.index_caches()
 			.get_store_btree_fst(
 				TreeNodeProvider::Terms(index_key_base.clone()),
 				state.btree.generation(),
 				tt,
 				cache_size as usize,
 			)
-			.await;
+			.await?;
 		Ok(Self {
-			ixs: ixs.clone(),
 			state_key,
 			index_key_base,
 			btree: BTree::new(state.btree),
@@ -84,7 +82,7 @@ impl Terms {
 			}
 		}
 		let term_id = self.get_next_term_id();
-		tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone(), None).await?;
+		tx.set(self.index_key_base.new_bu_key(term_id)?, term_key.clone(), None).await?;
 		self.btree.insert(tx, &mut self.store, term_key, term_id).await?;
 		Ok(term_id)
 	}
@@ -102,7 +100,7 @@ impl Terms {
 		tx: &Transaction,
 		term_id: TermId,
 	) -> Result<(), Error> {
-		let term_id_key = self.index_key_base.new_bu_key(term_id);
+		let term_id_key = self.index_key_base.new_bu_key(term_id)?;
 		if let Some(term_key) = tx.get(term_id_key.clone(), None).await? {
 			self.btree.delete(tx, &mut self.store, term_key.clone()).await?;
 			tx.del(term_id_key).await?;
@@ -130,7 +128,7 @@ impl Terms {
 				next_term_id: self.next_term_id,
 			};
 			tx.set(self.state_key.clone(), VersionedStore::try_into(&state)?, None).await?;
-			self.ixs.advance_store_btree_fst(new_cache);
+			tx.index_caches().advance_store_btree_fst(new_cache);
 		}
 		Ok(())
 	}
@@ -254,9 +252,7 @@ mod tests {
 		tt: TransactionType,
 	) -> (Transaction, Terms) {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let t = Terms::new(ds.index_store(), &tx, IndexKeyBase::default(), order, tt, 100)
-			.await
-			.unwrap();
+		let t = Terms::new(&tx, IndexKeyBase::default(), order, tt, 100).await.unwrap();
 		(tx, t)
 	}
 
@@ -329,7 +325,7 @@ mod tests {
 			let (tx, mut t) = new_operation(&ds, BTREE_ORDER, Write).await;
 
 			// Check removing an non-existing term id returns None
-			assert!(t.remove_term_id(&tx, 0).await.is_ok());
+			t.remove_term_id(&tx, 0).await.unwrap();
 
 			// Create few terms
 			t.resolve_term_id(&tx, "A").await.unwrap();

@@ -40,6 +40,10 @@ impl Ident {
 	pub(crate) fn is_dash(&self) -> bool {
 		self.0.as_str() == "-"
 	}
+	/// Checks if this field is the `id` field
+	pub(crate) fn is_id(&self) -> bool {
+		self.0.as_str() == "id"
+	}
 	/// Checks if this field is the `type` field
 	pub(crate) fn is_type(&self) -> bool {
 		self.0.as_str() == "type"

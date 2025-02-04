@@ -37,7 +37,7 @@ impl Response {
 	}
 
 	/// Send the response to the WebSocket channel
-	pub async fn send(self, cx: Arc<TelemetryContext>, fmt: Format, chn: &Sender<Message>) {
+	pub async fn send(self, cx: Arc<TelemetryContext>, fmt: Format, chn: Sender<Message>) {
 		// Create a new tracing span
 		let span = Span::current();
 		// Log the rpc response call

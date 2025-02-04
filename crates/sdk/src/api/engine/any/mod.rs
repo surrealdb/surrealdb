@@ -128,9 +128,9 @@
 //! In this case, the binary you build will have support for accessing an external server via WebSockets, embedding the database
 //! using RocksDB or using a distributed TiKV cluster.
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 mod native;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 mod wasm;
 
 use crate::api::err::Error;

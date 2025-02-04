@@ -1,11 +1,13 @@
 use crate::err::Error;
 use std::{collections::BTreeMap, mem};
 
-#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
+#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 use async_graphql::BatchRequest;
 use uuid::Uuid;
 
-#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
+#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+use crate::dbs::capabilities::ExperimentalTarget;
+#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 use crate::gql::SchemaCache;
 use crate::{
 	dbs::{capabilities::MethodTarget, QueryType, Response, Session},
@@ -62,11 +64,11 @@ pub trait RpcContext {
 	// ------------------------------
 
 	/// GraphQL queries are disabled by default
-	#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
+	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 	const GQL_SUPPORT: bool = false;
 
 	/// Returns the GraphQL schema cache used in GraphQL queries
-	#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
+	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		unimplemented!("graphql_schema_cache function must be implemented if GQL_SUPPORT = true")
 	}
@@ -789,20 +791,20 @@ pub trait RpcContext {
 	// Methods for querying with GraphQL
 	// ------------------------------
 
-	#[cfg(any(target_arch = "wasm32", not(surrealdb_unstable)))]
+	#[cfg(any(target_family = "wasm", not(surrealdb_unstable)))]
 	async fn graphql(&self, _: Array) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
-	#[cfg(all(not(target_arch = "wasm32"), surrealdb_unstable))]
+	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 	async fn graphql(&self, params: Array) -> Result<Data, RpcError> {
-		if !*GRAPHQL_ENABLE {
+		if !self.kvs().get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 			return Err(RpcError::BadGQLConfig);
 		}
 
 		use serde::Serialize;
 
-		use crate::{cnf::GRAPHQL_ENABLE, gql};
+		use crate::gql;
 
 		if !Self::GQL_SUPPORT {
 			return Err(RpcError::BadGQLConfig);

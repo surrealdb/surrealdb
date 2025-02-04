@@ -1,10 +1,11 @@
 //! Stores a DEFINE FIELD config definition
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Fd<'a> {
 	__: u8,
@@ -19,21 +20,22 @@ pub struct Fd<'a> {
 	_f: u8,
 	pub fd: &'a str,
 }
+impl_key!(Fd<'a>);
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, fd: &'a str) -> Fd<'a> {
 	Fd::new(ns, db, tb, fd)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db, tb).encode().unwrap();
+pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db, tb).encode()?;
 	k.extend_from_slice(b"!fd\x00");
-	k
+	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db, tb).encode().unwrap();
+pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db, tb).encode()?;
 	k.extend_from_slice(b"!fd\xff");
-	k
+	Ok(k)
 }
 
 impl Categorise for Fd<'_> {
@@ -62,6 +64,7 @@ impl<'a> Fd<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KeyDecode;
 	#[test]
 	fn key() {
 		use super::*;
@@ -81,13 +84,13 @@ mod tests {
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns", "testdb", "testtb");
+		let val = super::prefix("testns", "testdb", "testtb").unwrap();
 		assert_eq!(val, b"/*testns\0*testdb\0*testtb\0!fd\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns", "testdb", "testtb");
+		let val = super::suffix("testns", "testdb", "testtb").unwrap();
 		assert_eq!(val, b"/*testns\0*testdb\0*testtb\0!fd\xff");
 	}
 }

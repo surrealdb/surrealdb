@@ -1,7 +1,6 @@
 use super::tx::Transaction;
 use super::Key;
 use super::Val;
-use crate::cnf::MAX_STREAM_BATCH_SIZE;
 use crate::err::Error;
 use futures::stream::Stream;
 use futures::Future;
@@ -22,9 +21,9 @@ pub(super) struct Scanner<'a, I> {
 	results: VecDeque<I>,
 	#[allow(clippy::type_complexity)]
 	/// The currently running future to be polled
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	future: Option<Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a + Send>>>,
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	future: Option<Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a>>>,
 	/// Whether this stream should try to fetch more
 	exhausted: bool,
@@ -67,12 +66,10 @@ impl Stream for Scanner<'_, (Key, Val)> {
 		}
 		// Check if there is no pending future task
 		if self.future.is_none() {
-			// Set the max number of results to fetch
-			let num = std::cmp::min(*MAX_STREAM_BATCH_SIZE, self.batch);
 			// Clone the range to use when scanning
 			let range = self.range.clone();
 			// Prepare a future to scan for results
-			self.future = Some(Box::pin(self.store.scan(range, num, self.version)));
+			self.future = Some(Box::pin(self.store.scan(range, self.batch, self.version)));
 		}
 		// Try to resolve the future
 		match self.future.as_mut().unwrap().poll_unpin(cx) {
@@ -134,12 +131,10 @@ impl Stream for Scanner<'_, Key> {
 		}
 		// Check if there is no pending future task
 		if self.future.is_none() {
-			// Set the max number of results to fetch
-			let num = std::cmp::min(*MAX_STREAM_BATCH_SIZE, self.batch);
 			// Clone the range to use when scanning
 			let range = self.range.clone();
 			// Prepare a future to scan for results
-			self.future = Some(Box::pin(self.store.keys(range, num, self.version)));
+			self.future = Some(Box::pin(self.store.keys(range, self.batch, self.version)));
 		}
 		// Try to resolve the future
 		match self.future.as_mut().unwrap().poll_unpin(cx) {

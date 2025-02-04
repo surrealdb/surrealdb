@@ -309,7 +309,7 @@ impl InfoStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Output
-				#[cfg(not(target_arch = "wasm32"))]
+				#[cfg(not(target_family = "wasm"))]
 				if let Some(ib) = ctx.get_index_builder() {
 					// Obtain the index
 					let res = txn.get_tb_index(opt.ns()?, opt.db()?, table, index).await?;
@@ -404,5 +404,6 @@ async fn system() -> Value {
 		"memory_usage".to_string() => info.memory_usage.into(),
 		"physical_cores".to_string() => info.physical_cores.into(),
 		"memory_allocated".to_string() => info.memory_allocated.into(),
+		"threads".to_string() => info.threads.into(),
 	})
 }

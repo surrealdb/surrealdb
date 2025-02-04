@@ -6,7 +6,7 @@ use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::capabilities::{MethodTarget, RouteTarget};
+use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget, RouteTarget};
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
@@ -16,21 +16,20 @@ use crate::err::Error;
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::cache;
-use crate::kvs::cache::ds::Cache;
+use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
-use crate::syn::parser::{Parser, PartialResult};
+use crate::syn::parser::{ParserSettings, StatementStream};
 use async_channel::{Receiver, Sender};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
-use reblessive::{Stack, TreeStack};
+use reblessive::TreeStack;
 use std::fmt;
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -38,20 +37,20 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::task::{ready, Poll};
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
 use uuid::Uuid;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
-const LQ_CHANNEL_SIZE: usize = 100;
+const LQ_CHANNEL_SIZE: usize = 15_000;
 
 // The role assigned to the initial user created when starting the server with credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
@@ -78,9 +77,9 @@ pub struct Datastore {
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
-	cache: Arc<Cache>,
+	cache: Arc<DatastoreCache>,
 	// The index asynchronous builder
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	index_builder: IndexBuilder,
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
@@ -119,51 +118,54 @@ impl TransactionFactory {
 		};
 		// Create a new transaction on the datastore
 		#[allow(unused_variables)]
-		let inner = match self.flavor.as_ref() {
+		let (inner, local) = match self.flavor.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::Mem(tx)
+				(super::tr::Inner::Mem(tx), true)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::RocksDB(tx)
+				(super::tr::Inner::RocksDB(tx), true)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			DatastoreFlavor::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::IndxDB(tx)
+				(super::tr::Inner::IndxDB(tx), true)
 			}
 			#[cfg(feature = "kv-tikv")]
 			DatastoreFlavor::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::TiKV(tx)
+				(super::tr::Inner::TiKV(tx), false)
 			}
 			#[cfg(feature = "kv-fdb")]
 			DatastoreFlavor::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::FoundationDB(tx)
+				(super::tr::Inner::FoundationDB(tx), false)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::SurrealKV(tx)
+				(super::tr::Inner::SurrealKV(tx), true)
 			}
 			#[cfg(feature = "kv-surrealcs")]
 			DatastoreFlavor::SurrealCS(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tr::Inner::SurrealCS(tx)
+				(super::tr::Inner::SurrealCS(tx), false)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
-		Ok(Transaction::new(Transactor {
-			inner,
-			stash: super::stash::Stash::default(),
-			cf: cf::Writer::new(),
-			clock: self.clock.clone(),
-		}))
+		Ok(Transaction::new(
+			local,
+			Transactor {
+				inner,
+				stash: super::stash::Stash::default(),
+				cf: cf::Writer::new(),
+				clock: self.clock.clone(),
+			},
+		))
 	}
 }
 
@@ -249,30 +251,6 @@ impl Datastore {
 	/// ```
 	pub async fn new(path: &str) -> Result<Self, Error> {
 		Self::new_with_clock(path, None).await
-	}
-
-	#[cfg(debug_assertions)]
-	/// Create a new datastore with the same persistent data (inner), with flushed cache.
-	/// Simulating a server restart
-	pub fn restart(self) -> Self {
-		Self {
-			id: self.id,
-			strict: self.strict,
-			auth_enabled: self.auth_enabled,
-			query_timeout: self.query_timeout,
-			transaction_timeout: self.transaction_timeout,
-			capabilities: self.capabilities,
-			notification_channel: self.notification_channel,
-			index_stores: Default::default(),
-			#[cfg(not(target_arch = "wasm32"))]
-			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
-			#[cfg(feature = "jwks")]
-			jwks_cache: Arc::new(Default::default()),
-			#[cfg(storage)]
-			temporary_directory: self.temporary_directory,
-			transaction_factory: self.transaction_factory,
-			cache: Arc::new(cache::ds::new()),
-		}
 	}
 
 	#[allow(unused_variables)]
@@ -426,15 +404,39 @@ impl Datastore {
 				notification_channel: None,
 				capabilities: Capabilities::default(),
 				index_stores: IndexStores::default(),
-				#[cfg(not(target_arch = "wasm32"))]
+				#[cfg(not(target_family = "wasm"))]
 				index_builder: IndexBuilder::new(tf),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 				#[cfg(storage)]
 				temporary_directory: None,
-				cache: Arc::new(cache::ds::new()),
+				cache: Arc::new(DatastoreCache::new()),
 			}
 		})
+	}
+
+	/// Create a new datastore with the same persistent data (inner), with flushed cache.
+	/// Simulating a server restart
+	#[allow(dead_code)]
+	pub fn restart(self) -> Self {
+		Self {
+			id: self.id,
+			strict: self.strict,
+			auth_enabled: self.auth_enabled,
+			query_timeout: self.query_timeout,
+			transaction_timeout: self.transaction_timeout,
+			capabilities: self.capabilities,
+			notification_channel: self.notification_channel,
+			index_stores: Default::default(),
+			#[cfg(not(target_family = "wasm"))]
+			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
+			#[cfg(feature = "jwks")]
+			jwks_cache: Arc::new(Default::default()),
+			#[cfg(storage)]
+			temporary_directory: self.temporary_directory,
+			transaction_factory: self.transaction_factory,
+			cache: Arc::new(DatastoreCache::new()),
+		}
 	}
 
 	/// Specify whether this Datastore should run in strict mode
@@ -516,6 +518,11 @@ impl Datastore {
 		self.capabilities.allows_network_target(net_target)
 	}
 
+	/// Set specific capabilities for this Datastore
+	pub fn get_capabilities(&self) -> &Capabilities {
+		&self.capabilities
+	}
+
 	#[cfg(feature = "jwks")]
 	pub(crate) fn jwks_cache(&self) -> &Arc<RwLock<JwksCache>> {
 		&self.jwks_cache
@@ -523,6 +530,12 @@ impl Datastore {
 
 	pub(super) async fn clock_now(&self) -> Timestamp {
 		self.transaction_factory.clock.now().await
+	}
+
+	// Used for testing live queries
+	#[allow(dead_code)]
+	pub fn get_cache(&self) -> Arc<DatastoreCache> {
+		self.cache.clone()
 	}
 
 	// Initialise the cluster and run bootstrap utilities
@@ -778,7 +791,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Parse the SQL query text
-		let ast = syn::parse(txt)?;
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -817,78 +830,65 @@ impl Datastore {
 		vars.attach(&mut ctx)?;
 		// Process all statements
 
-		let mut offset = 0;
-		// A threshold of data in the buffer to avoid running the parser too many times when the
-		// statements get too big.
-		let mut buffer_size_threshold = 4096;
-		let mut buffer = Vec::new();
-		let mut query = pin!(query);
-		let mut stack = Stack::new();
+		let parser_settings = ParserSettings {
+			references_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			bearer_access_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			..Default::default()
+		};
+		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
+		let mut buffer = BytesMut::new();
+		let mut parse_size = 4096;
+		let mut bytes_stream = pin!(query);
 		let mut complete = false;
+		let mut filling = true;
 
-		let stream = futures::stream::poll_fn(move |ctx| loop {
-			if !complete && buffer.len() < buffer_size_threshold {
-				// if we aren't done loading the file and the buffer has less data then the
-				// threshold for running the parser then stream in more data.
-				let Some(bytes) = ready!(query.as_mut().poll_next(ctx)) else {
-					// stream return None, so no more data is available.
-					complete = true;
-					continue;
-				};
+		let stream = futures::stream::poll_fn(move |cx| loop {
+			// fill the buffer to at least parse_size when filling is required.
+			while filling {
+				let bytes = ready!(bytes_stream.as_mut().poll_next(cx));
 				let bytes = match bytes {
-					Ok(bytes) => bytes,
-					Err(e) => return Poll::Ready(Some(Err(e))),
+					Some(Err(e)) => return Poll::Ready(Some(Err(e))),
+					Some(Ok(x)) => x,
+					None => {
+						complete = true;
+						filling = false;
+						break;
+					}
 				};
 
 				buffer.extend_from_slice(&bytes);
-				continue;
+				filling = buffer.len() < parse_size
 			}
 
-			// try to parse a statement.
-			let res = stack
-				.enter(|ctx| async {
-					Parser::new(&buffer[offset..]).parse_partial_statement(complete, ctx).await
-				})
-				.finish();
-			// if we get a statement or error return it.
-			match res {
-				PartialResult::MoreData => {}
-				PartialResult::Empty {
-					used,
-				} => {
-					offset += used;
-					if complete {
-						return Poll::Ready(None);
+			// if we finished streaming we can parse with complete so that the parser can be sure
+			// of it's results.
+			if complete {
+				return match statements_stream.parse_complete(&mut buffer) {
+					Err(e) => Poll::Ready(Some(Err(Error::InvalidQuery(e)))),
+					Ok(None) => Poll::Ready(None),
+					Ok(Some(x)) => Poll::Ready(Some(Ok(x))),
+				};
+			}
+
+			// otherwise try to parse a single statement.
+			match statements_stream.parse_partial(&mut buffer) {
+				Err(e) => return Poll::Ready(Some(Err(Error::InvalidQuery(e)))),
+				Ok(Some(x)) => return Poll::Ready(Some(Ok(x))),
+				Ok(None) => {
+					// Couldn't parse a statement for sure.
+					if buffer.len() >= parse_size && parse_size < u32::MAX as usize {
+						// the buffer already contained more or equal to parse_size bytes
+						// this means we are trying to parse a statement of more then buffer size.
+						// so we need to increase the buffer size.
+						parse_size = (parse_size + 1).next_power_of_two();
 					}
+					// start filling the buffer again.
+					filling = true;
 				}
-				PartialResult::Ok {
-					value,
-					used,
-				} => {
-					offset += used;
-					return Poll::Ready(Some(Ok(value)));
-				}
-				PartialResult::Err {
-					err,
-					used,
-				} => {
-					offset += used;
-					let error = err.render_on_bytes(&buffer[offset..]);
-					let err = Error::InvalidQuery(error);
-					return Poll::Ready(Some(Err(err)));
-				}
-			}
-
-			// remove the already used data.
-			if offset > 0 {
-				// we used some of the data.
-				let len = buffer.len() - offset;
-				buffer.copy_within(offset.., 0);
-				buffer.truncate(len);
-				offset = 0;
-			} else {
-				// we didn't use any of the data which means this buffer size is not sufficient.
-				buffer_size_threshold = buffer_size_threshold.saturating_mul(2);
 			}
 		});
 
@@ -1077,7 +1077,7 @@ impl Datastore {
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
-		// Free the context
+		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
 		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
@@ -1210,7 +1210,7 @@ impl Datastore {
 			self.capabilities.clone(),
 			self.index_stores.clone(),
 			self.cache.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(not(target_family = "wasm"))]
 			self.index_builder.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),

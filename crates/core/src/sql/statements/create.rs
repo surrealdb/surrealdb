@@ -2,6 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::idx::planner::RecordStrategy;
 use crate::sql::{Data, Output, Timeout, Value, Values, Version};
 use derive::Store;
 use reblessive::tree::Stk;
@@ -80,7 +81,7 @@ impl CreateStatement {
 			})?;
 		}
 		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm).await?;
+		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
 		if ctx.is_timedout() {
 			return Err(Error::QueryTimedout);

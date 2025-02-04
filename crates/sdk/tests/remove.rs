@@ -26,10 +26,10 @@ async fn remove_statement_table() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -66,10 +66,10 @@ async fn remove_statement_namespace() -> Result<(), Error> {
 		assert!(tmp.is_err());
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	// Namespace selected
 	{
@@ -88,10 +88,10 @@ async fn remove_statement_namespace() -> Result<(), Error> {
 		assert!(tmp.is_err());
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	Ok(())
 }
@@ -114,10 +114,10 @@ async fn remove_statement_database() -> Result<(), Error> {
 		assert!(tmp.is_err());
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	// Database selected
 	{
@@ -136,10 +136,10 @@ async fn remove_statement_database() -> Result<(), Error> {
 		assert!(tmp.is_err());
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	Ok(())
 }
@@ -157,10 +157,10 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	// Analyzer is defined
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	// Analyzer is removed
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	// Check infos output
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -198,7 +198,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 	assert_eq!(res.len(), 9);
 	for _ in 0..8 {
 		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;
@@ -212,8 +212,6 @@ async fn remove_statement_index() -> Result<(), Error> {
 		}",
 	);
 	assert_eq!(tmp, val);
-	// Every index store cache has been removed
-	assert!(dbs.index_store().is_empty().await);
 	Ok(())
 }
 
@@ -582,9 +580,9 @@ async fn permissions_checks_remove_ns() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let check2 = format!("{{ accesses: {{  }}, namespaces: {{ NS: 'DEFINE NAMESPACE NS' }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let check_results = [vec![check1.as_str()], vec![check2.as_str()]];
+	let check1 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let check2 = "{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let check_results = [vec![check1], vec![check2]];
 
 	let test_cases = [
 		// Root level
@@ -749,9 +747,9 @@ async fn permissions_checks_remove_root_access() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let check2 = format!("{{ accesses: {{ access: \"DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let check_results = [vec![check1.as_str()], vec![check2.as_str()]];
+	let check1 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let check2 = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#;
+	let check_results = [vec![check1], vec![check2]];
 
 	let test_cases = [
 		// Root level
@@ -874,9 +872,9 @@ async fn permissions_checks_remove_root_user() {
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check1 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{  }} }}");
-	let check2 = format!("{{ accesses: {{  }}, namespaces: {{  }}, nodes: {{  }}, system: {{ available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }}, users: {{ user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" }} }}");
-	let check_results = [vec![check1.as_str()], vec![check2.as_str()]];
+	let check1 = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let check2 = r#"{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }"#;
+	let check_results = [vec![check1], vec![check2]];
 
 	let test_cases = [
 		// Root level

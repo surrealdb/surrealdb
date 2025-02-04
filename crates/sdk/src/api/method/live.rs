@@ -28,10 +28,10 @@ use surrealdb_core::sql::{
 };
 use uuid::Uuid;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
 const ID: &str = "id";

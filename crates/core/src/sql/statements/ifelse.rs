@@ -29,7 +29,7 @@ impl IfelseStatement {
 				return true;
 			}
 		}
-		self.close.as_ref().map_or(false, |v| v.writeable())
+		self.close.as_ref().is_some_and(Value::writeable)
 	}
 	/// Check if we require a writeable transaction
 	pub(crate) fn bracketed(&self) -> bool {

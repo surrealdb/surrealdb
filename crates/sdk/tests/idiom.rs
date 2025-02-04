@@ -1164,7 +1164,8 @@ async fn idiom_recursion_shortest_path() -> Result<(), Error> {
 			{ id: a:5 },
 		];
 
-		a:1.{..+shortest=a:5}.links;
+		LET $rid = a:5;
+		a:1.{..+shortest=$rid}.links;
 		a:1.{..+shortest=a:5+inclusive}.links;
 	"#;
 
@@ -1179,6 +1180,7 @@ async fn idiom_recursion_shortest_path() -> Result<(), Error> {
 			{ id: a:5 },
 		]",
 		)?
+		.expect_val("NONE")?
 		.expect_val(
 			"[
 			a:4,
@@ -1224,7 +1226,7 @@ async fn idiom_recursion_invalid_instruction() -> Result<(), Error> {
 	expect_parse_error!("a:1.{..+shortest}", "Unexpected token `}`, expected =");
 	expect_parse_error!(
 		"a:1.{..+shortest=123}",
-		"Unexpected token `a number`, expected an identifier"
+		"Unexpected token `a number`, expected a param or thing"
 	);
 	Ok(())
 }

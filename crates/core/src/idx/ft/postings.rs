@@ -3,14 +3,13 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore};
-use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
+use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType};
 
 pub(super) type TermFrequency = u64;
 
 pub(super) struct Postings {
-	ixs: IndexStores,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
@@ -19,29 +18,28 @@ pub(super) struct Postings {
 
 impl Postings {
 	pub(super) async fn new(
-		ixs: &IndexStores,
 		tx: &Transaction,
 		index_key_base: IndexKeyBase,
 		order: u32,
 		tt: TransactionType,
 		cache_size: u32,
 	) -> Result<Self, Error> {
-		let state_key: Key = index_key_base.new_bp_key(None);
+		let state_key: Key = index_key_base.new_bp_key(None)?;
 		let state: BState = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
 		} else {
 			BState::new(order)
 		};
-		let store = ixs
+		let store = tx
+			.index_caches()
 			.get_store_btree_trie(
 				TreeNodeProvider::Postings(index_key_base.clone()),
 				state.generation(),
 				tt,
 				cache_size as usize,
 			)
-			.await;
+			.await?;
 		Ok(Self {
-			ixs: ixs.clone(),
 			state_key,
 			index_key_base,
 			btree: BTree::new(state),
@@ -56,7 +54,7 @@ impl Postings {
 		doc_id: DocId,
 		term_freq: TermFrequency,
 	) -> Result<(), Error> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id);
+		let key = self.index_key_base.new_bf_key(term_id, doc_id)?;
 		self.btree.insert(tx, &mut self.store, key, term_freq).await
 	}
 
@@ -66,7 +64,7 @@ impl Postings {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id);
+		let key = self.index_key_base.new_bf_key(term_id, doc_id)?;
 		self.btree.search(tx, &self.store, &key).await
 	}
 
@@ -76,7 +74,7 @@ impl Postings {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id);
+		let key = self.index_key_base.new_bf_key(term_id, doc_id)?;
 		self.btree.delete(tx, &mut self.store, key).await
 	}
 
@@ -88,7 +86,7 @@ impl Postings {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
 			tx.set(self.state_key.clone(), VersionedStore::try_into(state)?, None).await?;
-			self.ixs.advance_cache_btree_trie(new_cache);
+			tx.index_caches().advance_store_btree_trie(new_cache);
 		}
 		Ok(())
 	}
@@ -107,9 +105,7 @@ mod tests {
 		tt: TransactionType,
 	) -> (Transaction, Postings) {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let p = Postings::new(ds.index_store(), &tx, IndexKeyBase::default(), order, tt, 100)
-			.await
-			.unwrap();
+		let p = Postings::new(&tx, IndexKeyBase::default(), order, tt, 100).await.unwrap();
 		(tx, p)
 	}
 

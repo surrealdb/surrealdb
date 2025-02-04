@@ -39,7 +39,7 @@ impl Parser<'_> {
 			}
 			t!("\"") | t!("'") => {
 				let strand: Strand = self.next_token_value()?;
-				if self.legacy_strands {
+				if self.settings.legacy_strands {
 					if let Some(x) = self.reparse_legacy_strand(ctx, &strand.0).await {
 						return Ok(x);
 					}

@@ -3,9 +3,9 @@ use crate::sql;
 use sql::Duration;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 // Traits cannot have async and we need sized structs for Clone + Send + Sync

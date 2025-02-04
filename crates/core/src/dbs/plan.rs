@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
+use crate::idx::planner::RecordStrategy;
 use crate::sql::{Object, Value};
 use std::collections::HashMap;
 
@@ -62,6 +63,17 @@ impl Explanation {
 		self.0.push(ExplainItem::new_fallback(reason));
 	}
 
+	pub(super) fn add_record_strategy(&mut self, rs: RecordStrategy) {
+		self.0.push(ExplainItem::new_record_strategy(rs));
+	}
+
+	pub(super) fn add_start_limit(
+		&mut self,
+		start_skip: Option<usize>,
+		cancel_on_limit: Option<u32>,
+	) {
+		self.0.push(ExplainItem::new_start_limit(start_skip, cancel_on_limit));
+	}
 	pub(super) fn output(self) -> Vec<Value> {
 		self.0.into_iter().map(|e| e.into()).collect()
 	}
@@ -109,20 +121,20 @@ impl ExplainItem {
 				name: "Iterate Edges".into(),
 				details: vec![("from", Value::Thing(e.from.to_owned()))],
 			},
-			Iterable::Table(t, keys_only) => Self {
-				name: if *keys_only {
-					"Iterate Table Keys"
-				} else {
-					"Iterate Table"
+			Iterable::Table(t, rs) => Self {
+				name: match rs {
+					RecordStrategy::Count => "Iterate Table Count",
+					RecordStrategy::KeysOnly => "Iterate Table Keys",
+					RecordStrategy::KeysAndValues => "Iterate Table",
 				}
 				.into(),
 				details: vec![("table", Value::from(t.0.to_owned()))],
 			},
-			Iterable::Range(tb, r, keys_only) => Self {
-				name: if *keys_only {
-					"Iterate Range Keys"
-				} else {
-					"Iterate Range"
+			Iterable::Range(tb, r, rs) => Self {
+				name: match rs {
+					RecordStrategy::Count => "Iterate Range Count",
+					RecordStrategy::KeysOnly => "Iterate Range Keys",
+					RecordStrategy::KeysAndValues => "Iterate Range",
 				}
 				.into(),
 				details: vec![("table", tb.to_owned().into()), ("range", r.to_owned().into())],
@@ -148,7 +160,7 @@ impl ExplainItem {
 					("value", v.to_owned()),
 				],
 			},
-			Iterable::Index(t, ir) => {
+			Iterable::Index(t, ir, rs) => {
 				let mut details = vec![("table", Value::from(t.0.to_owned()))];
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(&t.0) {
@@ -156,7 +168,12 @@ impl ExplainItem {
 					}
 				}
 				Self {
-					name: "Iterate Index".into(),
+					name: match rs {
+						RecordStrategy::Count => "Iterate Index Count",
+						RecordStrategy::KeysOnly => "Iterate Index Keys",
+						RecordStrategy::KeysAndValues => "Iterate Index",
+					}
+					.into(),
 					details,
 				}
 			}
@@ -166,10 +183,38 @@ impl ExplainItem {
 	pub(super) fn new_collector(
 		collector_type: &str,
 		mut details: Vec<(&'static str, Value)>,
-	) -> ExplainItem {
+	) -> Self {
 		details.insert(0, ("type", collector_type.into()));
 		Self {
 			name: "Collector".into(),
+			details,
+		}
+	}
+	pub(super) fn new_record_strategy(rs: RecordStrategy) -> Self {
+		Self {
+			name: "RecordStrategy".into(),
+			details: vec![(
+				"type",
+				match rs {
+					RecordStrategy::Count => "Count",
+					RecordStrategy::KeysOnly => "KeysOnly",
+					RecordStrategy::KeysAndValues => "KeysAndValues",
+				}
+				.into(),
+			)],
+		}
+	}
+
+	pub(super) fn new_start_limit(start_skip: Option<usize>, cancel_on_limit: Option<u32>) -> Self {
+		let mut details = vec![];
+		if let Some(s) = start_skip {
+			details.push(("SkipStart", s.into()));
+		}
+		if let Some(l) = cancel_on_limit {
+			details.push(("CancelOnLimit", l.into()));
+		}
+		Self {
+			name: "StartLimitStrategy".into(),
 			details,
 		}
 	}

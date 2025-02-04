@@ -1,0 +1,82 @@
+name: Bug report
+description: File a bug report.
+type: "Bug"
+labels: ["triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  - id: kind
+    type: dropdown
+    attributes:
+      label: What component does this affect?
+      description: Is this an issue with the Server or the Rust SDK?
+      options:
+        - SurrealDB Server
+        - SurrealDB Rust SDK
+    validations:
+      required: true
+  - id: what
+    type: textarea
+    attributes:
+      label: Describe the bug
+      description: What exactly is going wrong?
+      placeholder: |
+        Give a short description of what the bug is. Include as much relevant information as possible. Please ensure that all code is formatted within code blocks.
+    validations:
+      required: true
+  - id: steps
+    type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: What are the steps necessary to reproduce this bug?
+      placeholder: |
+        Detail the steps taken to reproduce the behaviour. Include as much relevant information as possible. Please ensure that all code is formatted within code blocks.
+    validations:
+      required: true
+  - id: expected
+    type: textarea
+    attributes:
+      label: Expected behaviour
+      description: What is the behaviour that you would expect to see?
+      placeholder: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+  - id: version
+    type: input
+    attributes:
+      label: SurrealDB version
+      description: Copy and paste the output of `surreal version`
+      placeholder: surreal 0.0.0 for macOS on aarch64
+    validations:
+      required: true
+  - id: contact
+    type: input
+    attributes:
+      label: Contact Details
+      description: How can we get in touch with you if we need more info?
+      placeholder: discord:username or email@example.com
+    validations:
+      required: false
+  - type: checkboxes
+    attributes:
+      label: Could this be a bug with your application?
+      description: Please confirm that this issue resides with SurrealDB, not your own application.
+      options:
+        - label: I confirm this is a bug with SurrealDB, not with my own application
+          required: true
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search [our issues](https://github.com/surrealdb/surrealdb/issues) to see if this bug already exists.
+      options:
+        - label: I confirm that I have searched the existing issues
+          required: true
+  - type: checkboxes
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/surrealdb/surrealdb).
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true

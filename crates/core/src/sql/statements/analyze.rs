@@ -50,14 +50,7 @@ impl AnalyzeStatement {
 					}
 					Index::MTree(p) => {
 						let tx = ctx.tx();
-						let mt = MTreeIndex::new(
-							ctx.get_index_stores(),
-							&tx,
-							ikb,
-							p,
-							TransactionType::Read,
-						)
-						.await?;
+						let mt = MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
 						mt.statistics(&tx).await?.into()
 					}
 					_ => {

@@ -9,6 +9,12 @@
 #[derive(Debug)]
 pub struct FakeAlloc;
 
+impl Default for FakeAlloc {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl FakeAlloc {
 	#[inline]
 	pub const fn new() -> Self {
@@ -18,8 +24,8 @@ impl FakeAlloc {
 
 impl FakeAlloc {
 	/// Returns the number of bytes that are allocated to the process
-	pub fn current_usage(&self) -> usize {
-		0
+	pub fn current_usage(&self) -> (usize, usize) {
+		(0, 0)
 	}
 	/// Checks whether the allocator is above the memory limit threshold
 	pub fn is_beyond_threshold(&self) -> bool {

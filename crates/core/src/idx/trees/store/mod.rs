@@ -7,10 +7,7 @@ pub(crate) mod tree;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
-use crate::idx::trees::btree::{BTreeNode, BTreeStore};
-use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
-use crate::idx::trees::store::cache::{TreeCache, TreeCaches};
+use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
@@ -97,7 +94,7 @@ where
 
 	pub(in crate::idx) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
 		match self {
-			Self::Write(w) => Ok(w.new_node(id, node)),
+			Self::Write(w) => Ok(w.new_node(id, node)?),
 			_ => Err(fail!("TreeStore::new_node")),
 		}
 	}
@@ -133,14 +130,14 @@ pub enum TreeNodeProvider {
 }
 
 impl TreeNodeProvider {
-	pub fn get_key(&self, node_id: NodeId) -> Key {
+	pub fn get_key(&self, node_id: NodeId) -> Result<Key, Error> {
 		match self {
 			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(Some(node_id)),
 			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(Some(node_id)),
 			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(Some(node_id)),
 			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(Some(node_id)),
 			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(Some(node_id)),
-			TreeNodeProvider::Debug => node_id.to_be_bytes().to_vec(),
+			TreeNodeProvider::Debug => Ok(node_id.to_be_bytes().to_vec()),
 		}
 	}
 
@@ -148,7 +145,7 @@ impl TreeNodeProvider {
 	where
 		N: TreeNode + Clone,
 	{
-		let key = self.get_key(id);
+		let key = self.get_key(id)?;
 		if let Some(val) = tx.get(key.clone(), None).await? {
 			let size = val.len() as u32;
 			let node = N::try_from_val(val)?;
@@ -217,18 +214,13 @@ pub trait TreeNode: Debug + Clone + Display {
 pub struct IndexStores(Arc<Inner>);
 
 struct Inner {
-	btree_fst_caches: TreeCaches<BTreeNode<FstKeys>>,
-	btree_trie_caches: TreeCaches<BTreeNode<TrieKeys>>,
-	mtree_caches: TreeCaches<MTreeNode>,
 	hnsw_indexes: HnswIndexes,
 	mappers: Mappers,
 }
+
 impl Default for IndexStores {
 	fn default() -> Self {
 		Self(Arc::new(Inner {
-			btree_fst_caches: TreeCaches::default(),
-			btree_trie_caches: TreeCaches::default(),
-			mtree_caches: TreeCaches::default(),
 			hnsw_indexes: HnswIndexes::default(),
 			mappers: Mappers::default(),
 		}))
@@ -236,51 +228,6 @@ impl Default for IndexStores {
 }
 
 impl IndexStores {
-	pub async fn get_store_btree_fst(
-		&self,
-		keys: TreeNodeProvider,
-		generation: StoreGeneration,
-		tt: TransactionType,
-		cache_size: usize,
-	) -> BTreeStore<FstKeys> {
-		let cache = self.0.btree_fst_caches.get_cache(generation, &keys, cache_size).await;
-		TreeStore::new(keys, cache, tt).await
-	}
-
-	pub fn advance_store_btree_fst(&self, new_cache: TreeCache<BTreeNode<FstKeys>>) {
-		self.0.btree_fst_caches.new_cache(new_cache);
-	}
-
-	pub async fn get_store_btree_trie(
-		&self,
-		keys: TreeNodeProvider,
-		generation: StoreGeneration,
-		tt: TransactionType,
-		cache_size: usize,
-	) -> BTreeStore<TrieKeys> {
-		let cache = self.0.btree_trie_caches.get_cache(generation, &keys, cache_size).await;
-		TreeStore::new(keys, cache, tt).await
-	}
-
-	pub fn advance_cache_btree_trie(&self, new_cache: TreeCache<BTreeNode<TrieKeys>>) {
-		self.0.btree_trie_caches.new_cache(new_cache);
-	}
-
-	pub async fn get_store_mtree(
-		&self,
-		keys: TreeNodeProvider,
-		generation: StoreGeneration,
-		tt: TransactionType,
-		cache_size: usize,
-	) -> MTreeStore {
-		let cache = self.0.mtree_caches.get_cache(generation, &keys, cache_size).await;
-		TreeStore::new(keys, cache, tt).await
-	}
-
-	pub fn advance_store_mtree(&self, new_cache: TreeCache<MTreeNode>) {
-		self.0.mtree_caches.new_cache(new_cache);
-	}
-
 	pub(crate) async fn get_index_hnsw(
 		&self,
 		ctx: &Context,
@@ -341,43 +288,16 @@ impl IndexStores {
 		db: &str,
 		ix: &DefineIndexStatement,
 	) -> Result<(), Error> {
-		let ikb = IndexKeyBase::new(ns, db, ix)?;
-		match ix.index {
-			Index::Search(_) => {
-				self.remove_search_caches(ikb);
-			}
-			Index::MTree(_) => {
-				self.remove_mtree_caches(ikb);
-			}
-			Index::Hnsw(_) => {
-				self.remove_hnsw_index(ikb).await;
-			}
-			_ => {}
+		if matches!(ix.index, Index::Hnsw(_)) {
+			let ikb = IndexKeyBase::new(ns, db, ix)?;
+			self.remove_hnsw_index(ikb).await?;
 		}
 		Ok(())
 	}
 
-	fn remove_search_caches(&self, ikb: IndexKeyBase) {
-		self.0.btree_trie_caches.remove_caches(&TreeNodeProvider::DocIds(ikb.clone()));
-		self.0.btree_trie_caches.remove_caches(&TreeNodeProvider::DocLengths(ikb.clone()));
-		self.0.btree_trie_caches.remove_caches(&TreeNodeProvider::Postings(ikb.clone()));
-		self.0.btree_fst_caches.remove_caches(&TreeNodeProvider::Terms(ikb));
-	}
-
-	fn remove_mtree_caches(&self, ikb: IndexKeyBase) {
-		self.0.btree_trie_caches.remove_caches(&TreeNodeProvider::DocIds(ikb.clone()));
-		self.0.mtree_caches.remove_caches(&TreeNodeProvider::Vector(ikb.clone()));
-	}
-
-	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) {
-		self.0.hnsw_indexes.remove(&ikb).await;
-	}
-
-	pub async fn is_empty(&self) -> bool {
-		self.0.mtree_caches.is_empty()
-			&& self.0.btree_fst_caches.is_empty()
-			&& self.0.btree_trie_caches.is_empty()
-			&& self.0.hnsw_indexes.is_empty().await
+	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) -> Result<(), Error> {
+		self.0.hnsw_indexes.remove(&ikb).await?;
+		Ok(())
 	}
 
 	pub(crate) fn mappers(&self) -> &Mappers {

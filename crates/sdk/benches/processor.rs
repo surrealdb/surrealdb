@@ -63,7 +63,7 @@ async fn prepare_data() -> Input {
 		.to_owned();
 	let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 	for _ in 0..3 {
-		assert!(res.remove(0).result.is_ok());
+		res.remove(0).result.unwrap();
 	}
 
 	let count = if cfg!(debug_assertions) {
@@ -88,7 +88,7 @@ async fn prepare_data() -> Input {
 		);
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		for _ in 0..5 {
-			assert!(res.remove(0).result.is_ok());
+			res.remove(0).result.unwrap();
 		}
 	}
 	Input {

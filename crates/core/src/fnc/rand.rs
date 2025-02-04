@@ -153,11 +153,11 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 	// Set the maximum valid seconds
 	const LIMIT: i64 = 8210298412799;
 	// Check the function input arguments
-	let val = if let Some((min, max)) = range {
+	let (min, max) = if let Some((min, max)) = range {
 		match min {
 			min if (1..=LIMIT).contains(&min) => match max {
-				max if min <= max && max <= LIMIT => rand::thread_rng().gen_range(min..=max),
-				max if max >= 1 && max <= min => rand::thread_rng().gen_range(max..=min),
+				max if min <= max && max <= LIMIT => (min, max),
+				max if max >= 1 && max <= min => (max, min),
 				_ => return Err(Error::InvalidArguments {
 					name: String::from("rand::time"),
 					message: format!("To generate a time between X and Y seconds, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
@@ -169,10 +169,11 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 			}),
 		}
 	} else {
-		rand::thread_rng().gen_range(0..=LIMIT)
+		(0, LIMIT)
 	};
 	// Generate the random time, try up to 5 times
 	for _ in 0..5 {
+		let val = rand::thread_rng().gen_range(min..=max);
 		if let Some(v) = Utc.timestamp_opt(val, 0).earliest() {
 			return Ok(v.into());
 		}
@@ -184,7 +185,7 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	let ulid = match timestamp {
 		Some(timestamp) => {
-			#[cfg(target_arch = "wasm32")]
+			#[cfg(target_family = "wasm")]
 			if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
 				return Err(Error::InvalidArguments {
 					name: String::from("rand::ulid"),
@@ -205,7 +206,7 @@ pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 pub fn uuid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	let uuid = match timestamp {
 		Some(timestamp) => {
-			#[cfg(target_arch = "wasm32")]
+			#[cfg(target_family = "wasm")]
 			if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
 				return Err(Error::InvalidArguments {
 					name: String::from("rand::ulid"),
@@ -236,7 +237,7 @@ pub mod uuid {
 	pub fn v7((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 		let uuid = match timestamp {
 			Some(timestamp) => {
-				#[cfg(target_arch = "wasm32")]
+				#[cfg(target_family = "wasm")]
 				if timestamp.0 < chrono::DateTime::UNIX_EPOCH {
 					return Err(Error::InvalidArguments {
 						name: String::from("rand::ulid"),

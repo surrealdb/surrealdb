@@ -22,11 +22,11 @@ use reblessive::TreeStack;
 use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;
 use trice::Instant;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
 const TARGET: &str = "surrealdb::core::dbs";

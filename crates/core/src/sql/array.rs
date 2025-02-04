@@ -474,8 +474,13 @@ impl Transpose<Array> for Array {
 		// This is safe.
 		let longest_length = iters.iter().map(|i| i.len()).max().unwrap();
 		for _ in 0..longest_length {
-			transposed_vec
-				.push(iters.iter_mut().filter_map(|i| i.next()).collect::<Vec<_>>().into());
+			transposed_vec.push(
+				iters
+					.iter_mut()
+					.map(|i| i.next().unwrap_or(Value::None))
+					.collect::<Vec<_>>()
+					.into(),
+			);
 		}
 		transposed_vec.into()
 	}

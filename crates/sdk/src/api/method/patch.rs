@@ -103,8 +103,17 @@ where
 	C: Connection,
 {
 	/// Applies JSON Patch changes to all records, or a specific record, in the database.
-	pub fn patch(mut self, PatchOp(patch): PatchOp) -> Patch<'r, C, R> {
-		self.patches.push(patch);
+	pub fn patch(mut self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
+		let PatchOp(patch) = patch.into();
+		match patch {
+			Ok(Content::Seq(values)) => {
+				for value in values {
+					self.patches.push(Ok(value));
+				}
+			}
+			Ok(value) => self.patches.push(Ok(value)),
+			Err(error) => self.patches.push(Err(error)),
+		}
 		self
 	}
 }

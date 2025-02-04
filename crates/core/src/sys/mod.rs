@@ -21,7 +21,7 @@ pub async fn refresh() {
 	let mut information = INFORMATION.lock().await;
 	// Update the cached information metrics
 	information.cpu_usage = environment.cpu_usage();
-	information.memory_allocated = crate::mem::ALLOC.current_usage();
+	(information.memory_allocated, information.threads) = crate::mem::ALLOC.current_usage();
 	information.memory_usage = environment.memory_usage();
 	information.load_average = environment.load_average();
 	information.physical_cores = environment.physical_cores();
@@ -35,6 +35,7 @@ pub struct Information {
 	pub cpu_usage: f32,
 	pub load_average: [f64; 3],
 	pub memory_allocated: usize,
+	pub threads: usize,
 	pub memory_usage: u64,
 	pub physical_cores: usize,
 }

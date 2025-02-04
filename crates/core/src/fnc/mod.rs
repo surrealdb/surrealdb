@@ -59,6 +59,7 @@ pub async fn run(
 		|| name.eq("array::reduce")
 		|| name.eq("array::some")
 		|| name.eq("record::exists")
+		|| name.eq("record::refs")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
@@ -461,14 +462,14 @@ pub async fn asynchronous(
 ) -> Result<Value, Error> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
 	) -> impl FnOnce() -> async_executor::Task<R> {
 		|| crate::exe::spawn(async move { function() })
 	}
 
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
 	) -> impl FnOnce() -> std::future::Ready<R> {
@@ -511,6 +512,7 @@ pub async fn asynchronous(
 		"http::delete" => http::delete(ctx).await,
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+		"record::refs" => record::refs((stk, ctx, opt, doc)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
@@ -677,6 +679,7 @@ pub async fn idiom(
 				"id" => record::id,
 				"table" => record::tb,
 				"tb" => record::tb,
+				"refs" => record::refs((stk, ctx, opt, doc)).await,
 			)
 		}
 		Value::Object(_) => {

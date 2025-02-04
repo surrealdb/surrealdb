@@ -27,18 +27,21 @@ impl RemoveFieldStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
+			// Get the NS and DB
+			let ns = opt.ns()?;
+			let db = opt.db()?;
 			// Get the transaction
 			let txn = ctx.tx();
 			// Get the field name
 			let na = self.name.to_string();
 			// Get the definition
-			let fd = txn.get_tb_field(opt.ns()?, opt.db()?, &self.what, &na).await?;
+			let fd = txn.get_tb_field(ns, db, &self.what, &na).await?;
 			// Delete the definition
-			let key = crate::key::table::fd::new(opt.ns()?, opt.db()?, &fd.what, &na);
+			let key = crate::key::table::fd::new(ns, db, &fd.what, &na);
 			txn.del(key).await?;
 			// Refresh the table cache for fields
-			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
-			let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
+			let key = crate::key::database::tb::new(ns, db, &self.what);
+			let tb = txn.get_tb(ns, db, &self.what).await?;
 			txn.set(
 				key,
 				DefineTableStatement {
@@ -48,6 +51,10 @@ impl RemoveFieldStatement {
 				None,
 			)
 			.await?;
+			// Clear the cache
+			if let Some(cache) = ctx.get_cache() {
+				cache.clear_tb(ns, db, &self.what);
+			}
 			// Clear the cache
 			txn.clear();
 			// Ok all good

@@ -145,7 +145,7 @@ impl Document {
 						Value::Thing(v) if v.eq(&rid) => (),
 						// The id is a match, so don't error
 						v if rid.id.is(&v) => (),
-						// The in field does not match
+						// The id field does not match
 						v => {
 							return Err(Error::IdMismatch {
 								value: v.to_string(),
@@ -216,7 +216,7 @@ impl Document {
 						Value::Thing(v) if v.eq(r) => (),
 						// The out is a match, so don't error
 						v if r.id.is(&v) => (),
-						// The in field does not match
+						// The out field does not match
 						v => {
 							return Err(Error::OutMismatch {
 								value: v.to_string(),
@@ -303,17 +303,20 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check where condition
-		if let Some(cond) = stm.cond() {
-			// Process the permitted documents
-			let current = match self.reduced(stk, ctx, opt, Current).await? {
-				true => &self.current_reduced,
-				false => &self.current,
-			};
-			// Check if the expression is truthy
-			if !cond.compute(stk, ctx, opt, Some(current)).await?.is_truthy() {
-				// Ignore this document
-				return Err(Error::Ignore);
+		// Check if we have already processed a condition
+		if !self.is_condition_checked() {
+			// Check if a WHERE condition is specified
+			if let Some(cond) = stm.cond() {
+				// Process the permitted documents
+				let current = match self.reduced(stk, ctx, opt, Current).await? {
+					true => &self.current_reduced,
+					false => &self.current,
+				};
+				// Check if the expression is truthy
+				if !cond.compute(stk, ctx, opt, Some(current)).await?.is_truthy() {
+					// Ignore this document
+					return Err(Error::Ignore);
+				}
 			}
 		}
 		// Carry on

@@ -263,6 +263,12 @@ user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-06-10"
 end = "2025-08-06"
 
+[[trusted.parking_lot]]
+criteria = "safe-to-deploy"
+user-id = 2915 # Amanieu d'Antras (Amanieu)
+start = "2019-05-04"
+end = "2025-12-19"
+
 [[trusted.paste]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)

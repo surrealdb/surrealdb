@@ -2,10 +2,10 @@
 use crate::idx::ft::terms::TermId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Bu<'a> {
 	__: u8,
@@ -22,6 +22,7 @@ pub struct Bu<'a> {
 	_g: u8,
 	pub term_id: TermId,
 }
+impl_key!(Bu<'a>);
 
 impl Categorise for Bu<'_> {
 	fn categorise(&self) -> Category {
@@ -51,6 +52,7 @@ impl<'a> Bu<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

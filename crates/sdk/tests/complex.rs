@@ -1,4 +1,4 @@
-#![cfg(not(target_arch = "wasm32"))]
+#![cfg(not(target_family = "wasm"))]
 
 mod parse;
 use parse::Parse;
@@ -64,7 +64,7 @@ fn cyclic_records() -> Result<(), Error> {
 		assert_eq!(res.len(), 2);
 		//
 		let tmp = res.next().unwrap();
-		assert!(tmp.is_ok());
+		tmp.unwrap();
 		//
 		let tmp = res.next().unwrap();
 		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)), "found {:?}", tmp);
@@ -136,7 +136,9 @@ fn ok_graph_traversal_depth() -> Result<(), Error> {
 			// Remove the last result
 			let tmp = res.next_back().unwrap();
 			// Check all other queries
-			assert!(res.all(|r| r.is_ok()));
+			for r in res {
+				r.unwrap();
+			}
 			//
 			match tmp {
 				Ok(res) => {

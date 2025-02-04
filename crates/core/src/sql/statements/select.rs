@@ -2,7 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::{QueryPlanner, StatementContext};
+use crate::idx::planner::{GrantedPermission, QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::{
 	order::{OldOrders, Order, OrderList, Ordering},
 	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
@@ -91,7 +91,7 @@ impl SelectStatement {
 		if self.what.iter().any(|v| v.writeable()) {
 			return true;
 		}
-		self.cond.as_ref().map_or(false, |v| v.writeable())
+		self.cond.as_deref().is_some_and(Value::writeable)
 	}
 
 	/// Process this type returning a computed simple Value
@@ -141,14 +141,20 @@ impl SelectStatement {
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, &opt, doc).await?;
 			match v {
-				Value::Thing(v) => match v.is_range() {
-					true => {
-						// Evaluate if we can only scan keys (rather than keys AND values)
-						let keys_only = stm_ctx.is_keys_only(&v.tb).await?;
-						i.prepare_range(&stm, v, keys_only)?
+				Value::Thing(v) => {
+					let p = planner.check_table_permission(&stm_ctx, &v.tb).await?;
+					// We prepare it only if wer have a permission
+					if !matches!(p, GrantedPermission::None) {
+						match v.is_range() {
+							true => {
+								// Evaluate if we can only scan keys (rather than keys AND values), or count
+								let rs = stm_ctx.check_record_strategy(false, p).await?;
+								i.prepare_range(&stm, v, rs)?
+							}
+							false => i.prepare_thing(&stm, v)?,
+						}
 					}
-					false => i.prepare_thing(&stm, v)?,
-				},
+				}
 				Value::Edges(v) => {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
@@ -165,7 +171,11 @@ impl SelectStatement {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-					planner.add_iterables(stk, &stm_ctx, t, &mut i).await?;
+					let p = planner.check_table_permission(&stm_ctx, &t).await?;
+					// We add the iterable only if we have a permission
+					if !matches!(p, GrantedPermission::None) {
+						planner.add_iterables(stk, &stm_ctx, t, p, &mut i).await?;
+					}
 				}
 				Value::Array(v) => {
 					if self.only && !limit_is_one_or_zero {
@@ -174,18 +184,29 @@ impl SelectStatement {
 					for v in v {
 						match v {
 							Value::Table(t) => {
-								planner.add_iterables(stk, &stm_ctx, t, &mut i).await?;
+								let p = planner.check_table_permission(&stm_ctx, &t).await?;
+								// We add the iterable only if we have a permission
+								if !matches!(p, GrantedPermission::None) {
+									planner.add_iterables(stk, &stm_ctx, t, p, &mut i).await?;
+								}
 							}
 							Value::Mock(v) => i.prepare_mock(&stm, v)?,
 							Value::Edges(v) => i.prepare_edges(&stm, *v)?,
-							Value::Thing(v) => match v.is_range() {
-								true => {
-									// Evaluate if we can only scan keys (rather than keys AND values)
-									let keys_only = stm_ctx.is_keys_only(&v.tb).await?;
-									i.prepare_range(&stm, v, keys_only)?
+							Value::Thing(v) => {
+								let p = planner.check_table_permission(&stm_ctx, &v.tb).await?;
+								// We prepare it only if wer have a permission
+								if !matches!(p, GrantedPermission::None) {
+									match v.is_range() {
+										true => {
+											// Evaluate if we can only scan keys (rather than keys AND values) or just count
+											let rs =
+												stm_ctx.check_record_strategy(false, p).await?;
+											i.prepare_range(&stm, v, rs)?
+										}
+										false => i.prepare_thing(&stm, v)?,
+									}
 								}
-								false => i.prepare_thing(&stm, v)?,
-							},
+							}
 							_ => i.ingest(Iterable::Value(v)),
 						}
 					}
@@ -201,7 +222,7 @@ impl SelectStatement {
 		}
 		let ctx = ctx.freeze();
 		// Process the statement
-		let res = i.output(stk, &ctx, &opt, &stm).await?;
+		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
 		if ctx.is_timedout() {
 			return Err(Error::QueryTimedout);

@@ -32,9 +32,9 @@ impl SleepStatement {
 			(_, d) => d,
 		};
 		// Sleep for the specified time
-		#[cfg(target_arch = "wasm32")]
+		#[cfg(target_family = "wasm")]
 		wasmtimer::tokio::sleep(dur).await;
-		#[cfg(not(target_arch = "wasm32"))]
+		#[cfg(not(target_family = "wasm"))]
 		tokio::time::sleep(dur).await;
 		// Ok all good
 		Ok(Value::None)

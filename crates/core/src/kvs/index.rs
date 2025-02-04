@@ -24,6 +24,8 @@ use tokio::sync::Mutex;
 use tokio::task;
 use tokio::task::JoinHandle;
 
+use super::KeyDecode;
+
 #[derive(Clone)]
 pub(crate) enum BuildingStatus {
 	Started,
@@ -296,20 +298,20 @@ impl Building {
 		// First iteration, we index every keys
 		let ns = self.opt.ns()?;
 		let db = self.opt.db()?;
-		let beg = thing::prefix(ns, db, &self.tb);
-		let end = thing::suffix(ns, db, &self.tb);
+		let beg = thing::prefix(ns, db, &self.tb)?;
+		let end = thing::suffix(ns, db, &self.tb)?;
 		let mut next = Some(beg..end);
 		let mut count = 0;
 		while let Some(rng) = next {
 			// Get the next batch of records
 			let tx = self.new_read_tx().await?;
-			let batch = catch!(tx, tx.batch(rng, *INDEXING_BATCH_SIZE, true, None).await);
+			let batch = catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await);
 			// We can release the read transaction
 			drop(tx);
 			// Set the next scan range
 			next = batch.next;
 			// Check there are records
-			if batch.values.is_empty() {
+			if batch.result.is_empty() {
 				// If not, we are with the initial indexing
 				break;
 			}
@@ -317,7 +319,7 @@ impl Building {
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
 			// Index the batch
-			catch!(tx, self.index_initial_batch(&ctx, &tx, batch.values, &mut count).await);
+			catch!(tx, self.index_initial_batch(&ctx, &tx, batch.result, &mut count).await);
 			tx.commit().await?;
 		}
 		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
@@ -358,7 +360,7 @@ impl Building {
 		let mut stack = TreeStack::new();
 		// Index the records
 		for (k, v) in values.into_iter() {
-			let key: thing::Thing = (&k).into();
+			let key = thing::Thing::decode(&k)?;
 			// Parse the value
 			let val: Value = (&v).into();
 			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();

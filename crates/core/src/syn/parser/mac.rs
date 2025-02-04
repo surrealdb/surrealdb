@@ -82,16 +82,28 @@ macro_rules! test_parse {
 	}};
 }
 
+#[cfg(test)]
+macro_rules! test_parse_with_settings {
+	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:expr, $s:expr) => {{
+		let mut parser = $crate::syn::parser::Parser::new_with_settings(
+			$t.as_bytes(),
+			$s,
+		);
+		let mut stack = reblessive::Stack::new();
+		stack.enter(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
+	}};
+}
+
 macro_rules! enter_object_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{
-		if $this.object_recursion == 0 {
+		if $this.settings.object_recursion_limit == 0 {
 			return Err($crate::syn::parser::SyntaxError::new("Exceeded query recursion depth limit")
 				.with_span($this.last_span(), $crate::syn::error::MessageKind::Error))
 		}
 		struct Dropper<'a, 'b>(&'a mut $crate::syn::parser::Parser<'b>);
 		impl Drop for Dropper<'_, '_> {
 			fn drop(&mut self) {
-				self.0.object_recursion += 1;
+				self.0.settings.object_recursion_limit += 1;
 			}
 		}
 		impl<'a> ::std::ops::Deref for Dropper<'_,'a>{
@@ -108,7 +120,7 @@ macro_rules! enter_object_recursion {
 			}
 		}
 
-		$this.object_recursion -= 1;
+		$this.settings.object_recursion_limit -= 1;
 		let mut $name = Dropper($this);
 		{
 			$($t)*
@@ -118,14 +130,14 @@ macro_rules! enter_object_recursion {
 
 macro_rules! enter_query_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{
-		if $this.query_recursion == 0 {
+		if $this.settings.query_recursion_limit == 0 {
 			return Err($crate::syn::parser::SyntaxError::new("Exceeded query recursion depth limit")
 				.with_span($this.last_span(), $crate::syn::error::MessageKind::Error))
 		}
 		struct Dropper<'a, 'b>(&'a mut $crate::syn::parser::Parser<'b>);
 		impl Drop for Dropper<'_, '_> {
 			fn drop(&mut self) {
-				self.0.query_recursion += 1;
+				self.0.settings.query_recursion_limit += 1;
 			}
 		}
 		impl<'a> ::std::ops::Deref for Dropper<'_,'a>{
@@ -142,7 +154,7 @@ macro_rules! enter_query_recursion {
 			}
 		}
 
-		$this.query_recursion -= 1;
+		$this.settings.query_recursion_limit -= 1;
         #[allow(unused_mut)]
 		let mut $name = Dropper($this);
 		{
@@ -196,3 +208,5 @@ pub(crate) use unexpected;
 
 #[cfg(test)]
 pub(crate) use test_parse;
+#[cfg(test)]
+pub(crate) use test_parse_with_settings;

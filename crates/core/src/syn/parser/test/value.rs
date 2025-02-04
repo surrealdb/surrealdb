@@ -8,7 +8,7 @@ use crate::{
 		Array, Constant, Expression, Geometry, Id, Ident, Idiom, Number, Object, Operator, Part,
 		Query, Statement, Statements, Strand, Thing, Value,
 	},
-	syn::parser::{mac::test_parse, Parser},
+	syn::parser::{mac::test_parse, Parser, ParserSettings},
 };
 
 #[test]
@@ -72,9 +72,14 @@ fn parse_large_depth_object() {
 	for _ in 0..1000 {
 		text.push_str(end);
 	}
-	let mut parser = Parser::new(text.as_bytes())
-		.with_query_recursion_limit(100000)
-		.with_object_recursion_limit(100000);
+	let mut parser = Parser::new_with_settings(
+		text.as_bytes(),
+		ParserSettings {
+			query_recursion_limit: 100000,
+			object_recursion_limit: 100000,
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
 	let query = stack.enter(|stk| parser.parse_query(stk)).finish().unwrap();
 	let Query(Statements(stmts)) = query;
@@ -104,9 +109,14 @@ fn parse_large_depth_record_id() {
 	for _ in 0..1000 {
 		text.push_str(end);
 	}
-	let mut parser = Parser::new(text.as_bytes())
-		.with_query_recursion_limit(100000)
-		.with_object_recursion_limit(100000);
+	let mut parser = Parser::new_with_settings(
+		text.as_bytes(),
+		ParserSettings {
+			query_recursion_limit: 100000,
+			object_recursion_limit: 100000,
+			..Default::default()
+		},
+	);
 	let mut stack = Stack::new();
 	let query = stack.enter(|stk| parser.parse_query(stk)).finish().unwrap();
 	let Query(Statements(stmts)) = query;

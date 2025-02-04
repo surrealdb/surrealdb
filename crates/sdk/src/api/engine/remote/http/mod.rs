@@ -31,20 +31,20 @@ use surrealdb_core::sql::{
 };
 use url::Url;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use std::path::PathBuf;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio::io;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
 // const SQL_PATH: &str = "sql";
@@ -165,7 +165,7 @@ struct AuthResponse {
 
 type BackupSender = channel::Sender<Result<Vec<u8>>>;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	let mut response = request
 		.send()
@@ -209,17 +209,19 @@ async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()
 		}
 	};
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	tokio::spawn(future);
 
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(target_family = "wasm")]
 	spawn_local(future);
 
 	Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
+	use crate::engine::proto::{QueryMethodResponse, Status};
+
 	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
@@ -231,7 +233,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		}
 	};
 
-	let res = request.header(ACCEPT, "application/octet-stream").body(file).send().await?;
+	let res = request.header(ACCEPT, "application/surrealdb").body(file).send().await?;
 
 	if res.error_for_status_ref().is_err() {
 		let res = res.text().await?;
@@ -248,7 +250,15 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 				return Err(Error::Http(res).into());
 			}
 		}
+	} else {
+		let response: Vec<QueryMethodResponse> = deserialize(&res.bytes().await?, false)?;
+		for res in response {
+			if let Status::Err = res.status {
+				return Err(Error::Query(res.result.0.as_string()).into());
+			}
+		}
 	}
+
 	Ok(())
 }
 
@@ -423,7 +433,7 @@ async fn router(
 			vars.shift_remove(&key);
 			Ok(DbResponse::Other(CoreValue::None))
 		}
-		#[cfg(target_arch = "wasm32")]
+		#[cfg(target_family = "wasm")]
 		Command::ExportFile {
 			..
 		}
@@ -440,7 +450,7 @@ async fn router(
 			Err(Error::BackupsNotSupported.into())
 		}
 
-		#[cfg(not(target_arch = "wasm32"))]
+		#[cfg(not(target_family = "wasm"))]
 		Command::ExportFile {
 			path,
 			config,
@@ -475,7 +485,7 @@ async fn router(
 			export_bytes(request, bytes).await?;
 			Ok(DbResponse::Other(CoreValue::None))
 		}
-		#[cfg(not(target_arch = "wasm32"))]
+		#[cfg(not(target_family = "wasm"))]
 		Command::ExportMl {
 			path,
 			config,
@@ -504,7 +514,7 @@ async fn router(
 			export_bytes(request, bytes).await?;
 			Ok(DbResponse::Other(CoreValue::None))
 		}
-		#[cfg(not(target_arch = "wasm32"))]
+		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
 			path,
 		} => {
@@ -517,7 +527,7 @@ async fn router(
 			import(request, path).await?;
 			Ok(DbResponse::Other(CoreValue::None))
 		}
-		#[cfg(not(target_arch = "wasm32"))]
+		#[cfg(not(target_family = "wasm"))]
 		Command::ImportMl {
 			path,
 		} => {
