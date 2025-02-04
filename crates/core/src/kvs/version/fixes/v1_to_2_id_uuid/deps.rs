@@ -159,7 +159,7 @@ pub mod key {
 	}
 	impl_key!(Thing<'a>);
 
-	impl<'a> Thing<'a> {
+	impl Thing<'_> {
 		/*
 		pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {
 			Self {

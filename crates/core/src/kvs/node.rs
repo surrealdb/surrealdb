@@ -259,7 +259,7 @@ impl Datastore {
 						next = res.next;
 						for (k, v) in res.result.iter() {
 							// Decode the LIVE query statement
-							let stm: LiveStatement = revision::from_slice(&v)?;
+							let stm: LiveStatement = revision::from_slice(v)?;
 							// Get the node id and the live query id
 							let (nid, lid) = (stm.node.0, stm.id.0);
 							// Check that the node for this query is archived
