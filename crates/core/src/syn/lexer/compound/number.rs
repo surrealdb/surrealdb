@@ -5,15 +5,15 @@ use std::{
 	time::Duration,
 };
 
+use num_traits::CheckedAdd;
 use rust_decimal::Decimal;
 
 use crate::{
 	sql::{
-		duration::{
+		bytesize::Bytesize, duration::{
 			SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
 			SECONDS_PER_YEAR,
-		},
-		Number,
+		}, Number
 	},
 	syn::{
 		error::{bail, syntax_error, SyntaxError},
@@ -30,8 +30,18 @@ pub enum Numeric {
 /// Like numeric but holds of parsing the a number into a specific value.
 #[derive(Debug)]
 pub enum NumericKind {
+	Bytesize(Bytesize),
 	Number(NumberKind),
 	Duration(Duration),
+}
+
+enum BytesizeSuffix {
+	Bytes,
+	KiloBytes,
+	MegaBytes,
+	GigaBytes,
+	TeraBytes,
+	PetaBytes,
 }
 
 #[derive(Debug)]
@@ -67,14 +77,21 @@ pub fn numeric_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, Synt
 	match start.kind {
 		t!("-") | t!("+") => number_kind(lexer, start).map(NumericKind::Number),
 		TokenKind::Digits => match lexer.reader.peek() {
-			Some(b'n' | b'm' | b's' | b'h' | b'y' | b'w' | b'u') => {
+			Some(b'b' | b'k' | b'g' | b't' | b'p') => {
+				bytesize(lexer, start).map(NumericKind::Bytesize)
+			}
+			Some(b'n' | b's' | b'h' | b'y' | b'w' | b'u') => {
 				duration(lexer, start).map(NumericKind::Duration)
+			}
+			Some(b'm') => match lexer.reader.peek1() {
+				Some(b'b') => bytesize(lexer, start).map(NumericKind::Bytesize),
+				_ => duration(lexer, start).map(NumericKind::Duration),
 			}
 			Some(x) if !x.is_ascii() => duration(lexer, start).map(NumericKind::Duration),
 			_ => number_kind(lexer, start).map(NumericKind::Number),
 		},
 		x => {
-			bail!("Unexpected token `{x}`, expected a numeric value, either a duration or number",@start.span)
+			bail!("Unexpected token `{x}`, expected a numeric value, either a bytesize, duration or number",@start.span)
 		}
 	}
 }
@@ -338,6 +355,92 @@ pub fn duration(lexer: &mut Lexer, start: Token) -> Result<Duration, SyntaxError
 	}
 
 	Ok(duration)
+}
+
+fn lex_bytesize_suffix(lexer: &mut Lexer) -> Result<BytesizeSuffix, SyntaxError> {
+	let suffix = match lexer.reader.next() {
+		Some(b'b') => {
+			BytesizeSuffix::Bytes
+		}
+		Some(b'k') => {
+			lexer.expect('b')?;
+			BytesizeSuffix::KiloBytes
+		}
+		Some(b'm') => {
+			lexer.expect('b')?;
+			BytesizeSuffix::MegaBytes
+		}
+		Some(b'g') => {
+			lexer.expect('b')?;
+			BytesizeSuffix::GigaBytes
+		}
+		Some(b't') => {
+			lexer.expect('b')?;
+			BytesizeSuffix::TeraBytes
+		}
+		Some(b'p') => {
+			lexer.expect('b')?;
+			BytesizeSuffix::PetaBytes
+		}
+		Some(x) => {
+			let char = lexer.reader.convert_to_char(x)?;
+			bail!("Invalid bytesize token, expected a bytesize suffix found `{char}`",@lexer.current_span())
+		}
+		None => {
+			bail!("Unexpected end of file, expected a bytesize suffix",@lexer.current_span())
+		}
+	};
+
+	if has_ident_after(lexer) {
+		let char = lexer.reader.next().unwrap();
+		let char = lexer.reader.convert_to_char(char)?;
+		bail!("Invalid token, found invalid character `{char}` after bytesize suffix", @lexer.current_span())
+	}
+
+	Ok(suffix)
+}
+
+pub fn bytesize(lexer: &mut Lexer, start: Token) -> Result<Bytesize, SyntaxError> {
+	match start.kind {
+		TokenKind::Digits => {}
+		x => bail!("Unexpected token {x}, expected bytesize", @start.span),
+	}
+
+	let mut bytesize = Bytesize::ZERO;
+
+	let mut number_span = start.span;
+	loop {
+		let suffix = lex_bytesize_suffix(lexer)?;
+
+		let numeric_string = prepare_number_str(lexer.span_str(number_span));
+		let numeric_value: u64 = numeric_string.parse().map_err(
+			|e| syntax_error!("Invalid token, failed to parse bytesize digits: {e}",@lexer.current_span()),
+		)?;
+
+		let addition = match suffix {
+			BytesizeSuffix::Bytes => Bytesize::b(numeric_value),
+			BytesizeSuffix::KiloBytes => Bytesize::kb(numeric_value),
+			BytesizeSuffix::MegaBytes => Bytesize::mb(numeric_value),
+			BytesizeSuffix::GigaBytes => Bytesize::gb(numeric_value),
+			BytesizeSuffix::TeraBytes => Bytesize::tb(numeric_value),
+			BytesizeSuffix::PetaBytes => Bytesize::pb(numeric_value),
+		};
+
+		bytesize = bytesize.checked_add(&addition).ok_or_else(
+			|| syntax_error!("Invalid bytesize, value overflowed maximum allowed value", @lexer.current_span()),
+		)?;
+
+		match lexer.reader.peek() {
+			Some(x) if x.is_ascii_digit() => {
+				let before = lexer.reader.offset();
+				eat_digits(lexer);
+				number_span = lexer.span_since(before);
+			}
+			_ => break,
+		}
+	}
+
+	Ok(bytesize)
 }
 
 fn lex_duration_suffix(lexer: &mut Lexer) -> Result<DurationSuffix, SyntaxError> {

@@ -8,20 +8,21 @@ use crate::{
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiInvocation<'a> {
 	pub params: Object,
-	pub body: Value,
 	pub method: Method,
 	pub query: Object,
+	pub headers: Object,
 	pub session: Option<Session>,
 	pub values: Vec<(&'a str, Value)>,
 }
 
-impl<'a> Into<Value> for ApiInvocation<'a> {
-	fn into(self) -> Value {
+impl<'a> ApiInvocation<'a> {
+	pub fn vars(self, body: Value) -> Value {
 		let mut obj = map! {
 			"params" => Value::from(self.params),
-			"body" => self.body,
+			"body" => body,
 			"method" => self.method.to_string().into(),
 			"query" => Value::from(self.query),
+			"headers" => Value::from(self.headers),
 		};
 
 		if let Some(session) = self.session {

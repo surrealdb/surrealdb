@@ -1,6 +1,6 @@
 use reblessive::Stack;
 
-use crate::api::path::Segment;
+use crate::api::path::{Segment, MAX_PATH_SEGMENTS};
 use crate::sql::Kind;
 use crate::syn::lexer::bail;
 use crate::syn::parser::Parser;
@@ -115,6 +115,10 @@ pub fn path(lexer: &mut Lexer, start: Token) -> Result<Vec<Segment>, SyntaxError
 		if done {
 			break;
 		}
+	}
+
+	if segments.len() > MAX_PATH_SEGMENTS as usize {
+		bail!("Path cannot have more than {MAX_PATH_SEGMENTS} segments", @lexer.current_span());
 	}
 
 	Ok(segments)

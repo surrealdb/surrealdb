@@ -313,6 +313,7 @@ impl QouteKind {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum Glued {
+	Bytesize,
 	Number,
 	Duration,
 	Strand,
@@ -323,6 +324,7 @@ pub enum Glued {
 impl Glued {
 	fn as_str(&self) -> &'static str {
 		match self {
+			Glued::Bytesize => "a number",
 			Glued::Number => "a number",
 			Glued::Strand => "a strand",
 			Glued::Uuid => "a uuid",

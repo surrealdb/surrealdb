@@ -4,11 +4,12 @@ use crate::api::method::Method;
 use crate::api::path::Path;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
+use crate::sql::statements::define::config::api::ApiConfig;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::define::{ApiAction, DefineConfigStatement};
 use crate::sql::statements::DefineApiStatement;
-use crate::sql::Value;
+use crate::sql::{Timeout, Value};
 use crate::syn::error::bail;
 use crate::{
 	sql::{
@@ -63,7 +64,7 @@ impl Parser<'_> {
 			}
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
-			t!("CONFIG") => self.parse_define_config().map(DefineStatement::Config),
+			t!("CONFIG") => self.parse_define_config(ctx).await.map(DefineStatement::Config),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -811,14 +812,24 @@ impl Parser<'_> {
 
 		let path: Path = self.next_token_value()?;
 
+		let config = match self.parse_api_config(ctx).await? {
+			v if v.is_empty() => None,
+			v => Some(v),
+		};
+
 		let mut res = DefineApiStatement {
 			path,
 			if_not_exists,
 			overwrite,
+			config,
 			..Default::default()
 		};
 
 		loop {
+			if !self.eat(t!("FOR")) {
+				break;
+			}
+
 			match self.peek().kind {
 				t!("ANY") => {
 					self.pop_peek();
@@ -835,26 +846,35 @@ impl Parser<'_> {
 							t!("PUT") => Method::Put,
 							t!("TRACE") => Method::Trace,
 							found => {
-								bail!("Expected one of `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`, found {found}");
+								bail!("Expected one of `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}");
 							}
 						};
 
 						self.pop_peek();
 						methods.push(method);
 
-						if !self.eat(t!("|")) {
+						if !self.eat(t!(",")) {
 							break 'methods;
 						}
 					}
 
+					let config = match self.parse_api_config(ctx).await? {
+						v if v.is_empty() => None,
+						v => Some(v),
+					};
+
+					expected!(self, t!("THEN"));
 					let action = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 					res.actions.push(ApiAction {
 						methods,
 						action,
+						config,
 					});
 				}
-				_ => {
-					break;
+				found => {
+					bail!(
+						"Expected one of `any`, `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}"
+					);
 				}
 			}
 		}
@@ -1370,7 +1390,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_config(&mut self) -> ParseResult<DefineConfigStatement> {
+	pub async fn parse_define_config(&mut self, stk: &mut Stk) -> ParseResult<DefineConfigStatement> {
 		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -1383,6 +1403,7 @@ impl Parser<'_> {
 
 		let next = self.next();
 		let inner = match next.kind {
+			t!("API") => self.parse_api_config(stk).await.map(ConfigInner::Api)?,
 			t!("GRAPHQL") => self.parse_graphql_config().map(ConfigInner::GraphQL)?,
 			_ => unexpected!(self, next, "a type of config"),
 		};
@@ -1392,6 +1413,47 @@ impl Parser<'_> {
 			if_not_exists,
 			overwrite,
 		})
+	}
+
+	pub async fn parse_api_config(&mut self, stk: &mut Stk) -> ParseResult<ApiConfig> {
+		let mut config = ApiConfig::default();
+		loop {
+			match self.peek_kind() {
+				t!("PERMISSIONS") => {
+					self.pop_peek();
+					config.permissions = Some(self.parse_permission_value(stk).await?);
+				},
+				t!("TIMEOUT") => {
+					self.pop_peek();
+					let duration = self.next_token_value()?;
+					config.timeout = Some(Timeout(duration));
+				},
+				t!("MAX_BODY_SIZE") => {
+					self.pop_peek();
+					config.max_body_size = Some(self.next_token_value()?);
+				},
+				t!("HEADERS") => {
+					self.pop_peek();
+					let before = self.peek().span;
+					expected!(self, t!("{"));
+					let obj = self.parse_object(stk, before).await?;
+					let span = before.covers(self.last_span());
+
+					if obj.values().any(|v| !v.is_strand()) {
+						bail!(
+							"Header values must be strings",
+							@span => "Non-string value found",
+						);
+					}
+
+					config.headers = Some(obj);
+				},
+				_ => {
+					break;
+				}
+			}
+		}
+		Ok(config)
 	}
 
 	fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {

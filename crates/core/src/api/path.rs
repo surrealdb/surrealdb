@@ -42,6 +42,10 @@ impl<'a> Path {
 	pub fn to_url(&'a self) -> String {
 		format!("/{}", self)
 	}
+
+	pub fn specifity(&self) -> u8 {
+		self.iter().map(|s| s.specificity()).sum()
+	}
 }
 
 impl From<Vec<Segment>> for Path {
@@ -81,6 +85,9 @@ pub enum Segment {
 	Rest(String),
 }
 
+pub const MAX_PATH_SPECIFICITY: u8 = 255;
+pub const MAX_PATH_SEGMENTS: u8 = MAX_PATH_SPECIFICITY / 3; // 3 is the maximum specificity of a segment
+
 impl Segment {
 	fn fit(&self, segments: &[&str]) -> Option<Option<(String, Value)>> {
 		if let Some(current) = segments.first() {
@@ -103,6 +110,14 @@ impl Segment {
 			}
 		} else {
 			None
+		}
+	}
+
+	fn specificity(&self) -> u8 {
+		match self {
+			Self::Fixed(_) => 3,
+			Self::Dynamic(_, _) => 2,
+			Self::Rest(_) => 1,
 		}
 	}
 }

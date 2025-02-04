@@ -25,6 +25,12 @@ impl From<Vec<u8>> for Bytes {
 	}
 }
 
+impl Into<Vec<u8>> for Bytes {
+	fn into(self) -> Vec<u8> {
+		self.0
+	}
+}
+
 impl Deref for Bytes {
 	type Target = Vec<u8>;
 

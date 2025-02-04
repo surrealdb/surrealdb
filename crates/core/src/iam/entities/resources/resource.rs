@@ -45,6 +45,7 @@ pub enum ResourceKind {
 #[non_exhaustive]
 pub enum ConfigKind {
 	GraphQL,
+	Api,
 }
 
 impl std::fmt::Display for ResourceKind {
@@ -76,6 +77,7 @@ impl std::fmt::Display for ConfigKind {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			ConfigKind::GraphQL => write!(f, "GraphQL"),
+			ConfigKind::Api => write!(f, "API"),
 		}
 	}
 }
