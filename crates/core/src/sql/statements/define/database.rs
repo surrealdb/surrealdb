@@ -5,13 +5,13 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{changefeed::ChangeFeed, Base, Ident, Strand, Value};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineDatabaseStatement {
@@ -54,7 +54,7 @@ impl DefineDatabaseStatement {
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.set(
 			key,
-			DefineDatabaseStatement {
+			revision::to_vec(&DefineDatabaseStatement {
 				id: if self.id.is_none() && nsv.id.is_some() {
 					Some(txn.lock().await.get_next_db_id(nsv.id.unwrap()).await?)
 				} else {
@@ -64,7 +64,7 @@ impl DefineDatabaseStatement {
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
-			},
+			})?,
 			None,
 		)
 		.await?;

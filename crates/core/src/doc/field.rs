@@ -5,6 +5,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::iam::Action;
+use crate::kvs::KeyEncode as _;
 use crate::sql::data::Data;
 use crate::sql::idiom::Idiom;
 use crate::sql::kind::Kind;
@@ -650,7 +651,7 @@ impl FieldEditContext<'_> {
 						&self.def.name.to_string(),
 						&self.rid.id,
 					)
-					.encode()
+					.encode_owned()
 					.unwrap();
 
 					self.ctx.tx().set(key, vec![], None).await?;
@@ -669,7 +670,7 @@ impl FieldEditContext<'_> {
 							&ff,
 							&self.rid.id,
 						)
-						.encode()
+						.encode_owned()
 						.unwrap();
 
 						self.ctx.tx().del(key).await?;

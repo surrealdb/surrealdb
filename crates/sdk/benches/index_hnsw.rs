@@ -223,7 +223,7 @@ async fn insert_objects(samples: &[(Thing, Vec<Value>)]) -> (Datastore, HnswInde
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut h = hnsw(&tx).await;
 	for (thg, content) in samples {
-		h.index_document(&tx, thg.id.clone(), content).await.unwrap();
+		h.index_document(&tx, &thg.id, content).await.unwrap();
 	}
 	tx.commit().await.unwrap();
 	(ds, h)

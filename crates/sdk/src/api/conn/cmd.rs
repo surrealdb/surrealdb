@@ -585,6 +585,7 @@ impl Revisioned for RouterRequest {
 			serializer
 				.serialize_into(&mut *w, "params")
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
+
 			x.serialize_revisioned(w)?;
 		}
 

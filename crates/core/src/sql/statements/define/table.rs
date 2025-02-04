@@ -13,7 +13,7 @@ use crate::sql::{
 	Value, Values, View,
 };
 use crate::sql::{Idiom, Kind, TableType};
-use derive::Store;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use revision::Error as RevisionError;
@@ -23,7 +23,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 6)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineTableStatement {
@@ -102,7 +102,7 @@ impl DefineTableStatement {
 		// Add table relational fields
 		Self::add_in_out_fields(&txn, ns, db, &mut dt).await?;
 		// Set the table definition
-		txn.set(key, &dt, None).await?;
+		txn.set(key, revision::to_vec(&dt)?, None).await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear_tb(ns, db, &self.name);
@@ -124,16 +124,16 @@ impl DefineTableStatement {
 			for ft in view.what.0.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &self.name);
-				txn.set(key, self, None).await?;
+				txn.set(key, revision::to_vec(self)?, None).await?;
 				// Refresh the table cache
 				let key = crate::key::database::tb::new(ns, db, ft);
 				let tb = txn.get_tb(ns, db, ft).await?;
 				txn.set(
 					key,
-					DefineTableStatement {
+					revision::to_vec(&DefineTableStatement {
 						cache_tables_ts: Uuid::now_v7(),
 						..tb.as_ref().clone()
-					},
+					})?,
 					None,
 				)
 				.await?;
@@ -195,12 +195,12 @@ impl DefineTableStatement {
 				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
 					key,
-					DefineFieldStatement {
+					revision::to_vec(&DefineFieldStatement {
 						name: Idiom::from(IN.to_vec()),
 						what: tb.name.to_owned(),
 						kind: Some(val),
 						..Default::default()
-					},
+					})?,
 					None,
 				)
 				.await?;
@@ -211,12 +211,12 @@ impl DefineTableStatement {
 				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
 					key,
-					DefineFieldStatement {
+					revision::to_vec(&DefineFieldStatement {
 						name: Idiom::from(OUT.to_vec()),
 						what: tb.name.to_owned(),
 						kind: Some(val),
 						..Default::default()
-					},
+					})?,
 					None,
 				)
 				.await?;

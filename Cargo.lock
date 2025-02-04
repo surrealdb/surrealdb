@@ -3276,7 +3276,7 @@ dependencies = [
  "chrono",
  "futures",
  "paste",
- "revision",
+ "revision 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "thiserror 2.0.11",
 ]
@@ -4526,10 +4526,18 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22f53179a035f881adad8c4d58a2c599c6b4a8325b989c68d178d7a34d1b1e4c"
 dependencies = [
+ "revision-derive 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "revision"
+version = "0.10.0"
+source = "git+https://github.com/surrealdb/revision.git#ccacbd2e74172ae4e5725801ba8a71cbc65fa371"
+dependencies = [
  "chrono",
  "geo",
  "regex",
- "revision-derive",
+ "revision-derive 0.10.0 (git+https://github.com/surrealdb/revision.git)",
  "roaring",
  "rust_decimal",
  "uuid",
@@ -4540,6 +4548,16 @@ name = "revision-derive"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f0ec466e5d8dca9965eb6871879677bef5590cf7525ad96cae14376efb75073"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
+]
+
+[[package]]
+name = "revision-derive"
+version = "0.10.0"
+source = "git+https://github.com/surrealdb/revision.git#ccacbd2e74172ae4e5725801ba8a71cbc65fa371"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5501,7 +5519,7 @@ dependencies = [
  "rand 0.8.5",
  "rcgen",
  "reqwest",
- "revision",
+ "revision 0.10.0 (git+https://github.com/surrealdb/revision.git)",
  "rmp-serde",
  "rmpv",
  "rust_decimal",
@@ -5563,7 +5581,7 @@ dependencies = [
  "bincode",
  "chrono",
  "nanoservices-utils",
- "revision",
+ "revision 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "tokio",
  "tracing",
@@ -5597,7 +5615,7 @@ dependencies = [
  "reblessive",
  "regex",
  "reqwest",
- "revision",
+ "revision 0.10.0 (git+https://github.com/surrealdb/revision.git)",
  "ring 0.17.8",
  "rust_decimal",
  "rustls 0.23.21",
@@ -5691,7 +5709,7 @@ dependencies = [
  "regex",
  "regex-syntax 0.8.5",
  "reqwest",
- "revision",
+ "revision 0.10.0 (git+https://github.com/surrealdb/revision.git)",
  "ring 0.17.8",
  "rmpv",
  "roaring",
@@ -5712,7 +5730,6 @@ dependencies = [
  "strsim",
  "subtle",
  "surrealcs",
- "surrealdb-derive",
  "surrealdb-tikv-client",
  "surrealkv",
  "surrealml-core",
@@ -5736,16 +5753,6 @@ dependencies = [
  "wasmtimer",
  "wiremock",
  "ws_stream_wasm",
-]
-
-[[package]]
-name = "surrealdb-derive"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aacdb4c58b9ebef0291310afcd63af0012d85610d361f3785952c61b6f1dddf4"
-dependencies = [
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -5793,7 +5800,7 @@ dependencies = [
  "lru",
  "parking_lot",
  "quick_cache 0.6.9",
- "revision",
+ "revision 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "vart 0.9.0",
  "wasm-bindgen-futures",
