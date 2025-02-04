@@ -183,7 +183,7 @@ async fn define_statement_index_concurrently_building_status(
 	// Create the index concurrently
 	info!("Indexing starts");
 	let mut r = ds.execute(def_index, &session, None).await?;
-	assert_eq!(r.len(), 2);
+	assert_eq!(r.len(), skip_def);
 	skip_ok(&mut r, skip_def)?;
 	//
 	let mut appending_count = *NORMAL_FETCH_SIZE * 3 / 2;
@@ -261,6 +261,16 @@ async fn define_statement_index_concurrently_building_status_standard() -> Resul
 }
 
 #[test(tokio::test)]
+async fn define_statement_index_concurrently_building_status_standard_overwrite(
+) -> Result<(), Error> {
+	define_statement_index_concurrently_building_status(
+		"DEFINE INDEX OVERWRITE test ON user FIELDS email CONCURRENTLY",
+		1,
+	)
+	.await
+}
+
+#[test(tokio::test)]
 async fn define_statement_index_concurrently_building_status_full_text() -> Result<(), Error> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
@@ -268,6 +278,17 @@ async fn define_statement_index_concurrently_building_status_full_text() -> Resu
 		2,
 	)
 	.await
+}
+
+#[test(tokio::test)]
+async fn define_statement_index_concurrently_building_status_full_text_overwrite(
+) -> Result<(), Error> {
+	define_statement_index_concurrently_building_status(
+		"DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX OVERWRITE test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
+		2,
+	)
+		.await
 }
 
 #[tokio::test]
