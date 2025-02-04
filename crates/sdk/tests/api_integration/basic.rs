@@ -1069,7 +1069,7 @@ struct Person {
 	marketing: bool,
 }
 
-pub async fn merge_record_id(new_db: impl CreateDb) {
+pub async fn update_merge_record_id(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
@@ -1655,7 +1655,7 @@ define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	update_record_id_with_content,
 	#[test_log::test(tokio::test)]
-	merge_record_id,
+	update_merge_record_id,
 	#[test_log::test(tokio::test)]
 	patch_record_id,
 	#[test_log::test(tokio::test)]
