@@ -48,7 +48,7 @@ pub async fn run(
 	arg: Vec<Value>,
 ) -> Result<Value, Error> {
 	// Check the context
-	if context.is_done() {
+	if context.is_done(true) {
 		return Ok(Value::None);
 	}
 	// Create a JavaScript context
