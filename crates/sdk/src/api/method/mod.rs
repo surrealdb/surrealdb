@@ -650,15 +650,24 @@ where
 	/// # }
 	/// ```
 	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
-		let inner = query.into_query().map(|x| ValidQuery {
-			client: Cow::Borrowed(self),
-			query: x,
-			bindings: Default::default(),
-			register_live_queries: true,
-		});
+		let inner = match query.into_query() {
+			Ok(query) => Ok(ValidQuery::Normal {
+				query,
+				register_live_queries: true,
+				bindings: Default::default(),
+			}),
+			Err(crate::Error::Api(crate::api::err::Error::RawQuery(query))) => {
+				Ok(ValidQuery::Raw {
+					query,
+					bindings: Default::default(),
+				})
+			}
+			Err(error) => Err(error),
+		};
 
 		Query {
 			inner,
+			client: Cow::Borrowed(self),
 		}
 	}
 
