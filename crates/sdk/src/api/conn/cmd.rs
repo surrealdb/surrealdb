@@ -1,4 +1,5 @@
 use super::MlExportConfig;
+use crate::api::engine::resource_to_values;
 use crate::{opt::Resource, value::Notification, Result};
 use bincode::Options;
 use channel::Sender;
@@ -59,6 +60,7 @@ pub(crate) enum Command {
 	Merge {
 		what: Resource,
 		data: Option<CoreValue>,
+		upsert: bool,
 	},
 	Select {
 		what: Resource,
@@ -122,6 +124,11 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
+		use surrealdb_core::sql::{
+			statements::{UpdateStatement, UpsertStatement},
+			Data, Output,
+		};
+
 		let res = match self {
 			Command::Use {
 				namespace,
@@ -266,16 +273,29 @@ impl Command {
 			Command::Merge {
 				what,
 				data,
+				upsert,
 				..
 			} => {
-				let mut params = vec![what.into_core_value()];
-				if let Some(data) = data {
-					params.push(data)
-				}
+				let query = if upsert {
+					let mut stmt = UpsertStatement::default();
+					stmt.what = resource_to_values(what);
+					stmt.data = data.map(Data::MergeExpression);
+					stmt.output = Some(Output::After);
+					Query::from(stmt)
+				} else {
+					let mut stmt = UpdateStatement::default();
+					stmt.what = resource_to_values(what);
+					stmt.data = data.map(Data::MergeExpression);
+					stmt.output = Some(Output::After);
+					Query::from(stmt)
+				};
+
+				let variables = CoreObject::default();
+				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
 
 				RouterRequest {
 					id,
-					method: "merge",
+					method: "query",
 					params: Some(params.into()),
 				}
 			}
