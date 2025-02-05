@@ -28,7 +28,7 @@ pub fn header(context: &mut RequestContext, (name, value): (String, String)) -> 
 pub fn headers(context: &mut RequestContext, (headers,): (Object,)) -> Result<(), Error> {
 	let headers = headers
 		.into_iter()
-		.map(|(k, v)| Ok((k, v.convert_to_strand()?.0)))
+		.map(|(k, v)| Ok((k, v.coerce_to_strand()?.0)))
 		.collect::<Result<BTreeMap<String, String>, Error>>()?;
 
 	if let Some(v) = context.headers.as_mut() {
