@@ -341,22 +341,19 @@ impl Options {
 	/// Get currently selected NS
 	#[inline(always)]
 	pub fn ns(&self) -> Result<&str, Error> {
-		self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::NsEmpty)
+		self.ns.as_deref().ok_or(Error::NsEmpty)
 	}
 
 	/// Get currently selected DB
 	#[inline(always)]
 	pub fn db(&self) -> Result<&str, Error> {
-		self.db.as_ref().map(AsRef::as_ref).ok_or(Error::DbEmpty)
+		self.db.as_deref().ok_or(Error::DbEmpty)
 	}
 
+	/// Get currently selected NS and DB
 	#[inline(always)]
 	pub fn ns_db(&self) -> Result<(&str, &str), Error> {
-		match (&self.ns, &self.db) {
-			(Some(ns), Some(db)) => Ok((ns.as_ref(), db.as_ref())),
-			(None, _) => Err(Error::NsEmpty),
-			(_, None) => Err(Error::DbEmpty),
-		}
+		Ok((self.ns()?, self.db()?))
 	}
 
 	/// Check whether this request supports realtime queries
@@ -395,7 +392,10 @@ impl Options {
 		let res = match base {
 			Base::Root => res.on_root(),
 			Base::Ns => res.on_ns(self.ns()?),
-			Base::Db => res.on_db(self.ns()?, self.db()?),
+			Base::Db => {
+				let (ns, db) = self.ns_db()?;
+				res.on_db(ns, db)
+			}
 			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
 			Base::Sc(_) => {
 				// We should not get here, the scope base is only used in parsing for backward compatibility.
@@ -441,9 +441,10 @@ impl Options {
 				// permissions, so if the target database
 				// belongs to the user's level, we don't
 				// need to check any table permissions.
+				let (ns, db) = self.ns_db()?;
 				let db_in_actor_level = self.auth.is_root()
-					|| self.auth.is_ns_check(self.ns()?)
-					|| self.auth.is_db_check(self.ns()?, self.db()?);
+					|| self.auth.is_ns_check(ns)
+					|| self.auth.is_db_check(ns, db);
 				// If either of the above checks are false
 				// then we need to check table permissions
 				Ok(!allowed || !db_in_actor_level)
@@ -456,9 +457,10 @@ impl Options {
 				// Edit permissions, so if the target
 				// database belongs to the user's level
 				// we don't need to check table permissions.
+				let (ns, db) = self.ns_db()?;
 				let db_in_actor_level = self.auth.is_root()
-					|| self.auth.is_ns_check(self.ns()?)
-					|| self.auth.is_db_check(self.ns()?, self.db()?);
+					|| self.auth.is_ns_check(ns)
+					|| self.auth.is_db_check(ns, db);
 				// If either of the above checks are false
 				// then we need to check table permissions
 				Ok(!allowed || !db_in_actor_level)
