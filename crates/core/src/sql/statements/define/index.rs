@@ -57,6 +57,8 @@ impl DefineIndexStatement {
 					value: self.name.to_string(),
 				});
 			}
+			// Clear the index store cache
+			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
 		}
 		// Does the table exists?
 		match txn.get_tb(ns, db, &self.what).await {
