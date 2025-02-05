@@ -341,19 +341,13 @@ impl Options {
 	/// Get currently selected NS
 	#[inline(always)]
 	pub fn ns(&self) -> Result<&str, Error> {
-		match &self.ns {
-			Some(db) => Ok(db.as_ref()),
-			None => Err(Error::DbEmpty),
-		}
+		self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::NsEmpty)
 	}
 
 	/// Get currently selected DB
 	#[inline(always)]
 	pub fn db(&self) -> Result<&str, Error> {
-		match &self.db {
-			Some(db) => Ok(db.as_ref()),
-			None => Err(Error::DbEmpty),
-		}
+		self.db.as_ref().map(AsRef::as_ref).ok_or(Error::DbEmpty)
 	}
 
 	#[inline(always)]
