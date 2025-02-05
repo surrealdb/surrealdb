@@ -4,6 +4,7 @@ use bincode::Options;
 use channel::Sender;
 use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
+use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
@@ -67,6 +68,10 @@ pub(crate) enum Command {
 	},
 	Query {
 		query: Query,
+		variables: CoreObject,
+	},
+	RawQuery {
+		query: Cow<'static, str>,
 		variables: CoreObject,
 	},
 	ExportFile {
@@ -295,6 +300,17 @@ impl Command {
 				variables,
 			} => {
 				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
+				RouterRequest {
+					id,
+					method: "query",
+					params: Some(params.into()),
+				}
+			}
+			Command::RawQuery {
+				query,
+				variables,
+			} => {
+				let params: Vec<CoreValue> = vec![query.into_owned().into(), variables.into()];
 				RouterRequest {
 					id,
 					method: "query",

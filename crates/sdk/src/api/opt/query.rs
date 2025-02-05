@@ -17,6 +17,8 @@ use surrealdb_core::{
 	syn,
 };
 
+use super::Raw;
+
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery {
 	/// Converts an input into SQL statements
@@ -185,6 +187,12 @@ impl IntoQuery for String {
 	}
 }
 
+impl IntoQuery for Raw {
+	fn into_query(self) -> Result<Vec<Statement>> {
+		Err(Error::RawQuery(self.0).into())
+	}
+}
+
 /// Represents a way to take a single query result from a list of responses
 pub trait QueryResult<Response>
 where
@@ -240,7 +248,6 @@ where
 				_ => Err(Error::LossyTake(QueryResponse {
 					results: mem::take(&mut response.results),
 					live_queries: mem::take(&mut response.live_queries),
-					..QueryResponse::new()
 				})
 				.into()),
 			},
@@ -318,7 +325,6 @@ where
 					return Err(Error::LossyTake(QueryResponse {
 						results: mem::take(&mut response.results),
 						live_queries: mem::take(&mut response.live_queries),
-						..QueryResponse::new()
 					})
 					.into());
 				}
