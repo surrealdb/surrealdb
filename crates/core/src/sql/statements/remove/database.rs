@@ -29,7 +29,9 @@ impl RemoveDatabaseStatement {
 			// Get the transaction
 			let txn = ctx.tx();
 			// Remove the index stores
-			ctx.get_index_stores().database_removed(&txn, opt.ns()?, &self.name).await?;
+			ctx.get_index_stores()
+				.database_removed(ctx.get_index_builder(), &txn, opt.ns()?, &self.name)
+				.await?;
 			// Get the definition
 			let db = txn.get_db(opt.ns()?, &self.name).await?;
 			// Delete the definition

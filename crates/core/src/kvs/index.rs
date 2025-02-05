@@ -121,14 +121,16 @@ type IndexBuilding = (Arc<Building>, JoinHandle<()>);
 struct IndexKey {
 	ns: String,
 	db: String,
+	tb: String,
 	ix: String,
 }
 
 impl IndexKey {
-	fn new(ns: &str, db: &str, ix: &str) -> Self {
+	fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Self {
 		Self {
 			ns: ns.to_owned(),
 			db: db.to_owned(),
+			tb: tb.to_owned(),
 			ix: ix.to_owned(),
 		}
 	}
@@ -155,7 +157,7 @@ impl IndexBuilder {
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<(), Error> {
 		let (ns, db) = opt.ns_db()?;
-		let key = IndexKey::new(ns, db, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		match self.indexes.entry(key) {
 			Entry::Occupied(e) => {
 				// If the building is currently running, we return error
@@ -189,7 +191,7 @@ impl IndexBuilder {
 		new_values: Option<Vec<Value>>,
 		rid: &Thing,
 	) -> Result<ConsumeResult, Error> {
-		let key = IndexKey::new(ns, db, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		if let Some(r) = self.indexes.get(&key) {
 			let (b, _) = r.value();
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
@@ -203,12 +205,20 @@ impl IndexBuilder {
 		db: &str,
 		ix: &DefineIndexStatement,
 	) -> BuildingStatus {
-		let key = IndexKey::new(ns, db, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		if let Some(a) = self.indexes.get(&key) {
 			a.value().0.status.read().await.clone()
 		} else {
 			BuildingStatus::default()
 		}
+	}
+
+	pub(crate) fn remove_index(&self, ns: &str, db: &str, tb: &str, ix: &str) -> Result<(), Error> {
+		let key = IndexKey::new(ns, db, tb, ix);
+		if let Some((_, b)) = self.indexes.remove(&key) {
+			b.1.abort();
+		}
+		Ok(())
 	}
 }
 
