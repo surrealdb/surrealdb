@@ -96,7 +96,7 @@ impl Document {
 				// Obtain a transaction
 				let txn = ctx.tx();
 				// Obtain a stream of keys
-				let mut stream = txn.stream_keys(range.clone());
+				let mut stream = txn.stream_keys(range.clone(), None);
 				// Loop until no more entries
 				while let Some(res) = stream.next().await {
 					// Decode the key
