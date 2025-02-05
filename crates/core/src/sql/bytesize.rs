@@ -1,22 +1,24 @@
-use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value;
+use crate::{err::Error, syn};
 use num_traits::CheckedAdd;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::iter::Sum;
 use std::ops;
+use std::str::FromStr;
 
 use super::value::{TryAdd, TrySub};
+use super::Strand;
 
-// pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Bytesize";
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Bytesize";
 
 #[revisioned(revision = 1)]
 #[derive(
 	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord,
 )]
-#[serde(rename = "$surrealdb::private::sql::Duration")]
+#[serde(rename = "$surrealdb::private::sql::Bytesize")]
 #[non_exhaustive]
 pub struct Bytesize(pub u64);
 
@@ -25,6 +27,37 @@ const MIB: u64 = KIB * 1024;
 const GIB: u64 = MIB * 1024;
 const TIB: u64 = GIB * 1024;
 const PIB: u64 = TIB * 1024;
+
+impl FromStr for Bytesize {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
+impl TryFrom<String> for Bytesize {
+	type Error = ();
+	fn try_from(v: String) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<Strand> for Bytesize {
+	type Error = ();
+	fn try_from(v: Strand) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<&str> for Bytesize {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match syn::bytesize(v) {
+			Ok(v) => Ok(v),
+			_ => Err(()),
+		}
+	}
+}
 
 impl Bytesize {
 	pub const ZERO: Bytesize = Bytesize(0);

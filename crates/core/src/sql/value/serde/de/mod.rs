@@ -22,6 +22,7 @@ impl Value {
 			},
 			Value::Strand(sql::Strand(v)) => Ok(Content::String(Cow::Owned(v))),
 			Value::Duration(sql::Duration(v)) => serializer.serialize(v).map_err(Into::into),
+			Value::Bytesize(sql::Bytesize(v)) => serializer.serialize(v).map_err(Into::into),
 			Value::Datetime(sql::Datetime(v)) => serializer.serialize(v).map_err(Into::into),
 			Value::Uuid(sql::Uuid(v)) => serializer.serialize(v).map_err(Into::into),
 			Value::Array(sql::Array(v)) => {

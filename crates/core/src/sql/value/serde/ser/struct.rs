@@ -67,6 +67,11 @@ pub(super) fn to_value(content: Content) -> Result<Value, Error> {
 					.map(Into::into)
 					.map_err(Into::into)
 			}
+			sql::bytesize::TOKEN => {
+				sql::Bytesize::deserialize(Content::Struct(v).into_deserializer())
+					.map(Into::into)
+					.map_err(Into::into)
+			}
 			sql::closure::TOKEN => {
 				sql::Closure::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)

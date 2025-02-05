@@ -10,10 +10,12 @@ use rust_decimal::Decimal;
 
 use crate::{
 	sql::{
-		bytesize::Bytesize, duration::{
+		bytesize::Bytesize,
+		duration::{
 			SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
 			SECONDS_PER_YEAR,
-		}, Number
+		},
+		Number,
 	},
 	syn::{
 		error::{bail, syntax_error, SyntaxError},
@@ -25,6 +27,7 @@ use crate::{
 pub enum Numeric {
 	Number(Number),
 	Duration(Duration),
+	Bytesize(Bytesize),
 }
 
 /// Like numeric but holds of parsing the a number into a specific value.
@@ -86,7 +89,7 @@ pub fn numeric_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, Synt
 			Some(b'm') => match lexer.reader.peek1() {
 				Some(b'b') => bytesize(lexer, start).map(NumericKind::Bytesize),
 				_ => duration(lexer, start).map(NumericKind::Duration),
-			}
+			},
 			Some(x) if !x.is_ascii() => duration(lexer, start).map(NumericKind::Duration),
 			_ => number_kind(lexer, start).map(NumericKind::Number),
 		},
@@ -101,7 +104,8 @@ pub fn numeric(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> 
 	match start.kind {
 		t!("-") | t!("+") => number(lexer, start).map(Numeric::Number),
 		TokenKind::Digits => match lexer.reader.peek() {
-			Some(b'n' | b'm' | b's' | b'h' | b'y' | b'w' | b'u') => {
+			Some(b'b' | b'k' | b'g' | b't' | b'p') => bytesize(lexer, start).map(Numeric::Bytesize),
+			Some(b'n' | b's' | b'h' | b'y' | b'w' | b'u') => {
 				duration(lexer, start).map(Numeric::Duration)
 			}
 			Some(b'd') => {
@@ -111,6 +115,10 @@ pub fn numeric(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> 
 					duration(lexer, start).map(Numeric::Duration)
 				}
 			}
+			Some(b'm') => match lexer.reader.peek1() {
+				Some(b'b') => bytesize(lexer, start).map(Numeric::Bytesize),
+				_ => duration(lexer, start).map(Numeric::Duration),
+			},
 			Some(x) if !x.is_ascii() => duration(lexer, start).map(Numeric::Duration),
 			_ => number(lexer, start).map(Numeric::Number),
 		},
@@ -359,9 +367,7 @@ pub fn duration(lexer: &mut Lexer, start: Token) -> Result<Duration, SyntaxError
 
 fn lex_bytesize_suffix(lexer: &mut Lexer) -> Result<BytesizeSuffix, SyntaxError> {
 	let suffix = match lexer.reader.next() {
-		Some(b'b') => {
-			BytesizeSuffix::Bytes
-		}
+		Some(b'b') => BytesizeSuffix::Bytes,
 		Some(b'k') => {
 			lexer.expect('b')?;
 			BytesizeSuffix::KiloBytes

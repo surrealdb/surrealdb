@@ -230,6 +230,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Datetime => TypeRef::named("datetime"),
 		Kind::Decimal => TypeRef::named("decimal"),
 		Kind::Duration => TypeRef::named("duration"),
+		Kind::Bytesize => TypeRef::named("bytesize"),
 		Kind::Float => TypeRef::named(TypeRef::FLOAT),
 		Kind::Int => TypeRef::named(TypeRef::INT),
 		Kind::Number => TypeRef::named("number"),
@@ -454,6 +455,13 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		},
 		Kind::Duration => match val {
 			GqlValue::String(s) => match syn::duration(s) {
+				Ok(d) => Ok(d.into()),
+				Err(_) => Err(type_error(kind, val)),
+			},
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Bytesize => match val {
+			GqlValue::String(s) => match syn::bytesize(s) {
 				Ok(d) => Ok(d.into()),
 				Err(_) => Err(type_error(kind, val)),
 			},

@@ -472,6 +472,7 @@ fn filter_from_type(
 		Kind::Datetime => {}
 		Kind::Decimal => {}
 		Kind::Duration => {}
+		Kind::Bytesize => {}
 		Kind::Float => {}
 		Kind::Int => {}
 		Kind::Number => {}

@@ -40,6 +40,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Value::Number(_)
 			| Value::Strand(_)
 			| Value::Duration(_)
+			| Value::Bytesize(_)
 			| Value::Datetime(_)
 			| Value::Uuid(_)
 			| Value::Geometry(_)

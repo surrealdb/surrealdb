@@ -211,6 +211,7 @@ impl Parser<'_> {
 				let v = match compound.value {
 					compound::Numeric::Number(x) => Literal::Number(x),
 					compound::Numeric::Duration(x) => Literal::Duration(Duration(x)),
+					compound::Numeric::Bytesize(x) => Literal::Bytesize(x),
 				};
 				Ok(v)
 			}
