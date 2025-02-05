@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use reblessive::Stk;
 
 use crate::api::method::Method;
@@ -1432,7 +1430,7 @@ impl Parser<'_> {
 				t!("MIDDLEWARE") => {
 					self.pop_peek();
 
-					let mut middleware: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+					let mut middleware: Vec<(String, Vec<Value>)> = Vec::new();
 					// let mut parsed_custom = false;
 
 					loop {
@@ -1466,7 +1464,7 @@ impl Parser<'_> {
 						expected!(self, t!("("));
 						let args = self.parse_function_args(stk).await?;
 
-						middleware.insert(name, args);
+						middleware.push((name, args));
 
 						if !self.eat(t!(",")) {
 							break;

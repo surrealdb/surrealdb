@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::Deref};
+use std::ops::Deref;
 
 pub(self) mod api;
 pub(super) mod invoke;
@@ -16,7 +16,7 @@ use crate::{
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct RequestMiddleware(pub BTreeMap<String, Vec<Value>>);
+pub struct RequestMiddleware(pub Vec<(String, Vec<Value>)>);
 
 impl InfoStructure for RequestMiddleware {
 	fn structure(self) -> Value {
@@ -25,7 +25,7 @@ impl InfoStructure for RequestMiddleware {
 }
 
 impl Deref for RequestMiddleware {
-	type Target = BTreeMap<String, Vec<Value>>;
+	type Target = Vec<(String, Vec<Value>)>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
