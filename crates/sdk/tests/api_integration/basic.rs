@@ -10,6 +10,7 @@ use surrealdb::fflags::FFLAGS;
 use surrealdb::opt::auth::Database;
 use surrealdb::opt::auth::Namespace;
 use surrealdb::opt::auth::Record as RecordAccess;
+use surrealdb::opt::Raw;
 use surrealdb::opt::Resource;
 use surrealdb::opt::{PatchOp, PatchOps};
 use surrealdb::sql::statements::BeginStatement;
@@ -349,6 +350,28 @@ pub async fn query(new_db: impl CreateDb) {
 		.check()
 		.unwrap();
 	let mut response = db.query("SELECT name FROM user:john").await.unwrap().check().unwrap();
+	let Some(name): Option<String> = response.take("name").unwrap() else {
+		panic!("query returned no record");
+	};
+	assert_eq!(name, "John Doe");
+}
+
+pub async fn query_raw(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let _ = db
+		.query(Raw::from("CREATE user:john SET name = 'John Doe'"))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
+	let mut response = db
+		.query(Raw::from("SELECT name FROM user:john".to_owned()))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
 	let Some(name): Option<String> = response.take("name").unwrap() else {
 		panic!("query returned no record");
 	};
@@ -1579,6 +1602,8 @@ define_include_tests!(basic => {
 	authenticate,
 	#[test_log::test(tokio::test)]
 	query,
+	#[test_log::test(tokio::test)]
+	query_raw,
 	#[test_log::test(tokio::test)]
 	query_decimals,
 	#[test_log::test(tokio::test)]

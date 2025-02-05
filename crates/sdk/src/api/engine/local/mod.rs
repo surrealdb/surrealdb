@@ -785,6 +785,16 @@ async fn router(
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
+		Command::RawQuery {
+			query,
+			mut variables,
+		} => {
+			let mut vars = vars.read().await.clone();
+			vars.append(&mut variables.0);
+			let response = kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?;
+			let response = process(response);
+			Ok(DbResponse::Query(response))
+		}
 
 		#[cfg(target_family = "wasm")]
 		Command::ExportFile {
