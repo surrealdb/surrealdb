@@ -848,7 +848,6 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		let (ns, db) = opt.ns_db()?;
 		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {

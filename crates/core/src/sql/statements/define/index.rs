@@ -83,17 +83,21 @@ impl DefineIndexStatement {
 		}
 		// Process the statement
 		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
-		let ix_def = DefineIndexStatement {
-			// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
-			if_not_exists: false,
-			overwrite: false,
-			concurrently: false,
-			..self.clone()
-		};
-		txn.set(key, &ix_def, None).await?;
+		txn.set(
+			key,
+			DefineIndexStatement {
+				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
+				if_not_exists: false,
+				overwrite: false,
+				concurrently: false,
+				..self.clone()
+			},
+			None,
+		)
+		.await?;
 		// Refresh the table cache
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
@@ -115,7 +119,7 @@ impl DefineIndexStatement {
 		// Process the index
 		#[cfg(not(target_family = "wasm"))]
 		if self.concurrently {
-			Self::async_index(ctx, ix_def.into(), opt)?;
+			self.async_index(ctx, opt)?;
 		} else {
 			self.sync_index(stk, ctx, opt, doc).await?;
 		}
@@ -145,15 +149,11 @@ impl DefineIndexStatement {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	fn async_index(
-		ctx: &Context,
-		ix: Arc<DefineIndexStatement>,
-		opt: &Options,
-	) -> Result<(), Error> {
+	fn async_index(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
 		ctx.get_index_builder().ok_or_else(|| fail!("No Index Builder"))?.build(
 			ctx,
 			opt.clone(),
-			ix,
+			self.clone().into(),
 		)
 	}
 }

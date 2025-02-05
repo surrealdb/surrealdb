@@ -158,7 +158,7 @@ impl IndexBuilder {
 		let key = IndexKey::new(ns, db, &ix.name);
 		match self.indexes.entry(key) {
 			Entry::Occupied(e) => {
-				// If the building is currently running we return error
+				// If the building is currently running, we return error
 				if !e.get().1.is_finished() {
 					return Err(Error::IndexAlreadyBuilding {
 						index: e.key().ix.clone(),
