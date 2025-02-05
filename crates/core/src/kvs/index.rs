@@ -19,6 +19,7 @@ use reblessive::TreeStack;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task;
@@ -39,6 +40,7 @@ pub(crate) enum BuildingStatus {
 		updated: Option<usize>,
 		pending: Option<usize>,
 	},
+	Aborted,
 	Error(Arc<Error>),
 }
 
@@ -105,6 +107,7 @@ impl From<BuildingStatus> for Value {
 				}
 				"ready"
 			}
+			BuildingStatus::Aborted => "aborted",
 			BuildingStatus::Error(error) => {
 				o.insert("error".to_string(), error.to_string().into());
 				"error"
@@ -216,7 +219,7 @@ impl IndexBuilder {
 	pub(crate) fn remove_index(&self, ns: &str, db: &str, tb: &str, ix: &str) -> Result<(), Error> {
 		let key = IndexKey::new(ns, db, tb, ix);
 		if let Some((_, b)) = self.indexes.remove(&key) {
-			b.1.abort();
+			b.0.abort();
 		}
 		Ok(())
 	}
@@ -283,6 +286,7 @@ struct Building {
 	tb: String,
 	status: Arc<RwLock<BuildingStatus>>,
 	queue: Arc<RwLock<QueueSequences>>,
+	aborted: AtomicBool,
 }
 
 impl Building {
@@ -300,6 +304,7 @@ impl Building {
 			ix,
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
+			aborted: AtomicBool::new(false),
 		})
 	}
 
@@ -385,6 +390,9 @@ impl Building {
 		})
 		.await;
 		while let Some(rng) = next {
+			if self.is_aborted().await {
+				return Ok(());
+			}
 			// Get the next batch of records
 			let batch = {
 				let tx = self.new_read_tx().await?;
@@ -419,6 +427,9 @@ impl Building {
 		let mut updates_count = 0;
 		let mut next_to_index = None;
 		loop {
+			if self.is_aborted().await {
+				return Ok(());
+			}
 			let range = {
 				let mut queue = self.queue.write().await;
 				if let Some(ni) = next_to_index {
@@ -468,6 +479,9 @@ impl Building {
 		let mut stack = TreeStack::new();
 		// Index the records
 		for (k, v) in values.into_iter() {
+			if self.is_aborted().await {
+				return Ok(());
+			}
 			let key = thing::Thing::decode(&k)?;
 			// Parse the value
 			let val: Value = (&v).into();
@@ -523,6 +537,9 @@ impl Building {
 	) -> Result<(), Error> {
 		let mut stack = TreeStack::new();
 		for i in range {
+			if self.is_aborted().await {
+				return Ok(());
+			}
 			let ia = self.new_ia_key(i)?;
 			if let Some(v) = tx.get(ia.clone(), None).await? {
 				tx.del(ia).await?;
@@ -546,5 +563,18 @@ impl Building {
 			}
 		}
 		Ok(())
+	}
+
+	fn abort(&self) {
+		self.aborted.store(true, Ordering::Relaxed);
+	}
+
+	async fn is_aborted(&self) -> bool {
+		if self.aborted.load(Ordering::Relaxed) {
+			self.set_status(BuildingStatus::Aborted).await;
+			true
+		} else {
+			false
+		}
 	}
 }
