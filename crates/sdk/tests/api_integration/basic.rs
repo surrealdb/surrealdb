@@ -1221,6 +1221,68 @@ pub async fn patch_record_id(new_db: impl CreateDb) {
 	);
 }
 
+pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
+	#[derive(Debug, Deserialize, PartialEq)]
+	struct Record {
+		id: RecordId,
+		baz: String,
+		hello: Vec<String>,
+	}
+
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let id = "john";
+	// Create a new record using upsert
+	let _: Option<ApiRecordId> = db
+		.upsert(("user", id))
+		.content(json!({
+			"baz": "qux",
+			"foo": "bar"
+		}))
+		.await
+		.unwrap();
+	// Update the record using patch
+	let _: Option<Record> = db
+		.update(("user", id))
+		.patch(PatchOps::new().replace("/baz", "boo").add("/hello", ["world"]).remove("/foo"))
+		.await
+		.unwrap();
+	let value: Option<Record> = db.select(("user", id)).await.unwrap();
+	assert_eq!(
+		value,
+		Some(Record {
+			id: format!("user:{id}").parse().unwrap(),
+			baz: "boo".to_owned(),
+			hello: vec!["world".to_owned()],
+		})
+	);
+	// Call upsert.patch on a new record
+	let mut jane: Option<Record> = db
+		.upsert(("user", "jane"))
+		.patch(PatchOps::new().replace("/baz", "boo").add("/hello", ["world"]).remove("/foo"))
+		.await
+		.unwrap();
+	assert_eq!(
+		jane,
+		Some(Record {
+			id: "user:jane".parse().unwrap(),
+			baz: "boo".to_owned(),
+			hello: vec!["world".to_owned()],
+		})
+	);
+	// Ensure the record is saved
+	jane = db.select(("user", "jane")).await.unwrap();
+	assert_eq!(
+		jane,
+		Some(Record {
+			id: "user:jane".parse().unwrap(),
+			baz: "boo".to_owned(),
+			hello: vec!["world".to_owned()],
+		})
+	);
+}
+
 pub async fn patch_record_id_ops(new_db: impl CreateDb) {
 	#[derive(Debug, Deserialize, PartialEq)]
 	struct Record {
@@ -1738,6 +1800,8 @@ define_include_tests!(basic => {
 	upsert_merge_record_id,
 	#[test_log::test(tokio::test)]
 	patch_record_id,
+	#[test_log::test(tokio::test)]
+	upsert_patch_record_id,
 	#[test_log::test(tokio::test)]
 	patch_record_id_ops,
 	#[test_log::test(tokio::test)]
