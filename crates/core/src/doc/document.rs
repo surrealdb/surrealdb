@@ -375,8 +375,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get transaction
 		let txn = ctx.tx();
 		// Get the table definition
@@ -409,8 +408,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the record id
 		let id = self.id()?;
 		// Get transaction
@@ -476,8 +474,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -510,8 +507,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -544,8 +540,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -578,8 +573,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -608,8 +602,7 @@ impl Document {
 	// Get the lives for this document
 	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context

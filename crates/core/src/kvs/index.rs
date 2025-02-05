@@ -117,10 +117,27 @@ impl From<BuildingStatus> for Value {
 
 type IndexBuilding = (Arc<Building>, JoinHandle<()>);
 
+#[derive(Hash, PartialEq, Eq)]
+struct IndexKey {
+	ns: String,
+	db: String,
+	ix: String,
+}
+
+impl IndexKey {
+	fn new(ns: &str, db: &str, ix: &str) -> Self {
+		Self {
+			ns: ns.to_owned(),
+			db: db.to_owned(),
+			ix: ix.to_owned(),
+		}
+	}
+}
+
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
 	tf: TransactionFactory,
-	indexes: Arc<DashMap<Arc<DefineIndexStatement>, IndexBuilding>>,
+	indexes: Arc<DashMap<IndexKey, IndexBuilding>>,
 }
 
 impl IndexBuilder {
@@ -137,18 +154,20 @@ impl IndexBuilder {
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<(), Error> {
-		match self.indexes.entry(ix) {
+		let (ns, db) = opt.ns_db()?;
+		let key = IndexKey::new(ns, db, &ix.name);
+		match self.indexes.entry(key) {
 			Entry::Occupied(e) => {
 				// If the building is currently running we return error
 				if !e.get().1.is_finished() {
 					return Err(Error::IndexAlreadyBuilding {
-						index: e.key().name.to_string(),
+						index: e.key().ix.clone(),
 					});
 				}
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, e.key().clone())?);
+				let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
 				let b = building.clone();
 				let jh = task::spawn(async move {
 					if let Err(err) = b.run().await {
@@ -164,20 +183,28 @@ impl IndexBuilder {
 	pub(crate) async fn consume(
 		&self,
 		ctx: &Context,
+		(ns, db): (&str, &str),
 		ix: &DefineIndexStatement,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
 		rid: &Thing,
 	) -> Result<ConsumeResult, Error> {
-		if let Some(r) = self.indexes.get(ix) {
+		let key = IndexKey::new(ns, db, &ix.name);
+		if let Some(r) = self.indexes.get(&key) {
 			let (b, _) = r.value();
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		Ok(ConsumeResult::Ignored(old_values, new_values))
 	}
 
-	pub(crate) async fn get_status(&self, ix: &DefineIndexStatement) -> BuildingStatus {
-		if let Some(a) = self.indexes.get(ix) {
+	pub(crate) async fn get_status(
+		&self,
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+	) -> BuildingStatus {
+		let key = IndexKey::new(ns, db, &ix.name);
+		if let Some(a) = self.indexes.get(&key) {
 			a.value().0.status.read().await.clone()
 		} else {
 			BuildingStatus::default()
@@ -313,14 +340,12 @@ impl Building {
 	}
 
 	fn new_ia_key(&self, i: u32) -> Result<Ia, Error> {
-		let ns = self.opt.ns()?;
-		let db = self.opt.db()?;
+		let (ns, db) = self.opt.ns_db()?;
 		Ok(Ia::new(ns, db, &self.ix.what, &self.ix.name, i))
 	}
 
 	fn new_ip_key(&self, id: Id) -> Result<Ip, Error> {
-		let ns = self.opt.ns()?;
-		let db = self.opt.db()?;
+		let (ns, db) = self.opt.ns_db()?;
 		Ok(Ip::new(ns, db, &self.ix.what, &self.ix.name, id))
 	}
 
@@ -337,8 +362,7 @@ impl Building {
 
 	async fn run(&self) -> Result<(), Error> {
 		// First iteration, we index every keys
-		let ns = self.opt.ns()?;
-		let db = self.opt.db()?;
+		let (ns, db) = self.opt.ns_db()?;
 		let beg = thing::prefix(ns, db, &self.tb)?;
 		let end = thing::suffix(ns, db, &self.tb)?;
 		let mut next = Some(beg..end);

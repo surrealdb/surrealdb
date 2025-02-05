@@ -691,9 +691,10 @@ impl FieldEditContext<'_> {
 				RefAction::Ignore => Ok(()),
 				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
+					let (ns, db) = self.opt.ns_db()?;
 					let key = crate::key::r#ref::new(
-						self.opt.ns()?,
-						self.opt.db()?,
+						ns,
+						db,
 						&thing.tb,
 						&thing.id,
 						&self.rid.tb,
@@ -709,10 +710,11 @@ impl FieldEditContext<'_> {
 				}
 				// Delete the reference, if it exists
 				RefAction::Delete(things, ff) => {
+					let (ns, db) = self.opt.ns_db()?;
 					for thing in things {
 						let key = crate::key::r#ref::new(
-							self.opt.ns()?,
-							self.opt.db()?,
+							ns,
+							db,
 							&thing.tb,
 							&thing.id,
 							&self.rid.tb,

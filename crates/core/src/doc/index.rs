@@ -73,7 +73,7 @@ impl Document {
 	) -> Result<(), Error> {
 		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
-			match ib.consume(ctx, ix, o, n, rid).await? {
+			match ib.consume(ctx, opt.ns_db()?, ix, o, n, rid).await? {
 				// The index builder consumed the value, which means it is currently building the index asynchronously,
 				// we don't index the document and let the index builder do it later.
 				ConsumeResult::Enqueued => return Ok(()),
@@ -288,25 +288,13 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
-		Ok(crate::key::index::Index::new(
-			self.opt.ns()?,
-			self.opt.db()?,
-			&self.ix.what,
-			&self.ix.name,
-			v,
-			None,
-		))
+		let (ns, db) = self.opt.ns_db()?;
+		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, None))
 	}
 
 	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
-		Ok(crate::key::index::Index::new(
-			self.opt.ns()?,
-			self.opt.db()?,
-			&self.ix.what,
-			&self.ix.name,
-			v,
-			Some(&self.rid.id),
-		))
+		let (ns, db) = self.opt.ns_db()?;
+		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.id)))
 	}
 
 	async fn index_unique(&mut self, ctx: &Context) -> Result<(), Error> {
@@ -394,7 +382,8 @@ impl<'a> IndexOperation<'a> {
 		ctx: &Context,
 		p: &SearchParams,
 	) -> Result<(), Error> {
-		let ikb = IndexKeyBase::new(self.opt.ns()?, self.opt.db()?, self.ix)?;
+		let (ns, db) = self.opt.ns_db()?;
+		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 
 		let mut ft = FtIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
 
@@ -413,7 +402,8 @@ impl<'a> IndexOperation<'a> {
 		p: &MTreeParams,
 	) -> Result<(), Error> {
 		let txn = ctx.tx();
-		let ikb = IndexKeyBase::new(self.opt.ns()?, self.opt.db()?, self.ix)?;
+		let (ns, db) = self.opt.ns_db()?;
+		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

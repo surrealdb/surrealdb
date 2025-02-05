@@ -27,9 +27,10 @@ impl RemoveParamStatement {
 			// Get the transaction
 			let txn = ctx.tx();
 			// Get the definition
-			let pa = txn.get_db_param(opt.ns()?, opt.db()?, &self.name).await?;
+			let (ns, db) = opt.ns_db()?;
+			let pa = txn.get_db_param(ns, db, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::database::pa::new(opt.ns()?, opt.db()?, &pa.name);
+			let key = crate::key::database::pa::new(ns, db, &pa.name);
 			txn.del(key).await?;
 			// Clear the cache
 			txn.clear();

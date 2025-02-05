@@ -41,10 +41,8 @@ impl Document {
 		let txn = ctx.tx();
 		// Get the record id
 		if let Some(rid) = &self.id {
-			// Get the namespace
-			let ns = opt.ns()?;
-			// Get the database
-			let db = opt.db()?;
+			// Get the namespace / database
+			let (ns, db) = opt.ns_db()?;
 			// Purge the record data
 			txn.del_record(ns, db, &rid.tb, &rid.id).await?;
 			// Purge the record edges

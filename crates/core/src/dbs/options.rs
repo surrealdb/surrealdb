@@ -341,13 +341,28 @@ impl Options {
 	/// Get currently selected NS
 	#[inline(always)]
 	pub fn ns(&self) -> Result<&str, Error> {
-		self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::NsEmpty)
+		match &self.ns {
+			Some(db) => Ok(db.as_ref()),
+			None => Err(Error::DbEmpty),
+		}
 	}
 
 	/// Get currently selected DB
 	#[inline(always)]
 	pub fn db(&self) -> Result<&str, Error> {
-		self.db.as_ref().map(AsRef::as_ref).ok_or(Error::DbEmpty)
+		match &self.db {
+			Some(db) => Ok(db.as_ref()),
+			None => Err(Error::DbEmpty),
+		}
+	}
+
+	#[inline(always)]
+	pub fn ns_db(&self) -> Result<(&str, &str), Error> {
+		match (&self.ns, &self.db) {
+			(Some(ns), Some(db)) => Ok((ns.as_ref(), db.as_ref())),
+			(None, _) => Err(Error::NsEmpty),
+			(_, None) => Err(Error::DbEmpty),
+		}
 	}
 
 	/// Check whether this request supports realtime queries

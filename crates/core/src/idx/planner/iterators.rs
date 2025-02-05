@@ -623,9 +623,10 @@ impl JoinThingIterator {
 		ix: IndexReference,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Result<Self, Error> {
+		let (ns, db) = opt.ns_db()?;
 		Ok(Self {
-			ns: opt.ns()?.to_string(),
-			db: opt.db()?.to_string(),
+			ns: ns.to_owned(),
+			db: db.to_owned(),
 			ix,
 			current_remote: None,
 			current_remote_batch: VecDeque::with_capacity(1),
@@ -963,8 +964,9 @@ impl UniqueUnionThingIterator {
 	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the key for each value in the array.
 		let mut keys = VecDeque::with_capacity(vals.len());
+		let (ns, db) = opt.ns_db()?;
 		for a in vals {
-			let key = Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, a, None).encode()?;
+			let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode()?;
 			keys.push_back(key);
 		}
 		Ok(Self {

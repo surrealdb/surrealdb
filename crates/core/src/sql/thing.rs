@@ -140,8 +140,7 @@ impl Thing {
 		ft: Option<&Table>,
 		ff: Option<&Idiom>,
 	) -> Result<Vec<Thing>, Error> {
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 
 		let (prefix, suffix) = match (ft, ff) {
 			(Some(ft), Some(ff)) => {

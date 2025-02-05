@@ -235,7 +235,8 @@ impl IndexStores {
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex, Error> {
-		let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, ix)?;
+		let (ns, db) = opt.ns_db()?;
+		let ikb = IndexKeyBase::new(ns, db, ix)?;
 		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}
 

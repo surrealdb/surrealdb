@@ -27,9 +27,10 @@ impl RemoveFunctionStatement {
 			// Get the transaction
 			let txn = ctx.tx();
 			// Get the definition
-			let fc = txn.get_db_function(opt.ns()?, opt.db()?, &self.name).await?;
+			let (ns, db) = opt.ns_db()?;
+			let fc = txn.get_db_function(ns, db, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::database::fc::new(opt.ns()?, opt.db()?, &fc.name);
+			let key = crate::key::database::fc::new(ns, db, &fc.name);
 			txn.del(key).await?;
 			// Clear the cache
 			txn.clear();

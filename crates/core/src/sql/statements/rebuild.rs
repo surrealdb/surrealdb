@@ -72,7 +72,8 @@ impl RebuildIndexStatement {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 			// Get the index definition
-			let ix = ctx.tx().get_tb_index(opt.ns()?, opt.db()?, &self.what, &self.name).await?;
+			let (ns, db) = opt.ns_db()?;
+			let ix = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await?;
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
 				name: self.name.clone(),

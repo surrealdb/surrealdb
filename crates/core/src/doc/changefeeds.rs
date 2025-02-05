@@ -16,8 +16,7 @@ impl Document {
 			return Ok(());
 		}
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the table for this record
 		let tbv = self.tb(ctx, opt).await?;
 		// Get the database for this record

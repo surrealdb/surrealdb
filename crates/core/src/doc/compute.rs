@@ -69,11 +69,9 @@ impl Document {
 					if is_save_point {
 						ctx.tx().lock().await.rollback_to_save_point().await?;
 					}
+					let (ns, db) = opt.ns_db()?;
 					// Fetch the data from the store
-					let val = ctx
-						.tx()
-						.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version)
-						.await?;
+					let val = ctx.tx().get_record(ns, db, &v.tb, &v.id, opt.version).await?;
 					pro = Processed {
 						rs: RecordStrategy::KeysAndValues,
 						generate: None,
