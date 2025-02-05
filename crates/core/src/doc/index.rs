@@ -95,10 +95,6 @@ impl Document {
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 		}
-
-		if !ix.name.is_empty() {
-			return Err(Error::Internal("ONE INDEX DONE".to_string()));
-		}
 		Ok(())
 	}
 

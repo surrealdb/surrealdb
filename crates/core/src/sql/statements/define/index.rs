@@ -57,8 +57,6 @@ impl DefineIndexStatement {
 					value: self.name.to_string(),
 				});
 			}
-			// Clear the index store cache
-			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
 		}
 		// Does the table exists?
 		match txn.get_tb(ns, db, &self.what).await {
@@ -150,9 +148,6 @@ impl DefineIndexStatement {
 
 	#[cfg(not(target_family = "wasm"))]
 	fn async_index(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
-		if !opt.ns()?.is_empty() {
-			return Err(Error::Internal("ASYNC INDEX".to_string()));
-		}
 		ctx.get_index_builder().ok_or_else(|| fail!("No Index Builder"))?.build(
 			ctx,
 			opt.clone(),
