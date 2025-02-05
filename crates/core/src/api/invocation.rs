@@ -105,10 +105,22 @@ impl<'a> ApiInvocation<'a> {
 
 		let body = body.stream(req_ctx.max_body_size).await?;
 
+		// Edit the context
 		let mut ctx = MutableContext::new_isolated(ctx, ContextIsolation::Full);
+
+		// Set the request variable
 		let vars = self.vars(Value::Bytes(Bytes(body)));
 		ctx.add_value("request", vars.into());
+
+		// Possibly set the timeout
+		if let Some(timeout) = req_ctx.timeout {
+			ctx.add_timeout(*timeout)?
+		}
+
+		// Freeze the context
 		let ctx = ctx.freeze();
+
+		// Compute the action
 
 		let res = action.compute(stk, &ctx, opt, None).await?;
 		Ok(Some(res))
