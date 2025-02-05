@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+pub mod body;
+
 use crate::{
 	api::context::RequestContext,
 	err::Error,
@@ -8,6 +10,18 @@ use crate::{
 
 pub fn timeout(context: &mut RequestContext, (timeout,): (Duration,)) -> Result<(), Error> {
 	context.timeout = Some(timeout);
+	Ok(())
+}
+
+pub fn header(context: &mut RequestContext, (name, value): (String, String)) -> Result<(), Error> {
+	if let Some(v) = context.headers.as_mut() {
+		v.insert(name, value);
+	} else {
+		context.headers = Some(map!(
+			name => value
+		));
+	}
+
 	Ok(())
 }
 

@@ -35,8 +35,10 @@ impl<'a> InvokeMiddleware<'a> for (&'a String, &'a Vec<Value>) {
 			self.1.to_owned(),
 			context,
 			//
-			"api::timeout" => api::timeout,
+			"api::body::max_size" => api::body::max_size,
+			"api::header" => api::header,
 			"api::headers" => api::headers,
+			"api::timeout" => api::timeout,
 		)
 	}
 }

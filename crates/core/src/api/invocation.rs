@@ -101,6 +101,8 @@ impl<'a> ApiInvocation<'a> {
 		let mut req_ctx = RequestContext::default();
 		req_ctx.apply_middleware(builtin)?;
 
+		println!("req_ctx: {:#?}", req_ctx);
+
 		let body = body.stream(req_ctx.max_body_size).await?;
 
 		let mut ctx = MutableContext::new_isolated(ctx, ContextIsolation::Full);
