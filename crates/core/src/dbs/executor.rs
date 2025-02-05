@@ -144,8 +144,8 @@ impl Executor {
 			}
 		};
 
-		// Catch cancelation during running.
-		match self.ctx.done() {
+		// Catch cancellation during running.
+		match self.ctx.done(true) {
 			None => {}
 			Some(Reason::Timedout) => {
 				return Err(Error::QueryTimedout);
@@ -165,7 +165,7 @@ impl Executor {
 		stmt: Statement,
 	) -> Result<Value, Error> {
 		// Don't even try to run if the query should already be finished.
-		match self.ctx.done() {
+		match self.ctx.done(true) {
 			None => {}
 			Some(Reason::Timedout) => {
 				return Err(Error::QueryTimedout);
@@ -294,9 +294,9 @@ impl Executor {
 				}
 			};
 
-			// check for timeout and cancelation.
-			if let Some(done) = self.ctx.done() {
-				// a cancelation happend. Cancel the transaction, fast forward the remaining
+			// check for timeout and cancellation.
+			if let Some(done) = self.ctx.done(true) {
+				// a cancellation happened. Cancel the transaction, fast forward the remaining
 				// results and then return.
 				let _ = txn.cancel().await;
 
