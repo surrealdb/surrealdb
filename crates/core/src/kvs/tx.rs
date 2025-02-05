@@ -1340,19 +1340,37 @@ impl Transaction {
 		db: &str,
 		cg: &str,
 	) -> Result<Arc<DefineConfigStatement>, Error> {
+		if let Some(val) = self.get_db_optional_config(ns, db, cg).await? {
+			Ok(val)
+		} else {
+			Err(Error::TbNotFound {
+				value: cg.to_owned(),
+			})
+		}
+	}
+
+	/// Retrieve a specific config definition from a database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_optional_config(
+		&self,
+		ns: &str,
+		db: &str,
+		cg: &str,
+	) -> Result<Option<Arc<DefineConfigStatement>>, Error> {
 		let qey = cache::tx::Lookup::Cg(ns, db, cg);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Option::Some),
 			None => {
 				let key = crate::key::database::cg::new(ns, db, cg).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::CgNotFound {
-					value: cg.to_owned(),
-				})?;
-				let val: DefineConfigStatement = val.into();
-				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
-				Ok(val)
+				if let Some(val) = self.get(key, None).await? {
+					let val: DefineConfigStatement = val.into();
+					let val = Arc::new(val);
+					let entr = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entr);
+					Ok(Some(val))
+				} else {
+					Ok(None)
+				}
 			}
 		}
 	}

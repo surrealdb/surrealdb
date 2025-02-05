@@ -101,13 +101,13 @@ async fn handler(
 			values: vec![],
 		};
 
-		match api
+		match invocation
 			.invoke_with_transaction(
 				ns,
 				db,
 				tx.clone(),
 				ds.clone(),
-				invocation,
+				api,
 				ApiBody::from_stream(body.into_data_stream()),
 			)
 			.await

@@ -128,7 +128,7 @@ keyword! {
 	M => "M",
 	M0 => "M0",
 	Mapper => "MAPPER",
-	MaxBodySize => "MAX_BODY_SIZE",
+	Middleware => "MIDDLEWARE",
 	Merge => "MERGE",
 	Model => "MODEL",
 	MTree => "MTREE",

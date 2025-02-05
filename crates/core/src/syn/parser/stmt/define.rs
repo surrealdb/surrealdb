@@ -1,6 +1,9 @@
+use std::collections::BTreeMap;
+
 use reblessive::Stk;
 
 use crate::api::method::Method;
+use crate::api::middleware::RequestMiddleware;
 use crate::api::path::Path;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
@@ -9,7 +12,7 @@ use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig
 use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::define::{ApiAction, DefineConfigStatement};
 use crate::sql::statements::DefineApiStatement;
-use crate::sql::{Timeout, Value};
+use crate::sql::Value;
 use crate::syn::error::bail;
 use crate::{
 	sql::{
@@ -1390,7 +1393,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_config(&mut self, stk: &mut Stk) -> ParseResult<DefineConfigStatement> {
+	pub async fn parse_define_config(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineConfigStatement> {
 		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -1422,32 +1428,53 @@ impl Parser<'_> {
 				t!("PERMISSIONS") => {
 					self.pop_peek();
 					config.permissions = Some(self.parse_permission_value(stk).await?);
-				},
-				t!("TIMEOUT") => {
+				}
+				t!("MIDDLEWARE") => {
 					self.pop_peek();
-					let duration = self.next_token_value()?;
-					config.timeout = Some(Timeout(duration));
-				},
-				t!("MAX_BODY_SIZE") => {
-					self.pop_peek();
-					config.max_body_size = Some(self.next_token_value()?);
-				},
-				t!("HEADERS") => {
-					self.pop_peek();
-					let before = self.peek().span;
-					expected!(self, t!("{"));
-					let obj = self.parse_object(stk, before).await?;
-					let span = before.covers(self.last_span());
 
-					if obj.values().any(|v| !v.is_strand()) {
-						bail!(
-							"Header values must be strings",
-							@span => "Non-string value found",
-						);
+					let mut middleware: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+					// let mut parsed_custom = false;
+
+					loop {
+						let mut name = match self.peek_kind() {
+							t!("API") => {
+								// if parsed_custom {
+								// 	bail!("Cannot specify builtin middlewares after custom middlewares");
+								// }
+
+								self.pop_peek();
+								expected!(self, t!("::"));
+								"api::".to_string()
+							}
+							t!("fn") => {
+								bail!("Custom middlewares are not yet supported")
+							}
+							_ => {
+								break;
+							}
+						};
+
+						let part = self.next_token_value::<Ident>()?;
+						name.push_str(part.0.to_lowercase().as_str());
+
+						while self.eat(t!("::")) {
+							let part = self.next_token_value::<Ident>()?;
+							name.push_str("::");
+							name.push_str(part.0.to_lowercase().as_str());
+						}
+
+						expected!(self, t!("("));
+						let args = self.parse_function_args(stk).await?;
+
+						middleware.insert(name, args);
+
+						if !self.eat(t!(",")) {
+							break;
+						}
 					}
 
-					config.headers = Some(obj);
-				},
+					config.middleware = Some(RequestMiddleware(middleware));
+				}
 				_ => {
 					break;
 				}

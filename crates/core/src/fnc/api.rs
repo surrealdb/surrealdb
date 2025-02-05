@@ -75,7 +75,7 @@ pub async fn invoke(
 			values,
 		};
 
-		match api.invoke_with_context(stk, ctx, opt, invocation, ApiBody::from_bytes(body)).await {
+		match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_bytes(body)).await {
 			Ok(Some(v)) => Ok(v),
 			Err(e) => return Err(e),
 			_ => Ok(Value::None),
