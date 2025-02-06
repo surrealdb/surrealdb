@@ -32,9 +32,7 @@ impl RemoveIndexStatement {
 			// Get the transaction
 			let txn = ctx.tx();
 			// Clear the index store cache
-			ctx.get_index_stores()
-				.index_removed(ctx.get_index_builder(), &txn, ns, db, &self.what, &self.name)
-				.await?;
+			ctx.get_index_stores().index_removed(ctx, &txn, ns, db, &self.what, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
 			txn.del(key).await?;

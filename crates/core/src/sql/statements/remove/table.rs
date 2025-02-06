@@ -33,9 +33,7 @@ impl RemoveTableStatement {
 			// Get the transaction
 			let txn = ctx.tx();
 			// Remove the index stores
-			ctx.get_index_stores()
-				.table_removed(ctx.get_index_builder(), &txn, ns, db, &self.name)
-				.await?;
+			ctx.get_index_stores().table_removed(ctx, &txn, ns, db, &self.name).await?;
 			// Get the defined table
 			let tb = txn.get_tb(ns, db, &self.name).await?;
 			// Get the foreign tables

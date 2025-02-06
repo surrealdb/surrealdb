@@ -12,7 +12,7 @@ use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::idx::IndexKeyBase;
-use crate::kvs::{IndexBuilder, Key, Transaction, TransactionType, Val};
+use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::index::HnswParams;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::Index;
@@ -242,14 +242,15 @@ impl IndexStores {
 
 	pub(crate) async fn index_removed(
 		&self,
-		ib: Option<&IndexBuilder>,
+		ctx: &Context,
 		tx: &Transaction,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		ix: &str,
 	) -> Result<(), Error> {
-		if let Some(ib) = ib {
+		#[cfg(not(target_family = "wasm"))]
+		if let Some(ib) = ctx.get_index_builder() {
 			ib.remove_index(ns, db, tb, ix)?;
 		}
 		self.remove_index(ns, db, tx.get_tb_index(ns, db, tb, ix).await?.as_ref()).await
@@ -257,39 +258,40 @@ impl IndexStores {
 
 	pub(crate) async fn namespace_removed(
 		&self,
-		ib: Option<&IndexBuilder>,
+		ctx: &Context,
 		tx: &Transaction,
 		ns: &str,
 	) -> Result<(), Error> {
 		for db in tx.all_db(ns).await?.iter() {
-			self.database_removed(ib, tx, ns, &db.name).await?;
+			self.database_removed(ctx, tx, ns, &db.name).await?;
 		}
 		Ok(())
 	}
 
 	pub(crate) async fn database_removed(
 		&self,
-		ib: Option<&IndexBuilder>,
+		ctx: &Context,
 		tx: &Transaction,
 		ns: &str,
 		db: &str,
 	) -> Result<(), Error> {
 		for tb in tx.all_tb(ns, db, None).await?.iter() {
-			self.table_removed(ib, tx, ns, db, &tb.name).await?;
+			self.table_removed(ctx, tx, ns, db, &tb.name).await?;
 		}
 		Ok(())
 	}
 
 	pub(crate) async fn table_removed(
 		&self,
-		ib: Option<&IndexBuilder>,
+		ctx: &Context,
 		tx: &Transaction,
 		ns: &str,
 		db: &str,
 		tb: &str,
 	) -> Result<(), Error> {
 		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
-			if let Some(ib) = ib {
+			#[cfg(not(target_family = "wasm"))]
+			if let Some(ib) = ctx.get_index_builder() {
 				ib.remove_index(ns, db, tb, &ix.name)?;
 			}
 			self.remove_index(ns, db, ix).await?;
