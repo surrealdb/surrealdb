@@ -172,6 +172,7 @@ where
 			patches,
 			client: self.client,
 			resource: self.resource,
+			upsert: false,
 			response_type: PhantomData,
 		}
 	}

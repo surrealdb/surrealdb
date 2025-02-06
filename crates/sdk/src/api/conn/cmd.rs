@@ -56,6 +56,7 @@ pub(crate) enum Command {
 	Patch {
 		what: Resource,
 		data: Option<CoreValue>,
+		upsert: bool,
 	},
 	Merge {
 		what: Resource,
@@ -256,17 +257,29 @@ impl Command {
 			Command::Patch {
 				what,
 				data,
+				upsert,
 				..
 			} => {
-				let mut params = vec![what.into_core_value()];
+				let query = if upsert {
+					let mut stmt = UpsertStatement::default();
+					stmt.what = resource_to_values(what);
+					stmt.data = data.map(Data::PatchExpression);
+					stmt.output = Some(Output::After);
+					Query::from(stmt)
+				} else {
+					let mut stmt = UpdateStatement::default();
+					stmt.what = resource_to_values(what);
+					stmt.data = data.map(Data::PatchExpression);
+					stmt.output = Some(Output::After);
+					Query::from(stmt)
+				};
 
-				if let Some(data) = data {
-					params.push(data);
-				}
+				let variables = CoreObject::default();
+				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
 
 				RouterRequest {
 					id,
-					method: "patch",
+					method: "query",
 					params: Some(params.into()),
 				}
 			}
