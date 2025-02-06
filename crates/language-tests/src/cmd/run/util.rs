@@ -37,7 +37,7 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 				BoolOr::Value(x) => x,
 			};
 
-			Capabilities::all()
+			Capabilities::none()
 				.with_scripting(schema_cap.scripting.unwrap_or(true))
 				.with_guest_access(schema_cap.quest_access.unwrap_or(true))
 				.with_live_query_notifications(schema_cap.live_query_notifications.unwrap_or(true))

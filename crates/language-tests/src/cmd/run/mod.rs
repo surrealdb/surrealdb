@@ -4,11 +4,12 @@ mod report;
 mod util;
 
 use core::str;
-use std::{io, mem, thread, time::Duration};
+use std::{any::Any, io, mem, panic::AssertUnwindSafe, thread, time::Duration};
 
 use anyhow::{bail, Context, Result};
 use camino::Utf8Path;
 use clap::ArgMatches;
+use futures::FutureExt;
 use progress::Progress;
 use report::{TestGrade, TestReport};
 use surrealdb_core::{
@@ -37,6 +38,7 @@ pub enum TestTaskResult {
 	RunningError(CoreError),
 	Timeout,
 	Results(Vec<Response>),
+	Paniced(Box<dyn Any + Send + 'static>),
 }
 
 pub struct TestTaskContext {
@@ -176,6 +178,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		reports.push(x);
 	}
 
+	schedular.join_all().await;
+
 	while let Some(x) = ds_recv.recv().await {
 		x.shutdown().await.context("Datastore failed to shutdown properly")?;
 	}
@@ -256,7 +260,36 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 
 	let mut ds = ds.with_query_timeout(Some(timeout_duration));
 
-	let res = run_test_with_dbs(context.id, &context.testset, &mut ds).await;
+	let res = AssertUnwindSafe(run_test_with_dbs(context.id, &context.testset, &mut ds))
+		.catch_unwind()
+		.await;
+
+	let res = match res {
+		Ok(x) => x,
+		Err(e) => {
+			// Test caused a panic!
+			// return this result and if required create a new non poisened ds to run other tests
+			// in.
+			context
+				.result
+				.send((context.id, TestTaskResult::Paniced(e)))
+				.await
+				.expect("result channel quit early");
+
+			if let Some(return_channel) = return_channel {
+				let db = Datastore::new("memory")
+					.await?
+					.with_capabilities(Capabilities::all())
+					.with_notifications();
+
+				db.bootstrap().await?;
+
+				return_channel.send(ds).await.expect("datastore return channel quit early");
+			}
+
+			return Ok(());
+		}
+	};
 
 	if let Some(return_channel) = return_channel {
 		return_channel.send(ds).await.expect("datastore return channel quit early");
