@@ -165,7 +165,7 @@ impl Iterator {
 			},
 			v => {
 				return Err(Error::InvalidStatementTarget {
-					value: v.to_string(),
+					value: v.to_raw_string(),
 				})
 			}
 		};
@@ -284,7 +284,7 @@ impl Iterator {
 				},
 				_ => {
 					return Err(Error::InvalidStatementTarget {
-						value: v.to_string(),
+						value: v.to_raw_string(),
 					})
 				}
 			}

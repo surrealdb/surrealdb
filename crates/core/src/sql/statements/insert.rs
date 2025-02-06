@@ -70,7 +70,7 @@ impl InsertStatement {
 				Value::Table(into) => Some(into),
 				v => {
 					return Err(Error::InsertStatement {
-						value: v.to_string(),
+						value: v.to_raw_string(),
 					})
 				}
 			},
@@ -113,7 +113,7 @@ impl InsertStatement {
 					}
 					v => {
 						return Err(Error::InsertStatement {
-							value: v.to_string(),
+							value: v.to_raw_string(),
 						})
 					}
 				}
@@ -173,7 +173,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 				Value::Thing(v) => v,
 				v => {
 					return Err(Error::InsertStatementIn {
-						value: v.to_string(),
+						value: v.to_raw_string(),
 					})
 				}
 			};
@@ -181,7 +181,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 				Value::Thing(v) => v,
 				v => {
 					return Err(Error::InsertStatementOut {
-						value: v.to_string(),
+						value: v.to_raw_string(),
 					})
 				}
 			};
@@ -204,7 +204,7 @@ fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing, Error> {
 				v => Ok(v),
 			},
 			v => Err(Error::InsertStatementId {
-				value: v.to_string(),
+				value: v.to_raw_string(),
 			}),
 		},
 	}
