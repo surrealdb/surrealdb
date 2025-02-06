@@ -1,9 +1,9 @@
 //! Stores the DocIds -> Thing of an HNSW index
 use crate::idx::docids::DocId;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Hd<'a> {
 	__: u8,
@@ -20,6 +20,7 @@ pub struct Hd<'a> {
 	_g: u8,
 	pub doc_id: Option<DocId>,
 }
+impl_key!(Hd<'a>);
 
 impl<'a> Hd<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, doc_id: Option<DocId>) -> Self {
@@ -44,6 +45,7 @@ impl<'a> Hd<'a> {
 #[cfg(test)]
 mod tests {
 
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

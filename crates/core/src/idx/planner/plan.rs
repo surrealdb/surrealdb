@@ -3,7 +3,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
-use crate::idx::planner::{RecordStrategy, StatementContext};
+use crate::idx::planner::{GrantedPermission, RecordStrategy, StatementContext};
 use crate::sql::with::With;
 use crate::sql::{Array, Expression, Idiom, Number, Object};
 use crate::sql::{Operator, Value};
@@ -28,7 +28,7 @@ impl PlanBuilder {
 	#[allow(clippy::too_many_arguments)]
 	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn build(
-		tb: &str,
+		granted_permission: GrantedPermission,
 		root: Option<Node>,
 		ctx: &StatementContext<'_>,
 		with_indexes: Option<Vec<IndexReference>>,
@@ -46,13 +46,13 @@ impl PlanBuilder {
 		};
 
 		if let Some(With::NoIndex) = ctx.with {
-			return Self::table_iterator(ctx, Some("WITH NOINDEX"), tb).await;
+			return Self::table_iterator(ctx, Some("WITH NOINDEX"), granted_permission).await;
 		}
 
 		// Browse the AST and collect information
 		if let Some(root) = &root {
 			if let Err(e) = b.eval_node(root) {
-				return Self::table_iterator(ctx, Some(&e), tb).await;
+				return Self::table_iterator(ctx, Some(&e), granted_permission).await;
 			}
 		}
 
@@ -74,7 +74,7 @@ impl PlanBuilder {
 			}
 			if let Some((_, io)) = compound_index {
 				// Evaluate if we can use keys only
-				let record_strategy = ctx.check_record_strategy(true, tb).await?;
+				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
@@ -83,7 +83,8 @@ impl PlanBuilder {
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
-					let record_strategy = ctx.check_record_strategy(true, tb).await?;
+					let record_strategy =
+						ctx.check_record_strategy(true, granted_permission).await?;
 					// Return the plan
 					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy));
 				}
@@ -92,14 +93,14 @@ impl PlanBuilder {
 			// Otherwise, we try to find the most interesting (todo: TBD) single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, tb).await?;
+				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
 			}
 			// If there is an order option
 			if let Some(o) = order {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, tb).await?;
+				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
 			}
@@ -115,20 +116,20 @@ impl PlanBuilder {
 				}
 			}
 			// Evaluate the record strategy
-			let record_strategy = ctx.check_record_strategy(true, tb).await?;
+			let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
-		Self::table_iterator(ctx, None, tb).await
+		Self::table_iterator(ctx, None, granted_permission).await
 	}
 
 	async fn table_iterator(
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
-		tb: &str,
+		granted_permission: GrantedPermission,
 	) -> Result<Plan, Error> {
 		// Evaluate the record strategy
-		let record_strategy = ctx.check_record_strategy(false, tb).await?;
+		let record_strategy = ctx.check_record_strategy(false, granted_permission).await?;
 		// Collect the reason if any
 		let reason = reason.map(|s| s.to_string());
 		Ok(Plan::TableIterator(reason, record_strategy))
@@ -158,28 +159,69 @@ impl PlanBuilder {
 	fn check_compound_index(
 		&self,
 		ixr: IndexReference,
-		mut vals: Vec<Option<Arc<Value>>>,
+		columns: Vec<Vec<Arc<Value>>>,
 	) -> Option<(IdiomCol, IndexOption)> {
 		// Check the index can be used
 		if !self.allowed_index(&ixr) {
 			return None;
 		}
 		// Count continues values (from the left)
-		let mut cols = 0;
-		for val in &vals {
-			if val.is_none() {
+		let mut cont = 0;
+		for vals in &columns {
+			if vals.is_empty() {
 				break;
 			}
-			cols += 1;
+			if vals.iter().all(|v| v.is_none_or_null()) {
+				break;
+			}
+			cont += 1;
 		}
-		if cols == 0 {
+		if cont == 0 {
 			return None;
 		}
-		let vals = vals.drain(0..cols).map(|v| v.unwrap()).collect();
+		let combinations = Self::cartesian_product(&columns);
+		if combinations.len() == 1 {
+			let val: Vec<Value> = combinations[0].iter().map(|v| v.as_ref().clone()).collect();
+			return Some((
+				cont,
+				IndexOption::new(
+					ixr,
+					None,
+					IdiomPosition::None,
+					IndexOperator::Equality(Arc::new(Value::Array(Array(val)))),
+				),
+			));
+		}
+		let vals: Vec<Value> = combinations
+			.iter()
+			.map(|v| {
+				let a: Vec<Value> = v.iter().map(|v| v.as_ref().clone()).collect();
+				Value::Array(Array(a))
+			})
+			.collect();
 		Some((
-			cols,
-			IndexOption::new(ixr, None, IdiomPosition::None, IndexOperator::Equality(vals)),
+			cont,
+			IndexOption::new(
+				ixr,
+				None,
+				IdiomPosition::None,
+				IndexOperator::Union(Arc::new(Value::Array(Array(vals)))),
+			),
 		))
+	}
+
+	fn cartesian_product(values: &[Vec<Arc<Value>>]) -> Vec<Vec<Arc<Value>>> {
+		values.iter().fold(vec![vec![]], |acc, v| {
+			acc.iter()
+				.flat_map(|prev| {
+					v.iter().map(move |x| {
+						let mut new_vec = prev.clone();
+						new_vec.push(x.clone());
+						new_vec
+					})
+				})
+				.collect()
+		})
 	}
 
 	fn eval_node(&mut self, node: &Node) -> Result<(), String> {
@@ -260,7 +302,7 @@ pub(super) struct IndexOption {
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
-	Equality(Vec<Arc<Value>>),
+	Equality(Arc<Value>),
 	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
 	RangePart(Operator, Arc<Value>),
@@ -306,16 +348,13 @@ impl IndexOption {
 		self.id_pos
 	}
 
-	fn reduce_array(values: &[Arc<Value>]) -> Value {
-		if values.len() == 1 {
-			if let Value::Array(a) = values[0].as_ref() {
-				if a.len() == 1 {
-					return a[0].clone();
-				}
+	fn reduce_array(value: &Value) -> Value {
+		if let Value::Array(a) = value {
+			if a.len() == 1 {
+				return a[0].clone();
 			}
-			return values[0].as_ref().clone();
 		}
-		Value::from(Array(values.iter().map(|v| v.as_ref().clone()).collect()))
+		value.clone()
 	}
 
 	pub(crate) fn explain(&self) -> Value {
@@ -538,14 +577,14 @@ mod tests {
 			IndexReference::new(Arc::new([]), 1),
 			Some(Idiom::parse("test").into()),
 			IdiomPosition::Right,
-			IndexOperator::Equality(vec![Value::Array(Array::from(vec!["test"])).into()]),
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
 			Some(Idiom::parse("test").into()),
 			IdiomPosition::Right,
-			IndexOperator::Equality(vec![Value::Array(Array::from(vec!["test"])).into()]),
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		set.insert(io1);

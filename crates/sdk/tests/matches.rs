@@ -93,6 +93,12 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 				},
 				{
 					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
 						count: 1,
 					},
 					operation: 'Fetch'

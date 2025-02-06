@@ -278,7 +278,6 @@ mod tests {
 	fn kind_null() {
 		let sql = "null";
 		let res = kind(sql);
-		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("null", format!("{}", out));
 		assert_eq!(out, Kind::Null);

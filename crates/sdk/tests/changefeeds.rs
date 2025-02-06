@@ -57,13 +57,13 @@ async fn database_change_feeds() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	// DEFINE DATABASE
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	// DEFINE TABLE
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	// DEFINE FIELD
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 
 	// Two timestamps
 	let variance = 4;
@@ -234,10 +234,10 @@ async fn table_change_feeds() -> Result<(), Error> {
 	assert_eq!(res.len(), 10);
 	// DEFINE TABLE
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	// DEFINE FIELD
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	// UPDATE CONTENT
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(

@@ -594,28 +594,30 @@ impl<'a> TreeBuilder<'a> {
 				(Operator::Equal | Operator::Exact, v, _) => {
 					self.index_map.check_compound(ixr, col, &v);
 					if col == 0 {
-						return Some(IndexOperator::Equality(vec![v]));
+						return Some(IndexOperator::Equality(v));
 					}
 				}
 				(Operator::Contain, v, IdiomPosition::Left) => {
 					if col == 0 {
-						return Some(IndexOperator::Equality(vec![v]));
+						return Some(IndexOperator::Equality(v));
 					}
 				}
 				(Operator::Inside, v, IdiomPosition::Right) => {
 					if col == 0 {
-						return Some(IndexOperator::Equality(vec![v]));
+						return Some(IndexOperator::Equality(v));
 					}
 				}
-				(
-					Operator::ContainAny | Operator::ContainAll | Operator::Inside,
-					v,
-					IdiomPosition::Left,
-				) => {
-					if col == 0 {
-						if let Value::Array(_) = v.as_ref() {
+				(Operator::Inside, v, IdiomPosition::Left) => {
+					if let Value::Array(a) = v.as_ref() {
+						self.index_map.check_compound_array(ixr, col, a);
+						if col == 0 {
 							return Some(IndexOperator::Union(v));
 						}
+					}
+				}
+				(Operator::ContainAny | Operator::ContainAll, v, IdiomPosition::Left) => {
+					if v.is_array() && col == 0 {
+						return Some(IndexOperator::Union(v));
 					}
 				}
 				(
@@ -645,7 +647,7 @@ impl<'a> TreeBuilder<'a> {
 	}
 }
 
-pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Option<Arc<Value>>>>;
+pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Vec<Arc<Value>>>>;
 
 /// For each expression a possible index option
 #[derive(Default)]
@@ -659,8 +661,14 @@ pub(super) struct IndexesMap {
 impl IndexesMap {
 	pub(crate) fn check_compound(&mut self, ixr: &IndexReference, col: usize, val: &Arc<Value>) {
 		let cols = ixr.cols.len();
-		let values = self.compound_indexes.entry(ixr.clone()).or_insert(vec![None; cols]);
-		values[col] = Some(val.clone());
+		let values = self.compound_indexes.entry(ixr.clone()).or_insert(vec![vec![]; cols]);
+		values[col].push(val.clone());
+	}
+
+	pub(crate) fn check_compound_array(&mut self, ixr: &IndexReference, col: usize, a: &Array) {
+		for v in a.iter() {
+			self.check_compound(ixr, col, &Arc::new(v.clone()))
+		}
 	}
 }
 

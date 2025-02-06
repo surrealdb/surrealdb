@@ -29,32 +29,32 @@ mod cli_integration {
 
 	#[test]
 	fn version_command() {
-		assert!(common::run("version").output().is_ok());
+		common::run("version").output().unwrap();
 	}
 
 	#[test]
 	fn version_flag_short() {
-		assert!(common::run("-V").output().is_ok());
+		common::run("-V").output().unwrap();
 	}
 
 	#[test]
 	fn version_flag_long() {
-		assert!(common::run("--version").output().is_ok());
+		common::run("--version").output().unwrap();
 	}
 
 	#[test]
 	fn help_command() {
-		assert!(common::run("help").output().is_ok());
+		common::run("help").output().unwrap();
 	}
 
 	#[test]
 	fn help_flag_short() {
-		assert!(common::run("-h").output().is_ok());
+		common::run("-h").output().unwrap();
 	}
 
 	#[test]
 	fn help_flag_long() {
-		assert!(common::run("--help").output().is_ok());
+		common::run("--help").output().unwrap();
 	}
 
 	#[test]
@@ -1146,7 +1146,7 @@ mod cli_integration {
 		statement_file.touch().unwrap();
 		statement_file.write_str("CREATE thing:success;").unwrap();
 
-		assert!(common::run_in_dir("validate", &temp_dir).output().is_ok());
+		common::run_in_dir("validate", &temp_dir).output().unwrap();
 	}
 
 	#[test]

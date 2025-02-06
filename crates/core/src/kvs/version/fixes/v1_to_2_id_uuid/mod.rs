@@ -2,7 +2,10 @@ mod deps;
 use deps::*;
 use std::sync::Arc;
 
-use crate::{err::Error, kvs::Transaction};
+use crate::{
+	err::Error,
+	kvs::{KeyEncode as _, Transaction},
+};
 
 pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<(), Error> {
 	for ns in tx.all_ns().await?.iter() {
@@ -26,8 +29,8 @@ async fn migrate_tb_records(
 	tb: &str,
 ) -> Result<(), Error> {
 	// mutable beg, as we update it each iteration to the last record id + a null byte
-	let mut beg = crate::key::thing::prefix(ns, db, tb);
-	let end = crate::key::thing::suffix(ns, db, tb);
+	let mut beg = crate::key::thing::prefix(ns, db, tb)?;
+	let end = crate::key::thing::suffix(ns, db, tb)?;
 
 	// We need to scan ALL keys and queue them first,
 	// because if we fix them as we iterate, the pagination is off
@@ -70,9 +73,9 @@ async fn migrate_tb_records(
 
 async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) -> Result<(), Error> {
 	// mutable beg, as we update it each iteration to the last record id + a null byte
-	let mut beg = crate::key::table::all::new(ns, db, tb).encode()?;
+	let mut beg = crate::key::table::all::new(ns, db, tb).encode_owned()?;
 	beg.extend_from_slice(&[b'~', 0x00]);
-	let mut end = crate::key::table::all::new(ns, db, tb).encode()?;
+	let mut end = crate::key::table::all::new(ns, db, tb).encode_owned()?;
 	end.extend_from_slice(&[b'~', 0xff]);
 
 	// We need to scan ALL keys and queue them first,
@@ -100,13 +103,13 @@ async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) ->
 	}
 
 	for enc in queue.iter() {
-		let broken = key::Graph::decode(enc).unwrap();
+		let broken = key::Graph::decode(enc)?;
 		// Get a fixed id
 		let fixed = broken.fix().unwrap();
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let val = tx.get(broken.clone().to_owned(), None).await?.unwrap();
+		let val = tx.get(broken.clone(), None).await?.unwrap();
 		// Delete the old key
-		tx.del(broken.to_owned()).await?;
+		tx.del(broken.clone()).await?;
 		// Set the fixed key
 		tx.set(fixed, val, None).await?;
 	}

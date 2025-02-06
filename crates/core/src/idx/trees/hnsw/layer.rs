@@ -371,12 +371,12 @@ where
 		let chunks = val.chunks(Self::CHUNK_SIZE);
 		let old_chunks_len = mem::replace(&mut st.chunks, chunks.len() as u32);
 		for (i, chunk) in chunks.enumerate() {
-			let key = self.ikb.new_hl_key(self.level, i as u32);
+			let key = self.ikb.new_hl_key(self.level, i as u32)?;
 			tx.set(key, chunk, None).await?;
 		}
 		// Delete larger chunks if they exists
 		for i in st.chunks..old_chunks_len {
-			let key = self.ikb.new_hl_key(self.level, i);
+			let key = self.ikb.new_hl_key(self.level, i)?;
 			tx.del(key).await?;
 		}
 		// Increase the version
@@ -388,7 +388,7 @@ where
 		let mut val = Vec::new();
 		// Load the chunks
 		for i in 0..st.chunks {
-			let key = self.ikb.new_hl_key(self.level, i);
+			let key = self.ikb.new_hl_key(self.level, i)?;
 			let chunk = tx.get(key, None).await?.ok_or_else(|| fail!("Missing chunk"))?;
 			val.extend(chunk);
 		}

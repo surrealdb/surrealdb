@@ -1,10 +1,7 @@
-mod parse;
-use parse::Parse;
 mod helpers;
-use helpers::new_ds;
-use surrealdb::dbs::Session;
+mod parse;
+use crate::helpers::Test;
 use surrealdb::err::Error;
-use surrealdb::sql::Value;
 
 #[tokio::test]
 async fn select_start_limit_fetch() -> Result<(), Error> {
@@ -16,69 +13,57 @@ async fn select_start_limit_fetch() -> Result<(), Error> {
 		CREATE person:jaime SET tags = [tag:js];
 		SELECT * FROM person LIMIT 1 FETCH tags;
 		SELECT * FROM person START 1 LIMIT 1 FETCH tags;
+		SELECT * FROM person START 1 LIMIT 1 FETCH tags EXPLAIN FULL;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
+	let mut t = Test::new(sql).await?;
+	t.expect_size(8)?;
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		"[
 			{
 				id: tag:rs,
 				name: 'Rust'
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
+	)?;
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		"[
 			{
 				id: tag:go,
 				name: 'Golang'
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
+	)?;
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		"[
 			{
 				id: tag:js,
 				name: 'JavaScript'
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
+	)?;
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		"[
 			{
 				id: person:tobie,
 				tags: [tag:rs, tag:go, tag:js]
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
+	)?;
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		"[
 			{
 				id: person:jaime,
 				tags: [tag:js]
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
+	)?;
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		"[
 			{
 				id: person:jaime,
@@ -90,11 +75,9 @@ async fn select_start_limit_fetch() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
+	)?;
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		"[
 			{
 				id: person:tobie,
@@ -114,8 +97,42 @@ async fn select_start_limit_fetch() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
+	)?;
 	//
+	t.expect_val(
+		"[
+				{
+					detail: {
+						table: 'person'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
+					},
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
+						CancelOnLimit: 2,
+						SkipStart: 1
+					},
+					operation: 'StartLimitStrategy'
+				},
+				{
+					detail: {
+						count: 1
+					},
+					operation: 'Fetch'
+				}
+			]",
+	)?;
 	Ok(())
 }

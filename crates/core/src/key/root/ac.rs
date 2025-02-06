@@ -1,10 +1,10 @@
 //! Stores a DEFINE ACCESS ON ROOT configuration
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Ac<'a> {
 	__: u8,
@@ -13,19 +13,20 @@ pub struct Ac<'a> {
 	_c: u8,
 	pub ac: &'a str,
 }
+impl_key!(Ac<'a>);
 
 pub fn new(ac: &str) -> Ac<'_> {
 	Ac::new(ac)
 }
 
 pub fn prefix() -> Vec<u8> {
-	let mut k = crate::key::root::all::new().encode().unwrap();
+	let mut k = crate::key::root::all::kv();
 	k.extend_from_slice(b"!ac\x00");
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
-	let mut k = crate::key::root::all::new().encode().unwrap();
+	let mut k = crate::key::root::all::kv();
 	k.extend_from_slice(b"!ac\xff");
 	k
 }
@@ -50,6 +51,7 @@ impl<'a> Ac<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;

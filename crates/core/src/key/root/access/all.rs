@@ -1,16 +1,17 @@
 //! Stores the key prefix for all keys under a root access method
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Access<'a> {
 	__: u8,
 	_a: u8,
 	pub ac: &'a str,
 }
+impl_key!(Access<'a>);
 
 pub fn new(ac: &str) -> Access {
 	Access::new(ac)
@@ -34,6 +35,7 @@ impl<'a> Access<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
 		use super::*;
@@ -41,10 +43,10 @@ mod tests {
 		let val = Access::new(
 			"testac",
 		);
-		let enc = Access::encode(&val).unwrap();
+		let enc = KeyEncode::encode(&val).unwrap();
 		assert_eq!(enc, b"/&testac\0");
 
-		let dec = Access::decode(&enc).unwrap();
+		let dec = KeyDecode::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

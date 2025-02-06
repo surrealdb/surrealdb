@@ -49,7 +49,7 @@ jobs:
   release:
     name: Prepare release
     needs: [checks]
-    uses: ./.github/workflows/reusable_publish_version.yml
+    uses: ./.github/workflows/publish-version.yml
     with:
       environment: stable
       git-ref: ${{ inputs.branch }}

@@ -8,7 +8,7 @@ use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::cache::ds::Cache;
+use crate::kvs::cache::ds::DatastoreCache;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
@@ -47,7 +47,7 @@ pub struct MutableContext {
 	// An optional iteration stage
 	iteration_stage: Option<IterationStage>,
 	// An optional datastore cache
-	cache: Option<Arc<Cache>>,
+	cache: Option<Arc<DatastoreCache>>,
 	// The index store
 	index_stores: IndexStores,
 	// The index concurrent builders
@@ -191,7 +191,7 @@ impl MutableContext {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
-		cache: Arc<Cache>,
+		cache: Arc<DatastoreCache>,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<MutableContext, Error> {
@@ -335,36 +335,44 @@ impl MutableContext {
 	}
 
 	// Get the current datastore cache
-	pub(crate) fn get_cache(&self) -> Option<Arc<Cache>> {
+	pub(crate) fn get_cache(&self) -> Option<Arc<DatastoreCache>> {
 		self.cache.clone()
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
-	pub(crate) fn done(&self) -> Option<Reason> {
+	/// Note regarding `check_deadline`:
+	/// Checking Instant::now() takes tens to hundreds of nanoseconds
+	/// Checking an AtomicBool takes a single-digit nanoseconds.
+	/// We may not want to check for the deadline on every call.
+	/// An iteration loop may want to check it every 10 or 100 calls. Eg.:
+	/// ctx.done(count % 100 == 0)
+	pub(crate) fn done(&self, check_deadline: bool) -> Option<Reason> {
 		match self.deadline {
-			Some(deadline) if deadline <= Instant::now() => Some(Reason::Timedout),
+			Some(deadline) if check_deadline && deadline <= Instant::now() => {
+				Some(Reason::Timedout)
+			}
 			_ if self.cancelled.load(Ordering::Relaxed) => Some(Reason::Canceled),
 			_ => match &self.parent {
-				Some(ctx) => ctx.done(),
+				Some(ctx) => ctx.done(check_deadline),
 				_ => None,
 			},
 		}
 	}
 
 	/// Check if the context is ok to continue.
-	pub(crate) fn is_ok(&self) -> bool {
-		self.done().is_none()
+	pub(crate) fn is_ok(&self, check_deadline: bool) -> bool {
+		self.done(check_deadline).is_none()
 	}
 
 	/// Check if the context is not ok to continue.
-	pub(crate) fn is_done(&self) -> bool {
-		self.done().is_some()
+	pub(crate) fn is_done(&self, check_deadline: bool) -> bool {
+		self.done(check_deadline).is_some()
 	}
 
 	/// Check if the context is not ok to continue, because it timed out.
 	pub(crate) fn is_timedout(&self) -> bool {
-		matches!(self.done(), Some(Reason::Timedout))
+		matches!(self.done(true), Some(Reason::Timedout))
 	}
 
 	#[cfg(storage)]

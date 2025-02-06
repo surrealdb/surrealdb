@@ -109,7 +109,7 @@ async fn upsert_simple_with_input() -> Result<(), Error> {
 	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -408,7 +408,7 @@ async fn upsert_new_records_with_table_and_unique_index() -> Result<(), Error> {
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
@@ -452,13 +452,13 @@ async fn upsert_new_and_update_records_with_content_and_merge() -> Result<(), Er
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -524,16 +524,16 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -708,9 +708,6 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			// Run the test
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
-
-			// Select always succeeds, but the result may be empty
-			assert!(res.is_ok());
 
 			if should_succeed {
 				assert!(res.unwrap() != Value::parse("[]"), "{}", msg);

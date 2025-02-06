@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::ctx::{Canceller, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
-use crate::dbs::plan::Plan;
+use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
 use crate::dbs::Options;
 use crate::dbs::Statement;
@@ -108,6 +108,8 @@ pub(crate) struct Iterator {
 	limit: Option<u32>,
 	/// Iterator start value
 	start: Option<u32>,
+	/// Counter of remaining documents that can be skipped processing
+	start_skip: Option<usize>,
 	/// Iterator runtime error
 	error: Option<Error>,
 	/// Iterator output results
@@ -127,6 +129,7 @@ impl Clone for Iterator {
 			count: 0,
 			limit: self.limit,
 			start: self.start,
+			start_skip: self.start_skip.map(|_| self.start.unwrap_or(0) as usize),
 			error: None,
 			results: Results::default(),
 			entries: self.entries.clone(),
@@ -321,20 +324,27 @@ impl Iterator {
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
 		// Check if we actually need to process and iterate over the results
 		if plan.do_iterate {
+			if let Some(e) = &mut plan.explanation {
+				e.add_record_strategy(rs);
+			}
 			// Process prepared values
-			if let Some(qp) = ctx.get_query_planner() {
+			let sp = if let Some(qp) = ctx.get_query_planner() {
+				let sp = Some(qp.is_any_specific_permission());
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
 					let mut c = MutableContext::unfreeze(cancel_ctx)?;
 					c.set_iteration_stage(s);
 					cancel_ctx = c.freeze();
 					if !is_last {
-						self.clone().iterate(stk, &cancel_ctx, opt, stm).await?;
+						self.clone().iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
 					};
 				}
-			}
+				sp
+			} else {
+				None
+			};
 			// Process all documents
-			self.iterate(stk, &cancel_ctx, opt, stm).await?;
+			self.iterate(stk, &cancel_ctx, opt, stm, sp, plan.explanation.as_mut()).await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
@@ -346,7 +356,7 @@ impl Iterator {
 					// Ingest the pre-defined guaranteed record yield
 					self.ingest(guaranteed);
 					// Process the pre-defined guaranteed document
-					self.iterate(stk, &cancel_ctx, opt, stm).await?;
+					self.iterate(stk, &cancel_ctx, opt, stm, sp, None).await?;
 				}
 			}
 			// Process any SPLIT AT clause
@@ -361,7 +371,7 @@ impl Iterator {
 				self.results.sort(orders);
 			}
 			// Process any START & LIMIT clause
-			self.results.start_limit(self.start, self.limit).await?;
+			self.results.start_limit(self.start_skip, self.start, self.limit).await?;
 			// Process any FETCH clause
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());
@@ -416,16 +426,17 @@ impl Iterator {
 	}
 
 	/// Check if the iteration can be limited per iterator
-	#[cfg(not(target_family = "wasm"))]
-	fn check_set_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) -> bool {
+	fn check_set_start_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
 		// If there are groups we can't
 		if stm.group().is_some() {
 			return false;
 		}
+
 		// If there is no specified order, we can
 		if stm.order().is_none() {
 			return true;
 		}
+
 		// If there is more than 1 iterator, we can't
 		if self.entries.len() != 1 {
 			return false;
@@ -442,8 +453,12 @@ impl Iterator {
 		false
 	}
 
-	#[cfg(not(target_family = "wasm"))]
-	fn compute_start_limit(&mut self, ctx: &Context, stm: &Statement<'_>) {
+	fn compute_start_limit(
+		&mut self,
+		ctx: &Context,
+		stm: &Statement<'_>,
+		is_specific_permission: Option<bool>,
+	) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {
 				if let Some(s) = self.start {
@@ -452,6 +467,25 @@ impl Iterator {
 					self.cancel_on_limit = Some(l);
 				}
 			}
+			// Check if we can skip processing the document below "start".
+			if let Some(false) = is_specific_permission {
+				let s = self.start.unwrap_or(0) as usize;
+				if s > 0 {
+					self.start_skip = Some(s);
+				}
+			}
+		}
+	}
+
+	/// Return the number of record that should be skipped
+	pub(super) fn skippable(&self) -> usize {
+		self.start_skip.unwrap_or(0)
+	}
+
+	/// Confirm the number of records that have been skipped
+	pub(super) fn skipped(&mut self, skipped: usize) {
+		if let Some(s) = &mut self.start_skip {
+			*s -= skipped;
 		}
 	}
 
@@ -539,36 +573,22 @@ impl Iterator {
 		Ok(())
 	}
 
-	#[cfg(target_family = "wasm")]
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
-		// Prevent deep recursion
-		let opt = &opt.dive(4)?;
-		// If any iterator requires distinct, we need to create a global distinct instance
-		let mut distinct = SyncDistinct::new(ctx);
-		// Process all prepared values
-		for v in mem::take(&mut self.entries) {
-			v.iterate(stk, ctx, opt, stm, self, distinct.as_mut()).await?;
-		}
-		// Everything processed ok
-		Ok(())
-	}
-
-	#[cfg(not(target_family = "wasm"))]
-	async fn iterate(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		stm: &Statement<'_>,
+		is_specific_permission: Option<bool>,
+		exp: Option<&mut Explanation>,
 	) -> Result<(), Error> {
 		// Compute iteration limits
-		self.compute_start_limit(ctx, stm);
+		self.compute_start_limit(ctx, stm, is_specific_permission);
+		if let Some(e) = exp {
+			if self.start_skip.is_some() || self.cancel_on_limit.is_some() {
+				e.add_start_limit(self.start_skip, self.cancel_on_limit);
+			}
+		}
 		// Prevent deep recursion
 		let opt = opt.dive(4)?;
 		// If any iterator requires distinct, we need to create a global distinct instance

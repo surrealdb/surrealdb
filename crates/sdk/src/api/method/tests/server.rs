@@ -44,6 +44,9 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				Command::Query {
 					..
 				} => Ok(DbResponse::Query(QueryResponse::new())),
+				Command::RawQuery {
+					..
+				} => Ok(DbResponse::Query(QueryResponse::new())),
 				Command::Create {
 					data,
 					..

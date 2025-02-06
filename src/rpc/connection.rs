@@ -1,6 +1,7 @@
-use crate::cnf::{
-	PKG_NAME, PKG_VERSION, WEBSOCKET_MAX_CONCURRENT_REQUESTS, WEBSOCKET_PING_FREQUENCY,
-};
+use crate::cnf::WEBSOCKET_PING_FREQUENCY;
+use crate::cnf::WEBSOCKET_RESPONSE_BUFFER_SIZE;
+use crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_SIZE;
+use crate::cnf::{PKG_NAME, PKG_VERSION};
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
 use crate::rpc::response::{failure, IntoRpcResponse};
@@ -9,8 +10,8 @@ use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
 use axum::extract::ws::{close_code::AGAIN, CloseFrame, Message, WebSocket};
-use futures_util::sink::Buffer;
-use futures_util::stream::{SplitSink, SplitStream};
+use core::fmt;
+use futures::Sink;
 use futures_util::{SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
@@ -28,7 +29,7 @@ use surrealdb::rpc::Data;
 use surrealdb::rpc::RpcContext;
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
-use tokio::sync::{RwLock, Semaphore};
+use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
@@ -60,8 +61,6 @@ pub struct Connection {
 	pub(crate) shutdown: CancellationToken,
 	/// A cancellation token for cancelling all spawned tasks
 	pub(crate) canceller: CancellationToken,
-	/// A semaphore for limiting the number of concurrent calls
-	pub(crate) semaphore: Arc<Semaphore>,
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: (Sender<Message>, Receiver<Message>),
 	/// The GraphQL schema cache stored in advance
@@ -89,8 +88,7 @@ impl Connection {
 			vars: BTreeMap::new(),
 			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
-			semaphore: Arc::new(Semaphore::new(*WEBSOCKET_MAX_CONCURRENT_REQUESTS)),
-			channel: channel::bounded(100),
+			channel: channel::bounded(*WEBSOCKET_RESPONSE_CHANNEL_SIZE),
 			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
@@ -107,8 +105,6 @@ impl Connection {
 		let state = rpc_lock.state.clone();
 		// Log the succesful WebSocket connection
 		trace!("WebSocket {} connected", id);
-		// Split the socket into sending and receiving streams
-		let (sender, receiver) = ws.buffer(100).split();
 		// Create an internal channel for sending and receiving
 		let internal_sender = rpc_lock.channel.0.clone();
 		let internal_receiver = rpc_lock.channel.1.clone();
@@ -123,8 +119,23 @@ impl Connection {
 		// Spawn async tasks for the WebSocket
 		let mut tasks = JoinSet::new();
 		tasks.spawn(Self::ping(rpc.clone(), internal_sender.clone()));
-		tasks.spawn(Self::read(rpc.clone(), receiver, internal_sender.clone()));
-		tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver.clone()));
+		// Buffer the WebSocket response stream
+		match *WEBSOCKET_RESPONSE_BUFFER_SIZE > 0 {
+			true => {
+				// Buffer the WebSocket response stream
+				let buffer = ws.buffer(*WEBSOCKET_RESPONSE_BUFFER_SIZE);
+				// Split the socket into sending and receiving streams
+				let (sender, receiver) = buffer.split();
+				tasks.spawn(Self::read(rpc.clone(), receiver, internal_sender.clone()));
+				tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver));
+			}
+			false => {
+				// Split the socket into sending and receiving streams
+				let (sender, receiver) = ws.split();
+				tasks.spawn(Self::read(rpc.clone(), receiver, internal_sender.clone()));
+				tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver));
+			}
+		}
 		// Wait for all tasks to finish
 		while let Some(res) = tasks.join_next().await {
 			if let Err(err) = res {
@@ -179,11 +190,13 @@ impl Connection {
 	}
 
 	/// Write messages to the client
-	async fn write(
+	async fn write<S: SinkExt<Message> + Unpin>(
 		rpc: Arc<RwLock<Connection>>,
-		mut sender: SplitSink<Buffer<WebSocket, Message>, Message>,
+		mut sender: S,
 		internal_receiver: Receiver<Message>,
-	) {
+	) where
+		<S as Sink<Message>>::Error: fmt::Display,
+	{
 		// Pin the internal receiving channel
 		let mut internal_receiver = Box::pin(internal_receiver);
 		// Clone the WebSocket cancellation token
@@ -216,7 +229,7 @@ impl Connection {
 	/// Read messages sent from the client
 	async fn read(
 		rpc: Arc<RwLock<Connection>>,
-		mut receiver: SplitStream<Buffer<WebSocket, Message>>,
+		mut receiver: impl StreamExt<Item = Result<Message, axum::Error>> + Unpin,
 		internal_sender: Sender<Message>,
 	) {
 		// Get all required values
@@ -336,7 +349,7 @@ impl Connection {
 	/// Handle an individual WebSocket message
 	async fn handle_message(rpc: Arc<RwLock<Connection>>, msg: Message, chn: Sender<Message>) {
 		// Get all required values
-		let (id, fmt, shutdown, canceller, semaphore) = {
+		let (id, fmt, shutdown, canceller) = {
 			// Read the connection state
 			let rpc = rpc.read().await;
 			// Fetch the connection id
@@ -347,10 +360,8 @@ impl Connection {
 			let shutdown = rpc.shutdown.clone();
 			// Clone the WebSocket cancellation token
 			let canceller = rpc.canceller.clone();
-			// Clone the request limiter
-			let semaphore = rpc.semaphore.clone();
 			// Return the required values
-			(id, format, shutdown, canceller, semaphore)
+			(id, format, shutdown, canceller)
 		};
 		// Calculate the message lenght and format
 		let (len, fmt) = match msg {
@@ -430,25 +441,12 @@ impl Connection {
 								}
 								// Otherwise process the request message
 								else {
-									// Acquire concurrent request rate limiter
-									let permit = semaphore.acquire().await.unwrap();
-									// Check to see whether we have available memory
-									if ALLOC.is_beyond_threshold() {
-										// Process the response
-										failure(req.id, Failure::custom(SERVER_OVERLOADED))
-											.send(otel_cx.clone(), fmt, chn)
-											.with_context(otel_cx.as_ref().clone())
-											.await;
-									} else {
-										// Process the message when the semaphore is acquired
-										Self::process_message(rpc.clone(), method, req.params).await
-											.into_response(req.id)
-											.send(otel_cx.clone(), fmt, chn)
-											.with_context(otel_cx.as_ref().clone())
-											.await;
-									}
-									// Drop the rate limiter permit
-									drop(permit);
+									// Process the message when the semaphore is acquired
+									Self::process_message(rpc.clone(), method, req.params).await
+										.into_response(req.id)
+										.send(otel_cx.clone(), fmt, chn)
+										.with_context(otel_cx.as_ref().clone())
+										.await;
 								}
 							}
 						} => (),
