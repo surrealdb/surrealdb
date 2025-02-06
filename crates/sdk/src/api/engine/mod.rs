@@ -39,7 +39,7 @@ use super::opt::Table;
 
 // used in http and all local engines.
 #[allow(dead_code)]
-fn resource_to_values(r: Resource) -> CoreValues {
+pub(crate) fn resource_to_values(r: Resource) -> CoreValues {
 	let mut res = CoreValues::default();
 	match r {
 		Resource::Table(x) => {

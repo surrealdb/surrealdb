@@ -21,6 +21,7 @@ pub struct Merge<'r, C: Connection, D, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) content: D,
+	pub(super) upsert: bool,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -38,12 +39,13 @@ where
 }
 
 macro_rules! into_future {
-	($method:ident) => {
+	() => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Merge {
 				client,
 				resource,
 				content,
+				upsert,
 				..
 			} = self;
 			let content = to_core_value(content);
@@ -58,10 +60,11 @@ macro_rules! into_future {
 
 				let router = client.router.extract()?;
 				let cmd = Command::Merge {
+					upsert,
 					what: resource?,
 					data: content,
 				};
-				router.$method(cmd).await
+				router.execute_query(cmd).await?.take(0)
 			})
 		}
 	};
@@ -75,7 +78,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_value}
+	into_future! {}
 }
 
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Option<R>>
@@ -87,7 +90,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_opt}
+	into_future! {}
 }
 
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Vec<R>>
@@ -99,5 +102,5 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_vec}
+	into_future! {}
 }

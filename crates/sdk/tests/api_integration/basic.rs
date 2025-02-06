@@ -1069,7 +1069,7 @@ struct Person {
 	marketing: bool,
 }
 
-pub async fn merge_record_id(new_db: impl CreateDb) {
+pub async fn update_merge_record_id(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
@@ -1105,6 +1105,84 @@ pub async fn merge_record_id(new_db: impl CreateDb) {
 	);
 }
 
+pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	// Create a new record using upsert
+	let record_id = ("person", "jaime");
+	let mut jaime: Option<Person> = db
+		.upsert(record_id)
+		.content(Person {
+			id: None,
+			title: "Founder & COO".into(),
+			name: Name {
+				first: "Jaime".into(),
+				last: "Morgan Hitchcock".into(),
+			},
+			marketing: false,
+		})
+		.await
+		.unwrap();
+	assert_eq!(jaime.unwrap().id.unwrap(), "person:jaime".parse().unwrap());
+	// Update the record using merge
+	jaime = db.upsert(record_id).merge(json!({ "marketing": true })).await.unwrap();
+	assert!(jaime.as_ref().unwrap().marketing);
+	jaime = db.select(record_id).await.unwrap();
+	assert_eq!(
+		jaime,
+		Some(Person {
+			id: Some("person:jaime".parse().unwrap()),
+			title: "Founder & COO".into(),
+			name: Name {
+				first: "Jaime".into(),
+				last: "Morgan Hitchcock".into(),
+			},
+			marketing: true,
+		})
+	);
+	// Call upsert.merge on a new record
+	let mut tobie: Option<Person> = db
+		.upsert(("person", "tobie"))
+		.merge(Person {
+			id: None,
+			title: "Founder & CEO".into(),
+			name: Name {
+				first: "Tobie".into(),
+				last: "Morgan Hitchcock".into(),
+			},
+			marketing: true,
+		})
+		.await
+		.unwrap();
+	assert_eq!(
+		tobie,
+		Some(Person {
+			id: Some("person:tobie".parse().unwrap()),
+			title: "Founder & CEO".into(),
+			name: Name {
+				first: "Tobie".into(),
+				last: "Morgan Hitchcock".into(),
+			},
+			marketing: true,
+		})
+	);
+	// Ensure the record is saved
+	tobie = db.select(("person", "tobie")).await.unwrap();
+	assert_eq!(
+		tobie,
+		Some(Person {
+			id: Some("person:tobie".parse().unwrap()),
+			title: "Founder & CEO".into(),
+			name: Name {
+				first: "Tobie".into(),
+				last: "Morgan Hitchcock".into(),
+			},
+			marketing: true,
+		})
+	);
+}
+
 pub async fn patch_record_id(new_db: impl CreateDb) {
 	#[derive(Debug, Deserialize, PartialEq)]
 	struct Record {
@@ -1137,6 +1215,68 @@ pub async fn patch_record_id(new_db: impl CreateDb) {
 		value,
 		Some(Record {
 			id: format!("user:{id}").parse().unwrap(),
+			baz: "boo".to_owned(),
+			hello: vec!["world".to_owned()],
+		})
+	);
+}
+
+pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
+	#[derive(Debug, Deserialize, PartialEq)]
+	struct Record {
+		id: RecordId,
+		baz: String,
+		hello: Vec<String>,
+	}
+
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let id = "john";
+	// Create a new record using upsert
+	let _: Option<ApiRecordId> = db
+		.upsert(("user", id))
+		.content(json!({
+			"baz": "qux",
+			"foo": "bar"
+		}))
+		.await
+		.unwrap();
+	// Update the record using patch
+	let _: Option<Record> = db
+		.update(("user", id))
+		.patch(PatchOps::new().replace("/baz", "boo").add("/hello", ["world"]).remove("/foo"))
+		.await
+		.unwrap();
+	let value: Option<Record> = db.select(("user", id)).await.unwrap();
+	assert_eq!(
+		value,
+		Some(Record {
+			id: format!("user:{id}").parse().unwrap(),
+			baz: "boo".to_owned(),
+			hello: vec!["world".to_owned()],
+		})
+	);
+	// Call upsert.patch on a new record
+	let mut jane: Option<Record> = db
+		.upsert(("user", "jane"))
+		.patch(PatchOps::new().replace("/baz", "boo").add("/hello", ["world"]).remove("/foo"))
+		.await
+		.unwrap();
+	assert_eq!(
+		jane,
+		Some(Record {
+			id: "user:jane".parse().unwrap(),
+			baz: "boo".to_owned(),
+			hello: vec!["world".to_owned()],
+		})
+	);
+	// Ensure the record is saved
+	jane = db.select(("user", "jane")).await.unwrap();
+	assert_eq!(
+		jane,
+		Some(Record {
+			id: "user:jane".parse().unwrap(),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
@@ -1655,9 +1795,13 @@ define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	update_record_id_with_content,
 	#[test_log::test(tokio::test)]
-	merge_record_id,
+	update_merge_record_id,
+	#[test_log::test(tokio::test)]
+	upsert_merge_record_id,
 	#[test_log::test(tokio::test)]
 	patch_record_id,
+	#[test_log::test(tokio::test)]
+	upsert_patch_record_id,
 	#[test_log::test(tokio::test)]
 	patch_record_id_ops,
 	#[test_log::test(tokio::test)]
