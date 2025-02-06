@@ -565,11 +565,17 @@ impl Building {
 		Ok(())
 	}
 
+	/// Abort the current indexing process.
 	fn abort(&self) {
+		// We use `Ordering::Relaxed` as the called does not require to be synchronized.
+		// We just want the current builder to eventually stop.
 		self.aborted.store(true, Ordering::Relaxed);
 	}
 
+	/// Check if the indexing process is aborting.
 	async fn is_aborted(&self) -> bool {
+		// We use `Ordering::Relaxed` as there are no shared data that would require any synchronization.
+		// This method is only called by the single thread building the index.
 		if self.aborted.load(Ordering::Relaxed) {
 			self.set_status(BuildingStatus::Aborted).await;
 			true
