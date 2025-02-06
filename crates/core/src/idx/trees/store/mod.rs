@@ -12,7 +12,9 @@ use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::idx::IndexKeyBase;
-use crate::kvs::{IndexBuilder, Key, Transaction, TransactionType, Val};
+#[cfg(not(target_family = "wasm"))]
+use crate::kvs::IndexBuilder;
+use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::index::HnswParams;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::Index;
