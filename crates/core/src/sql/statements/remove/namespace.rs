@@ -29,7 +29,12 @@ impl RemoveNamespaceStatement {
 			// Get the transaction
 			let txn = ctx.tx();
 			// Remove the index stores
-			ctx.get_index_stores().namespace_removed(ctx, &txn, &self.name).await?;
+			#[cfg(not(target_family = "wasm"))]
+			ctx.get_index_stores()
+				.namespace_removed(ctx.get_index_builder(), &txn, &self.name)
+				.await?;
+			#[cfg(target_family = "wasm")]
+			ctx.get_index_stores().namespace_removed(&txn, &self.name).await?;
 			// Get the definition
 			let ns = txn.get_ns(&self.name).await?;
 			// Delete the definition
