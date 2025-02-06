@@ -1,7 +1,7 @@
 /**
 
 [env.capabilities]
-allow_experimental = ["record_references"]
+allow-experimental = ["record_references"]
 
 [test]
 
