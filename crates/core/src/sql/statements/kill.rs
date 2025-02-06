@@ -37,7 +37,7 @@ impl KillStatement {
 		let lid = match self.id.compute(stk, ctx, opt, None).await?.convert_to_uuid() {
 			Err(_) => {
 				return Err(Error::KillStatement {
-					value: self.id.to_string(),
+					value: self.id.to_raw_string(),
 				})
 			}
 			Ok(id) => id,
@@ -70,7 +70,7 @@ impl KillStatement {
 			}
 			None => {
 				return Err(Error::KillStatement {
-					value: self.id.to_string(),
+					value: self.id.to_raw_string(),
 				});
 			}
 		}
