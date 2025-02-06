@@ -43,8 +43,14 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				} => Ok(DbResponse::Other(CoreValue::None)),
 				Command::Query {
 					..
-				} => Ok(DbResponse::Query(QueryResponse::new())),
-				Command::RawQuery {
+				}
+				| Command::RawQuery {
+					..
+				}
+				| Command::Patch {
+					..
+				}
+				| Command::Merge {
 					..
 				} => Ok(DbResponse::Query(QueryResponse::new())),
 				Command::Create {
@@ -75,14 +81,6 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					..
 				}
 				| Command::Update {
-					what,
-					..
-				}
-				| Command::Merge {
-					what,
-					..
-				}
-				| Command::Patch {
 					what,
 					..
 				} => match what {
