@@ -3,13 +3,16 @@ use surrealdb_core::dbs::capabilities::{Capabilities, Targets};
 
 /// Creates the right core capabilities from a test config.
 pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
-	/// Returns Targets::All if there is no value and deny is false,
-	/// Returns Targets::None if there is no value and deny is true ensuring the default behaviour
+	/// Returns Targets::All if there is no value and none_on_missing is false,
+	/// Returns Targets::None if there is no value and none_on_missing is true ensuring the default behaviour
 	/// is to allow everything.
 	///
 	/// If there is a value it will return Targets::All on the value true, Targets::None on the
 	/// value false, and otherwise the returns the specified values.
-	fn extract_targets<T>(v: &Option<BoolOr<Vec<SchemaTarget<T>>>>, deny: bool) -> Targets<T>
+	fn extract_targets<T>(
+		v: &Option<BoolOr<Vec<SchemaTarget<T>>>>,
+		none_on_missing: bool,
+	) -> Targets<T>
 	where
 		T: std::cmp::Eq + std::hash::Hash + Clone,
 	{
@@ -19,7 +22,7 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 				BoolOr::Bool(false) => Targets::None,
 				BoolOr::Value(x) => Targets::Some(x.iter().map(|x| x.0.clone()).collect()),
 			})
-			.unwrap_or(if deny {
+			.unwrap_or(if none_on_missing {
 				Targets::None
 			} else {
 				Targets::All
@@ -37,7 +40,7 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 				BoolOr::Value(x) => x,
 			};
 
-			Capabilities::all()
+			Capabilities::none()
 				.with_scripting(schema_cap.scripting.unwrap_or(true))
 				.with_guest_access(schema_cap.quest_access.unwrap_or(true))
 				.with_live_query_notifications(schema_cap.live_query_notifications.unwrap_or(true))
@@ -49,7 +52,7 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 				.without_rpc_methods(extract_targets(&schema_cap.deny_rpc, true))
 				.with_http_routes(extract_targets(&schema_cap.allow_http, false))
 				.without_http_routes(extract_targets(&schema_cap.deny_http, true))
-				.with_experimental(extract_targets(&schema_cap.allow_experimental, false))
+				.with_experimental(extract_targets(&schema_cap.allow_experimental, true))
 				.without_experimental(extract_targets(&schema_cap.deny_experimental, true))
 		})
 		.unwrap_or_else(Capabilities::all)

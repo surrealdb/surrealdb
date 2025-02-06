@@ -16,6 +16,7 @@ use std::marker::PhantomData;
 use surrealdb_core::sql::{to_value as to_core_value, Object as CoreObject, Value as CoreValue};
 
 use super::insert_relation::InsertRelation;
+use super::validate_data;
 
 /// An insert future
 #[derive(Debug)]
@@ -122,6 +123,7 @@ where
 	{
 		Content::from_closure(self.client, || {
 			let mut data = to_core_value(data)?;
+			validate_data(&data, "Tried to insert non-object-like data as content, only structs and objects are supported")?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::Insert {
 					what: Some(table),
@@ -170,6 +172,7 @@ where
 	{
 		InsertRelation::from_closure(self.client, || {
 			let mut data = to_core_value(data)?;
+			validate_data(&data, "Tried to insert non-object-like data as relation data, only structs and objects are supported")?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::InsertRelation {
 					what: Some(table),

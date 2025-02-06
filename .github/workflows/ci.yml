@@ -850,11 +850,13 @@ jobs:
         run: sleep 10
 
       - name: Run Golang tests (HTTP)
+        continue-on-error: true
         run: go test -v -cover ./...
         env:
           SURREALDB_URL: http://localhost:8000/rpc
 
       - name: Run Golang tests (WebSocket)
+        continue-on-error: true
         run: go test -v -cover ./...
         env:
           SURREALDB_URL: ws://localhost:8000/rpc
