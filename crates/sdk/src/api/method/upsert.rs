@@ -153,6 +153,7 @@ where
 			client: self.client,
 			resource: self.resource,
 			content: data,
+			upsert: true,
 			response_type: PhantomData,
 		}
 	}
@@ -169,6 +170,7 @@ where
 			patches,
 			client: self.client,
 			resource: self.resource,
+			upsert: true,
 			response_type: PhantomData,
 		}
 	}
