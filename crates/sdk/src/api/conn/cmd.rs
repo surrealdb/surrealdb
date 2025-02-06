@@ -1,5 +1,4 @@
 use super::MlExportConfig;
-use crate::api::engine::resource_to_values;
 use crate::{opt::Resource, value::Notification, Result};
 use bincode::Options;
 use channel::Sender;
@@ -125,6 +124,7 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
+		use crate::api::engine::resource_to_values;
 		use surrealdb_core::sql::{
 			statements::{UpdateStatement, UpsertStatement},
 			Data, Output,
