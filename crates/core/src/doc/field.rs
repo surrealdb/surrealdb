@@ -115,8 +115,6 @@ impl Document {
 		// which are prefixed with the specified idiom
 		// will be skipped, as the parent object is optional
 		let mut skip: Option<&Idiom> = None;
-		// Stores whether the last iteration was an array type
-		// let mut is_array = false;
 		// Loop through all field statements
 		for fd in self.fd(ctx, opt).await?.iter() {
 			println!("\nfd {:?}", fd);
@@ -138,9 +136,6 @@ impl Document {
 
 			// Loop over each field in document
 			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
-				println!("\ndoc {:?}", self.current.doc);
-				println!("\nk {:?}", k);
-				println!("\nval {:?}", val);
 				// Get the initial value
 				let old = Arc::new(self.initial.doc.as_ref().pick(&k));
 				// Get the input value
