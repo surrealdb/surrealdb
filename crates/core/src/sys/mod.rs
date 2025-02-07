@@ -50,6 +50,9 @@ impl Default for Environment {
 	fn default() -> Self {
 		Self {
 			sys: System::new_all(),
+			#[cfg(target_family = "wasm")]
+			pid: 0.into(),
+			#[cfg(not(target_family = "wasm"))]
 			pid: Pid::from(std::process::id() as usize),
 		}
 	}
