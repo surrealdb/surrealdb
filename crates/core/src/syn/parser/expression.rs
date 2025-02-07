@@ -244,9 +244,13 @@ impl Parser<'_> {
 		// HACK: For compatiblity with the old parser apply + and - operator immediately if the
 		// left value is a number.
 		if let Value::Number(number) = v {
-			if let Operator::Neg = operator {
-				// this can only panic if `number` is i64::MIN which currently can't be parsed.
-				return Ok(Value::Number(number.try_neg().unwrap()));
+			// If the number was already negative we already did apply a - so just return a unary
+			// in this case.
+			if number.is_positive() {
+				if let Operator::Neg = operator {
+					// this can only panic if `number` is i64::MIN which currently can't be parsed.
+					return Ok(Value::Number(number.try_neg().unwrap()));
+				}
 			}
 
 			if let Operator::Add = operator {
