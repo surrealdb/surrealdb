@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -9,10 +8,10 @@ use super::AppState;
 use crate::cnf;
 use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
 use crate::err::Error;
-use crate::rpc::connection::Connection;
 use crate::rpc::format::HttpFormat;
-use crate::rpc::post_context::PostRpcContext;
+use crate::rpc::http::Http;
 use crate::rpc::response::IntoRpcResponse;
+use crate::rpc::websocket::Websocket;
 use crate::rpc::RpcState;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
@@ -141,9 +140,9 @@ async fn handle_socket(
 		_ => Format::Unsupported,
 	};
 	// Create a new connection instance
-	let rpc = Connection::new(datastore, state, id, sess, format);
+	let rpc = Websocket::new(datastore, state, id, sess, format);
 	// Serve the socket connection requests
-	Connection::serve(rpc, ws).await;
+	Websocket::serve(rpc, ws).await;
 }
 
 async fn post_handler(
@@ -175,7 +174,7 @@ async fn post_handler(
 		}
 	}
 	// Create a new HTTP instance
-	let mut rpc = PostRpcContext::new(&state.datastore, session, BTreeMap::new());
+	let rpc = Http::new(&state.datastore, session);
 	// Check to see available memory
 	if ALLOC.is_beyond_threshold() {
 		return Err(Error::ServerOverloaded);
@@ -186,7 +185,7 @@ async fn post_handler(
 			// Parse the request RPC method type
 			let method = Method::parse(req.method);
 			// Execute the specified method
-			let res = rpc.execute_mutable(method, req.params).await;
+			let res = rpc.execute(method, req.params).await;
 			// Return the HTTP response
 			fmt.res_http(res.into_response(None)).map_err(Error::from)
 		}

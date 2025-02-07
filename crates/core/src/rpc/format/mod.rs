@@ -30,6 +30,7 @@ pub enum Format {
 }
 
 pub trait ResTrait: Serialize + Into<Value> + Revisioned {}
+
 impl<T: Serialize + Into<Value> + Revisioned> ResTrait for T {}
 
 impl From<&str> for Format {
