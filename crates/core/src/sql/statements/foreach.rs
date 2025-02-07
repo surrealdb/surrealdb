@@ -62,7 +62,7 @@ impl ForeachStatement {
 
 			v => {
 				return Err(Error::InvalidStatementTarget {
-					value: v.to_raw_string(),
+					value: v.to_string(),
 				})
 			}
 		};

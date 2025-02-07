@@ -136,7 +136,7 @@ impl LiveStatement {
 			}
 			v => {
 				return Err(Error::LiveStatement {
-					value: v.to_raw_string(),
+					value: v.to_string(),
 				});
 			}
 		};

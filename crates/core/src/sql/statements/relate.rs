@@ -74,7 +74,7 @@ impl RelateStatement {
 							},
 							v => {
 								return Err(Error::RelateStatementIn {
-									value: v.to_raw_string(),
+									value: v.to_string(),
 								})
 							}
 						}
@@ -90,7 +90,7 @@ impl RelateStatement {
 				},
 				v => {
 					return Err(Error::RelateStatementIn {
-						value: v.to_raw_string(),
+						value: v.to_string(),
 					})
 				}
 			};
@@ -116,7 +116,7 @@ impl RelateStatement {
 							},
 							v => {
 								return Err(Error::RelateStatementId {
-									value: v.to_raw_string(),
+									value: v.to_string(),
 								})
 							}
 						}
@@ -132,7 +132,7 @@ impl RelateStatement {
 				},
 				v => {
 					return Err(Error::RelateStatementId {
-						value: v.to_raw_string(),
+						value: v.to_string(),
 					})
 				}
 			};
@@ -162,7 +162,7 @@ impl RelateStatement {
 					// The relation can not be any other type
 					v => {
 						return Err(Error::RelateStatementOut {
-							value: v.to_raw_string(),
+							value: v.to_string(),
 						})
 					}
 				};
