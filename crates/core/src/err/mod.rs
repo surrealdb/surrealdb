@@ -528,7 +528,7 @@ pub enum Error {
 	},
 
 	/// Can not execute KILL statement using the specified id
-	#[error("Can not execute KILL statement using id: {value}'")]
+	#[error("Can not execute KILL statement using id: {value}")]
 	KillStatement {
 		value: String,
 	},
