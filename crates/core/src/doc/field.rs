@@ -117,7 +117,6 @@ impl Document {
 		let mut skip: Option<&Idiom> = None;
 		// Loop through all field statements
 		for fd in self.fd(ctx, opt).await?.iter() {
-			println!("\nfd {:?}", fd);
 			// Check if we should skip this field
 			let skipped = match skip {
 				// We are skipping a parent field
