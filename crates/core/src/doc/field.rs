@@ -53,7 +53,7 @@ impl Document {
 				}
 			}
 			// Loop over every field in the document
-			for fd in self.current.doc.every(None, true, true).iter() {
+			for fd in self.current.doc.every(None, true, false).iter() {
 				if !keys.contains(fd) {
 					match fd {
 						// Built-in fields
@@ -82,7 +82,7 @@ impl Document {
 			}
 		} else {
 			// Loop over every field in the document
-			for fd in self.current.doc.every(None, true, true).iter() {
+			for fd in self.current.doc.every(None, true, false).iter() {
 				// NONE values should never be stored
 				if self.current.doc.pick(fd).is_none() {
 					self.current.doc.to_mut().cut(fd);
@@ -115,8 +115,11 @@ impl Document {
 		// which are prefixed with the specified idiom
 		// will be skipped, as the parent object is optional
 		let mut skip: Option<&Idiom> = None;
+		// Stores whether the last iteration was an array type
+		// let mut is_array = false;
 		// Loop through all field statements
 		for fd in self.fd(ctx, opt).await?.iter() {
+			println!("\nfd {:?}", fd);
 			// Check if we should skip this field
 			let skipped = match skip {
 				// We are skipping a parent field
@@ -132,8 +135,12 @@ impl Document {
 				}
 				None => false,
 			};
+
 			// Loop over each field in document
 			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+				println!("\ndoc {:?}", self.current.doc);
+				println!("\nk {:?}", k);
+				println!("\nval {:?}", val);
 				// Get the initial value
 				let old = Arc::new(self.initial.doc.as_ref().pick(&k));
 				// Get the input value
@@ -240,10 +247,7 @@ impl Document {
 						skip = Some(&fd.name);
 					}
 					// Set the new value of the field, or delete it if empty
-					match val.is_none() {
-						false => self.current.doc.to_mut().put(&k, val),
-						true => self.current.doc.to_mut().cut(&k),
-					};
+					self.current.doc.to_mut().put(&k, val);
 				}
 			}
 		}
