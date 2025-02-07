@@ -5,25 +5,32 @@ use super::params::Params;
 use super::AppState;
 use crate::cnf::HTTP_MAX_API_BODY_SIZE;
 use crate::err::Error;
-use crate::net::output;
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
 use axum::extract::Query;
+use axum::http::HeaderMap;
 use axum::http::Method;
 use axum::response::IntoResponse;
 use axum::routing::any;
 use axum::Extension;
 use axum::Router;
-use http::HeaderMap;
+use http::header::CONTENT_TYPE;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
+use surrealdb::rpc::format::cbor;
+use surrealdb::rpc::format::json;
+use surrealdb::rpc::format::msgpack;
+use surrealdb::rpc::format::revision;
+use surrealdb::rpc::format::Format;
 use surrealdb::sql::statements::FindApi;
-use surrealdb::sql::Object;
 use surrealdb::sql::Value;
-use surrealdb::{ApiBody, ApiInvocation, ApiMethod};
+use surrealdb_core::api::{
+	body::ApiBody, invocation::ApiInvocation, method::Method as ApiMethod,
+	response::ResponseInstruction,
+};
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
@@ -55,25 +62,7 @@ async fn handler(
 		return Err(Error::ForbiddenRoute(RouteTarget::Api.to_string()));
 	}
 
-	let headers = {
-		let mut x = Object::default();
-
-		for (key, value) in headers.iter() {
-			let value =
-				value.to_str().map_err(|e| Error::InvalidHeader(key.to_owned(), e.to_string()))?;
-
-			x.insert(key.as_str().to_string(), Value::from(value));
-		}
-
-		x
-	};
-
-	let query: Object = query
-		.inner
-		.into_iter()
-		.map(|(k, v)| (k, Value::from(v)))
-		.collect::<BTreeMap<String, Value>>()
-		.into();
+	let query = query.inner.into_iter().map(|(k, v)| (k, v)).collect::<BTreeMap<String, String>>();
 
 	let method = match method {
 		Method::DELETE => ApiMethod::Delete,
@@ -91,50 +80,75 @@ async fn handler(
 	let apis = tx.all_db_apis(&ns, &db).await.map_err(Error::from)?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-	let res = if let Some((api, params)) = apis.as_ref().find_api(segments, method) {
-		let invocation = ApiInvocation {
-			params,
-			method,
-			query,
-			headers,
-			session: Some(session),
-			values: vec![],
-		};
+	let (mut res, res_instruction) =
+		if let Some((api, params)) = apis.as_ref().find_api(segments, method) {
+			let invocation = ApiInvocation {
+				params,
+				method,
+				query,
+				headers,
+				session: Some(session),
+				values: vec![],
+			};
 
-		match invocation
-			.invoke_with_transaction(
-				ns,
-				db,
-				tx.clone(),
-				ds.clone(),
-				api,
-				ApiBody::from_stream(body.into_data_stream()),
-			)
-			.await
-		{
-			Ok(Some(v)) => v,
-			Err(e) => return Err(Error::from(e)),
-			_ => return Err(Error::NotFound(url)),
-		}
-	} else {
-		return Err(Error::NotFound(url));
-	};
+			match invocation
+				.invoke_with_transaction(
+					ns,
+					db,
+					tx.clone(),
+					ds.clone(),
+					api,
+					ApiBody::from_stream(body.into_data_stream()),
+				)
+				.await
+			{
+				Ok(Some(v)) => v,
+				Err(e) => return Err(Error::from(e)),
+				_ => return Err(Error::NotFound(url)),
+			}
+		} else {
+			return Err(Error::NotFound(url));
+		};
 
 	// Commit the transaction
 	tx.commit().await.map_err(Error::from)?;
 
-	// // Convert the received sql query
-	// let sql = bytes_to_utf8(&sql)?;
-	// Execute the received sql query
-	Ok(output::json(&res))
-	// match None {
-	// 	// Simple serialization
-	// 	None | Some(Accept::ApplicationJson) => Ok(output::json(&res)),
-	// 	Some(Accept::ApplicationCbor) => Ok(output::cbor(&res)),
-	// 	Some(Accept::ApplicationPack) => Ok(output::pack(&res)),
-	// 	// Internal serialization
-	// 	Some(Accept::Surrealdb) => Ok(output::full(&res)),
-	// 	// An incorrect content-type was requested
-	// 	_ => Err(Error::InvalidType),
-	// }
+	let res_body: Vec<u8> = if let Some(body) = res.body {
+		match res_instruction {
+			ResponseInstruction::Raw => match body {
+				Value::Strand(v) => {
+					res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().unwrap());
+					v.0.into_bytes()
+				}
+				Value::Bytes(v) => {
+					res.headers
+						.entry(CONTENT_TYPE)
+						.or_insert("application/octet-stream".parse().unwrap());
+					v.into()
+				}
+				_ => return Err(Error::InvalidType),
+			},
+			ResponseInstruction::Format(format) => {
+				if res.headers.contains_key("Content-Type") {
+					return Err(Error::InvalidType);
+				}
+
+				let (header, val) = match format {
+					Format::Json => ("application/cbor", json::res(body)?),
+					Format::Cbor => ("application/cbor", cbor::res(body)?),
+					Format::Msgpack => ("application/pack", msgpack::res(body)?),
+					Format::Revision => ("application/surrealdb", revision::res(body)?),
+					_ => return Err(Error::InvalidType),
+				};
+
+				res.headers.insert(CONTENT_TYPE, header.parse().unwrap());
+				val
+			}
+			ResponseInstruction::Native => return Err(Error::InvalidType),
+		}
+	} else {
+		Vec::new()
+	};
+
+	Ok((res.status, res.headers, res_body))
 }

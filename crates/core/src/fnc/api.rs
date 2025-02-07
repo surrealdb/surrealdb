@@ -1,14 +1,14 @@
+use http::HeaderMap;
 use reblessive::tree::Stk;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
-	api::{body::ApiBody, method::Method},
+	api::{body::ApiBody, invocation::ApiInvocation, method::Method},
 	ctx::Context,
 	dbs::Options,
 	err::Error,
 	iam::{Auth, Role},
-	sql::{statements::FindApi, Bytes, Object, Value},
-	ApiInvocation,
+	sql::{statements::FindApi, Object, Value},
 };
 
 pub async fn invoke(
@@ -17,8 +17,8 @@ pub async fn invoke(
 ) -> Result<Value, Error> {
 	let (body, method, query, headers) = if let Some(opts) = opts {
 		let body = match opts.get("body") {
-			Some(v) => v.to_owned().convert_to_bytes()?,
-			_ => Bytes::default(),
+			Some(v) => v.to_owned(),
+			_ => Default::default(),
 		};
 
 		let method = if let Some(v) = opts.get("method") {
@@ -27,33 +27,26 @@ pub async fn invoke(
 			Method::Get
 		};
 
-		let query = if let Some(v) = opts.get("query") {
-			v.to_owned().convert_to_object()?
+		let query: BTreeMap<String, String> = if let Some(v) = opts.get("query") {
+			v.to_owned().convert_to_object()?.try_into()?
 		} else {
-			Object::default()
+			Default::default()
 		};
 
-		let headers = if let Some(v) = opts.get("headers") {
-			let obj = v.to_owned().convert_to_object()?;
-			if obj.iter().any(|(_, v)| !v.is_strand()) {
-				// TODO(kearfy): Add proper error
-				return Err(Error::Unreachable("All headers must be strands".into()));
-			}
-
-			obj
+		let headers: HeaderMap = if let Some(v) = opts.get("headers") {
+			v.to_owned().convert_to_object()?.try_into()?
 		} else {
-			Object::default()
+			Default::default()
 		};
 
 		(body, method, query, headers)
 	} else {
-		(Bytes::default(), Method::Get, Object::default(), Object::default())
+		(Default::default(), Method::Get, Default::default(), Default::default())
 	};
 
 	let ns = opt.ns()?;
 	let db = opt.db()?;
-	let tx = ctx.tx();
-	let apis = tx.all_db_apis(&ns, &db).await?;
+	let apis = ctx.tx().all_db_apis(&ns, &db).await?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
 	if let Some((api, params)) = apis.as_ref().find_api(segments, method) {
@@ -75,8 +68,8 @@ pub async fn invoke(
 			values,
 		};
 
-		match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_bytes(body)).await {
-			Ok(Some(v)) => Ok(v),
+		match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(body)).await {
+			Ok(Some(v)) => v.0.try_into(),
 			Err(e) => return Err(e),
 			_ => Ok(Value::None),
 		}

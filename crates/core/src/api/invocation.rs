@@ -1,8 +1,15 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
+use http::HeaderMap;
 use reblessive::{tree::Stk, TreeStack};
 
-use super::{context::RequestContext, method::Method, middleware::CollectMiddleware};
+use super::{
+	body::ApiBody,
+	context::InvocationContext,
+	method::Method,
+	middleware::CollectMiddleware,
+	response::{ApiResponse, ResponseInstruction},
+};
 use crate::{
 	api::middleware::RequestMiddleware,
 	ctx::{Context, ContextIsolation, MutableContext},
@@ -12,9 +19,8 @@ use crate::{
 	kvs::{Datastore, Transaction},
 	sql::{
 		statements::{define::config::api::ApiConfig, DefineApiStatement},
-		Bytes, Object, Value,
+		Object, Value,
 	},
-	ApiBody,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,20 +28,20 @@ use crate::{
 pub struct ApiInvocation<'a> {
 	pub params: Object,
 	pub method: Method,
-	pub query: Object,
-	pub headers: Object,
+	pub query: BTreeMap<String, String>,
+	pub headers: HeaderMap,
 	pub session: Option<Session>,
 	pub values: Vec<(&'a str, Value)>,
 }
 
 impl<'a> ApiInvocation<'a> {
-	pub fn vars(self, body: Value) -> Value {
+	pub fn vars(self, body: Value) -> Result<Value, Error> {
 		let mut obj = map! {
 			"params" => Value::from(self.params),
 			"body" => body,
 			"method" => self.method.to_string().into(),
-			"query" => Value::from(self.query),
-			"headers" => Value::from(self.headers),
+			"query" => Value::Object(self.query.into()),
+			"headers" => Value::Object(self.headers.try_into()?),
 		};
 
 		if let Some(session) = self.session {
@@ -44,7 +50,7 @@ impl<'a> ApiInvocation<'a> {
 
 		obj.extend(self.values.into_iter());
 
-		obj.into()
+		Ok(obj.into())
 	}
 
 	pub async fn invoke_with_transaction(
@@ -55,7 +61,7 @@ impl<'a> ApiInvocation<'a> {
 		ds: Arc<Datastore>,
 		api: &DefineApiStatement,
 		body: ApiBody,
-	) -> Result<Option<Value>, Error> {
+	) -> Result<Option<(ApiResponse, ResponseInstruction)>, Error> {
 		let sess = Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Owner)
 			.with_ns(&ns)
 			.with_db(&db);
@@ -78,7 +84,7 @@ impl<'a> ApiInvocation<'a> {
 		opt: &Options,
 		api: &DefineApiStatement,
 		body: ApiBody,
-	) -> Result<Option<Value>, Error> {
+	) -> Result<Option<(ApiResponse, ResponseInstruction)>, Error> {
 		let (action, action_config) =
 			match api.actions.iter().find(|x| x.methods.contains(&self.method)) {
 				Some(v) => (&v.action, &v.config),
@@ -98,22 +104,29 @@ impl<'a> ApiInvocation<'a> {
 			configs.into_iter().filter_map(|v| v.middleware.as_ref()).collect();
 		let builtin = middleware.collect()?;
 
-		let mut req_ctx = RequestContext::default();
-		req_ctx.apply_middleware(builtin)?;
+		let mut inv_ctx = InvocationContext::default();
+		inv_ctx.apply_middleware(builtin)?;
 
-		println!("req_ctx: {:#?}", req_ctx);
+		// Prepare the response headers and conversion
+		let res_instruction = if body.is_native() {
+			ResponseInstruction::Native
+		} else if inv_ctx.response_body_raw {
+			ResponseInstruction::Raw
+		} else {
+			ResponseInstruction::for_format(&self)?
+		};
 
-		let body = body.stream(req_ctx.max_body_size).await?;
+		let body = body.process(&inv_ctx, &self).await?;
 
 		// Edit the context
 		let mut ctx = MutableContext::new_isolated(ctx, ContextIsolation::Full);
 
 		// Set the request variable
-		let vars = self.vars(Value::Bytes(Bytes(body)));
+		let vars = self.vars(body)?;
 		ctx.add_value("request", vars.into());
 
 		// Possibly set the timeout
-		if let Some(timeout) = req_ctx.timeout {
+		if let Some(timeout) = inv_ctx.timeout {
 			ctx.add_timeout(*timeout)?
 		}
 
@@ -123,6 +136,14 @@ impl<'a> ApiInvocation<'a> {
 		// Compute the action
 
 		let res = action.compute(stk, &ctx, opt, None).await?;
-		Ok(Some(res))
+
+		let mut res = ApiResponse::try_from(res)?;
+		if let Some(headers) = inv_ctx.response_headers {
+			let mut headers = headers;
+			headers.extend(res.headers);
+			res.headers = headers;
+		}
+
+		Ok(Some((res, res_instruction)))
 	}
 }

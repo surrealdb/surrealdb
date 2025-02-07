@@ -1,3 +1,4 @@
+use crate::api::response::ApiResponse;
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
@@ -12,6 +13,7 @@ use bincode::Error as BincodeError;
 #[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
+use http::header::{InvalidHeaderName, InvalidHeaderValue, ToStrError};
 use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
@@ -1280,6 +1282,9 @@ pub enum Error {
 		existing_name: String,
 		existing_kind: String,
 	},
+
+	#[error("Tried to form an API response in a place where this is not supported")]
+	ApiResponse(ApiResponse),
 }
 
 impl From<Error> for String {
@@ -1303,6 +1308,24 @@ impl From<JWTError> for Error {
 impl From<regex::Error> for Error {
 	fn from(error: regex::Error) -> Self {
 		Error::InvalidRegex(error.to_string())
+	}
+}
+
+impl From<InvalidHeaderName> for Error {
+	fn from(error: InvalidHeaderName) -> Self {
+		Error::Unreachable(error.to_string())
+	}
+}
+
+impl From<InvalidHeaderValue> for Error {
+	fn from(error: InvalidHeaderValue) -> Self {
+		Error::Unreachable(error.to_string())
+	}
+}
+
+impl From<ToStrError> for Error {
+	fn from(error: ToStrError) -> Self {
+		Error::Unreachable(error.to_string())
 	}
 }
 

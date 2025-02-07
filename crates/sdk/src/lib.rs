@@ -122,6 +122,7 @@ pub use uuid::Uuid;
 
 #[macro_use]
 mod mac;
+#[allow(hidden_glob_reexports)]
 mod api;
 
 #[doc(hidden)]
@@ -141,10 +142,10 @@ pub mod error {
 
 #[cfg(feature = "protocol-http")]
 #[doc(hidden)]
-pub use api::headers;
+pub use crate::api::headers;
 
 #[doc(inline)]
-pub use api::{
+pub use crate::api::{
 	engine, method, opt,
 	value::{
 		self, Action, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value,

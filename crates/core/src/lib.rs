@@ -26,7 +26,7 @@ mod doc;
 mod exe;
 mod fnc;
 
-mod api;
+pub mod api;
 pub mod cnf;
 pub mod ctx;
 pub mod dbs;
@@ -47,13 +47,6 @@ pub mod sql;
 pub mod syn;
 pub mod sys;
 pub mod vs;
-
-#[doc(hidden)]
-pub use api::invocation::ApiInvocation;
-#[doc(hidden)]
-pub use api::body::ApiBody;
-#[doc(hidden)]
-pub use api::method::Method as ApiMethod;
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;

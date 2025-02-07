@@ -1,9 +1,9 @@
-use crate::{api::context::RequestContext, err::Error, fnc::args, sql::Value};
+use crate::{api::context::InvocationContext, err::Error, fnc::args, sql::Value};
 
 use super::api;
 
 pub trait InvokeMiddleware<'a> {
-	fn invoke(self, context: &'a mut RequestContext) -> Result<(), Error>;
+	fn invoke(self, context: &'a mut InvocationContext) -> Result<(), Error>;
 }
 
 macro_rules! dispatch {
@@ -27,7 +27,7 @@ macro_rules! dispatch {
 }
 
 impl<'a> InvokeMiddleware<'a> for (&'a String, &'a Vec<Value>) {
-	fn invoke(self, context: &'a mut RequestContext) -> Result<(), Error> {
+	fn invoke(self, context: &'a mut InvocationContext) -> Result<(), Error> {
 		let name = self.0.as_str();
 
 		dispatch!(
@@ -35,9 +35,13 @@ impl<'a> InvokeMiddleware<'a> for (&'a String, &'a Vec<Value>) {
 			self.1.to_owned(),
 			context,
 			//
-			"api::body::max_size" => api::body::max_size,
-			"api::header" => api::header,
-			"api::headers" => api::headers,
+			"api::req::max_body" => api::req::max_body,
+			"api::req::raw_body" => api::req::raw_body,
+			//
+			"api::res::raw_body" => api::res::raw_body,
+			"api::res::headers" => api::res::headers,
+			"api::res::header" => api::res::header,
+			//
 			"api::timeout" => api::timeout,
 		)
 	}

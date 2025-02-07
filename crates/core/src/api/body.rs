@@ -3,14 +3,20 @@ use std::fmt::Display;
 use bytes::Bytes;
 use futures::Stream;
 use futures::StreamExt;
+use http::header::CONTENT_TYPE;
 
 use crate::err::Error;
+use crate::rpc::format::{cbor, json, msgpack, revision};
 use crate::sql::Bytesize;
+use crate::sql::Value;
+
+use super::context::InvocationContext;
+use super::invocation::ApiInvocation;
 
 pub enum ApiBody {
 	#[cfg(not(target_arch = "wasm32"))]
 	Stream(Box<dyn Stream<Item = Result<Bytes, Box<dyn Display + Send + Sync>>> + Send + Unpin>),
-	Bytes(Vec<u8>),
+	Native(Value),
 }
 
 impl ApiBody {
@@ -25,8 +31,12 @@ impl ApiBody {
 		Self::Stream(Box::new(mapped_stream))
 	}
 
-	pub fn from_bytes(bytes: impl Into<Vec<u8>>) -> Self {
-		Self::Bytes(bytes.into())
+	pub fn from_value(value: Value) -> Self {
+		Self::Native(value)
+	}
+
+	pub fn is_native(&self) -> bool {
+		matches!(self, Self::Native(_))
 	}
 
 	pub async fn stream(self, max: Option<Bytesize>) -> Result<Vec<u8>, Error> {
@@ -55,15 +65,51 @@ impl ApiBody {
 
 				Ok(bytes)
 			}
-			Self::Bytes(bytes) => {
-				let size = bytes.len() as u64;
-				if size > max.0 {
-					return Err(Error::Unreachable(format!(
-						"body size exceeds limit: {size} > {max}"
-					)));
-				}
+			_ => Err(Error::Unreachable(format!(
+				"Encountered a native body whilst trying to stream one"
+			))),
+		}
+	}
 
-				Ok(bytes)
+	pub async fn process<'a>(
+		self,
+		ctx: &InvocationContext,
+		invocation: &'a ApiInvocation<'a>,
+	) -> Result<Value, Error> {
+		if let ApiBody::Native(value) = self {
+			let max = ctx.request_body_max.to_owned().unwrap_or(Bytesize::MAX);
+			let size = std::mem::size_of_val(&value);
+
+			if size > max.0 as usize {
+				return Err(Error::Unreachable(format!("body size exceeds limit: {size} > {max}")));
+			}
+
+			if ctx.request_body_raw && !value.is_bytes() {
+				return Err(Error::Unreachable(format!(
+					"Expected a bytes value, but recieved {} instead",
+					value.kindof()
+				)));
+			}
+
+			Ok(value)
+		} else {
+			let bytes = self.stream(ctx.request_body_max.to_owned()).await?;
+
+			if ctx.request_body_raw {
+				Ok(Value::Bytes(crate::sql::Bytes(bytes)))
+			} else {
+				let content_type =
+					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
+
+				let parsed = match content_type {
+					Some("application/json") => json::parse_value(&bytes),
+					Some("application/cbor") => cbor::parse_value(bytes),
+					Some("application/pack") => msgpack::parse_value(bytes),
+					Some("application/surrealdb") => revision::parse_value(bytes),
+					_ => return Ok(Value::Bytes(crate::sql::Bytes(bytes))),
+				};
+
+				parsed.map_err(|_| Error::Unreachable("Failed to parse".into()))
 			}
 		}
 	}

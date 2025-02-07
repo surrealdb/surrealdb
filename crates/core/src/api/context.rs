@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use http::HeaderMap;
 
 use crate::{
 	err::Error,
@@ -8,13 +8,15 @@ use crate::{
 use super::middleware::{invoke::InvokeMiddleware, CollectedMiddleware};
 
 #[derive(Default, Debug)]
-pub struct RequestContext {
-	pub max_body_size: Option<Bytesize>,
+pub struct InvocationContext {
+	pub request_body_max: Option<Bytesize>,
+	pub request_body_raw: bool,
+	pub response_body_raw: bool,
+	pub response_headers: Option<HeaderMap>,
 	pub timeout: Option<Duration>,
-	pub headers: Option<BTreeMap<String, String>>,
 }
 
-impl RequestContext {
+impl InvocationContext {
 	pub fn apply_middleware<'a>(
 		&'a mut self,
 		middleware: CollectedMiddleware<'a>,
