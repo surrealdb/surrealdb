@@ -118,47 +118,48 @@ impl TransactionFactory {
 		};
 		// Create a new transaction on the datastore
 		#[allow(unused_variables)]
-		let (inner, local) = match self.flavor.as_ref() {
+		let (inner, local, reverse_scan) = match self.flavor.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::Mem(tx), true)
+				(super::tr::Inner::Mem(tx), true, false)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::RocksDB(tx), true)
+				(super::tr::Inner::RocksDB(tx), true, true)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			DatastoreFlavor::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::IndxDB(tx), true)
+				(super::tr::Inner::IndxDB(tx), true, false)
 			}
 			#[cfg(feature = "kv-tikv")]
 			DatastoreFlavor::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::TiKV(tx), false)
+				(super::tr::Inner::TiKV(tx), false, true)
 			}
 			#[cfg(feature = "kv-fdb")]
 			DatastoreFlavor::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::FoundationDB(tx), false)
+				(super::tr::Inner::FoundationDB(tx), false, false)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::SurrealKV(tx), true)
+				(super::tr::Inner::SurrealKV(tx), true, false)
 			}
 			#[cfg(feature = "kv-surrealcs")]
 			DatastoreFlavor::SurrealCS(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::SurrealCS(tx), false)
+				(super::tr::Inner::SurrealCS(tx), false, false)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
 		Ok(Transaction::new(
 			local,
+			reverse_scan,
 			Transactor {
 				inner,
 				stash: super::stash::Stash::default(),

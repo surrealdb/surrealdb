@@ -104,12 +104,15 @@ pub trait Transaction {
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	async fn scan<K>(
 		&mut self,
-		rng: Range<K>,
-		limit: u32,
-		version: Option<u64>,
+		_rng: Range<K>,
+		_limit: u32,
+		_version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: KeyEncode + Sprintable + Debug;
+		K: KeyEncode + Sprintable + Debug,
+	{
+		Err(Error::UnsupportedVersionedQueries)
+	}
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
@@ -121,7 +124,10 @@ pub trait Transaction {
 		_version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: KeyEncode + Sprintable + Debug;
+		K: KeyEncode + Sprintable + Debug,
+	{
+		Err(Error::UnsupportedReversedScans)
+	}
 
 	/// Insert or replace a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]

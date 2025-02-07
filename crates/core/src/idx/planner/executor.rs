@@ -11,11 +11,15 @@ use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeReverseThingIterator,
-	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef,
-	KnnIterator, KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
-	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeReverseThingIterator,
-	UniqueRangeThingIterator, UniqueUnionThingIterator, ValueType,
+	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
+	IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef, KnnIterator,
+	KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
+	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
+	UniqueUnionThingIterator, ValueType,
+};
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+use crate::idx::planner::iterators::{
+	IndexRangeReverseThingIterator, UniqueRangeReverseThingIterator,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -394,9 +398,19 @@ impl QueryExecutor {
 			}
 			IndexOperator::Order(reverse) => {
 				if *reverse {
-					Some(ThingIterator::IndexRangeReverse(
-						IndexRangeReverseThingIterator::full_range(ir, opt.ns()?, opt.db()?, ix),
-					))
+					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+					{
+						Some(ThingIterator::IndexRangeReverse(
+							IndexRangeReverseThingIterator::full_range(
+								ir,
+								opt.ns()?,
+								opt.db()?,
+								ix,
+							),
+						))
+					}
+					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
+					None
 				} else {
 					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
 						ir,
@@ -859,9 +873,19 @@ impl QueryExecutor {
 			}
 			IndexOperator::Order(reverse) => {
 				if *reverse {
-					Some(ThingIterator::UniqueRangeReverse(
-						UniqueRangeReverseThingIterator::full_range(irf, opt.ns()?, opt.db()?, ixr),
-					))
+					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+					{
+						Some(ThingIterator::UniqueRangeReverse(
+							UniqueRangeReverseThingIterator::full_range(
+								irf,
+								opt.ns()?,
+								opt.db()?,
+								ixr,
+							),
+						))
+					}
+					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
+					None
 				} else {
 					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
 						irf,

@@ -174,7 +174,9 @@ impl SelectStatement {
 					let p = planner.check_table_permission(&stm_ctx, &t).await?;
 					// We add the iterable only if we have a permission
 					if !matches!(p, GrantedPermission::None) {
-						planner.add_iterables(stk, &stm_ctx, t, p, &mut i).await?;
+						planner
+							.add_iterables(stk, &stm_ctx, t, p, ctx.tx().reverse_scan(), &mut i)
+							.await?;
 					}
 				}
 				Value::Array(v) => {
@@ -187,7 +189,16 @@ impl SelectStatement {
 								let p = planner.check_table_permission(&stm_ctx, &t).await?;
 								// We add the iterable only if we have a permission
 								if !matches!(p, GrantedPermission::None) {
-									planner.add_iterables(stk, &stm_ctx, t, p, &mut i).await?;
+									planner
+										.add_iterables(
+											stk,
+											&stm_ctx,
+											t,
+											p,
+											ctx.tx().reverse_scan(),
+											&mut i,
+										)
+										.await?;
 								}
 							}
 							Value::Mock(v) => i.prepare_mock(&stm, v)?,

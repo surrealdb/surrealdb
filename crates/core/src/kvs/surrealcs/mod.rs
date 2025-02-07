@@ -506,18 +506,6 @@ impl super::api::Transaction for Transaction {
 		// Return result
 		Ok(response.values)
 	}
-
-	async fn scanr<K>(
-		&mut self,
-		_rng: Range<K>,
-		_limit: u32,
-		_version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
-		todo!()
-	}
 }
 
 impl SavePointImpl for Transaction {

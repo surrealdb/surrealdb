@@ -49,16 +49,19 @@ pub struct Transaction {
 	cache: TransactionCache,
 	/// Cache the index updates
 	index_caches: IndexTreeCaches,
+	/// Does this supports reverse scan
+	reverse_scan: bool,
 }
 
 impl Transaction {
 	/// Create a new query store
-	pub fn new(local: bool, tx: Transactor) -> Transaction {
+	pub fn new(local: bool, reverse_scan: bool, tx: Transactor) -> Transaction {
 		Transaction {
 			local,
 			tx: Mutex::new(tx),
 			cache: TransactionCache::new(),
 			index_caches: IndexTreeCaches::default(),
+			reverse_scan,
 		}
 	}
 
@@ -77,9 +80,14 @@ impl Transaction {
 		self.tx.lock().await
 	}
 
-	/// Check if the transaction is local or distributed
+	/// Check if the transaction is local or remote
 	pub fn local(&self) -> bool {
 		self.local
+	}
+
+	/// Check if the transaction supports reverse scan
+	pub fn reverse_scan(&self) -> bool {
+		self.reverse_scan
 	}
 
 	/// Check if the transaction is finished.
