@@ -13,6 +13,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
+use super::validate_data;
 use super::Content;
 
 /// A record create future
@@ -90,6 +91,8 @@ where
 		Content::from_closure(self.client, || {
 			let content = to_core_value(data)?;
 
+			validate_data(&content, "Tried to create non-object-like data as content, only structs and objects are supported")?;
+
 			let data = match content {
 				CoreValue::None | CoreValue::Null => None,
 				content => Some(content),
@@ -114,6 +117,8 @@ where
 	{
 		Content::from_closure(self.client, || {
 			let content = to_core_value(data)?;
+
+			validate_data(&content, "Tried to create non-object-like data as content, only structs and objects are supported")?;
 
 			let data = match content {
 				CoreValue::None | CoreValue::Null => None,

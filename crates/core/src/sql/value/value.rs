@@ -935,6 +935,15 @@ impl Value {
 		matches!(self, Value::None)
 	}
 
+	/// Check if this Value is NONE
+	pub fn is_empty_array(&self) -> bool {
+		if let Value::Array(v) = self {
+			v.is_empty()
+		} else {
+			false
+		}
+	}
+
 	/// Check if this Value is NULL
 	pub fn is_null(&self) -> bool {
 		matches!(self, Value::Null)

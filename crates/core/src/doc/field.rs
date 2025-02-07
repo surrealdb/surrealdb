@@ -251,6 +251,56 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+	/// Processes `DEFINE FIELD` statements which
+	/// have been defined on the table for this
+	/// record, with a `REFERENCE` clause, and remove
+	/// all possible references this record has made.
+	pub(super) async fn cleanup_table_references(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<(), Error> {
+		// Check import
+		if opt.import {
+			return Ok(());
+		}
+		// Get the record id
+		let rid = self.id()?;
+		// Loop through all field statements
+		for fd in self.fd(ctx, opt).await?.iter() {
+			// Only process reference fields
+			if fd.reference.is_none() {
+				continue;
+			}
+
+			// Loop over each value in document
+			'val: for (_, val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+				// Skip if the value is empty
+				if val.is_none() || val.is_empty_array() {
+					continue 'val;
+				}
+
+				// Prepare the field edit context
+				let mut field = FieldEditContext {
+					context: None,
+					doc: self,
+					rid: rid.clone(),
+					def: fd,
+					stk,
+					ctx,
+					opt,
+					old: val.into(),
+					inp: Value::None.into(),
+				};
+
+				// Pass an empty value to delete all the existing references
+				field.process_reference_clause(&Value::None).await?;
+			}
+		}
+
+		Ok(())
+	}
 }
 
 struct FieldEditContext<'a> {
