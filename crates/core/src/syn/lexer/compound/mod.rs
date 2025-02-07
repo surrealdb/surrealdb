@@ -17,7 +17,8 @@ pub use datetime::{datetime, datetime_inner};
 pub use ident::flexible_ident;
 pub use js::javascript;
 pub use number::{
-	bytesize, duration, float, integer, number, numeric, numeric_kind, NumberKind, Numeric, NumericKind,
+	bytesize, duration, float, integer, number, numeric, numeric_kind, NumberKind, Numeric,
+	NumericKind,
 };
 pub use path::path;
 pub use regex::regex;

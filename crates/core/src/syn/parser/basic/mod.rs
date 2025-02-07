@@ -1,6 +1,9 @@
 use crate::{
 	api::path::Path,
-	sql::{bytesize::Bytesize, language::Language, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid},
+	sql::{
+		bytesize::Bytesize, language::Language, Datetime, Duration, Ident, Param, Regex, Strand,
+		Table, Uuid,
+	},
 	syn::{
 		lexer::compound,
 		parser::{mac::unexpected, ParseResult, Parser},

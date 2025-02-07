@@ -1,5 +1,5 @@
-pub mod graphql;
 pub mod api;
+pub mod graphql;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
