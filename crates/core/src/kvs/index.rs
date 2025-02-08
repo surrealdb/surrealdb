@@ -103,7 +103,7 @@ impl IndexBuilder {
 				// If the building is currently running we return error
 				if !e.get().1.is_finished() {
 					return Err(Error::IndexAlreadyBuilding {
-						index: e.key().name.to_string(),
+						name: e.key().name.to_string(),
 					});
 				}
 			}
