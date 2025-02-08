@@ -33,7 +33,52 @@ pub async fn reverse_iterator(new_ds: impl CreateDs) {
 	for _ in 0..9 {
 		r.remove(0).result.unwrap();
 	}
-	assert_eq!(Value::parse("{}"), r.remove(0).result.unwrap());
+	let mut check = |tmp: &str| {
+		let tmp = Value::parse(tmp);
+		let val = r.remove(0).result.unwrap();
+		assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	};
+	check(
+		"[
+			{
+				detail: {
+					plan: {
+						index: 'time',
+						operator: 'ReverseOrder'
+					},
+					table: 'session'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					limit: 3,
+					type: 'MemoryOrderedLimit'
+				},
+				operation: 'Collector'
+			}
+		]",
+	);
+	check(
+		"[
+			{
+				id: session:3,
+				other: 'test'
+			},
+			{
+				id: session:4,
+				time: NULL
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			}
+		]",
+	);
 }
 
 macro_rules! define_tests {

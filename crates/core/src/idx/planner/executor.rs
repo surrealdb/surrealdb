@@ -809,8 +809,7 @@ impl QueryExecutor {
 			ir,
 			opt.ns()?,
 			opt.db()?,
-			&ix.what,
-			&ix.name,
+			ix,
 			range,
 		)?))
 	}
@@ -881,7 +880,7 @@ impl QueryExecutor {
 								opt.ns()?,
 								opt.db()?,
 								ixr,
-							),
+							)?,
 						))
 					}
 					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]

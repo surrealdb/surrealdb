@@ -870,19 +870,40 @@ pub(crate) struct UniqueRangeThingIterator {
 }
 
 impl UniqueRangeThingIterator {
+	fn full_iterator_range<'a>() -> IteratorRange<'a> {
+		let value = RangeValue {
+			value: Value::None,
+			inclusive: true,
+		};
+		IteratorRange {
+			value_type: ValueType::None,
+			from: Cow::Owned(value.clone()),
+			to: Cow::Owned(value),
+		}
+	}
+
+	fn range_scan(
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		range: &IteratorRange<'_>,
+	) -> Result<RangeScan, Error> {
+		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from, range.value_type)?;
+		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to, range.value_type)?;
+		Ok(RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive))
+	}
+
 	pub(super) fn new(
 		irf: IteratorRef,
 		ns: &str,
 		db: &str,
-		ix_what: &Ident,
-		ix_name: &Ident,
-		range: &IteratorRange<'_>,
+		ix: &DefineIndexStatement,
+		r: &IteratorRange<'_>,
 	) -> Result<Self, Error> {
-		let beg = Self::compute_beg(ns, db, ix_what, ix_name, &range.from, range.value_type)?;
-		let end = Self::compute_end(ns, db, ix_what, ix_name, &range.to, range.value_type)?;
+		let r = Self::range_scan(ns, db, ix, r)?;
 		Ok(Self {
 			irf,
-			r: RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive),
+			r,
 			done: false,
 		})
 	}
@@ -893,16 +914,8 @@ impl UniqueRangeThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 	) -> Result<Self, Error> {
-		let value = RangeValue {
-			value: Value::None,
-			inclusive: true,
-		};
-		let range = IteratorRange {
-			value_type: ValueType::None,
-			from: Cow::Borrowed(&value),
-			to: Cow::Borrowed(&value),
-		};
-		Self::new(irf, ns, db, &ix.what, &ix.name, &range)
+		let rng = Self::full_iterator_range();
+		Self::new(irf, ns, db, ix, &rng)
 	}
 
 	fn compute_beg(
@@ -998,28 +1011,61 @@ impl UniqueRangeThingIterator {
 
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 pub(crate) struct UniqueRangeReverseThingIterator {
-	_irf: IteratorRef,
-	_r: RangeScan,
-	_done: bool,
+	irf: IteratorRef,
+	r: RangeScan,
+	done: bool,
 }
 
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 impl UniqueRangeReverseThingIterator {
 	pub(super) fn full_range(
-		_irf: IteratorRef,
-		_ns: &str,
-		_db: &str,
-		_ix: &DefineIndexStatement,
-	) -> Self {
-		todo!()
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+	) -> Result<Self, Error> {
+		let r = UniqueRangeThingIterator::full_iterator_range();
+		let r = UniqueRangeThingIterator::range_scan(ns, db, ix, &r)?;
+		Ok(Self {
+			irf,
+			r,
+			done: true,
+		})
 	}
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		_tx: &Transaction,
-		mut _limit: u32,
+		tx: &Transaction,
+		mut limit: u32,
 	) -> Result<B, Error> {
-		todo!()
+		if self.done {
+			return Ok(B::empty());
+		}
+		let min = self.r.beg.clone();
+		let max = self.r.end.clone();
+		limit += 1;
+		let res = tx.scanr(min..max, limit, None).await?;
+		let mut records = B::with_capacity(res.len());
+		let end = self.r.end.clone();
+		if self.r.matches(&end) {
+			if let Some(v) = tx.get(end, None).await? {
+				let rid: Thing = v.into();
+				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
+			}
+		}
+		for (k, v) in res {
+			limit -= 1;
+			if limit == 0 {
+				self.r.end = k;
+				return Ok(records);
+			}
+			if self.r.matches(&k) {
+				let rid: Thing = v.into();
+				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
+			}
+		}
+		self.done = true;
+		Ok(records)
 	}
 
 	async fn next_count(&mut self, _tx: &Transaction, mut _limit: u32) -> Result<usize, Error> {
