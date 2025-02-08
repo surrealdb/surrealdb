@@ -428,7 +428,7 @@ impl Document {
 						let val = match txn.get_tb(ns, db, &id.tb).await {
 							// The table doesn't exist
 							Err(Error::TbNotFound {
-								value: _,
+								name: _,
 							}) => {
 								// Allowed to run?
 								opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
@@ -453,7 +453,7 @@ impl Document {
 				match txn.get_tb(ns, db, &id.tb).await {
 					// The table doesn't exist
 					Err(Error::TbNotFound {
-						value: _,
+						name: _,
 					}) => {
 						// Allowed to run?
 						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
