@@ -27,6 +27,7 @@ mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
 mod multiwriter_same_keys_conflict;
 mod raw;
+mod reverse_iterator;
 mod snapshot;
 mod timestamp_to_versionstamp;
 
@@ -138,7 +139,7 @@ mod rocksdb {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -208,7 +209,7 @@ mod tikv {
 		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
-	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp);
+	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp,reverse_iterator);
 }
 
 #[cfg(feature = "kv-fdb")]

@@ -275,6 +275,7 @@ pub async fn scan(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 pub async fn scanr(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("83b81cc2-9609-4533-bede-c170ab9f7bbe").unwrap();
