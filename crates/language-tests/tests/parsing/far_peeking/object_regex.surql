@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-value = "1d2h"
-*/
+value = "/a/"
 
-{1d2h}
+*/
+{/a/}
