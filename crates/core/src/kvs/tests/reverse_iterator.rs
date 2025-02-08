@@ -5,6 +5,7 @@ use crate::kvs::tests::CreateDs;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 pub async fn reverse_iterator(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("056804f2-b379-4397-9ceb-af8ebd527beb").unwrap();
