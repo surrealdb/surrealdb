@@ -166,7 +166,7 @@ impl IndexBuilder {
 				// If the building is currently running, we return error
 				if !e.get().1.is_finished() {
 					return Err(Error::IndexAlreadyBuilding {
-						index: e.key().ix.clone(),
+						name: e.key().ix.clone(),
 					});
 				}
 			}

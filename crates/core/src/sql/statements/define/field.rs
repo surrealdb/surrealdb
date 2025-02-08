@@ -75,7 +75,7 @@ impl DefineFieldStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::FdAlreadyExists {
-					value: fd,
+					name: fd,
 				});
 			}
 		}

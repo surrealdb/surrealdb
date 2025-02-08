@@ -48,7 +48,7 @@ impl DefineFunctionStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::FcAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}

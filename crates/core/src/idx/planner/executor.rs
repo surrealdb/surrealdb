@@ -933,7 +933,7 @@ impl QueryExecutor {
 
 		// If no previous case were successful, we end up with a user error
 		Err(Error::NoIndexFoundForMatch {
-			value: exp.to_string(),
+			exp: exp.to_string(),
 		})
 	}
 

@@ -50,7 +50,7 @@ impl DefineConfigStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::CgAlreadyExists {
-					value: "graphql".to_string(),
+					name: "graphql".to_string(),
 				});
 			}
 		}

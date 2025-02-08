@@ -45,7 +45,7 @@ impl DefineDatabaseStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::DbAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}

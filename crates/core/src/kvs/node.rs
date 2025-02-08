@@ -32,7 +32,7 @@ impl Datastore {
 		let val = Node::new(id, now, false);
 		match run!(txn, txn.put(key, val, None).await) {
 			Err(Error::TxKeyAlreadyExists) => Err(Error::ClAlreadyExists {
-				value: id.to_string(),
+				id: id.to_string(),
 			}),
 			other => other,
 		}
