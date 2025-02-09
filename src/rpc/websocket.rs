@@ -13,7 +13,6 @@ use crate::telemetry::traces::rpc::span_for_request;
 use arc_swap::ArcSwap;
 use axum::extract::ws::{close_code::AGAIN, CloseFrame, Message, WebSocket};
 use core::fmt;
-use futures::lock::Mutex;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
@@ -31,6 +30,7 @@ use surrealdb::rpc::Data;
 use surrealdb::rpc::RpcContext;
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
@@ -53,7 +53,7 @@ pub struct Websocket {
 	/// The datastore accessible to all RPC WebSocket connections
 	pub(crate) datastore: Arc<Datastore>,
 	/// Whether this WebSocket is locked
-	pub(crate) lock: Arc<Mutex<()>>,
+	pub(crate) lock: Arc<Semaphore>,
 	/// The persistent session for this WebSocket connection
 	pub(crate) session: ArcSwap<Session>,
 	/// A cancellation token called when shutting down the server
@@ -83,7 +83,7 @@ impl Websocket {
 			id,
 			state,
 			format,
-			lock: Arc::new(Mutex::new(())),
+			lock: Arc::new(Semaphore::new(1)),
 			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
@@ -427,7 +427,7 @@ impl RpcContext for Websocket {
 		&self.datastore
 	}
 	/// Retrieves the modification lock for this RPC context
-	fn mutex(&self) -> Arc<Mutex<()>> {
+	fn lock(&self) -> Arc<Semaphore> {
 		self.lock.clone()
 	}
 	/// The current session for this RPC context

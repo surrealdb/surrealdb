@@ -1,5 +1,4 @@
 use crate::cnf::{PKG_NAME, PKG_VERSION};
-use futures::lock::Mutex;
 use std::sync::Arc;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
@@ -7,13 +6,14 @@ use surrealdb_core::rpc::Data;
 use surrealdb_core::rpc::RpcContext;
 use surrealdb_core::rpc::RpcError;
 use surrealdb_core::sql::Array;
+use tokio::sync::Semaphore;
 
 #[cfg(surrealdb_unstable)]
 use surrealdb_core::gql::{Pessimistic, SchemaCache};
 
 pub struct Http {
 	pub kvs: Arc<Datastore>,
-	pub lock: Arc<Mutex<()>>,
+	pub lock: Arc<Semaphore>,
 	pub session: Arc<Session>,
 	#[cfg(surrealdb_unstable)]
 	pub gql_schema: SchemaCache<Pessimistic>,
@@ -23,7 +23,7 @@ impl Http {
 	pub fn new(kvs: &Arc<Datastore>, session: Session) -> Self {
 		Self {
 			kvs: kvs.clone(),
-			lock: Arc::new(Mutex::new(())),
+			lock: Arc::new(Semaphore::new(1)),
 			session: Arc::new(session),
 			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(kvs.clone()),
@@ -37,7 +37,7 @@ impl RpcContext for Http {
 		&self.kvs
 	}
 	/// Retrieves the modification lock for this RPC context
-	fn mutex(&self) -> Arc<Mutex<()>> {
+	fn lock(&self) -> Arc<Semaphore> {
 		self.lock.clone()
 	}
 	/// The current session for this RPC context

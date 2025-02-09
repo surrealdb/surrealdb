@@ -1,7 +1,7 @@
 use crate::err::Error;
-use futures::lock::Mutex;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 #[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 use async_graphql::BatchRequest;
@@ -30,7 +30,7 @@ pub trait RpcContext {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore;
 	/// Retrieves the modification lock for this RPC context
-	fn mutex(&self) -> Arc<Mutex<()>>;
+	fn lock(&self) -> Arc<Semaphore>;
 	/// The current session for this RPC context
 	fn session(&self) -> Arc<Session>;
 	/// Mutable access to the current session for this RPC context
@@ -127,9 +127,9 @@ pub trait RpcContext {
 		// To be able to select a namespace, and then list resources in that namespace, as an example
 		let (ns, db) = params.needs_two()?;
 		// Get the context lock
-		let mutex = self.mutex().clone();
+		let mutex = self.lock().clone();
 		// Lock the context for update
-		let guard = mutex.lock().await;
+		let guard = mutex.acquire().await;
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Update the selected namespace
@@ -170,9 +170,9 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Get the context lock
-		let mutex = self.mutex().clone();
+		let mutex = self.lock().clone();
 		// Lock the context for update
-		let guard = mutex.lock().await;
+		let guard = mutex.acquire().await;
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
@@ -194,9 +194,9 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Get the context lock
-		let mutex = self.mutex().clone();
+		let mutex = self.lock().clone();
 		// Lock the context for update
-		let guard = mutex.lock().await;
+		let guard = mutex.acquire().await;
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
@@ -218,9 +218,9 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Get the context lock
-		let mutex = self.mutex().clone();
+		let mutex = self.lock().clone();
 		// Lock the context for update
-		let guard = mutex.lock().await;
+		let guard = mutex.acquire().await;
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Attempt authentication, mutating the session
@@ -238,9 +238,9 @@ pub trait RpcContext {
 
 	async fn invalidate(&self) -> Result<Data, RpcError> {
 		// Get the context lock
-		let mutex = self.mutex().clone();
+		let mutex = self.lock().clone();
 		// Lock the context for update
-		let guard = mutex.lock().await;
+		let guard = mutex.acquire().await;
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Clear the current session
@@ -255,9 +255,9 @@ pub trait RpcContext {
 
 	async fn reset(&self) -> Result<Data, RpcError> {
 		// Get the context lock
-		let mutex = self.mutex().clone();
+		let mutex = self.lock().clone();
 		// Lock the context for update
-		let guard = mutex.lock().await;
+		let guard = mutex.acquire().await;
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Reset the current session
@@ -308,9 +308,9 @@ pub trait RpcContext {
 			// Remove the variable if undefined
 			Value::None => {
 				// Get the context lock
-				let mutex = self.mutex().clone();
+				let mutex = self.lock().clone();
 				// Lock the context for update
-				let guard = mutex.lock().await;
+				let guard = mutex.acquire().await;
 				// Clone the parameters
 				let mut session = self.session().as_ref().clone();
 				// Remove the set parameter
@@ -323,9 +323,9 @@ pub trait RpcContext {
 			// Store the variable if defined
 			v => {
 				// Get the context lock
-				let mutex = self.mutex().clone();
+				let mutex = self.lock().clone();
 				// Lock the context for update
-				let guard = mutex.lock().await;
+				let guard = mutex.acquire().await;
 				// Clone the parameters
 				let mut session = self.session().as_ref().clone();
 				// Remove the set parameter
@@ -346,9 +346,9 @@ pub trait RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Get the context lock
-		let mutex = self.mutex().clone();
+		let mutex = self.lock().clone();
 		// Lock the context for update
-		let guard = mutex.lock().await;
+		let guard = mutex.acquire().await;
 		// Clone the parameters
 		let mut session = self.session().as_ref().clone();
 		// Remove the set parameter
