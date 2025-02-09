@@ -6,10 +6,10 @@ use std::sync::Arc;
 #[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
-use crate::rpc::Data;
 use crate::{
 	dbs::{capabilities::MethodTarget, QueryType, Response},
 	rpc::args::Take,

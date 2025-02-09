@@ -4,11 +4,11 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
+use super::Data;
 use super::Method;
 use super::RpcError;
 use super::RpcProtocolV1;
 use super::RpcProtocolV2;
-use super::Data;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::Array;
