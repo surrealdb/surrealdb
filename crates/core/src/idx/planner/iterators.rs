@@ -15,6 +15,7 @@ use radix_trie::Trie;
 use rust_decimal::Decimal;
 use std::borrow::Cow;
 use std::collections::VecDeque;
+use std::ops::Range;
 use std::sync::Arc;
 
 pub(crate) type IteratorRef = usize;
@@ -295,46 +296,56 @@ impl IndexEqualThingIterator {
 }
 
 struct RangeScan {
-	beg: Vec<u8>,
-	end: Vec<u8>,
-	beg_excl: Option<Vec<u8>>,
-	end_excl: Option<Vec<u8>>,
+	beg: Key,
+	end: Key,
+	beg_incl: bool,
+	end_incl: bool,
 }
 
 impl RangeScan {
-	fn new(beg: Vec<u8>, beg_incl: bool, end: Vec<u8>, end_incl: bool) -> Self {
-		let beg_excl = if !beg_incl {
-			Some(beg.clone())
-		} else {
-			None
-		};
-		let end_excl = if !end_incl {
-			Some(end.clone())
-		} else {
-			None
-		};
+	fn new(beg_key: Key, beg_incl: bool, end_key: Key, end_incl: bool) -> Self {
 		Self {
-			beg,
-			end,
-			beg_excl,
-			end_excl,
+			beg: beg_key,
+			end: end_key,
+			beg_incl,
+			end_incl,
 		}
 	}
 
-	fn matches(&mut self, k: &Key) -> bool {
-		if let Some(b) = &self.beg_excl {
-			if b.eq(k) {
-				self.beg_excl = None;
-				return false;
-			}
+	fn range(&self) -> Range<Key> {
+		self.beg.clone()..self.end.clone()
+	}
+
+	fn matches(&self, k: &Key) -> bool {
+		// We check if we should match the key matching the beginning of the range
+		if !self.beg_incl {
+			return self.beg.ne(k);
 		}
-		if let Some(e) = &self.end_excl {
-			if e.eq(k) {
-				self.end_excl = None;
-				return false;
-			}
+		// We check if we should match the key matching the end of the range
+		if !self.end_incl {
+			return self.end.ne(k);
 		}
 		true
+	}
+
+	/// Update the range with a new beginning.
+	/// If the new key is different, the beginning becomes included.
+	/// Used by forward iterators.
+	fn next_beg(&mut self, beg: Key) {
+		if !self.beg_incl && beg.ne(&self.beg) {
+			self.beg_incl = true;
+		}
+		self.beg = beg;
+	}
+
+	/// Update the range with a new ending.
+	/// The new key is different, the ending becomes included.
+	/// Used by reverse iterators.
+	fn next_end(&mut self, end: Key) {
+		if !self.end_incl && end.ne(&self.end) {
+			self.end_incl = true;
+		}
+		self.end = end;
 	}
 }
 
@@ -518,9 +529,7 @@ impl IndexRangeThingIterator {
 	}
 
 	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
-		let min = self.r.beg.clone();
-		let max = self.r.end.clone();
-		let res = tx.scan(min..max, limit, None).await?;
+		let res = tx.scan(self.r.range(), limit, None).await?;
 		if let Some((key, _)) = res.last() {
 			self.r.beg.clone_from(key);
 			self.r.beg.push(0x00);
@@ -954,15 +963,13 @@ impl UniqueRangeThingIterator {
 		if self.done {
 			return Ok(B::empty());
 		}
-		let min = self.r.beg.clone();
-		let max = self.r.end.clone();
 		limit += 1;
-		let res = tx.scan(min..max, limit, None).await?;
+		let res = tx.scan(self.r.range(), limit, None).await?;
 		let mut records = B::with_capacity(res.len());
 		for (k, v) in res {
 			limit -= 1;
 			if limit == 0 {
-				self.r.beg = k;
+				self.r.next_beg(k);
 				return Ok(records);
 			}
 			if self.r.matches(&k) {
@@ -970,9 +977,8 @@ impl UniqueRangeThingIterator {
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
-		let end = self.r.end.clone();
-		if self.r.matches(&end) {
-			if let Some(v) = tx.get(end, None).await? {
+		if self.r.end_incl {
+			if let Some(v) = tx.get(&self.r.end, None).await? {
 				let rid: Thing = v.into();
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
@@ -985,23 +991,20 @@ impl UniqueRangeThingIterator {
 		if self.done {
 			return Ok(0);
 		}
-		let min = self.r.beg.clone();
-		let max = self.r.end.clone();
 		limit += 1;
-		let res = tx.scan(min..max, limit, None).await?;
+		let res = tx.keys(self.r.range(), limit, None).await?;
 		let mut count = 0;
-		for (k, _) in res {
+		for k in res {
 			limit -= 1;
 			if limit == 0 {
-				self.r.beg = k;
+				self.r.next_beg(k);
 				return Ok(count);
 			}
 			if self.r.matches(&k) {
 				count += 1;
 			}
 		}
-		let end = self.r.end.clone();
-		if self.r.matches(&end) && tx.exists(end, None).await? {
+		if self.r.end_incl && tx.exists(&self.r.end, None).await? {
 			count += 1;
 		}
 		self.done = true;
@@ -1029,7 +1032,7 @@ impl UniqueRangeReverseThingIterator {
 		Ok(Self {
 			irf,
 			r,
-			done: true,
+			done: false,
 		})
 	}
 
@@ -1041,22 +1044,25 @@ impl UniqueRangeReverseThingIterator {
 		if self.done {
 			return Ok(B::empty());
 		}
-		let min = self.r.beg.clone();
-		let max = self.r.end.clone();
 		limit += 1;
-		let res = tx.scanr(min..max, limit, None).await?;
+		let res = tx.scanr(self.r.range(), limit, None).await?;
 		let mut records = B::with_capacity(res.len());
-		let end = self.r.end.clone();
-		if self.r.matches(&end) {
-			if let Some(v) = tx.get(end, None).await? {
+		if self.r.end_incl {
+			if let Some(v) = tx.get(&self.r.end, None).await? {
 				let rid: Thing = v.into();
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
+				limit -= 1;
+				if limit == 0 {
+					// Next time we don't include the ending key
+					self.r.end_incl = false;
+					return Ok(records);
+				}
 			}
 		}
 		for (k, v) in res {
 			limit -= 1;
 			if limit == 0 {
-				self.r.end = k;
+				self.r.next_end(k);
 				return Ok(records);
 			}
 			if self.r.matches(&k) {
@@ -1068,8 +1074,36 @@ impl UniqueRangeReverseThingIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, _tx: &Transaction, mut _limit: u32) -> Result<usize, Error> {
-		todo!()
+	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize, Error> {
+		if self.done {
+			return Ok(0);
+		}
+		limit += 1;
+		let res = tx.scanr(self.r.range(), limit, None).await?;
+		let mut count = 0;
+		if self.r.end_incl {
+			if tx.exists(&self.r.end, None).await? {
+				count += 1;
+				limit -= 1;
+				if limit == 0 {
+					// Next time we don't include the ending key
+					self.r.end_incl = false;
+					return Ok(count);
+				}
+			}
+		}
+		for (k, _) in res {
+			limit -= 1;
+			if limit == 0 {
+				self.r.next_end(k);
+				return Ok(count);
+			}
+			if self.r.matches(&k) {
+				count += 1;
+			}
+		}
+		self.done = true;
+		Ok(count)
 	}
 }
 

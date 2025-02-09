@@ -36,7 +36,7 @@ pub async fn reverse_iterator(new_ds: impl CreateDs) {
 	let mut check = |tmp: &str| {
 		let tmp = Value::parse(tmp);
 		let val = r.remove(0).result.unwrap();
-		assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+		assert_eq!(format!("{val:#}"), format!("{tmp:#}"));
 	};
 	check(
 		"[
@@ -62,20 +62,56 @@ pub async fn reverse_iterator(new_ds: impl CreateDs) {
 	check(
 		"[
 			{
-				id: session:3,
-				other: 'test'
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
 			},
 			{
-				id: session:4,
-				time: NULL
-			},
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
 			},
 			{
 				id: session:6,
 				time: d'2024-06-30T23:30:00Z'
+			}
+		]",
+	);
+	check(
+		"[
+			{
+				detail: {
+					plan: {
+						index: 'time',
+						operator: 'ReverseOrder'
+					},
+					table: 'session'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'MemoryOrdered'
+				},
+				operation: 'Collector'
+			}
+		]",
+	);
+	check(
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
 			}
 		]",
 	);
