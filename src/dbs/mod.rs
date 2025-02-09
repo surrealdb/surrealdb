@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{
-	Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget, Targets,
+	Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, QueryTarget,
+	RouteTarget, Targets,
 };
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
@@ -83,6 +84,19 @@ Function names must be in the form <family>[::<name>]. For example:
 	allow_experimental: Option<Targets<ExperimentalTarget>>,
 
 	#[arg(
+		help = "Allow execution of queries by certain user groups except when specifically denied.",
+		long_help = r#"Allow execution of custom queries by certain user groups except when specifically denied. Alternatively, you can provide a comma-separated list of user groups to allow
+Specifically denied user groups prevail over any other allowed user group.
+User groups must be one of "guest", "record" or "system".
+"#
+	)]
+	#[arg(env = "SURREAL_CAPS_ALLOW_QUERY", long)]
+	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::query_targets)]
+	allow_query: Option<Targets<QueryTarget>>,
+
+	#[arg(
 		help = "Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow",
 		long_help = r#"Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow
 Specifically denied network targets prevail over any other allowed outbound network connections.
@@ -155,6 +169,19 @@ Function names must be in the form <family>[::<name>]. For example:
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::experimental_targets)]
 	deny_experimental: Option<Targets<ExperimentalTarget>>,
+
+	#[arg(
+		help = "Deny execution of queries by certain user groups except when specifically allowed.",
+		long_help = r#"Deny execution of custom queries by certain user groups except when specifically allowed. Alternatively, you can provide a comma-separated list of user groups to deny
+Specifically allowed user groups prevail over a general denial of user group.
+User groups must be one of "guest", "record" or "system".
+"#
+	)]
+	#[arg(env = "SURREAL_CAPS_DENY_QUERY", long)]
+	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::query_targets)]
+	deny_query: Option<Targets<QueryTarget>>,
 
 	#[arg(
 		help = "Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",
@@ -389,6 +416,22 @@ impl DbsCapabilities {
 			None => Targets::None,
 		}
 	}
+
+	fn get_allow_query(&self) -> Targets<QueryTarget> {
+		match &self.allow_query {
+			Some(t @ Targets::Some(_)) => t.clone(),
+			Some(_) => Targets::None,
+			None => Targets::None,
+		}
+	}
+
+	fn get_deny_query(&self) -> Targets<QueryTarget> {
+		match &self.deny_query {
+			Some(t @ Targets::Some(_)) => t.clone(),
+			Some(_) => Targets::None,
+			None => Targets::None,
+		}
+	}
 }
 
 impl From<DbsCapabilities> for Capabilities {
@@ -406,6 +449,8 @@ impl From<DbsCapabilities> for Capabilities {
 			.without_http_routes(caps.get_deny_http())
 			.with_experimental(caps.get_allow_experimental())
 			.without_experimental(caps.get_deny_experimental())
+			.with_query(caps.get_allow_query())
+			.without_query(caps.get_deny_query())
 	}
 }
 

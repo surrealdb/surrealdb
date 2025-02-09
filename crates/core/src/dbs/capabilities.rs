@@ -377,6 +377,69 @@ impl std::str::FromStr for RouteTarget {
 	}
 }
 
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum QueryTarget {
+	Guest,
+	Record,
+	System,
+}
+
+impl fmt::Display for QueryTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Guest => write!(f, "guest"),
+			Self::Record => write!(f, "record"),
+			Self::System => write!(f, "system"),
+		}
+	}
+}
+
+impl Target for QueryTarget {
+	fn matches(&self, elem: &QueryTarget) -> bool {
+		self == elem
+	}
+}
+
+impl Target<str> for QueryTarget {
+	fn matches(&self, elem: &str) -> bool {
+		match self {
+			Self::Guest => elem.eq_ignore_ascii_case("guest"),
+			Self::Record => elem.eq_ignore_ascii_case("record"),
+			Self::System => elem.eq_ignore_ascii_case("system"),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseQueryTargetError {
+	InvalidName,
+}
+
+impl std::error::Error for ParseQueryTargetError {}
+impl fmt::Display for ParseQueryTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match *self {
+			ParseQueryTargetError::InvalidName => {
+				write!(f, "invalid query target name")
+			}
+		}
+	}
+}
+
+impl std::str::FromStr for QueryTarget {
+	type Err = ParseQueryTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match_insensitive!(s.trim(), {
+			"guest" => Ok(QueryTarget::Guest),
+			"record" => Ok(QueryTarget::Record),
+			"system" => Ok(QueryTarget::System),
+			_ => Err(ParseQueryTargetError::InvalidName),
+		})
+	}
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Targets<T: Hash + Eq + PartialEq> {
@@ -438,6 +501,8 @@ pub struct Capabilities {
 	deny_http: Arc<Targets<RouteTarget>>,
 	allow_experimental: Arc<Targets<ExperimentalTarget>>,
 	deny_experimental: Arc<Targets<ExperimentalTarget>>,
+	allow_query: Arc<Targets<QueryTarget>>,
+	deny_query: Arc<Targets<QueryTarget>>,
 }
 
 impl fmt::Display for Capabilities {
@@ -467,6 +532,8 @@ impl Default for Capabilities {
 			deny_http: Arc::new(Targets::None),
 			allow_experimental: Arc::new(Targets::None),
 			deny_experimental: Arc::new(Targets::None),
+			allow_query: Arc::new(Targets::All),
+			deny_query: Arc::new(Targets::None),
 		}
 	}
 }
@@ -488,6 +555,8 @@ impl Capabilities {
 			deny_http: Arc::new(Targets::None),
 			allow_experimental: Arc::new(Targets::None),
 			deny_experimental: Arc::new(Targets::None),
+			allow_query: Arc::new(Targets::All),
+			deny_query: Arc::new(Targets::None),
 		}
 	}
 
@@ -507,6 +576,8 @@ impl Capabilities {
 			deny_http: Arc::new(Targets::None),
 			allow_experimental: Arc::new(Targets::None),
 			deny_experimental: Arc::new(Targets::None),
+			allow_query: Arc::new(Targets::None),
+			deny_query: Arc::new(Targets::None),
 		}
 	}
 
@@ -542,6 +613,16 @@ impl Capabilities {
 
 	pub fn without_experimental(mut self, deny_experimental: Targets<ExperimentalTarget>) -> Self {
 		self.deny_experimental = Arc::new(deny_experimental);
+		self
+	}
+
+	pub fn with_query(mut self, allow_query: Targets<QueryTarget>) -> Self {
+		self.allow_query = Arc::new(allow_query);
+		self
+	}
+
+	pub fn without_query(mut self, deny_query: Targets<QueryTarget>) -> Self {
+		self.deny_query = Arc::new(deny_query);
 		self
 	}
 
@@ -597,6 +678,14 @@ impl Capabilities {
 
 	pub fn allows_experimental_name(&self, target: &str) -> bool {
 		self.allow_experimental.matches(target) && !self.deny_experimental.matches(target)
+	}
+
+	pub fn allows_query(&self, target: &QueryTarget) -> bool {
+		self.allow_query.matches(target) && !self.deny_query.matches(target)
+	}
+
+	pub fn allows_query_name(&self, target: &str) -> bool {
+		self.allow_query.matches(target) && !self.deny_query.matches(target)
 	}
 
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {
