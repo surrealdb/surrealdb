@@ -57,7 +57,7 @@ impl DefineConfigStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::CgAlreadyExists {
-					value: cg.to_string(),
+					name: cg.to_string(),
 				});
 			}
 		}

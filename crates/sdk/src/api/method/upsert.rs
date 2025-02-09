@@ -18,6 +18,8 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
+use super::validate_data;
+
 /// An upsert future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
@@ -128,6 +130,8 @@ where
 		Content::from_closure(self.client, || {
 			let data = to_core_value(data)?;
 
+			validate_data(&data, "Tried to upsert non-object-like data as content, only structs and objects are supported")?;
+
 			let data = match data {
 				CoreValue::None => None,
 				content => Some(content),
@@ -149,6 +153,7 @@ where
 			client: self.client,
 			resource: self.resource,
 			content: data,
+			upsert: true,
 			response_type: PhantomData,
 		}
 	}
@@ -165,6 +170,7 @@ where
 			patches,
 			client: self.client,
 			resource: self.resource,
+			upsert: true,
 			response_type: PhantomData,
 		}
 	}

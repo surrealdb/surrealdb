@@ -92,7 +92,7 @@ async fn router_handle_request(
 		response,
 	}: Route,
 	state: &mut RouterState,
-	_endpoint: &Endpoint,
+	endpoint: &Endpoint,
 ) -> HandleResult {
 	let RequestData {
 		id,
@@ -183,7 +183,11 @@ async fn router_handle_request(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", req);
-		let payload = serialize(&req.stringify_queries(), true).unwrap();
+		let payload = if endpoint.config.ast_payload {
+			serialize(&req, true).unwrap()
+		} else {
+			serialize(&req.stringify_queries(), true).unwrap()
+		};
 		Message::Binary(payload)
 	};
 

@@ -55,7 +55,7 @@ impl DefineIndexStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::IxAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}

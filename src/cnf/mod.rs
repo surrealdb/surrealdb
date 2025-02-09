@@ -79,7 +79,7 @@ pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 pub static WEBSOCKET_RESPONSE_BUFFER_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_BUFFER_SIZE", usize, 0);
 
-/// How many messages can be queued for sending to the buffering WebSocket connection.
+/// How many messages can be queued for sending to the buffered WebSocket connection.
 pub static WEBSOCKET_RESPONSE_CHANNEL_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_CHANNEL_SIZE", usize, 100);
 

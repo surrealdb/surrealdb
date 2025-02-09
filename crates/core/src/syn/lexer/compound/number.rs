@@ -70,6 +70,13 @@ pub fn numeric_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, Synt
 			Some(b'n' | b's' | b'm' | b'h' | b'y' | b'w' | b'u') => {
 				duration(lexer, start).map(NumericKind::Duration)
 			}
+			Some(b'd') => {
+				if let Some(b'e') = lexer.reader.peek1() {
+					number_kind(lexer, start).map(NumericKind::Number)
+				} else {
+					duration(lexer, start).map(NumericKind::Duration)
+				}
+			}
 			Some(x) if !x.is_ascii() => duration(lexer, start).map(NumericKind::Duration),
 			_ => number_kind(lexer, start).map(NumericKind::Number),
 		},

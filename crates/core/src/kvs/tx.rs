@@ -382,13 +382,18 @@ impl Transaction {
 		&self,
 		rng: Range<Vec<u8>>,
 		version: Option<u64>,
+		limit: Option<usize>,
 	) -> impl Stream<Item = Result<(Key, Val), Error>> + '_ {
-		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version)
+		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version, limit)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream_keys(&self, rng: Range<Vec<u8>>) -> impl Stream<Item = Result<Key, Error>> + '_ {
-		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None)
+	pub fn stream_keys(
+		&self,
+		rng: Range<Vec<u8>>,
+		limit: Option<usize>,
+	) -> impl Stream<Item = Result<Key, Error>> + '_ {
+		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, limit)
 	}
 
 	// --------------------------------------------------
@@ -931,7 +936,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::root::nd::new(id).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::NdNotFound {
-					value: id.to_string(),
+					uuid: id.to_string(),
 				})?;
 				let val: Node = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
@@ -951,7 +956,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::root::us::new(us).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::UserRootNotFound {
-					value: us.to_owned(),
+					name: us.to_owned(),
 				})?;
 				let val: DefineUserStatement = val.into();
 				let val = Arc::new(val);
@@ -1017,7 +1022,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::root::ns::new(ns).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::NsNotFound {
-					value: ns.to_owned(),
+					name: ns.to_owned(),
 				})?;
 				let val: DefineNamespaceStatement = val.into();
 				let val = Arc::new(val);
@@ -1037,7 +1042,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::namespace::us::new(ns, us).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::UserNsNotFound {
-					value: us.to_owned(),
+					name: us.to_owned(),
 					ns: ns.to_owned(),
 				})?;
 				let val: DefineUserStatement = val.into();
@@ -1111,7 +1116,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::namespace::db::new(ns, db).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::DbNotFound {
-					value: db.to_owned(),
+					name: db.to_owned(),
 				})?;
 				let val: DefineDatabaseStatement = val.into();
 				let val = Arc::new(val);
@@ -1136,7 +1141,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::us::new(ns, db, us).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::UserDbNotFound {
-					value: us.to_owned(),
+					name: us.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
 				})?;
@@ -1221,7 +1226,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::ml::new(ns, db, ml, vn).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::MlNotFound {
-					value: format!("{ml}<{vn}>"),
+					name: format!("{ml}<{vn}>"),
 				})?;
 				let val: DefineModelStatement = val.into();
 				let val = Arc::new(val);
@@ -1271,7 +1276,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::az::new(ns, db, az).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::AzNotFound {
-					value: az.to_owned(),
+					name: az.to_owned(),
 				})?;
 				let val: DefineAnalyzerStatement = val.into();
 				let val = Arc::new(val);
@@ -1296,7 +1301,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::fc::new(ns, db, fc).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::FcNotFound {
-					value: fc.to_owned(),
+					name: fc.to_owned(),
 				})?;
 				let val: DefineFunctionStatement = val.into();
 				let val = Arc::new(val);
@@ -1321,7 +1326,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::pa::new(ns, db, pa).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::PaNotFound {
-					value: pa.to_owned(),
+					name: pa.to_owned(),
 				})?;
 				let val: DefineParamStatement = val.into();
 				let val = Arc::new(val);
@@ -1343,7 +1348,7 @@ impl Transaction {
 		if let Some(val) = self.get_db_optional_config(ns, db, cg).await? {
 			Ok(val)
 		} else {
-			Err(Error::TbNotFound {
+			Err(Error::CgNotFound {
 				value: cg.to_owned(),
 			})
 		}
@@ -1362,7 +1367,7 @@ impl Transaction {
 			Some(val) => val.try_into_type().map(Option::Some),
 			None => {
 				let key = crate::key::database::cg::new(ns, db, cg).encode()?;
-				if let Some(val) = self.get(key, None).await? {
+				if let Ok(val) = self.get(key, None).await? {
 					let val: DefineConfigStatement = val.into();
 					let val = Arc::new(val);
 					let entr = cache::tx::Entry::Any(val.clone());
@@ -1389,7 +1394,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::tb::new(ns, db, tb).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::TbNotFound {
-					value: tb.to_owned(),
+					name: tb.to_owned(),
 				})?;
 				let val: DefineTableStatement = val.into();
 				let val = Arc::new(val);
@@ -1415,7 +1420,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::table::ev::new(ns, db, tb, ev).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::EvNotFound {
-					value: ev.to_owned(),
+					name: ev.to_owned(),
 				})?;
 				let val: DefineEventStatement = val.into();
 				let val = Arc::new(val);
@@ -1441,7 +1446,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::table::fd::new(ns, db, tb, fd).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::FdNotFound {
-					value: fd.to_owned(),
+					name: fd.to_owned(),
 				})?;
 				let val: DefineFieldStatement = val.into();
 				let val = Arc::new(val);
@@ -1467,7 +1472,7 @@ impl Transaction {
 			None => {
 				let key = crate::key::table::ix::new(ns, db, tb, ix).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::IxNotFound {
-					value: ix.to_owned(),
+					name: ix.to_owned(),
 				})?;
 				let val: DefineIndexStatement = val.into();
 				let val = Arc::new(val);
@@ -1636,25 +1641,25 @@ impl Transaction {
 				// Check that the table exists
 				match self.get_tb(ns, db, tb).await {
 					Err(Error::TbNotFound {
-						value: tb,
+						name: tb,
 					}) => {
 						// If not, check the database exists
 						match self.get_db(ns, db).await {
 							Err(Error::DbNotFound {
-								value: db,
+								name: db,
 							}) => {
 								// If not, check the namespace exists
 								match self.get_ns(ns).await {
 									Err(Error::NsNotFound {
-										value: ns,
+										name: ns,
 									}) => Err(Error::NsNotFound {
-										value: ns,
+										name: ns,
 									}),
 									// Return any other errors
 									Err(err) => Err(err),
 									// Namespace does exist
 									Ok(_) => Err(Error::DbNotFound {
-										value: db,
+										name: db,
 									}),
 								}
 							}
@@ -1662,7 +1667,7 @@ impl Transaction {
 							Err(err) => Err(err),
 							// Database does exist
 							Ok(_) => Err(Error::TbNotFound {
-								value: tb,
+								name: tb,
 							}),
 						}
 					}
@@ -1703,7 +1708,7 @@ impl Transaction {
 				// Try to fetch the value from the datastore
 				let key = crate::key::root::ns::new(ns);
 				let res = self.get(&key, None).await?.ok_or_else(|| Error::NsNotFound {
-					value: ns.to_owned(),
+					name: ns.to_owned(),
 				});
 				// Check whether the value exists in the datastore
 				match res {
@@ -1755,7 +1760,7 @@ impl Transaction {
 				// Try to fetch the value from the datastore
 				let key = crate::key::namespace::db::new(ns, db);
 				let res = self.get(&key, None).await?.ok_or_else(|| Error::DbNotFound {
-					value: db.to_owned(),
+					name: db.to_owned(),
 				});
 				// Check whether the value exists in the datastore
 				match res {
@@ -1781,11 +1786,11 @@ impl Transaction {
 					}
 					// Check to see that the hierarchy exists
 					Err(Error::DbNotFound {
-						value,
+						name,
 					}) if strict => {
 						self.get_ns(ns).await?;
 						Err(Error::DbNotFound {
-							value,
+							name,
 						})?
 					}
 					// Store the fetched value in the cache
@@ -1822,7 +1827,7 @@ impl Transaction {
 				// Try to fetch the value from the datastore
 				let key = crate::key::database::tb::new(ns, db, tb);
 				let res = self.get(&key, None).await?.ok_or_else(|| Error::TbNotFound {
-					value: tb.to_owned(),
+					name: tb.to_owned(),
 				});
 				// Check whether the value exists in the datastore
 				match res {
@@ -1849,12 +1854,12 @@ impl Transaction {
 					}
 					// Check to see that the hierarchy exists
 					Err(Error::TbNotFound {
-						value,
+						name,
 					}) if strict => {
 						self.get_ns(ns).await?;
 						self.get_db(ns, db).await?;
 						Err(Error::TbNotFound {
-							value,
+							name,
 						})?
 					}
 					// Store the fetched value in the cache

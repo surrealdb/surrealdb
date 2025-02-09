@@ -106,27 +106,4 @@ impl Method {
 	pub fn is_valid(&self) -> bool {
 		!matches!(self, Self::Unknown)
 	}
-	/// Checks if this method needs mutable access to the RPC session
-	pub fn needs_mutability(&self) -> bool {
-		!matches!(
-			self,
-			Method::Ping
-				| Method::Info
-				| Method::Select
-				| Method::Insert
-				| Method::Create
-				| Method::Upsert
-				| Method::Update
-				| Method::Merge
-				| Method::Patch
-				| Method::Delete
-				| Method::Version
-				| Method::Query
-				| Method::Relate
-				| Method::Run
-				| Method::GraphQL
-				| Method::InsertRelation
-				| Method::Unknown
-		)
-	}
 }

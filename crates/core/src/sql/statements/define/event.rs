@@ -49,7 +49,7 @@ impl DefineEventStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::EvAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}

@@ -1,58 +1,52 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
-
 use crate::cnf::{PKG_NAME, PKG_VERSION};
+use std::sync::Arc;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::Data;
 use surrealdb_core::rpc::RpcContext;
 use surrealdb_core::rpc::RpcError;
 use surrealdb_core::sql::Array;
-use surrealdb_core::sql::Value;
+use tokio::sync::Semaphore;
 
 #[cfg(surrealdb_unstable)]
 use surrealdb_core::gql::{Pessimistic, SchemaCache};
 
-pub struct PostRpcContext {
+pub struct Http {
 	pub kvs: Arc<Datastore>,
-	pub session: Session,
-	pub vars: BTreeMap<String, Value>,
+	pub lock: Arc<Semaphore>,
+	pub session: Arc<Session>,
 	#[cfg(surrealdb_unstable)]
 	pub gql_schema: SchemaCache<Pessimistic>,
 }
 
-impl PostRpcContext {
-	pub fn new(kvs: &Arc<Datastore>, session: Session, vars: BTreeMap<String, Value>) -> Self {
+impl Http {
+	pub fn new(kvs: &Arc<Datastore>, session: Session) -> Self {
 		Self {
 			kvs: kvs.clone(),
-			session,
-			vars,
+			lock: Arc::new(Semaphore::new(1)),
+			session: Arc::new(session),
 			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(kvs.clone()),
 		}
 	}
 }
 
-impl RpcContext for PostRpcContext {
+impl RpcContext for Http {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore {
 		&self.kvs
 	}
+	/// Retrieves the modification lock for this RPC context
+	fn lock(&self) -> Arc<Semaphore> {
+		self.lock.clone()
+	}
 	/// The current session for this RPC context
-	fn session(&self) -> &Session {
-		&self.session
+	fn session(&self) -> Arc<Session> {
+		self.session.clone()
 	}
 	/// Mutable access to the current session for this RPC context
-	fn session_mut(&mut self) -> &mut Session {
-		&mut self.session
-	}
-	/// The current parameters stored on this RPC context
-	fn vars(&self) -> &BTreeMap<String, Value> {
-		&self.vars
-	}
-	/// Mutable access to the current parameters stored on this RPC context
-	fn vars_mut(&mut self) -> &mut BTreeMap<String, Value> {
-		&mut self.vars
+	fn set_session(&self, _session: Arc<Session>) {
+		// Do nothing as HTTP is stateless
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> Data {
@@ -84,12 +78,12 @@ impl RpcContext for PostRpcContext {
 	// ------------------------------
 
 	/// Parameters can't be set or unset on HTTP RPC context
-	async fn set(&mut self, _params: Array) -> Result<Data, RpcError> {
+	async fn set(&self, _params: Array) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
 	/// Parameters can't be set or unset on HTTP RPC context
-	async fn unset(&mut self, _params: Array) -> Result<Data, RpcError> {
+	async fn unset(&self, _params: Array) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 }
