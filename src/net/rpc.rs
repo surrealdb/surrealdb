@@ -137,7 +137,7 @@ async fn handle_socket(
 		// Any selected protocol will always be a valid value
 		Some(protocol) => protocol.into(),
 		// No protocol format was specified
-		_ => Format::Unsupported,
+		_ => Format::Json,
 	};
 	// Create a new connection instance
 	let rpc = Websocket::new(datastore, state, id, sess, format);
