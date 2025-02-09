@@ -5,7 +5,7 @@ use http::{
 
 use crate::{err::Error, rpc::format::Format, sql::Value};
 
-use super::invocation::ApiInvocation;
+use super::{err::ApiError, invocation::ApiInvocation};
 
 #[derive(Debug)]
 pub struct ApiResponse {
@@ -33,7 +33,10 @@ impl TryFrom<Value> for ApiResponse {
 
 					// Convert to StatusCode
 					v.try_into().map_err(|_| {
-						Error::Unreachable(format!("{v} is not a valid HTTP status code"))
+						ApiError::InvalidApiResponse(
+							format!("{v} is not a valid HTTP status code").into(),
+						)
+						.into()
 					})
 				})
 				.transpose()?
@@ -48,7 +51,7 @@ impl TryFrom<Value> for ApiResponse {
 			let body = opts.remove("body");
 
 			if opts.len() > 0 {
-				Err(Error::Unreachable("Invalid API response, unknown key".into()))
+				Err(ApiError::InvalidApiResponse("Contains invalid properties".into()).into())
 			} else {
 				Ok(Self {
 					raw,
@@ -58,7 +61,7 @@ impl TryFrom<Value> for ApiResponse {
 				})
 			}
 		} else {
-			Err(Error::Unreachable("Invalid API response".into()))
+			Err(ApiError::InvalidApiResponse("Expected an object".into()).into())
 		}
 	}
 }
@@ -97,8 +100,8 @@ impl ResponseInstruction {
 			Some("application/cbor") => Format::Cbor,
 			Some("application/pack") => Format::Msgpack,
 			Some("application/surrealdb") => Format::Revision,
-			Some(_) => return Err(Error::Unreachable("Invalid Accept or Content-Type".into())),
-			_ => return Err(Error::Unreachable("Missing Accept and Content-Type".into())),
+			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
+			_ => return Err(Error::ApiError(ApiError::MissingFormat)),
 		};
 
 		Ok(ResponseInstruction::Format(format))

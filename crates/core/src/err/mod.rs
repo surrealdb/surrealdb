@@ -1,4 +1,4 @@
-use crate::api::response::ApiResponse;
+use crate::api::err::ApiError;
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
@@ -1283,13 +1283,19 @@ pub enum Error {
 		existing_kind: String,
 	},
 
-	#[error("Tried to form an API response in a place where this is not supported")]
-	ApiResponse(ApiResponse),
+	#[error("An API error occurred: {0}")]
+	ApiError(ApiError),
 }
 
 impl From<Error> for String {
 	fn from(e: Error) -> String {
 		e.to_string()
+	}
+}
+
+impl From<ApiError> for Error {
+	fn from(value: ApiError) -> Self {
+		Error::ApiError(value)
 	}
 }
 

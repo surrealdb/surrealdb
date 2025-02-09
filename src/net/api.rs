@@ -27,6 +27,7 @@ use surrealdb::rpc::format::revision;
 use surrealdb::rpc::format::Format;
 use surrealdb::sql::statements::FindApi;
 use surrealdb::sql::Value;
+use surrealdb_core::api::err::ApiError;
 use surrealdb_core::api::{
 	body::ApiBody, invocation::ApiInvocation, method::Method as ApiMethod,
 	response::ResponseInstruction,
@@ -126,11 +127,18 @@ async fn handler(
 						.or_insert("application/octet-stream".parse().unwrap());
 					v.into()
 				}
-				_ => return Err(Error::InvalidType),
+				v => {
+					return Err(Error::ApiError(ApiError::InvalidApiResponse(format!(
+						"Expected bytes or string, found {}",
+						v.kindof()
+					))))
+				}
 			},
 			ResponseInstruction::Format(format) => {
 				if res.headers.contains_key("Content-Type") {
-					return Err(Error::InvalidType);
+					return Err(Error::ApiError(ApiError::InvalidApiResponse(
+						"A Content-Type header was already set while this was not expected".into(),
+					)));
 				}
 
 				let (header, val) = match format {
@@ -138,13 +146,21 @@ async fn handler(
 					Format::Cbor => ("application/cbor", cbor::res(body)?),
 					Format::Msgpack => ("application/pack", msgpack::res(body)?),
 					Format::Revision => ("application/surrealdb", revision::res(body)?),
-					_ => return Err(Error::InvalidType),
+					_ => {
+						return Err(Error::ApiError(ApiError::Unreachable(
+							"Expected a valid format".into(),
+						)))
+					}
 				};
 
 				res.headers.insert(CONTENT_TYPE, header.parse().unwrap());
 				val
 			}
-			ResponseInstruction::Native => return Err(Error::InvalidType),
+			ResponseInstruction::Native => {
+				return Err(Error::ApiError(ApiError::Unreachable(
+					"Found a native response instruction where this is not supported".into(),
+				)))
+			}
 		}
 	} else {
 		Vec::new()

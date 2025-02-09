@@ -8,9 +8,11 @@ use http::header::CONTENT_TYPE;
 use crate::err::Error;
 use crate::rpc::format::{cbor, json, msgpack, revision};
 use crate::sql::Bytesize;
+use crate::sql::Kind;
 use crate::sql::Value;
 
 use super::context::InvocationContext;
+use super::err::ApiError;
 use super::invocation::ApiInvocation;
 
 pub enum ApiBody {
@@ -50,14 +52,10 @@ impl ApiBody {
 
 				// TODO(kearfy) Proper errors
 				while let Some(chunk) = stream.next().await {
-					let chunk = chunk
-						.map_err(|e| Error::Unreachable(format!("failed to stream body: {e}")))?;
-
+					let chunk = chunk.map_err(|_| Error::ApiError(ApiError::InvalidRequestBody))?;
 					size += chunk.len() as u64;
 					if size > max.0 {
-						return Err(Error::Unreachable(format!(
-							"body size exceeds limit: {size} > {max}"
-						)));
+						return Err(ApiError::RequestBodyTooLarge(max).into());
 					}
 
 					bytes.extend_from_slice(&chunk);
@@ -81,17 +79,14 @@ impl ApiBody {
 			let size = std::mem::size_of_val(&value);
 
 			if size > max.0 as usize {
-				return Err(Error::Unreachable(format!("body size exceeds limit: {size} > {max}")));
+				return Err(ApiError::RequestBodyTooLarge(max).into());
 			}
 
-			if ctx.request_body_raw && !value.is_bytes() {
-				return Err(Error::Unreachable(format!(
-					"Expected a bytes value, but recieved {} instead",
-					value.kindof()
-				)));
+			if ctx.request_body_raw {
+				value.coerce_to(&Kind::Bytes)
+			} else {
+				Ok(value)
 			}
-
-			Ok(value)
 		} else {
 			let bytes = self.stream(ctx.request_body_max.to_owned()).await?;
 
@@ -109,7 +104,7 @@ impl ApiBody {
 					_ => return Ok(Value::Bytes(crate::sql::Bytes(bytes))),
 				};
 
-				parsed.map_err(|_| Error::Unreachable("Failed to parse".into()))
+				parsed.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
 			}
 		}
 	}
