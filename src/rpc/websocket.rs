@@ -163,7 +163,7 @@ impl Websocket {
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
-				//
+				// Process brances in order
 				biased;
 				// Check if we should teardown
 				_ = canceller.cancelled() => break,
@@ -202,7 +202,7 @@ impl Websocket {
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
-				//
+				// Process brances in order
 				biased;
 				// Check if we should teardown
 				_ = canceller.cancelled() => break,
@@ -239,7 +239,7 @@ impl Websocket {
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
-				//
+				// Process brances in order
 				biased;
 				// Remove any completed tasks
 				_ = tasks.next(), if !tasks.is_empty() => {},
@@ -292,12 +292,19 @@ impl Websocket {
 				}
 			}
 		}
-		// Check if we are shutting down
-		if shutdown.is_cancelled() {
-			// Wait for all tasks to finish
-			while tasks.next().await.is_some() {
-				// Do nothing
-			}
+		// Continue with the shutdown process
+		tokio::select! {
+			// Process brances in order
+			biased;
+			// Check if we have been cancelled
+			_ = canceller.cancelled() => (),
+			// Check if we are shutting down
+			_ = shutdown.cancelled() => {
+				// Wait for all tasks to finish
+				while tasks.next().await.is_some() {
+					// Do nothing
+				}
+			},
 		}
 		// Cancel the WebSocket tasks
 		canceller.cancel();
