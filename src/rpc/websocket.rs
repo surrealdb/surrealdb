@@ -295,7 +295,7 @@ impl Websocket {
 		// Check if we are shutting down
 		if shutdown.is_cancelled() {
 			// Wait for all tasks to finish
-			while let Some(_) = tasks.next().await {
+			while tasks.next().await.is_some() {
 				// Do nothing
 			}
 		}
