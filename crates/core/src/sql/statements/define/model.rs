@@ -45,7 +45,7 @@ impl DefineModelStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::MlAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}

@@ -42,7 +42,7 @@ impl DefineNamespaceStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::NsAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}

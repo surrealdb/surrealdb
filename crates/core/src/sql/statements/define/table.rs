@@ -80,7 +80,7 @@ impl DefineTableStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::TbAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}
