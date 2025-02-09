@@ -1,8 +1,7 @@
+#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+use crate::gql::SchemaCache;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
-
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
-use async_graphql::BatchRequest;
 use uuid::Uuid;
 
 use super::Method;
@@ -10,11 +9,7 @@ use super::RpcError;
 use super::RpcProtocolV1;
 use super::RpcProtocolV2;
 use super::RpcResponse;
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Session;
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
-use crate::gql::SchemaCache;
 use crate::kvs::Datastore;
 use crate::sql::Array;
 

@@ -1,18 +1,15 @@
+#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+use async_graphql::BatchRequest;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
 use crate::rpc::RpcResponse;
-use std::collections::BTreeMap;
-use std::sync::Arc;
-
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
-use async_graphql::BatchRequest;
-
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
-use crate::dbs::capabilities::ExperimentalTarget;
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
-use crate::gql::SchemaCache;
 use crate::{
 	dbs::{capabilities::MethodTarget, QueryType, Response},
 	rpc::args::Take,
