@@ -35,7 +35,7 @@ impl Method {
 	where
 		S: AsRef<str>,
 	{
-		match s.as_ref().to_lowercase().as_str() {
+		match s.as_ref() {
 			"ping" => Self::Ping,
 			"info" => Self::Info,
 			"use" => Self::Use,
@@ -46,7 +46,7 @@ impl Method {
 			"reset" => Self::Reset,
 			"kill" => Self::Kill,
 			"live" => Self::Live,
-			"let" | "set" => Self::Set,
+			"set" | "let" => Self::Set,
 			"unset" => Self::Unset,
 			"select" => Self::Select,
 			"insert" => Self::Insert,
@@ -98,6 +98,12 @@ impl Method {
 			Self::GraphQL => "graphql",
 			Self::InsertRelation => "insert_relation",
 		}
+	}
+}
+
+impl std::fmt::Display for Method {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.to_str())
 	}
 }
 

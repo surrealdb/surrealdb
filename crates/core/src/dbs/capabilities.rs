@@ -3,7 +3,7 @@ use std::hash::Hash;
 use std::net::IpAddr;
 use std::{collections::HashSet, sync::Arc};
 
-use crate::rpc::method::Method;
+use crate::rpc::Method;
 use ipnet::IpNet;
 use url::Url;
 

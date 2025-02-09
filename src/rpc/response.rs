@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::sync::Arc;
 use surrealdb::channel::Sender;
 use surrealdb::rpc::format::Format;
-use surrealdb::rpc::Data;
+use surrealdb::rpc::RpcResponse;
 use surrealdb::sql::Value;
 use tracing::Span;
 
@@ -16,7 +16,7 @@ use tracing::Span;
 #[derive(Debug, Serialize)]
 pub struct Response {
 	id: Option<Value>,
-	result: Result<Data, Failure>,
+	result: Result<RpcResponse, Failure>,
 }
 
 impl Response {
@@ -73,7 +73,7 @@ impl From<Response> for Value {
 }
 
 /// Create a JSON RPC result response
-pub fn success<T: Into<Data>>(id: Option<Value>, data: T) -> Response {
+pub fn success<T: Into<RpcResponse>>(id: Option<Value>, data: T) -> Response {
 	Response {
 		id,
 		result: Ok(data.into()),
@@ -94,7 +94,7 @@ pub trait IntoRpcResponse {
 
 impl<T, E> IntoRpcResponse for Result<T, E>
 where
-	T: Into<Data>,
+	T: Into<RpcResponse>,
 	E: Into<Failure>,
 {
 	fn into_response(self, id: Option<Value>) -> Response {

@@ -11,7 +11,7 @@ use serde::Serialize;
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-pub enum Data {
+pub enum RpcResponse {
 	/// Generally methods return a `sql::Value`
 	Other(Value),
 	/// The query methods, `query` and `query_with` return a `Vec` of responses
@@ -21,36 +21,36 @@ pub enum Data {
 	// Add new variants here
 }
 
-impl From<Value> for Data {
+impl From<Value> for RpcResponse {
 	fn from(v: Value) -> Self {
-		Data::Other(v)
+		RpcResponse::Other(v)
 	}
 }
 
-impl From<String> for Data {
+impl From<String> for RpcResponse {
 	fn from(v: String) -> Self {
-		Data::Other(Value::from(v))
+		RpcResponse::Other(Value::from(v))
 	}
 }
 
-impl From<Notification> for Data {
+impl From<Notification> for RpcResponse {
 	fn from(n: Notification) -> Self {
-		Data::Live(n)
+		RpcResponse::Live(n)
 	}
 }
 
-impl From<Vec<dbs::Response>> for Data {
+impl From<Vec<dbs::Response>> for RpcResponse {
 	fn from(v: Vec<dbs::Response>) -> Self {
-		Data::Query(v)
+		RpcResponse::Query(v)
 	}
 }
 
-impl From<Data> for Value {
-	fn from(val: Data) -> Self {
+impl From<RpcResponse> for Value {
+	fn from(val: RpcResponse) -> Self {
 		match val {
-			Data::Query(v) => sql::to_value(v).unwrap(),
-			Data::Live(v) => sql::to_value(v).unwrap(),
-			Data::Other(v) => v,
+			RpcResponse::Query(v) => sql::to_value(v).unwrap(),
+			RpcResponse::Live(v) => sql::to_value(v).unwrap(),
+			RpcResponse::Other(v) => v,
 		}
 	}
 }

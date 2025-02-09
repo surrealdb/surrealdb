@@ -32,8 +32,7 @@ use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
-use surrealdb::rpc::method::Method;
-use surrealdb::rpc::rpc_context::RpcContext;
+use surrealdb::rpc::RpcContext;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
@@ -182,10 +181,8 @@ async fn post_handler(
 	// Parse the HTTP request body
 	match fmt.req_http(body) {
 		Ok(req) => {
-			// Parse the request RPC method type
-			let method = Method::parse(req.method);
 			// Execute the specified method
-			let res = rpc.execute(method, req.params).await;
+			let res = RpcContext::execute(&rpc, req.version, req.method, req.params).await;
 			// Return the HTTP response
 			fmt.res_http(res.into_response(None)).map_err(Error::from)
 		}
