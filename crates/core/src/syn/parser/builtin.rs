@@ -2,7 +2,7 @@ use super::{ParseResult, Parser};
 use crate::{
 	sql::{Constant, Function, Value},
 	syn::{
-		error::MessageKind,
+		error::{bail, MessageKind},
 		parser::{mac::expected, unexpected, SyntaxError},
 		token::{t, Span},
 	},
@@ -523,10 +523,15 @@ impl Parser<'_> {
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),
-			Some((k, PathKind::Function)) => stk
-				.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
-				.await
-				.map(|x| Value::Function(Box::new(x))),
+			Some((k, PathKind::Function)) => {
+				if k == &UniCase::ascii("api::invoke") && !self.settings.define_api_enabled {
+					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @span);
+				}
+
+				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
+					.await
+					.map(|x| Value::Function(Box::new(x)))
+			}
 			None => {
 				if let Some(suggest) = find_suggestion(str) {
 					Err(SyntaxError::new(format_args!(

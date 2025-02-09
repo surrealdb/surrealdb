@@ -837,6 +837,9 @@ impl Datastore {
 			bearer_access_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			define_api_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::DefineApi),
 			..Default::default()
 		};
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);

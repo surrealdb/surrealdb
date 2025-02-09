@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use crate::{
 	api::{body::ApiBody, invocation::ApiInvocation, method::Method},
 	ctx::Context,
-	dbs::Options,
+	dbs::{capabilities::ExperimentalTarget, Options},
 	err::Error,
 	iam::{Auth, Role},
 	sql::{statements::FindApi, Object, Value},
@@ -15,6 +15,13 @@ pub async fn invoke(
 	(stk, ctx, opt): (&mut Stk, &Context, &Options),
 	(path, opts): (String, Option<Object>),
 ) -> Result<Value, Error> {
+	if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::DefineApi) {
+		return Err(Error::InvalidFunction {
+			name: "api::invoke".to_string(),
+			message: "Experimental feature is disabled".to_string(),
+		});
+	}
+
 	let (body, method, query, headers) = if let Some(opts) = opts {
 		let body = match opts.get("body") {
 			Some(v) => v.to_owned(),

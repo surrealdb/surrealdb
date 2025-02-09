@@ -75,6 +75,7 @@ pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 				.allows_experimental(&ExperimentalTarget::RecordReferences),
 			bearer_access_enabled: capabilities
 				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			define_api_enabled: capabilities.allows_experimental(&ExperimentalTarget::DefineApi),
 			..Default::default()
 		},
 	);

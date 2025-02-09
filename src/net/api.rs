@@ -16,6 +16,7 @@ use axum::routing::any;
 use axum::Extension;
 use axum::Router;
 use http::header::CONTENT_TYPE;
+use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::LockType;
@@ -57,9 +58,14 @@ async fn handler(
 	let url = format!("/api/{ns}/{db}/{path}");
 	// Get a database reference
 	let ds = &state.datastore;
+	// Check if the experimental capability is enabled
+	if !state.datastore.get_capabilities().allows_experimental(&ExperimentalTarget::DefineApi) {
+		warn!("Experimental capability for API routes is not enabled");
+		return Err(Error::NotFound(url));
+	}
 	// Check if capabilities allow querying the requested HTTP route
 	if !ds.allows_http_route(&RouteTarget::Api) {
-		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Sql);
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Api);
 		return Err(Error::ForbiddenRoute(RouteTarget::Api.to_string()));
 	}
 

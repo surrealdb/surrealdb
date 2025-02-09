@@ -801,6 +801,10 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_define_api(&mut self, ctx: &mut Stk) -> ParseResult<DefineApiStatement> {
+		if !self.settings.define_api_enabled {
+			bail!("Cannot define an API, as the experimental define api capability is not enabled", @self.last_span);
+		}
+
 		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));

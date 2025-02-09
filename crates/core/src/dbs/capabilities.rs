@@ -113,6 +113,7 @@ pub enum ExperimentalTarget {
 	RecordReferences,
 	GraphQL,
 	BearerAccess,
+	DefineApi,
 }
 
 impl fmt::Display for ExperimentalTarget {
@@ -121,6 +122,7 @@ impl fmt::Display for ExperimentalTarget {
 			Self::RecordReferences => write!(f, "record_references"),
 			Self::GraphQL => write!(f, "graphql"),
 			Self::BearerAccess => write!(f, "bearer_access"),
+			Self::DefineApi => write!(f, "define_api"),
 		}
 	}
 }
@@ -137,6 +139,7 @@ impl Target<str> for ExperimentalTarget {
 			Self::RecordReferences => elem.eq_ignore_ascii_case("record_references"),
 			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
 			Self::BearerAccess => elem.eq_ignore_ascii_case("bearer_access"),
+			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
 		}
 	}
 }
@@ -165,6 +168,7 @@ impl std::str::FromStr for ExperimentalTarget {
 			"record_references" => Ok(ExperimentalTarget::RecordReferences),
 			"graphql" => Ok(ExperimentalTarget::GraphQL),
 			"bearer_access" => Ok(ExperimentalTarget::BearerAccess),
+			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		})
 	}
