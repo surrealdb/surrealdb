@@ -66,7 +66,11 @@ impl Bytesize {
 	}
 
 	pub fn parse(input: impl Into<String>) -> Result<Self, Error> {
-		let input = input.into().to_lowercase();
+		let input = input.into().trim().to_lowercase();
+		if input.is_empty() {
+			return Err(Error::InvalidBytesize);
+		}
+
 		let mut chars: Peekable<Chars> = input.chars().peekable();
 		let mut total = Bytesize::new(0);
 
