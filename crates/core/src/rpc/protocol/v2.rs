@@ -34,7 +34,7 @@ pub trait RpcProtocolV2: RpcContext {
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method,
 		}) {
-			warn!("Capabilities denied RPC method call attempt, target: '{}'", method);
+			warn!("Capabilities denied RPC method call attempt, target: '{method}'");
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Execute the desired method
