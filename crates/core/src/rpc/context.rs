@@ -8,7 +8,7 @@ use super::Method;
 use super::RpcError;
 use super::RpcProtocolV1;
 use super::RpcProtocolV2;
-use super::RpcResponse;
+use super::Data;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::Array;
@@ -24,7 +24,7 @@ pub trait RpcContext {
 	/// Mutable access to the current session for this RPC context
 	fn set_session(&self, session: Arc<Session>);
 	/// The version information for this RPC context
-	fn version_data(&self) -> RpcResponse;
+	fn version_data(&self) -> Data;
 
 	// ------------------------------
 	// Realtime
@@ -70,7 +70,7 @@ pub trait RpcContext {
 		version: Option<u8>,
 		method: Method,
 		params: Array,
-	) -> Result<RpcResponse, RpcError>
+	) -> Result<Data, RpcError>
 	where
 		Self: RpcProtocolV1,
 		Self: RpcProtocolV2,

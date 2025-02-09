@@ -9,7 +9,7 @@ use crate::err::Error;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
-use crate::rpc::RpcResponse;
+use crate::rpc::Data;
 use crate::{
 	dbs::{capabilities::MethodTarget, QueryType, Response},
 	rpc::args::Take,
@@ -29,7 +29,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	/// Executes a method on this RPC implementation
-	async fn execute(&self, method: Method, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn execute(&self, method: Method, params: Array) -> Result<Data, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method,
@@ -73,7 +73,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for authentication
 	// ------------------------------
 
-	async fn yuse(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn yuse(&self, params: Array) -> Result<Data, RpcError> {
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
 		// To be able to select a namespace, and then list resources in that namespace, as an example
@@ -116,7 +116,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
 	// This will allow returning refresh tokens as well as any additional credential resulting from signing up.
-	async fn signup(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn signup(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -140,7 +140,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
 	// This will allow returning refresh tokens as well as any additional credential resulting from signing in.
-	async fn signin(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn signin(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -164,7 +164,7 @@ pub trait RpcProtocolV1: RpcContext {
 		out.map(Into::into).map_err(Into::into)
 	}
 
-	async fn authenticate(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn authenticate(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -188,7 +188,7 @@ pub trait RpcProtocolV1: RpcContext {
 		out.map_err(Into::into).map(Into::into)
 	}
 
-	async fn invalidate(&self) -> Result<RpcResponse, RpcError> {
+	async fn invalidate(&self) -> Result<Data, RpcError> {
 		// Get the context lock
 		let mutex = self.lock().clone();
 		// Lock the context for update
@@ -205,7 +205,7 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(Value::None.into())
 	}
 
-	async fn reset(&self) -> Result<RpcResponse, RpcError> {
+	async fn reset(&self) -> Result<Data, RpcError> {
 		// Get the context lock
 		let mutex = self.lock().clone();
 		// Lock the context for update
@@ -228,7 +228,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for identification
 	// ------------------------------
 
-	async fn info(&self) -> Result<RpcResponse, RpcError> {
+	async fn info(&self) -> Result<Data, RpcError> {
 		// Specify the SQL query string
 		let sql = SelectStatement {
 			expr: Fields::all(),
@@ -246,7 +246,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for setting variables
 	// ------------------------------
 
-	async fn set(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn set(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((Value::Strand(key), val)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -292,7 +292,7 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(Value::Null.into())
 	}
 
-	async fn unset(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn unset(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Strand(key)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -317,7 +317,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for live queries
 	// ------------------------------
 
-	async fn kill(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn kill(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let id = params.needs_one()?;
 		// Specify the SQL query string
@@ -333,7 +333,7 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res.remove(0).result?.into())
 	}
 
-	async fn live(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn live(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let (what, diff) = params.needs_one_or_two()?;
 		// Specify the SQL query string
@@ -357,7 +357,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for selecting
 	// ------------------------------
 
-	async fn select(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn select(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(what) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -389,7 +389,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for inserting
 	// ------------------------------
 
-	async fn insert(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn insert(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
@@ -420,7 +420,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.into())
 	}
 
-	async fn insert_relation(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn insert_relation(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
@@ -456,7 +456,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for creating
 	// ------------------------------
 
-	async fn create(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn create(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -491,7 +491,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for upserting
 	// ------------------------------
 
-	async fn upsert(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn upsert(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -527,7 +527,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for updating
 	// ------------------------------
 
-	async fn update(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn update(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -563,7 +563,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for merging
 	// ------------------------------
 
-	async fn merge(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn merge(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -599,7 +599,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for patching
 	// ------------------------------
 
-	async fn patch(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn patch(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((what, data, diff)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
@@ -635,7 +635,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for relating
 	// ------------------------------
 
-	async fn relate(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn relate(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((from, kind, with, data)) = params.needs_three_or_four() else {
 			return Err(RpcError::InvalidParams);
@@ -673,7 +673,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for deleting
 	// ------------------------------
 
-	async fn delete(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn delete(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(what) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -705,7 +705,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for getting info
 	// ------------------------------
 
-	async fn version(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn version(&self, params: Array) -> Result<Data, RpcError> {
 		match params.len() {
 			0 => Ok(self.version_data()),
 			_ => Err(RpcError::InvalidParams),
@@ -716,7 +716,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for querying
 	// ------------------------------
 
-	async fn query(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn query(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((query, vars)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -739,7 +739,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for running functions
 	// ------------------------------
 
-	async fn run(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn run(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok((name, version, args)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
@@ -785,12 +785,12 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	#[cfg(any(target_family = "wasm", not(surrealdb_unstable)))]
-	async fn graphql(&self, _: Array) -> Result<RpcResponse, RpcError> {
+	async fn graphql(&self, _: Array) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
 	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
-	async fn graphql(&self, params: Array) -> Result<RpcResponse, RpcError> {
+	async fn graphql(&self, params: Array) -> Result<Data, RpcError> {
 		if !self.kvs().get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 			return Err(RpcError::BadGQLConfig);
 		}
