@@ -1349,7 +1349,7 @@ impl Transaction {
 			Ok(val)
 		} else {
 			Err(Error::CgNotFound {
-				value: cg.to_owned(),
+				name: cg.to_owned(),
 			})
 		}
 	}
@@ -1367,7 +1367,7 @@ impl Transaction {
 			Some(val) => val.try_into_type().map(Option::Some),
 			None => {
 				let key = crate::key::database::cg::new(ns, db, cg).encode()?;
-				if let Ok(val) = self.get(key, None).await? {
+				if let Some(val) = self.get(key, None).await? {
 					let val: DefineConfigStatement = val.into();
 					let val = Arc::new(val);
 					let entr = cache::tx::Entry::Any(val.clone());
