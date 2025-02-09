@@ -1,5 +1,5 @@
 use super::escape::escape_key;
-use super::{Bytesize, Duration, Idiom, Number, Part, Strand};
+use super::{Duration, Idiom, Number, Part, Strand};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
@@ -39,7 +39,6 @@ pub enum Kind {
 	Range,
 	Literal(Literal),
 	References(Option<Table>, Option<Idiom>),
-	Bytesize,
 }
 
 impl Default for Kind {
@@ -161,7 +160,6 @@ impl Kind {
 				| Kind::Datetime
 				| Kind::Decimal
 				| Kind::Duration
-				| Kind::Bytesize
 				| Kind::Float
 				| Kind::Int
 				| Kind::Number
@@ -256,7 +254,6 @@ impl Display for Kind {
 			Kind::Datetime => f.write_str("datetime"),
 			Kind::Decimal => f.write_str("decimal"),
 			Kind::Duration => f.write_str("duration"),
-			Kind::Bytesize => f.write_str("bytesize"),
 			Kind::Float => f.write_str("float"),
 			Kind::Int => f.write_str("int"),
 			Kind::Number => f.write_str("number"),
@@ -313,7 +310,6 @@ pub enum Literal {
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),
 	DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
-	Bytesize(Bytesize),
 }
 
 impl Literal {
@@ -333,7 +329,6 @@ impl Literal {
 			}
 			Self::Object(_) => Kind::Object,
 			Self::DiscriminatedObject(_, _) => Kind::Object,
-			Self::Bytesize(_) => Kind::Bytesize,
 		}
 	}
 
@@ -349,10 +344,6 @@ impl Literal {
 			},
 			Self::Duration(v) => match value {
 				Value::Duration(n) => n == v,
-				_ => false,
-			},
-			Self::Bytesize(v) => match value {
-				Value::Bytesize(n) => n == v,
 				_ => false,
 			},
 			Self::Array(a) => match value {
@@ -488,7 +479,6 @@ impl Display for Literal {
 			Literal::String(s) => write!(f, "{}", s),
 			Literal::Number(n) => write!(f, "{}", n),
 			Literal::Duration(n) => write!(f, "{}", n),
-			Literal::Bytesize(n) => write!(f, "{}", n),
 			Literal::Array(a) => {
 				let mut f = Pretty::from(f);
 				f.write_char('[')?;

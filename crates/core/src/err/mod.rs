@@ -1285,6 +1285,9 @@ pub enum Error {
 
 	#[error("An API error occurred: {0}")]
 	ApiError(ApiError),
+
+	#[error("The string could not be parsed into a bytesize")]
+	InvalidBytesize,
 }
 
 impl From<Error> for String {

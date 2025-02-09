@@ -167,7 +167,6 @@ impl Parser<'_> {
 				let v = match value.value {
 					compound::Numeric::Number(x) => Value::Number(x),
 					compound::Numeric::Duration(x) => Value::Duration(Duration(x)),
-					compound::Numeric::Bytesize(x) => Value::Bytesize(x),
 				};
 				Ok(v)
 			}

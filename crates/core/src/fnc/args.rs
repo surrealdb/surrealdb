@@ -67,7 +67,7 @@ impl FromArg for Duration {
 
 impl FromArg for Bytesize {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		arg.coerce_to_bytesize()
+		Bytesize::parse(arg.coerce_to_string()?)
 	}
 }
 

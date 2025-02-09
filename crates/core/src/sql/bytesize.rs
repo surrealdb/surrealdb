@@ -1,18 +1,16 @@
+use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value;
-use crate::{err::Error, syn};
 use num_traits::CheckedAdd;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::iter::Sum;
+use std::iter::{Peekable, Sum};
 use std::ops;
-use std::str::FromStr;
+use std::str::{Chars, FromStr};
 
 use super::value::{TryAdd, TrySub};
 use super::Strand;
-
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Bytesize";
 
 #[revisioned(revision = 1)]
 #[derive(
@@ -52,7 +50,7 @@ impl TryFrom<Strand> for Bytesize {
 impl TryFrom<&str> for Bytesize {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::bytesize(v) {
+		match Bytesize::parse(v) {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
@@ -65,6 +63,54 @@ impl Bytesize {
 
 	pub fn new(b: u64) -> Self {
 		Bytesize(b)
+	}
+
+	pub fn parse(input: impl Into<String>) -> Result<Self, Error> {
+		let input = input.into().to_lowercase();
+		let mut chars: Peekable<Chars> = input.chars().peekable();
+		let mut total = Bytesize::new(0);
+
+		while chars.peek().is_some() {
+			// Parse number
+			let mut number = String::new();
+			while let Some(&c) = chars.peek() {
+				if !c.is_ascii_digit() {
+					break;
+				}
+				number.push(chars.next().unwrap());
+			}
+
+			let value = number.parse::<u64>().map_err(|_| Error::InvalidBytesize)?;
+
+			// Parse unit
+			let unit = chars.next().ok_or(Error::InvalidBytesize)?.to_ascii_lowercase();
+
+			// Handle optional 'b' suffix
+			if unit != 'b' {
+				match chars.next() {
+					Some('b') => (),
+					_ => return Err(Error::InvalidBytesize),
+				}
+			}
+
+			let bytesize = match unit {
+				'b' => Bytesize::b(value),
+				'k' => Bytesize::kb(value),
+				'm' => Bytesize::mb(value),
+				'g' => Bytesize::gb(value),
+				't' => Bytesize::tb(value),
+				'p' => Bytesize::pb(value),
+				_ => return Err(Error::InvalidBytesize),
+			};
+
+			total = total.try_add(bytesize)?;
+		}
+
+		if total == Bytesize::new(0) {
+			return Err(Error::InvalidBytesize);
+		}
+
+		Ok(total)
 	}
 
 	pub fn b(b: u64) -> Self {
@@ -236,5 +282,18 @@ impl<'a> Sum<&'a Self> for Bytesize {
 impl InfoStructure for Bytesize {
 	fn structure(self) -> Value {
 		self.to_string().into()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::Bytesize;
+
+	#[test]
+	fn parse_bytesize() {
+		let str = "1tb8mb2b";
+		let bytesize = Bytesize::parse(str).unwrap();
+		assert_eq!(bytesize, Bytesize::new(1_099_520_016_386));
+		assert_eq!(str, bytesize.to_string());
 	}
 }

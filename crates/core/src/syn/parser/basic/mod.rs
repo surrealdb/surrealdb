@@ -1,9 +1,6 @@
 use crate::{
 	api::path::Path,
-	sql::{
-		bytesize::Bytesize, language::Language, Datetime, Duration, Ident, Param, Regex, Strand,
-		Table, Uuid,
-	},
+	sql::{language::Language, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid},
 	syn::{
 		lexer::compound,
 		parser::{mac::unexpected, ParseResult, Parser},
@@ -89,21 +86,6 @@ impl TokenValue for Duration {
 				Ok(Duration(v))
 			}
 			_ => unexpected!(parser, token, "a duration"),
-		}
-	}
-}
-
-impl TokenValue for Bytesize {
-	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		let token = parser.peek();
-		match token.kind {
-			TokenKind::Glued(token::Glued::Bytesize) => Ok(pop_glued!(parser, Bytesize)),
-			TokenKind::Digits => {
-				parser.pop_peek();
-				let v = parser.lexer.lex_compound(token, compound::bytesize)?.value;
-				Ok(v)
-			}
-			_ => unexpected!(parser, token, "a bytesize"),
 		}
 	}
 }

@@ -4,7 +4,7 @@ use crate::{
 	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
 	dbs::{capabilities::ExperimentalTarget, Capabilities},
 	err::Error,
-	sql::{Block, Bytesize, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
+	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
 };
 
 pub mod error;
@@ -231,23 +231,6 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 	let mut parser = Parser::new(input.as_bytes());
 	parser
 		.next_token_value::<Duration>()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-}
-
-/// Parse a bytesize from a string.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn bytesize(input: &str) -> Result<Bytesize, Error> {
-	trace!(target: TARGET, "Parsing SurrealQL bytesize");
-
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
-
-	let mut parser = Parser::new(input.as_bytes());
-	parser
-		.next_token_value::<Bytesize>()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)

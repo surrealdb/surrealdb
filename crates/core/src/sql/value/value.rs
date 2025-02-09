@@ -10,6 +10,7 @@ use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
@@ -19,7 +20,6 @@ use crate::sql::{
 	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
 	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
-use crate::sql::{Bytesize, Closure};
 use chrono::{DateTime, Utc};
 use derive::Store;
 use geo::Point;
@@ -140,7 +140,6 @@ pub enum Value {
 	Closure(Box<Closure>),
 	Refs(Refs),
 	// Add new variants here
-	Bytesize(Bytesize),
 }
 
 impl Value {
@@ -266,12 +265,6 @@ impl From<Datetime> for Value {
 impl From<Duration> for Value {
 	fn from(v: Duration) -> Self {
 		Value::Duration(v)
-	}
-}
-
-impl From<Bytesize> for Value {
-	fn from(v: Bytesize) -> Self {
-		Value::Bytesize(v)
 	}
 }
 
@@ -598,15 +591,6 @@ impl From<Option<i64>> for Value {
 
 impl From<Option<Duration>> for Value {
 	fn from(v: Option<Duration>) -> Self {
-		match v {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		}
-	}
-}
-
-impl From<Option<Bytesize>> for Value {
-	fn from(v: Option<Bytesize>) -> Self {
 		match v {
 			Some(v) => Value::from(v),
 			None => Value::None,
@@ -989,7 +973,6 @@ impl Value {
 			Value::Strand(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
-			Value::Bytesize(v) => v.0 > 0,
 			_ => false,
 		}
 	}
@@ -1081,11 +1064,6 @@ impl Value {
 	/// Check if this Value is a Duration
 	pub fn is_duration(&self) -> bool {
 		matches!(self, Value::Duration(_))
-	}
-
-	/// Check if this Value is a Bytesize
-	pub fn is_bytesize(&self) -> bool {
-		matches!(self, Value::Bytesize(_))
 	}
 
 	/// Check if this Value is a Thing
@@ -1263,7 +1241,6 @@ impl Value {
 			| Value::Constant(_)
 			| Value::Datetime(_)
 			| Value::Duration(_)
-			| Value::Bytesize(_)
 			| Value::Uuid(_)
 			| Value::Number(_)
 			| Value::Object(_)
@@ -1329,7 +1306,6 @@ impl Value {
 			Self::Object(_) => "object",
 			Self::Strand(_) => "string",
 			Self::Duration(_) => "duration",
-			Self::Bytesize(_) => "bytesize",
 			Self::Datetime(_) => "datetime",
 			Self::Closure(_) => "function",
 			Self::Number(Number::Int(_)) => "int",
@@ -1366,7 +1342,6 @@ impl Value {
 			Kind::String => self.coerce_to_strand().map(Value::from),
 			Kind::Datetime => self.coerce_to_datetime().map(Value::from),
 			Kind::Duration => self.coerce_to_duration().map(Value::from),
-			Kind::Bytesize => self.coerce_to_bytesize().map(Value::from),
 			Kind::Object => self.coerce_to_object().map(Value::from),
 			Kind::Point => self.coerce_to_point().map(Value::from),
 			Kind::Bytes => self.coerce_to_bytes().map(Value::from),
@@ -1743,19 +1718,6 @@ impl Value {
 		}
 	}
 
-	/// Try to coerce this value to a `Bytesize`
-	pub(crate) fn coerce_to_bytesize(self) -> Result<Bytesize, Error> {
-		match self {
-			// Bytesizes are allowed
-			Value::Bytesize(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "bytesize".into(),
-			}),
-		}
-	}
-
 	/// Try to coerce this value to a `Bytes`
 	pub(crate) fn coerce_to_bytes(self) -> Result<Bytes, Error> {
 		match self {
@@ -1979,7 +1941,6 @@ impl Value {
 			Kind::String => self.convert_to_strand().map(Value::from),
 			Kind::Datetime => self.convert_to_datetime().map(Value::from),
 			Kind::Duration => self.convert_to_duration().map(Value::from),
-			Kind::Bytesize => self.convert_to_bytesize().map(Value::from),
 			Kind::Object => self.convert_to_object().map(Value::from),
 			Kind::Point => self.convert_to_point().map(Value::from),
 			Kind::Bytes => self.convert_to_bytes().map(Value::from),
@@ -2356,29 +2317,6 @@ impl Value {
 		}
 	}
 
-	/// Try to convert this value to a `Bytesize`
-	pub(crate) fn convert_to_bytesize(self) -> Result<Bytesize, Error> {
-		match self {
-			// Bytesizes are allowed
-			Value::Bytesize(v) => Ok(v),
-			// Attempt to parse a string
-			Value::Strand(ref v) => match Bytesize::from_str(v) {
-				// The string can be parsed as a bytesize
-				Ok(v) => Ok(v),
-				// This string is not a bytesize
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "bytesize".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "bytesize".into(),
-			}),
-		}
-	}
-
 	/// Try to convert this value to a `Bytes`
 	pub(crate) fn convert_to_bytes(self) -> Result<Bytes, Error> {
 		match self {
@@ -2684,7 +2622,6 @@ impl Value {
 			Value::Number(_) => true,
 			Value::Strand(_) => true,
 			Value::Duration(_) => true,
-			Value::Bytesize(_) => true,
 			Value::Datetime(_) => true,
 			Value::Geometry(_) => true,
 			Value::Array(v) => v.is_static(),
@@ -2750,10 +2687,6 @@ impl Value {
 			},
 			Value::Duration(v) => match other {
 				Value::Duration(w) => v == w,
-				_ => false,
-			},
-			Value::Bytesize(v) => match other {
-				Value::Bytesize(w) => v == w,
 				_ => false,
 			},
 			Value::Datetime(v) => match other {
@@ -2921,7 +2854,6 @@ impl Value {
 				| Value::Bool(_)
 				| Value::Datetime(_)
 				| Value::Duration(_)
-				| Value::Bytesize(_)
 				| Value::Geometry(_)
 				| Value::Number(_)
 				| Value::Object(_)
@@ -2948,7 +2880,6 @@ impl fmt::Display for Value {
 			Value::Constant(v) => write!(f, "{v}"),
 			Value::Datetime(v) => write!(f, "{v}"),
 			Value::Duration(v) => write!(f, "{v}"),
-			Value::Bytesize(v) => write!(f, "{v}"),
 			Value::Edges(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
 			Value::Function(v) => write!(f, "{v}"),
@@ -2985,8 +2916,8 @@ impl Value {
 	pub fn validate_computed(&self) -> Result<(), Error> {
 		use Value::*;
 		match self {
-			None | Null | Bool(_) | Number(_) | Strand(_) | Duration(_) | Bytesize(_)
-			| Datetime(_) | Uuid(_) | Geometry(_) | Bytes(_) | Thing(_) => Ok(()),
+			None | Null | Bool(_) | Number(_) | Strand(_) | Duration(_) | Datetime(_) | Uuid(_)
+			| Geometry(_) | Bytes(_) | Thing(_) => Ok(()),
 			Array(a) => a.validate_computed(),
 			Object(o) => o.validate_computed(),
 			Range(r) => r.validate_computed(),
@@ -3074,7 +3005,6 @@ impl TryAdd for Value {
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
-			(Self::Bytesize(v), Self::Bytesize(w)) => Self::Bytesize(v.try_add(w)?),
 			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
@@ -3096,7 +3026,6 @@ impl TrySub for Value {
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
-			(Self::Bytesize(v), Self::Bytesize(w)) => Self::Bytesize(v.try_sub(w)?),
 			(v, w) => return Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
 		})
 	}

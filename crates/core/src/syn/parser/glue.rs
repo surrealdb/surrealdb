@@ -48,13 +48,6 @@ impl Parser<'_> {
 							kind: TokenKind::Glued(Glued::Duration),
 						});
 					}
-					compound::NumericKind::Bytesize(x) => {
-						self.glued_value = GluedValue::Bytesize(x);
-						self.prepend_token(Token {
-							span: value.span,
-							kind: TokenKind::Glued(Glued::Bytesize),
-						});
-					}
 				}
 			}
 			TokenKind::Digits => {
@@ -73,13 +66,6 @@ impl Parser<'_> {
 						self.prepend_token(Token {
 							span: value.span,
 							kind: TokenKind::Glued(Glued::Duration),
-						});
-					}
-					compound::NumericKind::Bytesize(x) => {
-						self.glued_value = GluedValue::Bytesize(x);
-						self.prepend_token(Token {
-							span: value.span,
-							kind: TokenKind::Glued(Glued::Bytesize),
 						});
 					}
 				}

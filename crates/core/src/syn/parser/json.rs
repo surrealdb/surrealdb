@@ -50,7 +50,6 @@ impl Parser<'_> {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
-					Numeric::Bytesize(x) => Ok(Value::Bytesize(x)),
 					Numeric::Duration(x) => Ok(Value::Duration(Duration(x))),
 					Numeric::Number(x) => Ok(Value::Number(x)),
 				}
