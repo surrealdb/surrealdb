@@ -119,7 +119,7 @@ impl DefineUserStatement {
 						return Ok(Value::None);
 					} else if !self.overwrite {
 						return Err(Error::UserRootAlreadyExists {
-							value: self.name.to_string(),
+							name: self.name.to_string(),
 						});
 					}
 				}
@@ -150,7 +150,7 @@ impl DefineUserStatement {
 						return Ok(Value::None);
 					} else if !self.overwrite {
 						return Err(Error::UserNsAlreadyExists {
-							value: self.name.to_string(),
+							name: self.name.to_string(),
 							ns: opt.ns()?.into(),
 						});
 					}
@@ -183,7 +183,7 @@ impl DefineUserStatement {
 						return Ok(Value::None);
 					} else if !self.overwrite {
 						return Err(Error::UserDbAlreadyExists {
-							value: self.name.to_string(),
+							name: self.name.to_string(),
 							ns: opt.ns()?.into(),
 							db: opt.db()?.into(),
 						});
