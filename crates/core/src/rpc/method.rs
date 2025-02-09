@@ -31,7 +31,24 @@ pub enum Method {
 }
 
 impl Method {
-	pub fn parse<S>(s: S) -> Self
+	/// Parse a [Method] from a [str] with any case
+	pub fn parse_case_insensitive<S>(s: S) -> Self
+	where
+		S: AsRef<str>,
+	{
+		Self::parse(s.as_ref().to_lowercase().as_str())
+	}
+
+	/// Parse a [Method] from a [str] in lower case
+	pub fn parse_case_sensitive<S>(s: S) -> Self
+	where
+		S: AsRef<str>,
+	{
+		Self::parse(s.as_ref())
+	}
+
+	/// Parse a [Method] from a [str]
+	fn parse<S>(s: S) -> Self
 	where
 		S: AsRef<str>,
 	{

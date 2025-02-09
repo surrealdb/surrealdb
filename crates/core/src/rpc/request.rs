@@ -69,8 +69,8 @@ impl TryFrom<Value> for Request {
 			Value::Array(v) => v,
 			_ => Array::new(),
 		};
-		//
-		let method = Method::parse(&method);
+		// Parse the specified method
+		let method = Method::parse_case_sensitive(&method);
 		// Return the parsed request
 		Ok(Request {
 			id,

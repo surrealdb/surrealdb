@@ -286,7 +286,7 @@ impl std::str::FromStr for MethodTarget {
 	type Err = ParseMethodTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match Method::parse(s) {
+		match Method::parse_case_insensitive(s) {
 			Method::Unknown => Err(ParseMethodTargetError),
 			method => Ok(MethodTarget {
 				method,
