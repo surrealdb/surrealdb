@@ -3,6 +3,7 @@ use std::hash::Hash;
 use std::net::IpAddr;
 use std::{collections::HashSet, sync::Arc};
 
+use crate::iam::{Auth, Level};
 use crate::rpc::method::Method;
 use ipnet::IpNet;
 use url::Url;
@@ -392,6 +393,24 @@ impl fmt::Display for QueryTarget {
 			Self::Record => write!(f, "record"),
 			Self::System => write!(f, "system"),
 		}
+	}
+}
+
+impl<'a> From<&'a Level> for QueryTarget {
+	fn from(level: &'a Level) -> Self {
+		match level {
+			Level::No => QueryTarget::Guest,
+			Level::Root => QueryTarget::System,
+			Level::Namespace(_) => QueryTarget::System,
+			Level::Database(_, _) => QueryTarget::System,
+			Level::Record(_, _, _) => QueryTarget::Record,
+		}
+	}
+}
+
+impl<'a> From<&'a Auth> for QueryTarget {
+	fn from(auth: &'a Auth) -> Self {
+		auth.level().into()
 	}
 }
 

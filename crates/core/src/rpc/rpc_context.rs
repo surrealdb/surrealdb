@@ -155,6 +155,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn yuse(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
 		// To be able to select a namespace, and then list resources in that namespace, as an example
@@ -287,6 +291,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn set(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((Value::Strand(key), val)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -308,6 +316,10 @@ pub trait RpcContext {
 	}
 
 	async fn unset(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok(Value::Strand(key)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -323,6 +335,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn kill(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let id = params.needs_one()?;
 		// Specify the SQL query string
@@ -339,6 +355,10 @@ pub trait RpcContext {
 	}
 
 	async fn live(&mut self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let (what, diff) = params.needs_one_or_two()?;
 		// Specify the SQL query string
@@ -363,6 +383,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn select(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok(what) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -395,6 +419,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn insert(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
@@ -426,6 +454,10 @@ pub trait RpcContext {
 	}
 
 	async fn insert_relation(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
@@ -462,6 +494,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn create(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -499,6 +535,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn upsert(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -535,6 +575,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn update(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -571,6 +615,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn merge(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -607,6 +655,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn patch(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data, diff)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
@@ -643,6 +695,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn relate(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((from, kind, with, data)) = params.needs_three_or_four() else {
 			return Err(RpcError::InvalidParams);
@@ -681,6 +737,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn delete(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok(what) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -724,6 +784,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn query(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((query, vars)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -747,6 +811,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn run(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((name, version, args)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
@@ -798,6 +866,10 @@ pub trait RpcContext {
 
 	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 	async fn graphql(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		if !self.kvs().get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 			return Err(RpcError::BadGQLConfig);
 		}
