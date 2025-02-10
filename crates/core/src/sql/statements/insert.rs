@@ -6,14 +6,14 @@ use crate::idx::planner::RecordStrategy;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value, Version};
-use derive::Store;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct InsertStatement {

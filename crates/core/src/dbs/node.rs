@@ -1,6 +1,5 @@
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value;
-use derive::Store;
 use revision::revisioned;
 use revision::Error;
 use serde::{Deserialize, Serialize};
@@ -10,7 +9,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct Node {
 	#[revision(start = 2, default_fn = "default_id")]
@@ -110,9 +109,7 @@ impl InfoStructure for Node {
 // events in a cluster. It should be derived from a timestamp oracle, such as the
 // one available in TiKV via the client `TimestampExt` implementation.
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash, Store,
-)]
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
 #[non_exhaustive]
 pub struct Timestamp {
 	pub value: u64,

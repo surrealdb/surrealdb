@@ -7,7 +7,7 @@ use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::UpdateStatement;
 use crate::sql::{Base, Ident, Idioms, Index, Output, Part, Strand, Value, Values};
-use derive::Store;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineIndexStatement {
@@ -87,12 +87,12 @@ impl DefineIndexStatement {
 		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
 		txn.set(
 			key,
-			DefineIndexStatement {
+			revision::to_vec(&DefineIndexStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
-			},
+			})?,
 			None,
 		)
 		.await?;
@@ -101,10 +101,10 @@ impl DefineIndexStatement {
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
 			key,
-			DefineTableStatement {
+			revision::to_vec(&DefineTableStatement {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			},
+			})?,
 			None,
 		)
 		.await?;

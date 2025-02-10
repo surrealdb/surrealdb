@@ -1,10 +1,9 @@
 use crate::sql::{id::Gen, id::Id as NewId, Array, IdRange, Object};
-use derive::Key;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Key, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Id {
@@ -54,7 +53,6 @@ impl From<Id> for NewId {
 }
 
 pub mod key {
-	use derive::Key;
 	use serde::{Deserialize, Serialize};
 
 	use crate::{
@@ -64,7 +62,7 @@ pub mod key {
 
 	use super::Id;
 
-	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 	#[non_exhaustive]
 	pub struct Graph<'a> {
 		__: u8,
@@ -82,7 +80,8 @@ pub mod key {
 	}
 	impl_key!(Graph<'a>);
 
-	impl<'a> Graph<'a> {
+	impl Graph<'_> {
+		/*
 		pub fn new(
 			ns: &'a str,
 			db: &'a str,
@@ -107,6 +106,7 @@ pub mod key {
 				fk: fk.to_owned(),
 			}
 		}
+		*/
 
 		pub fn fix(&self) -> Option<crate::key::graph::Graph> {
 			let fixed = match (self.id.fix(), self.fk.fix()) {
@@ -144,7 +144,7 @@ pub mod key {
 		}
 	}
 
-	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 	#[non_exhaustive]
 	pub struct Thing<'a> {
 		__: u8,
@@ -159,7 +159,8 @@ pub mod key {
 	}
 	impl_key!(Thing<'a>);
 
-	impl<'a> Thing<'a> {
+	impl Thing<'_> {
+		/*
 		pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {
 			Self {
 				__: b'/',
@@ -173,6 +174,7 @@ pub mod key {
 				id,
 			}
 		}
+		*/
 
 		pub fn fix(&self) -> Option<crate::key::thing::Thing> {
 			self.id.fix().map(|id| crate::key::thing::new(self.ns, self.db, self.tb, &id))

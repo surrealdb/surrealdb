@@ -162,12 +162,6 @@ impl Debug for Document {
 	}
 }
 
-impl From<&Document> for Vec<u8> {
-	fn from(val: &Document) -> Vec<u8> {
-		val.current.doc.as_ref().into()
-	}
-}
-
 pub(crate) enum Permitted {
 	Initial,
 	Current,

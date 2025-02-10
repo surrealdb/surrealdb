@@ -264,8 +264,10 @@ impl IndexEqualThingIterator {
 	) -> Result<B, Error> {
 		let res = Self::next_scan(tx, beg, end, limit).await?;
 		let mut records = B::with_capacity(res.len());
-		res.into_iter()
-			.for_each(|(_, val)| records.add(IndexItemRecord::new_key(val.into(), irf.into())));
+		res.into_iter().try_for_each(|(_, val)| -> Result<(), Error> {
+			records.add(IndexItemRecord::new_key(revision::from_slice(&val)?, irf.into()));
+			Ok(())
+		})?;
 		Ok(records)
 	}
 
@@ -523,9 +525,12 @@ impl IndexRangeThingIterator {
 	) -> Result<B, Error> {
 		let res = self.next_scan(tx, limit).await?;
 		let mut records = B::with_capacity(res.len());
-		res.into_iter()
-			.filter(|(k, _)| self.r.matches(k))
-			.for_each(|(_, v)| records.add(IndexItemRecord::new_key(v.into(), self.irf.into())));
+		res.into_iter().filter(|(k, _)| self.r.matches(k)).try_for_each(
+			|(_, v)| -> Result<(), Error> {
+				records.add(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into()));
+				Ok(())
+			},
+		)?;
 		Ok(records)
 	}
 
@@ -675,7 +680,7 @@ impl JoinThingIterator {
 					break;
 				}
 				let thing = r.thing();
-				let k: Key = thing.into();
+				let k: Key = revision::to_vec(thing)?;
 				let value = Value::from(thing.clone());
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local = Some(new_iter(&self.ns, &self.db, &self.ix, value)?);
@@ -803,7 +808,7 @@ impl UniqueEqualThingIterator {
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B, Error> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = tx.get(key, None).await? {
-				let rid: Thing = val.into();
+				let rid: Thing = revision::from_slice(&val)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());
 				return Ok(B::from_one(record));
 			}
@@ -911,14 +916,14 @@ impl UniqueRangeThingIterator {
 				return Ok(records);
 			}
 			if self.r.matches(&k) {
-				let rid: Thing = v.into();
+				let rid: Thing = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
 		let end = self.r.end.clone();
 		if self.r.matches(&end) {
 			if let Some(v) = tx.get(end, None).await? {
-				let rid: Thing = v.into();
+				let rid: Thing = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
@@ -993,7 +998,7 @@ impl UniqueUnionThingIterator {
 			}
 			if let Some(val) = tx.get(key, None).await? {
 				count += 1;
-				let rid: Thing = val.into();
+				let rid: Thing = revision::from_slice(&val)?;
 				results.add(IndexItemRecord::new_key(rid, self.irf.into()));
 				if results.len() >= limit {
 					break;
