@@ -338,6 +338,7 @@ impl RangeScan {
 		self.beg = beg;
 	}
 
+	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 	/// Update the range with a new ending.
 	/// The new key is different, the ending becomes included.
 	/// Used by reverse iterators.
@@ -1079,7 +1080,7 @@ impl UniqueRangeReverseThingIterator {
 			return Ok(0);
 		}
 		limit += 1;
-		let res = tx.scanr(self.r.range(), limit, None).await?;
+		let res = tx.keysr(self.r.range(), limit, None).await?;
 		let mut count = 0;
 		if self.r.end_incl && tx.exists(&self.r.end, None).await? {
 			count += 1;
@@ -1090,7 +1091,7 @@ impl UniqueRangeReverseThingIterator {
 				return Ok(count);
 			}
 		}
-		for (k, _) in res {
+		for k in res {
 			limit -= 1;
 			if limit == 0 {
 				self.r.next_end(k);
