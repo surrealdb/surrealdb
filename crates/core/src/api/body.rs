@@ -1,7 +1,11 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::fmt::Display;
 
+#[cfg(not(target_arch = "wasm32"))]
 use bytes::Bytes;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::Stream;
+#[cfg(not(target_arch = "wasm32"))]
 use futures::StreamExt;
 use http::header::CONTENT_TYPE;
 
@@ -42,11 +46,10 @@ impl ApiBody {
 	}
 
 	pub async fn stream(self, max: Option<Bytesize>) -> Result<Vec<u8>, Error> {
-		let max = max.unwrap_or(Bytesize::MAX);
-
 		match self {
 			#[cfg(not(target_arch = "wasm32"))]
 			Self::Stream(mut stream) => {
+				let max = max.unwrap_or(Bytesize::MAX);
 				let mut size: u64 = 0;
 				let mut bytes: Vec<u8> = Vec::new();
 
@@ -74,6 +77,7 @@ impl ApiBody {
 		ctx: &InvocationContext,
 		invocation: &'a ApiInvocation<'a>,
 	) -> Result<Value, Error> {
+		#[allow(irrefutable_let_patterns)] // For WASM this is the only pattern
 		if let ApiBody::Native(value) = self {
 			let max = ctx.request_body_max.to_owned().unwrap_or(Bytesize::MAX);
 			let size = std::mem::size_of_val(&value);
