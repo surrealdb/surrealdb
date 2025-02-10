@@ -45,6 +45,8 @@ impl ApiBody {
 		matches!(self, Self::Native(_))
 	}
 
+	// The `max` variable is unused in WASM only
+	#[allow(unused_variables)]
 	pub async fn stream(self, max: Option<Bytesize>) -> Result<Vec<u8>, Error> {
 		match self {
 			#[cfg(not(target_arch = "wasm32"))]
@@ -53,7 +55,6 @@ impl ApiBody {
 				let mut size: u64 = 0;
 				let mut bytes: Vec<u8> = Vec::new();
 
-				// TODO(kearfy) Proper errors
 				while let Some(chunk) = stream.next().await {
 					let chunk = chunk.map_err(|_| Error::ApiError(ApiError::InvalidRequestBody))?;
 					size += chunk.len() as u64;

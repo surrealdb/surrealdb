@@ -421,7 +421,7 @@ impl DbsCapabilities {
 		match &self.allow_query {
 			Some(t @ Targets::Some(_)) => t.clone(),
 			Some(_) => Targets::None,
-			None => Targets::None,
+			None => Targets::All,
 		}
 	}
 
