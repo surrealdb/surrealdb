@@ -26,6 +26,8 @@ impl super::Routine for Create {
 				field: Id::rand(),
 			};
 
+			client.query(format!("DEFINE TABLE {}", self.table_name)).await.unwrap();
+
 			// Spawn one task for each operation
 			let mut tasks = JoinSet::default();
 			for _ in 0..num_ops {

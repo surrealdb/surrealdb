@@ -13,7 +13,7 @@ on:
         default: false
         description: "Publish the nightly release"
   schedule:
-    - cron: '0 0 * * *'
+    - cron: "0 0 * * *"
 
 defaults:
   run:
@@ -25,7 +25,7 @@ permissions:
 jobs:
   release:
     name: Prepare nightly release
-    uses: ./.github/workflows/reusable_publish_version.yml
+    uses: ./.github/workflows/publish-version.yml
     with:
       environment: nightly
       extra-features: storage-surrealkv,ml

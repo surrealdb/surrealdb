@@ -27,21 +27,22 @@ impl RemoveIndexStatement {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
+			// Get the NS and DB
+			let ns = opt.ns()?;
+			let db = opt.db()?;
 			// Get the transaction
 			let txn = ctx.tx();
 			// Clear the index store cache
-			ctx.get_index_stores()
-				.index_removed(&txn, opt.ns()?, opt.db()?, &self.what, &self.name)
-				.await?;
+			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::table::ix::new(opt.ns()?, opt.db()?, &self.what, &self.name);
+			let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
 			txn.del(key).await?;
 			// Remove the index data
-			let key = crate::key::index::all::new(opt.ns()?, opt.db()?, &self.what, &self.name);
+			let key = crate::key::index::all::new(ns, db, &self.what, &self.name);
 			txn.delp(key).await?;
 			// Refresh the table cache for indexes
-			let key = crate::key::database::tb::new(opt.ns()?, opt.db()?, &self.what);
-			let tb = txn.get_tb(opt.ns()?, opt.db()?, &self.what).await?;
+			let key = crate::key::database::tb::new(ns, db, &self.what);
+			let tb = txn.get_tb(ns, db, &self.what).await?;
 			txn.set(
 				key,
 				DefineTableStatement {
@@ -51,6 +52,10 @@ impl RemoveIndexStatement {
 				None,
 			)
 			.await?;
+			// Clear the cache
+			if let Some(cache) = ctx.get_cache() {
+				cache.clear_tb(ns, db, &self.what);
+			}
 			// Clear the cache
 			txn.clear();
 			// Ok all good

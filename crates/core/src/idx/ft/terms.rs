@@ -28,7 +28,7 @@ impl Terms {
 		tt: TransactionType,
 		cache_size: u32,
 	) -> Result<Self, Error> {
-		let state_key: Key = index_key_base.new_bt_key(None);
+		let state_key: Key = index_key_base.new_bt_key(None)?;
 		let state: State = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
 		} else {
@@ -42,7 +42,7 @@ impl Terms {
 				tt,
 				cache_size as usize,
 			)
-			.await;
+			.await?;
 		Ok(Self {
 			state_key,
 			index_key_base,
@@ -82,7 +82,7 @@ impl Terms {
 			}
 		}
 		let term_id = self.get_next_term_id();
-		tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone(), None).await?;
+		tx.set(self.index_key_base.new_bu_key(term_id)?, term_key.clone(), None).await?;
 		self.btree.insert(tx, &mut self.store, term_key, term_id).await?;
 		Ok(term_id)
 	}
@@ -100,7 +100,7 @@ impl Terms {
 		tx: &Transaction,
 		term_id: TermId,
 	) -> Result<(), Error> {
-		let term_id_key = self.index_key_base.new_bu_key(term_id);
+		let term_id_key = self.index_key_base.new_bu_key(term_id)?;
 		if let Some(term_key) = tx.get(term_id_key.clone(), None).await? {
 			self.btree.delete(tx, &mut self.store, term_key.clone()).await?;
 			tx.del(term_id_key).await?;
@@ -325,7 +325,7 @@ mod tests {
 			let (tx, mut t) = new_operation(&ds, BTREE_ORDER, Write).await;
 
 			// Check removing an non-existing term id returns None
-			assert!(t.remove_term_id(&tx, 0).await.is_ok());
+			t.remove_term_id(&tx, 0).await.unwrap();
 
 			// Create few terms
 			t.resolve_term_id(&tx, "A").await.unwrap();

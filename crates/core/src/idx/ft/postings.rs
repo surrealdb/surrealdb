@@ -24,7 +24,7 @@ impl Postings {
 		tt: TransactionType,
 		cache_size: u32,
 	) -> Result<Self, Error> {
-		let state_key: Key = index_key_base.new_bp_key(None);
+		let state_key: Key = index_key_base.new_bp_key(None)?;
 		let state: BState = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
 		} else {
@@ -38,7 +38,7 @@ impl Postings {
 				tt,
 				cache_size as usize,
 			)
-			.await;
+			.await?;
 		Ok(Self {
 			state_key,
 			index_key_base,
@@ -54,7 +54,7 @@ impl Postings {
 		doc_id: DocId,
 		term_freq: TermFrequency,
 	) -> Result<(), Error> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id);
+		let key = self.index_key_base.new_bf_key(term_id, doc_id)?;
 		self.btree.insert(tx, &mut self.store, key, term_freq).await
 	}
 
@@ -64,7 +64,7 @@ impl Postings {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id);
+		let key = self.index_key_base.new_bf_key(term_id, doc_id)?;
 		self.btree.search(tx, &self.store, &key).await
 	}
 
@@ -74,7 +74,7 @@ impl Postings {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>, Error> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id);
+		let key = self.index_key_base.new_bf_key(term_id, doc_id)?;
 		self.btree.delete(tx, &mut self.store, key).await
 	}
 

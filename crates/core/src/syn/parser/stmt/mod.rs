@@ -1,6 +1,5 @@
 use reblessive::Stk;
 
-use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::block::Entry;
 use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
@@ -89,7 +88,7 @@ impl Parser<'_> {
 		match token.kind {
 			t!("ACCESS") => {
 				// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-				if !*EXPERIMENTAL_BEARER_ACCESS {
+				if !self.settings.bearer_access_enabled {
 					unexpected!(
 						self,
 						token,

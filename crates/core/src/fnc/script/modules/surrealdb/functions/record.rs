@@ -12,5 +12,6 @@ impl_module_def!(
 	"exists" => fut Async,
 	"id" => run,
 	"table" => run,
-	"tb" => run
+	"tb" => run,
+	"refs" => fut Async
 );

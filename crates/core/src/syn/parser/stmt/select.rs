@@ -108,7 +108,7 @@ impl Parser<'_> {
 		Ok(Some(with))
 	}
 
-	async fn try_parse_split(
+	pub(crate) async fn try_parse_split(
 		&mut self,
 		ctx: &mut Stk,
 		fields: &Fields,
@@ -142,7 +142,7 @@ impl Parser<'_> {
 		Ok(Some(Splits(res)))
 	}
 
-	async fn try_parse_orders(
+	pub(crate) async fn try_parse_orders(
 		&mut self,
 		ctx: &mut Stk,
 		fields: &Fields,
@@ -213,7 +213,7 @@ impl Parser<'_> {
 		})
 	}
 
-	async fn try_parse_limit(&mut self, ctx: &mut Stk) -> ParseResult<Option<Limit>> {
+	pub(crate) async fn try_parse_limit(&mut self, ctx: &mut Stk) -> ParseResult<Option<Limit>> {
 		if !self.eat(t!("LIMIT")) {
 			return Ok(None);
 		}
@@ -222,7 +222,7 @@ impl Parser<'_> {
 		Ok(Some(Limit(value)))
 	}
 
-	async fn try_parse_start(&mut self, ctx: &mut Stk) -> ParseResult<Option<Start>> {
+	pub(crate) async fn try_parse_start(&mut self, ctx: &mut Stk) -> ParseResult<Option<Start>> {
 		if !self.eat(t!("START")) {
 			return Ok(None);
 		}

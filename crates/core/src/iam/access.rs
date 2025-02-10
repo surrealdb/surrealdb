@@ -29,7 +29,7 @@ pub async fn authenticate_record(
 				Error::Thrown(_) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
-				Error::Tx(_) | Error::TxFailure => {
+				Error::Tx(_) | Error::TxFailure | Error::TxRetryable => {
 					debug!("Unexpected error found while executing AUTHENTICATE clause: {e}");
 					Err(Error::UnexpectedAuth)
 				}
@@ -71,7 +71,7 @@ pub async fn authenticate_generic(
 				Error::Thrown(_) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
-				Error::Tx(_) | Error::TxFailure => {
+				Error::Tx(_) | Error::TxFailure | Error::TxRetryable => {
 					debug!("Unexpected error found while executing an AUTHENTICATE clause: {e}");
 					Err(Error::UnexpectedAuth)
 				}

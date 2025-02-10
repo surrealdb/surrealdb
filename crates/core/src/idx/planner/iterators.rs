@@ -7,8 +7,8 @@ use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
-use crate::kvs::Transaction;
 use crate::kvs::{Key, Val};
+use crate::kvs::{KeyEncode, Transaction};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Ident, Number, Thing, Value};
 use radix_trie::Trie;
@@ -210,23 +210,32 @@ impl IndexEqualThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		a: &Array,
-	) -> Self {
-		let (beg, end) = if ix.cols.len() == 1 {
-			(
-				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, a),
-				Index::prefix_ids_end(ns, db, &ix.what, &ix.name, a),
-			)
-		} else {
-			(
-				Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, a),
-				Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, a),
-			)
-		};
-		Self {
+	) -> Result<Self, Error> {
+		let (beg, end) = Self::get_beg_end(ns, db, ix, a)?;
+		Ok(Self {
 			irf,
 			beg,
 			end,
-		}
+		})
+	}
+
+	fn get_beg_end(
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		a: &Array,
+	) -> Result<(Vec<u8>, Vec<u8>), Error> {
+		Ok(if ix.cols.len() == 1 {
+			(
+				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, a)?,
+				Index::prefix_ids_end(ns, db, &ix.what, &ix.name, a)?,
+			)
+		} else {
+			(
+				Index::prefix_ids_composite_beg(ns, db, &ix.what, &ix.name, a)?,
+				Index::prefix_ids_composite_end(ns, db, &ix.what, &ix.name, a)?,
+			)
+		})
 	}
 
 	async fn next_scan(
@@ -352,7 +361,13 @@ pub(super) enum ValueType {
 }
 
 impl ValueType {
-	fn prefix_beg(&self, ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident) -> Vec<u8> {
+	fn prefix_beg(
+		&self,
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+	) -> Result<Vec<u8>, Error> {
 		match self {
 			Self::None => Index::prefix_beg(ns, db, ix_what, ix_name),
 			Self::NumberInt => Index::prefix_ids_beg(
@@ -379,7 +394,13 @@ impl ValueType {
 		}
 	}
 
-	fn prefix_end(&self, ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident) -> Vec<u8> {
+	fn prefix_end(
+		&self,
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+	) -> Result<Vec<u8>, Error> {
 		match self {
 			Self::None => Index::prefix_end(ns, db, ix_what, ix_name),
 			Self::NumberInt => Index::prefix_ids_end(
@@ -419,13 +440,13 @@ impl IndexRangeThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
-	) -> Self {
-		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from, range.value_type);
-		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to, range.value_type);
-		Self {
+	) -> Result<Self, Error> {
+		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from, range.value_type)?;
+		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to, range.value_type)?;
+		Ok(Self {
 			irf,
 			r: RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive),
-		}
+		})
 	}
 
 	pub(super) fn full_range(
@@ -433,7 +454,7 @@ impl IndexRangeThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-	) -> Self {
+	) -> Result<Self, Error> {
 		let full_range = RangeValue {
 			value: Value::None,
 			inclusive: true,
@@ -453,7 +474,7 @@ impl IndexRangeThingIterator {
 		ix_name: &Ident,
 		from: &RangeValue,
 		value_type: ValueType,
-	) -> Vec<u8> {
+	) -> Result<Vec<u8>, Error> {
 		if from.value == Value::None {
 			return value_type.prefix_beg(ns, db, ix_what, ix_name);
 		}
@@ -472,7 +493,7 @@ impl IndexRangeThingIterator {
 		ix_name: &Ident,
 		to: &RangeValue,
 		value_type: ValueType,
-	) -> Vec<u8> {
+	) -> Result<Vec<u8>, Error> {
 		if to.value == Value::None {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
@@ -527,27 +548,21 @@ impl IndexUnionThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-		a: &Value,
-	) -> Self {
+		arrays: &[Array],
+	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
-		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = if let Value::Array(a) = a {
-			a.0.iter()
-				.map(|v| {
-					let a = Array::from(v.clone());
-					let beg = Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, &a);
-					let end = Index::prefix_ids_end(ns, db, &ix.what, &ix.name, &a);
-					(beg, end)
-				})
-				.collect()
-		} else {
-			VecDeque::with_capacity(0)
-		};
+		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(arrays.len());
+
+		for a in arrays {
+			let (beg, end) = IndexEqualThingIterator::get_beg_end(ns, db, ix, a)?;
+			values.push_back((beg, end));
+		}
 		let current = values.pop_front();
-		Self {
+		Ok(Self {
 			irf,
 			values,
 			current,
-		}
+		})
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -557,7 +572,7 @@ impl IndexUnionThingIterator {
 		limit: u32,
 	) -> Result<B, Error> {
 		while let Some(r) = &mut self.current {
-			if ctx.is_done() {
+			if ctx.is_done(true) {
 				break;
 			}
 			let records: B =
@@ -578,7 +593,7 @@ impl IndexUnionThingIterator {
 		limit: u32,
 	) -> Result<usize, Error> {
 		while let Some(r) = &mut self.current {
-			if ctx.is_done() {
+			if ctx.is_done(true) {
 				break;
 			}
 			let res = IndexEqualThingIterator::next_scan(tx, &mut r.0, &r.1, limit).await?;
@@ -628,7 +643,7 @@ impl JoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<bool, Error> {
-		while !ctx.is_done() {
+		while !ctx.is_done(true) {
 			if let Some(it) = &mut self.current_remote {
 				self.current_remote_batch = it.next_batch(ctx, tx, limit).await?;
 				if !self.current_remote_batch.is_empty() {
@@ -651,17 +666,22 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<bool, Error>
 	where
-		F: Fn(&str, &str, &DefineIndexStatement, Value) -> ThingIterator,
+		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator, Error>,
 	{
-		while !ctx.is_done() {
+		while !ctx.is_done(true) {
+			let mut count = 0;
 			while let Some(r) = self.current_remote_batch.pop_front() {
+				if ctx.is_done(count % 100 == 0) {
+					break;
+				}
 				let thing = r.thing();
 				let k: Key = thing.into();
 				let value = Value::from(thing.clone());
 				if self.distinct.insert(k, true).is_none() {
-					self.current_local = Some(new_iter(&self.ns, &self.db, &self.ix, value));
+					self.current_local = Some(new_iter(&self.ns, &self.db, &self.ix, value)?);
 					return Ok(true);
 				}
+				count += 1;
 			}
 			if !self.next_current_remote_batch(ctx, tx, limit).await? {
 				break;
@@ -678,9 +698,9 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<B, Error>
 	where
-		F: Fn(&str, &str, &DefineIndexStatement, Value) -> ThingIterator + Copy,
+		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator, Error> + Copy,
 	{
-		while !ctx.is_done() {
+		while !ctx.is_done(true) {
 			if let Some(current_local) = &mut self.current_local {
 				let records: B = current_local.next_batch(ctx, tx, limit).await?;
 				if !records.is_empty() {
@@ -702,9 +722,9 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<usize, Error>
 	where
-		F: Fn(&str, &str, &DefineIndexStatement, Value) -> ThingIterator + Copy,
+		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator, Error> + Copy,
 	{
-		while !ctx.is_done() {
+		while !ctx.is_done(true) {
 			if let Some(current_local) = &mut self.current_local {
 				let count = current_local.next_count(ctx, tx, limit).await?;
 				if count > 0 {
@@ -739,8 +759,8 @@ impl IndexJoinThingIterator {
 	) -> Result<B, Error> {
 		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
 			let array = Array::from(value);
-			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array);
-			ThingIterator::IndexEqual(it)
+			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array)?;
+			Ok(ThingIterator::IndexEqual(it))
 		};
 		self.1.next_batch(ctx, tx, limit, new_iter).await
 	}
@@ -753,8 +773,8 @@ impl IndexJoinThingIterator {
 	) -> Result<usize, Error> {
 		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
 			let array = Array::from(value);
-			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array);
-			ThingIterator::IndexEqual(it)
+			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array)?;
+			Ok(ThingIterator::IndexEqual(it))
 		};
 		self.1.next_count(ctx, tx, limit, new_iter).await
 	}
@@ -772,12 +792,12 @@ impl UniqueEqualThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		a: &Array,
-	) -> Self {
-		let key = Index::new(ns, db, &ix.what, &ix.name, a, None).into();
-		Self {
+	) -> Result<Self, Error> {
+		let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode()?;
+		Ok(Self {
 			irf,
 			key: Some(key),
-		}
+		})
 	}
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B, Error> {
@@ -815,14 +835,14 @@ impl UniqueRangeThingIterator {
 		ix_what: &Ident,
 		ix_name: &Ident,
 		range: &IteratorRange<'_>,
-	) -> Self {
-		let beg = Self::compute_beg(ns, db, ix_what, ix_name, &range.from, range.value_type);
-		let end = Self::compute_end(ns, db, ix_what, ix_name, &range.to, range.value_type);
-		Self {
+	) -> Result<Self, Error> {
+		let beg = Self::compute_beg(ns, db, ix_what, ix_name, &range.from, range.value_type)?;
+		let end = Self::compute_end(ns, db, ix_what, ix_name, &range.to, range.value_type)?;
+		Ok(Self {
 			irf,
 			r: RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive),
 			done: false,
-		}
+		})
 	}
 
 	pub(super) fn full_range(
@@ -830,7 +850,7 @@ impl UniqueRangeThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-	) -> Self {
+	) -> Result<Self, Error> {
 		let value = RangeValue {
 			value: Value::None,
 			inclusive: true,
@@ -850,13 +870,11 @@ impl UniqueRangeThingIterator {
 		ix_name: &Ident,
 		from: &RangeValue,
 		value_type: ValueType,
-	) -> Vec<u8> {
+	) -> Result<Vec<u8>, Error> {
 		if from.value == Value::None {
 			return value_type.prefix_beg(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(from.value.to_owned()), None)
-			.encode()
-			.unwrap()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(from.value.to_owned()), None).encode()
 	}
 
 	fn compute_end(
@@ -866,13 +884,11 @@ impl UniqueRangeThingIterator {
 		ix_name: &Ident,
 		to: &RangeValue,
 		value_type: ValueType,
-	) -> Vec<u8> {
+	) -> Result<Vec<u8>, Error> {
 		if to.value == Value::None {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(to.value.to_owned()), None)
-			.encode()
-			.unwrap()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(to.value.to_owned()), None).encode()
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -948,20 +964,14 @@ impl UniqueUnionThingIterator {
 		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		a: &Value,
+		vals: &[Array],
 	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the key for each value in the array.
-		let keys: VecDeque<Key> = if let Value::Array(a) = a {
-			a.0.iter()
-				.map(|v| -> Result<Key, Error> {
-					let a = Array::from(v.clone());
-					let key = Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, &a, None).into();
-					Ok(key)
-				})
-				.collect::<Result<VecDeque<Key>, Error>>()?
-		} else {
-			VecDeque::with_capacity(0)
-		};
+		let mut keys = VecDeque::with_capacity(vals.len());
+		for a in vals {
+			let key = Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, a, None).encode()?;
+			keys.push_back(key);
+		}
 		Ok(Self {
 			irf,
 			keys,
@@ -976,11 +986,13 @@ impl UniqueUnionThingIterator {
 	) -> Result<B, Error> {
 		let limit = limit as usize;
 		let mut results = B::with_capacity(limit.min(self.keys.len()));
+		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
-			if ctx.is_done() {
+			if ctx.is_done(count % 100 == 0) {
 				break;
 			}
 			if let Some(val) = tx.get(key, None).await? {
+				count += 1;
 				let rid: Thing = val.into();
 				results.add(IndexItemRecord::new_key(rid, self.irf.into()));
 				if results.len() >= limit {
@@ -1000,7 +1012,7 @@ impl UniqueUnionThingIterator {
 		let limit = limit as usize;
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
-			if ctx.is_done() {
+			if ctx.is_done(count % 100 == 0) {
 				break;
 			}
 			if tx.exists(key, None).await? {
@@ -1034,8 +1046,8 @@ impl UniqueJoinThingIterator {
 	) -> Result<B, Error> {
 		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
 			let array = Array::from(value.clone());
-			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array);
-			ThingIterator::UniqueEqual(it)
+			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
+			Ok(ThingIterator::UniqueEqual(it))
 		};
 		self.1.next_batch(ctx, tx, limit, new_iter).await
 	}
@@ -1048,8 +1060,8 @@ impl UniqueJoinThingIterator {
 	) -> Result<usize, Error> {
 		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
 			let array = Array::from(value.clone());
-			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array);
-			ThingIterator::UniqueEqual(it)
+			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
+			Ok(ThingIterator::UniqueEqual(it))
 		};
 		self.1.next_count(ctx, tx, limit, new_iter).await
 	}
@@ -1089,7 +1101,7 @@ impl MatchesThingIterator {
 		if let Some(hits) = &mut self.hits {
 			let limit = limit as usize;
 			let mut records = B::with_capacity(limit.min(self.hits_left));
-			while limit > records.len() && !ctx.is_done() {
+			while limit > records.len() && !ctx.is_done(self.hits_left % 100 == 0) {
 				if let Some((thg, doc_id)) = hits.next(tx).await? {
 					let ir = IteratorRecord {
 						irf: self.irf,
@@ -1117,7 +1129,7 @@ impl MatchesThingIterator {
 		if let Some(hits) = &mut self.hits {
 			let limit = limit as usize;
 			let mut count = 0;
-			while limit > count && !ctx.is_done() {
+			while limit > count && !ctx.is_done(self.hits_left % 100 == 0) {
 				if let Some((_, _)) = hits.next(tx).await? {
 					count += 1;
 					self.hits_left -= 1;
@@ -1153,7 +1165,7 @@ impl KnnIterator {
 	) -> Result<B, Error> {
 		let limit = limit as usize;
 		let mut records = B::with_capacity(limit.min(self.res.len()));
-		while limit > records.len() && !ctx.is_done() {
+		while limit > records.len() && !ctx.is_done(records.len() % 100 == 0) {
 			if let Some((thing, dist, val)) = self.res.pop_front() {
 				let ir = IteratorRecord {
 					irf: self.irf,
@@ -1171,7 +1183,7 @@ impl KnnIterator {
 	async fn next_count(&mut self, ctx: &Context, limit: u32) -> Result<usize, Error> {
 		let limit = limit as usize;
 		let mut count = 0;
-		while limit > count && !ctx.is_done() {
+		while limit > count && !ctx.is_done(count % 100 == 0) {
 			if self.res.pop_front().is_some() {
 				count += 1;
 			} else {

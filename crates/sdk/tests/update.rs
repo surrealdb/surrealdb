@@ -109,7 +109,7 @@ async fn update_simple_with_input() -> Result<(), Error> {
 	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -519,7 +519,6 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			// Select always succeeds, but the result may be empty
-			assert!(res.is_ok());
 
 			if should_succeed {
 				assert!(res.unwrap() != Value::parse("[]"), "{}", msg);

@@ -67,7 +67,7 @@ where
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut t = BTree::<BK>::new(BState::new(100));
 	let np = TreeNodeProvider::Debug;
-	let c = TreeCache::new(0, np.get_key(0), np.clone(), cache_size);
+	let c = TreeCache::new(0, np.get_key(0).unwrap(), np.clone(), cache_size);
 	let mut s = TreeStore::new(np, c.into(), Write).await;
 	for i in 0..samples_size {
 		let (key, payload) = sample_provider(i);

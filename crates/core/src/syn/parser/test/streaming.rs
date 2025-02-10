@@ -296,7 +296,6 @@ fn statements() -> Vec<Statement> {
 			cache_events_ts: uuid::Uuid::default(),
 			cache_tables_ts: uuid::Uuid::default(),
 			cache_indexes_ts: uuid::Uuid::default(),
-			cache_lives_ts: uuid::Uuid::default(),
 		})),
 		Statement::Define(DefineStatement::Event(DefineEventStatement {
 			name: Ident("event".to_owned()),
@@ -333,6 +332,8 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			reference: None,
+			default_always: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -674,7 +675,6 @@ fn statements() -> Vec<Statement> {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					}),
 				])),
@@ -687,7 +687,6 @@ fn statements() -> Vec<Statement> {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					}),
 				]),
@@ -708,7 +707,6 @@ fn statements() -> Vec<Statement> {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					}),
 				])),
@@ -721,7 +719,6 @@ fn statements() -> Vec<Statement> {
 					Part::Graph(Graph {
 						dir: Dir::Out,
 						what: Tables(vec![Table("b".to_string())]),
-						expr: Fields::all(),
 						..Default::default()
 					}),
 				]),

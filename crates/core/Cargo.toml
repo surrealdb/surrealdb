@@ -3,7 +3,7 @@ name = "surrealdb-core"
 publish = true
 edition = "2021"
 version = "2.1.4"
-rust-version = "1.80.1"
+rust-version = "1.81.0"
 readme = "README.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
@@ -39,8 +39,8 @@ allocator = ["dep:jemallocator", "dep:mimalloc"]
 arbitrary = ["dep:arbitrary", "dep:regex-syntax", "rust_decimal/rust-fuzz", "geo-types/arbitrary", "uuid/arbitrary"]
 allocation-tracking = []
 # Special features
-kv-fdb-7_1 = ["foundationdb/fdb-7_1"]
-kv-fdb-7_3 = ["foundationdb/fdb-7_3"]
+kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
+kv-fdb-7_3 = ["foundationdb/fdb-7_3", "kv-fdb"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -121,7 +121,7 @@ storekey = "0.5.0"
 strsim = "0.11.1"
 subtle = "2.6"
 surrealcs = { version = "0.4.4", optional = true }
-surrealkv = { version = "0.7.0", optional = true }
+surrealkv = { version = "0.8.0", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 sysinfo = "0.33.0"
 tempfile = { version = "3.10.1", optional = true }

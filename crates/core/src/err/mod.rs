@@ -6,7 +6,7 @@ use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::syn::error::RenderedError as RenderedParserError;
-use crate::vs::Error as VersionstampError;
+use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 #[cfg(storage)]
@@ -310,127 +310,127 @@ pub enum Error {
 	},
 
 	/// The requested namespace does not exist
-	#[error("The namespace '{value}' does not exist")]
+	#[error("The namespace '{name}' does not exist")]
 	NsNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested namespace login does not exist
-	#[error("The namespace login '{value}' does not exist")]
+	#[error("The namespace login '{name}' does not exist")]
 	NlNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested database does not exist
-	#[error("The database '{value}' does not exist")]
+	#[error("The database '{name}' does not exist")]
 	DbNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested database login does not exist
-	#[error("The database login '{value}' does not exist")]
+	#[error("The database login '{name}' does not exist")]
 	DlNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested event does not exist
-	#[error("The event '{value}' does not exist")]
+	#[error("The event '{name}' does not exist")]
 	EvNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested function does not exist
-	#[error("The function 'fn::{value}' does not exist")]
+	#[error("The function 'fn::{name}' does not exist")]
 	FcNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested field does not exist
-	#[error("The field '{value}' does not exist")]
+	#[error("The field '{name}' does not exist")]
 	FdNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested model does not exist
-	#[error("The model 'ml::{value}' does not exist")]
+	#[error("The model 'ml::{name}' does not exist")]
 	MlNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The cluster node does not exist
-	#[error("The node '{value}' does not exist")]
+	#[error("The node '{uuid}' does not exist")]
 	NdNotFound {
-		value: String,
+		uuid: String,
 	},
 
 	/// The requested param does not exist
-	#[error("The param '${value}' does not exist")]
+	#[error("The param '${name}' does not exist")]
 	PaNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested config does not exist
-	#[error("The config for {value} does not exist")]
+	#[error("The config for {name} does not exist")]
 	CgNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested table does not exist
-	#[error("The table '{value}' does not exist")]
+	#[error("The table '{name}' does not exist")]
 	TbNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested live query does not exist
-	#[error("The live query '{value}' does not exist")]
+	#[error("The live query '{name}' does not exist")]
 	LvNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested cluster live query does not exist
-	#[error("The cluster live query '{value}' does not exist")]
+	#[error("The cluster live query '{name}' does not exist")]
 	LqNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested analyzer does not exist
-	#[error("The analyzer '{value}' does not exist")]
+	#[error("The analyzer '{name}' does not exist")]
 	AzNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested analyzer does not exist
-	#[error("The index '{value}' does not exist")]
+	#[error("The index '{name}' does not exist")]
 	IxNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested record does not exist
-	#[error("The record '{value}' does not exist")]
+	#[error("The record '{rid}' does not exist")]
 	IdNotFound {
-		value: String,
+		rid: String,
 	},
 
 	#[error("Unsupported distance: {0}")]
 	UnsupportedDistance(Distance),
 
 	/// The requested root user does not exist
-	#[error("The root user '{value}' does not exist")]
+	#[error("The root user '{name}' does not exist")]
 	UserRootNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested namespace user does not exist
-	#[error("The user '{value}' does not exist in the namespace '{ns}'")]
+	#[error("The user '{name}' does not exist in the namespace '{ns}'")]
 	UserNsNotFound {
-		value: String,
+		name: String,
 		ns: String,
 	},
 
 	/// The requested database user does not exist
-	#[error("The user '{value}' does not exist in the database '{db}'")]
+	#[error("The user '{name}' does not exist in the database '{db}'")]
 	UserDbNotFound {
-		value: String,
+		name: String,
 		ns: String,
 		db: String,
 	},
@@ -444,91 +444,91 @@ pub enum Error {
 	ComputationDepthExceeded,
 
 	/// Can not execute statement using the specified value
-	#[error("Can not execute statement using value '{value}'")]
+	#[error("Can not execute statement using value: {value}")]
 	InvalidStatementTarget {
 		value: String,
 	},
 
 	/// Can not execute CREATE statement using the specified value
-	#[error("Can not execute CREATE statement using value '{value}'")]
+	#[error("Can not execute CREATE statement using value: {value}")]
 	CreateStatement {
 		value: String,
 	},
 
 	/// Can not execute UPSERT statement using the specified value
-	#[error("Can not execute UPSERT statement using value '{value}'")]
+	#[error("Can not execute UPSERT statement using value: {value}")]
 	UpsertStatement {
 		value: String,
 	},
 
 	/// Can not execute UPDATE statement using the specified value
-	#[error("Can not execute UPDATE statement using value '{value}'")]
+	#[error("Can not execute UPDATE statement using value: {value}")]
 	UpdateStatement {
 		value: String,
 	},
 
 	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement using value '{value}'")]
+	#[error("Can not execute RELATE statement using value: {value}")]
 	RelateStatement {
 		value: String,
 	},
 
 	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement where property 'in' is '{value}'")]
+	#[error("Can not execute RELATE statement where property 'in' is: {value}")]
 	RelateStatementIn {
 		value: String,
 	},
 
 	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement where property 'id' is '{value}'")]
+	#[error("Can not execute RELATE statement where property 'id' is: {value}")]
 	RelateStatementId {
 		value: String,
 	},
 
 	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement where property 'out' is '{value}'")]
+	#[error("Can not execute RELATE statement where property 'out' is: {value}")]
 	RelateStatementOut {
 		value: String,
 	},
 
 	/// Can not execute DELETE statement using the specified value
-	#[error("Can not execute DELETE statement using value '{value}'")]
+	#[error("Can not execute DELETE statement using value: {value}")]
 	DeleteStatement {
 		value: String,
 	},
 
 	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement using value '{value}'")]
+	#[error("Can not execute INSERT statement using value: {value}")]
 	InsertStatement {
 		value: String,
 	},
 
 	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement where property 'in' is '{value}'")]
+	#[error("Can not execute INSERT statement where property 'in' is: {value}")]
 	InsertStatementIn {
 		value: String,
 	},
 
 	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement where property 'id' is '{value}'")]
+	#[error("Can not execute INSERT statement where property 'id' is: {value}")]
 	InsertStatementId {
 		value: String,
 	},
 
 	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement where property 'out' is '{value}'")]
+	#[error("Can not execute INSERT statement where property 'out' is: {value}")]
 	InsertStatementOut {
 		value: String,
 	},
 
 	/// Can not execute LIVE statement using the specified value
-	#[error("Can not execute LIVE statement using value '{value}'")]
+	#[error("Can not execute LIVE statement using value: {value}")]
 	LiveStatement {
 		value: String,
 	},
 
 	/// Can not execute KILL statement using the specified id
-	#[error("Can not execute KILL statement using id '{value}'")]
+	#[error("Can not execute KILL statement using id: {value}")]
 	KillStatement {
 		value: String,
 	},
@@ -754,10 +754,10 @@ pub enum Error {
 	#[error("Index is corrupted: {0}")]
 	CorruptedIndex(&'static str),
 
-	/// The query planner did not find an index able to support the match @@ for a given expression
-	#[error("There was no suitable index supporting the expression '{value}'")]
+	/// The query planner did not find an index able to support the given expression
+	#[error("There was no suitable index supporting the expression: {exp}")]
 	NoIndexFoundForMatch {
-		value: String,
+		exp: String,
 	},
 
 	/// Represents an error when analyzing a value
@@ -815,7 +815,7 @@ pub enum Error {
 	Unimplemented(String),
 
 	#[error("Versionstamp in key is corrupted: {0}")]
-	CorruptedVersionstampInKey(#[from] VersionstampError),
+	CorruptedVersionstampInKey(#[from] VersionStampError),
 
 	/// Invalid level
 	#[error("Invalid level '{0}'")]
@@ -897,114 +897,114 @@ pub enum Error {
 	MissingStorageEngine,
 
 	// The cluster node already exists
-	#[error("The node '{value}' already exists")]
+	#[error("The node '{id}' already exists")]
 	ClAlreadyExists {
-		value: String,
+		id: String,
 	},
 
 	/// The requested analyzer already exists
-	#[error("The analyzer '{value}' already exists")]
+	#[error("The analyzer '{name}' already exists")]
 	AzAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested database already exists
-	#[error("The database '{value}' already exists")]
+	#[error("The database '{name}' already exists")]
 	DbAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested event already exists
-	#[error("The event '{value}' already exists")]
+	#[error("The event '{name}' already exists")]
 	EvAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested field already exists
-	#[error("The field '{value}' already exists")]
+	#[error("The field '{name}' already exists")]
 	FdAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested function already exists
-	#[error("The function 'fn::{value}' already exists")]
+	#[error("The function 'fn::{name}' already exists")]
 	FcAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested index already exists
-	#[error("The index '{value}' already exists")]
+	#[error("The index '{name}' already exists")]
 	IxAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested model already exists
-	#[error("The model '{value}' already exists")]
+	#[error("The model '{name}' already exists")]
 	MlAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested namespace already exists
-	#[error("The namespace '{value}' already exists")]
+	#[error("The namespace '{name}' already exists")]
 	NsAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested param already exists
-	#[error("The param '${value}' already exists")]
+	#[error("The param '${name}' already exists")]
 	PaAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested config already exists
-	#[error("The config for {value} already exists")]
+	#[error("The config for {name} already exists")]
 	CgAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested table already exists
-	#[error("The table '{value}' already exists")]
+	#[error("The table '{name}' already exists")]
 	TbAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested namespace token already exists
-	#[error("The namespace token '{value}' already exists")]
+	#[error("The namespace token '{name}' already exists")]
 	NtAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested database token already exists
-	#[error("The database token '{value}' already exists")]
+	#[error("The database token '{name}' already exists")]
 	DtAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested user already exists
-	#[error("The root user '{value}' already exists")]
+	#[error("The root user '{name}' already exists")]
 	UserRootAlreadyExists {
-		value: String,
+		name: String,
 	},
 
 	/// The requested namespace user already exists
-	#[error("The user '{value}' already exists in the namespace '{ns}'")]
+	#[error("The user '{name}' already exists in the namespace '{ns}'")]
 	UserNsAlreadyExists {
-		value: String,
+		name: String,
 		ns: String,
 	},
 
 	/// The requested database user already exists
-	#[error("The user '{value}' already exists in the database '{db}'")]
+	#[error("The user '{name}' already exists in the database '{db}'")]
 	UserDbAlreadyExists {
-		value: String,
+		name: String,
 		ns: String,
 		db: String,
 	},
 
 	/// A database index entry for the specified table is already building
-	#[error("Database index `{index}` is currently building")]
+	#[error("Database index `{name}` is currently building")]
 	IndexAlreadyBuilding {
-		index: String,
+		name: String,
 	},
 
 	/// The token has expired
@@ -1234,6 +1234,40 @@ pub enum Error {
 	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
 	#[error("Can not construct a recursion plan when an instruction is provided")]
 	RecursionInstructionPlanConflict,
+
+	/// The record cannot be deleted as it's still referenced elsewhere
+	#[error("Cannot delete `{0}` as it is referenced by `{1}` with an ON DELETE REJECT clause")]
+	DeleteRejectedByReference(String, String),
+
+	/// The `REFERENCE` keyword can only be used in combination with a type referencing a record
+	#[error(
+		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type, or a type containing only records, instead."
+	)]
+	ReferenceTypeConflict(String),
+
+	/// The `references` type cannot be used with other clauses altering or working with the value
+	#[error("Cannot use the `{0}` keyword with `TYPE {0}`.")]
+	RefsTypeConflict(String, String),
+
+	/// The `references` type cannot be used with other clauses altering or working with the value
+	#[error("When specifying a `TYPE` clause with `references`, all variants must be of type `references`.")]
+	RefsMismatchingVariants,
+
+	/// Something went wrong while updating references
+	#[error("An error occured while updating references for `{0}`: {1}")]
+	RefsUpdateFailure(String, String),
+
+	/// Cannot process `Value::Refs` as there is no Record ID in the context for the operation
+	#[error("Cannot obtain a list of references as there is no Record ID in the context for the operation")]
+	InvalidRefsContext,
+
+	#[error("Cannot set field `{name}` with type `{kind}` as it mismatched with field `{existing_name}` with type `{existing_kind}`")]
+	MismatchedFieldTypes {
+		name: String,
+		kind: String,
+		existing_name: String,
+		existing_kind: String,
+	},
 }
 
 impl From<Error> for String {
@@ -1265,6 +1299,7 @@ impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
 		match e {
 			surrealkv::Error::TransactionReadConflict => Error::TxRetryable,
+			surrealkv::Error::TransactionWriteConflict => Error::TxRetryable,
 			_ => Error::Tx(e.to_string()),
 		}
 	}

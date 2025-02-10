@@ -20,6 +20,7 @@ impl Read {
 impl super::Routine for Read {
 	fn setup(&self, client: &'static Surreal<Any>, num_ops: usize) {
 		self.runtime.block_on(async {
+			client.query(format!("DEFINE TABLE {}", self.table_name)).await.unwrap();
 			// Spawn one task for each operation
 			let mut tasks = JoinSet::default();
 			for task_id in 0..num_ops {

@@ -19,7 +19,7 @@ use std::{
 	task::Poll,
 };
 use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
-use tokio::sync::watch;
+use tokio::sync::{watch, RwLock};
 use tokio_util::sync::CancellationToken;
 
 impl crate::api::Connection for Db {}
@@ -75,25 +75,25 @@ pub(crate) async fn run_router(
 	let kvs = match Datastore::new(endpoint).await {
 		Ok(kvs) => {
 			if let Err(error) = kvs.check_version().await {
-				let _ = conn_tx.send(Err(error.into())).await;
+				conn_tx.send(Err(error.into())).await.ok();
 				return;
 			};
 			if let Err(error) = kvs.bootstrap().await {
-				let _ = conn_tx.send(Err(error.into())).await;
+				conn_tx.send(Err(error.into())).await.ok();
 				return;
 			}
 			// If a root user is specified, setup the initial datastore credentials
 			if let Some(root) = configured_root {
 				if let Err(error) = kvs.initialise_credentials(root.username, root.password).await {
-					let _ = conn_tx.send(Err(error.into())).await;
+					conn_tx.send(Err(error.into())).await.ok();
 					return;
 				}
 			}
-			let _ = conn_tx.send(Ok(())).await;
+			conn_tx.send(Ok(())).await.ok();
 			kvs.with_auth_enabled(configured_root.is_some())
 		}
 		Err(error) => {
-			let _ = conn_tx.send(Err(error.into())).await;
+			conn_tx.send(Err(error.into())).await.ok();
 			return;
 		}
 	};
@@ -113,9 +113,9 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let mut vars = BTreeMap::default();
-	let mut live_queries = HashMap::new();
-	let mut session = Session::default().with_rt(true);
+	let vars = Arc::new(RwLock::new(BTreeMap::default()));
+	let live_queries = Arc::new(RwLock::new(HashMap::new()));
+	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
 
 	let canceller = CancellationToken::new();
 
@@ -143,21 +143,27 @@ pub(crate) async fn run_router(
 	});
 
 	loop {
+		let kvs = kvs.clone();
+		let session = session.clone();
+		let vars = vars.clone();
+		let live_queries = live_queries.clone();
 		tokio::select! {
 			route = route_rx.recv() => {
 				let Ok(route) = route else {
 					break
 				};
-				match super::router(route.request, &kvs, &mut session, &mut vars, &mut live_queries)
-					.await
-				{
-					Ok(value) => {
-						let _ = route.response.send(Ok(value)).await;
+				tokio::spawn(async move {
+					match super::router(route.request, &kvs, &session, &vars, &live_queries)
+						.await
+					{
+						Ok(value) => {
+							route.response.send(Ok(value)).await.ok();
+						}
+						Err(error) => {
+							route.response.send(Err(error)).await.ok();
+						}
 					}
-					Err(error) => {
-						let _ = route.response.send(Err(error)).await;
-					}
-				}
+				});
 			}
 			notification = notification_stream.next() => {
 				let Some(notification) = notification else {
@@ -172,25 +178,27 @@ pub(crate) async fn run_router(
 					data: notification.result
 				};
 
-				let id = notification.query_id;
-				if let Some(sender) = live_queries.get(&id) {
+				tokio::spawn(async move {
+					let id = notification.query_id;
+					if let Some(sender) = live_queries.read().await.get(&id) {
 
-					if sender.send(notification).await.is_err() {
-						live_queries.remove(&id);
-						if let Err(error) =
-							super::kill_live_query(&kvs, id, &session, vars.clone()).await
-						{
-							warn!("Failed to kill live query '{id}'; {error}");
+						if sender.send(notification).await.is_err() {
+							live_queries.write().await.remove(&id);
+							if let Err(error) =
+								super::kill_live_query(&kvs, id, &*session.read().await, vars.read().await.clone()).await
+							{
+								warn!("Failed to kill live query '{id}'; {error}");
+							}
 						}
 					}
-				}
+				});
 			}
 		}
 	}
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish
-	let _ = tasks.resolve().await;
+	tasks.resolve().await.ok();
 	// Delete this node from the cluster
-	let _ = kvs.shutdown().await;
+	kvs.shutdown().await.ok();
 }

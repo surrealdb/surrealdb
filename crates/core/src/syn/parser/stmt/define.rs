@@ -1,12 +1,12 @@
 use reblessive::Stk;
 
-use crate::cnf::EXPERIMENTAL_BEARER_ACCESS;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::Value;
+use crate::syn::error::bail;
 use crate::{
 	sql::{
 		access_type,
@@ -373,7 +373,7 @@ impl Parser<'_> {
 									}
 									t!("REFRESH") => {
 										// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-										if !*EXPERIMENTAL_BEARER_ACCESS {
+										if !self.settings.bearer_access_enabled {
 											unexpected!(
 												self,
 												peek,
@@ -397,7 +397,7 @@ impl Parser<'_> {
 						}
 						t!("BEARER") => {
 							// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-							if !*EXPERIMENTAL_BEARER_ACCESS {
+							if !self.settings.bearer_access_enabled {
 								unexpected!(
 									self,
 									peek,
@@ -889,6 +889,10 @@ impl Parser<'_> {
 				}
 				t!("DEFAULT") => {
 					self.pop_peek();
+					if self.eat(t!("ALWAYS")) {
+						res.default_always = true;
+					}
+
 					res.default = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
@@ -898,6 +902,17 @@ impl Parser<'_> {
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
+				}
+				t!("REFERENCE") => {
+					if !self.settings.references_enabled {
+						bail!(
+							"Experimental capability `record_references` is not enabled",
+							@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
+						)
+					}
+
+					self.pop_peek();
+					res.reference = Some(self.parse_reference(ctx).await?);
 				}
 				_ => break,
 			}

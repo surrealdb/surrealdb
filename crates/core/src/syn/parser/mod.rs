@@ -137,6 +137,10 @@ pub struct ParserSettings {
 	/// A query recurses when a statement contains another statement within itself.
 	/// Examples are subquery and blocks like block statements and if statements and such.
 	pub query_recursion_limit: usize,
+	/// Whether record references are enabled.
+	pub references_enabled: bool,
+	/// Whether bearer access is enabled
+	pub bearer_access_enabled: bool,
 }
 
 impl Default for ParserSettings {
@@ -146,6 +150,8 @@ impl Default for ParserSettings {
 			flexible_record_id: true,
 			object_recursion_limit: 100,
 			query_recursion_limit: 20,
+			references_enabled: false,
+			bearer_access_enabled: false,
 		}
 	}
 }

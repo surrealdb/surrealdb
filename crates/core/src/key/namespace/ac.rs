@@ -1,10 +1,11 @@
 //! Stores a DEFINE ACCESS ON NAMESPACE configuration
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use derive::Key;
+use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Ac<'a> {
 	__: u8,
@@ -15,21 +16,22 @@ pub struct Ac<'a> {
 	_d: u8,
 	pub ac: &'a str,
 }
+impl_key!(Ac<'a>);
 
 pub fn new<'a>(ns: &'a str, ac: &'a str) -> Ac<'a> {
 	Ac::new(ns, ac)
 }
 
-pub fn prefix(ns: &str) -> Vec<u8> {
-	let mut k = crate::key::namespace::all::new(ns).encode().unwrap();
+pub fn prefix(ns: &str) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::namespace::all::new(ns).encode()?;
 	k.extend_from_slice(b"!ac\x00");
-	k
+	Ok(k)
 }
 
-pub fn suffix(ns: &str) -> Vec<u8> {
-	let mut k = crate::key::namespace::all::new(ns).encode().unwrap();
+pub fn suffix(ns: &str) -> Result<Vec<u8>, Error> {
+	let mut k = crate::key::namespace::all::new(ns).encode()?;
 	k.extend_from_slice(b"!ac\xff");
-	k
+	Ok(k)
 }
 
 impl Categorise for Ac<'_> {
@@ -54,6 +56,7 @@ impl<'a> Ac<'a> {
 
 #[cfg(test)]
 mod tests {
+	use crate::kvs::KeyDecode;
 	#[test]
 	fn key() {
 		use super::*;
@@ -71,13 +74,13 @@ mod tests {
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns");
+		let val = super::prefix("testns").unwrap();
 		assert_eq!(val, b"/*testns\0!ac\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns");
+		let val = super::suffix("testns").unwrap();
 		assert_eq!(val, b"/*testns\0!ac\xff");
 	}
 }

@@ -140,6 +140,11 @@ impl TokenValue for Regex {
 		match peek.kind {
 			t!("/") => {
 				parser.pop_peek();
+				if parser.has_peek() {
+					// If the parser peeks past a `/` lexing the compound token can fail.
+					// Peeking past `/` can happen when parsing `{/bla`.
+					parser.backup_after(peek.span);
+				}
 				let v = parser.lexer.lex_compound(peek, compound::regex)?.value;
 				Ok(Regex(v))
 			}

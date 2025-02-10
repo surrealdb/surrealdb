@@ -5,7 +5,8 @@ pub mod any;
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
-	feature = "kv-fdb",
+	feature = "kv-fdb-7_1",
+	feature = "kv-fdb-7_3",
 	feature = "kv-indxdb",
 	feature = "kv-surrealkv",
 	feature = "kv-surrealcs",
@@ -38,7 +39,7 @@ use super::opt::Table;
 
 // used in http and all local engines.
 #[allow(dead_code)]
-fn resource_to_values(r: Resource) -> CoreValues {
+pub(crate) fn resource_to_values(r: Resource) -> CoreValues {
 	let mut res = CoreValues::default();
 	match r {
 		Resource::Table(x) => {

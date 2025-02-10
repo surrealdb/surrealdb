@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
-use crate::kvs::Key;
+use crate::err::Error;
+use crate::kvs::{Key, KeyEncode};
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::Idiom;
@@ -122,7 +123,7 @@ impl Writer {
 
 	// get returns all the mutations buffered for this transaction,
 	// that are to be written onto the key composed of the specified prefix + the current timestamp + the specified suffix.
-	pub(crate) fn get(&self) -> Vec<PreparedWrite> {
+	pub(crate) fn get(&self) -> Result<Vec<PreparedWrite>, Error> {
 		let mut r = Vec::<(Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val)>::new();
 		// Get the current timestamp
 		for (
@@ -134,13 +135,13 @@ impl Writer {
 			mutations,
 		) in self.buf.b.iter()
 		{
-			let ts_key: Key = crate::key::database::vs::new(ns, db).into();
-			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(ns, db);
+			let ts_key: Key = crate::key::database::vs::new(ns, db).encode()?;
+			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(ns, db)?;
 			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb.as_str());
 
 			r.push((ts_key, tc_key_prefix, tc_key_suffix, mutations.into()))
 		}
-		r
+		Ok(r)
 	}
 }
 
@@ -161,8 +162,7 @@ mod tests {
 	use crate::sql::thing::Thing;
 	use crate::sql::value::Value;
 	use crate::sql::{Datetime, Idiom, Number, Object, Operation, Strand};
-	use crate::vs;
-	use crate::vs::{conv, Versionstamp};
+	use crate::vs::VersionStamp;
 
 	const DONT_STORE_PREVIOUS: bool = false;
 
@@ -266,7 +266,7 @@ mod tests {
 
 		let want: Vec<ChangeSet> = vec![
 			ChangeSet(
-				vs::u64_to_versionstamp(2),
+				VersionStamp::from_u64(2),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
@@ -283,7 +283,7 @@ mod tests {
 				)]),
 			),
 			ChangeSet(
-				vs::u64_to_versionstamp(3),
+				VersionStamp::from_u64(3),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
@@ -300,7 +300,7 @@ mod tests {
 				)]),
 			),
 			ChangeSet(
-				vs::u64_to_versionstamp(4),
+				VersionStamp::from_u64(4),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
@@ -335,7 +335,7 @@ mod tests {
 
 		let tx5 = ds.transaction(Write, Optimistic).await.unwrap();
 		// gc_all needs to be committed before we can read the changes
-		crate::cf::gc_range(&tx5, NS, DB, vs::u64_to_versionstamp(4)).await.unwrap();
+		crate::cf::gc_range(&tx5, NS, DB, VersionStamp::from_u64(4)).await.unwrap();
 		// We now commit tx5, which should persist the gc_all resullts
 		tx5.commit().await.unwrap();
 
@@ -347,7 +347,7 @@ mod tests {
 		tx6.commit().await.unwrap();
 
 		let want: Vec<ChangeSet> = vec![ChangeSet(
-			vs::u64_to_versionstamp(4),
+			VersionStamp::from_u64(4),
 			DatabaseMutation(vec![TableMutations(
 				TB.to_string(),
 				match FFLAGS.change_feed_live_queries.enabled() {
@@ -472,7 +472,7 @@ mod tests {
 		assert_eq!(r.len(), 2, "{:?}", r);
 		let expected: Vec<ChangeSet> = vec![
 			ChangeSet(
-				vs::u64_to_versionstamp(2),
+				VersionStamp::from_u64(2),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
@@ -482,7 +482,7 @@ mod tests {
 				)]),
 			),
 			ChangeSet(
-				vs::u64_to_versionstamp(4),
+				VersionStamp::from_u64(4),
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::SetWithDiff(
@@ -513,13 +513,13 @@ mod tests {
 		r
 	}
 
-	async fn change_feed_vs(tx: Transaction, vs: &Versionstamp) -> Vec<ChangeSet> {
+	async fn change_feed_vs(tx: Transaction, vs: &VersionStamp) -> Vec<ChangeSet> {
 		let r = crate::cf::read(
 			&tx,
 			NS,
 			DB,
 			Some(TB),
-			ShowSince::Versionstamp(conv::versionstamp_to_u64(vs)),
+			ShowSince::Versionstamp(vs.into_u64_lossy()),
 			Some(10),
 		)
 		.await

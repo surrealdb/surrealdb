@@ -243,7 +243,7 @@ async fn insert_statement_duplicate_key_update() -> Result<(), Error> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
@@ -570,10 +570,10 @@ async fn insert_statement_unique_index() -> Result<(), Error> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
 	match tmp {

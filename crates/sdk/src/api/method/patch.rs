@@ -21,6 +21,7 @@ pub struct Patch<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) patches: Vec<serde_content::Result<Content<'static>>>,
+	pub(super) upsert: bool,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -38,12 +39,13 @@ where
 }
 
 macro_rules! into_future {
-	($method:ident) => {
+	() => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Patch {
 				client,
 				resource,
 				patches,
+				upsert,
 				..
 			} = self;
 			Box::pin(async move {
@@ -56,11 +58,12 @@ macro_rules! into_future {
 				let patches = CoreValue::from(vec);
 				let router = client.router.extract()?;
 				let cmd = Command::Patch {
+					upsert,
 					what: resource?,
 					data: Some(patches),
 				};
 
-				router.$method(cmd).await
+				router.execute_query(cmd).await?.take(0)
 			})
 		}
 	};
@@ -73,7 +76,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_value}
+	into_future! {}
 }
 
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, Option<R>>
@@ -84,7 +87,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_opt}
+	into_future! {}
 }
 
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, Vec<R>>
@@ -95,7 +98,7 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_vec}
+	into_future! {}
 }
 
 impl<'r, C, R> Patch<'r, C, R>
@@ -103,8 +106,17 @@ where
 	C: Connection,
 {
 	/// Applies JSON Patch changes to all records, or a specific record, in the database.
-	pub fn patch(mut self, PatchOp(patch): PatchOp) -> Patch<'r, C, R> {
-		self.patches.push(patch);
+	pub fn patch(mut self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
+		let PatchOp(patch) = patch.into();
+		match patch {
+			Ok(Content::Seq(values)) => {
+				for value in values {
+					self.patches.push(Ok(value));
+				}
+			}
+			Ok(value) => self.patches.push(Ok(value)),
+			Err(error) => self.patches.push(Err(error)),
+		}
 		self
 	}
 }

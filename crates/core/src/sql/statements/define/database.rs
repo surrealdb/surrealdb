@@ -35,26 +35,28 @@ impl DefineDatabaseStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
+		// Get the NS
+		let ns = opt.ns()?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_db(opt.ns()?, &self.name).await.is_ok() {
+		if txn.get_db(ns, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::DbAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}
 		// Process the statement
-		let key = crate::key::namespace::db::new(opt.ns()?, &self.name);
-		let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+		let key = crate::key::namespace::db::new(ns, &self.name);
+		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.set(
 			key,
 			DefineDatabaseStatement {
-				id: if self.id.is_none() && ns.id.is_some() {
-					Some(txn.lock().await.get_next_db_id(ns.id.unwrap()).await?)
+				id: if self.id.is_none() && nsv.id.is_some() {
+					Some(txn.lock().await.get_next_db_id(nsv.id.unwrap()).await?)
 				} else {
 					None
 				},
@@ -66,6 +68,10 @@ impl DefineDatabaseStatement {
 			None,
 		)
 		.await?;
+		// Clear the cache
+		if let Some(cache) = ctx.get_cache() {
+			cache.clear();
+		}
 		// Clear the cache
 		txn.clear();
 		// Ok all good

@@ -53,7 +53,7 @@ impl HnswElements {
 		vec: Vector,
 		ser_vec: &SerializedVector,
 	) -> Result<SharedVector, Error> {
-		let key = self.ikb.new_he_key(id);
+		let key = self.ikb.new_he_key(id)?;
 		let val = VersionedStore::try_into(ser_vec)?;
 		tx.set(key, val, None).await?;
 		let pt: SharedVector = vec.into();
@@ -69,7 +69,7 @@ impl HnswElements {
 		if let Some(r) = self.elements.get(e_id) {
 			return Ok(Some(r.value().clone()));
 		}
-		let key = self.ikb.new_he_key(*e_id);
+		let key = self.ikb.new_he_key(*e_id)?;
 		match tx.get(key, None).await? {
 			None => Ok(None),
 			Some(val) => {
@@ -97,7 +97,7 @@ impl HnswElements {
 
 	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<(), Error> {
 		self.elements.remove(&e_id);
-		let key = self.ikb.new_he_key(e_id);
+		let key = self.ikb.new_he_key(e_id)?;
 		tx.del(key).await?;
 		Ok(())
 	}

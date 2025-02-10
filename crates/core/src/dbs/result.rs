@@ -95,6 +95,7 @@ impl Results {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
+	#[allow(unused_variables)]
 	pub(super) async fn sort(&mut self, orders: &Ordering) -> Result<(), Error> {
 		match self {
 			#[cfg(storage)]
@@ -108,6 +109,7 @@ impl Results {
 	}
 
 	#[cfg(target_family = "wasm")]
+	#[allow(unused_variables)]
 	pub(super) fn sort(&mut self, orders: &Ordering) {
 		match self {
 			Self::MemoryOrdered(c) => c.sort(),
@@ -121,9 +123,15 @@ impl Results {
 
 	pub(super) async fn start_limit(
 		&mut self,
+		skip: Option<usize>,
 		start: Option<u32>,
 		limit: Option<u32>,
 	) -> Result<(), Error> {
+		let start = if skip.is_some() {
+			None
+		} else {
+			start
+		};
 		match self {
 			Self::Memory(m) => m.start_limit(start, limit),
 			Self::MemoryOrdered(m) => m.start_limit(start, limit),

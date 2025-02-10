@@ -24,6 +24,8 @@ use tokio::sync::Mutex;
 use tokio::task;
 use tokio::task::JoinHandle;
 
+use super::KeyDecode;
+
 #[derive(Clone)]
 pub(crate) enum BuildingStatus {
 	Started,
@@ -101,7 +103,7 @@ impl IndexBuilder {
 				// If the building is currently running we return error
 				if !e.get().1.is_finished() {
 					return Err(Error::IndexAlreadyBuilding {
-						index: e.key().name.to_string(),
+						name: e.key().name.to_string(),
 					});
 				}
 			}
@@ -296,8 +298,8 @@ impl Building {
 		// First iteration, we index every keys
 		let ns = self.opt.ns()?;
 		let db = self.opt.db()?;
-		let beg = thing::prefix(ns, db, &self.tb);
-		let end = thing::suffix(ns, db, &self.tb);
+		let beg = thing::prefix(ns, db, &self.tb)?;
+		let end = thing::suffix(ns, db, &self.tb)?;
 		let mut next = Some(beg..end);
 		let mut count = 0;
 		while let Some(rng) = next {
@@ -358,7 +360,7 @@ impl Building {
 		let mut stack = TreeStack::new();
 		// Index the records
 		for (k, v) in values.into_iter() {
-			let key: thing::Thing = (&k).into();
+			let key = thing::Thing::decode(&k)?;
 			// Parse the value
 			let val: Value = (&v).into();
 			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();

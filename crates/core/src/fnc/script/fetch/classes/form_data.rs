@@ -63,7 +63,7 @@ impl<'js> FormData<'js> {
 	// So we ignore those arguments.
 	#[qjs(constructor)]
 	pub fn new(ctx: Ctx<'js>, args: Rest<()>) -> Result<Self> {
-		if args.len() > 0 {
+		if !args.is_empty() {
 			return Err(Exception::throw_internal(
 				&ctx,
 				"Cant call FormData with arguments as the dom elements required are not available",

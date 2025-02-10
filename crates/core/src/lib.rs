@@ -12,6 +12,9 @@
 //! </section>
 //!
 
+#![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
+#![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
+
 #[macro_use]
 extern crate tracing;
 
@@ -22,7 +25,6 @@ mod cf;
 mod doc;
 mod exe;
 mod fnc;
-mod vs;
 
 pub mod cnf;
 pub mod ctx;
@@ -43,14 +45,10 @@ pub mod rpc;
 pub mod sql;
 pub mod syn;
 pub mod sys;
+pub mod vs;
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;
-
-pub mod test_helpers {
-	pub use crate::vs::conv::to_u128_be;
-	pub use crate::vs::generate_versionstamp_sequences;
-}
 
 /// Channels for receiving a SurrealQL database export
 pub mod channel {

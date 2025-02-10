@@ -8,6 +8,7 @@ use surrealdb_core::{dbs::Capabilities as CoreCapabilities, iam::Level};
 #[derive(Debug, Clone, Default)]
 pub struct Config {
 	pub(crate) strict: bool,
+	pub(crate) ast_payload: bool,
 	pub(crate) query_timeout: Option<Duration>,
 	pub(crate) transaction_timeout: Option<Duration>,
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -41,6 +42,18 @@ impl Config {
 	/// Enables `strict` server mode
 	pub fn strict(mut self) -> Self {
 		self.strict = true;
+		self
+	}
+
+	/// Whether to send queries as AST
+	pub fn set_ast_payload(mut self, ast_payload: bool) -> Self {
+		self.ast_payload = ast_payload;
+		self
+	}
+
+	/// Send queries as AST
+	pub fn ast_payload(mut self) -> Self {
+		self.ast_payload = true;
 		self
 	}
 
@@ -90,6 +103,13 @@ impl Config {
 	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
 		self.capabilities = capabilities.build();
 		self
+	}
+
+	/// Get the capabilities for the database
+	/// Used internally in the CLI to pass on capabilities to the parser
+	#[doc(hidden)]
+	pub fn get_capabilities(&self) -> &CoreCapabilities {
+		&self.capabilities
 	}
 
 	#[cfg(storage)]

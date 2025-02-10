@@ -7,10 +7,13 @@ where
 	T: ?Sized + Serialize,
 {
 	bincode::options()
+		// Don't specify a byte limit
 		.with_no_limit()
+		// Use little-endian data ordering
 		.with_little_endian()
+		// Use variable-sized integer encoding
 		.with_varint_encoding()
-		.reject_trailing_bytes()
+		// Serialize the value
 		.serialize(value)
 }
 
@@ -19,10 +22,14 @@ where
 	T: Deserialize<'a>,
 {
 	bincode::options()
+		// Don't specify a byte limit
 		.with_no_limit()
+		// Use little-endian data ordering
 		.with_little_endian()
+		// Use variable-sized integer encoding
 		.with_varint_encoding()
-		// Ignore extra fields so we can pull out the ID only from responses that fail to deserialise
+		// Allow any remaining unused data
 		.allow_trailing_bytes()
+		// Deserialize the value
 		.deserialize(bytes)
 }

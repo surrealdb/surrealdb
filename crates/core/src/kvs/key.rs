@@ -50,6 +50,85 @@ pub trait KeyDecodeOwned: for<'a> KeyDecode<'a> {
 	}
 }
 
+impl KeyEncode for Vec<u8> {
+	fn encode(&self) -> Result<Vec<u8>, crate::err::Error> {
+		Ok(self.clone())
+	}
+
+	fn encode_owned(self) -> Result<Vec<u8>, crate::err::Error> {
+		Ok(self)
+	}
+
+	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
+		buffer.extend_from_slice(self);
+		Ok(())
+	}
+
+	fn encode_owned_into(self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
+		if buffer.is_empty() {
+			// we can just move self into the buffer since there is no data.
+			*buffer = self;
+		} else {
+			// we can't overwrite the buffer so instead copy self into it.
+			buffer.extend_from_slice(&self);
+		}
+		Ok(())
+	}
+}
+
+impl<K: KeyEncode> KeyEncode for &K {
+	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
+		(*self).encode_into(buffer)
+	}
+}
+
+impl KeyEncode for &str {
+	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
+		buffer.extend_from_slice(self.as_bytes());
+		Ok(())
+	}
+}
+
+impl KeyEncode for &[u8] {
+	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
+		buffer.extend_from_slice(self);
+		Ok(())
+	}
+}
+
+impl KeyDecode<'_> for Vec<u8> {
+	fn decode(bytes: &[u8]) -> Result<Self, crate::err::Error>
+	where
+		Self: Sized,
+	{
+		Ok(bytes.to_vec())
+	}
+}
+
+impl KeyDecodeOwned for Vec<u8> {
+	fn decode_from_vec(bytes: Vec<u8>) -> Result<Self, crate::err::Error> {
+		Ok(bytes)
+	}
+}
+
+impl<'a> KeyDecode<'a> for () {
+	fn decode(_: &'a [u8]) -> Result<Self, crate::err::Error>
+	where
+		Self: Sized,
+	{
+		Ok(())
+	}
+}
+
+impl KeyDecodeOwned for () {
+	fn decode_from_vec(_: Vec<u8>) -> Result<Self, crate::err::Error>
+	where
+		Self: Sized,
+	{
+		Ok(())
+	}
+}
+
 /// Implements KeyEncode and KeyDecode uusing storekey and deserialize and serialize
 /// implementations.
 macro_rules! impl_key {
@@ -90,82 +169,3 @@ macro_rules! impl_key {
 	};
 }
 pub(crate) use impl_key;
-
-impl KeyEncode for Vec<u8> {
-	fn encode(&self) -> Result<Vec<u8>, crate::err::Error> {
-		Ok(self.clone())
-	}
-
-	fn encode_owned(self) -> Result<Vec<u8>, crate::err::Error> {
-		Ok(self)
-	}
-
-	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
-		buffer.extend_from_slice(&self);
-		Ok(())
-	}
-
-	fn encode_owned_into(self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
-		if buffer.is_empty() {
-			// we can just move self into the buffer since there is no data.
-			*buffer = self;
-		} else {
-			// we can't overwrite the buffer so instead copy self into it.
-			buffer.extend_from_slice(&self);
-		}
-		Ok(())
-	}
-}
-
-impl<K: KeyEncode> KeyEncode for &K {
-	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
-		(*self).encode_into(buffer)
-	}
-}
-
-impl KeyEncode for &str {
-	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
-		buffer.extend_from_slice(self.as_bytes());
-		Ok(())
-	}
-}
-
-impl KeyEncode for &[u8] {
-	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error> {
-		buffer.extend_from_slice(self);
-		Ok(())
-	}
-}
-
-impl<'a> KeyDecode<'a> for Vec<u8> {
-	fn decode(bytes: &[u8]) -> Result<Self, crate::err::Error>
-	where
-		Self: Sized,
-	{
-		Ok(bytes.to_vec())
-	}
-}
-
-impl KeyDecodeOwned for Vec<u8> {
-	fn decode_from_vec(bytes: Vec<u8>) -> Result<Self, crate::err::Error> {
-		Ok(bytes)
-	}
-}
-
-impl<'a> KeyDecode<'a> for () {
-	fn decode(_: &'a [u8]) -> Result<Self, crate::err::Error>
-	where
-		Self: Sized,
-	{
-		Ok(())
-	}
-}
-
-impl KeyDecodeOwned for () {
-	fn decode_from_vec(_: Vec<u8>) -> Result<Self, crate::err::Error>
-	where
-		Self: Sized,
-	{
-		Ok(())
-	}
-}

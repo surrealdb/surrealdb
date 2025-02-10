@@ -766,7 +766,7 @@ jobs:
   docker:
     name: Docker images
     needs: [prepare-vars, publish]
-    uses: ./.github/workflows/reusable_docker.yml
+    uses: ./.github/workflows/docker.yml
     with:
       environment: ${{ inputs.environment }}
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}

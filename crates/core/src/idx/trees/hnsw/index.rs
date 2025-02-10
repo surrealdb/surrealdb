@@ -80,7 +80,7 @@ impl HnswIndex {
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
-			hnsw: HnswFlavor::new(ikb.clone(), p),
+			hnsw: HnswFlavor::new(ikb.clone(), p)?,
 			docs: HnswDocs::new(tx, tb, ikb.clone()).await?,
 			vec_docs: VecDocs::new(ikb),
 		})
