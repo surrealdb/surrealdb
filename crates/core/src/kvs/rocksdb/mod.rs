@@ -641,7 +641,7 @@ impl super::api::Transaction for Transaction {
 				// Check the range validity
 				if k >= beg && k < end {
 					res.push(k.to_vec());
-					iter.next();
+					iter.prev();
 					continue;
 				}
 			}

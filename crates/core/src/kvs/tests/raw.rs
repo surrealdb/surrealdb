@@ -243,7 +243,7 @@ pub async fn keysr(new_ds: impl CreateDs) {
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx.keys("test1".."test9", u32::MAX, None).await.unwrap();
+	let val = tx.keysr("test1".."test9", u32::MAX, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0], b"test5");
 	assert_eq!(val[1], b"test4");
@@ -253,17 +253,17 @@ pub async fn keysr(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx.keys("test2".."test4", u32::MAX, None).await.unwrap();
+	let val = tx.keysr("test2".."test4", u32::MAX, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test3");
 	assert_eq!(val[1], b"test2");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx.keys("test1".."test9", 2, None).await.unwrap();
+	let val = tx.keysr("test1".."test9", 2, None).await.unwrap();
 	assert_eq!(val.len(), 2);
-	assert_eq!(val[0], b"test8");
-	assert_eq!(val[1], b"test7");
+	assert_eq!(val[0], b"test5");
+	assert_eq!(val[1], b"test4");
 	tx.cancel().await.unwrap();
 }
 
