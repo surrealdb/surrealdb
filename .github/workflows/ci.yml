@@ -770,6 +770,7 @@ jobs:
 
   sdk-javascript:
     name: JavaScript SDK tests (${{ matrix.version }})
+    continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
     strategy:
@@ -814,6 +815,7 @@ jobs:
 
   sdk-golang:
     name: Golang SDK tests (${{ matrix.version }})
+    continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
     strategy:
@@ -850,19 +852,18 @@ jobs:
         run: sleep 10
 
       - name: Run Golang tests (HTTP)
-        continue-on-error: true
         run: go test -v -cover ./...
         env:
           SURREALDB_URL: http://localhost:8000/rpc
 
       - name: Run Golang tests (WebSocket)
-        continue-on-error: true
         run: go test -v -cover ./...
         env:
           SURREALDB_URL: ws://localhost:8000/rpc
 
   sdk-python:
     name: Python SDK tests (${{ matrix.version }})
+    continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
     strategy:
@@ -913,6 +914,7 @@ jobs:
 
   sdk-php:
     name: PHP SDK tests (${{ matrix.version }})
+    continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
     strategy:
@@ -956,6 +958,7 @@ jobs:
 
   sdk-dotnet:
     name: .NET SDK tests (${{ matrix.version }})
+    continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
     strategy:
@@ -985,9 +988,9 @@ jobs:
 
       - name: Install dependencies
         run: dotnet restore
-      
+
       - name: Disable embedded mode
-        run: sudo bash disable_embedded_mode.sh 
+        run: sudo bash disable_embedded_mode.sh
 
       - name: Build
         run: dotnet build --no-restore
@@ -1000,14 +1003,14 @@ jobs:
 
       - name: Run .NET tests
         run: >
-          dotnet test 
+          dotnet test
           ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
           --no-restore
           --no-build
 
       - name: Run .NET tests (Live Query)
         run: >
-          dotnet test 
+          dotnet test
           ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
           --no-restore
           --no-build

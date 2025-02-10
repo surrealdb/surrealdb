@@ -5466,6 +5466,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 name = "surreal"
 version = "2.1.4"
 dependencies = [
+ "arc-swap",
  "argon2",
  "assert_fs",
  "async-graphql",
@@ -5779,9 +5780,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87b26b3b1ba4433ab3152304838b70b2798990ffdc739b8b551b4e3e64b8fe52"
+checksum = "e28eec56aca077c245bf5f9e08876fdcce58b5361e77a0b94a92fd47e1990ad4"
 dependencies = [
  "ahash 0.8.11",
  "async-channel",
@@ -5795,7 +5796,7 @@ dependencies = [
  "quick_cache 0.6.9",
  "revision",
  "tokio",
- "vart 0.9.0",
+ "vart 0.9.1",
  "wasm-bindgen-futures",
 ]
 
@@ -6798,9 +6799,9 @@ checksum = "87782b74f898179396e93c0efabb38de0d58d50bbd47eae00c71b3a1144dbbae"
 
 [[package]]
 name = "vart"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9486b23b6bec4be5205c9d696a8cc2bc82c51ee82a26e93ceabac56e535dfbcc"
+checksum = "907dbbd9267f93d6f023576d8c28710395dc6c417b70ab0c80b05500f7b44938"
 
 [[package]]
 name = "vcpkg"
