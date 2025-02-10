@@ -118,6 +118,9 @@ impl ApiInvocation<'_> {
 
 		let body = body.process(&inv_ctx, &self).await?;
 
+		// Edit the options
+		let opt = opt.new_with_perms(!inv_ctx.elevated);
+
 		// Edit the context
 		let mut ctx = MutableContext::new_isolated(ctx, ContextIsolation::Full);
 
@@ -135,7 +138,7 @@ impl ApiInvocation<'_> {
 
 		// Compute the action
 
-		let res = action.compute(stk, &ctx, opt, None).await?;
+		let res = action.compute(stk, &ctx, &opt, None).await?;
 
 		let mut res = ApiResponse::try_from(res)?;
 		if let Some(headers) = inv_ctx.response_headers {

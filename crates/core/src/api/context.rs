@@ -14,6 +14,7 @@ pub struct InvocationContext {
 	pub response_body_raw: bool,
 	pub response_headers: Option<HeaderMap>,
 	pub timeout: Option<Duration>,
+	pub elevated: bool,
 }
 
 impl InvocationContext {

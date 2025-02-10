@@ -7,3 +7,11 @@ pub fn timeout(context: &mut InvocationContext, (timeout,): (Duration,)) -> Resu
 	context.timeout = Some(timeout);
 	Ok(())
 }
+
+pub fn elevated(
+	context: &mut InvocationContext,
+	(elevated,): (Option<bool>,),
+) -> Result<(), Error> {
+	context.elevated = elevated.unwrap_or(true);
+	Ok(())
+}

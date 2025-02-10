@@ -42,6 +42,7 @@ impl<'a> InvokeMiddleware<'a> for (&'a String, &'a Vec<Value>) {
 			"api::res::headers" => api::res::headers,
 			"api::res::header" => api::res::header,
 			//
+			"api::elevated" => api::elevated,
 			"api::timeout" => api::timeout,
 		)
 	}
