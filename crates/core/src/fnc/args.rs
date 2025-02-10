@@ -19,7 +19,7 @@ impl FromArg for Value {
 
 impl FromArg for bool {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
-		Ok(arg.coerce_to_bool()?)
+		arg.coerce_to_bool()
 	}
 }
 

@@ -82,7 +82,7 @@ pub enum Error {
 	NotFound(String),
 
 	#[error("An API error occurred: {0}")]
-	ApiError(ApiError),
+	Api(ApiError),
 }
 
 impl From<Error> for String {
@@ -161,7 +161,7 @@ impl From<surrealdb::error::Db> for Error {
 	fn from(error: surrealdb::error::Db) -> Error {
 		match error {
 			surrealdb::error::Db::InvalidAuth => Error::InvalidAuth,
-			surrealdb::error::Db::ApiError(e) => Error::ApiError(e),
+			surrealdb::error::Db::ApiError(e) => Error::Api(e),
 			e => Error::Db(e.into()),
 		}
 	}
@@ -245,7 +245,7 @@ impl IntoResponse for Error {
 					information: Some(self.to_string()),
 				}),
 			),
-			Error::ApiError(e) => (
+			Error::Api(e) => (
 				e.status_code(),
 				Json(Message {
 					code: e.status_code().as_u16(),

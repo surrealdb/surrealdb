@@ -142,7 +142,7 @@ impl<'a> FindApi<'a> for &'a [DefineApiStatement] {
 		segments: Vec<&'a str>,
 		method: Method,
 	) -> Option<(&'a DefineApiStatement, Object)> {
-		let mut specifity = 0 as u8;
+		let mut specifity = 0_u8;
 		let mut res = None;
 		for api in self.iter() {
 			if let Some(params) = api.path.fit(segments.as_slice()) {

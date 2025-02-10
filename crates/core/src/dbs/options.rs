@@ -227,7 +227,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			perms: self.perms.clone(),
+			perms: self.perms,
 			..*self
 		}
 	}

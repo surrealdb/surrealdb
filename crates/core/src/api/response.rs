@@ -33,10 +33,8 @@ impl TryFrom<Value> for ApiResponse {
 
 					// Convert to StatusCode
 					v.try_into().map_err(|_| {
-						ApiError::InvalidApiResponse(
-							format!("{v} is not a valid HTTP status code").into(),
-						)
-						.into()
+						ApiError::InvalidApiResponse(format!("{v} is not a valid HTTP status code"))
+							.into()
 					})
 				})
 				.transpose()?

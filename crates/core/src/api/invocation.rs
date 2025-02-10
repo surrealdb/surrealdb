@@ -34,7 +34,7 @@ pub struct ApiInvocation<'a> {
 	pub values: Vec<(&'a str, Value)>,
 }
 
-impl<'a> ApiInvocation<'a> {
+impl ApiInvocation<'_> {
 	pub fn vars(self, body: Value) -> Result<Value, Error> {
 		let mut obj = map! {
 			"params" => Value::from(self.params),
@@ -45,10 +45,10 @@ impl<'a> ApiInvocation<'a> {
 		};
 
 		if let Some(session) = self.session {
-			obj.extend(session.values().into_iter());
+			obj.extend(session.values());
 		}
 
-		obj.extend(self.values.into_iter());
+		obj.extend(self.values);
 
 		Ok(obj.into())
 	}

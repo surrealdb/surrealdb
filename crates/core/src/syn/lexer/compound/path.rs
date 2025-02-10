@@ -58,7 +58,7 @@ pub fn path(lexer: &mut Lexer, start: Token) -> Result<Vec<Segment>, SyntaxError
 					}
 
 					lexer.reader.advance(1);
-					let mut parser = Parser::new(&lexer.reader.remaining());
+					let mut parser = Parser::new(lexer.reader.remaining());
 					let mut stack = Stack::new();
 					let span = parser.last_span();
 					let res = stack.enter(|stk| parser.parse_kind(stk, span)).finish().map_err(

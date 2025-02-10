@@ -671,7 +671,7 @@ impl Transaction {
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
 				let val = cache::tx::Entry::Aps(Arc::clone(&val));
-				self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey, val.clone());
 				val
 			}
 		}
@@ -1255,7 +1255,7 @@ impl Transaction {
 				})?;
 				let val: DefineApiStatement = val.into();
 				let val = cache::tx::Entry::Any(Arc::new(val));
-				self.cache.insert(qey.into(), val.clone());
+				self.cache.insert(qey, val.clone());
 				val
 			}
 		}

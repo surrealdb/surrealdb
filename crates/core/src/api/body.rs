@@ -63,9 +63,9 @@ impl ApiBody {
 
 				Ok(bytes)
 			}
-			_ => Err(Error::Unreachable(format!(
-				"Encountered a native body whilst trying to stream one"
-			))),
+			_ => Err(Error::Unreachable(
+				"Encountered a native body whilst trying to stream one".into(),
+			)),
 		}
 	}
 

@@ -32,15 +32,13 @@ pub struct Diagnostic {
 
 impl Diagnostic {
 	pub(crate) fn advance_span_offset(&mut self, offset: usize) {
-		match &mut self.kind {
-			DiagnosticKind::Span {
-				ref mut span,
-				..
-			} => {
-				span.offset += offset as u32;
-			}
-			_ => (),
-		};
+		if let DiagnosticKind::Span {
+			ref mut span,
+			..
+		} = &mut self.kind
+		{
+			span.offset += offset as u32;
+		}
 
 		if let Some(next) = self.next.as_mut() {
 			next.advance_span_offset(offset);

@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-pub(self) mod api;
+pub mod api;
 pub(super) mod invoke;
 
 use derive::Store;
@@ -41,7 +41,7 @@ impl<'a> CollectMiddleware<'a> for Vec<&'a RequestMiddleware> {
 	fn collect(&'a self) -> Result<CollectedMiddleware<'a>, Error> {
 		let mut middleware: CollectedMiddleware<'a> = Vec::new();
 
-		for map in self.into_iter() {
+		for map in self.iter() {
 			for (k, v) in map.iter() {
 				match k.split_once("::") {
 					Some(("api", _)) => middleware.push((k, v)),

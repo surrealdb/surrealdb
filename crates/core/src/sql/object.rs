@@ -171,10 +171,7 @@ impl IntoIterator for Object {
 impl TryInto<BTreeMap<String, String>> for Object {
 	type Error = Error;
 	fn try_into(self) -> Result<BTreeMap<String, String>, Self::Error> {
-		Ok(self
-			.into_iter()
-			.map(|(k, v)| Ok((k, v.coerce_to_string()?)))
-			.collect::<Result<BTreeMap<String, String>, Error>>()?)
+		self.into_iter().map(|(k, v)| Ok((k, v.coerce_to_string()?))).collect()
 	}
 }
 

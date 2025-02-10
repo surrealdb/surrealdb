@@ -3398,6 +3398,7 @@ dependencies = [
  "geo",
  "geo-types",
  "hex",
+ "http",
  "ipnet",
  "jsonwebtoken",
  "lexicmp",

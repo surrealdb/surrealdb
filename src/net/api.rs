@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::params::Params;
@@ -69,8 +68,6 @@ async fn handler(
 		return Err(Error::ForbiddenRoute(RouteTarget::Api.to_string()));
 	}
 
-	let query = query.inner.into_iter().map(|(k, v)| (k, v)).collect::<BTreeMap<String, String>>();
-
 	let method = match method {
 		Method::DELETE => ApiMethod::Delete,
 		Method::GET => ApiMethod::Get,
@@ -92,8 +89,8 @@ async fn handler(
 			let invocation = ApiInvocation {
 				params,
 				method,
-				query,
 				headers,
+				query: query.inner,
 				session: Some(session),
 				values: vec![],
 			};
@@ -134,7 +131,7 @@ async fn handler(
 					v.into()
 				}
 				v => {
-					return Err(Error::ApiError(ApiError::InvalidApiResponse(format!(
+					return Err(Error::Api(ApiError::InvalidApiResponse(format!(
 						"Expected bytes or string, found {}",
 						v.kindof()
 					))))
@@ -142,7 +139,7 @@ async fn handler(
 			},
 			ResponseInstruction::Format(format) => {
 				if res.headers.contains_key("Content-Type") {
-					return Err(Error::ApiError(ApiError::InvalidApiResponse(
+					return Err(Error::Api(ApiError::InvalidApiResponse(
 						"A Content-Type header was already set while this was not expected".into(),
 					)));
 				}
@@ -153,7 +150,7 @@ async fn handler(
 					Format::Msgpack => ("application/pack", msgpack::res(body)?),
 					Format::Revision => ("application/surrealdb", revision::res(body)?),
 					_ => {
-						return Err(Error::ApiError(ApiError::Unreachable(
+						return Err(Error::Api(ApiError::Unreachable(
 							"Expected a valid format".into(),
 						)))
 					}
@@ -163,7 +160,7 @@ async fn handler(
 				val
 			}
 			ResponseInstruction::Native => {
-				return Err(Error::ApiError(ApiError::Unreachable(
+				return Err(Error::Api(ApiError::Unreachable(
 					"Found a native response instruction where this is not supported".into(),
 				)))
 			}

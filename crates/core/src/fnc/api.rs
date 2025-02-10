@@ -53,7 +53,7 @@ pub async fn invoke(
 
 	let ns = opt.ns()?;
 	let db = opt.db()?;
-	let apis = ctx.tx().all_db_apis(&ns, &db).await?;
+	let apis = ctx.tx().all_db_apis(ns, db).await?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
 	if let Some((api, params)) = apis.as_ref().find_api(segments, method) {
@@ -77,7 +77,7 @@ pub async fn invoke(
 
 		match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(body)).await {
 			Ok(Some(v)) => v.0.try_into(),
-			Err(e) => return Err(e),
+			Err(e) => Err(e),
 			_ => Ok(Value::None),
 		}
 	} else {
