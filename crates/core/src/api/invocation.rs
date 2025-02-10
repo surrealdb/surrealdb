@@ -106,7 +106,7 @@ impl ApiInvocation {
 		let body = body.process(&inv_ctx, &self).await?;
 
 		// Edit the options
-		let opt = opt.new_with_perms(!inv_ctx.elevated);
+		let opt = opt.new_with_perms(false);
 
 		// Edit the context
 		let mut ctx = MutableContext::new_isolated(ctx);
