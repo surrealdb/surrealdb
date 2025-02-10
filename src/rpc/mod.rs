@@ -87,7 +87,7 @@ pub(crate) async fn notifications(
 							// Get the WebSocket output format
 							let format = rpc.format;
 							// Get the WebSocket sending channel
-							let sender = rpc.channel.0.clone();
+							let sender = rpc.channel.clone();
 							// Send the notification to the client
 							let future = message.send(cx, format, sender);
 							// Pus the future to the pipeline
