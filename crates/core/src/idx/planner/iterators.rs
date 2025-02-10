@@ -1055,7 +1055,7 @@ impl UniqueRangeReverseThingIterator {
 		let mut records = B::with_capacity(res.len());
 		if self.r.end_incl {
 			if let Some(v) = tx.get(&self.r.end, None).await? {
-				let rid: Thing = v.into();
+				let rid: Thing = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 				limit -= 1;
 				if limit == 0 {
@@ -1072,7 +1072,7 @@ impl UniqueRangeReverseThingIterator {
 				return Ok(records);
 			}
 			if self.r.matches(&k) {
-				let rid: Thing = v.into();
+				let rid: Thing = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
