@@ -379,6 +379,20 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
+[[publisher.revision]]
+version = "0.11.0"
+when = "2024-08-31"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.revision-derive]]
+version = "0.11.0"
+when = "2024-08-31"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
 [[publisher.ryu]]
 version = "1.0.18"
 when = "2024-05-07"
