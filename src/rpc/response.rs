@@ -6,10 +6,10 @@ use opentelemetry::Context as TelemetryContext;
 use revision::revisioned;
 use serde::Serialize;
 use std::sync::Arc;
-use surrealdb::channel::Sender;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::Data;
 use surrealdb::sql::Value;
+use tokio::sync::mpsc::Sender;
 use tracing::Span;
 
 #[revisioned(revision = 1)]
