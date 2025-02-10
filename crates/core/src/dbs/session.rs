@@ -3,6 +3,7 @@ use crate::iam::Auth;
 use crate::iam::{Level, Role};
 use crate::sql::value::Value;
 use chrono::Utc;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// Specifies the current session information when processing a query.
@@ -31,6 +32,8 @@ pub struct Session {
 	pub rd: Option<Value>,
 	/// The current expiration time of the session
 	pub exp: Option<i64>,
+	/// The parameters set
+	pub parameters: BTreeMap<String, Value>,
 }
 
 impl Session {
@@ -145,6 +148,7 @@ impl Session {
 			tk: None,
 			rd: Some(rid),
 			exp: None,
+			parameters: Default::default(),
 		}
 	}
 

@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -9,10 +8,10 @@ use super::AppState;
 use crate::cnf;
 use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
 use crate::err::Error;
-use crate::rpc::connection::Connection;
 use crate::rpc::format::HttpFormat;
-use crate::rpc::post_context::PostRpcContext;
+use crate::rpc::http::Http;
 use crate::rpc::response::IntoRpcResponse;
+use crate::rpc::websocket::Websocket;
 use crate::rpc::RpcState;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
@@ -135,15 +134,15 @@ async fn handle_socket(
 ) {
 	// Check if there is a WebSocket protocol specified
 	let format = match ws.protocol().and_then(|h| h.to_str().ok()) {
-		// Any selected protocol will always be a valie value
+		// Any selected protocol will always be a valid value
 		Some(protocol) => protocol.into(),
 		// No protocol format was specified
-		_ => Format::None,
+		_ => Format::Json,
 	};
 	// Create a new connection instance
-	let rpc = Connection::new(datastore, state, id, sess, format);
+	let rpc = Websocket::new(datastore, state, id, sess, format);
 	// Serve the socket connection requests
-	Connection::serve(rpc, ws).await;
+	Websocket::serve(rpc, ws).await;
 }
 
 async fn post_handler(
@@ -163,7 +162,7 @@ async fn post_handler(
 	// Get the input format from the Content-Type header
 	let fmt: Format = content_type.deref().into();
 	// Check that the input format is a valid format
-	if matches!(fmt, Format::Unsupported | Format::None) {
+	if matches!(fmt, Format::Unsupported) {
 		return Err(Error::InvalidType);
 	}
 	// Get the output format from the Accept header
@@ -175,7 +174,7 @@ async fn post_handler(
 		}
 	}
 	// Create a new HTTP instance
-	let mut rpc = PostRpcContext::new(&state.datastore, session, BTreeMap::new());
+	let rpc = Http::new(&state.datastore, session);
 	// Check to see available memory
 	if ALLOC.is_beyond_threshold() {
 		return Err(Error::ServerOverloaded);
@@ -186,7 +185,7 @@ async fn post_handler(
 			// Parse the request RPC method type
 			let method = Method::parse(req.method);
 			// Execute the specified method
-			let res = rpc.execute_mutable(method, req.params).await;
+			let res = rpc.execute(method, req.params).await;
 			// Return the HTTP response
 			fmt.res_http(res.into_response(None)).map_err(Error::from)
 		}

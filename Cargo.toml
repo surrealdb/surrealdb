@@ -57,6 +57,7 @@ strip = false
 inherits = "dev"
 
 [dependencies]
+arc-swap = "1.7.1"
 argon2 = "0.5.2"
 async-graphql = { version = "7.0.9", default-features = false }
 async-graphql-axum = { version = "7.0.9" }
