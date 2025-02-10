@@ -3,7 +3,6 @@ use std::ops::Deref;
 pub mod api;
 pub(super) mod invoke;
 
-use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +12,7 @@ use crate::{
 };
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RequestMiddleware(pub Vec<(String, Vec<Value>)>);

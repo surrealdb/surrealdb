@@ -280,7 +280,8 @@ impl Function {
 				// Check this function is allowed
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
-				let val = ctx.tx().get_db_function(opt.ns()?, opt.db()?, s).await?;
+				let (ns, db) = opt.ns_db()?;
+				let val = ctx.tx().get_db_function(ns, db, s).await?;
 				// Check permissions
 				if opt.check_perms(Action::View)? {
 					match &val.permissions {

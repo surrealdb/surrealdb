@@ -21,7 +21,7 @@ use crate::sql::{
 	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
 use chrono::{DateTime, Utc};
-use derive::Store;
+
 use geo::Point;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -85,7 +85,7 @@ impl From<&Tables> for Values {
 }
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -3240,19 +3240,19 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		let enc: Vec<u8> = Value::None.into();
+		let enc: Vec<u8> = revision::to_vec(&Value::None).unwrap();
 		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = Value::Null.into();
+		let enc: Vec<u8> = revision::to_vec(&Value::Null).unwrap();
 		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = Value::Bool(true).into();
+		let enc: Vec<u8> = revision::to_vec(&Value::Bool(true)).unwrap();
 		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = Value::Bool(false).into();
+		let enc: Vec<u8> = revision::to_vec(&Value::Bool(false)).unwrap();
 		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = Value::from("test").into();
+		let enc: Vec<u8> = revision::to_vec(&Value::from("test")).unwrap();
 		assert_eq!(8, enc.len());
-		let enc: Vec<u8> = Value::parse("{ hello: 'world' }").into();
+		let enc: Vec<u8> = revision::to_vec(&Value::parse("{ hello: 'world' }")).unwrap();
 		assert_eq!(19, enc.len());
-		let enc: Vec<u8> = Value::parse("{ compact: true, schema: 0 }").into();
+		let enc: Vec<u8> = revision::to_vec(&Value::parse("{ compact: true, schema: 0 }")).unwrap();
 		assert_eq!(27, enc.len());
 	}
 
@@ -3264,8 +3264,8 @@ mod tests {
 		let res = Value::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
-		let enc: Vec<u8> = val.into();
-		let dec: Value = enc.into();
+		let enc: Vec<u8> = revision::to_vec(&val).unwrap();
+		let dec: Value = revision::from_slice(&enc).unwrap();
 		assert_eq!(res, dec);
 	}
 

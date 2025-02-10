@@ -6,7 +6,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{pretty_indent, Fmt};
 use crate::sql::{Base, Object, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
-use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -15,7 +14,7 @@ use super::config::api::ApiConfig;
 use super::CursorDoc;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineApiStatement {
@@ -61,7 +60,7 @@ impl DefineApiStatement {
 			overwrite: false,
 			..self.clone()
 		};
-		txn.set(key, ap, None).await?;
+		txn.set(key, revision::to_vec(&ap)?, None).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good
@@ -106,7 +105,7 @@ impl InfoStructure for DefineApiStatement {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct ApiAction {

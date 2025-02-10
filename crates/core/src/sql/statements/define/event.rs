@@ -6,14 +6,14 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Strand, Value, Values};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use uuid::Uuid;
 
 #[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineEventStatement {
@@ -39,8 +39,7 @@ impl DefineEventStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
@@ -60,12 +59,12 @@ impl DefineEventStatement {
 		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
 		txn.set(
 			key,
-			DefineEventStatement {
+			revision::to_vec(&DefineEventStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
-			},
+			})?,
 			None,
 		)
 		.await?;
@@ -74,10 +73,10 @@ impl DefineEventStatement {
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
 			key,
-			DefineTableStatement {
+			revision::to_vec(&DefineTableStatement {
 				cache_events_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			},
+			})?,
 			None,
 		)
 		.await?;

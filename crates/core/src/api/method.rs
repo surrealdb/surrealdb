@@ -1,13 +1,12 @@
 use std::fmt::{self, Display};
 
-use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::{err::Error, sql::Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Method {

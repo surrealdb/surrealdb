@@ -87,7 +87,7 @@ impl MTreeIndex {
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let mut doc_ids = self.doc_ids.write().await;
-		let resolved = doc_ids.resolve_doc_id(txn, rid.into()).await?;
+		let resolved = doc_ids.resolve_doc_id(txn, revision::to_vec(rid)?).await?;
 		let doc_id = *resolved.doc_id();
 		drop(doc_ids);
 		// Index the values
@@ -111,7 +111,7 @@ impl MTreeIndex {
 		content: &[Value],
 	) -> Result<(), Error> {
 		let mut doc_ids = self.doc_ids.write().await;
-		let doc_id = doc_ids.remove_doc(txn, rid.into()).await?;
+		let doc_id = doc_ids.remove_doc(txn, revision::to_vec(rid)?).await?;
 		drop(doc_ids);
 		if let Some(doc_id) = doc_id {
 			// Lock the index

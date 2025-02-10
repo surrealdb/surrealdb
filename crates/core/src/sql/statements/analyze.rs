@@ -11,14 +11,14 @@ use crate::sql::ident::Ident;
 use crate::sql::index::Index;
 use crate::sql::value::Value;
 use crate::sql::Base;
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum AnalyzeStatement {
@@ -38,8 +38,9 @@ impl AnalyzeStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
 				// Read the index
-				let ix = ctx.tx().get_tb_index(opt.ns()?, opt.db()?, tb, idx).await?;
-				let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, &ix)?;
+				let (ns, db) = opt.ns_db()?;
+				let ix = ctx.tx().get_tb_index(ns, db, tb, idx).await?;
+				let ikb = IndexKeyBase::new(ns, db, &ix)?;
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {

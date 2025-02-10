@@ -8,15 +8,15 @@ use crate::err::Error;
 use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Value};
+
 use api::ApiConfig;
-use derive::Store;
 use graphql::GraphQLConfig;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineConfigStatement {
@@ -26,7 +26,7 @@ pub struct DefineConfigStatement {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum ConfigInner {
@@ -52,7 +52,8 @@ impl DefineConfigStatement {
 			ConfigInner::Api(_) => "api",
 		};
 		// Check if the definition exists
-		if txn.get_db_config(opt.ns()?, opt.db()?, cg).await.is_ok() {
+		let (ns, db) = opt.ns_db()?;
+		if txn.get_db_config(ns, db, cg).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
@@ -62,10 +63,10 @@ impl DefineConfigStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::cg::new(opt.ns()?, opt.db()?, cg);
-		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-		txn.replace(key, self.clone()).await?;
+		let key = crate::key::database::cg::new(ns, db, cg);
+		txn.get_or_add_ns(ns, opt.strict).await?;
+		txn.get_or_add_db(ns, db, opt.strict).await?;
+		txn.replace(key, revision::to_vec(self)?).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

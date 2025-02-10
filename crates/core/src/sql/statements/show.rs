@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Datetime, Table, Value};
 use crate::vs::VersionStamp;
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -34,7 +34,7 @@ impl ShowSince {
 
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct ShowStatement {
@@ -56,10 +56,11 @@ impl ShowStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Process the show query
+		let (ns, db) = opt.ns_db()?;
 		let r = crate::cf::read(
 			&txn,
-			opt.ns()?,
-			opt.db()?,
+			ns,
+			db,
 			self.table.as_deref().map(String::as_str),
 			self.since.clone(),
 			self.limit,

@@ -40,14 +40,14 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
-use derive::Store;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 3)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum DefineStatement {
@@ -163,7 +163,7 @@ mod tests {
 			name: Ident::from("test"),
 			..Default::default()
 		});
-		let enc: Vec<u8> = stm.into();
+		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
 		assert_eq!(13, enc.len());
 	}
 }

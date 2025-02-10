@@ -6,7 +6,7 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::{Base, Ident, Object, Value, Version};
 use crate::sys::INFORMATION;
-use derive::Store;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use std::fmt;
 use std::sync::Arc;
 
 #[revisioned(revision = 5)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum InfoStatement {
@@ -140,8 +140,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
-				let ns = opt.ns()?;
-				let db = opt.db()?;
+				let (ns, db) = opt.ns_db()?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(v.compute(stk, ctx, opt, None).await?),
@@ -233,8 +232,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
-				let ns = opt.ns()?;
-				let db = opt.db()?;
+				let (ns, db) = opt.ns_db()?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(v.compute(stk, ctx, opt, None).await?),
@@ -301,7 +299,10 @@ impl InfoStatement {
 				let res = match base {
 					Base::Root => txn.get_root_user(user).await?,
 					Base::Ns => txn.get_ns_user(opt.ns()?, user).await?,
-					Base::Db => txn.get_db_user(opt.ns()?, opt.db()?, user).await?,
+					Base::Db => {
+						let (ns, db) = opt.ns_db()?;
+						txn.get_db_user(ns, db, user).await?
+					}
 					_ => return Err(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
@@ -320,12 +321,12 @@ impl InfoStatement {
 				#[cfg(not(target_family = "wasm"))]
 				if let Some(ib) = ctx.get_index_builder() {
 					// Obtain the index
-					let res = txn.get_tb_index(opt.ns()?, opt.db()?, table, index).await?;
-					if let Some(status) = ib.get_status(&res).await {
-						let mut out = Object::default();
-						out.insert("building".to_string(), status.into());
-						return Ok(out.into());
-					}
+					let (ns, db) = opt.ns_db()?;
+					let res = txn.get_tb_index(ns, db, table, index).await?;
+					let status = ib.get_status(ns, db, &res).await;
+					let mut out = Object::default();
+					out.insert("building".to_string(), status.into());
+					return Ok(out.into());
 				}
 				Ok(Object::default().into())
 			}

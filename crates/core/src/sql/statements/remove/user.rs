@@ -3,13 +3,13 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RemoveUserStatement {
@@ -57,9 +57,10 @@ impl RemoveUserStatement {
 					// Get the transaction
 					let txn = ctx.tx();
 					// Get the definition
-					let us = txn.get_db_user(opt.ns()?, opt.db()?, &self.name).await?;
+					let (ns, db) = opt.ns_db()?;
+					let us = txn.get_db_user(ns, db, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::us::new(opt.ns()?, opt.db()?, &us.name);
+					let key = crate::key::database::us::new(ns, db, &us.name);
 					txn.del(key).await?;
 					// Clear the cache
 					txn.clear();
