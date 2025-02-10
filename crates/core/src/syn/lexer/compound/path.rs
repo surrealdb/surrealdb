@@ -12,7 +12,7 @@ use crate::syn::{
 
 pub fn path(lexer: &mut Lexer, start: Token) -> Result<Vec<Segment>, SyntaxError> {
 	if !matches!(start.kind, t!("/")) {
-		panic!("Invalid start of strand compound token");
+		bail!("Invalid start of strand compound token");
 	};
 
 	let mut segments: Vec<Segment> = vec![];
