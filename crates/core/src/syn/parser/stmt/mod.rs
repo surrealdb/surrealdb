@@ -34,7 +34,6 @@ mod create;
 mod define;
 mod delete;
 mod r#if;
-mod impersonate;
 mod insert;
 mod parts;
 mod relate;
@@ -215,10 +214,6 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_use_stmt().map(Statement::Use)
 			}
-			t!("IMPERSONATE") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_impersonate_stmt(ctx)).await.map(Statement::Impersonate)
-			}
 			_ => {
 				// TODO: Provide information about keywords.
 				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
@@ -307,10 +302,6 @@ impl Parser<'_> {
 			t!("UPSERT") => {
 				self.pop_peek();
 				self.parse_upsert_stmt(ctx).await.map(Entry::Upsert)
-			}
-			t!("IMPERSONATE") => {
-				self.pop_peek();
-				self.parse_impersonate_stmt(ctx).await.map(Entry::Impersonate)
 			}
 			_ => {
 				// TODO: Provide information about keywords.

@@ -145,7 +145,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("HIGHLIGHTS") => TokenKind::Keyword(Keyword::Highlights),
 	UniCase::ascii("HNSW") => TokenKind::Keyword(Keyword::Hnsw),
 	UniCase::ascii("IGNORE") => TokenKind::Keyword(Keyword::Ignore),
-	UniCase::ascii("IMPERSONATE") => TokenKind::Keyword(Keyword::Impersonate),
 	UniCase::ascii("INCLUDE") => TokenKind::Keyword(Keyword::Include),
 	UniCase::ascii("INDEX") => TokenKind::Keyword(Keyword::Index),
 	UniCase::ascii("INFO") => TokenKind::Keyword(Keyword::Info),

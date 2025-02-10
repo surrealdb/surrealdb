@@ -106,7 +106,6 @@ keyword! {
 	Highlights => "HIGHLIGHTS",
 	Hnsw => "HNSW",
 	Ignore => "IGNORE",
-	Impersonate => "IMPERSONATE",
 	Include => "INCLUDE",
 	Index => "INDEX",
 	Info => "INFO",

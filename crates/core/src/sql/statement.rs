@@ -9,10 +9,10 @@ use crate::sql::{
 	statements::{
 		AlterStatement, AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
 		CommitStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
-		ForeachStatement, IfelseStatement, ImpersonateStatement, InfoStatement, InsertStatement,
-		KillStatement, LiveStatement, OptionStatement, OutputStatement, RelateStatement,
-		RemoveStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
-		ThrowStatement, UpdateStatement, UpsertStatement, UseStatement,
+		ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
+		LiveStatement, OptionStatement, OutputStatement, RelateStatement, RemoveStatement,
+		SelectStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
+		UpdateStatement, UpsertStatement, UseStatement,
 	},
 	value::Value,
 };
@@ -55,7 +55,7 @@ impl Display for Statements {
 	}
 }
 
-#[revisioned(revision = 6)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -96,8 +96,6 @@ pub enum Statement {
 	// TODO(gguillemas): Document once bearer access is no longer experimental.
 	#[revision(start = 5)]
 	Access(AccessStatement),
-	#[revision(start = 6)]
-	Impersonate(ImpersonateStatement),
 }
 
 impl Statement {
@@ -132,7 +130,6 @@ impl Statement {
 			Self::Upsert(v) => v.writeable(),
 			Self::Update(v) => v.writeable(),
 			Self::Use(_) => false,
-			Self::Impersonate(v) => v.writeable(),
 			_ => false,
 		}
 	}
@@ -186,7 +183,6 @@ impl Statement {
 			Self::Throw(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Update(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Upsert(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Impersonate(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Value(v) => {
 				// Ensure futures are processed
 				let opt = &opt.new_with_futures(true);
@@ -232,7 +228,6 @@ impl Display for Statement {
 			Self::Update(v) => write!(Pretty::from(f), "{v}"),
 			Self::Upsert(v) => write!(Pretty::from(f), "{v}"),
 			Self::Use(v) => write!(Pretty::from(f), "{v}"),
-			Self::Impersonate(v) => write!(Pretty::from(f), "{v}"),
 		}
 	}
 }
