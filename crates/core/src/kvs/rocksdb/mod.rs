@@ -223,7 +223,7 @@ impl Datastore {
 					// Wait for the specified interval
 					thread::sleep(Duration::from_millis(wait));
 					// Flush the WAL to disk periodically
-					if let Err(err) = dbc.flush_wal(true) {
+					if let Err(err) = dbc.flush_wal(*cnf::SYNC_DATA) {
 						error!("Failed to flush WAL: {err}");
 					}
 				});
