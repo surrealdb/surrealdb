@@ -11,14 +11,14 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::sql::{Literal, Part};
 use crate::sql::{Relation, TableType};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use uuid::Uuid;
 
 #[revisioned(revision = 6)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineFieldStatement {
@@ -87,13 +87,13 @@ impl DefineFieldStatement {
 		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
 		txn.set(
 			key,
-			DefineFieldStatement {
+			revision::to_vec(&DefineFieldStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,
 				kind,
 				..self.clone()
-			},
+			})?,
 			None,
 		)
 		.await?;
@@ -102,10 +102,10 @@ impl DefineFieldStatement {
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
 			key,
-			DefineTableStatement {
+			revision::to_vec(&DefineTableStatement {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			},
+			})?,
 			None,
 		)
 		.await?;
@@ -162,7 +162,7 @@ impl DefineFieldStatement {
 						..Default::default()
 					}
 				};
-				txn.set(key, val, None).await?;
+				txn.set(key, revision::to_vec(&val)?, None).await?;
 				// Process to any sub field
 				if let Some(new_kind) = new_kind {
 					cur_kind = new_kind;
@@ -196,7 +196,7 @@ impl DefineFieldStatement {
 							}),
 							..tb.as_ref().to_owned()
 						};
-						txn.set(key, val, None).await?;
+						txn.set(key, revision::to_vec(&val)?, None).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
@@ -232,7 +232,7 @@ impl DefineFieldStatement {
 							}),
 							..tb.as_ref().to_owned()
 						};
-						txn.set(key, val, None).await?;
+						txn.set(key, revision::to_vec(&val)?, None).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);

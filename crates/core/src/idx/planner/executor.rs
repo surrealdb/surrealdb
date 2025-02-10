@@ -29,7 +29,7 @@ use crate::idx::planner::IterationStage;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::idx::IndexKeyBase;
-use crate::kvs::{Key, TransactionType};
+use crate::kvs::TransactionType;
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Cond, Expression, Idiom, Number, Object, Table, Thing, Value};
@@ -1011,7 +1011,8 @@ impl QueryExecutor {
 		thg: &Thing,
 		ft: &FtEntry,
 	) -> Result<bool, Error> {
-		let doc_key: Key = thg.into();
+		// TODO ask emmanual
+		let doc_key = revision::to_vec(thg)?;
 		let tx = ctx.tx();
 		let di = ft.0.doc_ids.read().await;
 		let doc_id = di.get_doc_id(&tx, doc_key).await?;
@@ -1129,7 +1130,7 @@ impl QueryExecutor {
 					None
 				};
 				if doc_id.is_none() {
-					let key: Key = rid.into();
+					let key = revision::to_vec(rid)?;
 					let di = e.0.doc_ids.read().await;
 					doc_id = di.get_doc_id(&tx, key).await?;
 					drop(di);

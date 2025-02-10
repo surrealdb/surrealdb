@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
-use derive::Store;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,7 @@ const ARGUMENTS: &str = "The model expects 1 argument. The argument can be eithe
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Model")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]

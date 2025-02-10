@@ -7,7 +7,6 @@ use crate::sql::access_type::BearerAccessSubject;
 use crate::sql::{
 	AccessType, Array, Base, Cond, Datetime, Duration, Ident, Object, Strand, Thing, Uuid, Value,
 };
-use derive::Store;
 use md5::Digest;
 use rand::Rng;
 use reblessive::tree::Stk;
@@ -29,7 +28,7 @@ pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum AccessStatement {
@@ -40,7 +39,7 @@ pub enum AccessStatement {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementGrant {
@@ -50,7 +49,7 @@ pub struct AccessStatementGrant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementShow {
@@ -61,7 +60,7 @@ pub struct AccessStatementShow {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementRevoke {
@@ -72,7 +71,7 @@ pub struct AccessStatementRevoke {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementPurge {
@@ -84,7 +83,7 @@ pub struct AccessStatementPurge {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessGrant {
@@ -185,7 +184,7 @@ impl From<AccessGrant> for Object {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Subject {
@@ -204,7 +203,7 @@ impl Subject {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Grant {
@@ -225,7 +224,7 @@ impl Grant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantJwt {
@@ -234,7 +233,7 @@ pub struct GrantJwt {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantRecord {
@@ -244,7 +243,7 @@ pub struct GrantRecord {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantBearer {
@@ -378,7 +377,7 @@ pub async fn create_grant(
 						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &gr.ac, &gr.id);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.put(key, &gr_store, None).await
+					txn.put(key, revision::to_vec(&gr_store)?, None).await
 				}
 				_ => return Err(Error::AccessLevelMismatch),
 			};
@@ -459,19 +458,19 @@ pub async fn create_grant(
 			let res = match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
-					txn.put(key, &gr_store, None).await
+					txn.put(key, revision::to_vec(&gr_store)?, None).await
 				}
 				Base::Ns => {
 					let key = crate::key::namespace::access::gr::new(opt.ns()?, &gr.ac, &gr.id);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.put(key, &gr_store, None).await
+					txn.put(key, revision::to_vec(&gr_store)?, None).await
 				}
 				Base::Db => {
 					let key =
 						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &gr.ac, &gr.id);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.put(key, &gr_store, None).await
+					txn.put(key, revision::to_vec(&gr_store)?, None).await
 				}
 				_ => {
 					return Err(Error::Unimplemented(
@@ -665,19 +664,19 @@ pub async fn revoke_grant(
 			match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&stmt.ac, gr);
-					txn.set(key, &revoke, None).await?;
+					txn.set(key, revision::to_vec(&revoke)?, None).await?;
 				}
 				Base::Ns => {
 					let key = crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.set(key, &revoke, None).await?;
+					txn.set(key, revision::to_vec(&revoke)?, None).await?;
 				}
 				Base::Db => {
 					let key =
 						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.set(key, &revoke, None).await?;
+					txn.set(key, revision::to_vec(&revoke)?, None).await?;
 				}
 				_ => {
 					return Err(Error::Unimplemented(
@@ -747,13 +746,13 @@ pub async fn revoke_grant(
 				match base {
 					Base::Root => {
 						let key = crate::key::root::access::gr::new(&stmt.ac, &gr.id);
-						txn.set(key, &gr, None).await?;
+						txn.set(key, revision::to_vec(&gr)?, None).await?;
 					}
 					Base::Ns => {
 						let key =
 							crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, &gr.id);
 						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-						txn.set(key, &gr, None).await?;
+						txn.set(key, revision::to_vec(&gr)?, None).await?;
 					}
 					Base::Db => {
 						let key = crate::key::database::access::gr::new(
@@ -764,7 +763,7 @@ pub async fn revoke_grant(
 						);
 						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 						txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-						txn.set(key, &gr, None).await?;
+						txn.set(key, revision::to_vec(&gr)?, None).await?;
 					}
 					_ => return Err(Error::Unimplemented(
 						"Managing access methods outside of root, namespace and database levels"

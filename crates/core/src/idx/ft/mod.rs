@@ -195,7 +195,7 @@ impl FtIndex {
 		let tx = ctx.tx();
 		// Extract and remove the doc_id (if any)
 		let mut doc_ids = self.doc_ids.write().await;
-		let doc_id = doc_ids.remove_doc(&tx, rid.into()).await?;
+		let doc_id = doc_ids.remove_doc(&tx, revision::to_vec(rid)?).await?;
 		drop(doc_ids);
 		if let Some(doc_id) = doc_id {
 			self.state.doc_count -= 1;
@@ -250,7 +250,7 @@ impl FtIndex {
 		// Resolve the doc_id
 		let tx = ctx.tx();
 		let mut doc_ids = self.doc_ids.write().await;
-		let resolved = doc_ids.resolve_doc_id(&tx, rid.into()).await?;
+		let resolved = doc_ids.resolve_doc_id(&tx, revision::to_vec(rid)?).await?;
 		drop(doc_ids);
 		let doc_id = *resolved.doc_id();
 
@@ -430,7 +430,7 @@ impl FtIndex {
 		idiom: &Idiom,
 		doc: &Value,
 	) -> Result<Value, Error> {
-		let doc_key: Key = thg.into();
+		let doc_key: Key = revision::to_vec(thg)?;
 		let di = self.doc_ids.read().await;
 		let doc_id = di.get_doc_id(tx, doc_key).await?;
 		drop(di);
@@ -454,7 +454,7 @@ impl FtIndex {
 		terms: &[Option<(TermId, u32)>],
 		partial: bool,
 	) -> Result<Value, Error> {
-		let doc_key: Key = thg.into();
+		let doc_key: Key = revision::to_vec(thg)?;
 		let di = self.doc_ids.read().await;
 		let doc_id = di.get_doc_id(tx, doc_key).await?;
 		drop(di);
@@ -519,7 +519,7 @@ impl HitsIterator {
 		for doc_id in self.iter.by_ref() {
 			if let Some(doc_key) = di.get_doc_key(tx, doc_id).await? {
 				drop(di);
-				return Ok(Some((doc_key.into(), doc_id)));
+				return Ok(Some((revision::from_slice(&doc_key)?, doc_id)));
 			}
 		}
 		drop(di);

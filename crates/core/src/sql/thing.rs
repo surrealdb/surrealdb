@@ -5,9 +5,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::key::r#ref::Ref;
+use crate::kvs::KeyDecode as _;
 use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
 use crate::syn;
-use derive::Store;
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -20,7 +20,7 @@ const ID: &str = "id";
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Thing")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -177,17 +177,14 @@ impl Thing {
 			keys.push(res?);
 		}
 
-		let ids = keys
-			.iter()
-			.map(|x| {
-				let key = Ref::from(x);
-
-				Thing {
-					tb: key.ft.to_string(),
-					id: key.fk,
-				}
+		let mut ids = Vec::new();
+		for x in keys.iter() {
+			let key = Ref::decode(x)?;
+			ids.push(Thing {
+				tb: key.ft.to_string(),
+				id: key.fk,
 			})
-			.collect();
+		}
 
 		Ok(ids)
 	}
