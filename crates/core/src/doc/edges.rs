@@ -27,10 +27,8 @@ impl Document {
 		}
 		// Store the record edges
 		if let Workable::Relate(l, r, _) = &self.extras {
-			// Get the namespace
-			let ns = opt.ns()?;
-			// Get the database
-			let db = opt.db()?;
+			// Get the namespace / database
+			let (ns, db) = opt.ns_db()?;
 			// Get the record id
 			let rid = self.id()?;
 			// Get the transaction

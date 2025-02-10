@@ -465,7 +465,7 @@ impl Transactor {
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
-		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Keys");
+		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Keysr");
 		if beg > end {
 			return Ok(vec![]);
 		}
@@ -508,7 +508,7 @@ impl Transactor {
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
 		let rng = beg.as_slice()..end.as_slice();
-		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Scan");
+		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Scanr");
 		if beg > end {
 			return Ok(vec![]);
 		}

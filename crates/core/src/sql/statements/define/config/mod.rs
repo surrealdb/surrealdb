@@ -44,7 +44,8 @@ impl DefineConfigStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_db_config(opt.ns()?, opt.db()?, "graphql").await.is_ok() {
+		let (ns, db) = opt.ns_db()?;
+		if txn.get_db_config(ns, db, "graphql").await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
@@ -54,9 +55,9 @@ impl DefineConfigStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::cg::new(opt.ns()?, opt.db()?, "graphql");
-		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		let key = crate::key::database::cg::new(ns, db, "graphql");
+		txn.get_or_add_ns(ns, opt.strict).await?;
+		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.replace(key, revision::to_vec(self)?).await?;
 		// Clear the cache
 		txn.clear();

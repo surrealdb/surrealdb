@@ -22,8 +22,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Get NS & DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Store the record data
 		let key = crate::key::thing::new(ns, db, &rid.tb, &rid.id);
 		// Match the statement type

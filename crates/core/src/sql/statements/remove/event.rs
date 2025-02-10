@@ -28,8 +28,7 @@ impl RemoveEventStatement {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 			// Get the NS and DB
-			let ns = opt.ns()?;
-			let db = opt.db()?;
+			let (ns, db) = opt.ns_db()?;
 			// Get the transaction
 			let txn = ctx.tx();
 			// Get the definition

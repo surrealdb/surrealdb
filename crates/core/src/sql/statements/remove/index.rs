@@ -28,11 +28,15 @@ impl RemoveIndexStatement {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 			// Get the NS and DB
-			let ns = opt.ns()?;
-			let db = opt.db()?;
+			let (ns, db) = opt.ns_db()?;
 			// Get the transaction
 			let txn = ctx.tx();
 			// Clear the index store cache
+			#[cfg(not(target_family = "wasm"))]
+			ctx.get_index_stores()
+				.index_removed(ctx.get_index_builder(), &txn, ns, db, &self.what, &self.name)
+				.await?;
+			#[cfg(target_family = "wasm")]
 			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
