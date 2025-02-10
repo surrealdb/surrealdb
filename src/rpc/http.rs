@@ -5,6 +5,8 @@ use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::Data;
 use surrealdb_core::rpc::RpcContext;
 use surrealdb_core::rpc::RpcError;
+use surrealdb_core::rpc::RpcProtocolV1;
+use surrealdb_core::rpc::RpcProtocolV2;
 use surrealdb_core::sql::Array;
 use tokio::sync::Semaphore;
 
@@ -72,11 +74,21 @@ impl RpcContext for Http {
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema
 	}
+}
 
-	// ------------------------------
-	// Overrides
-	// ------------------------------
+impl RpcProtocolV1 for Http {
+	/// Parameters can't be set or unset on HTTP RPC context
+	async fn set(&self, _params: Array) -> Result<Data, RpcError> {
+		Err(RpcError::MethodNotFound)
+	}
 
+	/// Parameters can't be set or unset on HTTP RPC context
+	async fn unset(&self, _params: Array) -> Result<Data, RpcError> {
+		Err(RpcError::MethodNotFound)
+	}
+}
+
+impl RpcProtocolV2 for Http {
 	/// Parameters can't be set or unset on HTTP RPC context
 	async fn set(&self, _params: Array) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)

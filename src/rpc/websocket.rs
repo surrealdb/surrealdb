@@ -25,11 +25,13 @@ use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
 use surrealdb::rpc::format::Format;
-use surrealdb::rpc::method::Method;
 use surrealdb::rpc::Data;
+use surrealdb::rpc::Method;
 use surrealdb::rpc::RpcContext;
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
+use surrealdb_core::rpc::RpcProtocolV1;
+use surrealdb_core::rpc::RpcProtocolV2;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -335,17 +337,15 @@ impl Websocket {
 			match rpc.format.req_ws(msg) {
 				Ok(req) => {
 					// Now that we know the method, we can update the span and create otel context
-					span.record("rpc.method", &req.method);
+					span.record("rpc.method", req.method.to_str());
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
 					span.record(
 						"rpc.request_id",
 						req.id.clone().map(Value::as_string).unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
-						req_cx.with_method(&req.method).with_size(len),
+						req_cx.with_method(req.method.to_str()).with_size(len),
 					));
-					// Parse the request RPC method type
-					let method = Method::parse(&req.method);
 					// Process the message
 					tokio::select! {
 						//
@@ -373,7 +373,7 @@ impl Websocket {
 							// Otherwise process the request message
 							else {
 								// Process the message
-								Self::process_message(rpc.clone(), method, req.params).await
+								Self::process_message(rpc.clone(), req.version, req.method, req.params).await
 									.into_response(req.id)
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
@@ -398,6 +398,7 @@ impl Websocket {
 	/// Process a WebSocket message and generate a response
 	async fn process_message(
 		rpc: Arc<Websocket>,
+		version: Option<u8>,
 		method: Method,
 		params: Array,
 	) -> Result<Data, Failure> {
@@ -407,7 +408,7 @@ impl Websocket {
 			return Err(Failure::METHOD_NOT_FOUND);
 		}
 		// Execute the specified method
-		rpc.execute(method, params).await.map_err(Into::into)
+		RpcContext::execute(rpc.as_ref(), version, method, params).await.map_err(Into::into)
 	}
 
 	/// Reject a WebSocket message due to server overloading
@@ -427,6 +428,9 @@ impl Websocket {
 		rpc.canceller.cancel();
 	}
 }
+
+impl RpcProtocolV1 for Websocket {}
+impl RpcProtocolV2 for Websocket {}
 
 impl RpcContext for Websocket {
 	/// The datastore for this RPC interface
