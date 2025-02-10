@@ -12,10 +12,9 @@ use super::{
 };
 use crate::{
 	api::middleware::RequestMiddleware,
-	ctx::{Context, ContextIsolation, MutableContext},
+	ctx::{Context, MutableContext},
 	dbs::{Options, Session},
 	err::Error,
-	iam::{Level, Role},
 	kvs::{Datastore, Transaction},
 	sql::{
 		statements::{define::config::api::ApiConfig, DefineApiStatement},
@@ -25,18 +24,16 @@ use crate::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct ApiInvocation<'a> {
+pub struct ApiInvocation {
 	pub params: Object,
 	pub method: Method,
 	pub query: BTreeMap<String, String>,
 	pub headers: HeaderMap,
-	pub session: Option<Session>,
-	pub values: Vec<(&'a str, Value)>,
 }
 
-impl ApiInvocation<'_> {
+impl ApiInvocation {
 	pub fn vars(self, body: Value) -> Result<Value, Error> {
-		let mut obj = map! {
+		let obj = map! {
 			"params" => Value::from(self.params),
 			"body" => body,
 			"method" => self.method.to_string().into(),
@@ -44,28 +41,18 @@ impl ApiInvocation<'_> {
 			"headers" => Value::Object(self.headers.try_into()?),
 		};
 
-		if let Some(session) = self.session {
-			obj.extend(session.values());
-		}
-
-		obj.extend(self.values);
-
 		Ok(obj.into())
 	}
 
 	pub async fn invoke_with_transaction(
 		self,
-		ns: String,
-		db: String,
 		tx: Arc<Transaction>,
 		ds: Arc<Datastore>,
+		sess: &Session,
 		api: &DefineApiStatement,
 		body: ApiBody,
 	) -> Result<Option<(ApiResponse, ResponseInstruction)>, Error> {
-		let sess = Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Owner)
-			.with_ns(&ns)
-			.with_db(&db);
-		let opt = ds.setup_options(&sess);
+		let opt = ds.setup_options(sess);
 
 		let mut ctx = ds.setup_ctx()?;
 		ctx.set_transaction(tx);
@@ -122,7 +109,7 @@ impl ApiInvocation<'_> {
 		let opt = opt.new_with_perms(!inv_ctx.elevated);
 
 		// Edit the context
-		let mut ctx = MutableContext::new_isolated(ctx, ContextIsolation::Full);
+		let mut ctx = MutableContext::new_isolated(ctx);
 
 		// Set the request variable
 		let vars = self.vars(body)?;

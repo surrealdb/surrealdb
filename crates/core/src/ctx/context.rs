@@ -61,12 +61,7 @@ pub struct MutableContext {
 	// An optional transaction
 	transaction: Option<Arc<Transaction>>,
 	// Does not read from parent `values`.
-	isolation: Option<ContextIsolation>,
-}
-
-pub enum ContextIsolation {
-	Full,
-	User,
+	isolated: bool,
 }
 
 impl Default for MutableContext {
@@ -114,7 +109,7 @@ impl MutableContext {
 			#[cfg(storage)]
 			temporary_directory: None,
 			transaction: None,
-			isolation: None,
+			isolated: false,
 		}
 	}
 
@@ -136,7 +131,7 @@ impl MutableContext {
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
-			isolation: None,
+			isolated: false,
 			parent: Some(parent.clone()),
 		}
 	}
@@ -144,7 +139,7 @@ impl MutableContext {
 	/// Create a new context from a frozen parent context.
 	/// This context is isolated, and values specified on
 	/// any parent contexts will not be accessible.
-	pub(crate) fn new_isolated(parent: &Context, isolation: ContextIsolation) -> Self {
+	pub(crate) fn new_isolated(parent: &Context) -> Self {
 		Self {
 			values: HashMap::default(),
 			deadline: parent.deadline,
@@ -161,7 +156,7 @@ impl MutableContext {
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
-			isolation: Some(isolation),
+			isolated: true,
 			parent: Some(parent.clone()),
 		}
 	}
@@ -186,7 +181,7 @@ impl MutableContext {
 			#[cfg(storage)]
 			temporary_directory: from.temporary_directory.clone(),
 			transaction: None,
-			isolation: None,
+			isolated: false,
 			parent: None,
 		}
 	}
@@ -217,7 +212,7 @@ impl MutableContext {
 			#[cfg(storage)]
 			temporary_directory,
 			transaction: None,
-			isolation: None,
+			isolated: false,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -400,13 +395,13 @@ impl MutableContext {
 	/// Get a value from the context. If no value is stored under the
 	/// provided key, then this will return None.
 	pub(crate) fn value(&self, key: &str) -> Option<&Value> {
-		match (self.values.get(key), &self.isolation) {
-			(Some(v), _) => Some(v.as_ref()),
-			(_, None) => self.parent.as_ref().and_then(|p| p.value(key)),
-			(_, Some(ContextIsolation::User)) if PROTECTED_PARAM_NAMES.contains(&key) => {
-				self.parent.as_ref().and_then(|p| p.value(key))
-			}
-			_ => None,
+		match self.values.get(key) {
+			Some(v) => Some(v.as_ref()),
+			None if PROTECTED_PARAM_NAMES.contains(&key) || !self.isolated => match &self.parent {
+				Some(p) => p.value(key),
+				_ => None,
+			},
+			None => None,
 		}
 	}
 

@@ -91,16 +91,13 @@ async fn handler(
 				method,
 				headers,
 				query: query.inner,
-				session: Some(session),
-				values: vec![],
 			};
 
 			match invocation
 				.invoke_with_transaction(
-					ns,
-					db,
 					tx.clone(),
 					ds.clone(),
+					&session,
 					api,
 					ApiBody::from_stream(body.into_data_stream()),
 				)

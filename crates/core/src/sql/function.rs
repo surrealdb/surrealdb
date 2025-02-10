@@ -1,4 +1,4 @@
-use crate::ctx::{Context, ContextIsolation, MutableContext};
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -333,7 +333,7 @@ impl Function {
 					})
 					.await?;
 				// Duplicate context
-				let mut ctx = MutableContext::new_isolated(ctx, ContextIsolation::User);
+				let mut ctx = MutableContext::new_isolated(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
 					ctx.add_value(name.to_raw(), val.coerce_to(kind)?.into());

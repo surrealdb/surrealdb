@@ -73,10 +73,10 @@ impl ApiBody {
 		}
 	}
 
-	pub async fn process<'a>(
+	pub async fn process(
 		self,
 		ctx: &InvocationContext,
-		invocation: &'a ApiInvocation<'a>,
+		invocation: &ApiInvocation,
 	) -> Result<Value, Error> {
 		#[allow(irrefutable_let_patterns)] // For WASM this is the only pattern
 		if let ApiBody::Native(value) = self {
