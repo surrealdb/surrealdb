@@ -6,14 +6,14 @@ use crate::iam::Auth;
 use crate::kvs::Live;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
-use derive::Store;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct LiveStatement {
@@ -122,10 +122,10 @@ impl LiveStatement {
 				txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, id);
-				txn.replace(key, lq).await?;
+				txn.replace(key, revision::to_vec(&lq)?).await?;
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
-				txn.replace(key, stm).await?;
+				txn.replace(key, revision::to_vec(&stm)?).await?;
 				// Refresh the table cache for lives
 				if let Some(cache) = ctx.get_cache() {
 					cache.new_live_queries_version(ns, db, &tb);

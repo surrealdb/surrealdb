@@ -459,7 +459,7 @@ impl Transaction {
 			let v: Value = if v.is_empty() {
 				Value::None
 			} else {
-				(&v).into()
+				revision::from_slice(&v)?
 			};
 			// Process the value and generate the appropriate SQL command.
 			let sql = Self::process_value(
@@ -537,7 +537,7 @@ impl Transaction {
 		// Process each regular value.
 		for (k, v) in regular_values {
 			let k = thing::Thing::decode(&k)?;
-			let v: Value = (&v).into();
+			let v: Value = revision::from_slice(&v)?;
 			// Process the value and categorize it into records_relate or records_normal.
 			Self::process_value(k, v, &mut records_relate, &mut records_normal, None, None);
 		}

@@ -3,7 +3,7 @@ use std::hash::Hash;
 use std::net::IpAddr;
 use std::{collections::HashSet, sync::Arc};
 
-use crate::rpc::method::Method;
+use crate::rpc::Method;
 use ipnet::IpNet;
 use url::Url;
 
@@ -286,7 +286,7 @@ impl std::str::FromStr for MethodTarget {
 	type Err = ParseMethodTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match Method::parse(s) {
+		match Method::parse_case_insensitive(s) {
 			Method::Unknown => Err(ParseMethodTargetError),
 			method => Ok(MethodTarget {
 				method,

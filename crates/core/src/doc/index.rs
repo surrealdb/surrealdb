@@ -307,7 +307,7 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
 				let key = self.get_unique_index_key(&o)?;
-				match txn.delc(key, Some(self.rid)).await {
+				match txn.delc(key, Some(revision::to_vec(self.rid)?)).await {
 					Err(Error::TxConditionNotMet) => Ok(()),
 					Err(e) => Err(e),
 					Ok(v) => Ok(v),
@@ -320,10 +320,10 @@ impl<'a> IndexOperation<'a> {
 			for n in i {
 				if !n.is_all_none_or_null() {
 					let key = self.get_unique_index_key(&n)?;
-					if txn.putc(key, self.rid, None).await.is_err() {
+					if txn.putc(key, revision::to_vec(self.rid)?, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
 						let val = txn.get(key, None).await?.unwrap();
-						let rid: Thing = val.into();
+						let rid: Thing = revision::from_slice(&val)?;
 						return self.err_index_exists(rid, n);
 					}
 				}
@@ -342,7 +342,7 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
 				let key = self.get_non_unique_index_key(&o)?;
-				match txn.delc(key, Some(self.rid)).await {
+				match txn.delc(key, Some(revision::to_vec(self.rid)?)).await {
 					Err(Error::TxConditionNotMet) => Ok(()),
 					Err(e) => Err(e),
 					Ok(v) => Ok(v),
@@ -354,10 +354,10 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
 				let key = self.get_non_unique_index_key(&n)?;
-				if txn.putc(key, self.rid, None).await.is_err() {
+				if txn.putc(key, revision::to_vec(self.rid)?, None).await.is_err() {
 					let key = self.get_non_unique_index_key(&n)?;
 					let val = txn.get(key, None).await?.unwrap();
-					let rid: Thing = val.into();
+					let rid: Thing = revision::from_slice(&val)?;
 					return self.err_index_exists(rid, n);
 				}
 			}
@@ -425,7 +425,7 @@ impl<'a> IndexOperation<'a> {
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			hnsw.index_document(&ctx.tx(), self.rid.id.clone(), &n).await?;
+			hnsw.index_document(&ctx.tx(), &self.rid.id, &n).await?;
 		}
 		Ok(())
 	}

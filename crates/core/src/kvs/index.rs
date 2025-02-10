@@ -14,7 +14,6 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Object, Thing, Value};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
-use derive::Store;
 use reblessive::TreeStack;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -226,7 +225,7 @@ impl IndexBuilder {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize, Store, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[non_exhaustive]
 struct Appending {
 	old_values: Option<Vec<Value>>,
@@ -235,7 +234,7 @@ struct Appending {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize, Store, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[non_exhaustive]
 struct PrimaryAppending(u32);
 
@@ -343,12 +342,12 @@ impl Building {
 		let idx = queue.add_update();
 		// Store the appending
 		let ia = self.new_ia_key(idx)?;
-		tx.set(ia, a, None).await?;
+		tx.set(ia, revision::to_vec(&a)?, None).await?;
 		// Do we already have a primary appending?
 		let ip = self.new_ip_key(rid.id.clone())?;
 		if tx.get(ip.clone(), None).await?.is_none() {
 			// If not, we set it
-			tx.set(ip, PrimaryAppending(idx), None).await?;
+			tx.set(ip, revision::to_vec(&PrimaryAppending(idx))?, None).await?;
 		}
 		drop(queue);
 		Ok(ConsumeResult::Enqueued)
@@ -484,7 +483,7 @@ impl Building {
 			}
 			let key = thing::Thing::decode(&k)?;
 			// Parse the value
-			let val: Value = (&v).into();
+			let val: Value = revision::from_slice(&v)?;
 			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
 
 			let opt_values;
@@ -493,13 +492,13 @@ impl Building {
 			let ip = self.new_ip_key(rid.id.clone())?;
 			if let Some(v) = tx.get(ip, None).await? {
 				// Then we take the old value of the appending value as the initial indexing value
-				let pa: PrimaryAppending = v.into();
+				let pa: PrimaryAppending = revision::from_slice(&v)?;
 				let ia = self.new_ia_key(pa.0)?;
 				let v = tx
 					.get(ia, None)
 					.await?
 					.ok_or_else(|| Error::CorruptedIndex("Appending record is missing"))?;
-				let a: Appending = v.into();
+				let a: Appending = revision::from_slice(&v)?;
 				opt_values = a.old_values;
 			} else {
 				// Otherwise, we normally proceed to the indexing
@@ -543,7 +542,7 @@ impl Building {
 			let ia = self.new_ia_key(i)?;
 			if let Some(v) = tx.get(ia.clone(), None).await? {
 				tx.del(ia).await?;
-				let a: Appending = v.into();
+				let a: Appending = revision::from_slice(&v)?;
 				let rid = Thing::from((self.tb.clone(), a.id));
 				let mut io =
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);

@@ -7,7 +7,7 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::{changefeed::ChangeFeed, Base, Ident, Permissions, Strand, Value};
 use crate::sql::{Kind, TableType};
-use derive::Store;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AlterTableStatement {
@@ -77,7 +77,7 @@ impl AlterTableStatement {
 			DefineTableStatement::add_in_out_fields(&txn, ns, db, &mut dt).await?;
 		}
 		// Set the table definition
-		txn.set(key, &dt, None).await?;
+		txn.set(key, revision::to_vec(&dt)?, None).await?;
 		// Record definition change
 		if self.changefeed.is_some() && dt.changefeed.is_some() {
 			txn.lock().await.record_table_change(ns, db, &self.name, &dt);

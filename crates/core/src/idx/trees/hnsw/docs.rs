@@ -7,7 +7,6 @@ use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Id, Thing};
-use derive::Store;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -22,7 +21,7 @@ pub(in crate::idx) struct HnswDocs {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Default, Clone, Serialize, Deserialize, Store)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 struct State {
 	available: RoaringTreemap,
@@ -52,7 +51,7 @@ impl HnswDocs {
 		})
 	}
 
-	pub(super) async fn resolve(&mut self, tx: &Transaction, id: Id) -> Result<DocId, Error> {
+	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &Id) -> Result<DocId, Error> {
 		let id_key = self.ikb.new_hi_key(id.clone())?;
 		if let Some(v) = tx.get(id_key.clone(), None).await? {
 			let doc_id = u64::from_be_bytes(v.try_into().unwrap());
@@ -61,7 +60,7 @@ impl HnswDocs {
 			let doc_id = self.next_doc_id();
 			tx.set(id_key, doc_id.to_be_bytes(), None).await?;
 			let doc_key = self.ikb.new_hd_key(Some(doc_id))?;
-			tx.set(doc_key, id, None).await?;
+			tx.set(doc_key, revision::to_vec(id)?, None).await?;
 			Ok(doc_id)
 		}
 	}
@@ -85,7 +84,7 @@ impl HnswDocs {
 	) -> Result<Option<Thing>, Error> {
 		let doc_key = self.ikb.new_hd_key(Some(doc_id))?;
 		if let Some(val) = tx.get(doc_key, None).await? {
-			let id: Id = val.into();
+			let id: Id = revision::from_slice(&val)?;
 			Ok(Some(Thing::from((self.tb.to_owned(), id))))
 		} else {
 			Ok(None)

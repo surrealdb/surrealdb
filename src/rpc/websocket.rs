@@ -2,6 +2,7 @@ use super::RpcState;
 use crate::cnf::WEBSOCKET_PING_FREQUENCY;
 use crate::cnf::WEBSOCKET_RESPONSE_BUFFER_SIZE;
 use crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_SIZE;
+use crate::cnf::WEBSOCKET_RESPONSE_FLUSH_PERIOD;
 use crate::cnf::{PKG_NAME, PKG_VERSION};
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
@@ -18,18 +19,21 @@ use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
 use std::sync::Arc;
-use surrealdb::channel::{self, Receiver, Sender};
+use std::time::Duration;
 use surrealdb::dbs::Session;
 #[cfg(surrealdb_unstable)]
 use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
 use surrealdb::rpc::format::Format;
-use surrealdb::rpc::method::Method;
 use surrealdb::rpc::Data;
+use surrealdb::rpc::Method;
 use surrealdb::rpc::RpcContext;
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
+use surrealdb_core::rpc::RpcProtocolV1;
+use surrealdb_core::rpc::RpcProtocolV2;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -61,50 +65,40 @@ pub struct Websocket {
 	/// A cancellation token for cancelling all spawned tasks
 	pub(crate) canceller: CancellationToken,
 	/// The channels used to send and receive WebSocket messages
-	pub(crate) channel: (Sender<Message>, Receiver<Message>),
+	pub(crate) channel: Sender<Message>,
 	/// The GraphQL schema cache stored in advance
 	#[cfg(surrealdb_unstable)]
 	pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Websocket {
-	/// Instantiate a new RPC
-	pub fn new(
+	/// Serve the RPC endpoint
+	pub async fn serve(
+		id: Uuid,
+		ws: WebSocket,
+		format: Format,
+		session: Session,
 		datastore: Arc<Datastore>,
 		state: Arc<RpcState>,
-		id: Uuid,
-		mut session: Session,
-		format: Format,
-	) -> Arc<Websocket> {
-		// Enable real-time mode
-		session.rt = true;
+	) {
+		// Log the succesful WebSocket connection
+		trace!("WebSocket {id} connected");
+		// Create a channel for sending messages
+		let (sender, receiver) = channel(*WEBSOCKET_RESPONSE_CHANNEL_SIZE);
 		// Create and store the RPC connection
-		Arc::new(Websocket {
+		let rpc = Arc::new(Websocket {
 			id,
-			state,
 			format,
+			state: state.clone(),
 			lock: Arc::new(Semaphore::new(1)),
 			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
-			channel: channel::bounded(*WEBSOCKET_RESPONSE_CHANNEL_SIZE),
+			channel: sender.clone(),
 			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
-		})
-	}
-
-	/// Serve the RPC endpoint
-	pub async fn serve(rpc: Arc<Websocket>, ws: WebSocket) {
-		// Get the WebSocket id
-		let id = rpc.id;
-		// Get the WebSocket state
-		let state = rpc.state.clone();
-		// Log the succesful WebSocket connection
-		trace!("WebSocket {id} connected");
-		// Create an internal channel for sending and receiving
-		let internal_sender = rpc.channel.0.clone();
-		let internal_receiver = rpc.channel.1.clone();
+		});
 		// Add this WebSocket to the list
 		state.web_sockets.write().await.insert(id, rpc.clone());
 		// Start telemetry metrics for this connection
@@ -121,17 +115,17 @@ impl Websocket {
 				// Split the socket into sending and receiving streams
 				let (ws_sender, ws_receiver) = buffer.split();
 				// Spawn async tasks for the WebSocket
-				tasks.spawn(Self::ping(rpc.clone(), internal_sender.clone()));
-				tasks.spawn(Self::read(rpc.clone(), ws_receiver, internal_sender.clone()));
-				tasks.spawn(Self::write(rpc.clone(), ws_sender, internal_receiver));
+				tasks.spawn(Self::ping(rpc.clone(), sender.clone()));
+				tasks.spawn(Self::read(rpc.clone(), ws_receiver, sender.clone()));
+				tasks.spawn(Self::write(rpc.clone(), ws_sender, receiver));
 			}
 			false => {
 				// Split the socket into sending and receiving streams
 				let (ws_sender, ws_receiver) = ws.split();
 				// Spawn async tasks for the WebSocket
-				tasks.spawn(Self::ping(rpc.clone(), internal_sender.clone()));
-				tasks.spawn(Self::read(rpc.clone(), ws_receiver, internal_sender.clone()));
-				tasks.spawn(Self::write(rpc.clone(), ws_sender, internal_receiver));
+				tasks.spawn(Self::ping(rpc.clone(), sender.clone()));
+				tasks.spawn(Self::read(rpc.clone(), ws_receiver, sender.clone()));
+				tasks.spawn(Self::write(rpc.clone(), ws_sender, receiver));
 			}
 		}
 		// Wait for all tasks to finish
@@ -141,7 +135,7 @@ impl Websocket {
 			}
 		}
 		// Close the internal response channel
-		std::mem::drop(internal_sender);
+		std::mem::drop(sender);
 		// Log the WebSocket disconnection
 		trace!("WebSocket {id} disconnected");
 		// Cleanup the live queries for this WebSocket
@@ -191,14 +185,16 @@ impl Websocket {
 	async fn write<S: SinkExt<Message> + Unpin>(
 		rpc: Arc<Websocket>,
 		mut socket: S,
-		internal_receiver: Receiver<Message>,
+		mut internal_receiver: Receiver<Message>,
 	) where
 		<S as Sink<Message>>::Error: fmt::Display,
 	{
-		// Pin the internal receiving channel
-		let mut internal_receiver = Box::pin(internal_receiver);
 		// Clone the WebSocket cancellation token
 		let canceller = rpc.canceller.clone();
+		// Check if the responses are buffered
+		let buffer = *WEBSOCKET_RESPONSE_BUFFER_SIZE > 0;
+		// How often should responses be flushed
+		let period = Duration::from_millis(*WEBSOCKET_RESPONSE_FLUSH_PERIOD);
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
@@ -206,10 +202,17 @@ impl Websocket {
 				biased;
 				// Check if we should teardown
 				_ = canceller.cancelled() => break,
-				// Wait for the next message to send
-				Some(res) = internal_receiver.next() => {
-					// Send the message to the client
-					if let Err(err) = socket.send(res).await {
+				// Retrieve a response from the channel
+				Some(res) = internal_receiver.recv() => {
+					// Check if the socket is buffered
+					let res = match buffer {
+						// Send the message to the socket buffer
+						true => socket.feed(res).await,
+						// Send the message direct to the socket
+						false => socket.send(res).await
+					};
+					// Check if there was an error
+					if let Err(err) = res {
 						// Output any errors if not a close error
 						if err.to_string() != CONN_CLOSED_ERR {
 							trace!("WebSocket error: {err}");
@@ -220,6 +223,20 @@ impl Websocket {
 						break;
 					}
 				},
+				// Wait for a short period of time
+				_ = tokio::time::sleep(period), if buffer => {
+					// Flush the WebSocket socket buffer
+					if let Err(err) = socket.flush().await {
+						// Output any errors if not a close error
+						if err.to_string() != CONN_CLOSED_ERR {
+							trace!("WebSocket error: {err}");
+						}
+						// Cancel the WebSocket tasks
+						canceller.cancel();
+						// Exit out of the loop
+						break;
+					}
+				}
 			}
 		}
 	}
@@ -335,17 +352,15 @@ impl Websocket {
 			match rpc.format.req_ws(msg) {
 				Ok(req) => {
 					// Now that we know the method, we can update the span and create otel context
-					span.record("rpc.method", &req.method);
+					span.record("rpc.method", req.method.to_str());
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
 					span.record(
 						"rpc.request_id",
 						req.id.clone().map(Value::as_string).unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
-						req_cx.with_method(&req.method).with_size(len),
+						req_cx.with_method(req.method.to_str()).with_size(len),
 					));
-					// Parse the request RPC method type
-					let method = Method::parse(&req.method);
 					// Process the message
 					tokio::select! {
 						//
@@ -373,7 +388,7 @@ impl Websocket {
 							// Otherwise process the request message
 							else {
 								// Process the message
-								Self::process_message(rpc.clone(), method, req.params).await
+								Self::process_message(rpc.clone(), req.version, req.method, req.params).await
 									.into_response(req.id)
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
@@ -398,6 +413,7 @@ impl Websocket {
 	/// Process a WebSocket message and generate a response
 	async fn process_message(
 		rpc: Arc<Websocket>,
+		version: Option<u8>,
 		method: Method,
 		params: Array,
 	) -> Result<Data, Failure> {
@@ -407,7 +423,7 @@ impl Websocket {
 			return Err(Failure::METHOD_NOT_FOUND);
 		}
 		// Execute the specified method
-		rpc.execute(method, params).await.map_err(Into::into)
+		RpcContext::execute(rpc.as_ref(), version, method, params).await.map_err(Into::into)
 	}
 
 	/// Reject a WebSocket message due to server overloading
@@ -427,6 +443,9 @@ impl Websocket {
 		rpc.canceller.cancel();
 	}
 }
+
+impl RpcProtocolV1 for Websocket {}
+impl RpcProtocolV2 for Websocket {}
 
 impl RpcContext for Websocket {
 	/// The datastore for this RPC interface

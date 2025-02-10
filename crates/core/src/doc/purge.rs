@@ -8,6 +8,7 @@ use crate::doc::CursorValue;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::key::r#ref::Ref;
+use crate::kvs::KeyDecode;
 use crate::sql::dir::Dir;
 use crate::sql::edges::Edges;
 use crate::sql::paths::EDGE;
@@ -99,7 +100,7 @@ impl Document {
 				while let Some(res) = stream.next().await {
 					// Decode the key
 					let key = res?;
-					let r#ref = Ref::from(&key);
+					let r#ref = Ref::decode(&key)?;
 					// Obtain the remote field definition
 					let fd = txn.get_tb_field(ns, db, r#ref.ft, r#ref.ff).await?;
 					// Check if there is a reference defined on the field
