@@ -261,8 +261,6 @@ impl Datastore {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
 					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
