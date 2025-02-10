@@ -1081,15 +1081,13 @@ impl UniqueRangeReverseThingIterator {
 		limit += 1;
 		let res = tx.scanr(self.r.range(), limit, None).await?;
 		let mut count = 0;
-		if self.r.end_incl {
-			if tx.exists(&self.r.end, None).await? {
-				count += 1;
-				limit -= 1;
-				if limit == 0 {
-					// Next time we don't include the ending key
-					self.r.end_incl = false;
-					return Ok(count);
-				}
+		if self.r.end_incl && tx.exists(&self.r.end, None).await? {
+			count += 1;
+			limit -= 1;
+			if limit == 0 {
+				// Next time we don't include the ending key
+				self.r.end_incl = false;
+				return Ok(count);
 			}
 		}
 		for (k, _) in res {

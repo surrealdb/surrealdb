@@ -309,6 +309,22 @@ impl Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
+	/// This function fetches the full range of keys, in a single request to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn keysr<K>(
+		&self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
+	where
+		K: KeyEncode + Debug,
+	{
+		self.lock().await.keysr(rng, limit, version).await
+	}
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn scan<K>(

@@ -101,6 +101,21 @@ pub trait Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
+	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
+	async fn keysr<K>(
+		&mut self,
+		_rng: Range<K>,
+		_limit: u32,
+		_version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
+	where
+		K: KeyEncode + Sprintable + Debug,
+	{
+		Err(Error::UnsupportedReversedScans)
+	}
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	async fn scan<K>(
 		&mut self,

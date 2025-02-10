@@ -458,6 +458,24 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve a range of keys from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keysr<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
+	where
+		K: KeyEncode + Sprintable + Debug,
+	{
+		let rng = self.prepare_scan(rng, version)?;
+		// Scan the keys
+		let res = self.inner.scan_keys_reverse(rng, limit).await?.map(Key::from).collect();
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of keys from the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan<K>(
 		&mut self,
 		rng: Range<K>,
