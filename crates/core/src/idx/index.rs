@@ -55,25 +55,13 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
-		Ok(key::index::Index::new(
-			self.opt.ns()?,
-			self.opt.db()?,
-			&self.ix.what,
-			&self.ix.name,
-			v,
-			None,
-		))
+		let (ns, db) = self.opt.ns_db()?;
+		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, None))
 	}
 
 	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
-		Ok(key::index::Index::new(
-			self.opt.ns()?,
-			self.opt.db()?,
-			&self.ix.what,
-			&self.ix.name,
-			v,
-			Some(&self.rid.id),
-		))
+		let (ns, db) = self.opt.ns_db()?;
+		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.id)))
 	}
 
 	async fn index_unique(&mut self) -> Result<(), Error> {
@@ -154,7 +142,8 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_full_text(&mut self, stk: &mut Stk, p: &SearchParams) -> Result<(), Error> {
-		let ikb = IndexKeyBase::new(self.opt.ns()?, self.opt.db()?, self.ix)?;
+		let (ns, db) = self.opt.ns_db()?;
+		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 
 		let mut ft =
 			FtIndex::new(self.ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
@@ -169,7 +158,8 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<(), Error> {
 		let txn = self.ctx.tx();
-		let ikb = IndexKeyBase::new(self.opt.ns()?, self.opt.db()?, self.ix)?;
+		let (ns, db) = self.opt.ns_db()?;
+		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

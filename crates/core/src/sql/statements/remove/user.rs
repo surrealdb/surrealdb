@@ -57,9 +57,10 @@ impl RemoveUserStatement {
 					// Get the transaction
 					let txn = ctx.tx();
 					// Get the definition
-					let us = txn.get_db_user(opt.ns()?, opt.db()?, &self.name).await?;
+					let (ns, db) = opt.ns_db()?;
+					let us = txn.get_db_user(ns, db, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::us::new(opt.ns()?, opt.db()?, &us.name);
+					let key = crate::key::database::us::new(ns, db, &us.name);
 					txn.del(key).await?;
 					// Clear the cache
 					txn.clear();

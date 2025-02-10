@@ -40,7 +40,8 @@ impl DefineModelStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await.is_ok() {
+		let (ns, db) = opt.ns_db()?;
+		if txn.get_db_model(ns, db, &self.name, &self.version).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
@@ -50,9 +51,9 @@ impl DefineModelStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::ml::new(opt.ns()?, opt.db()?, &self.name, &self.version);
-		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
+		txn.get_or_add_ns(ns, opt.strict).await?;
+		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
 			key,
 			revision::to_vec(&DefineModelStatement {

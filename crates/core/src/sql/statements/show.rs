@@ -56,10 +56,11 @@ impl ShowStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Process the show query
+		let (ns, db) = opt.ns_db()?;
 		let r = crate::cf::read(
 			&txn,
-			opt.ns()?,
-			opt.db()?,
+			ns,
+			db,
 			self.table.as_deref().map(String::as_str),
 			self.since.clone(),
 			self.limit,

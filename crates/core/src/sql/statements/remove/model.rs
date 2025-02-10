@@ -28,9 +28,10 @@ impl RemoveModelStatement {
 			// Get the transaction
 			let txn = ctx.tx();
 			// Get the defined model
-			let ml = txn.get_db_model(opt.ns()?, opt.db()?, &self.name, &self.version).await?;
+			let (ns, db) = opt.ns_db()?;
+			let ml = txn.get_db_model(ns, db, &self.name, &self.version).await?;
 			// Delete the definition
-			let key = crate::key::database::ml::new(opt.ns()?, opt.db()?, &ml.name, &ml.version);
+			let key = crate::key::database::ml::new(ns, db, &ml.name, &ml.version);
 			txn.del(key).await?;
 			// Clear the cache
 			txn.clear();

@@ -72,7 +72,8 @@ impl Param {
 					// Ensure a database is set
 					opt.valid_for_db()?;
 					// Fetch a defined param if set
-					let val = ctx.tx().get_db_param(opt.ns()?, opt.db()?, v).await;
+					let (ns, db) = opt.ns_db()?;
+					let val = ctx.tx().get_db_param(ns, db, v).await;
 					// Check if the param has been set globally
 					match val {
 						// The param has been set globally

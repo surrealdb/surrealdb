@@ -107,7 +107,8 @@ impl FtIndex {
 	) -> Result<Self, Error> {
 		let tx = ctx.tx();
 		let ixs = ctx.get_index_stores();
-		let az = tx.get_db_analyzer(opt.ns()?, opt.db()?, az).await?;
+		let (ns, db) = opt.ns_db()?;
+		let az = tx.get_db_analyzer(ns, db, az).await?;
 		ixs.mappers().check(&az).await?;
 		Self::with_analyzer(ixs, &tx, az, index_key_base, p, tt).await
 	}

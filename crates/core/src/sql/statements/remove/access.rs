@@ -63,13 +63,13 @@ impl RemoveAccessStatement {
 					// Get the transaction
 					let txn = ctx.tx();
 					// Get the definition
-					let ac = txn.get_db_access(opt.ns()?, opt.db()?, &self.name).await?;
+					let (ns, db) = opt.ns_db()?;
+					let ac = txn.get_db_access(ns, db, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &ac.name);
+					let key = crate::key::database::ac::new(ns, db, &ac.name);
 					txn.del(key).await?;
 					// Delete any associated data including access grants.
-					let key =
-						crate::key::database::access::all::new(opt.ns()?, opt.db()?, &ac.name);
+					let key = crate::key::database::access::all::new(ns, db, &ac.name);
 					txn.delp(key).await?;
 					// Clear the cache
 					txn.clear();

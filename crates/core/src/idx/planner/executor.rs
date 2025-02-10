@@ -132,7 +132,8 @@ impl InnerQueryExecutor {
 					let ft_entry = match ft_map.entry(ixr.clone()) {
 						Entry::Occupied(e) => FtEntry::new(stk, ctx, opt, e.get(), io).await?,
 						Entry::Vacant(e) => {
-							let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, e.key())?;
+							let (ns, db) = opt.ns_db()?;
+							let ikb = IndexKeyBase::new(ns, db, e.key())?;
 							let ft = FtIndex::new(
 								ctx,
 								opt,
@@ -166,7 +167,8 @@ impl InnerQueryExecutor {
 									.await?
 							}
 							Entry::Vacant(e) => {
-								let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, e.key())?;
+								let (ns, db) = opt.ns_db()?;
+								let ikb = IndexKeyBase::new(ns, db, e.key())?;
 								let tx = ctx.tx();
 								let mt =
 									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
@@ -367,23 +369,17 @@ impl QueryExecutor {
 				if variants.len() == 1 {
 					Some(Self::new_index_equal_iterator(ir, opt, ix, &variants[0])?)
 				} else {
+					let (ns, db) = opt.ns_db()?;
 					Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(
-						ir,
-						opt.ns()?,
-						opt.db()?,
-						ix,
-						&variants,
+						ir, ns, db, ix, &variants,
 					)?))
 				}
 			}
 			IndexOperator::Union(values) => {
 				let variants = Self::get_equal_variants_from_values(values);
+				let (ns, db) = opt.ns_db()?;
 				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(
-					ir,
-					opt.ns()?,
-					opt.db()?,
-					ix,
-					&variants,
+					ir, ns, db, ix, &variants,
 				)?))
 			}
 			IndexOperator::Join(ios) => {
@@ -392,9 +388,12 @@ impl QueryExecutor {
 					Box::new(IndexJoinThingIterator::new(ir, opt, ix.clone(), iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
-			IndexOperator::Order => Some(ThingIterator::IndexRange(
-				IndexRangeThingIterator::full_range(ir, opt.ns()?, opt.db()?, ix)?,
-			)),
+			IndexOperator::Order => {
+				let (ns, db) = opt.ns_db()?;
+				Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
+					ir, ns, db, ix,
+				)?))
+			}
 			_ => None,
 		})
 	}
@@ -464,13 +463,8 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		array: &Array,
 	) -> Result<ThingIterator, Error> {
-		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
-			irf,
-			opt.ns()?,
-			opt.db()?,
-			ix,
-			array,
-		)?))
+		let (ns, db) = opt.ns_db()?;
+		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
 	}
 
 	/// This function takes a reference to a `Number` enum and a conversion function `float_to_int`.
@@ -765,13 +759,8 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		range: &IteratorRange,
 	) -> Result<ThingIterator, Error> {
-		Ok(ThingIterator::IndexRange(IndexRangeThingIterator::new(
-			ir,
-			opt.ns()?,
-			opt.db()?,
-			ix,
-			range,
-		)?))
+		let (ns, db) = opt.ns_db()?;
+		Ok(ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, range)?))
 	}
 
 	fn new_unique_range_iterator(
@@ -780,13 +769,9 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
 	) -> Result<ThingIterator, Error> {
+		let (ns, db) = opt.ns_db()?;
 		Ok(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
-			ir,
-			opt.ns()?,
-			opt.db()?,
-			&ix.what,
-			&ix.name,
-			range,
+			ir, ns, db, &ix.what, &ix.name, range,
 		)?))
 	}
 
@@ -846,9 +831,12 @@ impl QueryExecutor {
 					Box::new(UniqueJoinThingIterator::new(irf, opt, ixr.clone(), iterators)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
-			IndexOperator::Order => Some(ThingIterator::UniqueRange(
-				UniqueRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, ixr)?,
-			)),
+			IndexOperator::Order => {
+				let (ns, db) = opt.ns_db()?;
+				Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
+					irf, ns, db, ixr,
+				)?))
+			}
 			_ => None,
 		})
 	}
@@ -859,25 +847,14 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		array: &Array,
 	) -> Result<ThingIterator, Error> {
+		let (ns, db) = opt.ns_db()?;
 		if ix.cols.len() > 1 {
 			// If the index is unique and the index is a composite index,
 			// then we have the opportunity to iterate on the first column of the index
 			// and consider it as a standard index (rather than a unique one)
-			Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
-				irf,
-				opt.ns()?,
-				opt.db()?,
-				ix,
-				array,
-			)?))
+			Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
 		} else {
-			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
-				irf,
-				opt.ns()?,
-				opt.db()?,
-				ix,
-				array,
-			)?))
+			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(irf, ns, db, ix, array)?))
 		}
 	}
 

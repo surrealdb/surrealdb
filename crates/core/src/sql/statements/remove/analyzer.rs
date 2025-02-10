@@ -21,7 +21,7 @@ pub struct RemoveAnalyzerStatement {
 impl RemoveAnalyzerStatement {
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
 		let future = async {
-			let (ns, db) = (opt.ns()?, opt.db()?);
+			let (ns, db) = opt.ns_db()?;
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 			// Get the transaction

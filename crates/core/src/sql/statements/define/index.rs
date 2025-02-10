@@ -45,8 +45,7 @@ impl DefineIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
@@ -58,6 +57,13 @@ impl DefineIndexStatement {
 					name: self.name.to_string(),
 				});
 			}
+			// Clear the index store cache
+			#[cfg(not(target_family = "wasm"))]
+			ctx.get_index_stores()
+				.index_removed(ctx.get_index_builder(), &txn, ns, db, &self.what, &self.name)
+				.await?;
+			#[cfg(target_family = "wasm")]
+			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
 		}
 		// Does the table exists?
 		match txn.get_tb(ns, db, &self.what).await {
@@ -82,15 +88,16 @@ impl DefineIndexStatement {
 		}
 		// Process the statement
 		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
 		txn.set(
 			key,
 			revision::to_vec(&DefineIndexStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
+				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
 				if_not_exists: false,
 				overwrite: false,
+				concurrently: false,
 				..self.clone()
 			})?,
 			None,

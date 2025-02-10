@@ -64,8 +64,7 @@ impl DefineFieldStatement {
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, opt).await?;
 		// Get the NS and DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the name of the field
@@ -331,11 +330,8 @@ impl DefineFieldStatement {
 
 		if let Some(Kind::References(Some(ft), Some(ff))) = &self.kind {
 			// Obtain the field definition
-			let fd = match ctx
-				.tx()
-				.get_tb_field(opt.ns()?, opt.db()?, &ft.to_string(), &ff.to_string())
-				.await
-			{
+			let (ns, db) = opt.ns_db()?;
+			let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
 				Ok(fd) => fd,
 				// If the field does not exist, there is nothing to correct
 				Err(Error::FdNotFound {
@@ -365,7 +361,8 @@ impl DefineFieldStatement {
 	}
 
 	async fn disallow_mismatched_types(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
-		let fds = ctx.tx().all_tb_fields(opt.ns()?, opt.db()?, &self.what, None).await?;
+		let (ns, db) = opt.ns_db()?;
+		let fds = ctx.tx().all_tb_fields(ns, db, &self.what, None).await?;
 
 		if let Some(self_kind) = &self.kind {
 			for fd in fds.iter() {
