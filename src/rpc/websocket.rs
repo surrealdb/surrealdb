@@ -2,6 +2,7 @@ use super::RpcState;
 use crate::cnf::WEBSOCKET_PING_FREQUENCY;
 use crate::cnf::WEBSOCKET_RESPONSE_BUFFER_SIZE;
 use crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_SIZE;
+use crate::cnf::WEBSOCKET_RESPONSE_FLUSH_PERIOD;
 use crate::cnf::{PKG_NAME, PKG_VERSION};
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
@@ -18,6 +19,7 @@ use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
 use std::sync::Arc;
+use std::time::Duration;
 use surrealdb::dbs::Session;
 #[cfg(surrealdb_unstable)]
 use surrealdb::gql::{Pessimistic, SchemaCache};
@@ -189,6 +191,10 @@ impl Websocket {
 	{
 		// Clone the WebSocket cancellation token
 		let canceller = rpc.canceller.clone();
+		// Check if the responses are buffered
+		let buffer = *WEBSOCKET_RESPONSE_BUFFER_SIZE > 0;
+		// How often should responses be flushed
+		let period = Duration::from_millis(*WEBSOCKET_RESPONSE_FLUSH_PERIOD);
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
@@ -196,10 +202,17 @@ impl Websocket {
 				biased;
 				// Check if we should teardown
 				_ = canceller.cancelled() => break,
-				// Wait for the next message to send
+				// Retrieve a response from the channel
 				Some(res) = internal_receiver.recv() => {
-					// Send the message to the client
-					if let Err(err) = socket.send(res).await {
+					// Check if the socket is buffered
+					let res = match buffer {
+						// Send the message to the socket buffer
+						true => socket.feed(res).await,
+						// Send the message direct to the socket
+						false => socket.send(res).await
+					};
+					// Check if there was an error
+					if let Err(err) = res {
 						// Output any errors if not a close error
 						if err.to_string() != CONN_CLOSED_ERR {
 							trace!("WebSocket error: {err}");
@@ -210,6 +223,20 @@ impl Websocket {
 						break;
 					}
 				},
+				// Wait for a short period of time
+				_ = tokio::time::sleep(period), if buffer => {
+					// Flush the WebSocket socket buffer
+					if let Err(err) = socket.flush().await {
+						// Output any errors if not a close error
+						if err.to_string() != CONN_CLOSED_ERR {
+							trace!("WebSocket error: {err}");
+						}
+						// Cancel the WebSocket tasks
+						canceller.cancel();
+						// Exit out of the loop
+						break;
+					}
+				}
 			}
 		}
 	}
