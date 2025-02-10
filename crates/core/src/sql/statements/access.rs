@@ -465,12 +465,12 @@ pub async fn create_grant(
 				match base {
 					Base::Root => {
 						let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
-					txn.put(key, revision::to_vec(&gr_store)?, None).await
+						txn.put(key, revision::to_vec(&gr_store)?, None).await
 					}
 					Base::Ns => {
 						let key = crate::key::namespace::access::gr::new(opt.ns()?, &gr.ac, &gr.id);
 						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.put(key, revision::to_vec(&gr_store)?, None).await
+						txn.put(key, revision::to_vec(&gr_store)?, None).await
 					}
 					Base::Db => {
 						let (ns, db) = opt.ns_db()?;
