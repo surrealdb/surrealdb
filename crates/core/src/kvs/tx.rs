@@ -666,8 +666,8 @@ impl Transaction {
 		match self.cache.get(&qey) {
 			Some(val) => val,
 			None => {
-				let beg = crate::key::database::ap::prefix(ns, db);
-				let end = crate::key::database::ap::suffix(ns, db);
+				let beg = crate::key::database::ap::prefix(ns, db)?;
+				let end = crate::key::database::ap::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
 				let val = cache::tx::Entry::Aps(Arc::clone(&val));

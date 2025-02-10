@@ -121,13 +121,17 @@ async fn handler(
 		match res_instruction {
 			ResponseInstruction::Raw => match body {
 				Value::Strand(v) => {
-					res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().unwrap());
+					res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().map_err(
+						|_| Error::Api(ApiError::Unreachable("Expected a valid format".into())),
+					)?);
 					v.0.into_bytes()
 				}
 				Value::Bytes(v) => {
-					res.headers
-						.entry(CONTENT_TYPE)
-						.or_insert("application/octet-stream".parse().unwrap());
+					res.headers.entry(CONTENT_TYPE).or_insert(
+						"application/octet-stream".parse().map_err(|_| {
+							Error::Api(ApiError::Unreachable("Expected a valid format".into()))
+						})?,
+					);
 					v.into()
 				}
 				v => {
@@ -156,7 +160,12 @@ async fn handler(
 					}
 				};
 
-				res.headers.insert(CONTENT_TYPE, header.parse().unwrap());
+				res.headers.insert(
+					CONTENT_TYPE,
+					header.parse().map_err(|_| {
+						Error::Api(ApiError::Unreachable("Expected a valid format".into()))
+					})?,
+				);
 				val
 			}
 			ResponseInstruction::Native => {

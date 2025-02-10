@@ -81,7 +81,11 @@ impl Bytesize {
 				if !c.is_ascii_digit() {
 					break;
 				}
-				number.push(chars.next().unwrap());
+				number.push(
+					chars
+						.next()
+						.ok_or(Error::Unreachable("Char was previously peekable".into()))?,
+				);
 			}
 
 			let value = number.parse::<u64>().map_err(|_| Error::InvalidBytesize)?;

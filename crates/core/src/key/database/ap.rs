@@ -1,4 +1,5 @@
 //! Stores a DEFINE API definition
+use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::{impl_key, KeyEncode};
@@ -23,16 +24,16 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ap: &'a str) -> Ap<'a> {
 	Ap::new(ns, db, ap)
 }
 
-pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db).encode().unwrap();
+pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!ap\x00");
-	k
+	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::all::new(ns, db).encode().unwrap();
+pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!ap\xff");
-	k
+	Ok(k)
 }
 
 impl Categorise for Ap<'_> {
@@ -78,13 +79,13 @@ mod tests {
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix("namespace", "database");
+		let val = super::prefix("namespace", "database").unwrap();
 		assert_eq!(val, b"/*namespace\0*database\0!ap\0");
 	}
 
 	#[test]
 	fn suffix() {
-		let val = super::suffix("namespace", "database");
+		let val = super::suffix("namespace", "database").unwrap();
 		assert_eq!(val, b"/*namespace\0*database\0!ap\xff");
 	}
 }
