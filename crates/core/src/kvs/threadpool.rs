@@ -1,7 +1,6 @@
-#![cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+#![cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
 
 /// Create a new blocking threadpool
-#[cfg(not(target_family = "wasm"))]
 pub(super) fn initialise() {
 	// Get a sensible number of worker threads
 	let size = std::cmp::max(8, num_cpus::get());
@@ -12,10 +11,4 @@ pub(super) fn initialise() {
 		.worker_threads(size)
 		.build()
 		.build_global();
-}
-
-/// Create a new blocking threadpool
-#[cfg(target_family = "wasm")]
-pub(super) fn initialise() {
-	// Do nothing in WebAssembly
 }
