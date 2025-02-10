@@ -447,7 +447,7 @@ end = "2025-07-08"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2024-02-08"
-end = "2025-02-10"
+end = "2026-02-10"
 
 [[trusted.surrealml-core]]
 criteria = "safe-to-deploy"

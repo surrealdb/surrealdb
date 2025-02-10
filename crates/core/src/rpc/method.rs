@@ -31,11 +31,28 @@ pub enum Method {
 }
 
 impl Method {
-	pub fn parse<S>(s: S) -> Self
+	/// Parse a [Method] from a [str] with any case
+	pub fn parse_case_insensitive<S>(s: S) -> Self
 	where
 		S: AsRef<str>,
 	{
-		match s.as_ref().to_lowercase().as_str() {
+		Self::parse(s.as_ref().to_ascii_lowercase().as_str())
+	}
+
+	/// Parse a [Method] from a [str] in lower case
+	pub fn parse_case_sensitive<S>(s: S) -> Self
+	where
+		S: AsRef<str>,
+	{
+		Self::parse(s.as_ref())
+	}
+
+	/// Parse a [Method] from a [str]
+	fn parse<S>(s: S) -> Self
+	where
+		S: AsRef<str>,
+	{
+		match s.as_ref() {
 			"ping" => Self::Ping,
 			"info" => Self::Info,
 			"use" => Self::Use,
@@ -46,7 +63,7 @@ impl Method {
 			"reset" => Self::Reset,
 			"kill" => Self::Kill,
 			"live" => Self::Live,
-			"let" | "set" => Self::Set,
+			"set" | "let" => Self::Set,
 			"unset" => Self::Unset,
 			"select" => Self::Select,
 			"insert" => Self::Insert,
@@ -98,6 +115,12 @@ impl Method {
 			Self::GraphQL => "graphql",
 			Self::InsertRelation => "insert_relation",
 		}
+	}
+}
+
+impl std::fmt::Display for Method {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.to_str())
 	}
 }
 
