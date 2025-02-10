@@ -11,21 +11,6 @@ use tokio::fs;
 
 use super::TestCase;
 
-pub trait Pattern {
-	fn matches(&self, name: &Utf8Path) -> bool;
-}
-
-impl Pattern for str {
-	fn matches(&self, name: &Utf8Path) -> bool {
-		name.as_str().contains(self)
-	}
-}
-impl Pattern for String {
-	fn matches(&self, name: &Utf8Path) -> bool {
-		name.as_str().contains(self)
-	}
-}
-
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct TestId(usize);
 
@@ -50,11 +35,14 @@ impl TestSet {
 		self.map.len()
 	}
 
-	pub fn filter<P: Pattern>(&self, pattern: &P) -> TestSet {
+	pub fn filter_map<F>(&self, f: F) -> TestSet
+	where
+		F: Fn(&str, &TestCase) -> bool,
+	{
 		let map = self
 			.map
 			.iter()
-			.filter(|x| pattern.matches(Utf8Path::new(&x.0)))
+			.filter(|x| f(x.0.as_str(), &self.all[x.1 .0]))
 			.map(|(a, b)| (a.clone(), *b))
 			.collect();
 

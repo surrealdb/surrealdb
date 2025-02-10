@@ -81,9 +81,15 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let testset = TestSet::collect_directory(Utf8Path::new(&path)).await?;
 
 	let subset = if let Some(x) = matches.get_one::<String>("filter") {
-		testset.filter(x)
+		testset.filter_map(|name, _| name.contains(x))
 	} else {
 		testset
+	};
+
+	let subset = if matches.get_flag("no-wip") {
+		subset.filter_map(|_, set| !set.config.is_wip())
+	} else {
+		subset
 	};
 
 	// check for unused keys in tests
