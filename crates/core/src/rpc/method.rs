@@ -36,7 +36,7 @@ impl Method {
 	where
 		S: AsRef<str>,
 	{
-		Self::parse(s.as_ref().to_lowercase().as_str())
+		Self::parse(s.as_ref().to_ascii_lowercase().as_str())
 	}
 
 	/// Parse a [Method] from a [str] in lower case
