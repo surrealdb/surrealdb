@@ -339,17 +339,6 @@ impl RangeScan {
 		}
 		self.beg = beg;
 	}
-
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-	/// Update the range with a new ending.
-	/// The new key is different, the ending becomes included.
-	/// Used by reverse iterators.
-	fn next_end(&mut self, end: Key) {
-		if !self.end_incl && end.ne(&self.end) {
-			self.end_incl = true;
-		}
-		self.end = end;
-	}
 }
 
 pub(super) struct IteratorRange<'a> {
@@ -604,12 +593,32 @@ impl IndexRangeReverseThingIterator {
 		Self::new(irf, ns, db, ix, &range)
 	}
 
-	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
+	async fn next_scan(
+		&mut self,
+		tx: &Transaction,
+		mut limit: u32,
+	) -> Result<Vec<(Key, Val)>, Error> {
+		// If the range include the end, we need to collect the last record with a get
+		if self.r.end_incl {
+			// We don't need include the ending key for the next scan,
+			// as it will be set to the first key
+			self.r.end_incl = false;
+			if let Some(v) = tx.get(&self.r.end, None).await? {
+				limit -= 1;
+				if limit == 0 {
+					return Ok(vec![(self.r.end.clone(), v)]);
+				}
+				let mut res = tx.scanr(self.r.range(), limit, None).await?;
+				if let Some((key, _)) = res.first() {
+					self.r.end.clone_from(key);
+				}
+				res.push((self.r.end.clone(), v));
+				return Ok(res);
+			}
+		}
 		let res = tx.scanr(self.r.range(), limit, None).await?;
-		println!("{}", res.len());
 		if let Some((key, _)) = res.first() {
 			self.r.end.clone_from(key);
-			self.r.end_incl = false;
 		}
 		Ok(res)
 	}
@@ -1104,33 +1113,50 @@ impl UniqueRangeReverseThingIterator {
 		if self.done {
 			return Ok(B::empty());
 		}
-		limit += 1;
-		let res = tx.scanr(self.r.range(), limit, None).await?;
-		let mut records = B::with_capacity(res.len());
-		if self.r.end_incl {
+		// Check if we include the last record
+		let ending_record = if self.r.end_incl {
+			// we don't include the ending key for the next batches
+			self.r.end_incl = false;
+			// tx.scanr is end exclusive, so we have to manually collect the value using a get
 			if let Some(v) = tx.get(&self.r.end, None).await? {
 				let rid: Thing = revision::from_slice(&v)?;
-				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
+				let record = IndexItemRecord::new_key(rid, self.irf.into());
 				limit -= 1;
 				if limit == 0 {
-					// Next time we don't include the ending key
-					self.r.end_incl = false;
-					return Ok(records);
+					return Ok(B::from_one(record));
+				}
+				Some(record)
+			} else {
+				None
+			}
+		} else {
+			None
+		};
+		let mut res = tx.scanr(self.r.range(), limit, None).await?;
+		if let Some((k, _)) = res.last() {
+			// We set the ending for the next batch
+			self.r.end = k.clone();
+			// If the last key is the beginning of the range, we're done
+			if self.r.beg.eq(k) {
+				self.done = true;
+				// Remove the beginning key if it is not supposed to be included
+				if !self.r.beg_incl {
+					res.remove(res.len() - 1);
 				}
 			}
+			self.r.beg_incl && self.done
+		} else {
+			false
+		};
+		// We collect the records
+		let mut records = B::with_capacity(res.len() + ending_record.is_some() as usize);
+		if let Some(record) = ending_record {
+			records.add(record);
 		}
-		for (k, v) in res {
-			limit -= 1;
-			if limit == 0 {
-				self.r.next_end(k);
-				return Ok(records);
-			}
-			if self.r.matches(&k) {
-				let rid: Thing = revision::from_slice(&v)?;
-				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
-			}
+		for (_, v) in res {
+			let rid: Thing = revision::from_slice(&v)?;
+			records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 		}
-		self.done = true;
 		Ok(records)
 	}
 
@@ -1138,29 +1164,37 @@ impl UniqueRangeReverseThingIterator {
 		if self.done {
 			return Ok(0);
 		}
-		limit += 1;
-		let res = tx.keysr(self.r.range(), limit, None).await?;
 		let mut count = 0;
-		if self.r.end_incl && tx.exists(&self.r.end, None).await? {
-			count += 1;
-			limit -= 1;
-			if limit == 0 {
-				// Next time we don't include the ending key
-				self.r.end_incl = false;
-				return Ok(count);
-			}
-		}
-		for k in res {
-			limit -= 1;
-			if limit == 0 {
-				self.r.next_end(k);
-				return Ok(count);
-			}
-			if self.r.matches(&k) {
+		// Check if we include the last record
+		if self.r.end_incl {
+			// we don't include the ending key for the next batches
+			self.r.end_incl = false;
+			// tx.keysr is end exclusive, so we have to manually check if the value exists
+			if tx.exists(&self.r.end, None).await? {
 				count += 1;
+				limit -= 1;
+				if limit == 0 {
+					return Ok(count);
+				}
 			}
 		}
-		self.done = true;
+		let mut res = tx.keysr(self.r.range(), limit, None).await?;
+		if let Some(k) = res.last() {
+			// We set the ending for the next batch
+			self.r.end = k.clone();
+			// If the last key is the beginning of the range, we're done
+			if self.r.beg.eq(k) {
+				self.done = true;
+				// Remove the beginning if it is not supposed to be included
+				if !self.r.beg_incl {
+					res.remove(res.len() - 1);
+				}
+			}
+			self.r.beg_incl && self.done
+		} else {
+			false
+		};
+		count += res.len();
 		Ok(count)
 	}
 }
