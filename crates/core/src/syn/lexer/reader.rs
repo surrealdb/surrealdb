@@ -53,11 +53,6 @@ impl<'a> BytesReader<'a> {
 	}
 
 	#[inline]
-	pub fn advance(&mut self, offset: usize) {
-		self.current += offset;
-	}
-
-	#[inline]
 	pub fn backup(&mut self, offset: usize) {
 		assert!(offset <= self.offset());
 		self.current = offset;
