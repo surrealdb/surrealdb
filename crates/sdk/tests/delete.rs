@@ -8,40 +8,6 @@ use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::{Thing, Value};
 
-#[tokio::test]
-async fn delete() -> Result<(), Error> {
-	let sql = "
-		CREATE person:test SET name = 'Tester';
-		DELETE person:test;
-		SELECT * FROM person;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: person:test,
-				name: 'Tester'
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
 //
 // Permissions
 //

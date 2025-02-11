@@ -92,6 +92,14 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		subset
 	};
 
+	let subset = if matches.get_flag("no-results") {
+		subset.filter_map(|_, set| {
+			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
+		})
+	} else {
+		subset
+	};
+
 	// check for unused keys in tests
 	for t in subset.iter() {
 		for k in t.config.unused_keys() {
@@ -358,7 +366,12 @@ async fn run_test_with_dbs(
 	let mut stack = reblessive::Stack::new();
 
 	let query = match stack.enter(|stk| parser.parse_query(stk)).finish() {
-		Ok(x) => x,
+		Ok(x) => {
+			if let Err(e) = parser.assert_finished() {
+				return Ok(TestTaskResult::ParserError(e.render_on_bytes(source)));
+			}
+			x
+		}
 		Err(e) => return Ok(TestTaskResult::ParserError(e.render_on_bytes(source))),
 	};
 

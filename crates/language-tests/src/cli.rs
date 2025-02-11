@@ -88,6 +88,9 @@ pub fn parse() -> ArgMatches {
                 )
 				.arg(
 					arg!(--"no-wip" "Skips tests marked work-in-progress")
+				)
+				.arg(
+					arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
 				),
         )
         .subcommand(
