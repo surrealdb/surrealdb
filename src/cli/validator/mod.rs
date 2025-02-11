@@ -6,7 +6,8 @@ use std::{
 };
 
 use surrealdb::dbs::capabilities::{
-	ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, QueryTarget, RouteTarget, Targets,
+	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
+	Targets,
 };
 
 pub(crate) mod parser;
@@ -133,7 +134,9 @@ pub(crate) fn experimental_targets(value: &str) -> Result<Targets<ExperimentalTa
 	Ok(Targets::Some(result))
 }
 
-pub(crate) fn query_targets(value: &str) -> Result<Targets<QueryTarget>, String> {
+pub(crate) fn query_arbitrary_targets(
+	value: &str,
+) -> Result<Targets<ArbitraryQueryTarget>, String> {
 	if ["*", ""].contains(&value) {
 		return Ok(Targets::All);
 	}
@@ -141,7 +144,7 @@ pub(crate) fn query_targets(value: &str) -> Result<Targets<QueryTarget>, String>
 	let mut result = HashSet::new();
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
-		result.insert(QueryTarget::from_str(target).map_err(|e| e.to_string())?);
+		result.insert(ArbitraryQueryTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
 	Ok(Targets::Some(result))

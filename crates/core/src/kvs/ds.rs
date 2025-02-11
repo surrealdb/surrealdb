@@ -6,7 +6,7 @@ use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget, QueryTarget, RouteTarget};
+use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget, ArbitraryQueryTarget, RouteTarget};
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
@@ -514,7 +514,7 @@ impl Datastore {
 
 	/// Does the datastore allow requesting an HTTP route?
 	/// This function needs to be public to allow access from the CLI crate.
-	pub fn allows_query_by_subject(&self, subject: impl Into<QueryTarget>) -> bool {
+	pub fn allows_query_by_subject(&self, subject: impl Into<ArbitraryQueryTarget>) -> bool {
 		self.capabilities.allows_query(&subject.into())
 	}
 

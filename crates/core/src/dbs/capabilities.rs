@@ -380,13 +380,13 @@ impl std::str::FromStr for RouteTarget {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum QueryTarget {
+pub enum ArbitraryQueryTarget {
 	Guest,
 	Record,
 	System,
 }
 
-impl fmt::Display for QueryTarget {
+impl fmt::Display for ArbitraryQueryTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::Guest => write!(f, "guest"),
@@ -396,31 +396,31 @@ impl fmt::Display for QueryTarget {
 	}
 }
 
-impl<'a> From<&'a Level> for QueryTarget {
+impl<'a> From<&'a Level> for ArbitraryQueryTarget {
 	fn from(level: &'a Level) -> Self {
 		match level {
-			Level::No => QueryTarget::Guest,
-			Level::Root => QueryTarget::System,
-			Level::Namespace(_) => QueryTarget::System,
-			Level::Database(_, _) => QueryTarget::System,
-			Level::Record(_, _, _) => QueryTarget::Record,
+			Level::No => ArbitraryQueryTarget::Guest,
+			Level::Root => ArbitraryQueryTarget::System,
+			Level::Namespace(_) => ArbitraryQueryTarget::System,
+			Level::Database(_, _) => ArbitraryQueryTarget::System,
+			Level::Record(_, _, _) => ArbitraryQueryTarget::Record,
 		}
 	}
 }
 
-impl<'a> From<&'a Auth> for QueryTarget {
+impl<'a> From<&'a Auth> for ArbitraryQueryTarget {
 	fn from(auth: &'a Auth) -> Self {
 		auth.level().into()
 	}
 }
 
-impl Target for QueryTarget {
-	fn matches(&self, elem: &QueryTarget) -> bool {
+impl Target for ArbitraryQueryTarget {
+	fn matches(&self, elem: &ArbitraryQueryTarget) -> bool {
 		self == elem
 	}
 }
 
-impl Target<str> for QueryTarget {
+impl Target<str> for ArbitraryQueryTarget {
 	fn matches(&self, elem: &str) -> bool {
 		match self {
 			Self::Guest => elem.eq_ignore_ascii_case("guest"),
@@ -431,30 +431,30 @@ impl Target<str> for QueryTarget {
 }
 
 #[derive(Debug, Clone)]
-pub enum ParseQueryTargetError {
+pub enum ParseArbitraryQueryTargetError {
 	InvalidName,
 }
 
-impl std::error::Error for ParseQueryTargetError {}
-impl fmt::Display for ParseQueryTargetError {
+impl std::error::Error for ParseArbitraryQueryTargetError {}
+impl fmt::Display for ParseArbitraryQueryTargetError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match *self {
-			ParseQueryTargetError::InvalidName => {
+			ParseArbitraryQueryTargetError::InvalidName => {
 				write!(f, "invalid query target name")
 			}
 		}
 	}
 }
 
-impl std::str::FromStr for QueryTarget {
-	type Err = ParseQueryTargetError;
+impl std::str::FromStr for ArbitraryQueryTarget {
+	type Err = ParseArbitraryQueryTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match_insensitive!(s.trim(), {
-			"guest" => Ok(QueryTarget::Guest),
-			"record" => Ok(QueryTarget::Record),
-			"system" => Ok(QueryTarget::System),
-			_ => Err(ParseQueryTargetError::InvalidName),
+			"guest" => Ok(ArbitraryQueryTarget::Guest),
+			"record" => Ok(ArbitraryQueryTarget::Record),
+			"system" => Ok(ArbitraryQueryTarget::System),
+			_ => Err(ParseArbitraryQueryTargetError::InvalidName),
 		})
 	}
 }
@@ -520,16 +520,16 @@ pub struct Capabilities {
 	deny_http: Arc<Targets<RouteTarget>>,
 	allow_experimental: Arc<Targets<ExperimentalTarget>>,
 	deny_experimental: Arc<Targets<ExperimentalTarget>>,
-	allow_query: Arc<Targets<QueryTarget>>,
-	deny_query: Arc<Targets<QueryTarget>>,
+	allow_arbitrary_query: Arc<Targets<ArbitraryQueryTarget>>,
+	deny_arbitrary_query: Arc<Targets<ArbitraryQueryTarget>>,
 }
 
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
             f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_query={}, deny_query={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http, self.allow_experimental, self.deny_experimental, self.allow_query, self.deny_query,
+            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
+            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http, self.allow_experimental, self.deny_experimental, self.allow_arbitrary_query, self.deny_arbitrary_query,
         )
 	}
 }
@@ -551,8 +551,8 @@ impl Default for Capabilities {
 			deny_http: Arc::new(Targets::None),
 			allow_experimental: Arc::new(Targets::None),
 			deny_experimental: Arc::new(Targets::None),
-			allow_query: Arc::new(Targets::All),
-			deny_query: Arc::new(Targets::None),
+			allow_arbitrary_query: Arc::new(Targets::All),
+			deny_arbitrary_query: Arc::new(Targets::None),
 		}
 	}
 }
@@ -574,8 +574,8 @@ impl Capabilities {
 			deny_http: Arc::new(Targets::None),
 			allow_experimental: Arc::new(Targets::None),
 			deny_experimental: Arc::new(Targets::None),
-			allow_query: Arc::new(Targets::All),
-			deny_query: Arc::new(Targets::None),
+			allow_arbitrary_query: Arc::new(Targets::All),
+			deny_arbitrary_query: Arc::new(Targets::None),
 		}
 	}
 
@@ -595,8 +595,8 @@ impl Capabilities {
 			deny_http: Arc::new(Targets::None),
 			allow_experimental: Arc::new(Targets::None),
 			deny_experimental: Arc::new(Targets::None),
-			allow_query: Arc::new(Targets::None),
-			deny_query: Arc::new(Targets::None),
+			allow_arbitrary_query: Arc::new(Targets::None),
+			deny_arbitrary_query: Arc::new(Targets::None),
 		}
 	}
 
@@ -635,13 +635,19 @@ impl Capabilities {
 		self
 	}
 
-	pub fn with_query(mut self, allow_query: Targets<QueryTarget>) -> Self {
-		self.allow_query = Arc::new(allow_query);
+	pub fn with_arbitrary_query(
+		mut self,
+		allow_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	) -> Self {
+		self.allow_arbitrary_query = Arc::new(allow_arbitrary_query);
 		self
 	}
 
-	pub fn without_query(mut self, deny_query: Targets<QueryTarget>) -> Self {
-		self.deny_query = Arc::new(deny_query);
+	pub fn without_arbitrary_query(
+		mut self,
+		deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	) -> Self {
+		self.deny_arbitrary_query = Arc::new(deny_arbitrary_query);
 		self
 	}
 
@@ -699,12 +705,12 @@ impl Capabilities {
 		self.allow_experimental.matches(target) && !self.deny_experimental.matches(target)
 	}
 
-	pub fn allows_query(&self, target: &QueryTarget) -> bool {
-		self.allow_query.matches(target) && !self.deny_query.matches(target)
+	pub fn allows_query(&self, target: &ArbitraryQueryTarget) -> bool {
+		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
 	}
 
 	pub fn allows_query_name(&self, target: &str) -> bool {
-		self.allow_query.matches(target) && !self.deny_query.matches(target)
+		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
 	}
 
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {

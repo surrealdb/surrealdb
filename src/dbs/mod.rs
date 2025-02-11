@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{
-	Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, QueryTarget,
+	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
 use surrealdb::dbs::Session;
@@ -84,17 +84,17 @@ Function names must be in the form <family>[::<name>]. For example:
 	allow_experimental: Option<Targets<ExperimentalTarget>>,
 
 	#[arg(
-		help = "Allow execution of queries by certain user groups except when specifically denied.",
-		long_help = r#"Allow execution of custom queries by certain user groups except when specifically denied. Alternatively, you can provide a comma-separated list of user groups to allow
+		help = "Allow execution of arbitrary queries by certain user groups except when specifically denied.",
+		long_help = r#"Allow execution of arbitrary queries by certain user groups except when specifically denied. Alternatively, you can provide a comma-separated list of user groups to allow
 Specifically denied user groups prevail over any other allowed user group.
 User groups must be one of "guest", "record" or "system".
 "#
 	)]
-	#[arg(env = "SURREAL_CAPS_ALLOW_QUERY", long)]
+	#[arg(env = "SURREAL_CAPS_ALLOW_ARBITRARY_QUERY", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
-	#[arg(value_parser = super::cli::validator::query_targets)]
-	allow_query: Option<Targets<QueryTarget>>,
+	#[arg(value_parser = super::cli::validator::query_arbitrary_targets)]
+	allow_arbitrary_query: Option<Targets<ArbitraryQueryTarget>>,
 
 	#[arg(
 		help = "Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow",
@@ -171,17 +171,17 @@ Function names must be in the form <family>[::<name>]. For example:
 	deny_experimental: Option<Targets<ExperimentalTarget>>,
 
 	#[arg(
-		help = "Deny execution of queries by certain user groups except when specifically allowed.",
-		long_help = r#"Deny execution of custom queries by certain user groups except when specifically allowed. Alternatively, you can provide a comma-separated list of user groups to deny
+		help = "Deny execution of arbitrary queries by certain user groups except when specifically allowed.",
+		long_help = r#"Deny execution of arbitrary queries by certain user groups except when specifically allowed. Alternatively, you can provide a comma-separated list of user groups to deny
 Specifically allowed user groups prevail over a general denial of user group.
 User groups must be one of "guest", "record" or "system".
 "#
 	)]
-	#[arg(env = "SURREAL_CAPS_DENY_QUERY", long)]
+	#[arg(env = "SURREAL_CAPS_DENY_ARBITRARY_QUERY", long)]
 	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
-	#[arg(value_parser = super::cli::validator::query_targets)]
-	deny_query: Option<Targets<QueryTarget>>,
+	#[arg(value_parser = super::cli::validator::query_arbitrary_targets)]
+	deny_arbitrary_query: Option<Targets<ArbitraryQueryTarget>>,
 
 	#[arg(
 		help = "Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",
@@ -417,16 +417,16 @@ impl DbsCapabilities {
 		}
 	}
 
-	fn get_allow_query(&self) -> Targets<QueryTarget> {
-		match &self.allow_query {
+	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
+		match &self.allow_arbitrary_query {
 			Some(t @ Targets::Some(_)) => t.clone(),
 			Some(_) => Targets::None,
 			None => Targets::All,
 		}
 	}
 
-	fn get_deny_query(&self) -> Targets<QueryTarget> {
-		match &self.deny_query {
+	fn get_deny_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
+		match &self.deny_arbitrary_query {
 			Some(t @ Targets::Some(_)) => t.clone(),
 			Some(_) => Targets::None,
 			None => Targets::None,
@@ -449,8 +449,8 @@ impl From<DbsCapabilities> for Capabilities {
 			.without_http_routes(caps.get_deny_http())
 			.with_experimental(caps.get_allow_experimental())
 			.without_experimental(caps.get_deny_experimental())
-			.with_query(caps.get_allow_query())
-			.without_query(caps.get_deny_query())
+			.with_arbitrary_query(caps.get_allow_arbitrary_query())
+			.without_arbitrary_query(caps.get_deny_arbitrary_query())
 	}
 }
 
