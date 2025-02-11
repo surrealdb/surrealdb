@@ -48,7 +48,7 @@ impl DefineConfigStatement {
 		let txn = ctx.tx();
 		// Get the config kind
 		let cg = match &self.inner {
-			ConfigInner::GraphQL(_) => "api",
+			ConfigInner::GraphQL(_) => "graphql",
 			ConfigInner::Api(_) => "api",
 		};
 		// Check if the definition exists
