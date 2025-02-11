@@ -55,7 +55,7 @@
 
 use self::token_buffer::TokenBuffer;
 use crate::{
-	sql::{self, bytesize::Bytesize, Datetime, Duration, Strand, Uuid},
+	sql::{self, Datetime, Duration, Strand, Uuid},
 	syn::{
 		error::{bail, SyntaxError},
 		lexer::{compound::NumberKind, Lexer},
@@ -112,7 +112,6 @@ pub enum PartialResult<T> {
 
 #[derive(Default)]
 pub enum GluedValue {
-	Bytesize(Bytesize),
 	Duration(Duration),
 	Datetime(Datetime),
 	Uuid(Uuid),
