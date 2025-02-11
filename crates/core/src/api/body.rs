@@ -1,11 +1,11 @@
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use std::fmt::Display;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use bytes::Bytes;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use futures::Stream;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 use futures::StreamExt;
 use http::header::CONTENT_TYPE;
 
@@ -20,13 +20,13 @@ use super::err::ApiError;
 use super::invocation::ApiInvocation;
 
 pub enum ApiBody {
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	Stream(Box<dyn Stream<Item = Result<Bytes, Box<dyn Display + Send + Sync>>> + Send + Unpin>),
 	Native(Value),
 }
 
 impl ApiBody {
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(not(target_family = "wasm"))]
 	pub fn from_stream<S, E>(stream: S) -> Self
 	where
 		S: Stream<Item = Result<Bytes, E>> + Unpin + Send + 'static,
@@ -49,7 +49,7 @@ impl ApiBody {
 	#[allow(unused_variables)]
 	pub async fn stream(self, max: Option<Bytesize>) -> Result<Vec<u8>, Error> {
 		match self {
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(not(target_family = "wasm"))]
 			Self::Stream(mut stream) => {
 				let max = max.unwrap_or(Bytesize::MAX);
 				let mut size: u64 = 0;
