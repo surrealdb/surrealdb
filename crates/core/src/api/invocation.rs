@@ -28,6 +28,7 @@ pub struct ApiInvocation {
 	pub params: Object,
 	pub method: Method,
 	pub query: BTreeMap<String, String>,
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	pub headers: HeaderMap,
 }
 
