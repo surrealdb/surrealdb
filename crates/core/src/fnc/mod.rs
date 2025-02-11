@@ -906,7 +906,6 @@ fn get_execution_context<'a>(
 mod tests {
 	use regex::Regex;
 
-	#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 	use crate::dbs::Capabilities;
 	use crate::{
 		dbs::capabilities::ExperimentalTarget,
