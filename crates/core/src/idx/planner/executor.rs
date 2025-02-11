@@ -402,7 +402,7 @@ impl QueryExecutor {
 								opt.ns()?,
 								opt.db()?,
 								ix,
-							),
+							)?,
 						))
 					}
 					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
