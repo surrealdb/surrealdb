@@ -75,6 +75,7 @@ impl IntoIterator for Path {
 
 impl Display for Path {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "/")?;
 		Display::fmt(&Fmt::new(self.iter(), fmt_separated_by("/")), f)
 	}
 }
@@ -82,16 +83,16 @@ impl Display for Path {
 impl FromStr for Path {
 	type Err = Error;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		if s.is_empty() {
+			return Err(Error::InvalidPath("Path cannot be empty".into()));
+		}
+
 		let mut chars = s.chars().peekable();
 		let mut segments: Vec<Segment> = Vec::new();
 
-		loop {
-			if let Some(c) = chars.next() {
-				if c != '/' {
-					return Err(Error::InvalidPath("Segment should start with /".into()));
-				}
-			} else {
-				break;
+		while let Some(c) = chars.next() {
+			if c != '/' {
+				return Err(Error::InvalidPath("Segment should start with /".into()));
 			}
 
 			let mut scratch = String::new();
@@ -189,14 +190,14 @@ impl FromStr for Path {
 				return Err(Error::InvalidPath(
 					"Expected a name or content for this segment".into(),
 				));
-			} else if scratch.starts_with(':') {
-				let segment = Segment::Dynamic(scratch[1..].to_string(), kind);
+			} else if let Some(name) = scratch.strip_prefix(':') {
+				let segment = Segment::Dynamic(name.to_string(), kind);
 				(segment, false)
-			} else if scratch.starts_with('*') {
-				let segment = Segment::Rest(scratch[1..].to_string());
+			} else if let Some(name) = scratch.strip_prefix('*') {
+				let segment = Segment::Rest(name.to_string());
 				(segment, true)
-			} else if scratch.starts_with('\\') {
-				let segment = Segment::Fixed(scratch[1..].to_string());
+			} else if let Some(name) = scratch.strip_prefix('\\') {
+				let segment = Segment::Fixed(name.to_string());
 				(segment, false)
 			} else {
 				let segment = Segment::Fixed(scratch.to_string());
@@ -212,6 +213,12 @@ impl FromStr for Path {
 
 		if chars.peek().is_some() {
 			return Err(Error::InvalidPath("Path not finished".into()));
+		}
+
+		if segments.len() > MAX_PATH_SEGMENTS as usize {
+			return Err(Error::InvalidPath(format!(
+				"Path cannot have more than {MAX_PATH_SEGMENTS} segments"
+			)));
 		}
 
 		Ok(Self(segments))
