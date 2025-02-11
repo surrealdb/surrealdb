@@ -5783,24 +5783,19 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e28eec56aca077c245bf5f9e08876fdcce58b5361e77a0b94a92fd47e1990ad4"
+version = "0.8.0"
+source = "git+https://github.com/surrealdb/surrealkv.git?branch=main#9e97fb1cb7d36949b7361ecf6f44ef5bda441c62"
 dependencies = [
  "ahash 0.8.11",
- "async-channel",
  "bytes",
  "chrono",
  "crc32fast",
- "futures",
  "getrandom 0.2.15",
  "lru",
  "parking_lot",
  "quick_cache 0.6.9",
  "revision 0.10.0",
- "tokio",
  "vart 0.9.1",
- "wasm-bindgen-futures",
 ]
 
 [[package]]

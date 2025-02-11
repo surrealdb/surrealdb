@@ -93,7 +93,7 @@ impl Datastore {
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Shutdown the database
-		if let Err(e) = self.db.close().await {
+		if let Err(e) = self.db.close() {
 			error!("An error occured closing the database: {e}");
 		}
 		// Nothing to do here
@@ -171,7 +171,7 @@ impl super::api::Transaction for Transaction {
 		// Mark the transaction as done.
 		self.done = true;
 		// Commit this transaction.
-		self.inner.commit().await?;
+		self.inner.commit()?;
 		// Continue
 		Ok(())
 	}
