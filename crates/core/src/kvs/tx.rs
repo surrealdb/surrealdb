@@ -13,6 +13,7 @@ use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
+use crate::sql::statements::define::ApiDefinition;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
@@ -654,6 +655,25 @@ impl Transaction {
 		}
 	}
 
+	/// Retrieve all api definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn all_db_apis(&self, ns: &str, db: &str) -> Result<Arc<[ApiDefinition]>, Error> {
+		let qey = cache::tx::Lookup::Aps(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::ap::prefix(ns, db)?;
+				let end = crate::key::database::ap::suffix(ns, db)?;
+				let val = self.getr(beg..end, None).await?;
+				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+				let val = cache::tx::Entry::Aps(Arc::clone(&val));
+				self.cache.insert(qey, val.clone());
+				val
+			}
+		}
+		.try_into_aps()
+	}
+
 	/// Retrieve all analyzer definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_analyzers(
@@ -1213,6 +1233,31 @@ impl Transaction {
 		}
 	}
 
+	/// Retrieve a specific api definition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_api(
+		&self,
+		ns: &str,
+		db: &str,
+		ap: &str,
+	) -> Result<Arc<ApiDefinition>, Error> {
+		let qey = cache::tx::Lookup::Ap(ns, db, ap);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::ap::new(ns, db, ap).encode()?;
+				let val = self.get(key, None).await?.ok_or_else(|| Error::ApNotFound {
+					value: ap.to_owned(),
+				})?;
+				let val: ApiDefinition = revision::from_slice(&val)?;
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey, val.clone());
+				val
+			}
+		}
+		.try_into_type()
+	}
+
 	/// Retrieve a specific analyzer definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db_analyzer(
@@ -1296,19 +1341,37 @@ impl Transaction {
 		db: &str,
 		cg: &str,
 	) -> Result<Arc<DefineConfigStatement>, Error> {
+		if let Some(val) = self.get_db_optional_config(ns, db, cg).await? {
+			Ok(val)
+		} else {
+			Err(Error::CgNotFound {
+				name: cg.to_owned(),
+			})
+		}
+	}
+
+	/// Retrieve a specific config definition from a database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_optional_config(
+		&self,
+		ns: &str,
+		db: &str,
+		cg: &str,
+	) -> Result<Option<Arc<DefineConfigStatement>>, Error> {
 		let qey = cache::tx::Lookup::Cg(ns, db, cg);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Option::Some),
 			None => {
 				let key = crate::key::database::cg::new(ns, db, cg).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::CgNotFound {
-					name: cg.to_owned(),
-				})?;
-				let val: DefineConfigStatement = revision::from_slice(&val)?;
-				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
-				Ok(val)
+				if let Some(val) = self.get(key, None).await? {
+					let val: DefineConfigStatement = revision::from_slice(&val)?;
+					let val = Arc::new(val);
+					let entr = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entr);
+					Ok(Some(val))
+				} else {
+					Ok(None)
+				}
 			}
 		}
 	}

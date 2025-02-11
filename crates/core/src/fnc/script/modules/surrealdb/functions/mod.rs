@@ -7,6 +7,7 @@ use reblessive::tree::Stk;
 
 use super::query::QueryContext;
 
+mod api;
 mod array;
 mod bytes;
 mod crypto;
@@ -34,6 +35,7 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"", // root path
+	"api" => (api::Package),
 	"array" => (array::Package),
 	"bytes" => (bytes::Package),
 	"count" => run,

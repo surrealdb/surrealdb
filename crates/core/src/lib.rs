@@ -26,6 +26,7 @@ mod doc;
 mod exe;
 mod fnc;
 
+pub mod api;
 pub mod cnf;
 pub mod ctx;
 pub mod dbs;

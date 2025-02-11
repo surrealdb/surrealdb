@@ -8,6 +8,7 @@ use crate::sql::value::Value;
 use crate::sql::Thing;
 use reblessive::tree::Stk;
 
+pub mod api;
 pub mod args;
 pub mod array;
 pub mod bytes;
@@ -45,6 +46,7 @@ pub async fn run(
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
 	if name.eq("sleep")
+		|| name.eq("api::invoke")
 		|| name.eq("array::all")
 		|| name.eq("array::any")
 		|| name.eq("array::every")
@@ -481,6 +483,8 @@ pub async fn asynchronous(
 		args,
 		"no such builtin function found",
 		//
+		"api::invoke" => api::invoke((stk, ctx, opt)).await,
+		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,
 		"array::every" => array::all((stk, ctx, Some(opt), doc)).await,
@@ -902,9 +906,11 @@ fn get_execution_context<'a>(
 mod tests {
 	use regex::Regex;
 
-	#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 	use crate::dbs::Capabilities;
-	use crate::sql::{statements::OutputStatement, Function, Query, Statement, Value};
+	use crate::{
+		dbs::capabilities::ExperimentalTarget,
+		sql::{statements::OutputStatement, Function, Query, Statement, Value},
+	};
 
 	#[tokio::test]
 	async fn implementations_are_present() {
@@ -929,7 +935,11 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let res = crate::syn::parse(&format!("RETURN {}()", name));
+			let res = crate::syn::parse_with_capabilities(
+				&format!("RETURN {}()", name),
+				&Capabilities::all().with_experimental(ExperimentalTarget::DefineApi.into()),
+			);
+
 			if let Ok(Query(mut x)) = res {
 				match x.0.pop() {
 					Some(Statement::Output(OutputStatement {

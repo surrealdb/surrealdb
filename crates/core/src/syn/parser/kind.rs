@@ -19,14 +19,14 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// expects the first `<` to already be eaten
-	pub(super) async fn parse_kind(&mut self, ctx: &mut Stk, delim: Span) -> ParseResult<Kind> {
+	pub(crate) async fn parse_kind(&mut self, ctx: &mut Stk, delim: Span) -> ParseResult<Kind> {
 		let kind = self.parse_inner_kind(ctx).await?;
 		self.expect_closing_delimiter(t!(">"), delim)?;
 		Ok(kind)
 	}
 
 	/// Parse an inner kind, a kind without enclosing `<` `>`.
-	pub(super) async fn parse_inner_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
+	pub(crate) async fn parse_inner_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
 		match self.parse_inner_single_kind(ctx).await? {
 			Kind::Any => Ok(Kind::Any),
 			Kind::Option(k) => Ok(Kind::Option(k)),

@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, configs: {  }, functions: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; } PERMISSIONS FULL' }, models: {  }, params: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; } PERMISSIONS FULL' }, models: {  }, params: {  }, tables: {  }, users: {  } }"
 
 [[test.results]]
 value = "'ab'"

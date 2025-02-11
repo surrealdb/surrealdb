@@ -5677,6 +5677,7 @@ dependencies = [
  "geo",
  "geo-types",
  "hex",
+ "http 1.2.0",
  "indxdb",
  "ipnet",
  "jsonwebtoken",

@@ -40,7 +40,8 @@ async fn post_handler(
 	content_type: TypedHeader<ContentType>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, Error> {
-	let fmt: Format = content_type.deref().into();
+	let fmt = content_type.deref();
+	let fmt: Format = fmt.into();
 	let val = fmt.parse_value(body)?;
 	let cfg = export::Config::try_from(&val)?;
 	handle_inner(state, session, cfg).await
