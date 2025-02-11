@@ -25,13 +25,13 @@ impl TryFrom<&Value> for Method {
 	type Error = Error;
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
-			Value::Strand(s) => match s.as_str() {
-				v if v.eq_ignore_ascii_case("delete") => Ok(Self::Delete),
-				v if v.eq_ignore_ascii_case("get") => Ok(Self::Get),
-				v if v.eq_ignore_ascii_case("patch") => Ok(Self::Patch),
-				v if v.eq_ignore_ascii_case("post") => Ok(Self::Post),
-				v if v.eq_ignore_ascii_case("put") => Ok(Self::Put),
-				v if v.eq_ignore_ascii_case("trace") => Ok(Self::Trace),
+			Value::Strand(s) => match s.to_ascii_lowercase().as_str() {
+				"delete" => Ok(Self::Delete),
+				"get" => Ok(Self::Get),
+				"patch" => Ok(Self::Patch),
+				"post" => Ok(Self::Post),
+				"put" => Ok(Self::Put),
+				"trace" => Ok(Self::Trace),
 				_ => Err(Error::Thrown("method does not match".into())),
 			},
 			_ => Err(Error::Thrown("method does not match".into())),
