@@ -58,10 +58,7 @@ impl Document {
 				if !keys.contains(fd) {
 					match fd {
 						// Built-in fields
-						fd if fd.is_id() => continue,
-						fd if fd.is_in() => continue,
-						fd if fd.is_out() => continue,
-						fd if fd.is_meta() => continue,
+						fd if fd.is_special() => continue,
 						// Custom fields
 						fd => match opt.strict {
 							// If strict, then throw an error on an undefined field

@@ -151,7 +151,7 @@ impl super::api::Transaction for Transaction {
 		}
 		// Mark the transaction as done.
 		self.done = true;
-		// Rollback the transaction.
+		// Rollback this transaction
 		self.inner.rollback();
 		// Continue
 		Ok(())
@@ -170,7 +170,7 @@ impl super::api::Transaction for Transaction {
 		}
 		// Mark the transaction as done.
 		self.done = true;
-		// Commit the transaction.
+		// Commit this transaction.
 		self.inner.commit().await?;
 		// Continue
 		Ok(())
@@ -186,8 +186,13 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Check the key
-		let res = self.inner.get(&key.encode_owned()?)?.is_some();
+		// Get the arguments
+		let key = key.encode_owned()?;
+		// Get the key
+		let res = match version {
+			Some(ts) => self.inner.get_at_version(&key, ts)?.is_some(),
+			None => self.inner.get(&key)?.is_some(),
+		};
 		// Return result
 		Ok(res)
 	}
@@ -202,10 +207,12 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Fetch the value from the database.
+		// Get the arguments
+		let key = key.encode_owned()?;
+		// Get the key
 		let res = match version {
-			Some(ts) => self.inner.get_at_version(&key.encode_owned()?, ts)?,
-			None => self.inner.get(&key.encode_owned()?)?,
+			Some(ts) => self.inner.get_at_version(&key, ts)?,
+			None => self.inner.get(&key)?,
 		};
 		// Return result
 		Ok(res)
@@ -226,10 +233,13 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Get the arguments
+		let key = key.encode_owned()?;
+		let val = val.into();
 		// Set the key
 		match version {
-			Some(ts) => self.inner.set_at_ts(&key.encode_owned()?, &val.into(), ts)?,
-			None => self.inner.set(&key.encode_owned()?, &val.into())?,
+			Some(ts) => self.inner.set_at_ts(&key, &val, ts)?,
+			None => self.inner.set(&key, &val)?,
 		}
 		// Return result
 		Ok(())
@@ -250,9 +260,11 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Get the arguments
+		let key = key.encode_owned()?;
+		let val = val.into();
 		// Replace the key
-		self.inner.insert_or_replace(&key.encode_owned()?, &val.into())?;
-
+		self.inner.insert_or_replace(&key, &val)?;
 		// Return result
 		Ok(())
 	}
@@ -331,8 +343,10 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Get the arguments
+		let key = key.encode_owned()?;
 		// Remove the key
-		self.inner.soft_delete(&key.encode_owned()?)?;
+		self.inner.soft_delete(&key)?;
 		// Return result
 		Ok(())
 	}
@@ -355,7 +369,7 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let chk = chk.map(Into::into);
-		// Delete the key if valid
+		// Set the key if valid
 		match (self.inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.soft_delete(&key)?,
 			(None, None) => self.inner.soft_delete(&key)?,
@@ -379,8 +393,10 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Get the arguments
+		let key = key.encode_owned()?;
 		// Remove the key
-		self.inner.delete(&key.encode_owned()?)?;
+		self.inner.delete(&key)?;
 		// Return result
 		Ok(())
 	}
@@ -403,7 +419,7 @@ impl super::api::Transaction for Transaction {
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let chk = chk.map(Into::into);
-		// Delete the key if valid
+		// Set the key if valid
 		match (self.inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.delete(&key)?,
 			(None, None) => self.inner.delete(&key)?,
@@ -431,10 +447,25 @@ impl super::api::Transaction for Transaction {
 		// Set the key range
 		let beg = rng.start.encode_owned()?;
 		let end = rng.end.encode_owned()?;
-		// Retrieve the scan range
-		let res = self.inner.keys(beg.as_slice()..end.as_slice(), Some(limit as usize));
-		// Convert the keys and values
-		let res = res.map(Key::from).collect();
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(|| -> Result<_, Error> {
+			// Retrieve the scan range
+			let res = match version {
+				Some(ts) => self
+					.inner
+					.keys_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
+					.map(Key::from)
+					.collect(),
+				None => self
+					.inner
+					.keys(beg.as_slice()..end.as_slice(), Some(limit as usize))
+					.map(Key::from)
+					.collect(),
+			};
+			// Return result
+			Ok(res)
+		})
+		.await?;
 		// Return result
 		Ok(res)
 	}
@@ -457,19 +488,27 @@ impl super::api::Transaction for Transaction {
 		// Set the key range
 		let beg = rng.start.encode_owned()?;
 		let end = rng.end.encode_owned()?;
-		let range = beg.as_slice()..end.as_slice();
-		// Retrieve the scan range
-		if let Some(ts) = version {
-			self.inner
-				.scan_at_version(range, ts, Some(limit as usize))
-				.map(|r| r.map(|(k, v)| (k.to_vec(), v)).map_err(Into::into))
-				.collect()
-		} else {
-			self.inner
-				.scan(range, Some(limit as usize))
-				.map(|r| r.map(|(k, v, _)| (k.to_vec(), v)).map_err(Into::into))
-				.collect()
-		}
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(|| -> Result<_, Error> {
+			// Retrieve the scan range
+			let res = match version {
+				Some(ts) => self
+					.inner
+					.scan_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
+					.map(|r| r.map(|(k, v)| (k.to_vec(), v)).map_err(Into::<Error>::into))
+					.collect::<Result<_, Error>>()?,
+				None => self
+					.inner
+					.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))
+					.map(|r| r.map(|(k, v, _)| (k.to_vec(), v)).map_err(Into::into))
+					.collect::<Result<_, Error>>()?,
+			};
+			// Return result
+			Ok(res)
+		})
+		.await?;
+		// Return result
+		Ok(res)
 	}
 
 	/// Retrieve all the versions from a range of keys from the databases
@@ -485,28 +524,32 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-
 		// Set the key range
 		let beg = rng.start.encode_owned()?;
 		let end = rng.end.encode_owned()?;
-		let range = beg.as_slice()..end.as_slice();
-
-		// Retrieve the scan range
-		self.inner
-			.scan_all_versions(range, Some(limit as usize))
-			.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
-			.collect()
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(|| -> Result<_, Error> {
+			// Retrieve the scan range
+			let res = self
+				.inner
+				.scan_all_versions(beg.as_slice()..end.as_slice(), Some(limit as usize))
+				.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
+				.collect::<Result<_, Error>>()?;
+			// Return result
+			Ok(res)
+		})
+		.await?;
+		// Return result
+		Ok(res)
 	}
 }
 
 impl Transaction {
 	pub(crate) fn new_save_point(&mut self) {
-		// Set the save point, the errors are ignored.
 		let _ = self.inner.set_savepoint();
 	}
 
 	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
-		// Rollback
 		self.inner.rollback_to_savepoint()?;
 		Ok(())
 	}
