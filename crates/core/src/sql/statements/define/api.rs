@@ -6,6 +6,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{pretty_indent, Fmt};
 use crate::sql::{Base, Object, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -18,10 +19,9 @@ use super::CursorDoc;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineApiStatement {
-	pub id: Option<u32>,
 	pub if_not_exists: bool,
 	pub overwrite: bool,
-	pub path: Path,
+	pub path: Value,
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Value>,
 	pub config: Option<ApiConfig>,
@@ -30,9 +30,10 @@ pub struct DefineApiStatement {
 impl DefineApiStatement {
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
@@ -51,14 +52,18 @@ impl DefineApiStatement {
 		}
 		// Process the statement
 		let name = self.path.to_string();
+		let path: Path =
+			self.path.compute(stk, ctx, opt, doc).await?.coerce_to_string()?.parse()?;
 		let key = crate::key::database::ap::new(ns, db, &name);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
-		let ap = DefineApiStatement {
+		let ap = ApiDefinition {
 			// Don't persist the `IF NOT EXISTS` clause to schema
-			if_not_exists: false,
-			overwrite: false,
-			..self.clone()
+			path,
+			actions: self.actions.clone(),
+			fallback: self.fallback.clone(),
+			config: self.config.clone(),
+			..Default::default()
 		};
 		txn.set(key, revision::to_vec(&ap)?, None).await?;
 		// Clear the cache
@@ -77,7 +82,7 @@ impl Display for DefineApiStatement {
 		if self.overwrite {
 			write!(f, " OVERWRITE")?
 		}
-		write!(f, " {}", self.path.to_url())?;
+		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
 		if let Some(config) = &self.config {
 			write!(f, "{}", config)?;
@@ -100,7 +105,48 @@ impl InfoStructure for DefineApiStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"path".to_string() => Value::from(self.path.to_string()),
+			"config".to_string(), if let Some(config) = self.config => config.structure(),
+			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
+			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
 		})
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[non_exhaustive]
+pub struct ApiDefinition {
+	pub id: Option<u32>,
+	pub path: Path,
+	pub actions: Vec<ApiAction>,
+	pub fallback: Option<Value>,
+	pub config: Option<ApiConfig>,
+}
+
+impl From<ApiDefinition> for DefineApiStatement {
+	fn from(value: ApiDefinition) -> Self {
+		DefineApiStatement {
+			if_not_exists: false,
+			overwrite: false,
+			path: value.path.to_string().into(),
+			actions: value.actions,
+			fallback: value.fallback,
+			config: value.config,
+		}
+	}
+}
+
+impl InfoStructure for ApiDefinition {
+	fn structure(self) -> Value {
+		let da: DefineApiStatement = self.into();
+		da.structure()
+	}
+}
+
+impl Display for ApiDefinition {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let da: DefineApiStatement = self.clone().into();
+		da.fmt(f)
 	}
 }
 
@@ -127,20 +173,30 @@ impl Display for ApiAction {
 	}
 }
 
+impl InfoStructure for ApiAction {
+	fn structure(self) -> Value {
+		Value::from(map!(
+			"methods" => Value::from(self.methods.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
+			"action" => Value::from(self.action.to_string()),
+			"config", if let Some(config) = self.config => config.structure(),
+		))
+	}
+}
+
 pub trait FindApi<'a> {
 	fn find_api(
 		&'a self,
 		segments: Vec<&'a str>,
 		method: Method,
-	) -> Option<(&'a DefineApiStatement, Object)>;
+	) -> Option<(&'a ApiDefinition, Object)>;
 }
 
-impl<'a> FindApi<'a> for &'a [DefineApiStatement] {
+impl<'a> FindApi<'a> for &'a [ApiDefinition] {
 	fn find_api(
 		&'a self,
 		segments: Vec<&'a str>,
 		method: Method,
-	) -> Option<(&'a DefineApiStatement, Object)> {
+	) -> Option<(&'a ApiDefinition, Object)> {
 		let mut specifity = 0_u8;
 		let mut res = None;
 		for api in self.iter() {
@@ -159,11 +215,3 @@ impl<'a> FindApi<'a> for &'a [DefineApiStatement] {
 		res
 	}
 }
-
-// /*bla - 1
-// /:bla - 2
-// /bla  - 3
-
-// /*bla - 1
-// /:bla - 2
-// /bla  - 3

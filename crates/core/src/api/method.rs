@@ -3,7 +3,10 @@ use std::fmt::{self, Display};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{err::Error, sql::Value};
+use crate::{
+	err::Error,
+	sql::{statements::info::InfoStructure, Value},
+};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -46,5 +49,11 @@ impl Display for Method {
 			Self::Put => write!(f, "PUT"),
 			Self::Trace => write!(f, "TRACE"),
 		}
+	}
+}
+
+impl InfoStructure for Method {
+	fn structure(self) -> Value {
+		Value::from(self.to_string())
 	}
 }

@@ -1288,6 +1288,9 @@ pub enum Error {
 
 	#[error("The string could not be parsed into a bytesize")]
 	InvalidBytesize,
+
+	#[error("The string could not be parsed into a path: {0}")]
+	InvalidPath(String),
 }
 
 impl From<Error> for String {

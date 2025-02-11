@@ -2,7 +2,6 @@ use reblessive::Stk;
 
 use crate::api::method::Method;
 use crate::api::middleware::RequestMiddleware;
-use crate::api::path::Path;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::api::ApiConfig;
@@ -815,7 +814,7 @@ impl Parser<'_> {
 			(false, false)
 		};
 
-		let path: Path = self.next_token_value()?;
+		let path = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 
 		let config = match self.parse_api_config(ctx).await? {
 			v if v.is_empty() => None,

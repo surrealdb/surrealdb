@@ -1,14 +1,19 @@
 use std::{
 	fmt::{self, Display, Formatter},
 	ops::Deref,
+	str::FromStr,
 };
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::sql::{
-	fmt::{fmt_separated_by, Fmt},
-	Kind, Object, Value,
+use crate::{
+	err::Error,
+	sql::{
+		fmt::{fmt_separated_by, Fmt},
+		Kind, Object, Value,
+	},
+	syn,
 };
 
 #[revisioned(revision = 1)]
@@ -71,6 +76,145 @@ impl IntoIterator for Path {
 impl Display for Path {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::new(self.iter(), fmt_separated_by("/")), f)
+	}
+}
+
+impl FromStr for Path {
+	type Err = Error;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let mut chars = s.chars().peekable();
+		let mut segments: Vec<Segment> = Vec::new();
+
+		loop {
+			if let Some(c) = chars.next() {
+				if c != '/' {
+					return Err(Error::InvalidPath("Segment should start with /".into()));
+				}
+			} else {
+				break;
+			}
+
+			let mut scratch = String::new();
+			let mut kind: Option<Kind> = None;
+
+			'segment: while let Some(c) = chars.peek() {
+				match c {
+					'/' if scratch.is_empty() => {
+						chars.next();
+						continue 'segment;
+					}
+
+					// We allow the first character to be an escape character to ignore potential otherwise instruction characters
+					'\\' if scratch.is_empty() => {
+						chars.next();
+						if let Some(x @ ':' | x @ '*') = chars.next() {
+							scratch.push('\\');
+							scratch.push(x);
+							continue 'segment;
+						} else {
+							return Err(Error::InvalidPath("Expected an instruction symbol `:` or `*` to follow after an escape character".into()));
+						}
+					}
+
+					// Valid segment characters
+					x if x.is_ascii_alphanumeric() => (),
+					'.' | '-' | '_' | '~' | '!' | '$' | '&' | '\'' | '(' | ')' | '*' | '+'
+					| ',' | ';' | '=' | ':' | '@' => (),
+
+					// We found a kind
+					'<' if scratch.starts_with(':') => {
+						if scratch.len() == 1 {
+							return Err(Error::InvalidPath(
+								"Encountered a type, but expected a name or content for this segment first".into(),
+							));
+						}
+
+						// Eat the '<'
+						chars.next();
+
+						let mut balance = 0;
+						let mut inner = String::new();
+
+						'kind: loop {
+							let Some(c) = chars.next() else {
+								return Err(Error::InvalidPath(
+									"Kind segment did not close".into(),
+								));
+							};
+
+							// Keep track of the balance
+							if c == '<' {
+								balance += 1;
+							} else if c == '>' {
+								if balance == 0 {
+									break 'kind;
+								} else {
+									balance -= 1;
+								}
+							}
+
+							inner.push(c);
+						}
+
+						kind =
+							Some(syn::kind(&inner).map_err(|e| Error::InvalidPath(e.to_string()))?);
+
+						break 'segment;
+					}
+
+					// We did not encounter a valid character
+					_ => {
+						break 'segment;
+					}
+				}
+
+				if let Some(c) = chars.next() {
+					scratch.push(c);
+				} else {
+					return Err(Error::Unreachable(
+						"Expected to find a character as we peeked it before".into(),
+					));
+				}
+			}
+
+			let (segment, done) = if scratch.is_empty() {
+				break;
+			} else if (scratch.starts_with(':')
+				|| scratch.starts_with('*')
+				|| scratch.starts_with('\\'))
+				&& scratch[1..].is_empty()
+			{
+				// We encountered a segment which starts with an instruction, but is empty
+				// Let's error
+				return Err(Error::InvalidPath(
+					"Expected a name or content for this segment".into(),
+				));
+			} else if scratch.starts_with(':') {
+				let segment = Segment::Dynamic(scratch[1..].to_string(), kind);
+				(segment, false)
+			} else if scratch.starts_with('*') {
+				let segment = Segment::Rest(scratch[1..].to_string());
+				(segment, true)
+			} else if scratch.starts_with('\\') {
+				let segment = Segment::Fixed(scratch[1..].to_string());
+				(segment, false)
+			} else {
+				let segment = Segment::Fixed(scratch.to_string());
+				(segment, false)
+			};
+
+			segments.push(segment);
+
+			if done {
+				break;
+			}
+		}
+
+		if chars.peek().is_some() {
+			return Err(Error::InvalidPath("Path not finished".into()));
+		}
+
+		Ok(Self(segments))
 	}
 }
 

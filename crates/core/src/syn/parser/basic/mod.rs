@@ -1,5 +1,4 @@
 use crate::{
-	api::path::Path,
 	sql::{language::Language, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid},
 	syn::{
 		lexer::compound,
@@ -116,20 +115,6 @@ impl TokenValue for Strand {
 				Ok(Strand(v))
 			}
 			_ => unexpected!(parser, token, "a strand"),
-		}
-	}
-}
-
-impl TokenValue for Path {
-	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		let token = parser.peek();
-		match token.kind {
-			t!("/") => {
-				parser.pop_peek();
-				let v = parser.lexer.lex_compound(token, compound::path)?.value;
-				Ok(Path(v))
-			}
-			_ => unexpected!(parser, token, "a path"),
 		}
 	}
 }

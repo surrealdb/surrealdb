@@ -33,6 +33,7 @@ pub use deprecated::scope::DefineScopeStatement;
 pub use deprecated::token::DefineTokenStatement;
 
 pub use api::ApiAction;
+pub use api::ApiDefinition;
 pub use api::FindApi;
 
 use crate::ctx::Context;
@@ -125,7 +126,7 @@ impl DefineStatement {
 			Self::Model(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Access(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Config(ref v) => v.compute(ctx, opt, doc).await,
-			Self::Api(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Api(ref v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }

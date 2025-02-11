@@ -8,7 +8,6 @@ mod datetime;
 mod ident;
 mod js;
 mod number;
-mod path;
 mod regex;
 mod strand;
 mod uuid;
@@ -19,7 +18,6 @@ pub use js::javascript;
 pub use number::{
 	duration, float, integer, number, numeric, numeric_kind, NumberKind, Numeric, NumericKind,
 };
-pub use path::path;
 pub use regex::regex;
 pub use strand::strand;
 pub use uuid::uuid;

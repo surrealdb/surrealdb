@@ -4,7 +4,7 @@ use crate::{
 	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
 	dbs::{capabilities::ExperimentalTarget, Capabilities},
 	err::Error,
-	sql::{Block, Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
+	sql::{Block, Datetime, Duration, Idiom, Kind, Query, Range, Subquery, Thing, Value},
 };
 
 pub mod error;
@@ -393,6 +393,25 @@ pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_json(stk))
+		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
+}
+
+/// Parse a kind from a string.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn kind(input: &str) -> Result<Kind, Error> {
+	trace!(target: TARGET, "Parsing SurrealQL duration");
+
+	if input.len() > u32::MAX as usize {
+		return Err(Error::QueryTooLarge);
+	}
+
+	let mut parser = Parser::new(input.as_bytes());
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_inner_kind(stk))
 		.finish()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))

@@ -17,7 +17,7 @@ use crate::{
 	err::Error,
 	kvs::{Datastore, Transaction},
 	sql::{
-		statements::{define::config::api::ApiConfig, DefineApiStatement},
+		statements::{define::config::api::ApiConfig, define::ApiDefinition},
 		Object, Value,
 	},
 };
@@ -50,7 +50,7 @@ impl ApiInvocation {
 		tx: Arc<Transaction>,
 		ds: Arc<Datastore>,
 		sess: &Session,
-		api: &DefineApiStatement,
+		api: &ApiDefinition,
 		body: ApiBody,
 	) -> Result<Option<(ApiResponse, ResponseInstruction)>, Error> {
 		let opt = ds.setup_options(sess);
@@ -70,7 +70,7 @@ impl ApiInvocation {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		api: &DefineApiStatement,
+		api: &ApiDefinition,
 		body: ApiBody,
 	) -> Result<Option<(ApiResponse, ResponseInstruction)>, Error> {
 		let (action, action_config) =

@@ -30,22 +30,6 @@ pub struct Diagnostic {
 	next: Option<Box<Diagnostic>>,
 }
 
-impl Diagnostic {
-	pub(crate) fn advance_span_offset(&mut self, offset: usize) {
-		if let DiagnosticKind::Span {
-			ref mut span,
-			..
-		} = &mut self.kind
-		{
-			span.offset += offset as u32;
-		}
-
-		if let Some(next) = self.next.as_mut() {
-			next.advance_span_offset(offset);
-		}
-	}
-}
-
 /// A parsing error.
 #[derive(Debug)]
 pub struct SyntaxError {
@@ -155,9 +139,5 @@ impl SyntaxError {
 				res.snippets.push(snippet)
 			}
 		}
-	}
-
-	pub(crate) fn advance_span_offset(&mut self, offset: usize) {
-		self.diagnostic.advance_span_offset(offset);
 	}
 }

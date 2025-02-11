@@ -13,11 +13,11 @@ use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
+use crate::sql::statements::define::ApiDefinition;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::statements::DefineApiStatement;
 use crate::sql::statements::DefineDatabaseStatement;
 use crate::sql::statements::DefineEventStatement;
 use crate::sql::statements::DefineFieldStatement;
@@ -657,11 +657,7 @@ impl Transaction {
 
 	/// Retrieve all api definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_apis(
-		&self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineApiStatement]>, Error> {
+	pub async fn all_db_apis(&self, ns: &str, db: &str) -> Result<Arc<[ApiDefinition]>, Error> {
 		let qey = cache::tx::Lookup::Aps(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val,
@@ -1244,7 +1240,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		ap: &str,
-	) -> Result<Arc<DefineApiStatement>, Error> {
+	) -> Result<Arc<ApiDefinition>, Error> {
 		let qey = cache::tx::Lookup::Ap(ns, db, ap);
 		match self.cache.get(&qey) {
 			Some(val) => val,
@@ -1253,7 +1249,7 @@ impl Transaction {
 				let val = self.get(key, None).await?.ok_or_else(|| Error::ApNotFound {
 					value: ap.to_owned(),
 				})?;
-				let val: DefineApiStatement = revision::from_slice(&val)?;
+				let val: ApiDefinition = revision::from_slice(&val)?;
 				let val = cache::tx::Entry::Any(Arc::new(val));
 				self.cache.insert(qey, val.clone());
 				val
