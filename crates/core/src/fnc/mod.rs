@@ -908,7 +908,10 @@ mod tests {
 
 	#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 	use crate::dbs::Capabilities;
-	use crate::sql::{statements::OutputStatement, Function, Query, Statement, Value};
+	use crate::{
+		dbs::capabilities::ExperimentalTarget,
+		sql::{statements::OutputStatement, Function, Query, Statement, Value},
+	};
 
 	#[tokio::test]
 	async fn implementations_are_present() {
@@ -933,7 +936,11 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let res = crate::syn::parse(&format!("RETURN {}()", name));
+			let res = crate::syn::parse_with_capabilities(
+				&format!("RETURN {}()", name),
+				&Capabilities::all().with_experimental(ExperimentalTarget::DefineApi.into()),
+			);
+
 			if let Ok(Query(mut x)) = res {
 				match x.0.pop() {
 					Some(Statement::Output(OutputStatement {

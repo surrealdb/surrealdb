@@ -258,6 +258,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			apis: {},
 			configs: {},
 			functions: {},
 			models: {},
