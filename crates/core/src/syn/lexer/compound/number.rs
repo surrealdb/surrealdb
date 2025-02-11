@@ -81,7 +81,7 @@ pub fn numeric_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, Synt
 			_ => number_kind(lexer, start).map(NumericKind::Number),
 		},
 		x => {
-			bail!("Unexpected token `{x}`, expected a numeric value, either a bytesize, duration or number",@start.span)
+			bail!("Unexpected token `{x}`, expected a numeric value, either a duration or number",@start.span)
 		}
 	}
 }
