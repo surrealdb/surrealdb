@@ -602,7 +602,6 @@ impl IndexRangeReverseThingIterator {
 		if self.r.end_incl {
 			// We don't need include the ending key for the next scan,
 			// as it will be set to the first key
-			self.r.end_incl = false;
 			if let Some(v) = tx.get(&self.r.end, None).await? {
 				limit -= 1;
 				if limit == 0 {
@@ -617,7 +616,7 @@ impl IndexRangeReverseThingIterator {
 			}
 		}
 		let res = tx.scanr(self.r.range(), limit, None).await?;
-		if let Some((key, _)) = res.first() {
+		if let Some((key, _)) = res.last() {
 			self.r.end.clone_from(key);
 		}
 		Ok(res)
@@ -627,7 +626,6 @@ impl IndexRangeReverseThingIterator {
 		let res = tx.keysr(self.r.range(), limit, None).await?;
 		if let Some(key) = res.first() {
 			self.r.end.clone_from(key);
-			self.r.end_incl = false;
 		}
 		Ok(res)
 	}
@@ -645,12 +643,20 @@ impl IndexRangeReverseThingIterator {
 				Ok(())
 			},
 		)?;
+		// Next batch should not include the end anymore
+		if self.r.end_incl {
+			self.r.end_incl = false;
+		}
 		Ok(records)
 	}
 
 	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize, Error> {
 		let res = self.next_keys(tx, limit).await?;
 		let count = res.into_iter().filter(|k| self.r.matches(k)).count();
+		// Next batch should not include the end anymore
+		if self.r.end_incl {
+			self.r.end_incl = false;
+		}
 		Ok(count)
 	}
 }

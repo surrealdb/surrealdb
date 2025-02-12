@@ -122,6 +122,14 @@ pub async fn standard(new_ds: impl CreateDs) {
 			{
 				id: session:2,
 				time: d'2024-06-30T23:00:00Z'
+			},
+			{
+				id: session:4,
+				time: NULL
+			},
+			{
+				id: session:3,
+				other: 'test'
 			}
 		]",
 	);
