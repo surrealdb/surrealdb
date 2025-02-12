@@ -310,6 +310,7 @@ pub enum Literal {
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),
 	DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
+	Bool(bool),
 }
 
 impl Literal {
@@ -329,6 +330,7 @@ impl Literal {
 			}
 			Self::Object(_) => Kind::Object,
 			Self::DiscriminatedObject(_, _) => Kind::Object,
+			Self::Bool(_) => Kind::Bool,
 		}
 	}
 
@@ -344,6 +346,10 @@ impl Literal {
 			},
 			Self::Duration(v) => match value {
 				Value::Duration(n) => n == v,
+				_ => false,
+			},
+			Self::Bool(v) => match value {
+				Value::Bool(b) => b == v,
 				_ => false,
 			},
 			Self::Array(a) => match value {
@@ -478,7 +484,8 @@ impl Display for Literal {
 		match self {
 			Literal::String(s) => write!(f, "{}", s),
 			Literal::Number(n) => write!(f, "{}", n),
-			Literal::Duration(n) => write!(f, "{}", n),
+			Literal::Duration(d) => write!(f, "{}", d),
+			Literal::Bool(b) => write!(f, "{}", b),
 			Literal::Array(a) => {
 				let mut f = Pretty::from(f);
 				f.write_char('[')?;

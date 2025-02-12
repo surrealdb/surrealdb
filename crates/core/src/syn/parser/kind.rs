@@ -197,6 +197,14 @@ impl Parser<'_> {
 	async fn parse_literal_kind(&mut self, ctx: &mut Stk) -> ParseResult<Literal> {
 		let peek = self.peek();
 		match peek.kind {
+			t!("true") => {
+				self.pop_peek();
+				Ok(Literal::Bool(true))
+			}
+			t!("false") => {
+				self.pop_peek();
+				Ok(Literal::Bool(false))
+			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;
 				Ok(Literal::String(s))
@@ -243,9 +251,11 @@ impl Parser<'_> {
 	fn token_can_be_literal_kind(t: TokenKind) -> bool {
 		matches!(
 			t,
-			t!("'")
-				| t!("\"") | t!("+")
-				| t!("-") | TokenKind::Glued(Glued::Duration | Glued::Strand | Glued::Number)
+			t!("true")
+				| t!("false")
+				| t!("'") | t!("\"")
+				| t!("+") | t!("-")
+				| TokenKind::Glued(Glued::Duration | Glued::Strand | Glued::Number)
 				| TokenKind::Digits
 				| t!("{") | t!("[")
 		)
