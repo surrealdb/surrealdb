@@ -34,6 +34,12 @@ value = "{ a: 1d }"
 [[test.results]]
 error = "Expected a { a: 2d } but cannot convert { a: 1d } into a { a: 2d }"
 
+[[test.results]]
+value = "true"
+
+[[test.results]]
+error = "Expected a true but cannot convert false into a true"
+
 */
 <"a" | "b"> "a";
 <"b"> "a";
@@ -46,3 +52,5 @@ error = "Expected a { a: 2d } but cannot convert { a: 1d } into a { a: 2d }"
 <[123, "abd"]> [123, "abc"];
 <{ a: 1d | 2d }> { a: 1d };
 <{ a: 2d }> { a: 1d };
+<true> true;
+<true> false;

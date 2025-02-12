@@ -1,8 +1,8 @@
-mod bincode;
+pub mod bincode;
 pub mod cbor;
-mod json;
+pub mod json;
 pub mod msgpack;
-mod revision;
+pub mod revision;
 
 use ::revision::Revisioned;
 use serde::Serialize;

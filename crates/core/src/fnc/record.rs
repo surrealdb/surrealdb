@@ -75,15 +75,15 @@ async fn correct_refs_field(
 	ff: Idiom,
 ) -> Result<Idiom, Error> {
 	// Obtain the field definition
-	let fd =
-		match ctx.tx().get_tb_field(opt.ns()?, opt.db()?, &ft.to_string(), &ff.to_string()).await {
-			Ok(fd) => fd,
-			// If the field does not exist, there is nothing to correct
-			Err(Error::FdNotFound {
-				..
-			}) => return Ok(ff),
-			Err(e) => return Err(e),
-		};
+	let (ns, db) = opt.ns_db()?;
+	let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
+		Ok(fd) => fd,
+		// If the field does not exist, there is nothing to correct
+		Err(Error::FdNotFound {
+			..
+		}) => return Ok(ff),
+		Err(e) => return Err(e),
+	};
 
 	// Check if the field is an array-like value and thus "containing" references
 	let is_contained = if let Some(kind) = &fd.kind {

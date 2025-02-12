@@ -4,14 +4,14 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::kvs::Live;
 use crate::sql::Value;
-use derive::Store;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct KillStatement {
@@ -54,7 +54,7 @@ impl KillStatement {
 		match txn.get(key, None).await? {
 			Some(val) => {
 				// Decode the data for this live query
-				let val: Live = val.into();
+				let val: Live = revision::from_slice(&val)?;
 				// Delete the node live query
 				let key = crate::key::node::lq::new(nid, lid);
 				txn.clr(key).await?;

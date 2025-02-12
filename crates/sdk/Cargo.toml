@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "2.1.4"
+version = "2.2.0"
 rust-version = "1.81.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -85,14 +85,7 @@ reqwest = { version = "0.12.7", default-features = false, features = [
     "multipart",
     "stream",
 ], optional = true }
-revision = { version = "0.10.0", features = [
-    "chrono",
-    "geo",
-    "roaring",
-    "regex",
-    "rust_decimal",
-    "uuid",
-] }
+revision = { version = "0.11", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rustls = { version = "0.23.12", default-features = false, features = [
     "ring",
@@ -106,7 +99,7 @@ semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.209", features = ["derive"] }
 serde_json = "1.0.127"
 serde-content = "0.1.0"
-surrealdb-core = { version = "=2.1.4", default-features = false, path = "../core", package = "surrealdb-core" }
+surrealdb-core = { version = "=2.2.0", default-features = false, path = "../core", package = "surrealdb-core" }
 thiserror = "1.0.63"
 tokio-util = { version = "0.7.11", features = ["compat"] }
 tracing = "0.1.40"

@@ -53,6 +53,12 @@ user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2021-02-25"
 end = "2025-01-24"
 
+[[trusted.affinitypool]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-01-06"
+end = "2026-01-16"
+
 [[trusted.aho-corasick]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
@@ -217,7 +223,7 @@ end = "2025-01-24"
 
 [[trusted.libc]]
 criteria = "safe-to-deploy"
-user-id = 51017 # Yuki Okushi (JohnTitor)
+user-id = 51017
 start = "2020-03-17"
 end = "2025-11-14"
 
@@ -327,13 +333,13 @@ end = "2025-08-06"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-08-09"
-end = "2025-01-24"
+end = "2026-02-10"
 
 [[trusted.revision-derive]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-08-09"
-end = "2025-01-24"
+end = "2026-02-10"
 
 [[trusted.ryu]]
 criteria = "safe-to-deploy"
@@ -447,7 +453,7 @@ end = "2025-07-08"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2024-02-08"
-end = "2025-02-10"
+end = "2026-02-10"
 
 [[trusted.surrealml-core]]
 criteria = "safe-to-deploy"

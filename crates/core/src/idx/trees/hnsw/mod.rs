@@ -627,7 +627,7 @@ mod tests {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(tx, Id::Number(*doc_id as i64), &content).await.unwrap();
+			h.index_document(tx, &Id::Number(*doc_id as i64), &content).await.unwrap();
 			match map.entry(obj.clone()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
@@ -850,7 +850,7 @@ mod tests {
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(&tx, Id::Number(*doc_id as i64), &content).await?;
+			h.index_document(&tx, &Id::Number(*doc_id as i64), &content).await?;
 		}
 		tx.commit().await?;
 

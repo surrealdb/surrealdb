@@ -19,14 +19,14 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// expects the first `<` to already be eaten
-	pub(super) async fn parse_kind(&mut self, ctx: &mut Stk, delim: Span) -> ParseResult<Kind> {
+	pub(crate) async fn parse_kind(&mut self, ctx: &mut Stk, delim: Span) -> ParseResult<Kind> {
 		let kind = self.parse_inner_kind(ctx).await?;
 		self.expect_closing_delimiter(t!(">"), delim)?;
 		Ok(kind)
 	}
 
 	/// Parse an inner kind, a kind without enclosing `<` `>`.
-	pub(super) async fn parse_inner_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
+	pub(crate) async fn parse_inner_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
 		match self.parse_inner_single_kind(ctx).await? {
 			Kind::Any => Ok(Kind::Any),
 			Kind::Option(k) => Ok(Kind::Option(k)),
@@ -197,6 +197,14 @@ impl Parser<'_> {
 	async fn parse_literal_kind(&mut self, ctx: &mut Stk) -> ParseResult<Literal> {
 		let peek = self.peek();
 		match peek.kind {
+			t!("true") => {
+				self.pop_peek();
+				Ok(Literal::Bool(true))
+			}
+			t!("false") => {
+				self.pop_peek();
+				Ok(Literal::Bool(false))
+			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;
 				Ok(Literal::String(s))
@@ -243,9 +251,11 @@ impl Parser<'_> {
 	fn token_can_be_literal_kind(t: TokenKind) -> bool {
 		matches!(
 			t,
-			t!("'")
-				| t!("\"") | t!("+")
-				| t!("-") | TokenKind::Glued(Glued::Duration | Glued::Strand | Glued::Number)
+			t!("true")
+				| t!("false")
+				| t!("'") | t!("\"")
+				| t!("+") | t!("-")
+				| TokenKind::Glued(Glued::Duration | Glued::Strand | Glued::Number)
 				| TokenKind::Digits
 				| t!("{") | t!("[")
 		)

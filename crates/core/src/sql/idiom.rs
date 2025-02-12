@@ -125,17 +125,9 @@ impl Idiom {
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&ID[0])
 	}
-	/// Check if this Idiom is an 'in' field
-	pub(crate) fn is_in(&self) -> bool {
-		self.0.len() == 1 && self.0[0].eq(&IN[0])
-	}
-	/// Check if this Idiom is an 'out' field
-	pub(crate) fn is_out(&self) -> bool {
-		self.0.len() == 1 && self.0[0].eq(&OUT[0])
-	}
-	/// Check if this Idiom is a 'meta' field
-	pub(crate) fn is_meta(&self) -> bool {
-		self.0.len() == 1 && self.0[0].eq(&META[0])
+	/// Check if this Idiom is a special field
+	pub(crate) fn is_special(&self) -> bool {
+		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0], &META[0]].iter().any(|f| self.0[0].eq(f))
 	}
 	/// Check if this Idiom is an specific field
 	pub(crate) fn is_field(&self, other: &[Part]) -> bool {

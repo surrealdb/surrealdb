@@ -3,13 +3,13 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RemoveAnalyzerStatement {
@@ -21,7 +21,7 @@ pub struct RemoveAnalyzerStatement {
 impl RemoveAnalyzerStatement {
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
 		let future = async {
-			let (ns, db) = (opt.ns()?, opt.db()?);
+			let (ns, db) = opt.ns_db()?;
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 			// Get the transaction

@@ -141,6 +141,8 @@ pub struct ParserSettings {
 	pub references_enabled: bool,
 	/// Whether bearer access is enabled
 	pub bearer_access_enabled: bool,
+	/// Whether bearer access is enabled
+	pub define_api_enabled: bool,
 }
 
 impl Default for ParserSettings {
@@ -152,6 +154,7 @@ impl Default for ParserSettings {
 			query_recursion_limit: 20,
 			references_enabled: false,
 			bearer_access_enabled: false,
+			define_api_enabled: false,
 		}
 	}
 }

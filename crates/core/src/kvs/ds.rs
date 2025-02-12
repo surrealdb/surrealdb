@@ -6,7 +6,9 @@ use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget, RouteTarget};
+use crate::dbs::capabilities::{
+	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
+};
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
@@ -264,6 +266,7 @@ impl Datastore {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
@@ -277,6 +280,9 @@ impl Datastore {
 			s if s.starts_with("file:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
 					let s = s.trim_start_matches("file://");
@@ -293,6 +299,9 @@ impl Datastore {
 			s if s.starts_with("rocksdb:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
@@ -308,6 +317,9 @@ impl Datastore {
 			s if s.starts_with("surrealkv") => {
 				#[cfg(feature = "kv-surrealkv")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", s);
 					let (path, enable_versions) =
 						super::surrealkv::Datastore::parse_start_string(s)?;
@@ -510,6 +522,12 @@ impl Datastore {
 	/// This function needs to be public to allow access from the CLI crate.
 	pub fn allows_http_route(&self, route_target: &RouteTarget) -> bool {
 		self.capabilities.allows_http_route(route_target)
+	}
+
+	/// Does the datastore allow requesting an HTTP route?
+	/// This function needs to be public to allow access from the CLI crate.
+	pub fn allows_query_by_subject(&self, subject: impl Into<ArbitraryQueryTarget>) -> bool {
+		self.capabilities.allows_query(&subject.into())
 	}
 
 	/// Does the datastore allow connections to a network target?
@@ -837,6 +855,9 @@ impl Datastore {
 			bearer_access_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			define_api_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::DefineApi),
 			..Default::default()
 		};
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);

@@ -13,18 +13,164 @@ use surrealdb::iam::Role;
 use surrealdb::kvs::{LockType, TransactionType};
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
-use surrealdb_core::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use test_log::test;
 use tracing::info;
 
-#[test(tokio::test)]
-async fn define_statement_index_concurrently_building_status() -> Result<(), Error> {
+#[tokio::test]
+async fn define_statement_namespace() -> Result<(), Error> {
+	let sql = "
+		DEFINE NAMESPACE test;
+		INFO FOR ROOT;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok(), "{:?}", tmp);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			accesses: {},
+			namespaces: { test: 'DEFINE NAMESPACE test' },
+			nodes: {},
+			system: {
+				available_parallelism: 0,
+				cpu_usage: 0.0f,
+				load_average: [
+					0.0f,
+					0.0f,
+					0.0f
+				],
+				memory_allocated: 0,
+				memory_usage: 0,
+				physical_cores: 0,
+                threads: 0
+			},
+			users: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_database() -> Result<(), Error> {
+	let sql = "
+		DEFINE DATABASE test;
+		INFO FOR NS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			accesses: {},
+			databases: { test: 'DEFINE DATABASE test' },
+			users: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_event_when_event() -> Result<(), Error> {
+	let sql = "
+		DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (
+			CREATE activity SET user = $this, value = $after.email, action = $event
+		);
+		REMOVE EVENT test ON user;
+		DEFINE EVENT test ON TABLE user WHEN $event = 'CREATE' THEN (
+			CREATE activity SET user = $this, value = $after.email, action = $event
+		);
+		INFO FOR TABLE user;
+		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'test@surrealdb.com', updated_at = time::now();
+		SELECT count() FROM activity GROUP ALL;
+	";
+	let mut t = Test::new(sql).await?;
+	//
+	t.skip_ok(3)?;
+	t.expect_val(
+		r#"{
+			events: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)" },
+			fields: {},
+			tables: {},
+			indexes: {},
+			lives: {},
+		}"#,
+	)?;
+	t.skip_ok(3)?;
+	t.expect_val(
+		"[{
+			count: 1
+		}]",
+	)?;
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_event_when_logic() -> Result<(), Error> {
+	let sql = "
+		DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (
+			CREATE activity SET user = $this, value = $after.email, action = $event
+		);
+		REMOVE EVENT test ON user;
+		DEFINE EVENT test ON TABLE user WHEN $before.email != $after.email THEN (
+			CREATE activity SET user = $this, value = $after.email, action = $event
+		);
+		INFO FOR TABLE user;
+		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now();
+		UPSERT user:test SET email = 'test@surrealdb.com', updated_at = time::now();
+		SELECT count() FROM activity GROUP ALL;
+	";
+	let mut t = Test::new(sql).await?;
+	//
+	t.skip_ok(3)?;
+	t.expect_val(
+		"{
+			events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' },
+			fields: {},
+			tables: {},
+			indexes: {},
+			lives: {},
+		}",
+	)?;
+	t.skip_ok(3)?;
+	t.expect_val(
+		"[{
+			count: 2
+		}]",
+	)?;
+	//
+	Ok(())
+}
+
+async fn define_statement_index_concurrently_building_status(
+	def_index: &str,
+	skip_def: usize,
+	initial_size: usize,
+	appended_size: usize,
+) -> Result<(), Error> {
 	let session = Session::owner().with_ns("test").with_db("test");
 	let ds = new_ds().await?;
 	// Populate initial records
-	let initial_count = *INDEXING_BATCH_SIZE * 3 / 2;
-	info!("Populate: {}", initial_count);
-	for i in 0..initial_count {
+	info!("Populate: {}", initial_size);
+	for i in 0..initial_size {
 		let mut responses = ds
 			.execute(
 				&format!("CREATE user:{i} SET email = 'test{i}@surrealdb.com';"),
@@ -36,73 +182,401 @@ async fn define_statement_index_concurrently_building_status() -> Result<(), Err
 	}
 	// Create the index concurrently
 	info!("Indexing starts");
-	let mut r =
-		ds.execute("DEFINE INDEX test ON user FIELDS email CONCURRENTLY", &session, None).await?;
-	skip_ok(&mut r, 1)?;
+	let mut r = ds.execute(def_index, &session, None).await?;
+	assert_eq!(r.len(), skip_def);
+	skip_ok(&mut r, skip_def)?;
 	//
-	let mut appending_count = *NORMAL_FETCH_SIZE * 3 / 2;
-	info!("Appending: {}", appending_count);
 	// Loop until the index is built
 	let now = SystemTime::now();
 	let mut initial_count = None;
-	let mut updates_count = None;
+	let mut pending_count = None;
+	let mut updated_count = None;
+	let mut appended_count = 0;
 	// While the concurrent indexing is running, we update and delete records
+	info!("Loop");
 	let time_out = Duration::from_secs(120);
 	loop {
 		if now.elapsed().map_err(|e| Error::Internal(e.to_string()))?.gt(&time_out) {
 			panic!("Time-out {time_out:?}");
 		}
-		if appending_count > 0 {
-			let sql = if appending_count % 2 != 0 {
-				format!("UPDATE user:{appending_count} SET email = 'new{appending_count}@surrealdb.com';")
+		// Update and delete records
+		if appended_count < appended_size {
+			let sql = if appended_count % 2 == 0 {
+				format!(
+					"UPDATE user:{appended_count} SET email = 'new{appended_count}@surrealdb.com'"
+				)
 			} else {
-				format!("DELETE user:{appending_count}")
+				format!("DELETE user:{appended_count}")
 			};
 			let mut responses = ds.execute(&sql, &session, None).await?;
 			skip_ok(&mut responses, 1)?;
-			appending_count -= 1;
+			appended_count += 1;
 		}
 		// We monitor the status
 		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
 		let tmp = r.remove(0).result?;
 		if let Value::Object(o) = &tmp {
-			if let Some(Value::Object(b)) = o.get("building") {
-				if let Some(v) = b.get("status") {
-					if Value::from("started").eq(v) {
-						continue;
-					}
-					let new_count = b.get("count").cloned();
-					if Value::from("initial").eq(v) {
-						if new_count != initial_count {
-							assert!(new_count > initial_count, "{new_count:?}");
-							info!("New initial count: {:?}", new_count);
-							initial_count = new_count;
+			if let Some(Value::Object(o)) = o.get("building") {
+				if let Some(Value::Strand(s)) = o.get("status") {
+					let new_initial = o.get("initial").cloned();
+					let new_pending = o.get("pending").cloned();
+					let new_updated = o.get("updated").cloned();
+					match s.as_str() {
+						"started" => {
+							info!("Started");
+							continue;
 						}
-						continue;
-					}
-					if Value::from("updates").eq(v) {
-						if new_count != updates_count {
-							assert!(new_count > updates_count, "{new_count:?}");
-							info!("New updates count: {:?}", new_count);
-							updates_count = new_count;
+						"indexing" => {
+							{
+								if new_initial != initial_count {
+									assert!(new_initial > initial_count, "{new_initial:?}");
+									info!("New initial count: {:?}", new_initial);
+									initial_count = new_initial;
+								}
+							}
+							{
+								if new_pending != pending_count {
+									info!("New pending count: {:?}", new_pending);
+									pending_count = new_pending;
+								}
+							}
+							{
+								if new_updated != updated_count {
+									assert!(new_updated > updated_count, "{new_updated:?}");
+									info!("New updated count: {:?}", new_updated);
+									updated_count = new_updated;
+								}
+							}
+							continue;
 						}
-						continue;
+						"ready" => {
+							let initial = new_initial.unwrap().coerce_to_i64()? as usize;
+							let pending = new_pending.unwrap().coerce_to_i64()?;
+							let updated = new_updated.unwrap().coerce_to_i64()? as usize;
+							assert!(initial > 0, "{initial} > 0");
+							assert!(initial <= initial_size, "{initial} <= {initial_size}");
+							assert_eq!(pending, 0);
+							assert!(updated > 0, "{updated} > 0");
+							assert!(updated <= appended_count, "{updated} <= appended_count");
+							break;
+						}
+						_ => {}
 					}
-					let val = Value::parse(
-						"{
-										building: {
-											status: 'built'
-										}
-									}",
-					);
-					assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
-					break;
 				}
 			}
 		}
-		panic!("Unexpected value {tmp:#}");
+		panic!("Invalid info: {tmp:#}");
 	}
+	info!("Appended: {appended_count}");
 	Ok(())
+}
+
+#[test(tokio::test)]
+async fn define_statement_index_concurrently_building_status_standard() -> Result<(), Error> {
+	define_statement_index_concurrently_building_status(
+		"DEFINE INDEX test ON user FIELDS email CONCURRENTLY",
+		1,
+		10000,
+		100,
+	)
+	.await
+}
+
+#[test(tokio::test)]
+async fn define_statement_index_concurrently_building_status_standard_overwrite(
+) -> Result<(), Error> {
+	define_statement_index_concurrently_building_status(
+		"DEFINE INDEX OVERWRITE test ON user FIELDS email CONCURRENTLY",
+		1,
+		10000,
+		100,
+	)
+	.await
+}
+
+#[test(tokio::test)]
+async fn define_statement_index_concurrently_building_status_full_text() -> Result<(), Error> {
+	define_statement_index_concurrently_building_status(
+		"DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
+		2,
+		200,
+		10,
+	)
+	.await
+}
+
+#[test(tokio::test)]
+async fn define_statement_index_concurrently_building_status_full_text_overwrite(
+) -> Result<(), Error> {
+	define_statement_index_concurrently_building_status(
+		"DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX OVERWRITE test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
+		2,
+		200, 10
+	)
+		.await
+}
+
+#[tokio::test]
+async fn define_statement_analyzer() -> Result<(), Error> {
+	let sql = r#"
+		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
+		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
+        DEFINE FUNCTION fn::stripHtml($html: string) {
+            RETURN string::replace($html, /<[^>]*>/, "");
+        };
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
+        DEFINE ANALYZER englishLemmatizer TOKENIZERS blank,class FILTERS mapper('../../tests/data/lemmatization-en.txt');
+		INFO FOR DB;
+	"#;
+	let mut t = Test::new(sql).await?;
+	t.expect_size(6)?;
+	t.skip_ok(5)?;
+	t.expect_val(
+		r#"{
+			accesses: {},
+			analyzers: {
+				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
+				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
+				englishLemmatizer: 'DEFINE ANALYZER englishLemmatizer TOKENIZERS BLANK,CLASS FILTERS MAPPER(../../tests/data/lemmatization-en.txt)',
+				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
+			},
+			apis: {},
+			configs: {},
+			functions: {
+				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, ''); } PERMISSIONS FULL"
+			},
+			models: {},
+			params: {},
+			tables: {},
+			users: {},
+		}"#,
+	)?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_search_index() -> Result<(), Error> {
+	let sql = r#"
+		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
+		CREATE blog:3 SET title = 'This blog is going to be deleted';
+		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
+		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
+		DELETE blog:3;
+		INFO FOR TABLE blog;
+		ANALYZE INDEX blog_title ON blog;
+	"#;
+
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 8);
+	//
+	for i in 0..6 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok(), "{}", i);
+	}
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title \
+			SEARCH ANALYZER simple BM25(1.2,0.75) \
+			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 \
+			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' },
+			lives: {},
+		}",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
+	let tmp = res.remove(0).result?;
+
+	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
+	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(62)));
+
+	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
+	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_lengths", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(56)));
+
+	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, Value::from(17)));
+	check_path(&tmp, &["postings", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["postings", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["postings", "total_size"], |v| assert!(v > Value::from(150)));
+
+	check_path(&tmp, &["terms", "keys_count"], |v| assert_eq!(v, Value::from(17)));
+	check_path(&tmp, &["terms", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["terms", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["terms", "total_size"], |v| assert!(v.gt(&Value::from(150))));
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_root() -> Result<(), Error> {
+	let sql = "
+		DEFINE USER test ON ROOT PASSWORD 'test';
+
+		INFO FOR ROOT;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner();
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+
+	tmp.unwrap();
+	//
+	let tmp = res.remove(0).result?;
+	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
+
+	assert!(define_str
+		.strip_prefix('\"')
+		.unwrap()
+		.starts_with("DEFINE USER test ON ROOT PASSHASH '$argon2id$"));
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_ns() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner();
+
+	// Create a NS user and retrieve it.
+	let sql = "
+		USE NS ns;
+		DEFINE USER test ON NS PASSWORD 'test';
+
+		INFO FOR USER test;
+		INFO FOR USER test ON NS;
+		INFO FOR USER test ON NAMESPACE;
+		INFO FOR USER test ON ROOT;
+	";
+	let res = dbs.execute(sql, &ses, None).await?;
+
+	let mut res = res.into_iter();
+	res.next().unwrap().result.unwrap();
+	res.next().unwrap().result.unwrap();
+
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(res
+		.next()
+		.unwrap()
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+
+	assert_eq!(
+		res.next().unwrap().result.as_ref().unwrap_err().to_string(),
+		"The root user 'test' does not exist"
+	); // User doesn't exist at the NS level
+
+	// If it tries to create a NS user without specifying a NS, it should fail
+	let sql = "
+		DEFINE USER test ON NS PASSWORD 'test';
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+
+	assert!(res.remove(0).result.is_err());
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_user_db() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner();
+
+	// Create a NS user and retrieve it.
+	let sql = "
+		USE NS ns;
+		USE DB db;
+		DEFINE USER test ON DB PASSWORD 'test';
+
+		INFO FOR USER test;
+		INFO FOR USER test ON DB;
+		INFO FOR USER test ON DATABASE;
+		INFO FOR USER test ON NS;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+
+	res[2].result.as_ref().unwrap();
+	res[3].result.as_ref().unwrap();
+	res[4].result.as_ref().unwrap();
+	res[5].result.as_ref().unwrap();
+	assert_eq!(
+		res[6].result.as_ref().unwrap_err().to_string(),
+		"The user 'test' does not exist in the namespace 'ns'"
+	); // User doesn't exist at the NS level
+
+	assert!(res[3]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[4]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+	assert!(res[5]
+		.result
+		.as_ref()
+		.unwrap()
+		.to_string()
+		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+
+	// If it tries to create a NS user without specifying a NS, it should fail
+	let sql = "
+		DEFINE USER test ON DB PASSWORD 'test';
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+
+	assert!(res.remove(0).result.is_err());
+
+	Ok(())
+}
+
+fn check_path<F>(val: &Value, path: &[&str], check: F)
+where
+	F: Fn(Value),
+{
+	let part: Vec<Part> = path.iter().map(|p| Part::from(*p)).collect();
+	let res = val.walk(&part);
+	for (i, v) in res {
+		let mut idiom = Idiom::default();
+		idiom.0.clone_from(&part);
+		assert_eq!(idiom, i);
+		check(v);
+	}
 }
 
 //
@@ -199,8 +673,8 @@ async fn permissions_checks_define_function() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -241,8 +715,8 @@ async fn permissions_checks_define_analyzer() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -366,8 +840,8 @@ async fn permissions_checks_define_access_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -491,8 +965,8 @@ async fn permissions_checks_define_user_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -533,8 +1007,8 @@ async fn permissions_checks_define_access_record() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -575,8 +1049,8 @@ async fn permissions_checks_define_param() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -614,8 +1088,8 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [

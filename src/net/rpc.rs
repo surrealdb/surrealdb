@@ -32,8 +32,7 @@ use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
-use surrealdb::rpc::method::Method;
-use surrealdb::rpc::rpc_context::RpcContext;
+use surrealdb::rpc::RpcContext;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
@@ -49,7 +48,7 @@ async fn get_handler(
 	ws: WebSocketUpgrade,
 	Extension(state): Extension<AppState>,
 	Extension(id): Extension<RequestId>,
-	Extension(mut sess): Extension<Session>,
+	Extension(mut session): Extension<Session>,
 	State(rpc_state): State<Arc<RpcState>>,
 	headers: HeaderMap,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
@@ -101,8 +100,10 @@ async fn get_handler(
 			},
 		},
 	};
-	// Store connection id in session
-	sess.id = Some(id.to_string());
+	// This session supports live queries
+	session.rt = true;
+	// Store the connection id in session
+	session.id = Some(id.to_string());
 	// Check if a connection with this id already exists
 	if rpc_state.web_sockets.read().await.contains_key(&id) {
 		return Err(Error::Request);
@@ -121,7 +122,7 @@ async fn get_handler(
 		})
 		// Handle the WebSocket upgrade and process messages
 		.on_upgrade(move |socket| {
-			handle_socket(state.datastore.clone(), rpc_state, socket, sess, id)
+			handle_socket(state.datastore.clone(), rpc_state, socket, session, id)
 		}))
 }
 
@@ -129,7 +130,7 @@ async fn handle_socket(
 	datastore: Arc<Datastore>,
 	state: Arc<RpcState>,
 	ws: WebSocket,
-	sess: Session,
+	session: Session,
 	id: Uuid,
 ) {
 	// Check if there is a WebSocket protocol specified
@@ -139,10 +140,8 @@ async fn handle_socket(
 		// No protocol format was specified
 		_ => Format::Json,
 	};
-	// Create a new connection instance
-	let rpc = Websocket::new(datastore, state, id, sess, format);
 	// Serve the socket connection requests
-	Websocket::serve(rpc, ws).await;
+	Websocket::serve(id, ws, format, session, datastore, state).await;
 }
 
 async fn post_handler(
@@ -182,10 +181,8 @@ async fn post_handler(
 	// Parse the HTTP request body
 	match fmt.req_http(body) {
 		Ok(req) => {
-			// Parse the request RPC method type
-			let method = Method::parse(req.method);
 			// Execute the specified method
-			let res = rpc.execute(method, req.params).await;
+			let res = RpcContext::execute(&rpc, req.version, req.method, req.params).await;
 			// Return the HTTP response
 			fmt.res_http(res.into_response(None)).map_err(Error::from)
 		}

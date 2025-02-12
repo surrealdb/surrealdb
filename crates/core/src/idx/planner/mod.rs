@@ -58,12 +58,13 @@ impl<'a> StatementContext<'a> {
 		stm: &'a Statement<'a>,
 	) -> Result<Self, Error> {
 		let is_perm = opt.check_perms(stm.into())?;
+		let (ns, db) = opt.ns_db()?;
 		Ok(Self {
 			ctx,
 			opt,
 			stm,
-			ns: opt.ns()?,
-			db: opt.db()?,
+			ns,
+			db,
 			fields: stm.expr(),
 			with: stm.with(),
 			order: stm.order(),

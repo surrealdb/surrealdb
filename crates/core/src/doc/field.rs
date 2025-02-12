@@ -5,6 +5,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::iam::Action;
+use crate::kvs::KeyEncode as _;
 use crate::sql::data::Data;
 use crate::sql::idiom::Idiom;
 use crate::sql::kind::Kind;
@@ -57,10 +58,7 @@ impl Document {
 				if !keys.contains(fd) {
 					match fd {
 						// Built-in fields
-						fd if fd.is_id() => continue,
-						fd if fd.is_in() => continue,
-						fd if fd.is_out() => continue,
-						fd if fd.is_meta() => continue,
+						fd if fd.is_special() => continue,
 						// Custom fields
 						fd => match opt.strict {
 							// If strict, then throw an error on an undefined field
@@ -691,16 +689,17 @@ impl FieldEditContext<'_> {
 				RefAction::Ignore => Ok(()),
 				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
+					let (ns, db) = self.opt.ns_db()?;
 					let key = crate::key::r#ref::new(
-						self.opt.ns()?,
-						self.opt.db()?,
+						ns,
+						db,
 						&thing.tb,
 						&thing.id,
 						&self.rid.tb,
 						&self.def.name.to_string(),
 						&self.rid.id,
 					)
-					.encode()
+					.encode_owned()
 					.unwrap();
 
 					self.ctx.tx().set(key, vec![], None).await?;
@@ -709,17 +708,18 @@ impl FieldEditContext<'_> {
 				}
 				// Delete the reference, if it exists
 				RefAction::Delete(things, ff) => {
+					let (ns, db) = self.opt.ns_db()?;
 					for thing in things {
 						let key = crate::key::r#ref::new(
-							self.opt.ns()?,
-							self.opt.db()?,
+							ns,
+							db,
 							&thing.tb,
 							&thing.id,
 							&self.rid.tb,
 							&ff,
 							&self.rid.id,
 						)
-						.encode()
+						.encode_owned()
 						.unwrap();
 
 						self.ctx.tx().del(key).await?;

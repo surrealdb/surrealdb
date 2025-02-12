@@ -4,14 +4,14 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::{Base, Ident, Value};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use uuid::Uuid;
 
 #[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RemoveTableStatement {
@@ -29,11 +29,15 @@ impl RemoveTableStatement {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 			// Get the NS and DB
-			let ns = opt.ns()?;
-			let db = opt.db()?;
+			let (ns, db) = opt.ns_db()?;
 			// Get the transaction
 			let txn = ctx.tx();
 			// Remove the index stores
+			#[cfg(not(target_family = "wasm"))]
+			ctx.get_index_stores()
+				.table_removed(ctx.get_index_builder(), &txn, ns, db, &self.name)
+				.await?;
+			#[cfg(target_family = "wasm")]
 			ctx.get_index_stores().table_removed(&txn, ns, db, &self.name).await?;
 			// Get the defined table
 			let tb = txn.get_tb(ns, db, &self.name).await?;
@@ -58,10 +62,10 @@ impl RemoveTableStatement {
 				let tb = txn.get_tb(ns, db, &ft.name).await?;
 				txn.set(
 					key,
-					DefineTableStatement {
+					revision::to_vec(&DefineTableStatement {
 						view: None,
 						..tb.as_ref().clone()
-					},
+					})?,
 					None,
 				)
 				.await?;
@@ -82,10 +86,10 @@ impl RemoveTableStatement {
 					let tb = txn.get_tb(ns, db, ft).await?;
 					txn.set(
 						key,
-						DefineTableStatement {
+						revision::to_vec(&DefineTableStatement {
 							cache_tables_ts: Uuid::now_v7(),
 							..tb.as_ref().clone()
-						},
+						})?,
 						None,
 					)
 					.await?;

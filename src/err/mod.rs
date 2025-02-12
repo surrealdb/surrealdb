@@ -12,6 +12,7 @@ use std::string::FromUtf8Error as Utf8Error;
 use surrealdb::error::Db as SurrealDbError;
 use surrealdb::iam::Error as SurrealIamError;
 use surrealdb::Error as SurrealError;
+use surrealdb_core::api::err::ApiError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -76,6 +77,12 @@ pub enum Error {
 
 	#[error("The HTTP route '{0}' is forbidden")]
 	ForbiddenRoute(String),
+
+	#[error("The HTTP route '{0}' is not found")]
+	NotFound(String),
+
+	#[error("An API error occurred: {0}")]
+	Api(ApiError),
 }
 
 impl From<Error> for String {
@@ -152,10 +159,11 @@ impl<T: std::fmt::Debug> From<ciborium::ser::Error<T>> for Error {
 
 impl From<surrealdb::error::Db> for Error {
 	fn from(error: surrealdb::error::Db) -> Error {
-		if matches!(error, surrealdb::error::Db::InvalidAuth) {
-			return Error::InvalidAuth;
+		match error {
+			surrealdb::error::Db::InvalidAuth => Error::InvalidAuth,
+			surrealdb::error::Db::ApiError(e) => Error::Api(e),
+			e => Error::Db(e.into()),
 		}
-		Error::Db(error.into())
 	}
 }
 
@@ -210,6 +218,15 @@ impl IntoResponse for Error {
 					information: Some(err.to_string()),
 				})
 			),
+			Error::NotFound(_) => (
+				StatusCode::NOT_FOUND,
+				Json(Message {
+					code: StatusCode::NOT_FOUND.as_u16(),
+					details: Some("Not found".to_string()),
+					description: Some("The request was made to an endpoint which does not exist.".to_string()),
+					information: None,
+				}),
+			),
 			Error::InvalidType => (
 				StatusCode::UNSUPPORTED_MEDIA_TYPE,
 				Json(Message {
@@ -226,6 +243,15 @@ impl IntoResponse for Error {
 					details: Some("Health check failed".to_string()),
 					description: Some("The database health check for this instance failed. There was an issue with the underlying storage engine.".to_string()),
 					information: Some(self.to_string()),
+				}),
+			),
+			Error::Api(e) => (
+				e.status_code(),
+				Json(Message {
+					code: e.status_code().as_u16(),
+					details: Some("An error occured while processing this API request".to_string()),
+					description: Some(e.into()),
+					information: None,
 				}),
 			),
 			_ => (
