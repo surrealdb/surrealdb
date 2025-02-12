@@ -101,7 +101,7 @@ impl Config {
 
 	/// Set the capabilities for the database
 	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
-		self.capabilities = capabilities.build();
+		self.capabilities = capabilities.into_inner();
 		self
 	}
 
