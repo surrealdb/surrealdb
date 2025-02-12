@@ -1,10 +1,10 @@
 //! The capabilities that can be enabled for a database instance
 
-use std::collections::HashSet;
+use std::{collections::HashSet, mem};
 
 use surrealdb_core::dbs::capabilities::{
-	Capabilities as CoreCapabilities, FuncTarget, NetTarget, ParseFuncTargetError,
-	ParseNetTargetError, Targets,
+	Capabilities as CoreCapabilities, FuncTarget, ParseFuncTargetError, ParseNetTargetError,
+	Targets,
 };
 
 /// Capabilities are used to limit what users are allowed to do using queries.
@@ -91,10 +91,6 @@ use surrealdb_core::dbs::capabilities::{
 #[derive(Debug, Clone)]
 pub struct Capabilities {
 	cap: CoreCapabilities,
-	allow_funcs: Targets<FuncTarget>,
-	deny_funcs: Targets<FuncTarget>,
-	allow_net: Targets<NetTarget>,
-	deny_net: Targets<NetTarget>,
 }
 
 impl Default for Capabilities {
@@ -109,33 +105,33 @@ impl Capabilities {
 	/// Default capabilities enables live query notifications and all (non-scripting) functions.
 	pub fn new() -> Self {
 		Capabilities {
-			cap: CoreCapabilities::default(),
-			allow_funcs: Targets::All,
-			deny_funcs: Targets::None,
-			allow_net: Targets::None,
-			deny_net: Targets::None,
+			cap: CoreCapabilities::default()
+				.with_functions(Targets::All)
+				.without_functions(Targets::None)
+				.with_network_targets(Targets::None)
+				.without_network_targets(Targets::None),
 		}
 	}
 
 	/// Create a builder with all capabilities enabled.
 	pub fn all() -> Self {
 		Capabilities {
-			cap: CoreCapabilities::all(),
-			allow_funcs: Targets::All,
-			deny_funcs: Targets::None,
-			allow_net: Targets::All,
-			deny_net: Targets::None,
+			cap: CoreCapabilities::all()
+				.with_functions(Targets::All)
+				.without_functions(Targets::None)
+				.with_network_targets(Targets::All)
+				.without_network_targets(Targets::None),
 		}
 	}
 
 	/// Create a builder with all capabilities disabled.
 	pub fn none() -> Self {
 		Capabilities {
-			cap: CoreCapabilities::none(),
-			allow_funcs: Targets::None,
-			deny_funcs: Targets::None,
-			allow_net: Targets::None,
-			deny_net: Targets::None,
+			cap: CoreCapabilities::none()
+				.with_functions(Targets::None)
+				.without_functions(Targets::None)
+				.with_network_targets(Targets::None)
+				.without_network_targets(Targets::None),
 		}
 	}
 
@@ -143,7 +139,6 @@ impl Capabilities {
 	pub fn with_scripting(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_scripting(enabled),
-			..self
 		}
 	}
 
@@ -152,7 +147,6 @@ impl Capabilities {
 	pub fn with_guest_access(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_guest_access(enabled),
-			..self
 		}
 	}
 
@@ -160,13 +154,12 @@ impl Capabilities {
 	pub fn with_live_query_notifications(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_live_query_notifications(enabled),
-			..self
 		}
 	}
 
 	/// Set the allow list to allow all functions
 	pub fn allow_all_functions(&mut self) -> &mut Self {
-		self.allow_funcs = Targets::All;
+		*self.cap.allowed_functions_mut() = Targets::All;
 		self
 	}
 
@@ -178,7 +171,7 @@ impl Capabilities {
 
 	/// Set the deny list to deny all functions
 	pub fn deny_all_functions(&mut self) -> &mut Self {
-		self.deny_funcs = Targets::All;
+		*self.cap.denied_functions_mut() = Targets::All;
 		self
 	}
 
@@ -190,7 +183,7 @@ impl Capabilities {
 
 	/// Set the allow list to allow no function
 	pub fn allow_none_functions(&mut self) -> &mut Self {
-		self.allow_funcs = Targets::None;
+		*self.cap.allowed_functions_mut() = Targets::None;
 		self
 	}
 
@@ -202,7 +195,7 @@ impl Capabilities {
 
 	/// Set the deny list to deny no function
 	pub fn deny_none_functions(&mut self) -> &mut Self {
-		self.deny_funcs = Targets::None;
+		*self.cap.denied_functions_mut() = Targets::None;
 		self
 	}
 
@@ -237,11 +230,11 @@ impl Capabilities {
 
 	fn allow_function_str(&mut self, s: &str) -> Result<&mut Self, ParseFuncTargetError> {
 		let target: FuncTarget = s.parse()?;
-		match self.allow_funcs {
+		match self.cap.allowed_functions_mut() {
 			Targets::None | Targets::All => {
 				let mut set = HashSet::new();
 				set.insert(target);
-				self.allow_funcs = Targets::Some(set);
+				self.cap = mem::take(&mut self.cap).with_functions(Targets::Some(set));
 			}
 			Targets::Some(ref mut x) => {
 				x.insert(target);
@@ -276,11 +269,11 @@ impl Capabilities {
 
 	fn deny_function_str(&mut self, s: &str) -> Result<&mut Self, ParseFuncTargetError> {
 		let target: FuncTarget = s.parse()?;
-		match self.deny_funcs {
+		match self.cap.denied_functions_mut() {
 			Targets::None | Targets::All => {
 				let mut set = HashSet::new();
 				set.insert(target);
-				self.deny_funcs = Targets::Some(set);
+				*self.cap.denied_functions_mut() = Targets::Some(set);
 			}
 			Targets::Some(ref mut x) => {
 				x.insert(target);
@@ -292,7 +285,7 @@ impl Capabilities {
 
 	/// Set the allow list to allow all net targets
 	pub fn allow_all_net_targets(&mut self) -> &mut Self {
-		self.allow_net = Targets::All;
+		*self.cap.allowed_network_targets_mut() = Targets::All;
 		self
 	}
 
@@ -304,7 +297,7 @@ impl Capabilities {
 
 	/// Set the deny list to deny all net targets
 	pub fn deny_all_net_targets(&mut self) -> &mut Self {
-		self.deny_net = Targets::All;
+		*self.cap.denied_network_targets_mut() = Targets::All;
 		self
 	}
 
@@ -316,7 +309,7 @@ impl Capabilities {
 
 	/// Set the allow list to allow no net targets
 	pub fn allow_none_net_targets(&mut self) -> &mut Self {
-		self.allow_net = Targets::None;
+		*self.cap.allowed_network_targets_mut() = Targets::None;
 		self
 	}
 
@@ -328,7 +321,7 @@ impl Capabilities {
 
 	/// Set the deny list to deny no net targets
 	pub fn deny_none_net_targets(&mut self) -> &mut Self {
-		self.deny_net = Targets::None;
+		*self.cap.denied_network_targets_mut() = Targets::None;
 		self
 	}
 
@@ -363,11 +356,11 @@ impl Capabilities {
 
 	fn allow_net_target_str(&mut self, s: &str) -> Result<&mut Self, ParseNetTargetError> {
 		let target = s.parse()?;
-		match self.allow_net {
+		match self.cap.allowed_network_targets_mut() {
 			Targets::None | Targets::All => {
 				let mut set = HashSet::new();
 				set.insert(target);
-				self.allow_net = Targets::Some(set);
+				*self.cap.allowed_network_targets_mut() = Targets::Some(set);
 			}
 			Targets::Some(ref mut x) => {
 				x.insert(target);
@@ -402,11 +395,11 @@ impl Capabilities {
 
 	fn deny_net_target_str(&mut self, s: &str) -> Result<&mut Self, ParseNetTargetError> {
 		let target = s.parse()?;
-		match self.deny_net {
+		match self.cap.denied_network_targets_mut() {
 			Targets::None | Targets::All => {
 				let mut set = HashSet::new();
 				set.insert(target);
-				self.deny_net = Targets::Some(set);
+				*self.cap.denied_network_targets_mut() = Targets::Some(set);
 			}
 			Targets::Some(ref mut x) => {
 				x.insert(target);
@@ -416,11 +409,7 @@ impl Capabilities {
 		Ok(self)
 	}
 
-	pub(crate) fn build(self) -> CoreCapabilities {
+	pub(crate) fn into_inner(self) -> CoreCapabilities {
 		self.cap
-			.with_functions(self.allow_funcs)
-			.without_functions(self.deny_funcs)
-			.with_network_targets(self.allow_net)
-			.without_network_targets(self.deny_net)
 	}
 }
