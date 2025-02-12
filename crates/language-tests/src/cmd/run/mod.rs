@@ -323,7 +323,7 @@ async fn run_test_with_dbs(
 	set: &TestSet,
 	dbs: &mut Datastore,
 ) -> Result<TestTaskResult> {
-	let mut session = Session::owner();
+	let session = util::session_from_test_config(&set[id].config);
 
 	let config = &set[id].config;
 	let timeout_duration = config
@@ -331,13 +331,6 @@ async fn run_test_with_dbs(
 		.as_ref()
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
-
-	if let Some(ns) = config.namespace() {
-		session = session.with_ns(ns)
-	}
-	if let Some(db) = config.database() {
-		session = session.with_db(db)
-	}
 
 	for import in set[id].config.imports() {
 		let Some(test) = set.find_all(import) else {
