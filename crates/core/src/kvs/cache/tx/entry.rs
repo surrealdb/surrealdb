@@ -1,5 +1,6 @@
 use crate::dbs::node::Node;
 use crate::err::Error;
+use crate::sql::statements::define::ApiDefinition;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
@@ -44,6 +45,8 @@ pub(crate) enum Entry {
 	Nag(Arc<[AccessGrant]>),
 	/// A slice of DefineDatabaseStatement specified on a namespace.
 	Dbs(Arc<[DefineDatabaseStatement]>),
+	/// A slice of ApiDefinition specified on a namespace.
+	Aps(Arc<[ApiDefinition]>),
 	/// A slice of DefineAnalyzerStatement specified on a namespace.
 	Azs(Arc<[DefineAnalyzerStatement]>),
 	/// A slice of DefineAccessStatement specified on a database.
@@ -179,6 +182,14 @@ impl Entry {
 		match self {
 			Entry::Dus(v) => Ok(v),
 			_ => Err(fail!("Unable to convert type into Entry::Dus")),
+		}
+	}
+	/// Converts this cache entry into a slice of [`ApiDefinition`].
+	/// This panics if called on a cache entry that is not an [`Entry::Aps`].
+	pub(crate) fn try_into_aps(self) -> Result<Arc<[ApiDefinition]>, Error> {
+		match self {
+			Entry::Aps(v) => Ok(v),
+			_ => Err(fail!("Unable to convert type into Entry::Aps")),
 		}
 	}
 	/// Converts this cache entry into a slice of [`DefineAnalyzerStatement`].

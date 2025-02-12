@@ -45,6 +45,10 @@ async fn post_handler(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Sql);
 		return Err(Error::ForbiddenRoute(RouteTarget::Sql.to_string()));
 	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Sql.to_string()));
+	}
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query

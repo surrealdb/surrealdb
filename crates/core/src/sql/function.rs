@@ -94,6 +94,15 @@ impl Function {
 			Self::Custom(f, _) => format!("fn::{f}").into(),
 		}
 	}
+	/// Checks if this function invocation is writable
+	pub fn writeable(&self) -> bool {
+		match self {
+			Self::Custom(_, _) => true,
+			Self::Script(_, _) => true,
+			Self::Normal(f, _) if f == "api::invoke" => true,
+			_ => self.args().iter().any(Value::writeable),
+		}
+	}
 	/// Convert this function to an aggregate
 	pub fn aggregate(&self, val: Value) -> Result<Self, Error> {
 		match self {

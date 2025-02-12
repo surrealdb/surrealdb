@@ -1,3 +1,4 @@
+pub mod api;
 pub mod graphql;
 
 use crate::ctx::Context;
@@ -8,6 +9,7 @@ use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Value};
 
+use api::ApiConfig;
 use graphql::GraphQLConfig;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -29,6 +31,7 @@ pub struct DefineConfigStatement {
 #[non_exhaustive]
 pub enum ConfigInner {
 	GraphQL(GraphQLConfig),
+	Api(ApiConfig),
 }
 
 impl DefineConfigStatement {
@@ -43,19 +46,24 @@ impl DefineConfigStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Config(ConfigKind::GraphQL), &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
+		// Get the config kind
+		let cg = match &self.inner {
+			ConfigInner::GraphQL(_) => "graphql",
+			ConfigInner::Api(_) => "api",
+		};
 		// Check if the definition exists
 		let (ns, db) = opt.ns_db()?;
-		if txn.get_db_config(ns, db, "graphql").await.is_ok() {
+		if txn.get_db_config(ns, db, cg).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::CgAlreadyExists {
-					name: "graphql".to_string(),
+					name: cg.to_string(),
 				});
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::cg::new(ns, db, "graphql");
+		let key = crate::key::database::cg::new(ns, db, cg);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.replace(key, revision::to_vec(self)?).await?;
@@ -74,8 +82,14 @@ impl ConfigInner {
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig, Error> {
 		match self {
 			ConfigInner::GraphQL(g) => Ok(g),
-			#[allow(unreachable_patterns)]
 			c => Err(fail!("found {c} when a graphql config was expected")),
+		}
+	}
+
+	pub fn try_into_api(&self) -> Result<&ApiConfig, Error> {
+		match self {
+			ConfigInner::Api(a) => Ok(a),
+			c => Err(fail!("found {c} when a api config was expected")),
 		}
 	}
 }
@@ -90,6 +104,7 @@ impl From<&ConfigInner> for ConfigKind {
 	fn from(value: &ConfigInner) -> Self {
 		match value {
 			ConfigInner::GraphQL(_) => ConfigKind::GraphQL,
+			ConfigInner::Api(_) => ConfigKind::Api,
 		}
 	}
 }
@@ -99,6 +114,9 @@ impl InfoStructure for DefineConfigStatement {
 		match self.inner {
 			ConfigInner::GraphQL(v) => Value::from(map!(
 				"graphql" => v.structure()
+			)),
+			ConfigInner::Api(v) => Value::from(map!(
+				"api" => v.structure()
 			)),
 		}
 	}
@@ -124,6 +142,7 @@ impl Display for ConfigInner {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {
 			ConfigInner::GraphQL(v) => Display::fmt(v, f),
+			ConfigInner::Api(v) => Display::fmt(v, f),
 		}
 	}
 }

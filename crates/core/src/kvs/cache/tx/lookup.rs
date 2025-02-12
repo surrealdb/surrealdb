@@ -29,6 +29,8 @@ pub(crate) enum Lookup<'a> {
 	Das(&'a str, &'a str),
 	/// A cache key for database access grants
 	Dgs(&'a str, &'a str, &'a str),
+	/// A cache key for apis (on a database)
+	Aps(&'a str, &'a str),
 	/// A cache key for analyzers (on a database)
 	Azs(&'a str, &'a str),
 	/// A cache key for functions (on a database)
@@ -75,6 +77,8 @@ pub(crate) enum Lookup<'a> {
 	Da(&'a str, &'a str, &'a str),
 	/// A cache key for a database access grant
 	Dg(&'a str, &'a str, &'a str, &'a str),
+	/// A cache key for an api (on a database)
+	Ap(&'a str, &'a str, &'a str),
 	/// A cache key for an analyzer (on a database)
 	Az(&'a str, &'a str, &'a str),
 	/// A cache key for a function (on a database)
@@ -114,6 +118,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Dus(la, lb), Key::Dus(ka, kb)) => la == ka && lb == kb,
 			(Self::Das(la, lb), Key::Das(ka, kb)) => la == ka && lb == kb,
 			(Self::Dgs(la, lb, lc), Key::Dgs(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::Aps(la, lb), Key::Aps(ka, kb)) => la == ka && lb == kb,
 			(Self::Azs(la, lb), Key::Azs(ka, kb)) => la == ka && lb == kb,
 			(Self::Fcs(la, lb), Key::Fcs(ka, kb)) => la == ka && lb == kb,
 			(Self::Mls(la, lb), Key::Mls(ka, kb)) => la == ka && lb == kb,
@@ -138,6 +143,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Du(la, lb, lc), Key::Du(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Da(la, lb, lc), Key::Da(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Dg(la, lb, lc, ld), Key::Dg(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
+			(Self::Ap(la, lb, lc), Key::Ap(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Az(la, lb, lc), Key::Az(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Fc(la, lb, lc), Key::Fc(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Ml(la, lb, lc, ld), Key::Ml(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,

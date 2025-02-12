@@ -7,6 +7,7 @@ use crate::sql::{
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
 	Operation, Thing, Value,
 };
+use http::{HeaderMap, HeaderName, HeaderValue};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,35 @@ impl From<BTreeMap<&str, Value>> for Object {
 impl From<BTreeMap<String, Value>> for Object {
 	fn from(v: BTreeMap<String, Value>) -> Self {
 		Self(v)
+	}
+}
+
+impl FromIterator<(String, Value)> for Object {
+	fn from_iter<T: IntoIterator<Item = (String, Value)>>(iter: T) -> Self {
+		Self(BTreeMap::from_iter(iter))
+	}
+}
+
+impl From<BTreeMap<String, String>> for Object {
+	fn from(v: BTreeMap<String, String>) -> Self {
+		Self(v.into_iter().map(|(k, v)| (k, Value::from(v))).collect())
+	}
+}
+
+impl TryFrom<HeaderMap> for Object {
+	type Error = Error;
+	fn try_from(v: HeaderMap) -> Result<Self, Error> {
+		Ok(Self(
+			v.into_iter()
+				.map(|(k, v)| {
+					if let Some(k) = k {
+						Ok((k.to_string(), Value::from(v.to_str()?)))
+					} else {
+						Err(Error::Unreachable("Encountered a header without a name".into()))
+					}
+				})
+				.collect::<Result<BTreeMap<String, Value>, Error>>()?,
+		))
 	}
 }
 
@@ -135,6 +165,27 @@ impl IntoIterator for Object {
 	type IntoIter = std::collections::btree_map::IntoIter<String, Value>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
+	}
+}
+
+impl TryInto<BTreeMap<String, String>> for Object {
+	type Error = Error;
+	fn try_into(self) -> Result<BTreeMap<String, String>, Self::Error> {
+		self.into_iter().map(|(k, v)| Ok((k, v.coerce_to_string()?))).collect()
+	}
+}
+
+impl TryInto<HeaderMap> for Object {
+	type Error = Error;
+	fn try_into(self) -> Result<HeaderMap, Self::Error> {
+		let mut headermap = HeaderMap::new();
+		for (k, v) in self.into_iter() {
+			let k: HeaderName = k.parse()?;
+			let v: HeaderValue = v.coerce_to_string()?.parse()?;
+			headermap.insert(k, v);
+		}
+
+		Ok(headermap)
 	}
 }
 

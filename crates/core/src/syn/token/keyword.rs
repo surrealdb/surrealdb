@@ -32,6 +32,7 @@ keyword! {
 	Always => "ALWAYS",
 	Analyze => "ANALYZE",
 	Analyzer => "ANALYZER",
+	Api => "API",
 	As => "AS",
 	Ascending => "ASCENDING",
 	Ascii => "ASCII",
@@ -101,6 +102,7 @@ keyword! {
 	Grant => "GRANT",
 	Graphql => "GRAPHQL",
 	Group => "GROUP",
+	Headers => "HEADERS",
 	Highlights => "HIGHLIGHTS",
 	Hnsw => "HNSW",
 	Ignore => "IGNORE",
@@ -125,6 +127,7 @@ keyword! {
 	M => "M",
 	M0 => "M0",
 	Mapper => "MAPPER",
+	Middleware => "MIDDLEWARE",
 	Merge => "MERGE",
 	Model => "MODEL",
 	MTree => "MTREE",
@@ -264,6 +267,11 @@ keyword! {
 
 	FN => "fn",
 	ML => "ml",
+
+	Get => "GET",
+	Post => "POST",
+	Put => "PUT",
+	Trace => "TRACE",
 }
 
 pub(crate) use keyword_t;

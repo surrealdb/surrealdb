@@ -1,8 +1,9 @@
 #![cfg(feature = "allocator")]
 
+use std::alloc::{GlobalAlloc, Layout, System};
+
 #[cfg(feature = "allocation-tracking")]
 use parking_lot::Mutex;
-use std::alloc::{GlobalAlloc, Layout, System};
 #[cfg(feature = "allocation-tracking")]
 use std::cell::RefCell;
 #[cfg(feature = "allocation-tracking")]

@@ -346,6 +346,9 @@ async fn run_test_with_dbs(
 		bearer_access_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::BearerAccess),
+		define_api_enabled: dbs
+			.get_capabilities()
+			.allows_experimental(&ExperimentalTarget::DefineApi),
 		..Default::default()
 	};
 	let mut parser = syn::parser::Parser::new_with_settings(source, settings);

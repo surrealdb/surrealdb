@@ -8,16 +8,15 @@
 	feature = "kv-surrealcs",
 ))]
 
+use super::Datastore;
 use crate::kvs::clock::SizedClock;
 use std::{future::Future, sync::Arc};
 use uuid::Uuid;
 
-use super::{Datastore, LockType, Transaction, TransactionType};
-
 macro_rules! include_tests {
-	($new_ds:ident, $new_tx:ident => $($name:ident),* $(,)?) => {
+	($new_ds:ident => $($name:ident),* $(,)?) => {
 		$(
-			super::$name::define_tests!($new_ds, $new_tx);
+			super::$name::define_tests!($new_ds);
 		)*
 	};
 }
@@ -50,20 +49,6 @@ pub(crate) enum Kvs {
 #[allow(dead_code)]
 type ClockType = Arc<SizedClock>;
 
-trait CreateTx {
-	async fn create_tx(&self, ty: TransactionType, lock_ty: LockType) -> Transaction;
-}
-
-impl<F, Fut> CreateTx for F
-where
-	F: Fn(TransactionType, LockType) -> Fut,
-	Fut: Future<Output = Transaction>,
-{
-	async fn create_tx(&self, tx_ty: TransactionType, lock_ty: LockType) -> Transaction {
-		(self)(tx_ty, lock_ty).await
-	}
-}
-
 trait CreateDs {
 	async fn create_ds(&self, id: Uuid, ty: ClockType) -> (Datastore, Kvs);
 }
@@ -81,14 +66,7 @@ where
 #[cfg(feature = "kv-mem")]
 mod mem {
 	use super::{ClockType, Kvs};
-	use crate::{
-		dbs::node::Timestamp,
-		kvs::{
-			clock::{FakeClock, SizedClock},
-			Datastore, LockType, Transaction, TransactionType,
-		},
-	};
-	use std::sync::Arc;
+	use crate::kvs::Datastore;
 	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
@@ -100,26 +78,13 @@ mod mem {
 		(ds, Kvs::Mem)
 	}
 
-	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
-		let nodeid = Uuid::new_v4();
-		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
-	}
-
-	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
 }
 
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb {
 	use super::{ClockType, Kvs};
-	use crate::{
-		dbs::node::Timestamp,
-		kvs::{
-			clock::{FakeClock, SizedClock},
-			Datastore, LockType, Transaction, TransactionType,
-		},
-	};
-	use std::sync::Arc;
+	use crate::kvs::Datastore;
 	use uuid::Uuid;
 
 	use temp_dir::TempDir;
@@ -134,26 +99,13 @@ mod rocksdb {
 		(ds, Kvs::Rocksdb)
 	}
 
-	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
-		let nodeid = Uuid::new_v4();
-		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
-	}
-
-	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator);
+	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator);
 }
 
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
 	use super::{ClockType, Kvs};
-	use crate::{
-		dbs::node::Timestamp,
-		kvs::{
-			clock::{FakeClock, SizedClock},
-			Datastore, LockType, Transaction, TransactionType,
-		},
-	};
-	use std::sync::Arc;
+	use crate::kvs::Datastore;
 	use uuid::Uuid;
 
 	use temp_dir::TempDir;
@@ -168,27 +120,13 @@ mod surrealkv {
 		(ds, Kvs::SurrealKV)
 	}
 
-	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
-		let nodeid = Uuid::new_v4();
-		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-		let (ds, _) = new_ds(nodeid, clock).await;
-		ds.transaction(write, lock).await.unwrap()
-	}
-
-	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
 }
 
 #[cfg(feature = "kv-tikv")]
 mod tikv {
 	use super::{ClockType, Kvs};
-	use crate::{
-		dbs::node::Timestamp,
-		kvs::{
-			clock::{FakeClock, SizedClock},
-			Datastore, LockType, Transaction, TransactionType,
-		},
-	};
-	use std::sync::Arc;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
@@ -204,26 +142,13 @@ mod tikv {
 		(ds, Kvs::Tikv)
 	}
 
-	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
-		let nodeid = Uuid::new_v4();
-		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
-	}
-
-	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp,reverse_iterator);
+	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp,reverse_iterator);
 }
 
 #[cfg(feature = "kv-fdb")]
 mod fdb {
 	use super::{ClockType, Kvs};
-	use crate::{
-		dbs::node::Timestamp,
-		kvs::{
-			clock::{FakeClock, SizedClock},
-			Datastore, LockType, Transaction, TransactionType,
-		},
-	};
-	use std::sync::Arc;
+	use crate::kvs::{Datastore, LockType, TransactionType};
 	use uuid::Uuid;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
@@ -239,11 +164,5 @@ mod fdb {
 		(ds, Kvs::Fdb)
 	}
 
-	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
-		let nodeid = Uuid::new_v4();
-		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-		new_ds(nodeid, clock).await.0.transaction(write, lock).await.unwrap()
-	}
-
-	include_tests!(new_ds, new_tx => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp);
+	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp);
 }

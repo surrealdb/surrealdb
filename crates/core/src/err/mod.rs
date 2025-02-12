@@ -1,3 +1,4 @@
+use crate::api::err::ApiError;
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
@@ -12,6 +13,7 @@ use bincode::Error as BincodeError;
 #[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
+use http::header::{InvalidHeaderName, InvalidHeaderValue, ToStrError};
 use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
@@ -391,6 +393,12 @@ pub enum Error {
 	#[error("The cluster live query '{name}' does not exist")]
 	LqNotFound {
 		name: String,
+	},
+
+	/// The requested api does not exist
+	#[error("The api '/{value}' does not exist")]
+	ApNotFound {
+		value: String,
 	},
 
 	/// The requested analyzer does not exist
@@ -902,6 +910,12 @@ pub enum Error {
 		id: String,
 	},
 
+	/// The requested api already exists
+	#[error("The api '/{value}' already exists")]
+	ApAlreadyExists {
+		value: String,
+	},
+
 	/// The requested analyzer already exists
 	#[error("The analyzer '{name}' already exists")]
 	AzAlreadyExists {
@@ -1272,11 +1286,26 @@ pub enum Error {
 		existing_name: String,
 		existing_kind: String,
 	},
+
+	#[error("An API error occurred: {0}")]
+	ApiError(ApiError),
+
+	#[error("The string could not be parsed into a bytesize")]
+	InvalidBytesize,
+
+	#[error("The string could not be parsed into a path: {0}")]
+	InvalidPath(String),
 }
 
 impl From<Error> for String {
 	fn from(e: Error) -> String {
 		e.to_string()
+	}
+}
+
+impl From<ApiError> for Error {
+	fn from(value: ApiError) -> Self {
+		Error::ApiError(value)
 	}
 }
 
@@ -1295,6 +1324,24 @@ impl From<JWTError> for Error {
 impl From<regex::Error> for Error {
 	fn from(error: regex::Error) -> Self {
 		Error::InvalidRegex(error.to_string())
+	}
+}
+
+impl From<InvalidHeaderName> for Error {
+	fn from(error: InvalidHeaderName) -> Self {
+		Error::Unreachable(error.to_string())
+	}
+}
+
+impl From<InvalidHeaderValue> for Error {
+	fn from(error: InvalidHeaderValue) -> Self {
+		Error::Unreachable(error.to_string())
+	}
+}
+
+impl From<ToStrError> for Error {
+	fn from(error: ToStrError) -> Self {
+		Error::Unreachable(error.to_string())
 	}
 }
 
