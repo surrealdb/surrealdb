@@ -48,15 +48,21 @@ pub struct TestTaskContext {
 	pub result: Sender<(TestId, TestTaskResult)>,
 }
 
+async fn create_base_datastore() -> Result<Datastore> {
+	let db = Datastore::new("memory")
+		.await?
+		.with_capabilities(Capabilities::all())
+		.with_notifications()
+		.with_auth_enabled(true);
+
+	db.bootstrap().await?;
+
+	Ok(db)
+}
+
 async fn fill_datastores(sender: &Sender<Datastore>, num_jobs: usize) -> Result<()> {
 	for _ in 0..num_jobs {
-		let db = Datastore::new("memory")
-			.await?
-			.with_capabilities(Capabilities::all())
-			.with_notifications();
-
-		db.bootstrap().await?;
-
+		let db = create_base_datastore().await?;
 		sender.send(db).await.unwrap();
 	}
 	Ok(())
@@ -258,8 +264,11 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		ds.with_capabilities(capabilities)
 	} else {
 		return_channel = None;
-		let ds =
-			Datastore::new("memory").await?.with_capabilities(capabilities).with_notifications();
+		let ds = Datastore::new("memory")
+			.await?
+			.with_capabilities(capabilities)
+			.with_notifications()
+			.with_auth_enabled(true);
 
 		ds.bootstrap().await?;
 
@@ -291,12 +300,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 				.expect("result channel quit early");
 
 			if let Some(return_channel) = return_channel {
-				let db = Datastore::new("memory")
-					.await?
-					.with_capabilities(Capabilities::all())
-					.with_notifications();
-
-				db.bootstrap().await?;
+				let ds = create_base_datastore().await?;
 
 				return_channel.send(ds).await.expect("datastore return channel quit early");
 			}
@@ -323,14 +327,23 @@ async fn run_test_with_dbs(
 	set: &TestSet,
 	dbs: &mut Datastore,
 ) -> Result<TestTaskResult> {
-	let session = util::session_from_test_config(&set[id].config);
-
 	let config = &set[id].config;
+
+	let session = util::session_from_test_config(config);
+
 	let timeout_duration = config
 		.env
 		.as_ref()
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
+
+	let mut import_session = Session::owner();
+	if let Some(ns) = session.ns.as_ref() {
+		import_session = import_session.with_ns(ns)
+	};
+	if let Some(db) = session.db.as_ref() {
+		import_session = import_session.with_db(db)
+	};
 
 	for import in set[id].config.imports() {
 		let Some(test) = set.find_all(import) else {
@@ -340,7 +353,7 @@ async fn run_test_with_dbs(
 		let source = str::from_utf8(&set[test].source)
 			.with_context(|| format!("Import `{import}` was not valid utf8"))?;
 
-		if let Err(e) = dbs.execute(source, &session, None).await {
+		if let Err(e) = dbs.execute(source, &import_session, None).await {
 			bail!("Failed to run import `{import}`: {e}");
 		}
 	}
@@ -355,6 +368,7 @@ async fn run_test_with_dbs(
 			.allows_experimental(&ExperimentalTarget::BearerAccess),
 		..Default::default()
 	};
+
 	let mut parser = syn::parser::Parser::new_with_settings(source, settings);
 	let mut stack = reblessive::Stack::new();
 
@@ -413,9 +427,7 @@ async fn run_test_with_dbs(
 				.await
 				.context("failed to remove test database")?;
 		}
-	}
 
-	if let Some(ref ns) = session.ns {
 		let session = Session::owner();
 		dbs.execute(&format!("REMOVE NAMESPACE IF EXISTS `{ns}`;"), &session, None)
 			.await
