@@ -37,6 +37,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 
 [[package]]
+name = "affinitypool"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2dde2a385b82232b559baeec740c37809051c596f9b56e7da0d0da2c8e8f54f6"
+dependencies = [
+ "async-channel",
+ "num_cpus",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "ahash"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2713,18 +2725,19 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22f53179a035f881adad8c4d58a2c599c6b4a8325b989c68d178d7a34d1b1e4c"
 dependencies = [
- "revision-derive 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revision-derive 0.10.0",
 ]
 
 [[package]]
 name = "revision"
-version = "0.10.0"
-source = "git+https://github.com/surrealdb/revision.git#ccacbd2e74172ae4e5725801ba8a71cbc65fa371"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54b8ee532f15b2f0811eb1a50adf10d036e14a6cdae8d99893e7f3b921cb227d"
 dependencies = [
  "chrono",
  "geo",
  "regex",
- "revision-derive 0.10.0 (git+https://github.com/surrealdb/revision.git)",
+ "revision-derive 0.11.0",
  "roaring",
  "rust_decimal",
  "uuid",
@@ -2743,8 +2756,9 @@ dependencies = [
 
 [[package]]
 name = "revision-derive"
-version = "0.10.0"
-source = "git+https://github.com/surrealdb/revision.git#ccacbd2e74172ae4e5725801ba8a71cbc65fa371"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3415e1bc838c36f9a0a2ac60c0fa0851c72297685e66592c44870d82834dfa2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3379,9 +3393,10 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surrealdb-core"
-version = "2.1.4"
+version = "2.2.0"
 dependencies = [
  "addr",
+ "affinitypool",
  "ahash 0.8.11",
  "ammonia",
  "any_ascii",
@@ -3431,7 +3446,7 @@ dependencies = [
  "rayon",
  "reblessive",
  "regex",
- "revision 0.10.0 (git+https://github.com/surrealdb/revision.git)",
+ "revision 0.11.0",
  "ring",
  "rmpv",
  "roaring",
@@ -3482,7 +3497,7 @@ dependencies = [
  "lru",
  "parking_lot",
  "quick_cache 0.6.9",
- "revision 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revision 0.10.0",
  "tokio",
  "vart 0.9.1",
  "wasm-bindgen-futures",
