@@ -15,22 +15,17 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 		"USE NS test;
 		USE DB test;
 		{index};
-		CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
-		CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
-		CREATE session:3 SET other = 'test';
-		CREATE session:4 SET time = null;
-		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
-		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
-		SELECT * FROM session ORDER BY time DESC LIMIT 3 EXPLAIN;
-		SELECT * FROM session ORDER BY time DESC LIMIT 3;
-		SELECT * FROM session ORDER BY time DESC EXPLAIN;
-		SELECT * FROM session ORDER BY time DESC;"
+		CREATE |i:1500| SET v = rand::uuid::v7() RETURN NONE;
+		SELECT v FROM i ORDER BY v DESC LIMIT 3 EXPLAIN;
+		SELECT v FROM i ORDER BY v DESC LIMIT 3;
+		SELECT v FROM i ORDER BY v DESC EXPLAIN;
+		SELECT v FROM i ORDER BY v DESC;"
 	);
 
 	let mut r = ds.execute(&sql, &Session::owner(), None).await.unwrap();
-	assert_eq!(r.len(), 13);
-	// Check the first 7 statements are successful
-	for _ in 0..9 {
+	assert_eq!(r.len(), 8);
+	// Check the first statements are successful
+	for _ in 0..4 {
 		r.remove(0).result.unwrap();
 	}
 	r
@@ -42,18 +37,28 @@ fn check(r: &mut Vec<Response>, tmp: &str) {
 	assert_eq!(format!("{val:#}"), format!("{tmp:#}"));
 }
 
+/// Extract the array from a value
+fn check_array_is_sorted(v: &Value, expected_len: usize) {
+	if let Value::Array(a) = v {
+		assert_eq!(a.len(), expected_len);
+		assert!(a.windows(2).all(|w| w[0] > w[1]), "Values are not sorted: {a:?}");
+	} else {
+		panic!("Expected a Value::Array but get: {v}");
+	}
+}
+
 pub async fn standard(new_ds: impl CreateDs) {
-	let ref mut r = test(new_ds, "DEFINE INDEX time ON TABLE session COLUMNS time").await;
+	let ref mut r = test(new_ds, "DEFINE INDEX idx ON TABLE i COLUMNS v").await;
 	check(
 		r,
 		"[
 			{
 				detail: {
 					plan: {
-						index: 'time',
+						index: 'idx',
 						operator: 'ReverseOrder'
 					},
-					table: 'session'
+					table: 'i'
 				},
 				operation: 'Iterate Index'
 			},
@@ -66,33 +71,17 @@ pub async fn standard(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check(
-		r,
-		"[
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			}
-		]",
-	);
+	check_array_is_sorted(&r.remove(0).result.unwrap(), 3);
 	check(
 		r,
 		"[
 			{
 				detail: {
 					plan: {
-						index: 'time',
+						index: 'idx',
 						operator: 'ReverseOrder'
 					},
-					table: 'session'
+					table: 'i'
 				},
 				operation: 'Iterate Index'
 			},
@@ -104,49 +93,21 @@ pub async fn standard(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check(
-		r,
-		"[
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
-				id: session:4,
-				time: NULL
-			},
-			{
-				id: session:3,
-				other: 'test'
-			}
-		]",
-	);
+	check_array_is_sorted(&r.remove(0).result.unwrap(), 1500);
 }
 
 pub async fn unique(new_ds: impl CreateDs) {
-	let ref mut r = test(new_ds, "DEFINE INDEX time ON TABLE session COLUMNS time UNIQUE").await;
+	let ref mut r = test(new_ds, "DEFINE INDEX idx ON TABLE i COLUMNS v UNIQUE").await;
 	check(
 		r,
 		"[
 			{
 				detail: {
 					plan: {
-						index: 'time',
+						index: 'idx',
 						operator: 'ReverseOrder'
 					},
-					table: 'session'
+					table: 'i'
 				},
 				operation: 'Iterate Index'
 			},
@@ -159,33 +120,17 @@ pub async fn unique(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check(
-		r,
-		"[
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			}
-		]",
-	);
+	check_array_is_sorted(&r.remove(0).result.unwrap(), 3);
 	check(
 		r,
 		"[
 			{
 				detail: {
 					plan: {
-						index: 'time',
+						index: 'idx',
 						operator: 'ReverseOrder'
 					},
-					table: 'session'
+					table: 'i'
 				},
 				operation: 'Iterate Index'
 			},
@@ -197,27 +142,7 @@ pub async fn unique(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check(
-		r,
-		"[
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			}
-		]",
-	);
+	check_array_is_sorted(&r.remove(0).result.unwrap(), 1500);
 }
 
 macro_rules! define_tests {
