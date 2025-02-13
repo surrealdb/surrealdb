@@ -300,10 +300,6 @@ impl IndexEqualThingIterator {
 struct RangeScan {
 	beg: Key,
 	end: Key,
-	/// True if the beginning key should be included
-	beg_incl: bool,
-	/// True if the ending key should be included
-	end_incl: bool,
 	/// True if the beginning key has already been seen and match checked
 	beg_excl_match_checked: bool,
 	/// True if the ending key has already been seen and match checked
@@ -315,8 +311,6 @@ impl RangeScan {
 		Self {
 			beg: beg_key,
 			end: end_key,
-			beg_incl,
-			end_incl,
 			beg_excl_match_checked: beg_incl,
 			end_excl_match_checked: end_incl,
 		}
@@ -340,28 +334,44 @@ impl RangeScan {
 		true
 	}
 
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-	fn matches_check(&self, k: &Key) -> bool {
-		// We check if we should match the key matching the beginning of the range
-		if !self.beg_excl_match_checked && self.beg.eq(k) {
-			return false;
-		}
+	fn matches_end(&mut self) -> bool {
 		// We check if we should match the key matching the end of the range
-		if !self.end_excl_match_checked && self.end.eq(k) {
+		if !self.end_excl_match_checked && self.end.eq(&self.end) {
+			self.end_excl_match_checked = true;
 			return false;
 		}
 		true
 	}
+}
 
-	/// Update the range with a new beginning.
-	/// If the new key is different, the beginning becomes included.
-	/// Used by forward iterators.
-	fn next_beg(&mut self, beg: Key) {
-		if !self.beg_incl && beg.ne(&self.beg) {
-			self.beg_incl = true;
-			self.beg_excl_match_checked = true;
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+struct ReverseRangeScan {
+	r: RangeScan,
+	/// True if the beginning key should be included
+	beg_incl: bool,
+	/// True if the ending key should be included
+	end_incl: bool,
+}
+
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+impl ReverseRangeScan {
+	fn new(r: RangeScan) -> Self {
+		Self {
+			beg_incl: r.beg_excl_match_checked,
+			end_incl: r.end_excl_match_checked,
+			r,
 		}
-		self.beg = beg;
+	}
+	fn matches_check(&self, k: &Key) -> bool {
+		// We check if we should match the key matching the beginning of the range
+		if !self.r.beg_excl_match_checked && self.r.beg.eq(k) {
+			return false;
+		}
+		// We check if we should match the key matching the end of the range
+		if !self.r.end_excl_match_checked && self.r.end.eq(k) {
+			return false;
+		}
+		true
 	}
 }
 
@@ -589,7 +599,7 @@ impl IndexRangeThingIterator {
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 pub(crate) struct IndexRangeReverseThingIterator {
 	irf: IteratorRef,
-	r: RangeScan,
+	r: ReverseRangeScan,
 }
 
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
@@ -603,7 +613,7 @@ impl IndexRangeReverseThingIterator {
 	) -> Result<Self, Error> {
 		Ok(Self {
 			irf,
-			r: IndexRangeThingIterator::range_scan(ns, db, ix, range)?,
+			r: ReverseRangeScan::new(IndexRangeThingIterator::range_scan(ns, db, ix, range)?),
 		})
 	}
 
@@ -621,11 +631,11 @@ impl IndexRangeReverseThingIterator {
 		tx: &Transaction,
 		limit: &mut u32,
 	) -> Result<Option<IndexItemRecord>, Error> {
-		if !self.r.end_incl || !self.r.matches_check(&self.r.end) {
+		if !self.r.end_incl || !self.r.matches_check(&self.r.r.end) {
 			return Ok(None);
 		}
-		self.r.end_excl_match_checked = true;
-		if let Some(v) = tx.get(&self.r.end, None).await? {
+		self.r.r.end_excl_match_checked = true;
+		if let Some(v) = tx.get(&self.r.r.end, None).await? {
 			*limit -= 1;
 			Ok(Some(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into())))
 		} else {
@@ -638,11 +648,11 @@ impl IndexRangeReverseThingIterator {
 		tx: &Transaction,
 		limit: &mut u32,
 	) -> Result<bool, Error> {
-		if !self.r.end_incl || !self.r.matches_check(&self.r.end) {
+		if !self.r.end_incl || !self.r.matches_check(&self.r.r.end) {
 			return Ok(false);
 		}
-		self.r.end_excl_match_checked = true;
-		if tx.exists(&self.r.end, None).await? {
+		self.r.r.end_excl_match_checked = true;
+		if tx.exists(&self.r.r.end, None).await? {
 			*limit -= 1;
 			Ok(true)
 		} else {
@@ -660,7 +670,7 @@ impl IndexRangeReverseThingIterator {
 
 		// Do we have enough limit left to collect additional records?
 		let res = if limit > 0 {
-			tx.scanr(self.r.range(), limit, None).await?
+			tx.scanr(self.r.r.range(), limit, None).await?
 		} else {
 			vec![]
 		};
@@ -677,7 +687,7 @@ impl IndexRangeReverseThingIterator {
 		let last_key = res.last().map(|(k, _)| k.clone());
 
 		// Feed the result
-		res.into_iter().filter(|(k, _)| self.r.matches(k)).try_for_each(
+		res.into_iter().filter(|(k, _)| self.r.r.matches(k)).try_for_each(
 			|(_, v)| -> Result<(), Error> {
 				records.add(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into()));
 				Ok(())
@@ -686,7 +696,7 @@ impl IndexRangeReverseThingIterator {
 
 		// Update the ending for the next batch
 		if let Some(key) = last_key {
-			self.r.end = key;
+			self.r.r.end = key;
 		}
 
 		// The next batch should not include the end anymore
@@ -702,17 +712,17 @@ impl IndexRangeReverseThingIterator {
 
 		// Do we have enough limit left to collect additional records?
 		let res = if limit > 0 {
-			tx.keysr(self.r.range(), limit, None).await?
+			tx.keysr(self.r.r.range(), limit, None).await?
 		} else {
 			vec![]
 		};
 
 		// Feed the result
-		count += res.iter().filter(|k| self.r.matches(k)).count();
+		count += res.iter().filter(|k| self.r.r.matches(k)).count();
 
 		// Update the ending for the next batch
 		if let Some(key) = res.last() {
-			self.r.end = key.clone();
+			self.r.r.end = key.clone();
 		}
 
 		// The next batch should not include the end anymore
@@ -1106,7 +1116,7 @@ impl UniqueRangeThingIterator {
 		for (k, v) in res {
 			limit -= 1;
 			if limit == 0 {
-				self.r.next_beg(k);
+				self.r.beg = k;
 				return Ok(records);
 			}
 			if self.r.matches(&k) {
@@ -1114,7 +1124,8 @@ impl UniqueRangeThingIterator {
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
-		if self.r.end_incl {
+
+		if self.r.matches_end() {
 			if let Some(v) = tx.get(&self.r.end, None).await? {
 				let rid: Thing = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
@@ -1134,14 +1145,14 @@ impl UniqueRangeThingIterator {
 		for k in res {
 			limit -= 1;
 			if limit == 0 {
-				self.r.next_beg(k);
+				self.r.beg = k;
 				return Ok(count);
 			}
 			if self.r.matches(&k) {
 				count += 1;
 			}
 		}
-		if self.r.end_incl && tx.exists(&self.r.end, None).await? {
+		if self.r.matches_end() && tx.exists(&self.r.end, None).await? {
 			count += 1;
 		}
 		self.done = true;
@@ -1152,7 +1163,7 @@ impl UniqueRangeThingIterator {
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 pub(crate) struct UniqueRangeReverseThingIterator {
 	irf: IteratorRef,
-	r: RangeScan,
+	r: ReverseRangeScan,
 	done: bool,
 }
 
@@ -1165,7 +1176,7 @@ impl UniqueRangeReverseThingIterator {
 		ix: &DefineIndexStatement,
 	) -> Result<Self, Error> {
 		let r = full_iterator_range();
-		let r = UniqueRangeThingIterator::range_scan(ns, db, ix, &r)?;
+		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, &r)?);
 		Ok(Self {
 			irf,
 			r,
@@ -1186,7 +1197,7 @@ impl UniqueRangeReverseThingIterator {
 			// we don't include the ending key for the next batches
 			self.r.end_incl = false;
 			// tx.scanr is end exclusive, so we have to manually collect the value using a get
-			if let Some(v) = tx.get(&self.r.end, None).await? {
+			if let Some(v) = tx.get(&self.r.r.end, None).await? {
 				let rid: Thing = revision::from_slice(&v)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());
 				limit -= 1;
@@ -1200,12 +1211,12 @@ impl UniqueRangeReverseThingIterator {
 		} else {
 			None
 		};
-		let mut res = tx.scanr(self.r.range(), limit, None).await?;
+		let mut res = tx.scanr(self.r.r.range(), limit, None).await?;
 		if let Some((k, _)) = res.last() {
 			// We set the ending for the next batch
-			self.r.end = k.clone();
+			self.r.r.end = k.clone();
 			// If the last key is the beginning of the range, we're done
-			if self.r.beg.eq(k) {
+			if self.r.r.beg.eq(k) {
 				self.done = true;
 				// Remove the beginning key if it is not supposed to be included
 				if !self.r.beg_incl {
@@ -1235,7 +1246,7 @@ impl UniqueRangeReverseThingIterator {
 			// we don't include the ending key for the next batches
 			self.r.end_incl = false;
 			// tx.keysr is end exclusive, so we have to manually check if the value exists
-			if tx.exists(&self.r.end, None).await? {
+			if tx.exists(&self.r.r.end, None).await? {
 				count += 1;
 				limit -= 1;
 				if limit == 0 {
@@ -1243,12 +1254,12 @@ impl UniqueRangeReverseThingIterator {
 				}
 			}
 		}
-		let mut res = tx.keysr(self.r.range(), limit, None).await?;
+		let mut res = tx.keysr(self.r.r.range(), limit, None).await?;
 		if let Some(k) = res.last() {
 			// We set the ending for the next batch
-			self.r.end = k.clone();
+			self.r.r.end = k.clone();
 			// If the last key is the beginning of the range, we're done
-			if self.r.beg.eq(k) {
+			if self.r.r.beg.eq(k) {
 				self.done = true;
 				// Remove the beginning if it is not supposed to be included
 				if !self.r.beg_incl {
