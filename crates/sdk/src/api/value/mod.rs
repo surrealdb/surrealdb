@@ -186,7 +186,7 @@ impl TryFrom<RecordIdKey> for Uuid {
 		} else {
 			Err(Self::Error::FromValue {
 				value: value.into(),
-				error: String::from("inner value is not an Uuid"),
+				error: String::from("inner value is not a UUID"),
 			})
 		}
 	}
