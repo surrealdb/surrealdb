@@ -102,9 +102,39 @@ impl From<Object> for RecordIdKey {
 	}
 }
 
+impl TryFrom<RecordIdKey> for Object {
+	type Error = crate::error::Api;
+
+	fn try_from(value: RecordIdKey) -> Result<Self, Self::Error> {
+		if let CoreId::Object(x) = value.0 {
+			Ok(Object::from_inner(x))
+		} else {
+			Err(Self::Error::FromValue {
+				value: value.into(),
+				error: String::from("inner value is not an object"),
+			})
+		}
+	}
+}
+
 impl From<String> for RecordIdKey {
 	fn from(value: String) -> Self {
 		Self(CoreId::String(value))
+	}
+}
+
+impl TryFrom<RecordIdKey> for String {
+	type Error = crate::error::Api;
+
+	fn try_from(value: RecordIdKey) -> Result<Self, Self::Error> {
+		if let CoreId::String(x) = value.0 {
+			Ok(x)
+		} else {
+			Err(Self::Error::FromValue {
+				value: value.into(),
+				error: String::from("inner value is not a string"),
+			})
+		}
 	}
 }
 
@@ -126,9 +156,39 @@ impl From<i64> for RecordIdKey {
 	}
 }
 
+impl TryFrom<RecordIdKey> for i64 {
+	type Error = crate::error::Api;
+
+	fn try_from(value: RecordIdKey) -> Result<Self, Self::Error> {
+		if let CoreId::Number(x) = value.0 {
+			Ok(x)
+		} else {
+			Err(Self::Error::FromValue {
+				value: value.into(),
+				error: String::from("inner value is not a number"),
+			})
+		}
+	}
+}
+
 impl From<Uuid> for RecordIdKey {
 	fn from(value: Uuid) -> Self {
 		Self(CoreId::Uuid(value.into()))
+	}
+}
+
+impl TryFrom<RecordIdKey> for Uuid {
+	type Error = crate::error::Api;
+
+	fn try_from(value: RecordIdKey) -> Result<Self, Self::Error> {
+		if let CoreId::Uuid(x) = value.0 {
+			Ok(*x)
+		} else {
+			Err(Self::Error::FromValue {
+				value: value.into(),
+				error: String::from("inner value is not a UUID"),
+			})
+		}
 	}
 }
 

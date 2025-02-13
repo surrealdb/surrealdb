@@ -816,16 +816,10 @@ impl Parser<'_> {
 
 		let path = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 
-		let config = match self.parse_api_config(ctx).await? {
-			v if v.is_empty() => None,
-			v => Some(v),
-		};
-
 		let mut res = DefineApiStatement {
 			path,
 			if_not_exists,
 			overwrite,
-			config,
 			..Default::default()
 		};
 
@@ -837,7 +831,14 @@ impl Parser<'_> {
 			match self.peek().kind {
 				t!("ANY") => {
 					self.pop_peek();
-					res.fallback = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
+					res.config = match self.parse_api_config(ctx).await? {
+						v if v.is_empty() => None,
+						v => Some(v),
+					};
+
+					if self.eat(t!("THEN")) {
+						res.fallback = Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?);
+					}
 				}
 				t!("DELETE") | t!("GET") | t!("PATCH") | t!("POST") | t!("PUT") | t!("TRACE") => {
 					let mut methods: Vec<Method> = vec![];
