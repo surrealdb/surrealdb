@@ -84,12 +84,20 @@ impl Display for DefineApiStatement {
 		}
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
-		if let Some(config) = &self.config {
-			write!(f, "{}", config)?;
-		}
 
-		if let Some(fallback) = &self.fallback {
-			write!(f, "FOR any {}", fallback)?;
+		if self.config.is_some() || self.fallback.is_some() {
+			write!(f, "FOR any")?;
+			let indent = pretty_indent();
+
+			if let Some(config) = &self.config {
+				write!(f, "{}", config)?;
+			}
+
+			if let Some(fallback) = &self.fallback {
+				write!(f, "THEN {}", fallback)?;
+			}
+
+			drop(indent);
 		}
 
 		for action in &self.actions {
@@ -104,7 +112,7 @@ impl Display for DefineApiStatement {
 impl InfoStructure for DefineApiStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"path".to_string() => Value::from(self.path.to_string()),
+			"path".to_string() => self.path,
 			"config".to_string(), if let Some(config) = self.config => config.structure(),
 			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
 			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
