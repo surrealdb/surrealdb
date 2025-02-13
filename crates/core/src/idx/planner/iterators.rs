@@ -598,34 +598,31 @@ impl IndexRangeReverseThingIterator {
 		tx: &Transaction,
 		mut limit: u32,
 	) -> Result<Vec<(Key, Val)>, Error> {
-		// If the range include the end, we need to collect the last record with a get
+		// If the range includes the end, we need to collect the last record with a get
 		if self.r.end_incl {
-			// We don't need include the ending key for the next scan,
-			// as it will be set to the first key
 			if let Some(v) = tx.get(&self.r.end, None).await? {
 				limit -= 1;
 				if limit == 0 {
 					return Ok(vec![(self.r.end.clone(), v)]);
 				}
 				let mut res = tx.scanr(self.r.range(), limit, None).await?;
-				if let Some((key, _)) = res.first() {
-					self.r.end.clone_from(key);
-				}
-				res.push((self.r.end.clone(), v));
+				res.insert(0, (self.r.end.clone(), v));
 				return Ok(res);
 			}
 		}
 		let res = tx.scanr(self.r.range(), limit, None).await?;
-		if let Some((key, _)) = res.last() {
-			self.r.end.clone_from(key);
-		}
 		Ok(res)
 	}
 
 	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>, Error> {
 		let res = tx.keysr(self.r.range(), limit, None).await?;
-		if let Some(key) = res.first() {
+		if let Some(key) = res.last() {
+			// We don't need to include the ending key for the next scan,
 			self.r.end.clone_from(key);
+		}
+		// Next batch should not include the end anymore
+		if self.r.end_incl {
+			self.r.end_incl = false;
 		}
 		Ok(res)
 	}
@@ -636,6 +633,7 @@ impl IndexRangeReverseThingIterator {
 		limit: u32,
 	) -> Result<B, Error> {
 		let res = self.next_scan(tx, limit).await?;
+		let last_key = res.last().map(|(k, _)| k.clone());
 		let mut records = B::with_capacity(res.len());
 		res.into_iter().filter(|(k, _)| self.r.matches(k)).try_for_each(
 			|(_, v)| -> Result<(), Error> {
@@ -643,6 +641,9 @@ impl IndexRangeReverseThingIterator {
 				Ok(())
 			},
 		)?;
+		if let Some(key) = last_key {
+			self.r.end = key;
+		}
 		// Next batch should not include the end anymore
 		if self.r.end_incl {
 			self.r.end_incl = false;
