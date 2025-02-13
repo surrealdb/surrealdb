@@ -84,12 +84,20 @@ impl Display for DefineApiStatement {
 		}
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
-		if let Some(config) = &self.config {
-			write!(f, "{}", config)?;
-		}
 
-		if let Some(fallback) = &self.fallback {
-			write!(f, "FOR any {}", fallback)?;
+		if self.config.is_some() || self.fallback.is_some() {
+			write!(f, "FOR any")?;
+			let indent = pretty_indent();
+
+			if let Some(config) = &self.config {
+				write!(f, "{}", config)?;
+			}
+
+			if let Some(fallback) = &self.fallback {
+				write!(f, "THEN {}", fallback)?;
+			}
+
+			drop(indent);
 		}
 
 		for action in &self.actions {
