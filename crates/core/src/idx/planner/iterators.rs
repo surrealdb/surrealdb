@@ -300,8 +300,14 @@ impl IndexEqualThingIterator {
 struct RangeScan {
 	beg: Key,
 	end: Key,
+	/// True if the beginning key should be included
 	beg_incl: bool,
+	/// True if the ending key should be included
 	end_incl: bool,
+	/// True if the beginning key has already been seen and match checked
+	beg_excl_match_checked: bool,
+	/// True if the ending key has already been seen and match checked
+	end_excl_match_checked: bool,
 }
 
 impl RangeScan {
@@ -311,6 +317,8 @@ impl RangeScan {
 			end: end_key,
 			beg_incl,
 			end_incl,
+			beg_excl_match_checked: beg_incl,
+			end_excl_match_checked: end_incl,
 		}
 	}
 
@@ -318,14 +326,29 @@ impl RangeScan {
 		self.beg.clone()..self.end.clone()
 	}
 
-	fn matches(&self, k: &Key) -> bool {
+	fn matches(&mut self, k: &Key) -> bool {
 		// We check if we should match the key matching the beginning of the range
-		if !self.beg_incl {
-			return self.beg.ne(k);
+		if !self.beg_excl_match_checked && self.beg.eq(k) {
+			self.beg_excl_match_checked = true;
+			return false;
 		}
 		// We check if we should match the key matching the end of the range
-		if !self.end_incl {
-			return self.end.ne(k);
+		if !self.end_excl_match_checked && self.end.eq(k) {
+			self.end_excl_match_checked = true;
+			return false;
+		}
+		true
+	}
+
+	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+	fn matches_check(&self, k: &Key) -> bool {
+		// We check if we should match the key matching the beginning of the range
+		if !self.beg_excl_match_checked && self.beg.eq(k) {
+			return false;
+		}
+		// We check if we should match the key matching the end of the range
+		if !self.end_excl_match_checked && self.end.eq(k) {
+			return false;
 		}
 		true
 	}
@@ -336,6 +359,7 @@ impl RangeScan {
 	fn next_beg(&mut self, beg: Key) {
 		if !self.beg_incl && beg.ne(&self.beg) {
 			self.beg_incl = true;
+			self.beg_excl_match_checked = true;
 		}
 		self.beg = beg;
 	}
@@ -592,69 +616,106 @@ impl IndexRangeReverseThingIterator {
 		let range = full_iterator_range();
 		Self::new(irf, ns, db, ix, &range)
 	}
-
-	async fn next_scan(
+	async fn check_batch_ending(
 		&mut self,
 		tx: &Transaction,
-		mut limit: u32,
-	) -> Result<Vec<(Key, Val)>, Error> {
-		// If the range includes the end, we need to collect the last record with a get
-		if self.r.end_incl {
-			if let Some(v) = tx.get(&self.r.end, None).await? {
-				limit -= 1;
-				if limit == 0 {
-					return Ok(vec![(self.r.end.clone(), v)]);
-				}
-				let mut res = tx.scanr(self.r.range(), limit, None).await?;
-				res.insert(0, (self.r.end.clone(), v));
-				return Ok(res);
-			}
+		limit: &mut u32,
+	) -> Result<Option<IndexItemRecord>, Error> {
+		if !self.r.end_incl || !self.r.matches_check(&self.r.end) {
+			return Ok(None);
 		}
-		let res = tx.scanr(self.r.range(), limit, None).await?;
-		Ok(res)
+		self.r.end_excl_match_checked = true;
+		if let Some(v) = tx.get(&self.r.end, None).await? {
+			*limit -= 1;
+			Ok(Some(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into())))
+		} else {
+			Ok(None)
+		}
 	}
 
-	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>, Error> {
-		let res = tx.keysr(self.r.range(), limit, None).await?;
-		if let Some(key) = res.last() {
-			// We don't need to include the ending key for the next scan,
-			self.r.end.clone_from(key);
+	async fn check_keys_ending(
+		&mut self,
+		tx: &Transaction,
+		limit: &mut u32,
+	) -> Result<bool, Error> {
+		if !self.r.end_incl || !self.r.matches_check(&self.r.end) {
+			return Ok(false);
 		}
-		// Next batch should not include the end anymore
-		if self.r.end_incl {
-			self.r.end_incl = false;
+		self.r.end_excl_match_checked = true;
+		if tx.exists(&self.r.end, None).await? {
+			*limit -= 1;
+			Ok(true)
+		} else {
+			Ok(false)
 		}
-		Ok(res)
 	}
 
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		tx: &Transaction,
-		limit: u32,
+		mut limit: u32,
 	) -> Result<B, Error> {
-		let res = self.next_scan(tx, limit).await?;
+		// Check if we need to retrieve the key at end of the range (not returned by the scanr)
+		let ending = self.check_batch_ending(tx, &mut limit).await?;
+
+		// Do we have enough limit left to collect additional records?
+		let res = if limit > 0 {
+			tx.scanr(self.r.range(), limit, None).await?
+		} else {
+			vec![]
+		};
+
+		// Proper allocation for the result
+		let mut records = B::with_capacity(res.len() + (ending.is_some() as usize));
+
+		// Add the ending record if any
+		if let Some(r) = ending {
+			records.add(r);
+		}
+
+		// Collect the last key
 		let last_key = res.last().map(|(k, _)| k.clone());
-		let mut records = B::with_capacity(res.len());
+
+		// Feed the result
 		res.into_iter().filter(|(k, _)| self.r.matches(k)).try_for_each(
 			|(_, v)| -> Result<(), Error> {
 				records.add(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into()));
 				Ok(())
 			},
 		)?;
+
+		// Update the ending for the next batch
 		if let Some(key) = last_key {
 			self.r.end = key;
 		}
-		// Next batch should not include the end anymore
+
+		// The next batch should not include the end anymore
 		if self.r.end_incl {
 			self.r.end_incl = false;
 		}
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize, Error> {
-		let res = self.next_keys(tx, limit).await?;
-		let count = res.into_iter().filter(|k| self.r.matches(k)).count();
-		// Next batch should not include the end anymore
+	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize, Error> {
+		// Check if we need to retrieve the key at end of the range (not returned by the keysr)
+		let mut count = self.check_keys_ending(tx, &mut limit).await? as usize;
+
+		// Do we have enough limit left to collect additional records?
+		let res = if limit > 0 {
+			tx.keysr(self.r.range(), limit, None).await?
+		} else {
+			vec![]
+		};
+
+		// Feed the result
+		count += res.iter().filter(|k| self.r.matches(k)).count();
+
+		// Update the ending for the next batch
+		if let Some(key) = res.last() {
+			self.r.end = key.clone();
+		}
+
+		// The next batch should not include the end anymore
 		if self.r.end_incl {
 			self.r.end_incl = false;
 		}
@@ -1151,10 +1212,7 @@ impl UniqueRangeReverseThingIterator {
 					res.remove(res.len() - 1);
 				}
 			}
-			self.r.beg_incl && self.done
-		} else {
-			false
-		};
+		}
 		// We collect the records
 		let mut records = B::with_capacity(res.len() + ending_record.is_some() as usize);
 		if let Some(record) = ending_record {
@@ -1197,10 +1255,7 @@ impl UniqueRangeReverseThingIterator {
 					res.remove(res.len() - 1);
 				}
 			}
-			self.r.beg_incl && self.done
-		} else {
-			false
-		};
+		}
 		count += res.len();
 		Ok(count)
 	}
