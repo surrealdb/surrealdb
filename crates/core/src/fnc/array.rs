@@ -198,38 +198,23 @@ pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
 pub fn fill(
 	(mut array, value, start, end): (Array, Value, Option<isize>, Option<isize>),
 ) -> Result<Value, Error> {
-	let min = 0;
-	let max = array.len();
-	let negative_max = -(max as isize);
+	let len = array.len();
 
-	let start = match start {
-		Some(start) if negative_max <= start && start < 0 => (start + max as isize) as usize,
-		Some(start) if start < negative_max => 0,
-		Some(start) => start as usize,
-		None => min,
-	};
-	let end = match end {
-		Some(end) if negative_max <= end && end < 0 => (end + max as isize) as usize,
-		Some(end) if end < negative_max => 0,
-		Some(end) => end as usize,
-		None => max,
+	let start = start.unwrap_or(0);
+	let start = if start < 0 {
+		len.saturating_sub((-start) as usize)
+	} else {
+		(start as usize).min(len)
 	};
 
-	if start == min && end >= max {
-		array.fill(value);
-	} else if end > start {
-		let end_minus_one = end - 1;
+	let end = end.unwrap_or(len as isize);
+	let end = if end < 0 {
+		len.saturating_sub((-end) as usize)
+	} else {
+		(end as usize).min(len)
+	};
 
-		for i in start..end_minus_one {
-			if let Some(elem) = array.get_mut(i) {
-				*elem = value.clone();
-			}
-		}
-
-		if let Some(last_elem) = array.get_mut(end_minus_one) {
-			*last_elem = value;
-		}
-	}
+	array[start..end].fill(value);
 
 	Ok(array.into())
 }
