@@ -2864,7 +2864,7 @@ fn parse_remove() {
 fn parse_update() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WITH INDEX index,index_2 WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL"#
+		r#"UPDATE ONLY <future> { "text" }, a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL"#
 	)
 	.unwrap();
 	assert_eq!(
@@ -2910,7 +2910,7 @@ fn parse_update() {
 fn parse_upsert() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WITH INDEX index,index_2 WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN"#
+		r#"UPSERT ONLY <future> { "text" }, a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN"#
 	)
 	.unwrap();
 	assert_eq!(
