@@ -84,6 +84,7 @@ revision = { workspace = true, features = [
     "uuid",
 ] }
 reblessive = { workspace = true, features = ["tree"] }
+trice = {workspace = true, optional = true }
 
 
 # Other crates

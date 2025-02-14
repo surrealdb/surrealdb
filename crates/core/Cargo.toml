@@ -54,8 +54,8 @@ targets = []
 surrealcs = { workspace = true, optional = true }
 surrealkv = { workspace = true, optional = true }
 surrealml = { workspace = true, optional = true }
-storekey.workspace = true
-derive.workspace = true
+affinitypool = { workspace = true, optional = true }
+#derive.workspace = true
 dmp.workspace = true
 indxdb = { workspace = true, optional = true}
 js = { workspace = true, features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties", "rust-alloc"], optional = true }
@@ -63,6 +63,7 @@ lexicmp.workspace = true
 reblessive = { workspace = true, features = ["tree"] }
 revision = { workspace = true, features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
 serde-content.workspace = true
+storekey.workspace = true
 vart.workspace = true
 
 # External KV stores
@@ -95,6 +96,7 @@ futures.workspace = true
 fuzzy-matcher.workspace = true
 geo = { workspace = true, features = ["use-serde"]}
 geo-types = { workspace = true }
+http.workspace = true
 hex.workspace = true
 ipnet.workspace = true
 jsonwebtoken.workspace = true
