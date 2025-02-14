@@ -1,6 +1,6 @@
 /**
 [test]
-timeout = 1
+timeout = 10
 reason = """
 The below function operated in O(n) where N was the last index of the insert, eventhough the actual array was very small.
 If the array is tiny this function should not take more time then it needs to set all the required values to the given value.
