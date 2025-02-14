@@ -153,6 +153,7 @@ impl Statement {
 				output: stm.output.to_owned(),
 				timeout: stm.timeout.to_owned(),
 				parallel: stm.parallel,
+				explain: stm.explain.to_owned(),
 			}),
 			(_, stm) => stm,
 		};

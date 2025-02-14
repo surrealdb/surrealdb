@@ -3,14 +3,14 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
-use crate::sql::{Cond, Output, Timeout, Value, Values};
+use crate::sql::{Cond, Explain, Output, Timeout, Value, Values};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -22,6 +22,8 @@ pub struct DeleteStatement {
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
+	#[revision(start = 3)]
+	pub explain: Option<Explain>,
 }
 
 impl DeleteStatement {

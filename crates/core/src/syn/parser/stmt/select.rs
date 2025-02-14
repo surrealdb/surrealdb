@@ -4,8 +4,7 @@ use crate::{
 	sql::{
 		order::{OrderList, Ordering},
 		statements::SelectStatement,
-		Explain, Field, Fields, Ident, Idioms, Limit, Order, Split, Splits, Start, Values, Version,
-		With,
+		Field, Fields, Ident, Idioms, Limit, Order, Split, Splits, Start, Values, Version, With,
 	},
 	syn::{
 		parser::{
@@ -62,7 +61,7 @@ impl Parser<'_> {
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		let tempfiles = self.eat(t!("TEMPFILES"));
-		let explain = self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL"))));
+		let explain = self.try_parse_explain()?;
 
 		Ok(SelectStatement {
 			expr,

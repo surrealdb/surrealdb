@@ -3,7 +3,7 @@
 use reblessive::Stk;
 
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
-use crate::sql::Fetch;
+use crate::sql::{Explain, Fetch};
 use crate::syn::error::bail;
 use crate::{
 	sql::{
@@ -530,5 +530,8 @@ impl Parser<'_> {
 			name.0.push_str(part.0.as_str());
 		}
 		Ok(name)
+	}
+	pub(super) fn try_parse_explain(&mut self) -> ParseResult<Option<Explain>> {
+		Ok(self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL")))))
 	}
 }

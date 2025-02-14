@@ -20,6 +20,7 @@ impl Parser<'_> {
 		let output = self.try_parse_output(ctx).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
+		let explain = self.try_parse_explain()?;
 
 		Ok(DeleteStatement {
 			only,
@@ -28,6 +29,7 @@ impl Parser<'_> {
 			output,
 			timeout,
 			parallel,
+			explain,
 		})
 	}
 }
