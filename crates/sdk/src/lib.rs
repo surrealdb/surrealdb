@@ -128,10 +128,10 @@ mod api;
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
-	pub use channel::bounded;
-	pub use channel::unbounded;
-	pub use channel::Receiver;
-	pub use channel::Sender;
+	pub use async_channel::bounded;
+	pub use async_channel::unbounded;
+	pub use async_channel::Receiver;
+	pub use async_channel::Sender;
 }
 
 /// Different error types for embedded and remote databases
