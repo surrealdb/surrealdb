@@ -18,7 +18,7 @@ use crate::engine::remote::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::{Action, Notification};
-use channel::{Receiver, Sender};
+use async_channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
 use futures::SinkExt;
@@ -61,11 +61,11 @@ impl Connection for Client {
 			address.url = address.url.join(PATH)?;
 
 			let (route_tx, route_rx) = match capacity {
-				0 => channel::unbounded(),
-				capacity => channel::bounded(capacity),
+				0 => async_channel::unbounded(),
+				capacity => async_channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = channel::bounded(1);
+			let (conn_tx, conn_rx) = async_channel::bounded(1);
 
 			spawn_local(run_router(address, capacity, conn_tx, route_rx));
 
