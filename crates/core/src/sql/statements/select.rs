@@ -143,7 +143,7 @@ impl SelectStatement {
 			match v {
 				Value::Thing(v) => {
 					let p = planner.check_table_permission(&stm_ctx, &v.tb).await?;
-					// We prepare it only if wer have a permission
+					// We prepare it only if we have a permission
 					if !matches!(p, GrantedPermission::None) {
 						match v.is_range() {
 							true => {

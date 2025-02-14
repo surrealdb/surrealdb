@@ -2120,7 +2120,7 @@ fn parse_define_analyzer() {
 fn parse_delete() {
 	let res = test_parse!(
 		parse_statement,
-		"DELETE FROM ONLY |foo:32..64| Where 2 RETURN AFTER TIMEOUT 1s PARALLEL EXPLAIN FULL"
+		"DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s PARALLEL EXPLAIN FULL"
 	)
 	.unwrap();
 	assert_eq!(
@@ -2128,6 +2128,7 @@ fn parse_delete() {
 		Statement::Delete(DeleteStatement {
 			only: true,
 			what: Values(vec![Value::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
+			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Value::Number(Number::Int(2)))),
 			output: Some(Output::After),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
@@ -2141,7 +2142,7 @@ fn parse_delete() {
 fn parse_delete_2() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"DELETE FROM ONLY a:b->?[$][?true] WHERE null RETURN NULL TIMEOUT 1h PARALLEL EXPLAIN"#
+		r#"DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h PARALLEL EXPLAIN"#
 	)
 	.unwrap();
 
@@ -2161,6 +2162,7 @@ fn parse_delete_2() {
 				Part::Last,
 				Part::Where(Value::Bool(true)),
 			]))]),
+			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Value::Null)),
 			output: Some(Output::Null),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(60 * 60)))),
@@ -2862,7 +2864,7 @@ fn parse_remove() {
 fn parse_update() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL"#
+		r#"UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WITH INDEX index,index_2 WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL"#
 	)
 	.unwrap();
 	assert_eq!(
@@ -2882,6 +2884,7 @@ fn parse_update() {
 					})
 				]))
 			]),
+			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Value::Bool(true))),
 			data: Some(Data::UnsetExpression(vec![
 				Idiom(vec![Part::Field(Ident("foo".to_string())), Part::Flatten]),
@@ -2907,7 +2910,7 @@ fn parse_update() {
 fn parse_upsert() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN"#
+		r#"UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WITH INDEX index,index_2 WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN"#
 	)
 	.unwrap();
 	assert_eq!(
@@ -2927,6 +2930,7 @@ fn parse_upsert() {
 					})
 				]))
 			]),
+			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Value::Bool(true))),
 			data: Some(Data::UnsetExpression(vec![
 				Idiom(vec![Part::Field(Ident("foo".to_string())), Part::Flatten]),

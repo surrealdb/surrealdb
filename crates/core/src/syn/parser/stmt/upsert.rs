@@ -13,6 +13,7 @@ impl Parser<'_> {
 		let only = self.eat(t!("ONLY"));
 		let what = Values(self.parse_what_list(stk).await?);
 		let data = self.try_parse_data(stk).await?;
+		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition(stk).await?;
 		let output = self.try_parse_output(stk).await?;
 		let timeout = self.try_parse_timeout()?;
@@ -22,6 +23,7 @@ impl Parser<'_> {
 		Ok(UpsertStatement {
 			only,
 			what,
+			with,
 			data,
 			cond,
 			output,

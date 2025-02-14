@@ -326,7 +326,10 @@ impl Statement<'_> {
 	/// Returns any WITH clause if specified
 	pub(crate) fn with(&self) -> Option<&With> {
 		match self {
-			Statement::Select(v) => v.with.as_ref(),
+			Statement::Select(s) => s.with.as_ref(),
+			Statement::Update(s) => s.with.as_ref(),
+			Statement::Upsert(s) => s.with.as_ref(),
+			Statement::Delete(s) => s.with.as_ref(),
 			_ => None,
 		}
 	}
@@ -380,7 +383,10 @@ impl Statement<'_> {
 	/// Returns any EXPLAIN clause if specified
 	pub(crate) fn explain(&self) -> Option<&Explain> {
 		match self {
-			Statement::Select(v) => v.explain.as_ref(),
+			Statement::Select(s) => s.explain.as_ref(),
+			Statement::Update(s) => s.explain.as_ref(),
+			Statement::Upsert(s) => s.explain.as_ref(),
+			Statement::Delete(s) => s.explain.as_ref(),
 			_ => None,
 		}
 	}

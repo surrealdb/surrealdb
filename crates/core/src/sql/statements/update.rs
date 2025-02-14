@@ -3,7 +3,7 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
-use crate::sql::{Cond, Data, Explain, Output, Timeout, Value, Values};
+use crate::sql::{Cond, Data, Explain, Output, Timeout, Value, Values, With};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -18,6 +18,8 @@ pub struct UpdateStatement {
 	#[revision(start = 2)]
 	pub only: bool,
 	pub what: Values,
+	#[revision(start = 2)]
+	pub with: Option<With>,
 	pub data: Option<Data>,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
@@ -97,6 +99,9 @@ impl fmt::Display for UpdateStatement {
 			f.write_str(" ONLY")?
 		}
 		write!(f, " {}", self.what)?;
+		if let Some(ref v) = self.with {
+			write!(f, " {v}")?
+		}
 		if let Some(ref v) = self.data {
 			write!(f, " {v}")?
 		}
@@ -111,6 +116,9 @@ impl fmt::Display for UpdateStatement {
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?
+		}
+		if let Some(ref v) = self.explain {
+			write!(f, " {v}")?
 		}
 		Ok(())
 	}
