@@ -2120,7 +2120,7 @@ fn parse_define_analyzer() {
 fn parse_delete() {
 	let res = test_parse!(
 		parse_statement,
-		"DELETE FROM ONLY |foo:32..64| Where 2 RETURN AFTER TIMEOUT 1s PARALLEL"
+		"DELETE FROM ONLY |foo:32..64| Where 2 RETURN AFTER TIMEOUT 1s PARALLEL EXPLAIN FULL"
 	)
 	.unwrap();
 	assert_eq!(
@@ -2132,6 +2132,7 @@ fn parse_delete() {
 			output: Some(Output::After),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			explain: Some(Explain(true)),
 		})
 	);
 }
@@ -2140,7 +2141,7 @@ fn parse_delete() {
 fn parse_delete_2() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"DELETE FROM ONLY a:b->?[$][?true] WHERE null RETURN NULL TIMEOUT 1h PARALLEL"#
+		r#"DELETE FROM ONLY a:b->?[$][?true] WHERE null RETURN NULL TIMEOUT 1h PARALLEL EXPLAIN"#
 	)
 	.unwrap();
 
@@ -2163,7 +2164,8 @@ fn parse_delete_2() {
 			cond: Some(Cond(Value::Null)),
 			output: Some(Output::Null),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(60 * 60)))),
-			parallel: true
+			parallel: true,
+			explain: Some(Explain(false)),
 		})
 	)
 }
@@ -2860,7 +2862,7 @@ fn parse_remove() {
 fn parse_update() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL"#
+		r#"UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL"#
 	)
 	.unwrap();
 	assert_eq!(
@@ -2896,6 +2898,7 @@ fn parse_update() {
 			output: Some(Output::Diff),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			explain: Some(Explain(true))
 		})
 	);
 }
@@ -2904,7 +2907,7 @@ fn parse_update() {
 fn parse_upsert() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL"#
+		r#"UPSERT ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN"#
 	)
 	.unwrap();
 	assert_eq!(
@@ -2940,6 +2943,7 @@ fn parse_upsert() {
 			output: Some(Output::Diff),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			explain: Some(Explain(false))
 		})
 	);
 }

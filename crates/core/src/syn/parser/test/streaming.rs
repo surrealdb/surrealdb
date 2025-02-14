@@ -419,6 +419,7 @@ fn statements() -> Vec<Statement> {
 			output: Some(Output::After),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			explain: Some(Explain(true)),
 		}),
 		Statement::Delete(DeleteStatement {
 			only: true,
@@ -438,6 +439,7 @@ fn statements() -> Vec<Statement> {
 			output: Some(Output::Null),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(60 * 60)))),
 			parallel: true,
+			explain: Some(Explain(true)),
 		}),
 		Statement::Foreach(ForeachStatement {
 			param: Param(Ident("foo".to_owned())),
@@ -695,6 +697,7 @@ fn statements() -> Vec<Statement> {
 			output: Some(Output::Diff),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			explain: Some(Explain(true)),
 		}),
 		Statement::Upsert(UpsertStatement {
 			only: true,
@@ -727,6 +730,7 @@ fn statements() -> Vec<Statement> {
 			output: Some(Output::Diff),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
+			explain: Some(Explain(true)),
 		}),
 		Statement::Value(Value::Function(Box::new(crate::sql::Function::Script(
 			Script(" ((1 + 1)) ".to_owned()),
