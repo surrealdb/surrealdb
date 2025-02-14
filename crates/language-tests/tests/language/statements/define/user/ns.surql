@@ -1,6 +1,7 @@
 /**
 [env]
 namespace = false
+clean = true
 
 [test]
 
