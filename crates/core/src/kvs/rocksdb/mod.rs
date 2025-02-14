@@ -98,15 +98,27 @@ impl Datastore {
 		// Set minimum number of write buffers to merge
 		info!(target: TARGET, "Minimum write buffers to merge: {}", *cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
 		opts.set_min_write_buffer_number_to_merge(*cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
+		// Delay compaction until the minimum number of files accumulate
+		info!(target: TARGET, "Number of files to trigger compaction: {}", *cnf::ROCKSDB_FILE_COMPACTION_TRIGGER);
+		opts.set_level_zero_file_num_compaction_trigger(*cnf::ROCKSDB_FILE_COMPACTION_TRIGGER);
+		// Set the compaction readahead size
+		info!(target: TARGET, "Compaction readahead size: {}", *cnf::ROCKSDB_COMPACTION_READAHEAD_SIZE);
+		opts.set_compaction_readahead_size(*cnf::ROCKSDB_COMPACTION_READAHEAD_SIZE);
+		// Set the max number of subcompactions
+		info!(target: TARGET, "Maximum concurrent subcompactions: {}", *cnf::ROCKSDB_MAX_CONCURRENT_SUBCOMPACTIONS);
+		opts.set_max_subcompactions(*cnf::ROCKSDB_MAX_CONCURRENT_SUBCOMPACTIONS);
 		// Use separate write thread queues
 		info!(target: TARGET, "Use separate thread queues: {}", *cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		opts.set_enable_pipelined_write(*cnf::ROCKSDB_ENABLE_PIPELINED_WRITES);
 		// Enable separation of keys and values
 		info!(target: TARGET, "Enable separation of keys and values: {}", *cnf::ROCKSDB_ENABLE_BLOB_FILES);
 		opts.set_enable_blob_files(*cnf::ROCKSDB_ENABLE_BLOB_FILES);
-		// Store 4KB values separate from keys
+		// Store large values separate from keys
 		info!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
+		// Set the write-ahead-log size limit in MB
+		info!(target: TARGET, "Write-ahead-log file size limit: {}MB", *cnf::ROCKSDB_WAL_SIZE_LIMIT);
+		opts.set_wal_size_limit_mb(*cnf::ROCKSDB_WAL_SIZE_LIMIT);
 		// Allow multiple writers to update memtables in parallel
 		info!(target: TARGET, "Allow concurrent memtable writes: true");
 		opts.set_allow_concurrent_memtable_write(true);
@@ -125,12 +137,20 @@ impl Datastore {
 		// Configure the block based file options
 		let mut block_opts = BlockBasedOptions::default();
 		block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
-		block_opts.set_hybrid_ribbon_filter(10.0, 2);
+		block_opts.set_pin_top_level_index_and_filter(true);
+		block_opts.set_bloom_filter(10.0, false);
+		block_opts.set_block_size(*cnf::ROCKSDB_BLOCK_SIZE);
 		block_opts.set_block_cache(&cache);
 		// Configure the database with the cache
 		opts.set_block_based_table_factory(&block_opts);
 		opts.set_blob_cache(&cache);
 		opts.set_row_cache(&cache);
+		// Configure memory-mapped reads
+		info!(target: TARGET, "Enable memory-mapped reads: {}", *cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_READS);
+		opts.set_allow_mmap_reads(true);
+		// Configure memory-mapped writes
+		info!(target: TARGET, "Enable memory-mapped writes: {}", *cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_WRITES);
+		opts.set_allow_mmap_writes(true);
 		// Set the delete compaction factory
 		info!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
@@ -177,6 +197,8 @@ impl Datastore {
 			// means that the WAL will be flushed
 			// whenever a transaction is committed.
 			false => {
+				// Dispay the configuration setting
+				info!(target: TARGET, "Background write-ahead-log flushing: disabled");
 				// Enable manual WAL flush
 				opts.set_manual_wal_flush(false);
 				// Create the optimistic datastore
@@ -186,6 +208,8 @@ impl Datastore {
 			// spawn a background worker thread to
 			// flush the WAL to disk periodically.
 			true => {
+				// Dispay the configuration setting
+				info!(target: TARGET, "Background write-ahead-log flushing: enabled every {}ms", *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL);
 				// Enable manual WAL flush
 				opts.set_manual_wal_flush(true);
 				// Create the optimistic datastore
@@ -199,7 +223,7 @@ impl Datastore {
 					// Wait for the specified interval
 					thread::sleep(Duration::from_millis(wait));
 					// Flush the WAL to disk periodically
-					if let Err(err) = dbc.flush_wal(true) {
+					if let Err(err) = dbc.flush_wal(*cnf::SYNC_DATA) {
 						error!("Failed to flush WAL: {err}");
 					}
 				});
@@ -299,10 +323,7 @@ impl super::api::Transaction for Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Cancel this transaction
-		match self.inner.as_ref() {
-			Some(inner) => inner.rollback()?,
-			None => return Err(fail!("Unable to cancel an already taken transaction")),
-		};
+		self.inner.as_ref().unwrap().rollback()?;
 		// Continue
 		Ok(())
 	}
@@ -321,10 +342,7 @@ impl super::api::Transaction for Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Commit this transaction
-		match self.inner.take() {
-			Some(inner) => inner.commit()?,
-			None => return Err(fail!("Unable to commit an already taken transaction")),
-		};
+		self.inner.take().unwrap().commit()?;
 		// Continue
 		Ok(())
 	}
@@ -343,9 +361,10 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Check the key
-		let res =
-			self.inner.as_ref().unwrap().get_pinned_opt(key.encode_owned()?, &self.ro)?.is_some();
+		// Get the arguments
+		let key = key.encode_owned()?;
+		// Get the key
+		let res = self.inner.as_ref().unwrap().get_pinned_opt(key, &self.ro)?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -364,8 +383,10 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
+		// Get the arguments
+		let key = key.encode_owned()?;
 		// Get the key
-		let res = self.inner.as_ref().unwrap().get_opt(key.encode_owned()?, &self.ro)?;
+		let res = self.inner.as_ref().unwrap().get_opt(key, &self.ro)?;
 		// Return result
 		Ok(res)
 	}
@@ -380,13 +401,14 @@ impl super::api::Transaction for Transaction {
 		if self.closed() {
 			return Err(Error::TxFinished);
 		}
-		// Get the arguments
-		let mut keys_encoded = Vec::new();
-		for k in keys {
-			keys_encoded.push(k.encode_owned()?);
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
 		}
+		// Get the arguments
+		let keys: Vec<Key> = keys.into_iter().map(K::encode_owned).collect::<Result<_, _>>()?;
 		// Get the keys
-		let res = self.inner.as_ref().unwrap().multi_get_opt(keys_encoded, &self.ro);
+		let res = self.inner.as_ref().unwrap().multi_get_opt(keys, &self.ro);
 		// Convert result
 		let res = res.into_iter().collect::<Result<_, _>>()?;
 		// Return result
@@ -412,8 +434,11 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Get the arguments
+		let key = key.encode_owned()?;
+		let val = val.into();
 		// Set the key
-		self.inner.as_ref().unwrap().put(key.encode_owned()?, val.into())?;
+		self.inner.as_ref().unwrap().put(key, val)?;
 		// Return result
 		Ok(())
 	}
@@ -437,14 +462,12 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let val = val.into();
 		// Set the key if empty
-		match inner.get_pinned_opt(&key, &self.ro)? {
-			None => inner.put(key, val)?,
+		match self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)? {
+			None => self.inner.as_ref().unwrap().put(key, val)?,
 			_ => return Err(Error::TxKeyAlreadyExists),
 		};
 		// Return result
@@ -466,16 +489,14 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let val = val.into();
 		let chk = chk.map(Into::into);
-		// Set the key if valid
-		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
-			(Some(v), Some(w)) if v.eq(&w) => inner.put(key, val)?,
-			(None, None) => inner.put(key, val)?,
+		// Set the key if empty
+		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
+			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().put(key, val)?,
+			(None, None) => self.inner.as_ref().unwrap().put(key, val)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -496,8 +517,10 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Get the arguments
+		let key = key.encode_owned()?;
 		// Remove the key
-		self.inner.as_ref().unwrap().delete(key.encode_owned()?)?;
+		self.inner.as_ref().unwrap().delete(key)?;
 		// Return result
 		Ok(())
 	}
@@ -517,15 +540,13 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let chk = chk.map(Into::into);
 		// Delete the key if valid
-		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
-			(Some(v), Some(w)) if v.eq(&w) => inner.delete(key)?,
-			(None, None) => inner.delete(key)?,
+		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
+			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().delete(key)?,
+			(None, None) => self.inner.as_ref().unwrap().delete(key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -551,43 +572,49 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
 			start: rng.start.encode_owned()?,
 			end: rng.end.encode_owned()?,
 		};
-		// Create result set
-		let mut res = vec![];
-		// Set the key range
-		let beg = rng.start.as_slice();
-		let end = rng.end.as_slice();
-		// Set the ReadOptions with the snapshot
-		let mut ro = ReadOptions::default();
-		ro.set_snapshot(&inner.snapshot());
-		ro.set_iterate_lower_bound(beg);
-		ro.set_iterate_upper_bound(end);
-		ro.set_async_io(true);
-		ro.fill_cache(true);
-		// Create the iterator
-		let mut iter = inner.raw_iterator_opt(ro);
-		// Seek to the start key
-		iter.seek(&rng.start);
-		// Check the scan limit
-		while res.len() < limit as usize {
-			// Check the key and value
-			if let Some(k) = iter.key() {
-				// Check the range validity
-				if k >= beg && k < end {
-					res.push(k.to_vec());
-					iter.next();
-					continue;
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(move || {
+			// Create result set
+			let mut res = vec![];
+			// Set the key range
+			let beg = rng.start.as_slice();
+			let end = rng.end.as_slice();
+			// Set the ReadOptions with the snapshot
+			let mut ro = ReadOptions::default();
+			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
+			ro.set_iterate_lower_bound(beg);
+			ro.set_iterate_upper_bound(end);
+			ro.set_async_io(true);
+			ro.fill_cache(true);
+			// Create the iterator
+			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
+			// Seek to the start key
+			iter.seek(&rng.start);
+			// Check the scan limit
+			while res.len() < limit as usize {
+				// Check the key and value
+				if let Some(k) = iter.key() {
+					// Check the range validity
+					if k >= beg && k < end {
+						res.push(k.to_vec());
+						iter.next();
+						continue;
+					}
 				}
+				// Exit
+				break;
 			}
-			// Exit
-			break;
-		}
+			// Drop the iterator
+			drop(iter);
+			// Return result
+			res
+		})
+		.await;
 		// Return result
 		Ok(res)
 	}
@@ -611,43 +638,49 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
 			start: rng.start.encode_owned()?,
 			end: rng.end.encode_owned()?,
 		};
-		// Create result set
-		let mut res = vec![];
-		// Set the key range
-		let beg = rng.start.as_slice();
-		let end = rng.end.as_slice();
-		// Set the ReadOptions with the snapshot
-		let mut ro = ReadOptions::default();
-		ro.set_snapshot(&inner.snapshot());
-		ro.set_iterate_lower_bound(beg);
-		ro.set_iterate_upper_bound(end);
-		ro.set_async_io(true);
-		ro.fill_cache(true);
-		// Create the iterator
-		let mut iter = inner.raw_iterator_opt(ro);
-		// Seek to the start key
-		iter.seek(&rng.start);
-		// Check the scan limit
-		while res.len() < limit as usize {
-			// Check the key and value
-			if let Some((k, v)) = iter.item() {
-				// Check the range validity
-				if k >= beg && k < end {
-					res.push((k.to_vec(), v.to_vec()));
-					iter.next();
-					continue;
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(move || {
+			// Create result set
+			let mut res = vec![];
+			// Set the key range
+			let beg = rng.start.as_slice();
+			let end = rng.end.as_slice();
+			// Set the ReadOptions with the snapshot
+			let mut ro = ReadOptions::default();
+			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
+			ro.set_iterate_lower_bound(beg);
+			ro.set_iterate_upper_bound(end);
+			ro.set_async_io(true);
+			ro.fill_cache(true);
+			// Create the iterator
+			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
+			// Seek to the start key
+			iter.seek(&rng.start);
+			// Check the scan limit
+			while res.len() < limit as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.item() {
+					// Check the range validity
+					if k >= beg && k < end {
+						res.push((k.to_vec(), v.to_vec()));
+						iter.next();
+						continue;
+					}
 				}
+				// Exit
+				break;
 			}
-			// Exit
-			break;
-		}
+			// Drop the iterator
+			drop(iter);
+			// Return result
+			res
+		})
+		.await;
 		// Return result
 		Ok(res)
 	}

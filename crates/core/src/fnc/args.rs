@@ -1,8 +1,8 @@
 use crate::err::Error;
 use crate::sql::value::Value;
 use crate::sql::{
-	Array, Bytes, Closure, Datetime, Duration, Geometry, Kind, Number, Object, Regex, Strand,
-	Thing, Uuid,
+	Array, Bytes, Bytesize, Closure, Datetime, Duration, Geometry, Kind, Number, Object, Regex,
+	Strand, Thing, Uuid,
 };
 use std::vec::IntoIter;
 
@@ -14,6 +14,12 @@ pub trait FromArg: Sized {
 impl FromArg for Value {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		Ok(arg)
+	}
+}
+
+impl FromArg for bool {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_bool()
 	}
 }
 
@@ -56,6 +62,12 @@ impl FromArg for Datetime {
 impl FromArg for Duration {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		arg.coerce_to_duration()
+	}
+}
+
+impl FromArg for Bytesize {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		Bytesize::parse(arg.coerce_to_string()?)
 	}
 }
 

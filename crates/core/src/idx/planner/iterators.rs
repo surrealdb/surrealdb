@@ -264,8 +264,10 @@ impl IndexEqualThingIterator {
 	) -> Result<B, Error> {
 		let res = Self::next_scan(tx, beg, end, limit).await?;
 		let mut records = B::with_capacity(res.len());
-		res.into_iter()
-			.for_each(|(_, val)| records.add(IndexItemRecord::new_key(val.into(), irf.into())));
+		res.into_iter().try_for_each(|(_, val)| -> Result<(), Error> {
+			records.add(IndexItemRecord::new_key(revision::from_slice(&val)?, irf.into()));
+			Ok(())
+		})?;
 		Ok(records)
 	}
 
@@ -523,9 +525,12 @@ impl IndexRangeThingIterator {
 	) -> Result<B, Error> {
 		let res = self.next_scan(tx, limit).await?;
 		let mut records = B::with_capacity(res.len());
-		res.into_iter()
-			.filter(|(k, _)| self.r.matches(k))
-			.for_each(|(_, v)| records.add(IndexItemRecord::new_key(v.into(), self.irf.into())));
+		res.into_iter().filter(|(k, _)| self.r.matches(k)).try_for_each(
+			|(_, v)| -> Result<(), Error> {
+				records.add(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into()));
+				Ok(())
+			},
+		)?;
 		Ok(records)
 	}
 
@@ -572,7 +577,7 @@ impl IndexUnionThingIterator {
 		limit: u32,
 	) -> Result<B, Error> {
 		while let Some(r) = &mut self.current {
-			if ctx.is_done() {
+			if ctx.is_done(true) {
 				break;
 			}
 			let records: B =
@@ -593,7 +598,7 @@ impl IndexUnionThingIterator {
 		limit: u32,
 	) -> Result<usize, Error> {
 		while let Some(r) = &mut self.current {
-			if ctx.is_done() {
+			if ctx.is_done(true) {
 				break;
 			}
 			let res = IndexEqualThingIterator::next_scan(tx, &mut r.0, &r.1, limit).await?;
@@ -623,9 +628,10 @@ impl JoinThingIterator {
 		ix: IndexReference,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Result<Self, Error> {
+		let (ns, db) = opt.ns_db()?;
 		Ok(Self {
-			ns: opt.ns()?.to_string(),
-			db: opt.db()?.to_string(),
+			ns: ns.to_owned(),
+			db: db.to_owned(),
 			ix,
 			current_remote: None,
 			current_remote_batch: VecDeque::with_capacity(1),
@@ -643,7 +649,7 @@ impl JoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<bool, Error> {
-		while !ctx.is_done() {
+		while !ctx.is_done(true) {
 			if let Some(it) = &mut self.current_remote {
 				self.current_remote_batch = it.next_batch(ctx, tx, limit).await?;
 				if !self.current_remote_batch.is_empty() {
@@ -668,15 +674,20 @@ impl JoinThingIterator {
 	where
 		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator, Error>,
 	{
-		while !ctx.is_done() {
+		while !ctx.is_done(true) {
+			let mut count = 0;
 			while let Some(r) = self.current_remote_batch.pop_front() {
+				if ctx.is_done(count % 100 == 0) {
+					break;
+				}
 				let thing = r.thing();
-				let k: Key = thing.into();
+				let k: Key = revision::to_vec(thing)?;
 				let value = Value::from(thing.clone());
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local = Some(new_iter(&self.ns, &self.db, &self.ix, value)?);
 					return Ok(true);
 				}
+				count += 1;
 			}
 			if !self.next_current_remote_batch(ctx, tx, limit).await? {
 				break;
@@ -695,7 +706,7 @@ impl JoinThingIterator {
 	where
 		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator, Error> + Copy,
 	{
-		while !ctx.is_done() {
+		while !ctx.is_done(true) {
 			if let Some(current_local) = &mut self.current_local {
 				let records: B = current_local.next_batch(ctx, tx, limit).await?;
 				if !records.is_empty() {
@@ -719,7 +730,7 @@ impl JoinThingIterator {
 	where
 		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator, Error> + Copy,
 	{
-		while !ctx.is_done() {
+		while !ctx.is_done(true) {
 			if let Some(current_local) = &mut self.current_local {
 				let count = current_local.next_count(ctx, tx, limit).await?;
 				if count > 0 {
@@ -798,7 +809,7 @@ impl UniqueEqualThingIterator {
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B, Error> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = tx.get(key, None).await? {
-				let rid: Thing = val.into();
+				let rid: Thing = revision::from_slice(&val)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());
 				return Ok(B::from_one(record));
 			}
@@ -906,14 +917,14 @@ impl UniqueRangeThingIterator {
 				return Ok(records);
 			}
 			if self.r.matches(&k) {
-				let rid: Thing = v.into();
+				let rid: Thing = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
 		let end = self.r.end.clone();
 		if self.r.matches(&end) {
 			if let Some(v) = tx.get(end, None).await? {
-				let rid: Thing = v.into();
+				let rid: Thing = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
@@ -963,8 +974,9 @@ impl UniqueUnionThingIterator {
 	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the key for each value in the array.
 		let mut keys = VecDeque::with_capacity(vals.len());
+		let (ns, db) = opt.ns_db()?;
 		for a in vals {
-			let key = Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, a, None).encode()?;
+			let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode()?;
 			keys.push_back(key);
 		}
 		Ok(Self {
@@ -981,12 +993,14 @@ impl UniqueUnionThingIterator {
 	) -> Result<B, Error> {
 		let limit = limit as usize;
 		let mut results = B::with_capacity(limit.min(self.keys.len()));
+		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
-			if ctx.is_done() {
+			if ctx.is_done(count % 100 == 0) {
 				break;
 			}
 			if let Some(val) = tx.get(key, None).await? {
-				let rid: Thing = val.into();
+				count += 1;
+				let rid: Thing = revision::from_slice(&val)?;
 				results.add(IndexItemRecord::new_key(rid, self.irf.into()));
 				if results.len() >= limit {
 					break;
@@ -1005,7 +1019,7 @@ impl UniqueUnionThingIterator {
 		let limit = limit as usize;
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
-			if ctx.is_done() {
+			if ctx.is_done(count % 100 == 0) {
 				break;
 			}
 			if tx.exists(key, None).await? {
@@ -1094,7 +1108,7 @@ impl MatchesThingIterator {
 		if let Some(hits) = &mut self.hits {
 			let limit = limit as usize;
 			let mut records = B::with_capacity(limit.min(self.hits_left));
-			while limit > records.len() && !ctx.is_done() {
+			while limit > records.len() && !ctx.is_done(self.hits_left % 100 == 0) {
 				if let Some((thg, doc_id)) = hits.next(tx).await? {
 					let ir = IteratorRecord {
 						irf: self.irf,
@@ -1122,7 +1136,7 @@ impl MatchesThingIterator {
 		if let Some(hits) = &mut self.hits {
 			let limit = limit as usize;
 			let mut count = 0;
-			while limit > count && !ctx.is_done() {
+			while limit > count && !ctx.is_done(self.hits_left % 100 == 0) {
 				if let Some((_, _)) = hits.next(tx).await? {
 					count += 1;
 					self.hits_left -= 1;
@@ -1158,7 +1172,7 @@ impl KnnIterator {
 	) -> Result<B, Error> {
 		let limit = limit as usize;
 		let mut records = B::with_capacity(limit.min(self.res.len()));
-		while limit > records.len() && !ctx.is_done() {
+		while limit > records.len() && !ctx.is_done(records.len() % 100 == 0) {
 			if let Some((thing, dist, val)) = self.res.pop_front() {
 				let ir = IteratorRecord {
 					irf: self.irf,
@@ -1176,7 +1190,7 @@ impl KnnIterator {
 	async fn next_count(&mut self, ctx: &Context, limit: u32) -> Result<usize, Error> {
 		let limit = limit as usize;
 		let mut count = 0;
-		while limit > count && !ctx.is_done() {
+		while limit > count && !ctx.is_done(count % 100 == 0) {
 			if self.res.pop_front().is_some() {
 				count += 1;
 			} else {

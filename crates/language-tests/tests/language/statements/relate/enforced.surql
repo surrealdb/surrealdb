@@ -14,7 +14,7 @@ value = "[{ id: a:1 }, { id: a:2 }]"
 value = "[{ id: edge:1, in: a:1, out: a:2 }]"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: { a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE', edge: 'DEFINE TABLE edge TYPE RELATION ENFORCED SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: { a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE', edge: 'DEFINE TABLE edge TYPE RELATION ENFORCED SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
 
 */
 

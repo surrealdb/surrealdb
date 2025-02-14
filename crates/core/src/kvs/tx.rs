@@ -13,6 +13,7 @@ use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
+use crate::sql::statements::define::ApiDefinition;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
@@ -381,13 +382,18 @@ impl Transaction {
 		&self,
 		rng: Range<Vec<u8>>,
 		version: Option<u64>,
+		limit: Option<usize>,
 	) -> impl Stream<Item = Result<(Key, Val), Error>> + '_ {
-		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version)
+		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version, limit)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream_keys(&self, rng: Range<Vec<u8>>) -> impl Stream<Item = Result<Key, Error>> + '_ {
-		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None)
+	pub fn stream_keys(
+		&self,
+		rng: Range<Vec<u8>>,
+		limit: Option<usize>,
+	) -> impl Stream<Item = Result<Key, Error>> + '_ {
+		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, limit)
 	}
 
 	// --------------------------------------------------
@@ -649,6 +655,25 @@ impl Transaction {
 		}
 	}
 
+	/// Retrieve all api definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn all_db_apis(&self, ns: &str, db: &str) -> Result<Arc<[ApiDefinition]>, Error> {
+		let qey = cache::tx::Lookup::Aps(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::ap::prefix(ns, db)?;
+				let end = crate::key::database::ap::suffix(ns, db)?;
+				let val = self.getr(beg..end, None).await?;
+				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+				let val = cache::tx::Entry::Aps(Arc::clone(&val));
+				self.cache.insert(qey, val.clone());
+				val
+			}
+		}
+		.try_into_aps()
+	}
+
 	/// Retrieve all analyzer definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_analyzers(
@@ -907,9 +932,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::root::nd::new(id).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::NdNotFound {
-					value: id.to_string(),
+					uuid: id.to_string(),
 				})?;
-				let val: Node = val.into();
+				let val: Node = revision::from_slice(&val)?;
 				let val = cache::tx::Entry::Any(Arc::new(val));
 				self.cache.insert(qey, val.clone());
 				val
@@ -927,9 +952,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::root::us::new(us).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::UserRootNotFound {
-					value: us.to_owned(),
+					name: us.to_owned(),
 				})?;
-				let val: DefineUserStatement = val.into();
+				let val: DefineUserStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -949,7 +974,7 @@ impl Transaction {
 				let val = self.get(key, None).await?.ok_or_else(|| Error::AccessRootNotFound {
 					ac: ra.to_owned(),
 				})?;
-				let val: DefineAccessStatement = val.into();
+				let val: DefineAccessStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -975,7 +1000,7 @@ impl Transaction {
 						ac: ac.to_owned(),
 						gr: gr.to_owned(),
 					})?;
-				let val: AccessGrant = val.into();
+				let val: AccessGrant = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -993,9 +1018,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::root::ns::new(ns).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::NsNotFound {
-					value: ns.to_owned(),
+					name: ns.to_owned(),
 				})?;
-				let val: DefineNamespaceStatement = val.into();
+				let val: DefineNamespaceStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1013,10 +1038,10 @@ impl Transaction {
 			None => {
 				let key = crate::key::namespace::us::new(ns, us).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::UserNsNotFound {
-					value: us.to_owned(),
+					name: us.to_owned(),
 					ns: ns.to_owned(),
 				})?;
-				let val: DefineUserStatement = val.into();
+				let val: DefineUserStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1041,7 +1066,7 @@ impl Transaction {
 					ac: na.to_owned(),
 					ns: ns.to_owned(),
 				})?;
-				let val: DefineAccessStatement = val.into();
+				let val: DefineAccessStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1069,7 +1094,7 @@ impl Transaction {
 						gr: gr.to_owned(),
 						ns: ns.to_owned(),
 					})?;
-				let val: AccessGrant = val.into();
+				let val: AccessGrant = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1087,9 +1112,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::namespace::db::new(ns, db).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::DbNotFound {
-					value: db.to_owned(),
+					name: db.to_owned(),
 				})?;
-				let val: DefineDatabaseStatement = val.into();
+				let val: DefineDatabaseStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1112,11 +1137,11 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::us::new(ns, db, us).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::UserDbNotFound {
-					value: us.to_owned(),
+					name: us.to_owned(),
 					ns: ns.to_owned(),
 					db: db.to_owned(),
 				})?;
-				let val: DefineUserStatement = val.into();
+				let val: DefineUserStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1143,7 +1168,7 @@ impl Transaction {
 					ns: ns.to_owned(),
 					db: db.to_owned(),
 				})?;
-				let val: DefineAccessStatement = val.into();
+				let val: DefineAccessStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1173,7 +1198,7 @@ impl Transaction {
 						ns: ns.to_owned(),
 						db: db.to_owned(),
 					})?;
-				let val: AccessGrant = val.into();
+				let val: AccessGrant = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1197,15 +1222,40 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::ml::new(ns, db, ml, vn).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::MlNotFound {
-					value: format!("{ml}<{vn}>"),
+					name: format!("{ml}<{vn}>"),
 				})?;
-				let val: DefineModelStatement = val.into();
+				let val: DefineModelStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
 				Ok(val)
 			}
 		}
+	}
+
+	/// Retrieve a specific api definition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_api(
+		&self,
+		ns: &str,
+		db: &str,
+		ap: &str,
+	) -> Result<Arc<ApiDefinition>, Error> {
+		let qey = cache::tx::Lookup::Ap(ns, db, ap);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::ap::new(ns, db, ap).encode()?;
+				let val = self.get(key, None).await?.ok_or_else(|| Error::ApNotFound {
+					value: ap.to_owned(),
+				})?;
+				let val: ApiDefinition = revision::from_slice(&val)?;
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey, val.clone());
+				val
+			}
+		}
+		.try_into_type()
 	}
 
 	/// Retrieve a specific analyzer definition.
@@ -1222,9 +1272,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::az::new(ns, db, az).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::AzNotFound {
-					value: az.to_owned(),
+					name: az.to_owned(),
 				})?;
-				let val: DefineAnalyzerStatement = val.into();
+				let val: DefineAnalyzerStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1247,9 +1297,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::fc::new(ns, db, fc).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::FcNotFound {
-					value: fc.to_owned(),
+					name: fc.to_owned(),
 				})?;
-				let val: DefineFunctionStatement = val.into();
+				let val: DefineFunctionStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1272,9 +1322,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::pa::new(ns, db, pa).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::PaNotFound {
-					value: pa.to_owned(),
+					name: pa.to_owned(),
 				})?;
-				let val: DefineParamStatement = val.into();
+				let val: DefineParamStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1291,19 +1341,37 @@ impl Transaction {
 		db: &str,
 		cg: &str,
 	) -> Result<Arc<DefineConfigStatement>, Error> {
+		if let Some(val) = self.get_db_optional_config(ns, db, cg).await? {
+			Ok(val)
+		} else {
+			Err(Error::CgNotFound {
+				name: cg.to_owned(),
+			})
+		}
+	}
+
+	/// Retrieve a specific config definition from a database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_optional_config(
+		&self,
+		ns: &str,
+		db: &str,
+		cg: &str,
+	) -> Result<Option<Arc<DefineConfigStatement>>, Error> {
 		let qey = cache::tx::Lookup::Cg(ns, db, cg);
 		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+			Some(val) => val.try_into_type().map(Option::Some),
 			None => {
 				let key = crate::key::database::cg::new(ns, db, cg).encode()?;
-				let val = self.get(key, None).await?.ok_or_else(|| Error::CgNotFound {
-					value: cg.to_owned(),
-				})?;
-				let val: DefineConfigStatement = val.into();
-				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
-				Ok(val)
+				if let Some(val) = self.get(key, None).await? {
+					let val: DefineConfigStatement = revision::from_slice(&val)?;
+					let val = Arc::new(val);
+					let entr = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entr);
+					Ok(Some(val))
+				} else {
+					Ok(None)
+				}
 			}
 		}
 	}
@@ -1322,9 +1390,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::database::tb::new(ns, db, tb).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::TbNotFound {
-					value: tb.to_owned(),
+					name: tb.to_owned(),
 				})?;
-				let val: DefineTableStatement = val.into();
+				let val: DefineTableStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1348,9 +1416,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::table::ev::new(ns, db, tb, ev).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::EvNotFound {
-					value: ev.to_owned(),
+					name: ev.to_owned(),
 				})?;
-				let val: DefineEventStatement = val.into();
+				let val: DefineEventStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1374,9 +1442,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::table::fd::new(ns, db, tb, fd).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::FdNotFound {
-					value: fd.to_owned(),
+					name: fd.to_owned(),
 				})?;
-				let val: DefineFieldStatement = val.into();
+				let val: DefineFieldStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1400,9 +1468,9 @@ impl Transaction {
 			None => {
 				let key = crate::key::table::ix::new(ns, db, tb, ix).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::IxNotFound {
-					value: ix.to_owned(),
+					name: ix.to_owned(),
 				})?;
-				let val: DefineIndexStatement = val.into();
+				let val: DefineIndexStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1428,7 +1496,7 @@ impl Transaction {
 			match self.get(key, version).await? {
 				// The value exists in the datastore
 				Some(val) => {
-					let val = cache::tx::Entry::Val(Arc::new(val.into()));
+					let val = cache::tx::Entry::Val(Arc::new(revision::from_slice(&val)?));
 					val.try_into_val()
 				}
 				// The value is not in the datastore
@@ -1446,7 +1514,7 @@ impl Transaction {
 					match self.get(key, None).await? {
 						// The value exists in the datastore
 						Some(val) => {
-							let val = cache::tx::Entry::Val(Arc::new(val.into()));
+							let val = cache::tx::Entry::Val(Arc::new(revision::from_slice(&val)?));
 							self.cache.insert(qey, val.clone());
 							val.try_into_val()
 						}
@@ -1469,7 +1537,7 @@ impl Transaction {
 	) -> Result<(), Error> {
 		// Set the value in the datastore
 		let key = crate::key::thing::new(ns, db, tb, id);
-		self.set(&key, &val, None).await?;
+		self.set(&key, revision::to_vec(&val)?, None).await?;
 		// Set the value in the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 		self.cache.insert(qey, cache::tx::Entry::Val(Arc::new(val)));
@@ -1569,25 +1637,25 @@ impl Transaction {
 				// Check that the table exists
 				match self.get_tb(ns, db, tb).await {
 					Err(Error::TbNotFound {
-						value: tb,
+						name: tb,
 					}) => {
 						// If not, check the database exists
 						match self.get_db(ns, db).await {
 							Err(Error::DbNotFound {
-								value: db,
+								name: db,
 							}) => {
 								// If not, check the namespace exists
 								match self.get_ns(ns).await {
 									Err(Error::NsNotFound {
-										value: ns,
+										name: ns,
 									}) => Err(Error::NsNotFound {
-										value: ns,
+										name: ns,
 									}),
 									// Return any other errors
 									Err(err) => Err(err),
 									// Namespace does exist
 									Ok(_) => Err(Error::DbNotFound {
-										value: db,
+										name: db,
 									}),
 								}
 							}
@@ -1595,7 +1663,7 @@ impl Transaction {
 							Err(err) => Err(err),
 							// Database does exist
 							Ok(_) => Err(Error::TbNotFound {
-								value: tb,
+								name: tb,
 							}),
 						}
 					}
@@ -1636,7 +1704,7 @@ impl Transaction {
 				// Try to fetch the value from the datastore
 				let key = crate::key::root::ns::new(ns);
 				let res = self.get(&key, None).await?.ok_or_else(|| Error::NsNotFound {
-					value: ns.to_owned(),
+					name: ns.to_owned(),
 				});
 				// Check whether the value exists in the datastore
 				match res {
@@ -1649,7 +1717,7 @@ impl Transaction {
 							..Default::default()
 						};
 						let val = {
-							self.put(&key, &val, None).await?;
+							self.put(&key, revision::to_vec(&val)?, None).await?;
 							cache::tx::Entry::Any(Arc::new(val))
 						};
 						self.cache.insert(qey, val.clone());
@@ -1657,7 +1725,7 @@ impl Transaction {
 					}
 					// Store the fetched value in the cache
 					Ok(val) => {
-						let val: DefineNamespaceStatement = val.into();
+						let val: DefineNamespaceStatement = revision::from_slice(&val)?;
 						let val = cache::tx::Entry::Any(Arc::new(val));
 						self.cache.insert(qey, val.clone());
 						val
@@ -1688,7 +1756,7 @@ impl Transaction {
 				// Try to fetch the value from the datastore
 				let key = crate::key::namespace::db::new(ns, db);
 				let res = self.get(&key, None).await?.ok_or_else(|| Error::DbNotFound {
-					value: db.to_owned(),
+					name: db.to_owned(),
 				});
 				// Check whether the value exists in the datastore
 				match res {
@@ -1706,7 +1774,7 @@ impl Transaction {
 							..Default::default()
 						};
 						let val = {
-							self.put(&key, &val, None).await?;
+							self.put(&key, revision::to_vec(&val)?, None).await?;
 							cache::tx::Entry::Any(Arc::new(val))
 						};
 						self.cache.insert(qey, val.clone());
@@ -1714,16 +1782,16 @@ impl Transaction {
 					}
 					// Check to see that the hierarchy exists
 					Err(Error::DbNotFound {
-						value,
+						name,
 					}) if strict => {
 						self.get_ns(ns).await?;
 						Err(Error::DbNotFound {
-							value,
+							name,
 						})?
 					}
 					// Store the fetched value in the cache
 					Ok(val) => {
-						let val: DefineDatabaseStatement = val.into();
+						let val: DefineDatabaseStatement = revision::from_slice(&val)?;
 						let val = cache::tx::Entry::Any(Arc::new(val));
 						self.cache.insert(qey, val.clone());
 						val
@@ -1755,7 +1823,7 @@ impl Transaction {
 				// Try to fetch the value from the datastore
 				let key = crate::key::database::tb::new(ns, db, tb);
 				let res = self.get(&key, None).await?.ok_or_else(|| Error::TbNotFound {
-					value: tb.to_owned(),
+					name: tb.to_owned(),
 				});
 				// Check whether the value exists in the datastore
 				match res {
@@ -1774,7 +1842,7 @@ impl Transaction {
 							..Default::default()
 						};
 						let val = {
-							self.put(&key, &val, None).await?;
+							self.put(&key, revision::to_vec(&val)?, None).await?;
 							cache::tx::Entry::Any(Arc::new(val))
 						};
 						self.cache.insert(qey, val.clone());
@@ -1782,17 +1850,17 @@ impl Transaction {
 					}
 					// Check to see that the hierarchy exists
 					Err(Error::TbNotFound {
-						value,
+						name,
 					}) if strict => {
 						self.get_ns(ns).await?;
 						self.get_db(ns, db).await?;
 						Err(Error::TbNotFound {
-							value,
+							name,
 						})?
 					}
 					// Store the fetched value in the cache
 					Ok(val) => {
-						let val: DefineTableStatement = val.into();
+						let val: DefineTableStatement = revision::from_slice(&val)?;
 						let val = cache::tx::Entry::Any(Arc::new(val));
 						self.cache.insert(qey, val.clone());
 						val

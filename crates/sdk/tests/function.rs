@@ -3571,8 +3571,7 @@ async fn function_search_analyzer() -> Result<(), Error> {
 
 	//
 	for _ in 0..2 {
-		let tmp = test.next()?.result;
-		tmp.unwrap();
+		test.next()?.result?;
 	}
 	//
 	let tmp = test.next()?.result?;
@@ -3594,8 +3593,7 @@ async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
 
 	//
 	for _ in 0..2 {
-		let tmp = test.next()?.result;
-		tmp.unwrap();
+		test.next()?.result?;
 	}
 	//
 	match test.next()?.result {
@@ -3624,8 +3622,7 @@ async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
 
 	//
 	for _ in 0..2 {
-		let tmp = test.next()?.result;
-		tmp.unwrap();
+		test.next()?.result?;
 	}
 	//
 	match test.next()?.result {
@@ -3649,14 +3646,13 @@ async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
-	let tmp = test.next()?.result;
-	tmp.unwrap();
+	test.next()?.result?;
 	//
 	match test.next()?.result {
 		Err(Error::FcNotFound {
-			value,
+			name,
 		}) => {
-			assert_eq!(&value, "doesNotExist");
+			assert_eq!(&name, "doesNotExist");
 		}
 		r => panic!("Unexpected result: {:?}", r),
 	}

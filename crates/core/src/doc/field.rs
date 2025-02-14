@@ -5,6 +5,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::iam::Action;
+use crate::kvs::KeyEncode as _;
 use crate::sql::data::Data;
 use crate::sql::idiom::Idiom;
 use crate::sql::kind::Kind;
@@ -57,10 +58,7 @@ impl Document {
 				if !keys.contains(fd) {
 					match fd {
 						// Built-in fields
-						fd if fd.is_id() => continue,
-						fd if fd.is_in() => continue,
-						fd if fd.is_out() => continue,
-						fd if fd.is_meta() => continue,
+						fd if fd.is_special() => continue,
 						// Custom fields
 						fd => match opt.strict {
 							// If strict, then throw an error on an undefined field
@@ -248,6 +246,56 @@ impl Document {
 			}
 		}
 		// Carry on
+		Ok(())
+	}
+	/// Processes `DEFINE FIELD` statements which
+	/// have been defined on the table for this
+	/// record, with a `REFERENCE` clause, and remove
+	/// all possible references this record has made.
+	pub(super) async fn cleanup_table_references(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<(), Error> {
+		// Check import
+		if opt.import {
+			return Ok(());
+		}
+		// Get the record id
+		let rid = self.id()?;
+		// Loop through all field statements
+		for fd in self.fd(ctx, opt).await?.iter() {
+			// Only process reference fields
+			if fd.reference.is_none() {
+				continue;
+			}
+
+			// Loop over each value in document
+			'val: for (_, val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+				// Skip if the value is empty
+				if val.is_none() || val.is_empty_array() {
+					continue 'val;
+				}
+
+				// Prepare the field edit context
+				let mut field = FieldEditContext {
+					context: None,
+					doc: self,
+					rid: rid.clone(),
+					def: fd,
+					stk,
+					ctx,
+					opt,
+					old: val.into(),
+					inp: Value::None.into(),
+				};
+
+				// Pass an empty value to delete all the existing references
+				field.process_reference_clause(&Value::None).await?;
+			}
+		}
+
 		Ok(())
 	}
 }
@@ -641,16 +689,17 @@ impl FieldEditContext<'_> {
 				RefAction::Ignore => Ok(()),
 				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
+					let (ns, db) = self.opt.ns_db()?;
 					let key = crate::key::r#ref::new(
-						self.opt.ns()?,
-						self.opt.db()?,
+						ns,
+						db,
 						&thing.tb,
 						&thing.id,
 						&self.rid.tb,
 						&self.def.name.to_string(),
 						&self.rid.id,
 					)
-					.encode()
+					.encode_owned()
 					.unwrap();
 
 					self.ctx.tx().set(key, vec![], None).await?;
@@ -659,17 +708,18 @@ impl FieldEditContext<'_> {
 				}
 				// Delete the reference, if it exists
 				RefAction::Delete(things, ff) => {
+					let (ns, db) = self.opt.ns_db()?;
 					for thing in things {
 						let key = crate::key::r#ref::new(
-							self.opt.ns()?,
-							self.opt.db()?,
+							ns,
+							db,
 							&thing.tb,
 							&thing.id,
 							&self.rid.tb,
 							&ff,
 							&self.rid.id,
 						)
-						.encode()
+						.encode_owned()
 						.unwrap();
 
 						self.ctx.tx().del(key).await?;

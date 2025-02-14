@@ -1,6 +1,7 @@
 //! The different options and types for use in API functions
 
 use serde::Serialize;
+use std::borrow::Cow;
 
 pub mod auth;
 pub mod capabilities;
@@ -134,6 +135,106 @@ impl PatchOp {
 	}
 }
 
+/// Multiple patch operations
+#[derive(Debug, Default)]
+#[must_use]
+pub struct PatchOps(Vec<PatchOp>);
+
+impl From<PatchOps> for PatchOp {
+	fn from(ops: PatchOps) -> Self {
+		let mut merged = PatchOp(Ok(Content::Seq(Vec::with_capacity(ops.0.len()))));
+		for PatchOp(result) in ops.0 {
+			if let Ok(Content::Seq(value)) = &mut merged.0 {
+				match result {
+					Ok(op) => value.push(op),
+					Err(error) => {
+						merged.0 = Err(error);
+						// This operation produced an error, no need to continue
+						break;
+					}
+				}
+			}
+		}
+		merged
+	}
+}
+
+impl PatchOps {
+	/// Prepare for multiple patch operations
+	pub const fn new() -> Self {
+		Self(Vec::new())
+	}
+
+	/// Adds a value to an object or inserts it into an array.
+	///
+	/// In the case of an array, the value is inserted before the given index.
+	/// The `-` character can be used instead of an index to insert at the end of an array.
+	///
+	/// # Examples
+	///
+	/// ```
+	/// # use serde_json::json;
+	/// # use surrealdb::opt::PatchOps;
+	/// PatchOps::new().add("/biscuits/1", json!({ "name": "Ginger Nut" }))
+	/// # ;
+	/// ```
+	pub fn add<T>(mut self, path: &str, value: T) -> Self
+	where
+		T: Serialize,
+	{
+		self.0.push(PatchOp::add(path, value));
+		self
+	}
+
+	/// Removes a value from an object or array.
+	///
+	/// # Examples
+	///
+	/// ```
+	/// # use surrealdb::opt::PatchOps;
+	/// PatchOps::new().remove("/biscuits")
+	/// # ;
+	/// ```
+	///
+	/// Remove the first element of the array at `biscuits`
+	/// (or just removes the “0” key if `biscuits` is an object)
+	///
+	/// ```
+	/// # use surrealdb::opt::PatchOps;
+	/// PatchOps::new().remove("/biscuits/0")
+	/// # ;
+	/// ```
+	pub fn remove(mut self, path: &str) -> Self {
+		self.0.push(PatchOp::remove(path));
+		self
+	}
+
+	/// Replaces a value.
+	///
+	/// Equivalent to a “remove” followed by an “add”.
+	///
+	/// # Examples
+	///
+	/// ```
+	/// # use surrealdb::opt::PatchOps;
+	/// PatchOps::new().replace("/biscuits/0/name", "Chocolate Digestive")
+	/// # ;
+	/// ```
+	pub fn replace<T>(mut self, path: &str, value: T) -> Self
+	where
+		T: Serialize,
+	{
+		self.0.push(PatchOp::replace(path, value));
+		self
+	}
+
+	/// Changes a value
+	pub fn change(mut self, path: &str, diff: String) -> Self {
+		self.0.push(PatchOp::change(path, diff));
+		self
+	}
+}
+
 /// Makes the client wait for a certain event or call to happen before continuing
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
@@ -142,4 +243,21 @@ pub enum WaitFor {
 	Connection,
 	/// Waits for the desired database to be selected
 	Database,
+}
+
+/// Forwards a raw query without trying to parse for live select statements
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[doc(hidden)]
+pub struct Raw(pub(crate) Cow<'static, str>);
+
+impl From<&'static str> for Raw {
+	fn from(query: &'static str) -> Self {
+		Self(Cow::Borrowed(query))
+	}
+}
+
+impl From<String> for Raw {
+	fn from(query: String) -> Self {
+		Self(Cow::Owned(query))
+	}
 }

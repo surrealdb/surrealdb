@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.1.4"
+version = "2.2.0"
 rust-version = "1.81.0"
 readme = "README.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -24,12 +24,12 @@ resolver = "2"
 [features]
 # Public features
 default = ["kv-mem"]
-kv-mem = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-mem = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort", "dep:affinitypool"]
 kv-indxdb = ["dep:indxdb"]
-kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort", "dep:affinitypool"]
 kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
-kv-surrealkv = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-surrealkv = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort", "dep:affinitypool"]
 kv-surrealcs = ["dep:surrealcs", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
@@ -142,7 +142,6 @@ ext-sort = { workspace = true, optional = true }
 regex-syntax = { workspace = true, optional = true }
 reqwest = { workspace = true, default-features = false, features = ["json", "stream", "multipart"], optional = true }
 tempfile = { workspace = true, optional = true }
-
 
 
 [dev-dependencies]

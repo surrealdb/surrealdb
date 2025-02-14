@@ -88,7 +88,7 @@ where
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}
 		let query =
-			Query::new(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
+			Query::normal(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
 		let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
 			return Err(Error::InternalError(
 				"successufull live query didn't return a uuid".to_string(),

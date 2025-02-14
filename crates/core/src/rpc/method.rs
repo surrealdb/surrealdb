@@ -31,11 +31,28 @@ pub enum Method {
 }
 
 impl Method {
-	pub fn parse<S>(s: S) -> Self
+	/// Parse a [Method] from a [str] with any case
+	pub fn parse_case_insensitive<S>(s: S) -> Self
 	where
 		S: AsRef<str>,
 	{
-		match s.as_ref().to_lowercase().as_str() {
+		Self::parse(s.as_ref().to_ascii_lowercase().as_str())
+	}
+
+	/// Parse a [Method] from a [str] in lower case
+	pub fn parse_case_sensitive<S>(s: S) -> Self
+	where
+		S: AsRef<str>,
+	{
+		Self::parse(s.as_ref())
+	}
+
+	/// Parse a [Method] from a [str]
+	fn parse<S>(s: S) -> Self
+	where
+		S: AsRef<str>,
+	{
+		match s.as_ref() {
 			"ping" => Self::Ping,
 			"info" => Self::Info,
 			"use" => Self::Use,
@@ -46,7 +63,7 @@ impl Method {
 			"reset" => Self::Reset,
 			"kill" => Self::Kill,
 			"live" => Self::Live,
-			"let" | "set" => Self::Set,
+			"set" | "let" => Self::Set,
 			"unset" => Self::Unset,
 			"select" => Self::Select,
 			"insert" => Self::Insert,
@@ -101,32 +118,15 @@ impl Method {
 	}
 }
 
+impl std::fmt::Display for Method {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.to_str())
+	}
+}
+
 impl Method {
 	/// Checks if the provided method is a valid and supported RPC method
 	pub fn is_valid(&self) -> bool {
 		!matches!(self, Self::Unknown)
-	}
-	/// Checks if this method needs mutable access to the RPC session
-	pub fn needs_mutability(&self) -> bool {
-		!matches!(
-			self,
-			Method::Ping
-				| Method::Info
-				| Method::Select
-				| Method::Insert
-				| Method::Create
-				| Method::Upsert
-				| Method::Update
-				| Method::Merge
-				| Method::Patch
-				| Method::Delete
-				| Method::Version
-				| Method::Query
-				| Method::Relate
-				| Method::Run
-				| Method::GraphQL
-				| Method::InsertRelation
-				| Method::Unknown
-		)
 	}
 }

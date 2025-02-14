@@ -1,17 +1,17 @@
-use crate::err::Error;
-use std::{collections::BTreeMap, mem};
-
 #[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 use async_graphql::BatchRequest;
-use uuid::Uuid;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 use crate::dbs::capabilities::ExperimentalTarget;
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
-use crate::gql::SchemaCache;
+use crate::err::Error;
+use crate::rpc::Data;
+use crate::rpc::Method;
+use crate::rpc::RpcContext;
+use crate::rpc::RpcError;
 use crate::{
-	dbs::{capabilities::MethodTarget, QueryType, Response, Session},
-	kvs::Datastore,
+	dbs::{capabilities::MethodTarget, QueryType, Response},
 	rpc::args::Take,
 	sql::{
 		statements::{
@@ -22,68 +22,19 @@ use crate::{
 	},
 };
 
-use super::{method::Method, response::Data, rpc_error::RpcError};
-
 #[allow(async_fn_in_trait)]
-pub trait RpcContext {
-	/// The datastore for this RPC interface
-	fn kvs(&self) -> &Datastore;
-	/// The current session for this RPC context
-	fn session(&self) -> &Session;
-	/// Mutable access to the current session for this RPC context
-	fn session_mut(&mut self) -> &mut Session;
-	/// The current parameters stored on this RPC context
-	fn vars(&self) -> &BTreeMap<String, Value>;
-	/// Mutable access to the current parameters stored on this RPC context
-	fn vars_mut(&mut self) -> &mut BTreeMap<String, Value>;
-	/// The version information for this RPC context
-	fn version_data(&self) -> Data;
-
-	// ------------------------------
-	// Realtime
-	// ------------------------------
-
-	/// Live queries are disabled by default
-	const LQ_SUPPORT: bool = false;
-
-	/// Handles the execution of a LIVE statement
-	fn handle_live(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
-		async { unimplemented!("handle_live function must be implemented if LQ_SUPPORT = true") }
-	}
-	/// Handles the execution of a KILL statement
-	fn handle_kill(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
-		async { unimplemented!("handle_kill function must be implemented if LQ_SUPPORT = true") }
-	}
-	/// Handles the cleanup of live queries
-	fn cleanup_lqs(&self) -> impl std::future::Future<Output = ()> + Send {
-		async { unimplemented!("cleanup_lqs function must be implemented if LQ_SUPPORT = true") }
-	}
-
-	// ------------------------------
-	// GraphQL
-	// ------------------------------
-
-	/// GraphQL queries are disabled by default
-	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
-	const GQL_SUPPORT: bool = false;
-
-	/// Returns the GraphQL schema cache used in GraphQL queries
-	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
-	fn graphql_schema_cache(&self) -> &SchemaCache {
-		unimplemented!("graphql_schema_cache function must be implemented if GQL_SUPPORT = true")
-	}
-
+pub trait RpcProtocolV2: RpcContext {
 	// ------------------------------
 	// Method execution
 	// ------------------------------
 
-	/// Executes any method on this RPC implementation
-	async fn execute_mutable(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
+	/// Executes a method on this RPC implementation
+	async fn execute(&self, method: Method, params: Array) -> Result<Data, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method,
 		}) {
-			warn!("Capabilities denied RPC method call attempt, target: '{}'", method.to_str());
+			warn!("Capabilities denied RPC method call attempt, target: '{method}'");
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Execute the desired method
@@ -118,52 +69,30 @@ pub trait RpcContext {
 		}
 	}
 
-	/// Executes any immutable method on this RPC implementation
-	async fn execute_immutable(&self, method: Method, params: Array) -> Result<Data, RpcError> {
-		// Check if capabilities allow executing the requested RPC method
-		if !self.kvs().allows_rpc_method(&MethodTarget {
-			method,
-		}) {
-			warn!("Capabilities denied RPC method call attempt, target: '{}'", method.to_str());
-			return Err(RpcError::MethodNotAllowed);
-		}
-		// Execute the desired method
-		match method {
-			Method::Ping => Ok(Value::None.into()),
-			Method::Info => self.info().await,
-			Method::Select => self.select(params).await,
-			Method::Insert => self.insert(params).await,
-			Method::Create => self.create(params).await,
-			Method::Upsert => self.upsert(params).await,
-			Method::Update => self.update(params).await,
-			Method::Merge => self.merge(params).await,
-			Method::Patch => self.patch(params).await,
-			Method::Delete => self.delete(params).await,
-			Method::Version => self.version(params).await,
-			Method::Query => self.query(params).await,
-			Method::Relate => self.relate(params).await,
-			Method::Run => self.run(params).await,
-			Method::GraphQL => self.graphql(params).await,
-			Method::InsertRelation => self.insert_relation(params).await,
-			Method::Unknown => Err(RpcError::MethodNotFound),
-			_ => Err(RpcError::MethodNotFound),
-		}
-	}
-
 	// ------------------------------
 	// Methods for authentication
 	// ------------------------------
 
-	async fn yuse(&mut self, params: Array) -> Result<Data, RpcError> {
+	async fn yuse(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
 		// To be able to select a namespace, and then list resources in that namespace, as an example
 		let (ns, db) = params.needs_two()?;
+		// Get the context lock
+		let mutex = self.lock().clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await;
+		// Clone the current session
+		let mut session = self.session().as_ref().clone();
 		// Update the selected namespace
 		match ns {
 			Value::None => (),
-			Value::Null => self.session_mut().ns = None,
-			Value::Strand(ns) => self.session_mut().ns = Some(ns.0),
+			Value::Null => session.ns = None,
+			Value::Strand(ns) => session.ns = Some(ns.0),
 			_ => {
 				return Err(RpcError::InvalidParams);
 			}
@@ -171,93 +100,128 @@ pub trait RpcContext {
 		// Update the selected database
 		match db {
 			Value::None => (),
-			Value::Null => self.session_mut().db = None,
-			Value::Strand(db) => self.session_mut().db = Some(db.0),
+			Value::Null => session.db = None,
+			Value::Strand(db) => session.db = Some(db.0),
 			_ => {
 				return Err(RpcError::InvalidParams);
 			}
 		}
 		// Clear any residual database
 		if self.session().ns.is_none() && self.session().db.is_some() {
-			self.session_mut().db = None;
+			session.db = None;
 		}
+		// Store the updated session
+		self.set_session(Arc::new(session));
+		// Drop the mutex guard
+		std::mem::drop(guard);
 		// Return nothing
 		Ok(Value::None.into())
 	}
 
 	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
 	// This will allow returning refresh tokens as well as any additional credential resulting from signing up.
-	async fn signup(&mut self, params: Array) -> Result<Data, RpcError> {
+	async fn signup(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		// Take ownership over the current session
-		let mut session = mem::take(self.session_mut());
-		// Attempt signup, storing information in the session
+		// Get the context lock
+		let mutex = self.lock().clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await;
+		// Clone the current session
+		let mut session = self.session().clone().as_ref().clone();
+		// Attempt signup, mutating the session
 		let out: Result<Value, Error> =
 			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(|v| v.token.into());
-		// Return ownership of the current session
-		*self.session_mut() = session;
+		// Store the updated session
+		self.set_session(Arc::new(session));
+		// Drop the mutex guard
+		std::mem::drop(guard);
 		// Return the signup result
 		out.map(Into::into).map_err(Into::into)
 	}
 
 	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
 	// This will allow returning refresh tokens as well as any additional credential resulting from signing in.
-	async fn signin(&mut self, params: Array) -> Result<Data, RpcError> {
+	async fn signin(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		// Take ownership over the current session
-		let mut session = mem::take(self.session_mut());
-		// Attempt signin, storing information in the session
+		// Get the context lock
+		let mutex = self.lock().clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await;
+		// Clone the current session
+		let mut session = self.session().clone().as_ref().clone();
+		// Attempt signin, mutating the session
 		let out: Result<Value, Error> = crate::iam::signin::signin(self.kvs(), &mut session, v)
 			.await
 			// The default `signin` method just returns the token
 			.map(|v| v.token.into());
-		// Return ownership of the current session
-		*self.session_mut() = session;
+		// Store the updated session
+		self.set_session(Arc::new(session));
+		// Drop the mutex guard
+		std::mem::drop(guard);
 		// Return the signin result
 		out.map(Into::into).map_err(Into::into)
 	}
 
-	async fn authenticate(&mut self, params: Array) -> Result<Data, RpcError> {
+	async fn authenticate(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Strand(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
-		// Take ownership over the current session
-		let mut session = mem::take(self.session_mut());
-		// Attempt authentcation, storing information in the session
+		// Get the context lock
+		let mutex = self.lock().clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await;
+		// Clone the current session
+		let mut session = self.session().as_ref().clone();
+		// Attempt authentication, mutating the session
 		let out: Result<Value, Error> =
 			crate::iam::verify::token(self.kvs(), &mut session, &token.0)
 				.await
 				.map(|_| Value::None);
-		// Return ownership of the current session
-		*self.session_mut() = session;
+		// Store the updated session
+		self.set_session(Arc::new(session));
+		// Drop the mutex guard
+		std::mem::drop(guard);
 		// Return nothing on success
 		out.map_err(Into::into).map(Into::into)
 	}
 
-	async fn invalidate(&mut self) -> Result<Data, RpcError> {
+	async fn invalidate(&self) -> Result<Data, RpcError> {
+		// Get the context lock
+		let mutex = self.lock().clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await;
+		// Clone the current session
+		let mut session = self.session().as_ref().clone();
 		// Clear the current session
-		crate::iam::clear::clear(self.session_mut())?;
+		crate::iam::clear::clear(&mut session)?;
+		// Store the updated session
+		self.set_session(Arc::new(session));
+		// Drop the mutex guard
+		std::mem::drop(guard);
 		// Return nothing on success
 		Ok(Value::None.into())
 	}
 
-	async fn reset(&mut self) -> Result<Data, RpcError> {
-		// Take ownership over the current session
-		let mut session = mem::take(self.session_mut());
-		// Clear the current session completely
-		crate::iam::clear::clear(&mut session)?;
-		// Clear the namespace and database
-		self.session_mut().ns = None;
-		self.session_mut().db = None;
-		// Clear all connection parameters
-		self.vars_mut().clear();
+	async fn reset(&self) -> Result<Data, RpcError> {
+		// Get the context lock
+		let mutex = self.lock().clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await;
+		// Clone the current session
+		let mut session = self.session().as_ref().clone();
+		// Reset the current session
+		crate::iam::reset::reset(&mut session)?;
+		// Store the updated session
+		self.set_session(Arc::new(session));
+		// Drop the mutex guard
+		std::mem::drop(guard);
 		// Cleanup live queries
 		self.cleanup_lqs().await;
 		// Return nothing on success
@@ -277,7 +241,7 @@ pub trait RpcContext {
 		}
 		.into();
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), None).await?;
+		let mut res = self.kvs().process(sql, &self.session(), None).await?;
 		// Extract the first value from the result
 		Ok(res.remove(0).result?.first().into())
 	}
@@ -286,7 +250,11 @@ pub trait RpcContext {
 	// Methods for setting variables
 	// ------------------------------
 
-	async fn set(&mut self, params: Array) -> Result<Data, RpcError> {
+	async fn set(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((Value::Strand(key), val)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -294,26 +262,65 @@ pub trait RpcContext {
 		// Specify the query parameters
 		let var = Some(map! {
 			key.0.clone() => Value::None,
-			=> &self.vars()
 		});
 		// Compute the specified parameter
-		match self.kvs().compute(val, self.session(), var).await? {
+		match self.kvs().compute(val, &self.session(), var).await? {
 			// Remove the variable if undefined
-			Value::None => self.vars_mut().remove(&key.0),
+			Value::None => {
+				// Get the context lock
+				let mutex = self.lock().clone();
+				// Lock the context for update
+				let guard = mutex.acquire().await;
+				// Clone the parameters
+				let mut session = self.session().as_ref().clone();
+				// Remove the set parameter
+				session.parameters.remove(&key.0);
+				// Store the updated session
+				self.set_session(Arc::new(session));
+				// Drop the mutex guard
+				std::mem::drop(guard);
+			}
 			// Store the variable if defined
-			v => self.vars_mut().insert(key.0, v),
+			v => {
+				// Get the context lock
+				let mutex = self.lock().clone();
+				// Lock the context for update
+				let guard = mutex.acquire().await;
+				// Clone the parameters
+				let mut session = self.session().as_ref().clone();
+				// Remove the set parameter
+				session.parameters.insert(key.0, v);
+				// Store the updated session
+				self.set_session(Arc::new(session));
+				// Drop the mutex guard
+				std::mem::drop(guard);
+			}
 		};
 		// Return nothing
 		Ok(Value::Null.into())
 	}
 
-	async fn unset(&mut self, params: Array) -> Result<Data, RpcError> {
+	async fn unset(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok(Value::Strand(key)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Get the context lock
+		let mutex = self.lock().clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await;
+		// Clone the parameters
+		let mut session = self.session().as_ref().clone();
 		// Remove the set parameter
-		self.vars_mut().remove(&key.0);
+		session.parameters.remove(&key.0);
+		// Store the updated session
+		self.set_session(Arc::new(session));
+		// Drop the mutex guard
+		std::mem::drop(guard);
 		// Return nothing
 		Ok(Value::Null.into())
 	}
@@ -322,7 +329,11 @@ pub trait RpcContext {
 	// Methods for live queries
 	// ------------------------------
 
-	async fn kill(&mut self, params: Array) -> Result<Data, RpcError> {
+	async fn kill(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let id = params.needs_one()?;
 		// Specify the SQL query string
@@ -331,14 +342,18 @@ pub trait RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
 		let mut res = self.query_inner(Value::Query(sql), var).await?;
 		// Extract the first query result
 		Ok(res.remove(0).result?.into())
 	}
 
-	async fn live(&mut self, params: Array) -> Result<Data, RpcError> {
+	async fn live(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let (what, diff) = params.needs_one_or_two()?;
 		// Specify the SQL query string
@@ -351,7 +366,7 @@ pub trait RpcContext {
 		)
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
 		let mut res = self.query_inner(Value::Query(sql), var).await?;
 		// Extract the first query result
@@ -363,6 +378,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn select(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok(what) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -376,9 +395,9 @@ pub trait RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -395,6 +414,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn insert(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
@@ -411,9 +434,9 @@ pub trait RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -426,6 +449,10 @@ pub trait RpcContext {
 	}
 
 	async fn insert_relation(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_two() else {
 			return Err(RpcError::InvalidParams);
@@ -443,9 +470,9 @@ pub trait RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -462,6 +489,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn create(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -479,10 +510,8 @@ pub trait RpcContext {
 			..Default::default()
 		}
 		.into();
-		// Specify the query parameters
-		let var = Some(self.vars().clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, &self.session(), None).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -499,6 +528,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn upsert(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -516,9 +549,9 @@ pub trait RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -535,6 +568,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn update(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -552,9 +589,9 @@ pub trait RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -571,6 +608,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn merge(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -588,9 +629,9 @@ pub trait RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -607,6 +648,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn patch(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((what, data, diff)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
@@ -624,9 +669,9 @@ pub trait RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -643,6 +688,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn relate(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((from, kind, with, data)) = params.needs_three_or_four() else {
 			return Err(RpcError::InvalidParams);
@@ -662,9 +711,9 @@ pub trait RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -681,6 +730,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn delete(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok(what) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -694,9 +747,9 @@ pub trait RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.vars().clone());
+		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, self.session(), var).await?;
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -724,6 +777,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn query(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((query, vars)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
@@ -734,8 +791,8 @@ pub trait RpcContext {
 		}
 		// Specify the query variables
 		let vars = match vars {
-			Value::Object(mut v) => Some(mrg! {v.0, &self.vars()}),
-			Value::None | Value::Null => Some(self.vars().clone()),
+			Value::Object(mut v) => Some(mrg! {v.0, self.session().parameters.clone()}),
+			Value::None | Value::Null => Some(self.session().parameters.clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};
 		// Execute the specified query
@@ -747,6 +804,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn run(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		// Process the method arguments
 		let Ok((name, version, args)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
@@ -779,10 +840,10 @@ pub trait RpcContext {
 			.into(),
 			_ => Function::Normal(name, args).into(),
 		};
-		// Specify the query variables
-		let vars = Some(self.vars().clone());
+		// Specify the query parameters
+		let var = Some(self.session().parameters.clone());
 		// Execute the function on the database
-		let mut res = self.kvs().process(func, self.session(), vars).await?;
+		let mut res = self.kvs().process(func, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res.remove(0).result?.into())
 	}
@@ -798,6 +859,10 @@ pub trait RpcContext {
 
 	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
 	async fn graphql(&self, params: Array) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
 		if !self.kvs().get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 			return Err(RpcError::BadGQLConfig);
 		}
@@ -885,7 +950,7 @@ pub trait RpcContext {
 		// Process and cache the graphql schema
 		let schema = self
 			.graphql_schema_cache()
-			.get_schema(self.session())
+			.get_schema(&self.session())
 			.await
 			.map_err(|e| RpcError::Thrown(e.to_string()))?;
 		// Execute the request against the schema
@@ -920,8 +985,8 @@ pub trait RpcContext {
 		}
 		// Execute the query on the database
 		let res = match query {
-			Value::Query(sql) => self.kvs().process(sql, self.session(), vars).await?,
-			Value::Strand(sql) => self.kvs().execute(&sql, self.session(), vars).await?,
+			Value::Query(sql) => self.kvs().process(sql, &self.session(), vars).await?,
+			Value::Strand(sql) => self.kvs().execute(&sql, &self.session(), vars).await?,
 			_ => return Err(fail!("Unexpected query type: {query:?}").into()),
 		};
 

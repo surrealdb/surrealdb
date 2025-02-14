@@ -146,6 +146,7 @@ async fn router_handle_route(
 		response,
 	}: Route,
 	state: &mut RouterState,
+	endpoint: &Endpoint,
 ) -> HandleResult {
 	let RequestData {
 		id,
@@ -236,7 +237,11 @@ async fn router_handle_route(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", request);
-		let payload = serialize(&request.stringify_queries(), true).unwrap();
+		let payload = if endpoint.config.ast_payload {
+			serialize(&request, true).unwrap()
+		} else {
+			serialize(&request.stringify_queries(), true).unwrap()
+		};
 		Message::Binary(payload)
 	};
 
@@ -490,7 +495,7 @@ pub(crate) async fn run_router(
 						break 'router;
 					};
 
-					match router_handle_route(response, &mut state).await {
+					match router_handle_route(response, &mut state, &endpoint).await {
 						HandleResult::Ok => {},
 						HandleResult::Disconnected => {
 							router_reconnect(

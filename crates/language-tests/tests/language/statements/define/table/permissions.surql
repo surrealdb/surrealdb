@@ -14,6 +14,7 @@ value = "NONE"
 value = """{
 	accesses: {},
 	analyzers: {},
+	apis: {},
 	configs: {},
 	functions: {},
 	models: {},

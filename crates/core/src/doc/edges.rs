@@ -27,10 +27,8 @@ impl Document {
 		}
 		// Store the record edges
 		if let Workable::Relate(l, r, _) = &self.extras {
-			// Get the namespace
-			let ns = opt.ns()?;
-			// Get the database
-			let db = opt.db()?;
+			// Get the namespace / database
+			let (ns, db) = opt.ns_db()?;
 			// Get the record id
 			let rid = self.id()?;
 			// Get the transaction
@@ -49,14 +47,14 @@ impl Document {
 				let key = crate::key::thing::new(ns, db, &l.tb, &l.id);
 				if !txn.exists(key, None).await? {
 					return Err(Error::IdNotFound {
-						value: l.to_string(),
+						rid: l.to_string(),
 					});
 				}
 				// Check that the `out` record exists
 				let key = crate::key::thing::new(ns, db, &r.tb, &r.id);
 				if !txn.exists(key, None).await? {
 					return Err(Error::IdNotFound {
-						value: r.to_string(),
+						rid: r.to_string(),
 					});
 				}
 			}

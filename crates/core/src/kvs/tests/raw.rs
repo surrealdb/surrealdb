@@ -11,10 +11,15 @@ use crate::{
 	},
 };
 
-use super::{CreateDs, CreateTx};
+use super::CreateDs;
 
-pub async fn initialise(new_tx: impl CreateTx) {
-	let mut tx = new_tx.create_tx(Write, Optimistic).await.inner();
+pub async fn initialise(new_ds: impl CreateDs) {
+	// Create a new datastore
+	let node_id = Uuid::parse_str("d09445ed-520b-438c-b275-0f3c768bdb8d").unwrap();
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
+	// Create a writeable transaction
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tx.put("test", "ok", None).await.unwrap();
 	tx.commit().await.unwrap();
 }
@@ -330,11 +335,11 @@ pub async fn batch(new_ds: impl CreateDs) {
 }
 
 macro_rules! define_tests {
-	($new_ds:ident, $new_tx:ident) => {
+	($new_ds:ident) => {
 		#[tokio::test]
 		#[serial_test::serial]
 		async fn initialise() {
-			super::raw::initialise($new_tx).await;
+			super::raw::initialise($new_ds).await;
 		}
 
 		#[tokio::test]

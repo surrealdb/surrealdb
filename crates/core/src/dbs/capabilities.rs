@@ -1,9 +1,10 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
-use std::{collections::HashSet, sync::Arc};
 
-use crate::rpc::method::Method;
+use crate::iam::{Auth, Level};
+use crate::rpc::Method;
 use ipnet::IpNet;
 use url::Url;
 
@@ -113,6 +114,7 @@ pub enum ExperimentalTarget {
 	RecordReferences,
 	GraphQL,
 	BearerAccess,
+	DefineApi,
 }
 
 impl fmt::Display for ExperimentalTarget {
@@ -121,6 +123,7 @@ impl fmt::Display for ExperimentalTarget {
 			Self::RecordReferences => write!(f, "record_references"),
 			Self::GraphQL => write!(f, "graphql"),
 			Self::BearerAccess => write!(f, "bearer_access"),
+			Self::DefineApi => write!(f, "define_api"),
 		}
 	}
 }
@@ -137,6 +140,7 @@ impl Target<str> for ExperimentalTarget {
 			Self::RecordReferences => elem.eq_ignore_ascii_case("record_references"),
 			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
 			Self::BearerAccess => elem.eq_ignore_ascii_case("bearer_access"),
+			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
 		}
 	}
 }
@@ -165,6 +169,7 @@ impl std::str::FromStr for ExperimentalTarget {
 			"record_references" => Ok(ExperimentalTarget::RecordReferences),
 			"graphql" => Ok(ExperimentalTarget::GraphQL),
 			"bearer_access" => Ok(ExperimentalTarget::BearerAccess),
+			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		})
 	}
@@ -286,7 +291,7 @@ impl std::str::FromStr for MethodTarget {
 	type Err = ParseMethodTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match Method::parse(s) {
+		match Method::parse_case_insensitive(s) {
 			Method::Unknown => Err(ParseMethodTargetError),
 			method => Ok(MethodTarget {
 				method,
@@ -310,6 +315,7 @@ pub enum RouteTarget {
 	Key,
 	Ml,
 	GraphQL,
+	Api,
 }
 
 // impl display
@@ -328,6 +334,7 @@ impl fmt::Display for RouteTarget {
 			RouteTarget::Key => write!(f, "key"),
 			RouteTarget::Ml => write!(f, "ml"),
 			RouteTarget::GraphQL => write!(f, "graphql"),
+			RouteTarget::Api => write!(f, "api"),
 		}
 	}
 }
@@ -365,8 +372,90 @@ impl std::str::FromStr for RouteTarget {
 			"key" => Ok(RouteTarget::Key),
 			"ml" => Ok(RouteTarget::Ml),
 			"graphql" => Ok(RouteTarget::GraphQL),
+			"api" => Ok(RouteTarget::Api),
 			_ => Err(ParseRouteTargetError),
 		}
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ArbitraryQueryTarget {
+	Guest,
+	Record,
+	System,
+}
+
+impl fmt::Display for ArbitraryQueryTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Guest => write!(f, "guest"),
+			Self::Record => write!(f, "record"),
+			Self::System => write!(f, "system"),
+		}
+	}
+}
+
+impl<'a> From<&'a Level> for ArbitraryQueryTarget {
+	fn from(level: &'a Level) -> Self {
+		match level {
+			Level::No => ArbitraryQueryTarget::Guest,
+			Level::Root => ArbitraryQueryTarget::System,
+			Level::Namespace(_) => ArbitraryQueryTarget::System,
+			Level::Database(_, _) => ArbitraryQueryTarget::System,
+			Level::Record(_, _, _) => ArbitraryQueryTarget::Record,
+		}
+	}
+}
+
+impl<'a> From<&'a Auth> for ArbitraryQueryTarget {
+	fn from(auth: &'a Auth) -> Self {
+		auth.level().into()
+	}
+}
+
+impl Target for ArbitraryQueryTarget {
+	fn matches(&self, elem: &ArbitraryQueryTarget) -> bool {
+		self == elem
+	}
+}
+
+impl Target<str> for ArbitraryQueryTarget {
+	fn matches(&self, elem: &str) -> bool {
+		match self {
+			Self::Guest => elem.eq_ignore_ascii_case("guest"),
+			Self::Record => elem.eq_ignore_ascii_case("record"),
+			Self::System => elem.eq_ignore_ascii_case("system"),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseArbitraryQueryTargetError {
+	InvalidName,
+}
+
+impl std::error::Error for ParseArbitraryQueryTargetError {}
+impl fmt::Display for ParseArbitraryQueryTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match *self {
+			ParseArbitraryQueryTargetError::InvalidName => {
+				write!(f, "invalid query target name")
+			}
+		}
+	}
+}
+
+impl std::str::FromStr for ArbitraryQueryTarget {
+	type Err = ParseArbitraryQueryTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match_insensitive!(s.trim(), {
+			"guest" => Ok(ArbitraryQueryTarget::Guest),
+			"record" => Ok(ArbitraryQueryTarget::Record),
+			"system" => Ok(ArbitraryQueryTarget::System),
+			_ => Err(ParseArbitraryQueryTargetError::InvalidName),
+		})
 	}
 }
 
@@ -421,24 +510,26 @@ pub struct Capabilities {
 	guest_access: bool,
 	live_query_notifications: bool,
 
-	allow_funcs: Arc<Targets<FuncTarget>>,
-	deny_funcs: Arc<Targets<FuncTarget>>,
-	allow_net: Arc<Targets<NetTarget>>,
-	deny_net: Arc<Targets<NetTarget>>,
-	allow_rpc: Arc<Targets<MethodTarget>>,
-	deny_rpc: Arc<Targets<MethodTarget>>,
-	allow_http: Arc<Targets<RouteTarget>>,
-	deny_http: Arc<Targets<RouteTarget>>,
-	allow_experimental: Arc<Targets<ExperimentalTarget>>,
-	deny_experimental: Arc<Targets<ExperimentalTarget>>,
+	allow_funcs: Targets<FuncTarget>,
+	deny_funcs: Targets<FuncTarget>,
+	allow_net: Targets<NetTarget>,
+	deny_net: Targets<NetTarget>,
+	allow_rpc: Targets<MethodTarget>,
+	deny_rpc: Targets<MethodTarget>,
+	allow_http: Targets<RouteTarget>,
+	deny_http: Targets<RouteTarget>,
+	allow_experimental: Targets<ExperimentalTarget>,
+	deny_experimental: Targets<ExperimentalTarget>,
+	allow_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
 }
 
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
             f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http, self.allow_experimental, self.deny_experimental,
+            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
+            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http, self.allow_experimental, self.deny_experimental, self.allow_arbitrary_query, self.deny_arbitrary_query,
         )
 	}
 }
@@ -450,16 +541,18 @@ impl Default for Capabilities {
 			guest_access: false,
 			live_query_notifications: true,
 
-			allow_funcs: Arc::new(Targets::All),
-			deny_funcs: Arc::new(Targets::None),
-			allow_net: Arc::new(Targets::None),
-			deny_net: Arc::new(Targets::None),
-			allow_rpc: Arc::new(Targets::All),
-			deny_rpc: Arc::new(Targets::None),
-			allow_http: Arc::new(Targets::All),
-			deny_http: Arc::new(Targets::None),
-			allow_experimental: Arc::new(Targets::None),
-			deny_experimental: Arc::new(Targets::None),
+			allow_funcs: Targets::All,
+			deny_funcs: Targets::None,
+			allow_net: Targets::None,
+			deny_net: Targets::None,
+			allow_rpc: Targets::All,
+			deny_rpc: Targets::None,
+			allow_http: Targets::All,
+			deny_http: Targets::None,
+			allow_experimental: Targets::None,
+			deny_experimental: Targets::None,
+			allow_arbitrary_query: Targets::All,
+			deny_arbitrary_query: Targets::None,
 		}
 	}
 }
@@ -471,16 +564,18 @@ impl Capabilities {
 			guest_access: true,
 			live_query_notifications: true,
 
-			allow_funcs: Arc::new(Targets::All),
-			deny_funcs: Arc::new(Targets::None),
-			allow_net: Arc::new(Targets::All),
-			deny_net: Arc::new(Targets::None),
-			allow_rpc: Arc::new(Targets::All),
-			deny_rpc: Arc::new(Targets::None),
-			allow_http: Arc::new(Targets::All),
-			deny_http: Arc::new(Targets::None),
-			allow_experimental: Arc::new(Targets::None),
-			deny_experimental: Arc::new(Targets::None),
+			allow_funcs: Targets::All,
+			deny_funcs: Targets::None,
+			allow_net: Targets::All,
+			deny_net: Targets::None,
+			allow_rpc: Targets::All,
+			deny_rpc: Targets::None,
+			allow_http: Targets::All,
+			deny_http: Targets::None,
+			allow_experimental: Targets::None,
+			deny_experimental: Targets::None,
+			allow_arbitrary_query: Targets::All,
+			deny_arbitrary_query: Targets::None,
 		}
 	}
 
@@ -490,16 +585,18 @@ impl Capabilities {
 			guest_access: false,
 			live_query_notifications: false,
 
-			allow_funcs: Arc::new(Targets::None),
-			deny_funcs: Arc::new(Targets::None),
-			allow_net: Arc::new(Targets::None),
-			deny_net: Arc::new(Targets::None),
-			allow_rpc: Arc::new(Targets::None),
-			deny_rpc: Arc::new(Targets::None),
-			allow_http: Arc::new(Targets::None),
-			deny_http: Arc::new(Targets::None),
-			allow_experimental: Arc::new(Targets::None),
-			deny_experimental: Arc::new(Targets::None),
+			allow_funcs: Targets::None,
+			deny_funcs: Targets::None,
+			allow_net: Targets::None,
+			deny_net: Targets::None,
+			allow_rpc: Targets::None,
+			deny_rpc: Targets::None,
+			allow_http: Targets::None,
+			deny_http: Targets::None,
+			allow_experimental: Targets::None,
+			deny_experimental: Targets::None,
+			allow_arbitrary_query: Targets::None,
+			deny_arbitrary_query: Targets::None,
 		}
 	}
 
@@ -519,52 +616,84 @@ impl Capabilities {
 	}
 
 	pub fn with_functions(mut self, allow_funcs: Targets<FuncTarget>) -> Self {
-		self.allow_funcs = Arc::new(allow_funcs);
+		self.allow_funcs = allow_funcs;
 		self
+	}
+
+	pub fn allowed_functions_mut(&mut self) -> &mut Targets<FuncTarget> {
+		&mut self.allow_funcs
 	}
 
 	pub fn without_functions(mut self, deny_funcs: Targets<FuncTarget>) -> Self {
-		self.deny_funcs = Arc::new(deny_funcs);
+		self.deny_funcs = deny_funcs;
 		self
 	}
 
+	pub fn denied_functions_mut(&mut self) -> &mut Targets<FuncTarget> {
+		&mut self.deny_funcs
+	}
+
 	pub fn with_experimental(mut self, allow_experimental: Targets<ExperimentalTarget>) -> Self {
-		self.allow_experimental = Arc::new(allow_experimental);
+		self.allow_experimental = allow_experimental;
 		self
 	}
 
 	pub fn without_experimental(mut self, deny_experimental: Targets<ExperimentalTarget>) -> Self {
-		self.deny_experimental = Arc::new(deny_experimental);
+		self.deny_experimental = deny_experimental;
+		self
+	}
+
+	pub fn with_arbitrary_query(
+		mut self,
+		allow_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	) -> Self {
+		self.allow_arbitrary_query = allow_arbitrary_query;
+		self
+	}
+
+	pub fn without_arbitrary_query(
+		mut self,
+		deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	) -> Self {
+		self.deny_arbitrary_query = deny_arbitrary_query;
 		self
 	}
 
 	pub fn with_network_targets(mut self, allow_net: Targets<NetTarget>) -> Self {
-		self.allow_net = Arc::new(allow_net);
+		self.allow_net = allow_net;
 		self
+	}
+
+	pub fn allowed_network_targets_mut(&mut self) -> &mut Targets<NetTarget> {
+		&mut self.allow_net
 	}
 
 	pub fn without_network_targets(mut self, deny_net: Targets<NetTarget>) -> Self {
-		self.deny_net = Arc::new(deny_net);
+		self.deny_net = deny_net;
 		self
 	}
 
+	pub fn denied_network_targets_mut(&mut self) -> &mut Targets<NetTarget> {
+		&mut self.deny_net
+	}
+
 	pub fn with_rpc_methods(mut self, allow_rpc: Targets<MethodTarget>) -> Self {
-		self.allow_rpc = Arc::new(allow_rpc);
+		self.allow_rpc = allow_rpc;
 		self
 	}
 
 	pub fn without_rpc_methods(mut self, deny_rpc: Targets<MethodTarget>) -> Self {
-		self.deny_rpc = Arc::new(deny_rpc);
+		self.deny_rpc = deny_rpc;
 		self
 	}
 
 	pub fn with_http_routes(mut self, allow_http: Targets<RouteTarget>) -> Self {
-		self.allow_http = Arc::new(allow_http);
+		self.allow_http = allow_http;
 		self
 	}
 
 	pub fn without_http_routes(mut self, deny_http: Targets<RouteTarget>) -> Self {
-		self.deny_http = Arc::new(deny_http);
+		self.deny_http = deny_http;
 		self
 	}
 
@@ -590,6 +719,14 @@ impl Capabilities {
 
 	pub fn allows_experimental_name(&self, target: &str) -> bool {
 		self.allow_experimental.matches(target) && !self.deny_experimental.matches(target)
+	}
+
+	pub fn allows_query(&self, target: &ArbitraryQueryTarget) -> bool {
+		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
+	}
+
+	pub fn allows_query_name(&self, target: &str) -> bool {
+		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
 	}
 
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {

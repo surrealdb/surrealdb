@@ -18,6 +18,8 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
+use super::validate_data;
+
 /// An upsert future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
@@ -128,6 +130,8 @@ where
 		Content::from_closure(self.client, || {
 			let data = to_core_value(data)?;
 
+			validate_data(&data, "Tried to upsert non-object-like data as content, only structs and objects are supported")?;
+
 			let data = match data {
 				CoreValue::None => None,
 				content => Some(content),
@@ -149,16 +153,24 @@ where
 			client: self.client,
 			resource: self.resource,
 			content: data,
+			upsert: true,
 			response_type: PhantomData,
 		}
 	}
 
 	/// Patches the current document / record data with the specified JSON Patch data
-	pub fn patch(self, PatchOp(patch): PatchOp) -> Patch<'r, C, R> {
+	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
+		let PatchOp(result) = patch.into();
+		let patches = match result {
+			Ok(serde_content::Value::Seq(values)) => values.into_iter().map(Ok).collect(),
+			Ok(value) => vec![Ok(value)],
+			Err(error) => vec![Err(error)],
+		};
 		Patch {
+			patches,
 			client: self.client,
 			resource: self.resource,
-			patches: vec![patch],
+			upsert: true,
 			response_type: PhantomData,
 		}
 	}

@@ -24,7 +24,7 @@ impl Document {
 		// Loop over maximum two times
 		for _ in 0..2 {
 			// Check current context
-			if ctx.is_done() {
+			if ctx.is_done(true) {
 				// Don't process the document
 				return Err(Error::Ignore);
 			}
@@ -68,10 +68,8 @@ impl Document {
 						ctx.tx().lock().await.rollback_to_save_point().await?;
 					}
 					// Fetch the data from the store
-					let val = ctx
-						.tx()
-						.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version)
-						.await?;
+					let (ns, db) = opt.ns_db()?;
+					let val = ctx.tx().get_record(ns, db, &v.tb, &v.id, opt.version).await?;
 					pro = Processed {
 						rs: RecordStrategy::KeysAndValues,
 						generate: None,

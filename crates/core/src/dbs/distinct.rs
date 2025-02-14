@@ -23,7 +23,8 @@ impl SyncDistinct {
 	}
 
 	pub(super) fn check_already_processed(&mut self, pro: &Processed) -> bool {
-		if let Some(key) = pro.rid.as_ref().map(|r| r.as_ref().into()) {
+		// If the serialization failed we couldn't have processed it.
+		if let Some(key) = pro.rid.as_ref().and_then(|r| revision::to_vec(&**r).ok()) {
 			if self.processed.get(&key).is_some() {
 				true
 			} else {

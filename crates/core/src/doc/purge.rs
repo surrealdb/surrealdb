@@ -8,6 +8,7 @@ use crate::doc::CursorValue;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::key::r#ref::Ref;
+use crate::kvs::KeyDecode;
 use crate::sql::dir::Dir;
 use crate::sql::edges::Edges;
 use crate::sql::paths::EDGE;
@@ -41,10 +42,8 @@ impl Document {
 		let txn = ctx.tx();
 		// Get the record id
 		if let Some(rid) = &self.id {
-			// Get the namespace
-			let ns = opt.ns()?;
-			// Get the database
-			let db = opt.db()?;
+			// Get the namespace / database
+			let (ns, db) = opt.ns_db()?;
 			// Purge the record data
 			txn.del_record(ns, db, &rid.tb, &rid.id).await?;
 			// Purge the record edges
@@ -96,12 +95,12 @@ impl Document {
 				// Obtain a transaction
 				let txn = ctx.tx();
 				// Obtain a stream of keys
-				let mut stream = txn.stream_keys(range.clone());
+				let mut stream = txn.stream_keys(range.clone(), None);
 				// Loop until no more entries
 				while let Some(res) = stream.next().await {
 					// Decode the key
 					let key = res?;
-					let r#ref = Ref::from(&key);
+					let r#ref = Ref::decode(&key)?;
 					// Obtain the remote field definition
 					let fd = txn.get_tb_field(ns, db, r#ref.ft, r#ref.ff).await?;
 					// Check if there is a reference defined on the field

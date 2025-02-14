@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "2.1.4"
+version = "2.2.0"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -31,7 +31,7 @@ js = { version = "0.9.0", package = "rquickjs" }
 lexicmp = "0.1.0"
 ## Also maintained by @Delskayn
 reblessive = "0.4.2"
-revision = "0.10.0"
+revision = "0.11.0"
 ## Maintained by @rushmorem
 serde-content = "0.1.0"
 vart = "0.8.1"
@@ -203,6 +203,7 @@ surrealdb-core.workspace = true
 revision = { workspace = true, features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
 
 # Crates only used by the root surrealdb crate
+arc-swap = "1.7.1"
 axum = { version = "0.7.5", features = ["tracing", "ws"] }
 axum-extra = { version = "0.9.3", features = ["query", "typed-routing", "typed-header"] }
 axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }

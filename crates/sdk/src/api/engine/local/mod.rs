@@ -706,40 +706,52 @@ async fn router(
 		Command::Patch {
 			what,
 			data,
+			upsert,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_single_recordid();
-			let statement = {
+			let statement = if upsert {
+				let mut stmt = UpsertStatement::default();
+				stmt.what = resource_to_values(what);
+				stmt.data = data.map(Data::PatchExpression);
+				stmt.output = Some(Output::After);
+				Statement::Upsert(stmt)
+			} else {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
-				stmt
+				Statement::Update(stmt)
 			};
-			query.0 .0 = vec![Statement::Update(statement)];
+			query.0 .0 = vec![statement];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
-			let value = take(one, response).await?;
-			Ok(DbResponse::Other(value))
+			let response = process(response);
+			Ok(DbResponse::Query(response))
 		}
 		Command::Merge {
 			what,
 			data,
+			upsert,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_single_recordid();
-			let statement = {
+			let statement = if upsert {
+				let mut stmt = UpsertStatement::default();
+				stmt.what = resource_to_values(what);
+				stmt.data = data.map(Data::MergeExpression);
+				stmt.output = Some(Output::After);
+				Statement::Upsert(stmt)
+			} else {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
-				stmt
+				Statement::Update(stmt)
 			};
-			query.0 .0 = vec![Statement::Update(statement)];
+			query.0 .0 = vec![statement];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
-			let value = take(one, response).await?;
-			Ok(DbResponse::Other(value))
+			let response = process(response);
+			Ok(DbResponse::Query(response))
 		}
 		Command::Select {
 			what,
@@ -782,6 +794,16 @@ async fn router(
 			let mut vars = vars.read().await.clone();
 			vars.append(&mut variables.0);
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
+			let response = process(response);
+			Ok(DbResponse::Query(response))
+		}
+		Command::RawQuery {
+			query,
+			mut variables,
+		} => {
+			let mut vars = vars.read().await.clone();
+			vars.append(&mut variables.0);
+			let response = kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}

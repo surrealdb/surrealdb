@@ -12,7 +12,7 @@ use crate::sql::statements::UpdateStatement;
 use crate::sql::statements::UpsertStatement;
 use crate::sql::statements::{DefineStatement, RemoveStatement};
 use crate::sql::{Statement, Statements};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
@@ -23,7 +23,7 @@ use std::str;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Query";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Query")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]

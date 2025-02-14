@@ -492,8 +492,8 @@ mod tests {
 		let value = to_value(foo_bar).unwrap();
 		let expected = Value::Object(
 			map! {
-				"foo".to_owned() => foo.into(),
-				"bar".to_owned() => bar.into(),
+				"foo".to_owned() => Value::from(foo),
+				"bar".to_owned() => Value::from(bar),
 			}
 			.into(),
 		);

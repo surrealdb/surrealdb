@@ -67,8 +67,15 @@ pub fn numeric_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, Synt
 	match start.kind {
 		t!("-") | t!("+") => number_kind(lexer, start).map(NumericKind::Number),
 		TokenKind::Digits => match lexer.reader.peek() {
-			Some(b'n' | b'm' | b's' | b'h' | b'y' | b'w' | b'u') => {
+			Some(b'n' | b's' | b'm' | b'h' | b'y' | b'w' | b'u') => {
 				duration(lexer, start).map(NumericKind::Duration)
+			}
+			Some(b'd') => {
+				if let Some(b'e') = lexer.reader.peek1() {
+					number_kind(lexer, start).map(NumericKind::Number)
+				} else {
+					duration(lexer, start).map(NumericKind::Duration)
+				}
 			}
 			Some(x) if !x.is_ascii() => duration(lexer, start).map(NumericKind::Duration),
 			_ => number_kind(lexer, start).map(NumericKind::Number),
@@ -84,7 +91,7 @@ pub fn numeric(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> 
 	match start.kind {
 		t!("-") | t!("+") => number(lexer, start).map(Numeric::Number),
 		TokenKind::Digits => match lexer.reader.peek() {
-			Some(b'n' | b'm' | b's' | b'h' | b'y' | b'w' | b'u') => {
+			Some(b'n' | b's' | b'm' | b'h' | b'y' | b'w' | b'u') => {
 				duration(lexer, start).map(Numeric::Duration)
 			}
 			Some(b'd') => {

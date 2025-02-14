@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "2.1.4"
+version = "2.2.0"
 rust-version = "1.81.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -118,7 +118,6 @@ rustls = { workspace = true, default-features = false, features = [
     "std",
     "tls12",
 ], optional = true }
-trice = { workspace = true, optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 pharos.workspace = true

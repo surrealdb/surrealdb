@@ -94,6 +94,15 @@ impl Function {
 			Self::Custom(f, _) => format!("fn::{f}").into(),
 		}
 	}
+	/// Checks if this function invocation is writable
+	pub fn writeable(&self) -> bool {
+		match self {
+			Self::Custom(_, _) => true,
+			Self::Script(_, _) => true,
+			Self::Normal(f, _) if f == "api::invoke" => true,
+			_ => self.args().iter().any(Value::writeable),
+		}
+	}
 	/// Convert this function to an aggregate
 	pub fn aggregate(&self, val: Value) -> Result<Self, Error> {
 		match self {
@@ -271,7 +280,8 @@ impl Function {
 				// Check this function is allowed
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
-				let val = ctx.tx().get_db_function(opt.ns()?, opt.db()?, s).await?;
+				let (ns, db) = opt.ns_db()?;
+				let val = ctx.tx().get_db_function(ns, db, s).await?;
 				// Check permissions
 				if opt.check_perms(Action::View)? {
 					match &val.permissions {

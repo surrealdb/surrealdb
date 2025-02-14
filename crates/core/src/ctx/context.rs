@@ -189,7 +189,7 @@ impl MutableContext {
 	/// Creates a new context from a configured datastore.
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
-		capabilities: Capabilities,
+		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
 		cache: Arc<DatastoreCache>,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
@@ -204,7 +204,7 @@ impl MutableContext {
 			query_planner: None,
 			query_executor: None,
 			iteration_stage: None,
-			capabilities: Arc::new(capabilities),
+			capabilities,
 			index_stores,
 			cache: Some(cache),
 			#[cfg(not(target_family = "wasm"))]
@@ -238,6 +238,17 @@ impl MutableContext {
 		K: Into<Cow<'static, str>>,
 	{
 		self.values.insert(key.into(), value);
+	}
+
+	/// Add a value to the context. It overwrites any previously set values
+	/// with the same key.
+	pub(crate) fn add_values<T, K, V>(&mut self, iter: T)
+	where
+		T: IntoIterator<Item = (K, V)>,
+		K: Into<Cow<'static, str>>,
+		V: Into<Arc<Value>>,
+	{
+		self.values.extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
 	}
 
 	/// Add cancellation to the context. The value that is returned will cancel
@@ -341,30 +352,38 @@ impl MutableContext {
 
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
-	pub(crate) fn done(&self) -> Option<Reason> {
+	/// Note regarding `check_deadline`:
+	/// Checking Instant::now() takes tens to hundreds of nanoseconds
+	/// Checking an AtomicBool takes a single-digit nanoseconds.
+	/// We may not want to check for the deadline on every call.
+	/// An iteration loop may want to check it every 10 or 100 calls. Eg.:
+	/// ctx.done(count % 100 == 0)
+	pub(crate) fn done(&self, check_deadline: bool) -> Option<Reason> {
 		match self.deadline {
-			Some(deadline) if deadline <= Instant::now() => Some(Reason::Timedout),
+			Some(deadline) if check_deadline && deadline <= Instant::now() => {
+				Some(Reason::Timedout)
+			}
 			_ if self.cancelled.load(Ordering::Relaxed) => Some(Reason::Canceled),
 			_ => match &self.parent {
-				Some(ctx) => ctx.done(),
+				Some(ctx) => ctx.done(check_deadline),
 				_ => None,
 			},
 		}
 	}
 
 	/// Check if the context is ok to continue.
-	pub(crate) fn is_ok(&self) -> bool {
-		self.done().is_none()
+	pub(crate) fn is_ok(&self, check_deadline: bool) -> bool {
+		self.done(check_deadline).is_none()
 	}
 
 	/// Check if the context is not ok to continue.
-	pub(crate) fn is_done(&self) -> bool {
-		self.done().is_some()
+	pub(crate) fn is_done(&self, check_deadline: bool) -> bool {
+		self.done(check_deadline).is_some()
 	}
 
 	/// Check if the context is not ok to continue, because it timed out.
 	pub(crate) fn is_timedout(&self) -> bool {
-		matches!(self.done(), Some(Reason::Timedout))
+		matches!(self.done(true), Some(Reason::Timedout))
 	}
 
 	#[cfg(storage)]
@@ -402,8 +421,8 @@ impl MutableContext {
 	//
 
 	/// Set the capabilities for this context
-	pub(crate) fn add_capabilities(&mut self, caps: Capabilities) {
-		self.capabilities = Arc::new(caps);
+	pub(crate) fn add_capabilities(&mut self, caps: Arc<Capabilities>) {
+		self.capabilities = caps;
 	}
 
 	/// Get the capabilities for this context

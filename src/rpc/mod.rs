@@ -1,11 +1,11 @@
-pub mod connection;
 pub mod failure;
 pub mod format;
-pub mod post_context;
+pub mod http;
 pub mod response;
+pub mod websocket;
 
-use crate::rpc::connection::Connection;
 use crate::rpc::response::success;
+use crate::rpc::websocket::Websocket;
 use crate::telemetry::metrics::ws::NotificationContext;
 use futures::stream::FuturesUnordered;
 use opentelemetry::Context as TelemetryContext;
@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 static CONN_CLOSED_ERR: &str = "Connection closed normally";
 /// A type alias for an RPC Connection
-type WebSocket = Arc<RwLock<Connection>>;
+type WebSocket = Arc<Websocket>;
 /// Mapping of WebSocket ID to WebSocket
 type WebSockets = RwLock<HashMap<Uuid, WebSocket>>;
 /// Mapping of LIVE Query ID to WebSocket ID
@@ -85,9 +85,9 @@ pub(crate) async fn notifications(
 								  .with_live_id(id.to_string());
 							let cx = Arc::new(cx.with_value(not_ctx));
 							// Get the WebSocket output format
-							let format = rpc.read().await.format;
+							let format = rpc.format;
 							// Get the WebSocket sending channel
-							let sender = rpc.read().await.channel.0.clone();
+							let sender = rpc.channel.clone();
 							// Send the notification to the client
 							let future = message.send(cx, format, sender);
 							// Pus the future to the pipeline
@@ -104,7 +104,7 @@ pub(crate) async fn notifications(
 pub(crate) async fn graceful_shutdown(state: Arc<RpcState>) {
 	// Close WebSocket connections, ensuring queued messages are processed
 	for (_, rpc) in state.web_sockets.read().await.iter() {
-		rpc.read().await.shutdown.cancel();
+		rpc.shutdown.cancel();
 	}
 	// Wait for all existing WebSocket connections to finish sending
 	while !state.web_sockets.read().await.is_empty() {

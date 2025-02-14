@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Strand, Value};
-use derive::Store;
+
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use revision::revisioned;
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 3)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineAccessStatement {
@@ -86,12 +86,12 @@ impl DefineAccessStatement {
 				let key = crate::key::root::ac::new(&self.name);
 				txn.set(
 					key,
-					DefineAccessStatement {
+					revision::to_vec(&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
 						overwrite: false,
 						..self.clone()
-					},
+					})?,
 					None,
 				)
 				.await?;
@@ -119,12 +119,12 @@ impl DefineAccessStatement {
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.set(
 					key,
-					DefineAccessStatement {
+					revision::to_vec(&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
 						overwrite: false,
 						..self.clone()
-					},
+					})?,
 					None,
 				)
 				.await?;
@@ -137,29 +137,30 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				if txn.get_db_access(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+				let (ns, db) = opt.ns_db()?;
+				if txn.get_db_access(ns, db, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite {
 						return Err(Error::AccessDbAlreadyExists {
 							ac: self.name.to_string(),
-							ns: opt.ns()?.into(),
-							db: opt.db()?.into(),
+							ns: ns.into(),
+							db: db.into(),
 						});
 					}
 				}
 				// Process the statement
-				let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &self.name);
-				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-				txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+				let key = crate::key::database::ac::new(ns, db, &self.name);
+				txn.get_or_add_ns(ns, opt.strict).await?;
+				txn.get_or_add_db(ns, db, opt.strict).await?;
 				txn.set(
 					key,
-					DefineAccessStatement {
+					revision::to_vec(&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						if_not_exists: false,
 						overwrite: false,
 						..self.clone()
-					},
+					})?,
 					None,
 				)
 				.await?;

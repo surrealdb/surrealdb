@@ -1,5 +1,6 @@
 use crate::{api::Response, Value};
 use serde::Serialize;
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::{convert::Infallible, io};
 use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
@@ -244,6 +245,10 @@ pub enum Error {
 	/// The engine used does not support data versioning
 	#[error("The '{0}' engine does not support data versioning")]
 	VersionsNotSupported(String),
+
+	#[doc(hidden)] // A raw query being forwarded
+	#[error("{0}")]
+	RawQuery(Cow<'static, str>),
 }
 
 impl serde::ser::Error for Error {
