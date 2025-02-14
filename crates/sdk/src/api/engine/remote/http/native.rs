@@ -11,7 +11,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
-use channel::Receiver;
+use async_channel::Receiver;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
@@ -49,8 +49,8 @@ impl Connection for Client {
 			super::health(client.get(base_url.join("health")?)).await?;
 
 			let (route_tx, route_rx) = match capacity {
-				0 => channel::unbounded(),
-				capacity => channel::bounded(capacity),
+				0 => async_channel::unbounded(),
+				capacity => async_channel::bounded(capacity),
 			};
 
 			tokio::spawn(run_router(base_url, client, route_rx));

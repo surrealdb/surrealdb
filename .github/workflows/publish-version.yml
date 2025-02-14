@@ -81,12 +81,6 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
-      - name: Install a TOML parser
-        run: |
-          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
-          chmod +x taplo
-          sudo mv taplo /usr/bin/taplo
-
       - name: Configure git
         run: |
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -98,7 +92,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
 
           if [[ $currentVersion == *"-beta"* ]]; then
             git push origin --delete releases/stable || true
@@ -114,7 +108,7 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"${major}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" crates/sdk/Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" Cargo.toml
 
             # Update Cargo.lock without updating dependency versions
             cargo check --no-default-features --features storage-mem
@@ -133,7 +127,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
 
           if [[ $currentVersion == *"-beta"* ]]; then
             if [[ "${{ inputs.bump-version }}" == "true" ]]; then
@@ -148,7 +142,7 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${betaVersion}\"#" crates/sdk/Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" Cargo.toml
           else
             git checkout -b releases/beta
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
@@ -157,7 +151,7 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"${major}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${betaVersion}\"#" crates/sdk/Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" Cargo.toml
           fi
 
           # Bump the crate version
@@ -179,7 +173,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
 
           # Create the tag
           alphaVersion=${currentVersion}-${{ inputs.environment }}.${{ inputs.patch }}
@@ -198,7 +192,7 @@ jobs:
         run: |
           set -x
 
-          version=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
 
           if [[ "${{ inputs.environment }}" == "alpha" ]]; then
             version=${version}-${{ inputs.environment }}.${{ inputs.patch }}
@@ -569,7 +563,7 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
           sed -i "s#surrealdb = { version = \"2\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -617,13 +611,6 @@ jobs:
           curl -L https://github.com/release-plz/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
           sudo chmod +x /usr/bin/release-plz
 
-      - name: Install a TOML parser
-        if: ${{ inputs.environment != 'stable' }}
-        run: |
-          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
-          chmod +x taplo
-          sudo mv taplo /usr/bin/taplo
-
       - name: Create a temporary branch
         run: git checkout -b crate
 
@@ -643,7 +630,7 @@ jobs:
           set -x
 
           # Derive crate version
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
           betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
@@ -652,7 +639,7 @@ jobs:
           # Update crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"2.1.0-${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" Cargo.toml
 
       - name: Patch alpha crate version
         if: ${{ inputs.environment == 'alpha' }}
@@ -664,7 +651,7 @@ jobs:
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
       - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
@@ -675,7 +662,7 @@ jobs:
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
 
           # Derive crate version
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
           # This sets the nightly version to something like `1.3.20231117`
@@ -684,7 +671,7 @@ jobs:
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment != 'stable' }}
@@ -703,7 +690,7 @@ jobs:
           sed -i "s#\"surrealdb/#\"surrealdb-${{ inputs.environment }}/#" Cargo.toml
 
           # Patch sdk dependency
-          sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" crates/sdk/Cargo.toml
+          sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" Cargo.toml
 
           # Patch the description
           sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" crates/sdk/Cargo.toml

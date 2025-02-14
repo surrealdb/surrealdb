@@ -20,7 +20,7 @@ use crate::engine::remote::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::{Action, Notification};
-use channel::Receiver;
+use async_channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;
@@ -119,8 +119,8 @@ impl Connection for Client {
 			let socket = connect(&address, Some(config), maybe_connector.clone()).await?;
 
 			let (route_tx, route_rx) = match capacity {
-				0 => channel::unbounded(),
-				capacity => channel::bounded(capacity),
+				0 => async_channel::unbounded(),
+				capacity => async_channel::bounded(capacity),
 			};
 
 			tokio::spawn(run_router(address, maybe_connector, capacity, config, socket, route_rx));

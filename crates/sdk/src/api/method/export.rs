@@ -9,7 +9,7 @@ use crate::method::ExportConfig as Config;
 use crate::method::Model;
 use crate::method::OnceLockExt;
 use crate::Surreal;
-use channel::Receiver;
+use async_channel::Receiver;
 use futures::Stream;
 use futures::StreamExt;
 use semver::Version;
