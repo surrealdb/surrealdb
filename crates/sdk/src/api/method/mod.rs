@@ -21,9 +21,11 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use surrealdb_core::sql::to_value as to_core_value;
 use surrealdb_core::sql::Value as CoreValue;
+use transaction::TransactionBuilder;
 
 pub(crate) mod live;
 pub(crate) mod query;
+pub(crate) mod transaction;
 
 mod authenticate;
 mod begin;
@@ -266,6 +268,10 @@ where
 		Begin {
 			client: self,
 		}
+	}
+
+	pub fn begin_transaction(&self) -> TransactionBuilder<C> {
+		TransactionBuilder::new(Cow::Borrowed(self))
 	}
 
 	/// Switch to a specific namespace
