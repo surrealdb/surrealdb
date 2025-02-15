@@ -423,11 +423,9 @@ impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
-			router: self.router.clone(),
-			engine: PhantomData,
+			surreal: self.inner.clone().into(),
 			address: address.into_endpoint(),
 			capacity: 0,
-			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}

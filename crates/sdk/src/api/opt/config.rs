@@ -101,15 +101,8 @@ impl Config {
 
 	/// Set the capabilities for the database
 	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
-		self.capabilities = capabilities.into_inner();
+		self.capabilities = capabilities.into();
 		self
-	}
-
-	/// Get the capabilities for the database
-	/// Used internally in the CLI to pass on capabilities to the parser
-	#[doc(hidden)]
-	pub fn get_capabilities(&self) -> &CoreCapabilities {
-		&self.capabilities
 	}
 
 	#[cfg(storage)]

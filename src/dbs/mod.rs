@@ -11,6 +11,7 @@ use surrealdb::dbs::capabilities::{
 };
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
+use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
@@ -44,7 +45,7 @@ pub struct StartCommandDbsOptions {
 }
 
 #[derive(Args, Debug)]
-struct DbsCapabilities {
+pub struct DbsCapabilities {
 	//
 	// Allow
 	//
@@ -432,25 +433,33 @@ impl DbsCapabilities {
 			None => Targets::None,
 		}
 	}
+
+	pub fn into_cli_capabilities(self) -> Capabilities {
+		merge_capabilities(SdkCapabilities::all().into(), self)
+	}
+}
+
+fn merge_capabilities(initial: Capabilities, caps: DbsCapabilities) -> Capabilities {
+	initial
+		.with_scripting(caps.get_scripting())
+		.with_guest_access(caps.get_allow_guests())
+		.with_functions(caps.get_allow_funcs())
+		.without_functions(caps.get_deny_funcs())
+		.with_network_targets(caps.get_allow_net())
+		.without_network_targets(caps.get_deny_net())
+		.with_rpc_methods(caps.get_allow_rpc())
+		.without_rpc_methods(caps.get_deny_rpc())
+		.with_http_routes(caps.get_allow_http())
+		.without_http_routes(caps.get_deny_http())
+		.with_experimental(caps.get_allow_experimental())
+		.without_experimental(caps.get_deny_experimental())
+		.with_arbitrary_query(caps.get_allow_arbitrary_query())
+		.without_arbitrary_query(caps.get_deny_arbitrary_query())
 }
 
 impl From<DbsCapabilities> for Capabilities {
 	fn from(caps: DbsCapabilities) -> Self {
-		Capabilities::default()
-			.with_scripting(caps.get_scripting())
-			.with_guest_access(caps.get_allow_guests())
-			.with_functions(caps.get_allow_funcs())
-			.without_functions(caps.get_deny_funcs())
-			.with_network_targets(caps.get_allow_net())
-			.without_network_targets(caps.get_deny_net())
-			.with_rpc_methods(caps.get_allow_rpc())
-			.without_rpc_methods(caps.get_deny_rpc())
-			.with_http_routes(caps.get_allow_http())
-			.without_http_routes(caps.get_deny_http())
-			.with_experimental(caps.get_allow_experimental())
-			.without_experimental(caps.get_deny_experimental())
-			.with_arbitrary_query(caps.get_allow_arbitrary_query())
-			.without_arbitrary_query(caps.get_deny_arbitrary_query())
+		merge_capabilities(Default::default(), caps)
 	}
 }
 

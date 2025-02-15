@@ -7,7 +7,6 @@ use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::ExtraFeatures;
-use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
@@ -17,8 +16,6 @@ use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
-use std::sync::OnceLock;
 use tokio::sync::watch;
 use url::Url;
 
@@ -28,6 +25,7 @@ impl Connection for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let headers = super::default_headers();
+			let config = address.config.clone();
 
 			#[allow(unused_mut)]
 			let mut builder = ClientBuilder::new().default_headers(headers);
@@ -58,14 +56,15 @@ impl Connection for Client {
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
 
-			Ok(Surreal::new_from_router_waiter(
-				Arc::new(OnceLock::with_value(Router {
-					features,
-					sender: route_tx,
-					last_id: AtomicI64::new(0),
-				})),
-				Arc::new(watch::channel(Some(WaitFor::Connection))),
-			))
+			let waiter = watch::channel(Some(WaitFor::Connection));
+			let router = Router {
+				features,
+				config,
+				sender: route_tx,
+				last_id: AtomicI64::new(0),
+			};
+
+			Ok((router, waiter).into())
 		})
 	}
 }

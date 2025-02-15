@@ -43,7 +43,7 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let router = client.router.extract()?;
+				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Delete {
 						what: resource?,

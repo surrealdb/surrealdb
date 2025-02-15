@@ -4,7 +4,6 @@ use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
-use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::WaitFor;
@@ -14,8 +13,6 @@ use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
-use std::sync::OnceLock;
 use tokio::sync::watch;
 use url::Url;
 use wasm_bindgen_futures::spawn_local;
@@ -30,20 +27,22 @@ impl Connection for Client {
 				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = channel::bounded(1);
+			let (conn_tx, conn_rx) = async_channel::bounded(1);
+			let config = address.config.clone();
 
 			spawn_local(run_router(address, conn_tx, route_rx));
 
 			conn_rx.recv().await??;
 
-			Ok(Surreal::new_from_router_waiter(
-				Arc::new(OnceLock::with_value(Router {
-					features: HashSet::new(),
-					sender: route_tx,
-					last_id: AtomicI64::new(0),
-				})),
-				Arc::new(watch::channel(Some(WaitFor::Connection))),
-			))
+			let waiter = watch::channel(Some(WaitFor::Connection));
+			let router = Router {
+				features: HashSet::new(),
+				config,
+				sender: route_tx,
+				last_id: AtomicI64::new(0),
+			};
+
+			Ok((router, waiter).into())
 		})
 	}
 }

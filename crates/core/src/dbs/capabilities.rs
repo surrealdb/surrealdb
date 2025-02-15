@@ -638,9 +638,17 @@ impl Capabilities {
 		self
 	}
 
+	pub fn allowed_experimental_features_mut(&mut self) -> &mut Targets<ExperimentalTarget> {
+		&mut self.allow_experimental
+	}
+
 	pub fn without_experimental(mut self, deny_experimental: Targets<ExperimentalTarget>) -> Self {
 		self.deny_experimental = deny_experimental;
 		self
+	}
+
+	pub fn denied_experimental_features_mut(&mut self) -> &mut Targets<ExperimentalTarget> {
+		&mut self.deny_experimental
 	}
 
 	pub fn with_arbitrary_query(

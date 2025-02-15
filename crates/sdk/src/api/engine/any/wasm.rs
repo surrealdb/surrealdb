@@ -7,15 +7,12 @@ use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::ExtraFeatures;
-use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
-use std::sync::OnceLock;
 use tokio::sync::watch;
 use wasm_bindgen_futures::spawn_local;
 
@@ -30,7 +27,8 @@ impl Connection for Any {
 				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = channel::bounded::<Result<()>>(1);
+			let (conn_tx, conn_rx) = async_channel::bounded::<Result<()>>(1);
+			let config = address.config.clone();
 			let mut features = HashSet::new();
 
 			match EndpointKind::from(address.url.scheme()) {
@@ -172,14 +170,15 @@ impl Connection for Any {
 				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
 			}
 
-			Ok(Surreal::new_from_router_waiter(
-				Arc::new(OnceLock::with_value(Router {
-					features,
-					sender: route_tx,
-					last_id: AtomicI64::new(0),
-				})),
-				Arc::new(watch::channel(Some(WaitFor::Connection))),
-			))
+			let waiter = watch::channel(Some(WaitFor::Connection));
+			let router = Router {
+				features,
+				config,
+				sender: route_tx,
+				last_id: AtomicI64::new(0),
+			};
+
+			Ok((router, waiter).into())
 		})
 	}
 }

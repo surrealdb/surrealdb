@@ -20,6 +20,8 @@ pub(crate) use cmd::Command;
 #[cfg(feature = "protocol-http")]
 pub(crate) use cmd::RouterRequest;
 
+use super::opt::Config;
+
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections
 pub struct RequestData {
@@ -38,6 +40,7 @@ pub(crate) struct Route {
 #[derive(Debug)]
 pub struct Router {
 	pub(crate) sender: Sender<Route>,
+	pub(crate) config: Config,
 	pub(crate) last_id: AtomicI64,
 	pub(crate) features: HashSet<ExtraFeatures>,
 }
