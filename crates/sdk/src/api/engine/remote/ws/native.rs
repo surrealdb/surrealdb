@@ -28,7 +28,6 @@ use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
 use surrealdb_core::sql::Value as CoreValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
@@ -62,7 +61,7 @@ impl From<Tls> for Connector {
 			#[cfg(feature = "native-tls")]
 			Tls::Native(config) => Self::NativeTls(config),
 			#[cfg(feature = "rustls")]
-			Tls::Rust(config) => Self::Rustls(Arc::new(config)),
+			Tls::Rust(config) => Self::Rustls(std::sync::Arc::new(config)),
 		}
 	}
 }
