@@ -3,6 +3,7 @@ use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
 };
 use crate::cnf::PKG_VERSION;
+use crate::dbs::DbsCapabilities;
 use crate::err::Error;
 use clap::Args;
 use futures::StreamExt;
@@ -14,7 +15,7 @@ use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{connect, IntoEndpoint};
 use surrealdb::method::{Stats, WithStats};
-use surrealdb::opt::{capabilities::Capabilities, Config};
+use surrealdb::opt::Config;
 use surrealdb::sql::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::{Notification, Response, Value};
 
@@ -38,6 +39,9 @@ pub struct SqlCommandArguments {
 	/// Whether to show welcome message
 	#[arg(long, env = "SURREAL_HIDE_WELCOME")]
 	hide_welcome: bool,
+	#[command(flatten)]
+	#[command(next_help_heading = "Capabilities")]
+	capabilities: DbsCapabilities,
 }
 
 pub async fn init(
@@ -59,12 +63,13 @@ pub async fn init(
 		json,
 		multi,
 		hide_welcome,
+		capabilities,
 		..
 	}: SqlCommandArguments,
 ) -> Result<(), Error> {
-	// Default datastore configuration for local engines
-	let config = Config::new().capabilities(Capabilities::all());
-	let capabilities = config.get_capabilities().clone();
+	// Capabilities configuration for local engines
+	let capabilities = capabilities.into_cli_capabilities();
+	let config = Config::new().capabilities(capabilities.clone().into());
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
 	let client = if username.is_some()

@@ -173,7 +173,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.router.extract()?;
+			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				return Err(Error::BackupsNotSupported.into());
 			}
@@ -206,7 +206,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.router.extract()?;
+			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				return Err(Error::BackupsNotSupported.into());
 			}

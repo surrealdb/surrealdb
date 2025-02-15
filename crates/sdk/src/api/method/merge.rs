@@ -58,7 +58,7 @@ macro_rules! into_future {
 					},
 				};
 
-				let router = client.router.extract()?;
+				let router = client.inner.router.extract()?;
 				let cmd = Command::Merge {
 					upsert,
 					what: resource?,
