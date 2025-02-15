@@ -53,7 +53,7 @@ where
 			..
 		} = self;
 		Box::pin(async move {
-			let router = client.router.extract()?;
+			let router = client.inner.router.extract()?;
 			let (name, version) = function?;
 			let value = match args.map_err(crate::error::Db::from)? {
 				// Tuples are treated as multiple function arguments

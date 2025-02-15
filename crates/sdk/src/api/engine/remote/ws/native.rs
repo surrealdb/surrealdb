@@ -13,7 +13,6 @@ use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::ExtraFeatures;
-use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::Data;
@@ -30,7 +29,6 @@ use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
-use std::sync::OnceLock;
 use surrealdb_core::sql::Value as CoreValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
@@ -109,33 +107,42 @@ impl Connection for Client {
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 			let maybe_connector = None;
 
-			let config = WebSocketConfig {
+			let ws_config = WebSocketConfig {
 				max_message_size: Some(MAX_MESSAGE_SIZE),
 				max_frame_size: Some(MAX_FRAME_SIZE),
 				max_write_buffer_size: MAX_WRITE_BUFFER_SIZE,
 				..Default::default()
 			};
 
-			let socket = connect(&address, Some(config), maybe_connector.clone()).await?;
+			let socket = connect(&address, Some(ws_config), maybe_connector.clone()).await?;
 
 			let (route_tx, route_rx) = match capacity {
 				0 => async_channel::unbounded(),
 				capacity => async_channel::bounded(capacity),
 			};
+			let config = address.config.clone();
 
-			tokio::spawn(run_router(address, maybe_connector, capacity, config, socket, route_rx));
+			tokio::spawn(run_router(
+				address,
+				maybe_connector,
+				capacity,
+				ws_config,
+				socket,
+				route_rx,
+			));
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
 
-			Ok(Surreal::new_from_router_waiter(
-				Arc::new(OnceLock::with_value(Router {
-					features,
-					sender: route_tx,
-					last_id: AtomicI64::new(0),
-				})),
-				Arc::new(watch::channel(Some(WaitFor::Connection))),
-			))
+			let waiter = watch::channel(Some(WaitFor::Connection));
+			let router = Router {
+				features,
+				config,
+				sender: route_tx,
+				last_id: AtomicI64::new(0),
+			};
+
+			Ok((router, waiter).into())
 		})
 	}
 }

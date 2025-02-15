@@ -3,9 +3,31 @@
 use std::{collections::HashSet, mem};
 
 use surrealdb_core::dbs::capabilities::{
-	Capabilities as CoreCapabilities, FuncTarget, ParseFuncTargetError, ParseNetTargetError,
-	Targets,
+	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
+	ParseNetTargetError, Targets,
 };
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub enum ExperimentalFeature {
+	RecordReferences,
+	GraphQl,
+	BearerAccess,
+	DefineApi,
+}
+
+/// Not public API
+#[doc(hidden)]
+impl From<&ExperimentalFeature> for ExperimentalTarget {
+	fn from(feature: &ExperimentalFeature) -> Self {
+		match feature {
+			ExperimentalFeature::RecordReferences => ExperimentalTarget::RecordReferences,
+			ExperimentalFeature::GraphQl => ExperimentalTarget::GraphQL,
+			ExperimentalFeature::BearerAccess => ExperimentalTarget::BearerAccess,
+			ExperimentalFeature::DefineApi => ExperimentalTarget::DefineApi,
+		}
+	}
+}
 
 /// Capabilities are used to limit what users are allowed to do using queries.
 ///
@@ -409,7 +431,149 @@ impl Capabilities {
 		Ok(self)
 	}
 
-	pub(crate) fn into_inner(self) -> CoreCapabilities {
-		self.cap
+	pub fn allow_all_experimental_features(&mut self) -> &mut Self {
+		*self.cap.allowed_experimental_features_mut() = Targets::All;
+		self
+	}
+
+	pub fn with_all_experimental_features_allowed(mut self) -> Self {
+		self.allow_all_experimental_features();
+		self
+	}
+
+	pub fn allow_experimental_features(&mut self, features: &[ExperimentalFeature]) -> &mut Self {
+		let features = features.iter().map(ExperimentalTarget::from);
+		match self.cap.allowed_experimental_features_mut() {
+			Targets::None | Targets::All => {
+				let mut set = HashSet::new();
+				set.extend(features);
+				*self.cap.allowed_experimental_features_mut() = Targets::Some(set);
+			}
+			Targets::Some(set) => {
+				set.extend(features);
+			}
+			_ => unreachable!(),
+		}
+		self
+	}
+
+	pub fn with_experimental_features_allowed(mut self, features: &[ExperimentalFeature]) -> Self {
+		self.allow_experimental_features(features);
+		self
+	}
+
+	pub fn allow_experimental_feature(&mut self, feature: ExperimentalFeature) -> &mut Self {
+		let feature = ExperimentalTarget::from(&feature);
+		match self.cap.allowed_experimental_features_mut() {
+			Targets::None | Targets::All => {
+				let mut set = HashSet::new();
+				set.insert(feature);
+				*self.cap.allowed_experimental_features_mut() = Targets::Some(set);
+			}
+			Targets::Some(set) => {
+				set.insert(feature);
+			}
+			_ => unreachable!(),
+		}
+		self
+	}
+
+	pub fn with_experimental_feature_allowed(mut self, feature: ExperimentalFeature) -> Self {
+		self.allow_experimental_feature(feature);
+		self
+	}
+
+	pub fn allow_no_experimental_features(&mut self) -> &mut Self {
+		*self.cap.allowed_experimental_features_mut() = Targets::None;
+		self
+	}
+
+	pub fn with_no_experimental_features_allowed(mut self) -> Self {
+		self.allow_no_experimental_features();
+		self
+	}
+
+	pub fn deny_all_experimental_features(&mut self) -> &mut Self {
+		*self.cap.denied_experimental_features_mut() = Targets::All;
+		self
+	}
+
+	pub fn with_all_experimental_features_denied(mut self) -> Self {
+		self.deny_all_experimental_features();
+		self
+	}
+
+	pub fn deny_experimental_features(&mut self, features: &[ExperimentalFeature]) -> &mut Self {
+		let features = features.iter().map(ExperimentalTarget::from);
+		match self.cap.denied_experimental_features_mut() {
+			Targets::None | Targets::All => {
+				let mut set = HashSet::new();
+				set.extend(features);
+				*self.cap.denied_experimental_features_mut() = Targets::Some(set);
+			}
+			Targets::Some(set) => {
+				set.extend(features);
+			}
+			_ => unreachable!(),
+		}
+		self
+	}
+
+	pub fn with_experimental_features_denied(mut self, features: &[ExperimentalFeature]) -> Self {
+		self.deny_experimental_features(features);
+		self
+	}
+
+	pub fn deny_experimental_feature(&mut self, feature: ExperimentalFeature) -> &mut Self {
+		let feature = ExperimentalTarget::from(&feature);
+		match self.cap.denied_experimental_features_mut() {
+			Targets::None | Targets::All => {
+				let mut set = HashSet::new();
+				set.insert(feature);
+				*self.cap.denied_experimental_features_mut() = Targets::Some(set);
+			}
+			Targets::Some(set) => {
+				set.insert(feature);
+			}
+			_ => unreachable!(),
+		}
+		self
+	}
+
+	pub fn with_experimental_feature_denied(mut self, feature: ExperimentalFeature) -> Self {
+		self.deny_experimental_feature(feature);
+		self
+	}
+
+	pub fn deny_no_experimental_features(&mut self) -> &mut Self {
+		*self.cap.denied_experimental_features_mut() = Targets::None;
+		self
+	}
+
+	pub fn with_no_experimental_features_denied(mut self) -> Self {
+		self.deny_no_experimental_features();
+		self
+	}
+}
+
+/// Not public API
+#[doc(hidden)]
+impl From<Capabilities> for CoreCapabilities {
+	fn from(
+		Capabilities {
+			cap,
+		}: Capabilities,
+	) -> Self {
+		cap
+	}
+}
+
+/// Not public API
+#[doc(hidden)]
+impl From<CoreCapabilities> for Capabilities {
+	fn from(cap: CoreCapabilities) -> Self {
+		Self {
+			cap,
+		}
 	}
 }
