@@ -7,6 +7,7 @@ use surrealdb_core::dbs::capabilities::{
 	ParseNetTargetError, Targets,
 };
 
+/// A list of features that are still experimental
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum ExperimentalFeature {
@@ -431,16 +432,22 @@ impl Capabilities {
 		Ok(self)
 	}
 
+	/// Set the allow list to allow all experimental features
 	pub fn allow_all_experimental_features(&mut self) -> &mut Self {
 		*self.cap.allowed_experimental_features_mut() = Targets::All;
 		self
 	}
 
+	/// Set the allow list to allow all experimental features
 	pub fn with_all_experimental_features_allowed(mut self) -> Self {
 		self.allow_all_experimental_features();
 		self
 	}
 
+	/// Add a list of experimental features to the allow lists
+	///
+	/// Adding features to the allow list overwrites previously set allow-all or allow-none
+	/// filters.
 	pub fn allow_experimental_features(&mut self, features: &[ExperimentalFeature]) -> &mut Self {
 		let features = features.iter().map(ExperimentalTarget::from);
 		match self.cap.allowed_experimental_features_mut() {
@@ -457,11 +464,19 @@ impl Capabilities {
 		self
 	}
 
+	/// Add a list of experimental features to the allow lists
+	///
+	/// Adding features to the allow list overwrites previously set allow-all or allow-none
+	/// filters.
 	pub fn with_experimental_features_allowed(mut self, features: &[ExperimentalFeature]) -> Self {
 		self.allow_experimental_features(features);
 		self
 	}
 
+	/// Add an experimental feature to the allow lists
+	///
+	/// Adding a feature to the allow list overwrites previously set allow-all or allow-none
+	/// filters.
 	pub fn allow_experimental_feature(&mut self, feature: ExperimentalFeature) -> &mut Self {
 		let feature = ExperimentalTarget::from(&feature);
 		match self.cap.allowed_experimental_features_mut() {
@@ -478,31 +493,43 @@ impl Capabilities {
 		self
 	}
 
+	/// Add an experimental feature to the allow lists
+	///
+	/// Adding a feature to the allow list overwrites previously set allow-all or allow-none
+	/// filters.
 	pub fn with_experimental_feature_allowed(mut self, feature: ExperimentalFeature) -> Self {
 		self.allow_experimental_feature(feature);
 		self
 	}
 
+	/// Set the allow list to allow no experimental features
 	pub fn allow_no_experimental_features(&mut self) -> &mut Self {
 		*self.cap.allowed_experimental_features_mut() = Targets::None;
 		self
 	}
 
+	/// Set the allow list to allow no experimental features
 	pub fn with_no_experimental_features_allowed(mut self) -> Self {
 		self.allow_no_experimental_features();
 		self
 	}
 
+	/// Set the deny list to deny all experimental features
 	pub fn deny_all_experimental_features(&mut self) -> &mut Self {
 		*self.cap.denied_experimental_features_mut() = Targets::All;
 		self
 	}
 
+	/// Set the deny list to deny all experimental features
 	pub fn with_all_experimental_features_denied(mut self) -> Self {
 		self.deny_all_experimental_features();
 		self
 	}
 
+	/// Add a list of experimental features to the deny lists
+	///
+	/// Adding features to the deny list overwrites previously set deny-all or deny-none
+	/// filters.
 	pub fn deny_experimental_features(&mut self, features: &[ExperimentalFeature]) -> &mut Self {
 		let features = features.iter().map(ExperimentalTarget::from);
 		match self.cap.denied_experimental_features_mut() {
@@ -519,11 +546,19 @@ impl Capabilities {
 		self
 	}
 
+	/// Add a list of experimental features to the deny lists
+	///
+	/// Adding features to the deny list overwrites previously set deny-all or deny-none
+	/// filters.
 	pub fn with_experimental_features_denied(mut self, features: &[ExperimentalFeature]) -> Self {
 		self.deny_experimental_features(features);
 		self
 	}
 
+	/// Add an experimental feature to the deny lists
+	///
+	/// Adding a feature to the deny list overwrites previously set deny-all or deny-none
+	/// filters.
 	pub fn deny_experimental_feature(&mut self, feature: ExperimentalFeature) -> &mut Self {
 		let feature = ExperimentalTarget::from(&feature);
 		match self.cap.denied_experimental_features_mut() {
@@ -540,16 +575,22 @@ impl Capabilities {
 		self
 	}
 
+	/// Add an experimental feature to the deny lists
+	///
+	/// Adding a feature to the deny list overwrites previously set deny-all or deny-none
+	/// filters.
 	pub fn with_experimental_feature_denied(mut self, feature: ExperimentalFeature) -> Self {
 		self.deny_experimental_feature(feature);
 		self
 	}
 
+	/// Set the deny list to deny no experimental features
 	pub fn deny_no_experimental_features(&mut self) -> &mut Self {
 		*self.cap.denied_experimental_features_mut() = Targets::None;
 		self
 	}
 
+	/// Set the deny list to deny no experimental features
 	pub fn with_no_experimental_features_denied(mut self) -> Self {
 		self.deny_no_experimental_features();
 		self
