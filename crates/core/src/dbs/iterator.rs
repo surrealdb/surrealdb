@@ -189,7 +189,7 @@ impl Iterator {
 	) -> Result<(), Error> {
 		let p = planner.check_table_permission(ctx, &v).await?;
 		// We add the iterable only if we have a permission
-		if !matches!(p, GrantedPermission::None) {
+		if matches!(p, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Add the record to the iterator
