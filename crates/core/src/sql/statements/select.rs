@@ -1,4 +1,4 @@
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -126,14 +126,7 @@ impl SelectStatement {
 			return Err(Error::SingleOnlyOutput);
 		}
 		// Check if there is a timeout
-		let ctx = match self.timeout.as_ref() {
-			Some(timeout) => {
-				let mut ctx = MutableContext::new(ctx);
-				ctx.add_timeout(*timeout.0)?;
-				ctx.freeze()
-			}
-			None => ctx.clone(),
-		};
+		let ctx = stm.setup_timeout(ctx)?;
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
 		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
@@ -214,13 +207,8 @@ impl SelectStatement {
 				v => i.ingest(Iterable::Value(v)),
 			};
 		}
-		// Create a new context
-		let mut ctx = MutableContext::new(&ctx);
-		// Add query executors if any
-		if planner.has_executors() {
-			ctx.set_query_planner(planner);
-		}
-		let ctx = ctx.freeze();
+		// Attach the query planner to the context
+		let ctx = stm.setup_query_planner(planner, ctx);
 		// Process the statement
 		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout

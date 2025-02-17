@@ -8,7 +8,9 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
-use crate::idx::planner::{IterationStage, RecordStrategy};
+use crate::idx::planner::{
+	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, StatementContext,
+};
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::mock::Mock;
@@ -151,17 +153,22 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare(&mut self, stm: &Statement<'_>, val: Value) -> Result<(), Error> {
+	pub(crate) async fn prepare(
+		&mut self,
+		planner: &mut QueryPlanner,
+		ctx: &StatementContext<'_>,
+		val: Value,
+	) -> Result<(), Error> {
 		// Match the values
 		match val {
-			Value::Mock(v) => self.prepare_mock(stm, v)?,
-			Value::Table(v) => self.prepare_table(stm, v)?,
-			Value::Edges(v) => self.prepare_edges(stm, *v)?,
-			Value::Object(v) => self.prepare_object(stm, v)?,
-			Value::Array(v) => self.prepare_array(stm, v)?,
+			Value::Mock(v) => self.prepare_mock(ctx.stm, v)?,
+			Value::Table(v) => self.prepare_table(planner, ctx, v).await?,
+			Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
+			Value::Object(v) => self.prepare_object(ctx.stm, v)?,
+			Value::Array(v) => self.prepare_array(planner, ctx, v).await?,
 			Value::Thing(v) => match v.is_range() {
-				true => self.prepare_range(stm, v, RecordStrategy::KeysAndValues)?,
-				false => self.prepare_thing(stm, v)?,
+				true => self.prepare_range(ctx.stm, v, RecordStrategy::KeysAndValues)?,
+				false => self.prepare_thing(ctx.stm, v)?,
 			},
 			v => {
 				return Err(Error::InvalidStatementTarget {
@@ -174,11 +181,21 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_table(&mut self, stm: &Statement<'_>, v: Table) -> Result<(), Error> {
+	pub(crate) async fn prepare_table(
+		&mut self,
+		planner: &mut QueryPlanner,
+		ctx: &StatementContext<'_>,
+		v: Table,
+	) -> Result<(), Error> {
+		let p = planner.check_table_permission(ctx, &v).await?;
+		// We add the iterable only if we have a permission
+		if !matches!(p, GrantedPermission::None) {
+			return Ok(());
+		}
 		// Add the record to the iterator
-		match stm.is_deferable() {
+		match ctx.stm.is_deferable() {
 			true => self.ingest(Iterable::Yield(v)),
-			false => match stm.is_guaranteed() {
+			false => match ctx.stm.is_guaranteed() {
 				false => self.ingest(Iterable::Table(v, RecordStrategy::KeysAndValues)),
 				true => {
 					self.guaranteed = Some(Iterable::Yield(v.clone()));
@@ -270,17 +287,22 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_array(&mut self, stm: &Statement<'_>, v: Array) -> Result<(), Error> {
+	pub(crate) async fn prepare_array(
+		&mut self,
+		planner: &mut QueryPlanner,
+		ctx: &StatementContext<'_>,
+		v: Array,
+	) -> Result<(), Error> {
 		// Add the records to the iterator
 		for v in v {
 			match v {
-				Value::Mock(v) => self.prepare_mock(stm, v)?,
-				Value::Table(v) => self.prepare_table(stm, v)?,
-				Value::Edges(v) => self.prepare_edges(stm, *v)?,
-				Value::Object(v) => self.prepare_object(stm, v)?,
+				Value::Mock(v) => self.prepare_mock(ctx.stm, v)?,
+				Value::Table(v) => self.prepare_table(planner, ctx, v).await?,
+				Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
+				Value::Object(v) => self.prepare_object(ctx.stm, v)?,
 				Value::Thing(v) => match v.is_range() {
-					true => self.prepare_range(stm, v, RecordStrategy::KeysAndValues)?,
-					false => self.prepare_thing(stm, v)?,
+					true => self.prepare_range(ctx.stm, v, RecordStrategy::KeysAndValues)?,
+					false => self.prepare_thing(ctx.stm, v)?,
 				},
 				_ => {
 					return Err(Error::InvalidStatementTarget {

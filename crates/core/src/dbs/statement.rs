@@ -1,3 +1,6 @@
+use crate::ctx::{Context, MutableContext};
+use crate::err::Error;
+use crate::idx::planner::QueryPlanner;
 use crate::sql::cond::Cond;
 use crate::sql::data::Data;
 use crate::sql::fetch::Fetchs;
@@ -20,7 +23,8 @@ use crate::sql::statements::show::ShowStatement;
 use crate::sql::statements::update::UpdateStatement;
 use crate::sql::statements::upsert::UpsertStatement;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{Explain, Permission, With};
+use crate::sql::{Explain, Permission, Timeout, With};
+use std::borrow::Cow;
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -406,6 +410,43 @@ impl Statement<'_> {
 			&table.permissions.create
 		} else {
 			&table.permissions.update
+		}
+	}
+
+	pub(crate) fn timeout(&self) -> Option<&Timeout> {
+		match self {
+			Statement::Create(s) => s.timeout.as_ref(),
+			Statement::Delete(s) => s.timeout.as_ref(),
+			Statement::Insert(s) => s.timeout.as_ref(),
+			Statement::Select(s) => s.timeout.as_ref(),
+			Statement::Update(s) => s.timeout.as_ref(),
+			Statement::Upsert(s) => s.timeout.as_ref(),
+			_ => None,
+		}
+	}
+	pub(crate) fn setup_timeout<'a>(&self, ctx: &'a Context) -> Result<Cow<'a, Context>, Error> {
+		if let Some(t) = self.timeout() {
+			let mut ctx = MutableContext::new(ctx);
+			ctx.add_timeout(*t.0)?;
+			Ok(Cow::Owned(ctx.freeze()))
+		} else {
+			Ok(Cow::Borrowed(ctx))
+		}
+	}
+
+	pub(crate) fn setup_query_planner<'a>(
+		&self,
+		planner: QueryPlanner,
+		ctx: Cow<'a, Context>,
+	) -> Cow<'a, Context> {
+		// Add query executors if any
+		if planner.has_executors() {
+			// Create a new context
+			let mut ctx = MutableContext::new(&ctx);
+			ctx.set_query_planner(planner);
+			Cow::Owned(ctx.freeze())
+		} else {
+			ctx
 		}
 	}
 }
