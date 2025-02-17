@@ -31,6 +31,7 @@ pub enum TestError {
 	Timeout,
 	Running(String),
 	Paniced(String),
+	Import(String, String),
 }
 
 pub enum TestOutputs {
@@ -283,6 +284,7 @@ impl TestReport {
 			TestTaskResult::ParserError(ref e) => Some(TestOutputs::ParsingError(e.to_string())),
 			TestTaskResult::RunningError(_) => None,
 			TestTaskResult::Timeout => None,
+			TestTaskResult::Import(_, _) => None,
 			TestTaskResult::Results(ref e) => Some(TestOutputs::Values(
 				e.iter().map(|x| x.result.as_ref().map_err(|e| e.to_string()).cloned()).collect(),
 			)),
@@ -309,6 +311,7 @@ impl TestReport {
 				TestReportKind::Error(TestError::Running(e.to_string()))
 			}
 			TestTaskResult::Timeout => TestReportKind::Error(TestError::Timeout),
+			TestTaskResult::Import(a, b) => TestReportKind::Error(TestError::Import(a, b)),
 			TestTaskResult::Paniced(e) => {
 				let error = e
 					.downcast::<String>()

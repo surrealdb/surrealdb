@@ -36,6 +36,7 @@ use crate::{
 pub enum TestTaskResult {
 	ParserError(RenderedError),
 	RunningError(CoreError),
+	Import(String, String),
 	Timeout,
 	Results(Vec<Response>),
 	Paniced(Box<dyn Any + Send + 'static>),
@@ -347,14 +348,24 @@ async fn run_test_with_dbs(
 
 	for import in set[id].config.imports() {
 		let Some(test) = set.find_all(import) else {
-			bail!("Could not find import import `{import}`");
+			return Ok(TestTaskResult::Import(
+				import.to_string(),
+				format!("Could not find import."),
+			));
 		};
 
-		let source = str::from_utf8(&set[test].source)
-			.with_context(|| format!("Import `{import}` was not valid utf8"))?;
+		let Ok(source) = str::from_utf8(&set[test].source) else {
+			return Ok(TestTaskResult::Import(
+				import.to_string(),
+				format!("Import file was not valid utf-8."),
+			));
+		};
 
 		if let Err(e) = dbs.execute(source, &import_session, None).await {
-			bail!("Failed to run import `{import}`: {e}");
+			return Ok(TestTaskResult::Import(
+				import.to_string(),
+				format!("Failed to run import: `{e}`"),
+			));
 		}
 	}
 
