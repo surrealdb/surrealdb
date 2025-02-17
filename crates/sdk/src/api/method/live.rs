@@ -46,7 +46,7 @@ where
 		..
 	} = this;
 	Box::pin(async move {
-		let router = client.router.extract()?;
+		let router = client.inner.router.extract()?;
 		if !router.features.contains(&ExtraFeatures::LiveQueries) {
 			return Err(Error::LiveQueriesNotSupported.into());
 		}
@@ -96,11 +96,7 @@ where
 			.into());
 		};
 		let rx = register(router, *id).await?;
-		Ok(Stream::new(
-			Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
-			*id,
-			Some(rx),
-		))
+		Ok(Stream::new(client.inner.clone().into(), *id, Some(rx)))
 	})
 }
 
@@ -257,7 +253,7 @@ where
 {
 	let client = client.clone();
 	spawn(async move {
-		if let Ok(router) = client.router.extract() {
+		if let Ok(router) = client.inner.router.extract() {
 			router
 				.execute_unit(Command::Kill {
 					uuid,

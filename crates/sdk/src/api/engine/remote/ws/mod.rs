@@ -131,11 +131,9 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			router: self.router.clone(),
-			engine: PhantomData,
+			surreal: self.inner.clone().into(),
 			address: address.into_endpoint(),
 			capacity: 0,
-			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}
