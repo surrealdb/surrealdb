@@ -4,7 +4,7 @@ use crate::{
 		engine::local::Db,
 		method::BoxFuture,
 		opt::{Endpoint, EndpointKind},
-		ExtraFeatures, OnceLockExt, Result, Surreal,
+		ExtraFeatures, Result, Surreal,
 	},
 	engine::tasks,
 	opt::{auth::Root, WaitFor},
@@ -15,7 +15,7 @@ use async_channel::{Receiver, Sender};
 use futures::{stream::poll_fn, StreamExt};
 use std::{
 	collections::{BTreeMap, HashMap, HashSet},
-	sync::{atomic::AtomicI64, Arc, OnceLock},
+	sync::{atomic::AtomicI64, Arc},
 	task::Poll,
 };
 use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
@@ -33,6 +33,7 @@ impl Connection for Db {
 			};
 
 			let (conn_tx, conn_rx) = async_channel::bounded(1);
+			let config = address.config.clone();
 
 			tokio::spawn(run_router(address, conn_tx, route_rx));
 
@@ -42,14 +43,15 @@ impl Connection for Db {
 			features.insert(ExtraFeatures::Backup);
 			features.insert(ExtraFeatures::LiveQueries);
 
-			Ok(Surreal::new_from_router_waiter(
-				Arc::new(OnceLock::with_value(Router {
-					features,
-					sender: route_tx,
-					last_id: AtomicI64::new(0),
-				})),
-				Arc::new(watch::channel(Some(WaitFor::Connection))),
-			))
+			let waiter = watch::channel(Some(WaitFor::Connection));
+			let router = Router {
+				features,
+				config,
+				sender: route_tx,
+				last_id: AtomicI64::new(0),
+			};
+
+			Ok((router, waiter).into())
 		})
 	}
 }
