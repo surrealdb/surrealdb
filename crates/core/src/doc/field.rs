@@ -47,12 +47,7 @@ impl Document {
 					}
 					true => {
 						// Loop over every field under this field in the document
-						for k in self
-							.current
-							.doc
-							.every(Some(&fd.name), true, ArrayBehaviour::Nested)
-							.into_iter()
-						{
+						for k in self.current.doc.every(Some(&fd.name), true, true).into_iter() {
 							keys.push(k);
 						}
 					}
@@ -81,18 +76,14 @@ impl Document {
 						},
 					}
 				}
-				// NONE values should never be stored
-				if self.current.doc.pick(fd).is_none() {
-					self.current.doc.to_mut().cut(fd);
-				}
 			}
-		} else {
-			// Loop over every field in the document
-			for fd in self.current.doc.every(None, true, ArrayBehaviour::Nested).iter() {
-				// NONE values should never be stored
-				if self.current.doc.pick(fd).is_none() {
-					self.current.doc.to_mut().cut(fd);
-				}
+		}
+
+		// Loop over every field in the document
+		for fd in self.current.doc.every(None, true, ArrayBehaviour::Nested).iter() {
+			// NONE values should never be stored
+			if self.current.doc.pick(fd).is_none() {
+				self.current.doc.to_mut().cut(fd);
 			}
 		}
 		// Carry on
