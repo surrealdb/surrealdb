@@ -59,7 +59,7 @@ impl Document {
 				}
 			}
 			// Loop over every field in the document
-			for fd in self.current.doc.every(None, true, false).iter() {
+			for fd in self.current.doc.every(None, true, true).iter() {
 				if !keys.contains(fd) {
 					match fd {
 						// Built-in fields
