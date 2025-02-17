@@ -1,6 +1,7 @@
 mod access;
 mod analyzer;
 mod api;
+mod bucket;
 pub mod config;
 mod database;
 mod deprecated;

@@ -1277,6 +1277,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-foundation"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b55271e5c8c478ad3f38ad24ef34923091e0548492a266d19b3c0b4d82574c63"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2474,6 +2484,7 @@ dependencies = [
  "hyper 1.5.2",
  "hyper-util",
  "rustls 0.23.21",
+ "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.1",
@@ -2773,7 +2784,7 @@ dependencies = [
  "log",
  "num-format",
  "once_cell",
- "quick-xml",
+ "quick-xml 0.26.0",
  "rgb",
  "str_stack",
 ]
@@ -3285,7 +3296,7 @@ dependencies = [
  "openssl-probe",
  "openssl-sys",
  "schannel",
- "security-framework",
+ "security-framework 2.11.1",
  "security-framework-sys",
  "tempfile",
 ]
@@ -3474,13 +3485,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6da452820c715ce78221e8202ccc599b4a52f3e1eb3eedb487b680c81a8e3f3"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "futures",
  "humantime",
+ "hyper 1.5.2",
  "itertools 0.13.0",
+ "md-5",
  "parking_lot",
  "percent-encoding",
+ "quick-xml 0.36.2",
+ "rand 0.8.5",
+ "reqwest",
+ "ring 0.17.8",
+ "serde",
+ "serde_json",
  "snafu",
  "tokio",
  "tracing",
@@ -4142,6 +4162,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-xml"
+version = "0.36.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7649a7b4df05aed9ea7ec6f628c67c9953a43869b8bc50929569b2999d443fe"
+dependencies = [
+ "memchr",
+ "serde",
+]
+
+[[package]]
 name = "quick_cache"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4491,6 +4521,7 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls 0.23.21",
+ "rustls-native-certs",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "serde",
@@ -4863,6 +4894,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls-native-certs"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fcff2dd52b58a8d98a70243663a0d234c4e2b79235637849d15913394a247d3"
+dependencies = [
+ "openssl-probe",
+ "rustls-pki-types",
+ "schannel",
+ "security-framework 3.2.0",
+]
+
+[[package]]
 name = "rustls-pemfile"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5025,7 +5068,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
 dependencies = [
  "bitflags 2.8.0",
- "core-foundation",
+ "core-foundation 0.9.4",
+ "core-foundation-sys",
+ "libc",
+ "security-framework-sys",
+]
+
+[[package]]
+name = "security-framework"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "271720403f46ca04f7ba6f55d438f8bd878d6b8ca0a1046e8228c4145bcbb316"
+dependencies = [
+ "bitflags 2.8.0",
+ "core-foundation 0.10.0",
  "core-foundation-sys",
  "libc",
  "security-framework-sys",
