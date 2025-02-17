@@ -12,6 +12,7 @@ use crate::sql::permission::Permission;
 use crate::sql::reference::Refs;
 use crate::sql::statements::DefineFieldStatement;
 use crate::sql::thing::Thing;
+use crate::sql::value::every::ArrayBehaviour;
 use crate::sql::value::Value;
 use crate::sql::Part;
 use reblessive::tree::Stk;
@@ -46,7 +47,12 @@ impl Document {
 					}
 					true => {
 						// Loop over every field under this field in the document
-						for k in self.current.doc.every(Some(&fd.name), true, true).into_iter() {
+						for k in self
+							.current
+							.doc
+							.every(Some(&fd.name), true, ArrayBehaviour::Nested)
+							.into_iter()
+						{
 							keys.push(k);
 						}
 					}
@@ -82,7 +88,7 @@ impl Document {
 			}
 		} else {
 			// Loop over every field in the document
-			for fd in self.current.doc.every(None, true, false).iter() {
+			for fd in self.current.doc.every(None, true, ArrayBehaviour::Nested).iter() {
 				// NONE values should never be stored
 				if self.current.doc.pick(fd).is_none() {
 					self.current.doc.to_mut().cut(fd);
