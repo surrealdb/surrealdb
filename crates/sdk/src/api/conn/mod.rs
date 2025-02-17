@@ -7,8 +7,8 @@ use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::Value;
-use channel::Receiver;
-use channel::Sender;
+use async_channel::Receiver;
+use async_channel::Sender;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
@@ -19,6 +19,8 @@ mod cmd;
 pub(crate) use cmd::Command;
 #[cfg(feature = "protocol-http")]
 pub(crate) use cmd::RouterRequest;
+
+use super::opt::Config;
 
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections
@@ -38,6 +40,7 @@ pub(crate) struct Route {
 #[derive(Debug)]
 pub struct Router {
 	pub(crate) sender: Sender<Route>,
+	pub(crate) config: Config,
 	pub(crate) last_id: AtomicI64,
 	pub(crate) features: HashSet<ExtraFeatures>,
 }
@@ -53,7 +56,7 @@ impl Router {
 	) -> BoxFuture<'_, Result<Receiver<Result<DbResponse>>>> {
 		Box::pin(async move {
 			let id = self.next_id();
-			let (sender, receiver) = channel::bounded(1);
+			let (sender, receiver) = async_channel::bounded(1);
 			let route = Route {
 				request: RequestData {
 					id,

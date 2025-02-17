@@ -73,7 +73,7 @@ pub struct Datastore {
 	/// The maximum duration timeout for running multiple statements in a transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
-	capabilities: Capabilities,
+	capabilities: Arc<Capabilities>,
 	// Whether this datastore enables live query notifications to subscribers.
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// The index store cache
@@ -414,7 +414,7 @@ impl Datastore {
 				query_timeout: None,
 				transaction_timeout: None,
 				notification_channel: None,
-				capabilities: Capabilities::default(),
+				capabilities: Arc::new(Capabilities::default()),
 				index_stores: IndexStores::default(),
 				#[cfg(not(target_family = "wasm"))]
 				index_builder: IndexBuilder::new(tf),
@@ -489,7 +489,7 @@ impl Datastore {
 
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
-		self.capabilities = caps;
+		self.capabilities = Arc::new(caps);
 		self
 	}
 

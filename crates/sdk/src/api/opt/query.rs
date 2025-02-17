@@ -9,12 +9,8 @@ use futures::stream::select_all;
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
-use surrealdb_core::{
-	sql::{
-		self, from_value as from_core_value, statements::*, Statement, Statements,
-		Value as CoreValue,
-	},
-	syn,
+use surrealdb_core::sql::{
+	self, from_value as from_core_value, statements::*, Statement, Statements, Value as CoreValue,
 };
 
 use super::Raw;
@@ -23,6 +19,12 @@ use super::Raw;
 pub trait IntoQuery {
 	/// Converts an input into SQL statements
 	fn into_query(self) -> Result<Vec<Statement>>;
+
+	/// Not public API
+	#[doc(hidden)]
+	fn as_str(&self) -> Option<&str> {
+		None
+	}
 }
 
 impl IntoQuery for sql::Query {
@@ -171,19 +173,31 @@ impl IntoQuery for OptionStatement {
 
 impl IntoQuery for &str {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		syn::parse(self)?.into_query()
+		Ok(Vec::new())
+	}
+
+	fn as_str(&self) -> Option<&str> {
+		Some(self)
 	}
 }
 
 impl IntoQuery for &String {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		syn::parse(self)?.into_query()
+		Ok(Vec::new())
+	}
+
+	fn as_str(&self) -> Option<&str> {
+		Some(self)
 	}
 }
 
 impl IntoQuery for String {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		syn::parse(&self)?.into_query()
+		Ok(Vec::new())
+	}
+
+	fn as_str(&self) -> Option<&str> {
+		Some(self)
 	}
 }
 

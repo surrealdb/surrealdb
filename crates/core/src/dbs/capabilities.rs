@@ -1,7 +1,7 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
-use std::{collections::HashSet, sync::Arc};
 
 use crate::iam::{Auth, Level};
 use crate::rpc::Method;
@@ -510,18 +510,18 @@ pub struct Capabilities {
 	guest_access: bool,
 	live_query_notifications: bool,
 
-	allow_funcs: Arc<Targets<FuncTarget>>,
-	deny_funcs: Arc<Targets<FuncTarget>>,
-	allow_net: Arc<Targets<NetTarget>>,
-	deny_net: Arc<Targets<NetTarget>>,
-	allow_rpc: Arc<Targets<MethodTarget>>,
-	deny_rpc: Arc<Targets<MethodTarget>>,
-	allow_http: Arc<Targets<RouteTarget>>,
-	deny_http: Arc<Targets<RouteTarget>>,
-	allow_experimental: Arc<Targets<ExperimentalTarget>>,
-	deny_experimental: Arc<Targets<ExperimentalTarget>>,
-	allow_arbitrary_query: Arc<Targets<ArbitraryQueryTarget>>,
-	deny_arbitrary_query: Arc<Targets<ArbitraryQueryTarget>>,
+	allow_funcs: Targets<FuncTarget>,
+	deny_funcs: Targets<FuncTarget>,
+	allow_net: Targets<NetTarget>,
+	deny_net: Targets<NetTarget>,
+	allow_rpc: Targets<MethodTarget>,
+	deny_rpc: Targets<MethodTarget>,
+	allow_http: Targets<RouteTarget>,
+	deny_http: Targets<RouteTarget>,
+	allow_experimental: Targets<ExperimentalTarget>,
+	deny_experimental: Targets<ExperimentalTarget>,
+	allow_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
 }
 
 impl fmt::Display for Capabilities {
@@ -541,18 +541,18 @@ impl Default for Capabilities {
 			guest_access: false,
 			live_query_notifications: true,
 
-			allow_funcs: Arc::new(Targets::All),
-			deny_funcs: Arc::new(Targets::None),
-			allow_net: Arc::new(Targets::None),
-			deny_net: Arc::new(Targets::None),
-			allow_rpc: Arc::new(Targets::All),
-			deny_rpc: Arc::new(Targets::None),
-			allow_http: Arc::new(Targets::All),
-			deny_http: Arc::new(Targets::None),
-			allow_experimental: Arc::new(Targets::None),
-			deny_experimental: Arc::new(Targets::None),
-			allow_arbitrary_query: Arc::new(Targets::All),
-			deny_arbitrary_query: Arc::new(Targets::None),
+			allow_funcs: Targets::All,
+			deny_funcs: Targets::None,
+			allow_net: Targets::None,
+			deny_net: Targets::None,
+			allow_rpc: Targets::All,
+			deny_rpc: Targets::None,
+			allow_http: Targets::All,
+			deny_http: Targets::None,
+			allow_experimental: Targets::None,
+			deny_experimental: Targets::None,
+			allow_arbitrary_query: Targets::All,
+			deny_arbitrary_query: Targets::None,
 		}
 	}
 }
@@ -564,18 +564,18 @@ impl Capabilities {
 			guest_access: true,
 			live_query_notifications: true,
 
-			allow_funcs: Arc::new(Targets::All),
-			deny_funcs: Arc::new(Targets::None),
-			allow_net: Arc::new(Targets::All),
-			deny_net: Arc::new(Targets::None),
-			allow_rpc: Arc::new(Targets::All),
-			deny_rpc: Arc::new(Targets::None),
-			allow_http: Arc::new(Targets::All),
-			deny_http: Arc::new(Targets::None),
-			allow_experimental: Arc::new(Targets::None),
-			deny_experimental: Arc::new(Targets::None),
-			allow_arbitrary_query: Arc::new(Targets::All),
-			deny_arbitrary_query: Arc::new(Targets::None),
+			allow_funcs: Targets::All,
+			deny_funcs: Targets::None,
+			allow_net: Targets::All,
+			deny_net: Targets::None,
+			allow_rpc: Targets::All,
+			deny_rpc: Targets::None,
+			allow_http: Targets::All,
+			deny_http: Targets::None,
+			allow_experimental: Targets::None,
+			deny_experimental: Targets::None,
+			allow_arbitrary_query: Targets::All,
+			deny_arbitrary_query: Targets::None,
 		}
 	}
 
@@ -585,18 +585,18 @@ impl Capabilities {
 			guest_access: false,
 			live_query_notifications: false,
 
-			allow_funcs: Arc::new(Targets::None),
-			deny_funcs: Arc::new(Targets::None),
-			allow_net: Arc::new(Targets::None),
-			deny_net: Arc::new(Targets::None),
-			allow_rpc: Arc::new(Targets::None),
-			deny_rpc: Arc::new(Targets::None),
-			allow_http: Arc::new(Targets::None),
-			deny_http: Arc::new(Targets::None),
-			allow_experimental: Arc::new(Targets::None),
-			deny_experimental: Arc::new(Targets::None),
-			allow_arbitrary_query: Arc::new(Targets::None),
-			deny_arbitrary_query: Arc::new(Targets::None),
+			allow_funcs: Targets::None,
+			deny_funcs: Targets::None,
+			allow_net: Targets::None,
+			deny_net: Targets::None,
+			allow_rpc: Targets::None,
+			deny_rpc: Targets::None,
+			allow_http: Targets::None,
+			deny_http: Targets::None,
+			allow_experimental: Targets::None,
+			deny_experimental: Targets::None,
+			allow_arbitrary_query: Targets::None,
+			deny_arbitrary_query: Targets::None,
 		}
 	}
 
@@ -616,30 +616,46 @@ impl Capabilities {
 	}
 
 	pub fn with_functions(mut self, allow_funcs: Targets<FuncTarget>) -> Self {
-		self.allow_funcs = Arc::new(allow_funcs);
+		self.allow_funcs = allow_funcs;
 		self
+	}
+
+	pub fn allowed_functions_mut(&mut self) -> &mut Targets<FuncTarget> {
+		&mut self.allow_funcs
 	}
 
 	pub fn without_functions(mut self, deny_funcs: Targets<FuncTarget>) -> Self {
-		self.deny_funcs = Arc::new(deny_funcs);
+		self.deny_funcs = deny_funcs;
 		self
+	}
+
+	pub fn denied_functions_mut(&mut self) -> &mut Targets<FuncTarget> {
+		&mut self.deny_funcs
 	}
 
 	pub fn with_experimental(mut self, allow_experimental: Targets<ExperimentalTarget>) -> Self {
-		self.allow_experimental = Arc::new(allow_experimental);
+		self.allow_experimental = allow_experimental;
 		self
 	}
 
+	pub fn allowed_experimental_features_mut(&mut self) -> &mut Targets<ExperimentalTarget> {
+		&mut self.allow_experimental
+	}
+
 	pub fn without_experimental(mut self, deny_experimental: Targets<ExperimentalTarget>) -> Self {
-		self.deny_experimental = Arc::new(deny_experimental);
+		self.deny_experimental = deny_experimental;
 		self
+	}
+
+	pub fn denied_experimental_features_mut(&mut self) -> &mut Targets<ExperimentalTarget> {
+		&mut self.deny_experimental
 	}
 
 	pub fn with_arbitrary_query(
 		mut self,
 		allow_arbitrary_query: Targets<ArbitraryQueryTarget>,
 	) -> Self {
-		self.allow_arbitrary_query = Arc::new(allow_arbitrary_query);
+		self.allow_arbitrary_query = allow_arbitrary_query;
 		self
 	}
 
@@ -647,37 +663,45 @@ impl Capabilities {
 		mut self,
 		deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
 	) -> Self {
-		self.deny_arbitrary_query = Arc::new(deny_arbitrary_query);
+		self.deny_arbitrary_query = deny_arbitrary_query;
 		self
 	}
 
 	pub fn with_network_targets(mut self, allow_net: Targets<NetTarget>) -> Self {
-		self.allow_net = Arc::new(allow_net);
+		self.allow_net = allow_net;
 		self
+	}
+
+	pub fn allowed_network_targets_mut(&mut self) -> &mut Targets<NetTarget> {
+		&mut self.allow_net
 	}
 
 	pub fn without_network_targets(mut self, deny_net: Targets<NetTarget>) -> Self {
-		self.deny_net = Arc::new(deny_net);
+		self.deny_net = deny_net;
 		self
 	}
 
+	pub fn denied_network_targets_mut(&mut self) -> &mut Targets<NetTarget> {
+		&mut self.deny_net
+	}
+
 	pub fn with_rpc_methods(mut self, allow_rpc: Targets<MethodTarget>) -> Self {
-		self.allow_rpc = Arc::new(allow_rpc);
+		self.allow_rpc = allow_rpc;
 		self
 	}
 
 	pub fn without_rpc_methods(mut self, deny_rpc: Targets<MethodTarget>) -> Self {
-		self.deny_rpc = Arc::new(deny_rpc);
+		self.deny_rpc = deny_rpc;
 		self
 	}
 
 	pub fn with_http_routes(mut self, allow_http: Targets<RouteTarget>) -> Self {
-		self.allow_http = Arc::new(allow_http);
+		self.allow_http = allow_http;
 		self
 	}
 
 	pub fn without_http_routes(mut self, deny_http: Targets<RouteTarget>) -> Self {
-		self.deny_http = Arc::new(deny_http);
+		self.deny_http = deny_http;
 		self
 	}
 

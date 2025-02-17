@@ -38,14 +38,14 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.router.extract()?;
+			let router = self.client.inner.router.extract()?;
 			router
 				.execute_unit(Command::Use {
 					namespace: self.ns,
 					database: Some(self.db),
 				})
 				.await?;
-			self.client.waiter.0.send(Some(WaitFor::Database)).ok();
+			self.client.inner.waiter.0.send(Some(WaitFor::Database)).ok();
 			Ok(())
 		})
 	}

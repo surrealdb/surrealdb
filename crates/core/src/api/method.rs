@@ -42,12 +42,12 @@ impl TryFrom<&Value> for Method {
 impl Display for Method {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Delete => write!(f, "DELETE"),
-			Self::Get => write!(f, "GET"),
-			Self::Patch => write!(f, "PATCH"),
-			Self::Post => write!(f, "POST"),
-			Self::Put => write!(f, "PUT"),
-			Self::Trace => write!(f, "TRACE"),
+			Self::Delete => write!(f, "delete"),
+			Self::Get => write!(f, "get"),
+			Self::Patch => write!(f, "patch"),
+			Self::Post => write!(f, "post"),
+			Self::Put => write!(f, "put"),
+			Self::Trace => write!(f, "trace"),
 		}
 	}
 }

@@ -48,7 +48,7 @@ where
 			..
 		} = self;
 		Box::pin(async move {
-			let router = client.router.extract()?;
+			let router = client.inner.router.extract()?;
 			let content = credentials.map_err(crate::error::Db::from)?;
 			router
 				.execute(Command::Signin {

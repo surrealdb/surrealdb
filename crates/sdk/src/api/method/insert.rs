@@ -72,7 +72,7 @@ macro_rules! into_future {
 					data: data.into(),
 				};
 
-				let router = client.router.extract()?;
+				let router = client.inner.router.extract()?;
 				router.$method(cmd).await
 			})
 		}
