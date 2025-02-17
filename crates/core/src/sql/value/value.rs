@@ -1991,6 +1991,7 @@ impl Value {
 				Err(Error::ConvertTo {
 					from: val,
 					into: kind.to_string(),
+					path: "type::coerce_to.convert".into(),
 				})
 			}
 			Kind::Literal(lit) => self.convert_to_literal(lit),
@@ -2008,6 +2009,7 @@ impl Value {
 			}) => Err(Error::ConvertTo {
 				from,
 				into: kind.to_string(),
+				path: "type::coerce_to".into(),
 			}),
 			// There was a different error
 			Err(e) => Err(e),
@@ -2024,6 +2026,7 @@ impl Value {
 			Err(Error::ConvertTo {
 				from: self,
 				into: literal.to_string(),
+				path: "type::literal.convert".into(),
 			})
 		}
 	}
@@ -2037,6 +2040,7 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "null".into(),
+				path: "type::null.convert".into(),
 			}),
 		}
 	}
@@ -2054,12 +2058,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "bool".into(),
+					path: "type::bool.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "bool".into(),
+				path: "type::bool.convert".into(),
 			}),
 		}
 	}
@@ -2079,6 +2085,7 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "int".into(),
+					path: "type::int.convert".into(),
 				}),
 			},
 			// Attempt to convert a string value
@@ -2089,12 +2096,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "int".into(),
+					path: "type::int.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "int".into(),
+				path: "type::int.convert".into(),
 			}),
 		}
 	}
@@ -2114,6 +2123,7 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "float".into(),
+					path: "type::float.convert".into(),
 				}),
 			},
 			// Attempt to convert a string value
@@ -2124,12 +2134,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "float".into(),
+					path: "type::float.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "float".into(),
+				path: "type::float.convert".into(),
 			}),
 		}
 	}
@@ -2149,6 +2161,7 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
+					path: "type::decimal.convert".into(),
 				}),
 			},
 			// Attempt to convert a string value
@@ -2159,12 +2172,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
+					path: "type::decimal.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "decimal".into(),
+				path: "type::decimal.convert".into(),
 			}),
 		}
 	}
@@ -2182,12 +2197,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "number".into(),
+					path: "type::number.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "number".into(),
+				path: "type::number.convert".into(),
 			}),
 		}
 	}
@@ -2199,16 +2216,19 @@ impl Value {
 			Value::Bytes(_) => Err(Error::ConvertTo {
 				from: self,
 				into: "string".into(),
+				path: "type::string.convert".into(),
 			}),
 			// None can't convert to a string
 			Value::None => Err(Error::ConvertTo {
 				from: self,
 				into: "string".into(),
+				path: "type::string.convert".into(),
 			}),
 			// Null can't convert to a string
 			Value::Null => Err(Error::ConvertTo {
 				from: self,
 				into: "string".into(),
+				path: "type::string.convert".into(),
 			}),
 			// Stringify anything else
 			_ => Ok(self.as_string()),
@@ -2222,16 +2242,19 @@ impl Value {
 			Value::Bytes(_) => Err(Error::ConvertTo {
 				from: self,
 				into: "string".into(),
+				path: "type::strand.convert".into(),
 			}),
 			// None can't convert to a string
 			Value::None => Err(Error::ConvertTo {
 				from: self,
 				into: "string".into(),
+				path: "type::strand.convert".into(),
 			}),
 			// Null can't convert to a string
 			Value::Null => Err(Error::ConvertTo {
 				from: self,
 				into: "string".into(),
+				path: "type::strand.convert".into(),
 			}),
 			// Allow any string value
 			Value::Strand(v) => Ok(v),
@@ -2257,12 +2280,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "uuid".into(),
+					path: "type::uuid.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "uuid".into(),
+				path: "type::uuid.convert".into(),
 			}),
 		}
 	}
@@ -2276,6 +2301,7 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "function".into(),
+				path: "type::function.convert".into(),
 			}),
 		}
 	}
@@ -2293,12 +2319,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "datetime".into(),
+					path: "type::datetime.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "datetime".into(),
+				path: "type::datetime.convert".into(),
 			}),
 		}
 	}
@@ -2316,12 +2344,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "duration".into(),
+					path: "type::duration.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "duration".into(),
+				path: "type::duration.convert".into(),
 			}),
 		}
 	}
@@ -2337,6 +2367,7 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "bytes".into(),
+				path: "type::bytes.convert".into(),
 			}),
 		}
 	}
@@ -2350,10 +2381,10 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "object".into(),
+				path: "type::object.convert".into(),
 			}),
 		}
 	}
-
 	/// Try to convert this value to an `Array`
 	pub(crate) fn convert_to_array(self) -> Result<Array, Error> {
 		match self {
@@ -2368,6 +2399,7 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "array".into(),
+				path: "type::array.convert".into(),
 			}),
 		}
 	}
@@ -2389,6 +2421,7 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "range".into(),
+				path: "type::range.convert".into(),
 			}),
 		}
 	}
@@ -2406,12 +2439,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "point".into(),
+					path: "type::point.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "point".into(),
+				path: "type::point.convert".into(),
 			}),
 		}
 	}
@@ -2429,12 +2464,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "record".into(),
+					path: "type::record.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "record".into(),
+				path: "type::record.convert".into(),
 			}),
 		}
 	}
@@ -2448,6 +2485,7 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "geometry".into(),
+				path: "type::geometry.convert".into(),
 			}),
 		}
 	}
@@ -2465,12 +2503,14 @@ impl Value {
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "record".into(),
+					path: "type::record.convert".into(),
 				}),
 			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "record".into(),
+				path: "type::record.convert".into(),
 			}),
 		}
 	}
@@ -2484,6 +2524,7 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "geometry".into(),
+				path: "type::geometry.convert".into(),
 			}),
 		}
 	}
@@ -2501,6 +2542,7 @@ impl Value {
 				} => Error::ConvertTo {
 					from,
 					into: format!("array<{kind}>"),
+					path: "type::array.convert".into(),
 				},
 				e => e,
 			})
@@ -2519,6 +2561,7 @@ impl Value {
 				} => Error::ConvertTo {
 					from,
 					into: format!("array<{kind}, {len}>"),
+					path: "type::array.convert".into(),
 				},
 				e => e,
 			})
@@ -2545,6 +2588,7 @@ impl Value {
 				} => Error::ConvertTo {
 					from,
 					into: format!("set<{kind}>"),
+					path: "type::set.convert".into(),
 				},
 				e => e,
 			})
@@ -2564,6 +2608,7 @@ impl Value {
 				} => Error::ConvertTo {
 					from,
 					into: format!("set<{kind}, {len}>"),
+					path: "type::set.convert".into(),
 				},
 				e => e,
 			})
@@ -3144,10 +3189,8 @@ impl TryNeg for Value {
 
 #[cfg(test)]
 mod tests {
-
-	use chrono::TimeZone;
-
 	use super::*;
+	use chrono::TimeZone;
 	use crate::syn::Parse;
 
 	#[test]
