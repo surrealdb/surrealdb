@@ -346,19 +346,12 @@ impl Value {
 							None => Ok(Value::None),
 						},
 						Value::Range(r) => {
-							if let Some(range) = r.slice(v.as_slice()) {
-								let path = path.next();
-								stk.scope(|scope| {
-									let futs = range
-										.iter()
-										.map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
-									try_join_all_buffered(futs)
-								})
-								.await
-								.map(Into::into)
-							} else {
-								Ok(Value::None)
-							}
+							let v = r
+								.slice(v.as_slice())
+								.map(|v| Value::from(v.to_vec()))
+								.unwrap_or_default();
+
+							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
 						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
