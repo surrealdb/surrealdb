@@ -27,7 +27,7 @@ impl Connection for Any {
 				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = async_channel::bounded::<Result<()>>(1);
+			let (conn_tx, conn_rx) = channel::bounded::<Result<()>>(1);
 			let config = address.config.clone();
 			let mut features = HashSet::new();
 

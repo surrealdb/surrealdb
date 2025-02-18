@@ -32,7 +32,7 @@ impl Connection for Db {
 				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = async_channel::bounded(1);
+			let (conn_tx, conn_rx) = channel::bounded(1);
 			let config = address.config.clone();
 
 			tokio::spawn(run_router(address, conn_tx, route_rx));
