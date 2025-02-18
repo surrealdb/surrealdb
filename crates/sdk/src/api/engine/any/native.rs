@@ -13,7 +13,6 @@ use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
-use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 #[allow(unused_imports)]
@@ -23,8 +22,6 @@ use crate::opt::WaitFor;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
-use std::sync::OnceLock;
 use tokio::sync::watch;
 #[cfg(feature = "protocol-ws")]
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -43,7 +40,8 @@ impl Connection for Any {
 				capacity => channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = channel::bounded::<Result<()>>(1);
+			let (conn_tx, conn_rx) = async_channel::bounded::<Result<()>>(1);
+			let config = address.config.clone();
 			let mut features = HashSet::new();
 
 			match EndpointKind::from(address.url.scheme()) {
@@ -213,14 +211,15 @@ impl Connection for Any {
 				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
 			}
 
-			Ok(Surreal::new_from_router_waiter(
-				Arc::new(OnceLock::with_value(Router {
-					features,
-					sender: route_tx,
-					last_id: AtomicI64::new(0),
-				})),
-				Arc::new(watch::channel(Some(WaitFor::Connection))),
-			))
+			let waiter = watch::channel(Some(WaitFor::Connection));
+			let router = Router {
+				features,
+				config,
+				sender: route_tx,
+				last_id: AtomicI64::new(0),
+			};
+
+			Ok((router, waiter).into())
 		})
 	}
 }

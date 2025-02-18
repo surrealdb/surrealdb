@@ -56,7 +56,7 @@ macro_rules! into_future {
 					vec.push(value);
 				}
 				let patches = CoreValue::from(vec);
-				let router = client.router.extract()?;
+				let router = client.inner.router.extract()?;
 				let cmd = Command::Patch {
 					upsert,
 					what: resource?,

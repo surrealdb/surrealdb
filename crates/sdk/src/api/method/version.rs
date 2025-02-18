@@ -36,7 +36,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.router.extract()?;
+			let router = self.client.inner.router.extract()?;
 			let version = router.execute_value(Command::Version).await?;
 			let version = version.into_inner().to_raw_string();
 			let semantic = version.trim_start_matches("surrealdb-");
