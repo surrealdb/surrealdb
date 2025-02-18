@@ -14,13 +14,13 @@ value = "[{ detail: { thing: person:test }, operation: 'Iterate Thing' }, { deta
 value = "[{ id: person:test, name: 'Tester' }]"
 
 [[test.results]]
-value = "[{ detail: { table: 'person' }, operation: 'Iterate Table Keys' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { table: 'person' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ id: person:test, name: 'Tester' }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idx', operator: '=', value: 'Tester' }, table: 'person' }, operation: 'Iterate Index Keys' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'idx', operator: '=', value: 'Tester' }, table: 'person' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ id: person:test, name: 'Tester' }]"

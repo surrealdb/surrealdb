@@ -362,6 +362,18 @@ impl Statement<'_> {
 		}
 	}
 
+	pub(crate) fn is_only(&self) -> bool {
+		match self {
+			Statement::Create(v) => v.only,
+			Statement::Delete(v) => v.only,
+			Statement::Relate(v) => v.only,
+			Statement::Select(v) => v.only,
+			Statement::Upsert(v) => v.only,
+			Statement::Update(v) => v.only,
+			_ => false,
+		}
+	}
+
 	/// Returns any RETURN clause if specified
 	pub(crate) fn output(&self) -> Option<&Output> {
 		match self {
