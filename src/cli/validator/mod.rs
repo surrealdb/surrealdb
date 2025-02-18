@@ -188,9 +188,7 @@ pub(crate) fn export_tables(value: &str) -> Result<TableConfig, String> {
 		return Ok(TableConfig::None);
 	}
 
-	Ok(TableConfig::Some(
-		value.split(",").filter(|s| !s.is_empty()).map(str::to_string).collect(),
-	))
+	Ok(TableConfig::Some(value.split(",").filter(|s| !s.is_empty()).map(str::to_string).collect()))
 }
 
 #[cfg(test)]
