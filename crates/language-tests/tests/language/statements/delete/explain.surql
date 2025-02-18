@@ -25,6 +25,12 @@ value = "[{ detail: { plan: { index: 'idx', operator: '=', value: 'Tester' }, ta
 [[test.results]]
 value = "[{ id: person:test, name: 'Tester' }]"
 
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
 */
 
 CREATE person:test SET name = 'Tester';
@@ -34,4 +40,6 @@ SELECT * FROM person;
 DELETE person EXPLAIN;
 SELECT * FROM person;
 DELETE person WHERE name = 'Tester' EXPLAIN;
+SELECT * FROM person;
+DELETE person WHERE name = 'Tester';
 SELECT * FROM person;
