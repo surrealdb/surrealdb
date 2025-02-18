@@ -48,6 +48,7 @@ impl From<Config> for Value {
 			"functions" => config.functions.into(),
 			"analyzers" => config.analyzers.into(),
 			"versions" => config.versions.into(),
+			"records" => config.records.into(),
 			"tables" => match config.tables {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
