@@ -8,10 +8,19 @@ value = "[{ id: person:test, name: 'Tester' }]"
 value = "NONE"
 
 [[test.results]]
-value = "[{ detail: { table: 'test' }, operation: 'Iterate Table' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
+value = "[{ detail: { thing: person:test }, operation: 'Iterate Thing' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
-value = "[{ detail: { table: 'test' }, operation: 'Iterate Table' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
+value = "[{ id: person:test, name: 'Tester' }]"
+
+[[test.results]]
+value = "[{ detail: { table: 'person' }, operation: 'Iterate Table Keys' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+
+[[test.results]]
+value = "[{ id: person:test, name: 'Tester' }]"
+
+[[test.results]]
+value = "[{ detail: { plan: { index: 'idx', operator: '=', value: 'Tester' }, table: 'person' }, operation: 'Iterate Index Keys' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ id: person:test, name: 'Tester' }]"
@@ -20,6 +29,9 @@ value = "[{ id: person:test, name: 'Tester' }]"
 
 CREATE person:test SET name = 'Tester';
 DEFINE INDEX idx ON person FIELDS name;
-DELETE person:test WHERE name = 'Tester' EXPLAIN;
 DELETE person:test EXPLAIN;
+SELECT * FROM person;
+DELETE person EXPLAIN;
+SELECT * FROM person;
+DELETE person WHERE name = 'Tester' EXPLAIN;
 SELECT * FROM person;

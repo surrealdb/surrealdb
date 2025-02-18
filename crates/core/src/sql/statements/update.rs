@@ -58,7 +58,7 @@ impl UpdateStatement {
 		// Loop over the update targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, opt, doc).await?;
-			i.prepare(&mut planner, &stm_ctx, v).await.map_err(|e| match e {
+			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
 				} => Error::UpdateStatement {

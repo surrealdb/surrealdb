@@ -155,6 +155,7 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare(
 		&mut self,
+		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
 		val: Value,
@@ -162,10 +163,10 @@ impl Iterator {
 		// Match the values
 		match val {
 			Value::Mock(v) => self.prepare_mock(ctx.stm, v)?,
-			Value::Table(v) => self.prepare_table(planner, ctx, v).await?,
+			Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
 			Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
 			Value::Object(v) => self.prepare_object(ctx.stm, v)?,
-			Value::Array(v) => self.prepare_array(planner, ctx, v).await?,
+			Value::Array(v) => self.prepare_array(stk, planner, ctx, v).await?,
 			Value::Thing(v) => match v.is_range() {
 				true => self.prepare_range(ctx.stm, v, RecordStrategy::KeysAndValues)?,
 				false => self.prepare_thing(ctx.stm, v)?,
@@ -183,6 +184,7 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_table(
 		&mut self,
+		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
 		v: Table,
@@ -196,10 +198,10 @@ impl Iterator {
 		match ctx.stm.is_deferable() {
 			true => self.ingest(Iterable::Yield(v)),
 			false => match ctx.stm.is_guaranteed() {
-				false => self.ingest(Iterable::Table(v, RecordStrategy::KeysAndValues)),
+				false => planner.add_iterables(stk, ctx, v, p, self).await?,
 				true => {
 					self.guaranteed = Some(Iterable::Yield(v.clone()));
-					self.ingest(Iterable::Table(v, RecordStrategy::KeysAndValues))
+					planner.add_iterables(stk, ctx, v, p, self).await?;
 				}
 			},
 		}
@@ -289,6 +291,7 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_array(
 		&mut self,
+		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
 		v: Array,
@@ -297,7 +300,7 @@ impl Iterator {
 		for v in v {
 			match v {
 				Value::Mock(v) => self.prepare_mock(ctx.stm, v)?,
-				Value::Table(v) => self.prepare_table(planner, ctx, v).await?,
+				Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
 				Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
 				Value::Object(v) => self.prepare_object(ctx.stm, v)?,
 				Value::Thing(v) => match v.is_range() {
