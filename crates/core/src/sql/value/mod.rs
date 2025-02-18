@@ -15,7 +15,7 @@ mod def;
 mod del;
 mod diff;
 mod each;
-mod every;
+pub(crate) mod every;
 mod extend;
 mod fetch;
 mod first;
