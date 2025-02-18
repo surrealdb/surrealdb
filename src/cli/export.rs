@@ -17,28 +17,28 @@ struct ExportConfigArguments {
 	only: bool,
 	/// Whether users should be exported
 	#[arg(long)]
-	users: bool,
+	users: Option<bool>,
 	/// Whether access methods should be exported
 	#[arg(long)]
-	accesses: bool,
+	accesses: Option<bool>,
 	/// Whether params should be exported
 	#[arg(long)]
-	params: bool,
+	params: Option<bool>,
 	/// Whether functions should be exported
 	#[arg(long)]
-	functions: bool,
+	functions: Option<bool>,
 	/// Whether analyzers should be exported
 	#[arg(long)]
-	analyzers: bool,
+	analyzers: Option<bool>,
 	/// Whether tables should be exported, optionally providing a list of tables
 	#[arg(long, num_args(0..), action = clap::ArgAction::Append)]
 	tables: Option<Vec<String>>,
 	/// Whether versions should be exported
 	#[arg(long)]
-	versions: bool,
+	versions: Option<bool>,
 	/// Whether records should be exported
 	#[arg(long)]
-	records: bool,
+	records: Option<bool>,
 }
 
 #[derive(Args, Debug)]
@@ -149,24 +149,24 @@ fn apply_config<C: Connection, R>(
 			.records(false);
 	}
 
-	if config.users {
-		export = export.users(true);
+	if let Some(value) = config.users {
+		export = export.users(value);
 	}
 
-	if config.accesses {
-		export = export.accesses(true);
+	if let Some(value) = config.accesses {
+		export = export.accesses(value);
 	}
 
-	if config.params {
-		export = export.params(true);
+	if let Some(value) = config.params {
+		export = export.params(value);
 	}
 
-	if config.functions {
-		export = export.functions(true);
+	if let Some(value) = config.functions {
+		export = export.functions(value);
 	}
 
-	if config.analyzers {
-		export = export.analyzers(true);
+	if let Some(value) = config.analyzers {
+		export = export.analyzers(value);
 	}
 
 	if let Some(tables) = config.tables {
@@ -177,12 +177,12 @@ fn apply_config<C: Connection, R>(
 		}
 	}
 
-	if config.versions {
-		export = export.versions(true);
+	if let Some(value) = config.versions {
+		export = export.versions(value);
 	}
 
-	if config.records {
-		export = export.records(true);
+	if let Some(value) = config.records {
+		export = export.records(value);
 	}
 
 	export
