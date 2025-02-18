@@ -6,7 +6,40 @@ use crate::err::Error;
 use clap::Args;
 use futures_util::StreamExt;
 use surrealdb::engine::any::{connect, IntoEndpoint};
+use surrealdb::method::{Export, ExportConfig};
+use surrealdb::Connection;
 use tokio::io::{self, AsyncWriteExt};
+
+#[derive(Args, Debug)]
+struct ExportConfigArguments {
+	/// Whether only specific resources should be exported
+	#[arg(long)]
+	only: bool,
+	/// Whether users should be exported
+	#[arg(long)]
+	users: bool,
+	/// Whether access methods should be exported
+	#[arg(long)]
+	accesses: bool,
+	/// Whether params should be exported
+	#[arg(long)]
+	params: bool,
+	/// Whether functions should be exported
+	#[arg(long)]
+	functions: bool,
+	/// Whether analyzers should be exported
+	#[arg(long)]
+	analyzers: bool,
+	/// Whether tables should be exported, optionally providing a list of tables
+	#[arg(long, num_args(0..), action = clap::ArgAction::Append)]
+	tables: Option<Vec<String>>,
+	/// Whether versions should be exported
+	#[arg(long)]
+	versions: bool,
+	/// Whether records should be exported
+	#[arg(long)]
+	records: bool,
+}
 
 #[derive(Args, Debug)]
 pub struct ExportCommandArguments {
@@ -20,6 +53,8 @@ pub struct ExportCommandArguments {
 	auth: AuthArguments,
 	#[command(flatten)]
 	sel: DatabaseSelectionArguments,
+	#[command(flatten)]
+	config: ExportConfigArguments,
 }
 
 pub async fn init(
@@ -38,6 +73,7 @@ pub async fn init(
 			namespace,
 			database,
 		},
+		config,
 	}: ExportCommandArguments,
 ) -> Result<(), Error> {
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
@@ -75,11 +111,12 @@ pub async fn init(
 
 	// Use the specified namespace / database
 	client.use_ns(namespace).use_db(database).await?;
+
 	// Export the data from the database
 	debug!("Exporting data from the database");
 	if file == "-" {
 		// Prepare the backup
-		let mut backup = client.export(()).await?;
+		let mut backup = apply_config(config, client.export(())).await?;
 		// Get a handle to standard output
 		let mut stdout = io::stdout();
 		// Write the backup to standard output
@@ -87,9 +124,66 @@ pub async fn init(
 			stdout.write_all(&bytes?).await?;
 		}
 	} else {
-		client.export(file).await?;
+		apply_config(config, client.export(file)).await?;
 	}
 	info!("The SurrealQL file was exported successfully");
 	// Everything OK
 	Ok(())
+}
+
+fn apply_config<C: Connection, R>(
+	config: ExportConfigArguments,
+	export: Export<C, R>,
+) -> Export<C, R, ExportConfig> {
+	let mut export = export.with_config();
+
+	if config.only {
+		export = export
+			.users(false)
+			.accesses(false)
+			.params(false)
+			.functions(false)
+			.analyzers(false)
+			.tables(false)
+			.versions(false)
+			.records(false);
+	}
+
+	if config.users {
+		export = export.users(true);
+	}
+
+	if config.accesses {
+		export = export.accesses(true);
+	}
+
+	if config.params {
+		export = export.params(true);
+	}
+
+	if config.functions {
+		export = export.functions(true);
+	}
+
+	if config.analyzers {
+		export = export.analyzers(true);
+	}
+
+	if let Some(tables) = config.tables {
+		if tables.is_empty() {
+			export = export.tables(true);
+		} else {
+			export = export.tables(tables);
+		}
+	}
+
+	if config.versions {
+		export = export.versions(true);
+	}
+
+	if config.records {
+		export = export.records(true);
+	}
+
+	export
 }
