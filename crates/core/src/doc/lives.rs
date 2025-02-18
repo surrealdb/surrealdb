@@ -168,10 +168,10 @@ impl Document {
 			if let Some(fetchs) = &lv.fetch {
 				let mut idioms = Vec::with_capacity(fetchs.0.len());
 				for fetch in fetchs.iter() {
-					fetch.compute(stk, ctx, opt, &mut idioms).await?;
+					fetch.compute(stk, &lqctx, &lqopt, &mut idioms).await?;
 				}
 				for i in &idioms {
-					stk.run(|stk| result.fetch(stk, ctx, opt, i)).await?;
+					stk.run(|stk| result.fetch(stk, &lqctx, &lqopt, i)).await?;
 				}
 			}
 
