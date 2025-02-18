@@ -165,9 +165,10 @@ impl Iterator {
 			Value::Mock(v) => self.prepare_mock(ctx.stm, v)?,
 			Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
 			Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
-			Value::Object(v) => self.prepare_object(ctx.stm, v)?,
+			Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
 			Value::Array(v) => self.prepare_array(stk, planner, ctx, v).await?,
 			Value::Thing(v) => self.prepare_thing(planner, ctx, v).await?,
+			v if ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
 				return Err(Error::InvalidStatementTarget {
 					value: v.to_string(),
