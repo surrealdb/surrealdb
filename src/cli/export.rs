@@ -6,6 +6,7 @@ use crate::err::Error;
 use clap::Args;
 use futures_util::StreamExt;
 use surrealdb::engine::any::{connect, IntoEndpoint};
+use surrealdb::kvs::export::TableConfig;
 use surrealdb::method::{Export, ExportConfig};
 use surrealdb::Connection;
 use tokio::io::{self, AsyncWriteExt};
@@ -16,28 +17,28 @@ struct ExportConfigArguments {
 	#[arg(long)]
 	only: bool,
 	/// Whether users should be exported
-	#[arg(long)]
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	users: Option<bool>,
 	/// Whether access methods should be exported
-	#[arg(long)]
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	accesses: Option<bool>,
 	/// Whether params should be exported
-	#[arg(long)]
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	params: Option<bool>,
 	/// Whether functions should be exported
-	#[arg(long)]
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	functions: Option<bool>,
 	/// Whether analyzers should be exported
-	#[arg(long)]
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	analyzers: Option<bool>,
 	/// Whether tables should be exported, optionally providing a list of tables
-	#[arg(long, num_args(0..), action = clap::ArgAction::Append)]
-	tables: Option<Vec<String>>,
+	#[arg(long, num_args = 0..=1, default_missing_value = "true", value_parser = super::validator::export_tables)]
+	tables: Option<TableConfig>,
 	/// Whether versions should be exported
-	#[arg(long)]
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	versions: Option<bool>,
 	/// Whether records should be exported
-	#[arg(long)]
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	records: Option<bool>,
 }
 
@@ -170,11 +171,7 @@ fn apply_config<C: Connection, R>(
 	}
 
 	if let Some(tables) = config.tables {
-		if tables.is_empty() {
-			export = export.tables(true);
-		} else {
-			export = export.tables(tables);
-		}
+		export = export.tables(tables);
 	}
 
 	if let Some(value) = config.versions {
