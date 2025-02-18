@@ -151,11 +151,9 @@ pub trait Connection: conn::Connection {}
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Connect<C: Connection, Response> {
-	router: Arc<OnceLock<Router>>,
-	engine: PhantomData<C>,
+	surreal: Surreal<C>,
 	address: Result<Endpoint>,
 	capacity: usize,
-	waiter: Arc<Waiter>,
 	response_type: PhantomData<Response>,
 }
 
@@ -219,7 +217,7 @@ where
 				}
 			}
 			// Both ends of the channel are still alive at this point
-			client.waiter.0.send(Some(WaitFor::Connection)).ok();
+			client.inner.waiter.0.send(Some(WaitFor::Connection)).ok();
 			Ok(client)
 		})
 	}
@@ -235,7 +233,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			// Avoid establishing another connection if already connected
-			if self.router.get().is_some() {
+			if self.surreal.inner.router.get().is_some() {
 				return Err(Error::AlreadyConnected.into());
 			}
 			let endpoint = self.address?;
@@ -252,12 +250,12 @@ where
 					Err(e) => return Err(e),
 				}
 			}
-			let cell =
-				Arc::into_inner(client.router).expect("new connection to have no references");
-			let router = cell.into_inner().expect("router to be set");
-			self.router.set(router).map_err(|_| Error::AlreadyConnected)?;
+			let inner =
+				Arc::into_inner(client.inner).expect("new connection to have no references");
+			let router = inner.router.into_inner().expect("router to be set");
+			self.surreal.inner.router.set(router).map_err(|_| Error::AlreadyConnected)?;
 			// Both ends of the channel are still alive at this point
-			self.waiter.0.send(Some(WaitFor::Connection)).ok();
+			self.surreal.inner.waiter.0.send(Some(WaitFor::Connection)).ok();
 			Ok(())
 		})
 	}
@@ -269,28 +267,64 @@ pub(crate) enum ExtraFeatures {
 	LiveQueries,
 }
 
+#[derive(Debug)]
+struct Inner {
+	router: OnceLock<Router>,
+	waiter: Waiter,
+}
+
 /// A database client instance for embedded or remote databases
 pub struct Surreal<C: Connection> {
-	router: Arc<OnceLock<Router>>,
-	waiter: Arc<Waiter>,
+	inner: Arc<Inner>,
 	engine: PhantomData<C>,
+}
+
+impl<C> From<(OnceLock<Router>, Waiter)> for Surreal<C>
+where
+	C: Connection,
+{
+	fn from((router, waiter): (OnceLock<Router>, Waiter)) -> Self {
+		Surreal {
+			inner: Arc::new(Inner {
+				router,
+				waiter,
+			}),
+			engine: PhantomData,
+		}
+	}
+}
+
+impl<C> From<(Router, Waiter)> for Surreal<C>
+where
+	C: Connection,
+{
+	fn from((router, waiter): (Router, Waiter)) -> Self {
+		Surreal {
+			inner: Arc::new(Inner {
+				router: OnceLock::with_value(router),
+				waiter,
+			}),
+			engine: PhantomData,
+		}
+	}
+}
+
+impl<C> From<Arc<Inner>> for Surreal<C>
+where
+	C: Connection,
+{
+	fn from(inner: Arc<Inner>) -> Self {
+		Surreal {
+			inner,
+			engine: PhantomData,
+		}
+	}
 }
 
 impl<C> Surreal<C>
 where
 	C: Connection,
 {
-	pub(crate) fn new_from_router_waiter(
-		router: Arc<OnceLock<Router>>,
-		waiter: Arc<Waiter>,
-	) -> Self {
-		Surreal {
-			router,
-			waiter,
-			engine: PhantomData,
-		}
-	}
-
 	async fn check_server_version(&self, version: &Version) -> Result<()> {
 		let (versions, build_meta) = SUPPORTED_VERSIONS;
 		// invalid version requirements should be caught during development
@@ -320,8 +354,7 @@ where
 {
 	fn clone(&self) -> Self {
 		Self {
-			router: self.router.clone(),
-			waiter: self.waiter.clone(),
+			inner: self.inner.clone(),
 			engine: self.engine,
 		}
 	}
@@ -333,7 +366,7 @@ where
 {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("Surreal")
-			.field("router", &self.router)
+			.field("router", &self.inner.router)
 			.field("engine", &self.engine)
 			.finish()
 	}

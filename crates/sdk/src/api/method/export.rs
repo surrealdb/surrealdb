@@ -9,7 +9,7 @@ use crate::method::ExportConfig as Config;
 use crate::method::Model;
 use crate::method::OnceLockExt;
 use crate::Surreal;
-use channel::Receiver;
+use async_channel::Receiver;
 use futures::Stream;
 use futures::StreamExt;
 use semver::Version;
@@ -173,7 +173,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.router.extract()?;
+			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				return Err(Error::BackupsNotSupported.into());
 			}
@@ -206,7 +206,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.router.extract()?;
+			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				return Err(Error::BackupsNotSupported.into());
 			}

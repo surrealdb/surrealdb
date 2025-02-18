@@ -172,7 +172,7 @@ impl InfoStatement {
 						"apis".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_apis(ns, db).await?.iter() {
-								out.insert(v.path.to_url(), v.to_string().into());
+								out.insert(v.path.to_string(), v.to_string().into());
 							}
 							out.into()
 						},

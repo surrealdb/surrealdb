@@ -189,7 +189,7 @@ impl MutableContext {
 	/// Creates a new context from a configured datastore.
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
-		capabilities: Capabilities,
+		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
 		cache: Arc<DatastoreCache>,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
@@ -204,7 +204,7 @@ impl MutableContext {
 			query_planner: None,
 			query_executor: None,
 			iteration_stage: None,
-			capabilities: Arc::new(capabilities),
+			capabilities,
 			index_stores,
 			cache: Some(cache),
 			#[cfg(not(target_family = "wasm"))]
@@ -421,8 +421,8 @@ impl MutableContext {
 	//
 
 	/// Set the capabilities for this context
-	pub(crate) fn add_capabilities(&mut self, caps: Capabilities) {
-		self.capabilities = Arc::new(caps);
+	pub(crate) fn add_capabilities(&mut self, caps: Arc<Capabilities>) {
+		self.capabilities = caps;
 	}
 
 	/// Get the capabilities for this context

@@ -43,10 +43,6 @@ impl<'a> Path {
 		}
 	}
 
-	pub fn to_url(&'a self) -> String {
-		format!("/{}", self)
-	}
-
 	pub fn specifity(&self) -> u8 {
 		self.iter().map(|s| s.specificity()).sum()
 	}

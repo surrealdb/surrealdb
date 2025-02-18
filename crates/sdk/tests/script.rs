@@ -27,16 +27,16 @@ async fn script_function_error() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Problem with embedded script function. An exception occurred: error"
-	));
-	//
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Problem with embedded script function. An exception occurred: error\n"
+	);
+
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Problem with embedded script function. An exception occurred: error"
-	));
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Problem with embedded script function. An exception occurred: error\n"
+	);
 	//
 	Ok(())
 }

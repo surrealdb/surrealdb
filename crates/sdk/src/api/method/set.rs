@@ -39,7 +39,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.router.extract()?;
+			let router = self.client.inner.router.extract()?;
 			router
 				.execute_unit(Command::Set {
 					key: self.key,
