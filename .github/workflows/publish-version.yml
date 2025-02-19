@@ -141,6 +141,7 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
           sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
+          cat Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment != 'stable' }}
