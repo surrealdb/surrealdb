@@ -19,7 +19,7 @@ impl Default for UserDuration {
 	fn default() -> Self {
 		Self {
 			// By default, tokens expire after one hour
-			token: Some(Duration::from_hours(1)),
+			token: Some(Duration::from_hours(1).expect("1 hour should fit in a duration")),
 			// By default, sessions do not expire
 			session: None,
 		}
