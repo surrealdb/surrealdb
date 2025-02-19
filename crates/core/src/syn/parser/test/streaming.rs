@@ -232,8 +232,8 @@ fn statements() -> Vec<Statement> {
 			authenticate: None,
 			// Default durations.
 			duration: AccessDuration {
-				grant: Some(Duration::from_days(30)),
-				token: Some(Duration::from_hours(1)),
+				grant: Some(Duration::from_days(30).unwrap()),
+				token: Some(Duration::from_hours(1).unwrap()),
 				session: None,
 			},
 			comment: Some(Strand("bar".to_string())),

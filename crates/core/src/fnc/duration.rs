@@ -45,11 +45,15 @@ pub mod from {
 	use crate::sql::value::Value;
 
 	pub fn days((val,): (u64,)) -> Result<Value, Error> {
-		Ok(Duration::from_days(val).into())
+		Duration::from_days(val)
+			.map(|x| x.into())
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from::days({val})")))
 	}
 
 	pub fn hours((val,): (u64,)) -> Result<Value, Error> {
-		Ok(Duration::from_hours(val).into())
+		Duration::from_hours(val)
+			.map(|x| x.into())
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from::hours({val})")))
 	}
 
 	pub fn micros((val,): (u64,)) -> Result<Value, Error> {
@@ -61,7 +65,9 @@ pub mod from {
 	}
 
 	pub fn mins((val,): (u64,)) -> Result<Value, Error> {
-		Ok(Duration::from_mins(val).into())
+		Duration::from_mins(val)
+			.map(|x| x.into())
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from::mins({val})")))
 	}
 
 	pub fn nanos((val,): (u64,)) -> Result<Value, Error> {
@@ -73,6 +79,8 @@ pub mod from {
 	}
 
 	pub fn weeks((val,): (u64,)) -> Result<Value, Error> {
-		Ok(Duration::from_weeks(val).into())
+		Duration::from_weeks(val)
+			.map(|x| x.into())
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from::weeks({val})")))
 	}
 }
