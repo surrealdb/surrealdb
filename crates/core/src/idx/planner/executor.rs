@@ -357,6 +357,9 @@ impl QueryExecutor {
 			Index::Search {
 				..
 			} => self.new_search_index_iterator(irf, io.clone()).await,
+			Index::Search2 {
+				..
+			} => self.new_search2_index_iterator(irf, io.clone()).await,
 			Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(irf)),
 			Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(irf)),
 		}
@@ -915,6 +918,14 @@ impl QueryExecutor {
 			}
 		}
 		Ok(None)
+	}
+
+	async fn new_search2_index_iterator(
+		&self,
+		_ir: IteratorRef,
+		_io: IndexOption,
+	) -> Result<Option<ThingIterator>, Error> {
+		todo!()
 	}
 
 	fn new_mtree_index_knn_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {

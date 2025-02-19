@@ -8,7 +8,7 @@ use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::key;
 use crate::kvs::TransactionType;
-use crate::sql::index::{HnswParams, MTreeParams, SearchParams};
+use crate::sql::index::{HnswParams, MTreeParams, Search2Params, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Index, Part, Thing, Value};
 use reblessive::tree::Stk;
@@ -49,6 +49,7 @@ impl<'a> IndexOperation<'a> {
 			Index::Uniq => self.index_unique().await,
 			Index::Idx => self.index_non_unique().await,
 			Index::Search(p) => self.index_full_text(stk, p).await,
+			Index::Search2(p) => self.index_full_text_multiwriter(stk, p).await,
 			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
 		}
@@ -154,6 +155,14 @@ impl<'a> IndexOperation<'a> {
 			ft.remove_document(self.ctx, self.rid).await?;
 		}
 		ft.finish(self.ctx).await
+	}
+
+	async fn index_full_text_multiwriter(
+		&mut self,
+		_stk: &mut Stk,
+		_p: &Search2Params,
+	) -> Result<(), Error> {
+		todo!()
 	}
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<(), Error> {

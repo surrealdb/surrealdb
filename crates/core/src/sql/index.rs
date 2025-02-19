@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -22,13 +22,16 @@ pub enum Index {
 	Idx,
 	/// Unique index
 	Uniq,
-	/// Index with Full-Text search capabilities
+	/// Index with Full-Text search capabilities - single writer
 	Search(SearchParams),
-	/// M-Tree index for distance based metrics
+	/// M-Tree index for distance-based metrics
 	MTree(MTreeParams),
-	/// HNSW index for distance based metrics
+	/// HNSW index for distance-based metrics
 	#[revision(start = 2)]
 	Hnsw(HnswParams),
+	/// Index with Full-Text search capabilities supporting multiple writers
+	#[revision(start = 3)]
+	Search2(Search2Params),
 }
 
 #[revisioned(revision = 2)]
@@ -51,6 +54,16 @@ pub struct SearchParams {
 	pub postings_cache: u32,
 	#[revision(start = 2)]
 	pub terms_cache: u32,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct Search2Params {
+	pub az: Ident,
+	pub hl: bool,
+	pub sc: Scoring,
 }
 
 #[revisioned(revision = 2)]
@@ -256,6 +269,13 @@ impl Display for Index {
 					p.postings_cache,
 					p.terms_cache
 				)?;
+				if p.hl {
+					f.write_str(" HIGHLIGHTS")?
+				}
+				Ok(())
+			}
+			Self::Search2(p) => {
+				write!(f, "SEARCH ANALYZER {} {}", p.az, p.sc,)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?
 				}

@@ -11,7 +11,7 @@ use crate::key;
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
 use crate::sql::array::Array;
-use crate::sql::index::{HnswParams, Index, MTreeParams, SearchParams};
+use crate::sql::index::{HnswParams, Index, MTreeParams, Search2Params, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{FlowResultExt as _, Part, Thing, Value};
 use reblessive::tree::Stk;
@@ -92,6 +92,7 @@ impl Document {
 			Index::Uniq => ic.index_unique(ctx).await?,
 			Index::Idx => ic.index_non_unique(ctx).await?,
 			Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
+			Index::Search2(p) => ic.index_full_text_multiwriter(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 		}
@@ -393,6 +394,15 @@ impl<'a> IndexOperation<'a> {
 			ft.remove_document(ctx, self.rid).await?;
 		}
 		ft.finish(ctx).await
+	}
+
+	async fn index_full_text_multiwriter(
+		&mut self,
+		_stk: &mut Stk,
+		_ctx: &Context,
+		_p: &Search2Params,
+	) -> Result<(), Error> {
+		todo!()
 	}
 
 	async fn index_mtree(
