@@ -13,6 +13,7 @@ use crate::sql::permission::Permission;
 use crate::sql::reference::Refs;
 use crate::sql::statements::DefineFieldStatement;
 use crate::sql::thing::Thing;
+use crate::sql::value::every::ArrayBehaviour;
 use crate::sql::value::Value;
 use crate::sql::Part;
 use reblessive::tree::Stk;
@@ -73,18 +74,14 @@ impl Document {
 						},
 					}
 				}
-				// NONE values should never be stored
-				if self.current.doc.pick(fd).is_none() {
-					self.current.doc.to_mut().cut(fd);
-				}
 			}
-		} else {
-			// Loop over every field in the document
-			for fd in self.current.doc.every(None, true, true).iter() {
-				// NONE values should never be stored
-				if self.current.doc.pick(fd).is_none() {
-					self.current.doc.to_mut().cut(fd);
-				}
+		}
+
+		// Loop over every field in the document
+		for fd in self.current.doc.every(None, true, ArrayBehaviour::Nested).iter() {
+			// NONE values should never be stored
+			if self.current.doc.pick(fd).is_none() {
+				self.current.doc.to_mut().cut(fd);
 			}
 		}
 		// Carry on
@@ -130,6 +127,7 @@ impl Document {
 				}
 				None => false,
 			};
+
 			// Loop over each field in document
 			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
 				// Get the initial value
@@ -238,10 +236,7 @@ impl Document {
 						skip = Some(&fd.name);
 					}
 					// Set the new value of the field, or delete it if empty
-					match val.is_none() {
-						false => self.current.doc.to_mut().put(&k, val),
-						true => self.current.doc.to_mut().cut(&k),
-					};
+					self.current.doc.to_mut().put(&k, val);
 				}
 			}
 		}

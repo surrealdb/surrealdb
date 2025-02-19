@@ -102,7 +102,7 @@ mod cli_integration {
 
 		info!("* Export to stdout");
 		{
-			let args = format!("export --conn http://{addr} {creds} --ns {ns} --db {db} -");
+			let args = format!("export --conn http://{addr} {creds} --ns {ns} --db {db} - --only --tables thing --records");
 			let output = common::run(&args)
 				.output()
 				.unwrap_or_else(|_| panic!("failed to run stdout export: {args}"));
