@@ -1,4 +1,7 @@
 /**
+[env]
+timeout = 5000
+
 [test]
 
 [[test.results]]
