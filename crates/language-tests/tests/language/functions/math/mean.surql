@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-value = "NaN"
+value = "true"
 
 [[test.results]]
 value = "172f"
@@ -17,7 +17,8 @@ value = "172.46666666666667f"
 value = "173.83333333333334f"
 
 */
-math::mean([]);
+// no good way to compare against NaN so just compare against the string representation
+<string> math::mean([]) == "NaN";
 math::mean([101, 213, 202]);
 math::mean([101, 213, 203]);
 math::mean([101, 213, 203.4]);

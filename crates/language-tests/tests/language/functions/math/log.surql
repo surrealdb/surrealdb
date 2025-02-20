@@ -11,14 +11,14 @@ value = "0.30102999566398114f"
 value = "0f"
 
 [[test.results]]
-value = "-inf"
+value = "true"
 
 [[test.results]]
-value = "NaN"
+value = "'NaN'"
 
 */
 math::log(2.7183, 10);
 math::log(2, 10);
 math::log(1, 10);
-math::log(0, 10);
-math::log(-1, 10);
+math::log(0, 10) == math::neg_inf;
+<string> math::log(-1, 10);

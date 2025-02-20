@@ -414,7 +414,10 @@ impl TestReport {
 							index,
 							kind,
 						},
-						None => continue,
+						None => {
+							index += 1;
+							continue;
+						}
 					}
 				}
 			};

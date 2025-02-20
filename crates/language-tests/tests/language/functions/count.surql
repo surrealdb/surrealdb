@@ -34,8 +34,6 @@ value = "1"
 [[test.results]]
 value = "1"
 
-[[test.results]]
-value = "1"
 
 */
 count();
