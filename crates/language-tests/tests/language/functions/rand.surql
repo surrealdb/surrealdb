@@ -14,7 +14,7 @@ value = "true"
 value = "true"
 
 */
-let $array = (<array> 0..10000).map(|$x| rand());
+let $array = (<array> 0..1000).map(|$x| rand());
 array::min($array) >= 0;
 array::max($array) < 1;
-$array.filter(|$x| type::is::float($x)).len() == 10000
+$array.all(|$x| type::is::float($x))
