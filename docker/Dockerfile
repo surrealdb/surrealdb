@@ -3,7 +3,7 @@
 # This stage is used to build the SurrealDB linux binary
 ###
 
-FROM docker.io/rockylinux:8 as builder
+FROM docker.io/rockylinux:8 AS builder
 
 
 RUN yum install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11
@@ -33,7 +33,7 @@ ENTRYPOINT ["/builder-entrypoint.sh"]
 #
 # Development image (built on the CI environment)
 #
-FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest-dev as dev-ci
+FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev-ci
 
 ARG TARGETPLATFORM
 ARG TARGETOS
@@ -56,7 +56,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built on the CI environment)
 #
-FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest as prod-ci
+FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest AS prod-ci
 
 ARG TARGETPLATFORM
 
@@ -71,7 +71,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Development image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev as dev
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev
 
 ARG SURREALDB_BINARY=target/release/surreal
 
@@ -90,7 +90,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest as prod
+FROM cgr.dev/chainguard/glibc-dynamic:latest AS prod
 
 COPY --from=dev /surreal /surreal
 
