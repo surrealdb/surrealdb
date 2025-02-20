@@ -151,20 +151,20 @@ impl Duration {
 		time::Duration::from_secs(secs).into()
 	}
 	/// Create a duration from minutes
-	pub fn from_mins(mins: u64) -> Duration {
-		time::Duration::from_secs(mins * SECONDS_PER_MINUTE).into()
+	pub fn from_mins(mins: u64) -> Option<Duration> {
+		mins.checked_mul(SECONDS_PER_MINUTE).map(time::Duration::from_secs).map(|x| x.into())
 	}
 	/// Create a duration from hours
-	pub fn from_hours(hours: u64) -> Duration {
-		time::Duration::from_secs(hours * SECONDS_PER_HOUR).into()
+	pub fn from_hours(hours: u64) -> Option<Duration> {
+		hours.checked_mul(SECONDS_PER_HOUR).map(time::Duration::from_secs).map(|x| x.into())
 	}
 	/// Create a duration from days
-	pub fn from_days(days: u64) -> Duration {
-		time::Duration::from_secs(days * SECONDS_PER_DAY).into()
+	pub fn from_days(days: u64) -> Option<Duration> {
+		days.checked_mul(SECONDS_PER_DAY).map(time::Duration::from_secs).map(|x| x.into())
 	}
 	/// Create a duration from weeks
-	pub fn from_weeks(days: u64) -> Duration {
-		time::Duration::from_secs(days * SECONDS_PER_WEEK).into()
+	pub fn from_weeks(weeks: u64) -> Option<Duration> {
+		weeks.checked_mul(SECONDS_PER_WEEK).map(time::Duration::from_secs).map(|x| x.into())
 	}
 }
 
