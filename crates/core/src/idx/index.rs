@@ -162,7 +162,7 @@ impl<'a> IndexOperation<'a> {
 		_stk: &mut Stk,
 		_p: &Search2Params,
 	) -> Result<(), Error> {
-		todo!()
+		todo!("index_full_text_multiwriter")
 	}
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<(), Error> {

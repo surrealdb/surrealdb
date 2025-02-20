@@ -925,7 +925,7 @@ impl QueryExecutor {
 		_ir: IteratorRef,
 		_io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		todo!()
+		todo!("new_search2_index_iterator")
 	}
 
 	fn new_mtree_index_knn_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {

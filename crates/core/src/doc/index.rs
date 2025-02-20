@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::{Force, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
+use crate::idx::ft::search2::Search2;
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
@@ -398,11 +399,21 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_full_text_multiwriter(
 		&mut self,
-		_stk: &mut Stk,
-		_ctx: &Context,
-		_p: &Search2Params,
+		stk: &mut Stk,
+		ctx: &Context,
+		p: &Search2Params,
 	) -> Result<(), Error> {
-		todo!()
+		// Build a Search2 instance
+		let s = Search2::new(ctx, self.opt, p).await?;
+		// Delete the old index data
+		if let Some(o) = self.o.take() {
+			s.remove_document(stk, ctx, self.opt, self.rid, o).await?;
+		}
+		// Create the new index data
+		if let Some(n) = self.n.take() {
+			s.index_document(stk, ctx, self.opt, self.rid, n).await?;
+		}
+		Ok(())
 	}
 
 	async fn index_mtree(

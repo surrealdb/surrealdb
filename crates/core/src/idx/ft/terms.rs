@@ -1,4 +1,7 @@
+use crate::ctx::Context;
 use crate::err::Error;
+use crate::idx::ft::offsets::{Offset, OffsetRecords};
+use crate::idx::ft::postings::TermFrequency;
 use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
@@ -7,6 +10,7 @@ use crate::kvs::{Key, Transaction, TransactionType, Val};
 use revision::{revisioned, Revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub(crate) type TermId = u64;
 pub(crate) type TermLen = u32;

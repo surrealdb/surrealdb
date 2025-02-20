@@ -4,6 +4,7 @@ pub(crate) mod highlighter;
 mod offsets;
 mod postings;
 pub(super) mod scorer;
+pub(crate) mod search2;
 pub(super) mod termdocs;
 pub(crate) mod terms;
 

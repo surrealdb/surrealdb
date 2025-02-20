@@ -134,6 +134,8 @@ pub enum Category {
 	IndexBTreeNodeTerms,
 	/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
 	IndexTerms,
+	/// crate::key::index::dl                /*{ns}*{db}*{tb}+{ix}!dl{id}
+	IndexDocLength,
 	/// crate::key::index::he                /*{ns}*{db}*{tb}+{ix}!he{id}
 	IndexHnswElements,
 	/// crate::key::index::hd                /*{ns}*{db}*{tb}+{ix}!hd{id}
@@ -226,6 +228,7 @@ impl Display for Category {
 			Self::IndexBTreeNode => "IndexBTreeNode",
 			Self::IndexTermDocFrequency => "IndexTermDocFrequency",
 			Self::IndexDocKeys => "IndexDocKeys",
+			Self::IndexDocLength => "IndexDocLength",
 			Self::IndexTermList => "IndexTermList",
 			Self::IndexBTreeNodeDocLengths => "IndexBTreeNodeDocLengths",
 			Self::IndexOffset => "IndexOffset",
