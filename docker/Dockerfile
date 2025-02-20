@@ -47,8 +47,15 @@ COPY ${ARTIFACT_PREFIX}.${TARGETOS}-${TARGETARCH}/surreal /surreal
 
 RUN chmod +x /surreal
 
-# Allow connectivity from the host with bridge networking
-# This still requires publishing the port when running the container
+RUN mkdir /data /logs \
+	&& chown -R nonroot:nonroot /data \
+	&& chmod -R 777 /data \
+	&& chown -R nonroot:nonroot /logs \
+	&& chmod -R 777 /logs \
+	&& echo "OK"
+
+VOLUME /data /logs
+
 ENV SURREAL_BIND="0.0.0.0:8000"
 
 ENTRYPOINT ["/surreal"]
@@ -62,8 +69,12 @@ ARG TARGETPLATFORM
 
 COPY --from=dev-ci /surreal /surreal
 
-# Allow connectivity from the host with bridge networking
-# This still requires publishing the port when running the container
+COPY --from=dev-ci /data /data
+
+COPY --from=dev-ci /logs /logs
+
+VOLUME /data /logs
+
 ENV SURREAL_BIND="0.0.0.0:8000"
 
 ENTRYPOINT ["/surreal"]
@@ -77,12 +88,19 @@ ARG SURREALDB_BINARY=target/release/surreal
 
 COPY ${SURREALDB_BINARY} /surreal
 
-RUN chmod +x /surreal
-
 USER root
 
-# Allow connectivity from the host with bridge networking
-# This still requires publishing the port when running the container
+RUN chmod +x /surreal
+
+RUN mkdir /data /logs \
+	&& chown -R nonroot:nonroot /data \
+	&& chmod -R 777 /data \
+	&& chown -R nonroot:nonroot /logs \
+	&& chmod -R 777 /logs \
+	&& echo "OK"
+
+VOLUME /data /logs
+
 ENV SURREAL_BIND="0.0.0.0:8000"
 
 ENTRYPOINT ["/surreal"]
@@ -94,8 +112,12 @@ FROM cgr.dev/chainguard/glibc-dynamic:latest AS prod
 
 COPY --from=dev /surreal /surreal
 
-# Allow connectivity from the host with bridge networking
-# This still requires publishing the port when running the container
+COPY --from=dev /data /data
+
+COPY --from=dev /logs /logs
+
+VOLUME /data /logs
+
 ENV SURREAL_BIND="0.0.0.0:8000"
 
 ENTRYPOINT ["/surreal"]
