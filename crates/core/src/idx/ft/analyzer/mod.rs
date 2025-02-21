@@ -17,9 +17,9 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-mod filter;
+pub(in crate::idx::ft) mod filter;
 pub(in crate::idx) mod mapper;
-mod tokenizer;
+pub(in crate::idx::ft) mod tokenizer;
 
 #[derive(Clone)]
 pub(crate) struct Analyzer {
@@ -118,14 +118,13 @@ impl Analyzer {
 				}
 			}
 		}
-		drop(tx);
 		Ok(TermsSet {
 			set,
 			has_unknown_terms,
 		})
 	}
 
-	fn extract_frequencies(
+	pub(in crate::idx::ft) fn extract_frequencies(
 		inputs: &[Tokens],
 	) -> Result<(DocLength, HashMap<&str, TermFrequency>), Error> {
 		let mut dl = 0;
@@ -172,7 +171,7 @@ impl Analyzer {
 		Ok((dl, tfid))
 	}
 
-	fn extract_offsets(
+	pub(in crate::idx::ft) fn extract_offsets(
 		inputs: &[Tokens],
 	) -> Result<(DocLength, HashMap<&str, Vec<Offset>>), Error> {
 		let mut dl = 0;
@@ -221,7 +220,7 @@ impl Analyzer {
 	}
 
 	/// Was marked recursive
-	async fn analyze_content(
+	pub(in crate::idx::ft) async fn analyze_content(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,

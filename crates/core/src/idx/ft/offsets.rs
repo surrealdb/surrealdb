@@ -3,6 +3,8 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Transaction, Val};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 
 pub(super) type Position = u32;
 
@@ -56,7 +58,8 @@ impl Offsets {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(super) struct Offset {
 	pub(super) index: u32,
 	// Start position of the original term

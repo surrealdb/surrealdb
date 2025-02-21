@@ -4,7 +4,7 @@ pub(crate) mod highlighter;
 mod offsets;
 mod postings;
 pub(super) mod scorer;
-pub(crate) mod search2;
+pub(crate) mod search;
 pub(super) mod termdocs;
 pub(crate) mod terms;
 
@@ -249,11 +249,12 @@ impl FtIndex {
 		rid: &Thing,
 		content: Vec<Value>,
 	) -> Result<(), Error> {
-		// Resolve the doc_id
 		let tx = ctx.tx();
-		let mut doc_ids = self.doc_ids.write().await;
-		let resolved = doc_ids.resolve_doc_id(&tx, revision::to_vec(rid)?).await?;
-		drop(doc_ids);
+		// Resolve the doc_id
+		let resolved = {
+			let mut doc_ids = self.doc_ids.write().await;
+			doc_ids.resolve_doc_id(&tx, revision::to_vec(rid)?).await?
+		};
 		let doc_id = *resolved.doc_id();
 
 		// Extract the doc_lengths, terms en frequencies (and offset)
@@ -273,15 +274,15 @@ impl FtIndex {
 		};
 
 		// Set the doc length
-		let tx = ctx.tx();
-		let mut dl = self.doc_lengths.write().await;
-		if resolved.was_existing() {
-			if let Some(old_doc_length) = dl.get_doc_length_mut(&tx, doc_id).await? {
-				self.state.total_docs_lengths -= old_doc_length as u128;
+		{
+			let mut dl = self.doc_lengths.write().await;
+			if resolved.was_existing() {
+				if let Some(old_doc_length) = dl.get_doc_length_mut(&tx, doc_id).await? {
+					self.state.total_docs_lengths -= old_doc_length as u128;
+				}
 			}
+			dl.set_doc_length(&tx, doc_id, doc_length).await?;
 		}
-		dl.set_doc_length(&tx, doc_id, doc_length).await?;
-		drop(dl);
 
 		// Retrieve the existing terms for this document (if any)
 		let term_ids_key = self.index_key_base.new_bk_key(doc_id)?;
@@ -347,7 +348,6 @@ impl FtIndex {
 
 		// Update the states
 		tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?, None).await?;
-		drop(tx);
 		Ok(())
 	}
 
@@ -360,7 +360,6 @@ impl FtIndex {
 	) -> Result<(TermsList, TermsSet), Error> {
 		let t = self.terms.read().await;
 		let res = self.analyzer.extract_querying_terms(stk, ctx, opt, &t, query_string).await?;
-		drop(t);
 		Ok(res)
 	}
 
@@ -457,9 +456,10 @@ impl FtIndex {
 		partial: bool,
 	) -> Result<Value, Error> {
 		let doc_key: Key = revision::to_vec(thg)?;
-		let di = self.doc_ids.read().await;
-		let doc_id = di.get_doc_id(tx, doc_key).await?;
-		drop(di);
+		let doc_id = {
+			let di = self.doc_ids.read().await;
+			di.get_doc_id(tx, doc_key).await?
+		};
 		if let Some(doc_id) = doc_id {
 			let mut or = Offseter::new(partial);
 			for (term_id, term_len) in terms.iter().flatten() {
@@ -524,7 +524,6 @@ impl HitsIterator {
 				return Ok(Some((revision::from_slice(&doc_key)?, doc_id)));
 			}
 		}
-		drop(di);
 		Ok(None)
 	}
 }

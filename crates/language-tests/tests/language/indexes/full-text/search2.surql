@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-value = "{}"
+value = "[{ id: b:1, t: 'Hello World!' }]"
 
 [[test.results]]
 value = "None"

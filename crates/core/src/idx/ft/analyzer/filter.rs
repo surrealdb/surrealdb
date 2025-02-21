@@ -9,7 +9,7 @@ use deunicode::deunicode;
 use rust_stemmers::{Algorithm, Stemmer};
 
 #[derive(Clone, Copy)]
-pub(super) enum FilteringStage {
+pub(in crate::idx::ft) enum FilteringStage {
 	Indexing,
 	Querying,
 }

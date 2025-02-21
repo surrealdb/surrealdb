@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::{Force, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::idx::ft::search2::Search2;
+use crate::idx::ft::search::Search2;
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
@@ -407,11 +407,11 @@ impl<'a> IndexOperation<'a> {
 		let s = Search2::new(ctx, self.opt, p).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			s.remove_document(stk, ctx, self.opt, self.rid, o).await?;
+			s.remove_document(stk, ctx, self.opt, self.ix, self.rid, o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			s.index_document(stk, ctx, self.opt, self.rid, n).await?;
+			s.index_document(stk, ctx, self.opt, self.ix, self.rid, n).await?;
 		}
 		Ok(())
 	}
