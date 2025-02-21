@@ -592,7 +592,6 @@ jobs:
   publish:
     name: Publish crate and artifacts binaries
     needs: [prepare-vars, test, lint, build]
-    if: ${{ inputs.publish }}
     environment: ${{ inputs.environment }}
     runs-on: [runner-amd64-2xlarge]
     steps:
@@ -687,6 +686,7 @@ jobs:
       - run: cat crates/core/Cargo.toml
 
       - name: Publish the crate
+        if: ${{ inputs.publish }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
@@ -694,7 +694,7 @@ jobs:
 
           for crate in crates/{core,sdk}; do
             cd $crate
-            cargo publish --dry-run
+            cargo publish
             cd -
           done
 
