@@ -159,7 +159,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          set -ex
+          set -x
 
           for crate in crates/{core,sdk}; do
             cd $crate
