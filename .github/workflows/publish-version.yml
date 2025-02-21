@@ -75,27 +75,8 @@ jobs:
         with:
           toolchain: ${{ inputs.rust_version }}
 
-      - name: Install release-plz
-        run: |
-          curl -L https://github.com/release-plz/release-plz/releases/download/release-plz-v0.3.120/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
-          sudo chmod +x /usr/bin/release-plz
-
       - name: Create a temporary branch
         run: git checkout -b crate
-
-      - name: Configure release-plz
-        run: |
-          cat << EOF > /tmp/release-plz.toml
-          [workspace]
-          changelog_update = false
-          git_release_enable = false
-          semver_check = false
-          git_tag_enable = false
-
-          [[package]]
-          name = "surreal"
-          release = false
-          EOF
 
       - name: Patch beta crate version
         if: ${{ inputs.environment == 'beta' }}
@@ -185,4 +166,11 @@ jobs:
       - name: Publish the crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: release-plz release --config /tmp/release-plz.toml
+        run: |
+          set -x
+
+          for crate in crates/{core,sdk}; do
+            cd $crate
+            cargo publish --dry-run
+            cd -
+          done
