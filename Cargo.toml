@@ -273,7 +273,7 @@ nix = { version = "0.27.1", features = ["signal", "user"] }
 # Crates only used by the root surrealdb crate
 assert_fs = "1.0.13"
 opentelemetry-proto = { version = "0.7.0", features = ["gen-tonic", "metrics", "logs"] }
-rcgen = "0.11.3"
+rcgen = "0.13.2"
 tonic = "0.12.3"
 
 # Other crates
