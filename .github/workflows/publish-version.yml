@@ -127,12 +127,6 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
           sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
           sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
-          echo "Binary ================================================================================="
-          cat Cargo.toml
-          echo "SDK ================================================================================="
-          cat crates/sdk/Cargo.toml
-          echo "Core ================================================================================="
-          cat crates/core/Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment != 'stable' }}
@@ -162,6 +156,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
           git commit -am "Name and version patches"
+
+      - run: cat Cargo.toml
+      - run: cat crates/sdk/Cargo.toml
+      - run: cat crates/core/Cargo.toml
 
       - name: Publish the crate
         env:
