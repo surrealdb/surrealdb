@@ -85,7 +85,13 @@ pub fn parse() -> ArgMatches {
                         .value_parser(value_parser!(u32).range(1..))
                 ).arg(
                     arg!(--failure <FAILURE> "How to handle failure of tests").value_parser(EnumValueParser::<FailureMode>::new()).default_value("fail")
-                ),
+                )
+				.arg(
+					arg!(--"no-wip" "Skips tests marked work-in-progress")
+				)
+				.arg(
+					arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
+				),
         )
         .subcommand(
             Command::new("list")

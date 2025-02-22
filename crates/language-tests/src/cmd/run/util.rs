@@ -1,5 +1,11 @@
-use crate::tests::schema::{BoolOr, SchemaTarget, TestConfig};
-use surrealdb_core::dbs::capabilities::{Capabilities, Targets};
+use crate::tests::schema::{BoolOr, SchemaTarget, TestConfig, TestLevel, TestLogin, TestRole};
+use surrealdb_core::{
+	dbs::{
+		capabilities::{Capabilities, Targets},
+		Session,
+	},
+	iam::{Level, Role},
+};
 
 /// Creates the right core capabilities from a test config.
 pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
@@ -56,4 +62,53 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 				.without_experimental(extract_targets(&schema_cap.deny_experimental, true))
 		})
 		.unwrap_or_else(Capabilities::all)
+}
+
+/// Creates the right core capabilities from a test config.
+pub fn session_from_test_config(config: &TestConfig) -> Session {
+	let Some(env) = config.env.as_ref() else {
+		return Session::owner().with_ns("test").with_db("test");
+	};
+
+	let ns = env.namespace();
+	let db = env.database();
+
+	let mut session = if let Some(login) = env.login.as_ref() {
+		match login {
+			TestLogin::Leveled(test_leveled_login) => {
+				let role = match test_leveled_login.role {
+					Some(TestRole::Viewer) => Role::Viewer,
+					Some(TestRole::Editor) => Role::Editor,
+					Some(TestRole::Owner) | None => Role::Owner,
+				};
+
+				match test_leveled_login.level {
+					TestLevel::Root => Session::for_level(Level::Root, role),
+					TestLevel::Namespace => {
+						Session::for_level(Level::Namespace(ns.unwrap_or("test").to_string()), role)
+					}
+					TestLevel::Database => Session::for_level(
+						Level::Database(
+							ns.unwrap_or("test").to_string(),
+							db.unwrap_or("test").to_string(),
+						),
+						role,
+					),
+				}
+			}
+			TestLogin::Record(test_record_login) => Session::for_record(
+				ns.unwrap_or("test"),
+				db.unwrap_or("test"),
+				&test_record_login.access,
+				test_record_login.rid.0.clone().into(),
+			),
+		}
+	} else {
+		Session::owner()
+	};
+
+	session.ns = ns.map(|x| x.to_owned());
+	session.db = db.map(|x| x.to_owned());
+
+	session
 }

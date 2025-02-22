@@ -92,6 +92,7 @@ in toml and contains the following sections:
 	- `database` the database, if any, to run the test in
 	- `imports` a list of files to run before the test.
 	- `timeout` a duration in milliseconds that the test is allowed to take.
+	- `[login]` the login configuration into the dataset.
 	- `[capabilities]` a configuration of database capabilities in which the
 	  test should run.
 
@@ -269,6 +270,35 @@ Specifies a duration in milliseconds within which the test should finish. If the
 test takes longer than the given duration it will be considered an error and it
 will cause a test run to fail. This key can also be set to `false` to disable
 the timeout altogether or `true` to default to 1 second. Defaults to `1000`.
+
+
+#### `[env.login]`
+Specify the login into the datastore. This can be either a level login or a 
+record login. The first is a login into a specific part of the datastore, either 
+`root`, `database`, or `namespace`. When specifying `database` and `namespace`
+the database and namespace that is used for login is the same a the one
+specified in `[env.database]` or `[env.namespace]`. When database or namespace
+are specifically unset the login will be for the `test` database and/or
+namespace.
+
+When logging into a level you can also specify a role, either `owner`, `editor` 
+or `viewer`. 
+
+Configuring a level login is done by setting the `level` field on the 
+`env.login` table and optionally the role field. See below for an example:
+```toml
+[env]
+login = { level = "database", role = "viewer" }
+```
+
+Instead of configuring a login for a level one can also use a record based
+login. This is done by specifying the `access` and `rid` fields on `login`. Note
+that record based and level based login are mutally exclusive, you can only
+specify one.
+
+For the record based login the `access` field is the name of the access grant
+for which the record-id in `rid` is the specific record for which the test was
+authenticated.
 
 
 #### `[env.capabilities]`
