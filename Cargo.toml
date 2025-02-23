@@ -103,7 +103,7 @@ rayon = "1.10.0"
 regex = "1.10.6"
 regex-syntax = "0.8.4"
 reqwest = { version = "0.12.7", default-features = false }
-ring = "0.17.7"
+ring = "0.17.10"
 rmpv = "1.0.1"
 roaring = "0.10.6"
 rustls = { version = "0.23.12", default-features = false }
