@@ -14,8 +14,8 @@ members = [
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb-core = { version = "=2.2.0", path = "./crates/core", default-features = false }
-surrealdb = { version = "=2.2.0", path = "./crates/sdk" }
+surrealdb-core = { version = "=2.2.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
+surrealdb = { version = "=2.2.0", package = "surrealdb", path = "./crates/sdk" }
 
 # External surreal crates
 surrealcs = { version = "0.4.4" }
