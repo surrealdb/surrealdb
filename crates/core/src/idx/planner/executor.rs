@@ -1157,7 +1157,6 @@ impl FtEntry {
 				ft.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let tx = ctx.tx();
 			let terms_docs = Arc::new(ft.get_terms_docs(&tx, &terms_list).await?);
-			drop(tx);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,
 				doc_ids: ft.doc_ids(),

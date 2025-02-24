@@ -79,7 +79,8 @@ struct PrefixTerm<'a> {
 impl_key!(PrefixTerm<'a>);
 
 impl<'a> PrefixTerm<'a> {
-	fn _new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
+	#[allow(dead_code)]
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -101,7 +102,6 @@ impl<'a> PrefixTerm<'a> {
 #[cfg(test)]
 mod tests {
 	use crate::kvs::{KeyDecode, KeyEncode};
-	use crate::syn::Parse;
 
 	#[test]
 	fn key() {
