@@ -151,15 +151,16 @@ impl InfoStatement {
 				// Create the result set
 				Ok(match structured {
 					true => Value::from(map! {
-						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
-						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
-						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
-						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
-						"models".to_string() => process(txn.all_db_models(ns, db).await?),
-						"params".to_string() => process(txn.all_db_params(ns, db).await?),
-						"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
-						"users".to_string() => process(txn.all_db_users(ns, db).await?),
-						"configs".to_string() => process(txn.all_db_configs(ns, db).await?),
+											"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
+											"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
+											"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
+											"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
+											"models".to_string() => process(txn.all_db_models(ns, db).await?),
+											"params".to_string() => process(txn.all_db_params(ns, db).await?),
+											"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
+											"users".to_string() => process(txn.all_db_users(ns, db).await?),
+											"configs".to_string() => process(txn.all_db_configs(ns, db).await?),
+											"sequences".to_string() => process(txn.all_db_sequences(ns, db).await?),
 					}),
 					false => Value::from(map! {
 						"accesses".to_string() => {
@@ -222,6 +223,13 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_configs(ns, db).await?.iter() {
 								out.insert(v.inner.name(), v.to_string().into());
+							}
+							out.into()
+						},
+						"sequences".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_sequences( ns, db).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
 							}
 							out.into()
 						},

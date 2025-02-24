@@ -13,8 +13,8 @@ use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
-use crate::sql::statements::define::ApiDefinition;
 use crate::sql::statements::define::DefineConfigStatement;
+use crate::sql::statements::define::{ApiDefinition, DefineSequenceStatement};
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -696,6 +696,28 @@ impl Transaction {
 		}
 	}
 
+	/// Retrieve all analyzer definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn all_db_sequences(
+		&self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineSequenceStatement]>, Error> {
+		let qey = cache::tx::Lookup::Sqs(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_sqs(),
+			None => {
+				let beg = crate::key::database::sq::prefix(ns, db)?;
+				let end = crate::key::database::sq::suffix(ns, db)?;
+				let val = self.getr(beg..end, None).await?;
+				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+				let entry = cache::tx::Entry::Sqs(val.clone());
+				self.cache.insert(qey, entry);
+				Ok(val)
+			}
+		}
+	}
+
 	/// Retrieve all function definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_functions(
@@ -1275,6 +1297,30 @@ impl Transaction {
 					name: az.to_owned(),
 				})?;
 				let val: DefineAnalyzerStatement = revision::from_slice(&val)?;
+				let val = Arc::new(val);
+				let entr = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entr);
+				Ok(val)
+			}
+		}
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_sequence(
+		&self,
+		ns: &str,
+		db: &str,
+		sq: &str,
+	) -> Result<Arc<DefineSequenceStatement>, Error> {
+		let qey = cache::tx::Lookup::Sq(ns, db, sq);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type(),
+			None => {
+				let key = crate::key::database::sq::new(ns, db, sq).encode()?;
+				let val = self.get(key, None).await?.ok_or_else(|| Error::SeqNotFound {
+					name: sq.to_owned(),
+				})?;
+				let val: DefineSequenceStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
