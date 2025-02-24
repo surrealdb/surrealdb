@@ -127,7 +127,7 @@ chrono = "0.4.38"
 env_logger = "0.10.1"
 jsonwebtoken = "9.3.0"
 opentelemetry-proto = { version = "0.7.0", features = ["gen-tonic", "metrics", "logs"] }
-rcgen = "0.11.3"
+rcgen = "0.13.2"
 serial_test = "2.0.0"
 temp-env = { version = "0.3.6", features = ["async_closure"] }
 test-log = { version = "0.2.13", features = ["trace"] }

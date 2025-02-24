@@ -62,7 +62,7 @@ mod tests {
 		fs::write(&file_path, "content").expect("failed to write file in file_path");
 
 		// With an empty allowlist, access should be allowed.
-		let result = check_is_path_allowed(&file_path, &vec![]);
+		let result = check_is_path_allowed(&file_path, &[]);
 		assert!(result.is_ok(), "File access should be allowed when no restrictions are set");
 	}
 

@@ -175,10 +175,6 @@ criteria = "safe-to-deploy"
 version = "1.1.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.autocfg]]
-version = "1.4.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.axum]]
 version = "0.6.20"
 criteria = "safe-to-deploy"
@@ -637,10 +633,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.indexmap]]
 version = "1.9.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.indexmap]]
-version = "2.2.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.inferno]]
@@ -1120,7 +1112,7 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rcgen]]
-version = "0.11.3"
+version = "0.13.2"
 criteria = "safe-to-run"
 
 [[exemptions.reblessive]]
@@ -1148,11 +1140,11 @@ version = "0.8.50"
 criteria = "safe-to-deploy"
 
 [[exemptions.ring]]
-version = "0.16.20"
-criteria = "safe-to-run"
+version = "0.17.10"
+criteria = "safe-to-deploy"
 
 [[exemptions.ring]]
-version = "0.17.8"
+version = "0.17.14"
 criteria = "safe-to-deploy"
 
 [[exemptions.rkyv]]
@@ -1201,10 +1193,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rust-stemmers]]
 version = "1.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.rust_decimal]]
-version = "1.36.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustc-hash]]
@@ -1335,10 +1323,6 @@ criteria = "safe-to-deploy"
 version = "1.0.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.smallvec]]
-version = "1.13.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.smol_str]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
@@ -1360,15 +1344,7 @@ version = "2.12.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.spin]]
-version = "0.5.2"
-criteria = "safe-to-run"
-
-[[exemptions.spin]]
 version = "0.9.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.stable_deref_trait]]
-version = "1.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.stacker]]
@@ -1615,24 +1591,12 @@ criteria = "safe-to-deploy"
 version = "1.1.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.unicode-normalization]]
-version = "0.1.24"
-criteria = "safe-to-deploy"
-
 [[exemptions.unicode-script]]
 version = "0.5.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.unicode-security]]
 version = "0.1.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.unicode-segmentation]]
-version = "1.12.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.unicode-width]]
-version = "0.1.14"
 criteria = "safe-to-deploy"
 
 [[exemptions.untrusted]]
