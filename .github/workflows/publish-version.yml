@@ -687,6 +687,7 @@ jobs:
 
       - name: Publish the crate
         if: ${{ inputs.publish }}
+        continue-on-error: true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
