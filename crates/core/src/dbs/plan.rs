@@ -59,6 +59,7 @@ impl Explanation {
 	) {
 		self.0.push(ExplainItem::new_collector(collector_type, details));
 	}
+
 	fn add_fallback(&mut self, reason: String) {
 		self.0.push(ExplainItem::new_fallback(reason));
 	}

@@ -50,16 +50,19 @@ pub struct Transaction {
 	cache: TransactionCache,
 	/// Cache the index updates
 	index_caches: IndexTreeCaches,
+	/// Does this supports reverse scan
+	reverse_scan: bool,
 }
 
 impl Transaction {
 	/// Create a new query store
-	pub fn new(local: bool, tx: Transactor) -> Transaction {
+	pub fn new(local: bool, reverse_scan: bool, tx: Transactor) -> Transaction {
 		Transaction {
 			local,
 			tx: Mutex::new(tx),
 			cache: TransactionCache::new(),
 			index_caches: IndexTreeCaches::default(),
+			reverse_scan,
 		}
 	}
 
@@ -78,9 +81,14 @@ impl Transaction {
 		self.tx.lock().await
 	}
 
-	/// Check if the transaction is local or distributed
+	/// Check if the transaction is local or remote
 	pub fn local(&self) -> bool {
 		self.local
+	}
+
+	/// Check if the transaction supports reverse scan
+	pub fn reverse_scan(&self) -> bool {
+		self.reverse_scan
 	}
 
 	/// Check if the transaction is finished.
@@ -302,6 +310,22 @@ impl Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
+	/// This function fetches the full range of keys, in a single request to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn keysr<K>(
+		&self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
+	where
+		K: KeyEncode + Debug,
+	{
+		self.lock().await.keysr(rng, limit, version).await
+	}
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn scan<K>(
@@ -314,6 +338,19 @@ impl Transaction {
 		K: KeyEncode + Debug,
 	{
 		self.lock().await.scan(rng, limit, version).await
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn scanr<K>(
+		&self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		self.lock().await.scanr(rng, limit, version).await
 	}
 
 	/// Count the total number of keys within a range in the datastore.

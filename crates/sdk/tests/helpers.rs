@@ -395,8 +395,8 @@ impl Test {
 	#[allow(dead_code)]
 	/// Expect values in the given slice to be present in the responses, following the same order.
 	pub fn expect_vals(&mut self, vals: &[&str]) -> Result<&mut Self, Error> {
-		for val in vals {
-			self.expect_val(val)?;
+		for (i, val) in vals.iter().enumerate() {
+			self.expect_val_info(val, i)?;
 		}
 		Ok(self)
 	}
