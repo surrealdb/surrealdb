@@ -132,12 +132,15 @@ jobs:
         run: |
           set -x
 
+          tag=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }}
+          echo $tag >> $GITHUB_OUTPUT
+
           if [[ "${{ inputs.environment }}" == "stable" ]]; then
             major=$(echo ${{ inputs.tag-prefix }} | tr "." "\n" | sed -n 1p)
             minor=$(echo ${{ inputs.tag-prefix }} | tr "." "\n" | sed -n 2p)
-            echo "tags=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}.${minor}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
+            echo "tags=${tag},surrealdb/surrealdb:${major}.${minor}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
           else
-            echo "tags=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
+            echo "tags=${tag}"  >> $GITHUB_OUTPUT
           fi
 
       - name: Push to DockerHub
@@ -152,6 +155,22 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
             ARTIFACT_PREFIX=surreal-${{ inputs.tag-prefix }}
+
+      - name: Pull docker image
+        id: image-pull
+        if: ${{ inputs.push }}
+        run: |
+          docker pull '${{ steps.tags.outputs.tag }}'
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.29.0
+        if: ${{ inputs.push }}
+        with:
+          image-ref: '${{ steps.tags.outputs.tag }}'
+          format: 'table'
+          exit-code: '1'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
 
       - name: Push to DockerHub (latest)
         uses: docker/build-push-action@v5
