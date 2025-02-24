@@ -133,7 +133,7 @@ jobs:
           set -x
 
           tag=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }}
-          echo $tag >> $GITHUB_OUTPUT
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
 
           if [[ "${{ inputs.environment }}" == "stable" ]]; then
             major=$(echo ${{ inputs.tag-prefix }} | tr "." "\n" | sed -n 1p)
