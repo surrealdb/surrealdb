@@ -8,7 +8,7 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
 	let path: &String = matches.get_one("path").unwrap();
 	let testset = TestSet::collect_directory(Utf8Path::new(&path)).await?;
 	let subset = if let Some(x) = matches.get_one::<String>("filter") {
-		testset.filter(x)
+		testset.filter_map(|name, _| name.contains(x))
 	} else {
 		testset
 	};
