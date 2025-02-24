@@ -118,6 +118,12 @@ impl<'a> StatementContext<'a> {
 		with_all_indexes: bool,
 		granted_permission: GrantedPermission,
 	) -> Result<RecordStrategy, Error> {
+		// Update / Upsert / Delete need to retrieve the values:
+		// 1. So they can be removed from any existing index
+		// 2. To hydrate live queries
+		if matches!(self.stm, Statement::Update(_) | Statement::Upsert(_) | Statement::Delete(_)) {
+			return Ok(RecordStrategy::KeysAndValues);
+		}
 		// If there is a WHERE clause, then
 		// we need to fetch and process
 		// record content values too.
