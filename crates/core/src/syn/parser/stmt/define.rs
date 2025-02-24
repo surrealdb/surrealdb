@@ -7,7 +7,7 @@ use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::api::ApiConfig;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::ConfigInner;
-use crate::sql::statements::define::{ApiAction, DefineConfigStatement};
+use crate::sql::statements::define::{ApiAction, DefineConfigStatement, DefineSequenceStatement};
 use crate::sql::statements::DefineApiStatement;
 use crate::sql::Value;
 use crate::syn::error::bail;
@@ -65,6 +65,7 @@ impl Parser<'_> {
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
 			t!("CONFIG") => self.parse_define_config(ctx).await.map(DefineStatement::Config),
+			t!("SEQUENCE") => self.parse_define_sequence().map(DefineStatement::Sequence),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -1393,6 +1394,30 @@ impl Parser<'_> {
 			}
 		}
 		Ok(res)
+	}
+
+	pub fn parse_define_sequence(&mut self) -> ParseResult<DefineSequenceStatement> {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
+		} else {
+			(false, false)
+		};
+		let name = self.next_token_value()?;
+		let batch = if self.eat(t!("BATCH")) {
+			self.next_token_value()?
+		} else {
+			1000
+		};
+		Ok(DefineSequenceStatement {
+			name,
+			batch,
+			if_not_exists,
+			overwrite,
+		})
 	}
 
 	pub async fn parse_define_config(
