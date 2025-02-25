@@ -24,6 +24,7 @@ use crate::kvs::clock::SizedClock;
 use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
+use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
@@ -89,6 +90,8 @@ pub struct Datastore {
 	#[cfg(storage)]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
+	// The sequences
+	sequences: Sequences,
 }
 
 #[derive(Clone)]
@@ -417,12 +420,13 @@ impl Datastore {
 				capabilities: Arc::new(Capabilities::default()),
 				index_stores: IndexStores::default(),
 				#[cfg(not(target_family = "wasm"))]
-				index_builder: IndexBuilder::new(tf),
+				index_builder: IndexBuilder::new(tf.clone()),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 				#[cfg(storage)]
 				temporary_directory: None,
 				cache: Arc::new(DatastoreCache::new()),
+				sequences: Sequences::new(tf),
 			}
 		})
 	}
@@ -446,8 +450,9 @@ impl Datastore {
 			jwks_cache: Arc::new(Default::default()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
-			transaction_factory: self.transaction_factory,
 			cache: Arc::new(DatastoreCache::new()),
+			sequences: Sequences::new(self.transaction_factory.clone()),
+			transaction_factory: self.transaction_factory,
 		}
 	}
 
@@ -1230,9 +1235,10 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
-			self.cache.clone(),
 			#[cfg(not(target_family = "wasm"))]
 			self.index_builder.clone(),
+			self.sequences.clone(),
+			self.cache.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 		)?;

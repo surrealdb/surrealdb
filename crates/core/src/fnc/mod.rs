@@ -527,7 +527,7 @@ pub async fn asynchronous(
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"sequence::nextval" => sequence::nextval(ctx).await,
+		"sequence::nextval" => sequence::nextval((ctx, opt)).await,
 		//
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,

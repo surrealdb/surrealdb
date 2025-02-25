@@ -20,7 +20,7 @@ async fn concurrent_task(ds: Arc<Datastore>, count: usize) -> HashSet<i64> {
 }
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_sequence_next_val() -> Result<(), Error> {
-	let ds = new_ds().await?;
+	let ds = Arc::new(new_ds().await?);
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// Create the sequence
@@ -28,8 +28,7 @@ async fn concurrent_sequence_next_val() -> Result<(), Error> {
 	skip_ok(res, 1)?;
 
 	let count = 1000;
-
-	let ds = Arc::new(ds);
+	// Run 3 tasks collecting the next value of the sequence
 	let task1 = tokio::spawn(concurrent_task(ds.clone(), count));
 	let task2 = tokio::spawn(concurrent_task(ds.clone(), count));
 	let task3 = tokio::spawn(concurrent_task(ds.clone(), count));

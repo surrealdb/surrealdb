@@ -27,6 +27,10 @@ impl RemoveSequenceStatement {
 			let txn = ctx.tx();
 			// Get the definition
 			let sq = txn.get_db_sequence(ns, db, &self.name).await?;
+			// Remove the sequence
+			if let Some(seq) = ctx.get_sequences() {
+				seq.sequence_removed(ns, db, &self.name);
+			}
 			// Delete the definition
 			let key = crate::key::database::sq::new(ns, db, &sq.name);
 			txn.del(key).await?;
