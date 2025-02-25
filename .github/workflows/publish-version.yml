@@ -694,7 +694,11 @@ jobs:
 
           for crate in crates/{core,sdk}; do
             cd $crate
-            cargo publish
+            if ! cargo publish; then
+              if [[ "${{ inputs.environment }}" != "nightly" ]]; then
+                exit 101
+              fi
+            fi
             cd -
           done
 
