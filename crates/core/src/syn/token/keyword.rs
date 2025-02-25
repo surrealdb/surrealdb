@@ -174,6 +174,7 @@ keyword! {
 	Schemaless => "SCHEMALESS",
 	Scope => "SCOPE",
 	Search => "SEARCH",
+	Search2 => "SEARCH2",
 	Select => "SELECT",
 	Session => "SESSION",
 	Set => "SET",

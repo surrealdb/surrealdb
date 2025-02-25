@@ -20,7 +20,10 @@ impl Tokens {
 		}
 	}
 
-	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&'a str, Error> {
+	pub(in crate::idx::ft) fn get_token_string<'a>(
+		&'a self,
+		t: &'a Token,
+	) -> Result<&'a str, Error> {
 		t.get_str(&self.i)
 	}
 
@@ -59,7 +62,7 @@ impl Tokens {
 		})
 	}
 
-	pub(super) fn list(&self) -> &Vec<Token> {
+	pub(in crate::idx::ft) fn list(&self) -> &Vec<Token> {
 		&self.t
 	}
 }
@@ -77,7 +80,7 @@ impl TryFrom<Tokens> for Value {
 }
 
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
-pub(super) enum Token {
+pub(in crate::idx::ft) enum Token {
 	Ref {
 		chars: (Position, Position, Position),
 		bytes: (Position, Position),
