@@ -3448,7 +3448,7 @@ async fn select_limit_start() -> Result<(), Error> {
 					},
 					{
 						detail: {
-							CancelOnLimit: 12,
+							CancelOnLimit: 10,
 							SkipStart: 2
 						},
 						operation: 'StartLimitStrategy'
