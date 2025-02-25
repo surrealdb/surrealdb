@@ -88,6 +88,8 @@ pub enum Category {
 	DatabaseVersionstamp,
 	/// crate::key::database::cg             /*{ns}*{db}!cg{ty}
 	DatabaseConfig,
+	/// crate::key::database::sq             /*{ns}*{db}!sq{sq}
+	DatabaseSequence,
 	///
 	/// ------------------------------
 	///
@@ -201,6 +203,7 @@ impl Display for Category {
 			Self::DatabaseTimestamp => "DatabaseTimestamp",
 			Self::DatabaseUser => "DatabaseUser",
 			Self::DatabaseVersionstamp => "DatabaseVersionstamp",
+			Self::DatabaseSequence => "DatabaseSequence",
 			Self::DatabaseConfig => "DatabaseConfig",
 			Self::TableRoot => "TableRoot",
 			Self::TableEvent => "TableEvent",

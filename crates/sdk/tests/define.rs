@@ -1341,6 +1341,40 @@ async fn define_table_type_normal() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_sequence() -> Result<(), Error> {
+	let sql = r#"
+		DEFINE SEQUENCE seq1;
+		DEFINE SEQUENCE seq2 BATCH 100;
+		INFO FOR DB;
+		DEFINE SEQUENCE OVERWRITE seq2 BATCH 250;
+		DEFINE SEQUENCE seq2 BATCH 150;
+		INFO FOR DB;
+	"#;
+	let mut t = Test::new(sql).await?;
+	t.expect_size(6)?;
+	t.skip_ok(4)?;
+	t.expect_error("The sequence 'seq2' already exists")?;
+	t.expect_val(
+		r#"{
+			accesses: {},
+			analyzers: {},
+			apis: {},
+			configs: {},
+			functions: {},
+			models: {},
+			params: {},
+			tables: {},
+			users: {},
+			sequences: {
+				seq1: 'DEFINE SEQUENCE seq1 BATCH 1000',
+				seq2: 'DEFINE SEQUENCE seq2 BATCH 250'
+			}
+		}"#,
+	)?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
 	let ds = new_ds().await?;
 	let cache = ds.get_cache();
