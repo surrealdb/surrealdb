@@ -131,7 +131,7 @@ impl super::api::Transaction for Transaction {
 		// Mark the transaction as done.
 		self.done = true;
 		// Commit this transaction.
-		self.inner.commit().await?;
+		self.inner.commit()?;
 		// Continue
 		Ok(())
 	}
