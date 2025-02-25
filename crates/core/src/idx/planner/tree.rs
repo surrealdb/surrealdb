@@ -664,7 +664,9 @@ impl IndexesMap {
 	pub(crate) fn check_compound(&mut self, ixr: &IndexReference, col: usize, val: &Arc<Value>) {
 		let cols = ixr.cols.len();
 		let values = self.compound_indexes.entry(ixr.clone()).or_insert(vec![vec![]; cols]);
-		values[col].push(val.clone());
+		if let Some(a) = values.get_mut(col) {
+			a.push(val.clone());
+		}
 	}
 
 	pub(crate) fn check_compound_array(&mut self, ixr: &IndexReference, col: usize, a: &Array) {
