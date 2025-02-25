@@ -451,6 +451,29 @@ impl Transactor {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
+	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn keysr<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
+	where
+		K: KeyEncode + Debug,
+	{
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Keysr");
+		if beg > end {
+			return Ok(vec![]);
+		}
+		expand_inner!(&mut self.inner, v => { v.keysr(beg..end, limit, version).await })
+	}
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn scan<K>(
@@ -470,6 +493,26 @@ impl Transactor {
 			return Ok(vec![]);
 		}
 		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit, version).await })
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn scanr<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Scanr");
+		if beg > end {
+			return Ok(vec![]);
+		}
+		expand_inner!(&mut self.inner, v => { v.scanr(beg..end, limit, version).await })
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.

@@ -643,13 +643,13 @@ jobs:
           set -x
 
           # Get the date of the last commit
-          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
 
           # Derive crate version
           currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-          # This sets the nightly version to something like `1.3.20231117`
+          # This sets the nightly version to something like `1.3.20250224221932`
           version=${major}.${minor}.${date}
 
           # Update the version to a nightly one
@@ -694,7 +694,11 @@ jobs:
 
           for crate in crates/{core,sdk}; do
             cd $crate
-            cargo publish
+            if ! cargo publish; then
+              if [[ "${{ inputs.environment }}" != "nightly" ]]; then
+                exit 101
+              fi
+            fi
             cd -
           done
 

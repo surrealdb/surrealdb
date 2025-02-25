@@ -12,7 +12,7 @@ use crate::err::Error;
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
 use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
-use crate::idx::planner::plan::{Plan, PlanBuilder};
+use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
 use crate::sql::with::With;
 use crate::sql::{order::Ordering, Cond, Fields, Groups, Table};
@@ -256,19 +256,18 @@ impl QueryPlanner {
 			tree.knn_condition,
 		)
 		.await?;
-		match PlanBuilder::build(
+		let p = PlanBuilderParameters {
+			root: tree.root,
 			gp,
-			tree.root,
-			ctx,
-			tree.with_indexes,
-			tree.index_map.compound_indexes,
-			tree.index_map.order_limit,
-			tree.all_and_groups,
-			tree.all_and,
-			tree.all_expressions_with_index,
-		)
-		.await?
-		{
+			compound_indexes: tree.index_map.compound_indexes,
+			order_limit: tree.index_map.order_limit,
+			with_indexes: tree.with_indexes,
+			all_and: tree.all_and,
+			all_expressions_with_index: tree.all_expressions_with_index,
+			all_and_groups: tree.all_and_groups,
+			reverse_scan: ctx.ctx.tx().reverse_scan(),
+		};
+		match PlanBuilder::build(ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;
