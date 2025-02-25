@@ -5,7 +5,6 @@ use crate::kvs::ds::TransactionFactory;
 use crate::kvs::Transaction;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
-use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -70,9 +69,9 @@ impl Sequences {
 		let (ns, db) = opt.ns_db()?;
 		let key = SequenceKey::new(ns, db, sq);
 		match self.sequences.entry(key) {
-			Entry::Occupied(e) => e.get().next(ctx).await,
+			Entry::Occupied(mut e) => e.get_mut().next(ctx).await,
 			Entry::Vacant(e) => {
-				let sq = Sequence::new(self.tf.clone(), ctx).await?;
+				let sq = Sequence::new(self.tf.clone());
 				e.insert(sq).next(ctx).await
 			}
 		}
@@ -80,21 +79,33 @@ impl Sequences {
 }
 
 struct Sequence {
-	_tf: TransactionFactory,
-	seq: AtomicI64,
+	tf: TransactionFactory,
+	next: i64,
+	last: i64,
 }
 
 impl Sequence {
-	async fn new(tf: TransactionFactory, _ctx: &Context) -> Result<Self, Error> {
-		// TODO check pre-allocation
-		Ok(Self {
-			_tf: tf,
-			seq: AtomicI64::new(0),
-		})
+	fn new(tf: TransactionFactory) -> Self {
+		Self {
+			tf,
+			next: 0,
+			last: 0,
+		}
 	}
-	pub(crate) async fn next(&self, _ctx: &Context) -> Result<i64, Error> {
-		// TODO check pre-allocation
-		let v = self.seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+	pub(crate) async fn next(&mut self, ctx: &Context) -> Result<i64, Error> {
+		if self.next >= self.last {
+			(self.next, self.last) = Self::check_allocation(&self.tf, ctx).await?;
+		}
+		let v = self.next;
+		self.next += 1;
+		// TODO write next on the kv store
 		Ok(v)
+	}
+
+	async fn check_allocation(
+		_tf: &TransactionFactory,
+		_ctx: &Context,
+	) -> Result<(i64, i64), Error> {
+		todo!()
 	}
 }
