@@ -20,6 +20,7 @@ use crate::sql::Closure;
 use crate::sql::Function;
 use rand::prelude::SliceRandom;
 use reblessive::tree::Stk;
+use std::cmp::Ordering;
 use std::mem::size_of_val;
 
 /// Returns an error if an array of this length is too much to allocate.
@@ -637,33 +638,53 @@ pub fn slice((array, beg, lim): (Array, Option<isize>, Option<isize>)) -> Result
 	.into())
 }
 
-pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+fn sort_as_asc(order: &Option<Value>) -> bool {
 	match order {
-		// If "asc", sort ascending
-		Some(Value::Strand(s)) if s.as_str() == "asc" => {
-			array.sort_unstable();
-			Ok(array.into())
-		}
-		// If "desc", sort descending
-		Some(Value::Strand(s)) if s.as_str() == "desc" => {
-			array.sort_unstable_by(|a, b| b.cmp(a));
-			Ok(array.into())
-		}
-		// If true, sort ascending
-		Some(Value::Bool(true)) => {
-			array.sort_unstable();
-			Ok(array.into())
-		}
-		// If false, sort descending
-		Some(Value::Bool(false)) => {
-			array.sort_unstable_by(|a, b| b.cmp(a));
-			Ok(array.into())
-		}
-		// Sort ascending by default
-		_ => {
-			array.sort_unstable();
-			Ok(array.into())
-		}
+		Some(Value::Strand(s)) if s.as_str() == "asc" => true,
+		Some(Value::Strand(s)) if s.as_str() == "desc" => false,
+		Some(Value::Bool(true)) => true,
+		Some(Value::Bool(false)) => false,
+		_ => true,
+	}
+}
+
+pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+	if sort_as_asc(&order) {
+		array.sort_unstable();
+		Ok(array.into())
+	} else {
+		array.sort_unstable_by(|a, b| b.cmp(a));
+		Ok(array.into())
+	}
+}
+
+pub fn sort_natural((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+	if sort_as_asc(&order) {
+		array.sort_unstable_by(|a, b| a.natural_cmp(b).unwrap_or(Ordering::Equal));
+		Ok(array.into())
+	} else {
+		array.sort_unstable_by(|a, b| b.natural_cmp(a).unwrap_or(Ordering::Equal));
+		Ok(array.into())
+	}
+}
+
+pub fn sort_lexical((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+	if sort_as_asc(&order) {
+		array.sort_unstable_by(|a, b| a.lexical_cmp(b).unwrap_or(Ordering::Equal));
+		Ok(array.into())
+	} else {
+		array.sort_unstable_by(|a, b| b.lexical_cmp(a).unwrap_or(Ordering::Equal));
+		Ok(array.into())
+	}
+}
+
+pub fn sort_natural_lexical((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+	if sort_as_asc(&order) {
+		array.sort_unstable_by(|a, b| a.natural_lexical_cmp(b).unwrap_or(Ordering::Equal));
+		Ok(array.into())
+	} else {
+		array.sort_unstable_by(|a, b| b.natural_lexical_cmp(a).unwrap_or(Ordering::Equal));
+		Ok(array.into())
 	}
 }
 
