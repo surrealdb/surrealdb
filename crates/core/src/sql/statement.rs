@@ -148,11 +148,13 @@ impl Statement {
 			(true, Self::Update(stm)) => &Statement::Upsert(UpsertStatement {
 				only: stm.only,
 				what: stm.what.to_owned(),
+				with: stm.with.to_owned(),
 				data: stm.data.to_owned(),
 				cond: stm.cond.to_owned(),
 				output: stm.output.to_owned(),
 				timeout: stm.timeout.to_owned(),
 				parallel: stm.parallel,
+				explain: stm.explain.to_owned(),
 			}),
 			(_, stm) => stm,
 		};

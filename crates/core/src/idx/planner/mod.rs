@@ -118,6 +118,12 @@ impl<'a> StatementContext<'a> {
 		with_all_indexes: bool,
 		granted_permission: GrantedPermission,
 	) -> Result<RecordStrategy, Error> {
+		// Update / Upsert / Delete need to retrieve the values:
+		// 1. So they can be removed from any existing index
+		// 2. To hydrate live queries
+		if matches!(self.stm, Statement::Update(_) | Statement::Upsert(_) | Statement::Delete(_)) {
+			return Ok(RecordStrategy::KeysAndValues);
+		}
 		// If there is a WHERE clause, then
 		// we need to fetch and process
 		// record content values too.
@@ -232,7 +238,6 @@ impl QueryPlanner {
 		ctx: &StatementContext<'_>,
 		t: Table,
 		gp: GrantedPermission,
-		reverse_scan: bool,
 		it: &mut Iterator,
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
@@ -260,7 +265,7 @@ impl QueryPlanner {
 			all_and: tree.all_and,
 			all_expressions_with_index: tree.all_expressions_with_index,
 			all_and_groups: tree.all_and_groups,
-			reverse_scan,
+			reverse_scan: ctx.ctx.tx().reverse_scan(),
 		};
 		match PlanBuilder::build(ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs) => {
