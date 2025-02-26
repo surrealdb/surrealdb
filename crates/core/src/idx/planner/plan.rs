@@ -3,7 +3,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
-use crate::idx::planner::{GrantedPermission, RecordStrategy, StatementContext};
+use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
 use crate::sql::with::With;
 use crate::sql::{Array, Expression, Idiom, Number, Object};
 use crate::sql::{Operator, Value};
@@ -78,7 +78,7 @@ impl PlanBuilder {
 			}
 			if let Some((_, io)) = compound_index {
 				// Evaluate if we can use keys only
-				let record_strategy = ctx.check_record_strategy(true, p.gp).await?;
+				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
@@ -87,7 +87,7 @@ impl PlanBuilder {
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
-					let record_strategy = ctx.check_record_strategy(true, p.gp).await?;
+					let record_strategy = ctx.check_record_strategy(true, p.gp)?;
 					// Return the plan
 					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy));
 				}
@@ -96,14 +96,14 @@ impl PlanBuilder {
 			// Otherwise, we try to find the most interesting (todo: TBD) single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, p.gp).await?;
+				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
 			}
 			// If there is an order option
 			if let Some(o) = p.order_limit {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, p.gp).await?;
+				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
 				// Check it is compatible with the reverse scan capability
 				if Self::check_order_scan(p.reverse_scan, o.op()) {
 					// Return the plan
@@ -122,7 +122,7 @@ impl PlanBuilder {
 				}
 			}
 			// Evaluate the record strategy
-			let record_strategy = ctx.check_record_strategy(true, p.gp).await?;
+			let record_strategy = ctx.check_record_strategy(true, p.gp)?;
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
@@ -135,10 +135,12 @@ impl PlanBuilder {
 		granted_permission: GrantedPermission,
 	) -> Result<Plan, Error> {
 		// Evaluate the record strategy
-		let record_strategy = ctx.check_record_strategy(false, granted_permission).await?;
+		let rs = ctx.check_record_strategy(false, granted_permission)?;
+		// Evaluate the scan direction
+		let sc = ctx.check_scan_direction();
 		// Collect the reason if any
 		let reason = reason.map(|s| s.to_string());
-		Ok(Plan::TableIterator(reason, record_strategy))
+		Ok(Plan::TableIterator(reason, rs, sc))
 	}
 
 	/// Check if we have an explicit list of index that we should use
@@ -278,7 +280,7 @@ pub(super) enum Plan {
 	/// Table full scan
 	/// 1: An optional reason
 	/// 2: A record strategy
-	TableIterator(Option<String>, RecordStrategy),
+	TableIterator(Option<String>, RecordStrategy, ScanDirection),
 	/// Index scan filtered on records matching a given expression
 	/// 1: The optional expression associated with the index
 	/// 2: A record strategy

@@ -2,6 +2,7 @@ use super::tx::Transaction;
 use super::Key;
 use super::Val;
 use crate::err::Error;
+use crate::idx::planner::ScanDirection;
 use futures::stream::Stream;
 use futures::Future;
 use futures::FutureExt;
@@ -33,6 +34,8 @@ pub(super) struct Scanner<'a, I> {
 	version: Option<u64>,
 	/// An optional maximum number of keys to scan
 	limit: Option<usize>,
+	/// The scan direction
+	sc: ScanDirection,
 }
 
 impl<'a, I> Scanner<'a, I> {
@@ -42,6 +45,7 @@ impl<'a, I> Scanner<'a, I> {
 		range: Range<Key>,
 		version: Option<u64>,
 		limit: Option<usize>,
+		sc: ScanDirection,
 	) -> Self {
 		Scanner {
 			store,
@@ -52,6 +56,7 @@ impl<'a, I> Scanner<'a, I> {
 			exhausted: false,
 			version,
 			limit,
+			sc,
 		}
 	}
 
@@ -100,7 +105,7 @@ impl<'a, I> Scanner<'a, I> {
 							// Mark this stream as complete
 							Poll::Ready(None)
 						}
-						// There are results which need streaming
+						// There are results that need streaming
 						false => {
 							if let Some(l) = &mut self.limit {
 								*l -= v.len();
@@ -113,10 +118,18 @@ impl<'a, I> Scanner<'a, I> {
 							let last = v.last().ok_or_else(|| {
 								fail!("Expected the last key-value pair to not be none")
 							})?;
-							// Start the next scan from the last result
-							self.range.start.clone_from(key(last));
-							// Ensure we don't see the last result again
-							self.range.start.push(0xff);
+							match self.sc {
+								ScanDirection::Forward => {
+									// Start the next scan from the last result
+									self.range.start.clone_from(key(last));
+									// Ensure we don't see the last result again
+									self.range.start.push(0xff);
+								}
+								ScanDirection::Backward => {
+									// Start the next scan from the last result
+									self.range.end.clone_from(key(last));
+								}
+							};
 							// Store the fetched range results
 							self.results.extend(v);
 							// Remove the first result to return
@@ -142,11 +155,18 @@ impl Stream for Scanner<'_, (Key, Val)> {
 		cx: &mut Context,
 	) -> Poll<Option<Result<(Key, Val), Error>>> {
 		let (store, version) = (self.store, self.version);
-		self.next_poll(
-			cx,
-			move |range, batch| Box::pin(store.scan(range, batch, version)),
-			|v| &v.0,
-		)
+		match self.sc {
+			ScanDirection::Forward => self.next_poll(
+				cx,
+				move |range, batch| Box::pin(store.scan(range, batch, version)),
+				|v| &v.0,
+			),
+			ScanDirection::Backward => self.next_poll(
+				cx,
+				move |range, batch| Box::pin(store.scanr(range, batch, version)),
+				|v| &v.0,
+			),
+		}
 	}
 }
 
@@ -154,6 +174,17 @@ impl Stream for Scanner<'_, Key> {
 	type Item = Result<Key, Error>;
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<Key, Error>>> {
 		let (store, version) = (self.store, self.version);
-		self.next_poll(cx, move |range, batch| Box::pin(store.keys(range, batch, version)), |v| v)
+		match self.sc {
+			ScanDirection::Forward => self.next_poll(
+				cx,
+				move |range, batch| Box::pin(store.keys(range, batch, version)),
+				|v| v,
+			),
+			ScanDirection::Backward => self.next_poll(
+				cx,
+				move |range, batch| Box::pin(store.keysr(range, batch, version)),
+				|v| v,
+			),
+		}
 	}
 }
