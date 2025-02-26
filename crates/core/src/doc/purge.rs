@@ -7,6 +7,7 @@ use crate::doc::CursorDoc;
 use crate::doc::CursorValue;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode;
 use crate::sql::dir::Dir;
@@ -95,7 +96,7 @@ impl Document {
 				// Obtain a transaction
 				let txn = ctx.tx();
 				// Obtain a stream of keys
-				let mut stream = txn.stream_keys(range.clone(), None);
+				let mut stream = txn.stream_keys(range.clone(), None, ScanDirection::Forward);
 				// Loop until no more entries
 				while let Some(res) = stream.next().await {
 					// Decode the key

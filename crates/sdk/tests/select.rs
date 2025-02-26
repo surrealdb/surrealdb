@@ -215,6 +215,7 @@ async fn select_expression_value() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+                        direction: 'forward',
 						table: 'thing',
 					},
 					operation: 'Iterate Table'
@@ -781,12 +782,14 @@ async fn select_where_explain() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+                        direction: 'forward',
 						table: 'person',
 					},
 					operation: 'Iterate Table'
 				},
 				{
 					detail: {
+                        direction: 'forward',
 						table: 'software',
 					},
 					operation: 'Iterate Table'
@@ -806,12 +809,14 @@ async fn select_where_explain() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+                        direction: 'forward',
 						table: 'person',
 					},
 					operation: 'Iterate Table'
 				},
 				{
 					detail: {
+                        direction: 'forward',
 						table: 'software',
 					},
 					operation: 'Iterate Table'

@@ -122,23 +122,30 @@ impl ExplainItem {
 				name: "Iterate Edges".into(),
 				details: vec![("from", Value::Thing(e.from.to_owned()))],
 			},
-			Iterable::Table(t, rs) => Self {
+			Iterable::Table(t, rs, sc) => Self {
 				name: match rs {
 					RecordStrategy::Count => "Iterate Table Count",
 					RecordStrategy::KeysOnly => "Iterate Table Keys",
 					RecordStrategy::KeysAndValues => "Iterate Table",
 				}
 				.into(),
-				details: vec![("table", Value::from(t.0.to_owned()))],
+				details: vec![
+					("table", Value::from(t.0.to_owned())),
+					("direction", sc.to_string().into()),
+				],
 			},
-			Iterable::Range(tb, r, rs) => Self {
+			Iterable::Range(tb, r, rs, sc) => Self {
 				name: match rs {
 					RecordStrategy::Count => "Iterate Range Count",
 					RecordStrategy::KeysOnly => "Iterate Range Keys",
 					RecordStrategy::KeysAndValues => "Iterate Range",
 				}
 				.into(),
-				details: vec![("table", tb.to_owned().into()), ("range", r.to_owned().into())],
+				details: vec![
+					("table", tb.to_owned().into()),
+					("range", r.to_owned().into()),
+					("direction", sc.to_string().into()),
+				],
 			},
 			Iterable::Mergeable(t, v) => Self {
 				name: "Iterate Mergeable".into(),

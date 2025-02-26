@@ -9,7 +9,8 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
-	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, StatementContext,
+	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
+	StatementContext,
 };
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
@@ -49,10 +50,10 @@ pub(crate) enum Iterable {
 	Edges(Edges),
 	/// An iterable which needs to iterate over the records
 	/// in a table before processing each document.
-	Table(Table, RecordStrategy),
+	Table(Table, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	Range(String, IdRange, RecordStrategy),
+	Range(String, IdRange, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
@@ -282,10 +283,11 @@ impl Iterator {
 			});
 		}
 		// Evaluate if we can only scan keys (rather than keys AND values), or count
-		let rs = ctx.check_record_strategy(false, p).await?;
+		let rs = ctx.check_record_strategy(false, p)?;
+		let sc = ctx.check_scan_direction();
 		// Add the record to the iterator
 		if let (tb, Id::Range(v)) = (v.tb, v.id) {
-			self.ingest(Iterable::Range(tb, *v, rs));
+			self.ingest(Iterable::Range(tb, *v, rs, sc));
 		}
 		// All ingested ok
 		Ok(())

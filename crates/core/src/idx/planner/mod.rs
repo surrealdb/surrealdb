@@ -18,6 +18,7 @@ use crate::sql::with::With;
 use crate::sql::{order::Ordering, Cond, Fields, Groups, Table};
 use reblessive::tree::Stk;
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::sync::atomic::{self, AtomicU8};
 
 /// The goal of this structure is to cache parameters so they can be easily passed
@@ -42,6 +43,23 @@ pub(crate) enum RecordStrategy {
 	Count,
 	KeysOnly,
 	KeysAndValues,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ScanDirection {
+	Forward,
+	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+	Backward,
+}
+
+impl Display for ScanDirection {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			ScanDirection::Forward => f.write_str("forward"),
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			ScanDirection::Backward => f.write_str("backward"),
+		}
+	}
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -113,7 +131,7 @@ impl<'a> StatementContext<'a> {
 		Ok(GrantedPermission::Full)
 	}
 
-	pub(crate) async fn check_record_strategy(
+	pub(crate) fn check_record_strategy(
 		&self,
 		with_all_indexes: bool,
 		granted_permission: GrantedPermission,
@@ -182,6 +200,22 @@ impl<'a> StatementContext<'a> {
 		}
 		// Otherwise we can iterate over keys only
 		Ok(RecordStrategy::KeysOnly)
+	}
+
+	/// Determines the scan direction.
+	/// This is used for Table and Range iterators.
+	/// The direction is reversed if the first element of order is ID descending.
+	/// Typically: `ORDER BY id DESC`
+	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
+		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+		if let Some(Ordering::Order(o)) = self.order {
+			if let Some(o) = o.first() {
+				if !o.direction && o.value.is_id() {
+					return ScanDirection::Backward;
+				}
+			}
+		}
+		ScanDirection::Forward
 	}
 }
 
@@ -297,12 +331,12 @@ impl QueryPlanner {
 				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
 				self.add(t.clone(), Some(ir), exe, it, keys_only);
 			}
-			Plan::TableIterator(reason, rs) => {
+			Plan::TableIterator(reason, rs, sc) => {
 				if let Some(reason) = reason {
 					self.fallbacks.push(reason);
 				}
 				self.add(t.clone(), None, exe, it, rs);
-				it.ingest(Iterable::Table(t, rs));
+				it.ingest(Iterable::Table(t, rs, sc));
 				is_table_iterator = true;
 			}
 		}
