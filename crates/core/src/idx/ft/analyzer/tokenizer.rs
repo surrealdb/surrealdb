@@ -197,13 +197,12 @@ impl Tokenizer {
 	}
 
 	fn should_split(&mut self, c: char) -> bool {
-		let mut res = false;
 		for s in &mut self.splitters {
 			if s.should_split(c) {
-				res = true;
+				return true;
 			}
 		}
-		res
+		false
 	}
 
 	pub(super) fn tokenize(t: &[SqlTokenizer], i: String) -> Tokens {
@@ -212,12 +211,13 @@ impl Tokenizer {
 		let mut last_byte_pos = 0;
 		let mut current_char_pos = 0;
 		let mut current_byte_pos = 0;
+		let mut next_new_token = false;
 		let mut t = Vec::new();
 		for c in i.chars() {
 			let char_len = c.len_utf8() as Position;
 			let is_valid = Self::is_valid(c);
 			let should_split = w.should_split(c);
-			if should_split || !is_valid {
+			if next_new_token || should_split || !is_valid {
 				// The last pos may be more advanced due to the is_valid process
 				if last_char_pos < current_char_pos {
 					t.push(Token::Ref {
@@ -234,6 +234,7 @@ impl Tokenizer {
 					last_char_pos += 1;
 					last_byte_pos += char_len;
 				}
+				next_new_token = should_split || !is_valid;
 			}
 			current_char_pos += 1;
 			current_byte_pos += char_len;
@@ -397,6 +398,16 @@ static LANGUAGE: &str = "Rust";"#,
 				"\"",
 				";",
 			],
+		)
+		.await;
+	}
+
+	#[tokio::test]
+	async fn test_tokenize_punct() {
+		test_analyzer(
+			"ANALYZER test TOKENIZERS punct",
+			"and pass...leaving memories",
+			&["and", "pass", ".", ".", ".", "leaving", "memories"],
 		)
 		.await;
 	}
