@@ -29,8 +29,15 @@ pub fn r#enum(mut args: Vec<Value>) -> Result<Value, Error> {
 	})
 }
 
+// TODO (Delskayn): Don't agree with the inclusive ranges in the functions here,
+// seems inconsistent with general use of ranges not including the upperbound.
+// These should probably all be exclusive.
+//
+// TODO (Delskayn): Switching of min and max if min > max is also inconsistent with rest of
+// functions and the range type. The functions should either return NONE or an error if the lowerbound
+// of the ranges here are larger then the upperbound.
 pub fn float((range,): (Option<(f64, f64)>,)) -> Result<Value, Error> {
-	Ok(if let Some((min, max)) = range {
+	let res = if let Some((min, max)) = range {
 		if max < min {
 			rand::thread_rng().gen_range(max..=min)
 		} else {
@@ -38,43 +45,44 @@ pub fn float((range,): (Option<(f64, f64)>,)) -> Result<Value, Error> {
 		}
 	} else {
 		rand::random::<f64>()
-	}
-	.into())
+	};
+	Ok(res.into())
 }
 
 pub fn guid((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
 	// Set a reasonable maximum length
 	const LIMIT: i64 = 64;
-	// Check the function input arguments
-	let val = if let Some((min, max)) = arg1.zip(arg2) {
-		match min {
-			min if (1..=LIMIT).contains(&min) => match max {
-				max if min <= max && max <= LIMIT => rand::thread_rng().gen_range(min as usize..=max as usize),
-				max if max >= 1 && max <= min => rand::thread_rng().gen_range(max as usize..=min as usize),
-				_ => return Err(Error::InvalidArguments {
-					name: String::from("rand::guid"),
-					message: format!("To generate a guid of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
-				}),
-			},
-			_ => return Err(Error::InvalidArguments {
+
+	// rand::guid(NULL,10) is not allowed by the calling infrastructure.
+	let lower = arg1.unwrap_or(20);
+	let len = if let Some(upper) = arg2 {
+		if lower > upper {
+			return Err(Error::InvalidArguments {
 				name: String::from("rand::guid"),
-				message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
-			}),
+				message: "Lowerbound of number of characters must be less then the upperbound."
+					.to_string(),
+			});
 		}
-	} else if let Some(len) = arg1 {
-		if (1..=LIMIT).contains(&len) {
-			len as usize
-		} else {
+		if upper > LIMIT {
 			return Err(Error::InvalidArguments {
 				name: String::from("rand::guid"),
 				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
 			});
 		}
+
+		rand::thread_rng().gen_range((lower as usize)..=(upper as usize))
 	} else {
-		20
+		if lower > LIMIT {
+			return Err(Error::InvalidArguments {
+			name: String::from("rand::guid"),
+			message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
+		});
+		}
+		lower as usize
 	};
+
 	// Generate the random guid
-	Ok(nanoid!(val, &ID_CHARS).into())
+	Ok(nanoid!(len, &ID_CHARS).into())
 }
 
 pub fn int((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
@@ -93,36 +101,35 @@ pub fn int((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 pub fn string((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
 	// Set a reasonable maximum length
 	const LIMIT: i64 = 65536;
-	// Check the function input arguments
-	let val = if let Some((min, max)) = arg1.zip(arg2) {
-		match min {
-			min if (1..=LIMIT).contains(&min) => match max {
-				max if min <= max && max <= LIMIT => rand::thread_rng().gen_range(min as usize..=max as usize),
-				max if max >= 1 && max <= min => rand::thread_rng().gen_range(max as usize..=min as usize),
-				_ => return Err(Error::InvalidArguments {
-					name: String::from("rand::string"),
-					message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
-				}),
-			},
-			_ => return Err(Error::InvalidArguments {
-				name: String::from("rand::string"),
-				message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
-			}),
-		}
-	} else if let Some(len) = arg1 {
-		if (1..=LIMIT).contains(&len) {
-			len as usize
-		} else {
+	// rand::guid(NULL,10) is not allowed by the calling infrastructure.
+	let lower = arg1.unwrap_or(32);
+	let len = if let Some(upper) = arg2 {
+		if lower > upper {
 			return Err(Error::InvalidArguments {
-				name: String::from("rand::string"),
+				name: String::from("rand::guid"),
+				message: "Lowerbound of number of characters must be less then the upperbound."
+					.to_string(),
+			});
+		}
+		if upper > LIMIT {
+			return Err(Error::InvalidArguments {
+				name: String::from("rand::guid"),
 				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
 			});
 		}
+
+		rand::thread_rng().gen_range((lower as usize)..=(upper as usize))
 	} else {
-		32
+		if lower > LIMIT {
+			return Err(Error::InvalidArguments {
+			name: String::from("rand::guid"),
+			message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
+		});
+		}
+		lower as usize
 	};
 	// Generate the random string
-	Ok(Alphanumeric.sample_string(&mut rand::thread_rng(), val).into())
+	Ok(Alphanumeric.sample_string(&mut rand::thread_rng(), len).into())
 }
 
 pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {

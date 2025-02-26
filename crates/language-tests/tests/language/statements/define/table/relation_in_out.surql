@@ -25,15 +25,15 @@ value = "[{ id: likes:qvwx0qdpo7b0mkjnqeq1, in: person:a6cld8fhzwbrwhlfnbju, out
 skip-record-id-key = true
 
 [[test.results]]
-match = "$error = Found record: `likes:[a-zA-Z0-9]*` which is a relation, but expected a  RELATION IN record<person> OUT record<person | thing>"
+match = '''string::matches($error,"Found record: `likes:[a-zA-Z0-9]*` which is a relation, but expected a  RELATION IN record<person> OUT record<person \\| thing>")'''
 error = true
 
 [[test.results]]
-match = "$error = Found other:[a-zA-Z0-9]* for field `out`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person | thing>"
+match = '''string::matches($error,'Found other:[a-zA-Z0-9]* for field `out`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person \\| thing>')'''
 error = true
 
 [[test.results]]
-match = "$error = Found thing:[a-zA-Z0-9]* for field `in`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person>"
+match = '''string::matches($error,'Found thing:[a-zA-Z0-9]* for field `in`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person>')'''
 error = true
 
 */

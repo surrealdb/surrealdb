@@ -1,37 +1,41 @@
 /**
+[env]
+imports = ["datasets/type_order.surql"]
+
 [test]
 
 [[test.results]]
-value = "['1', '11', '2', 'Zoo', 'Ábaco']"
+value = "[]"
 
 [[test.results]]
-value = "['Ábaco', 'Zoo', '2', '11', '1']"
+error = "Incorrect arguments for function array::sort(). Argument 1 was the wrong type. Expected a array but found 3"
 
 [[test.results]]
-value = "['1', '2', '11', 'Zoo', 'Ábaco']"
+value = "[1, 2, 3, 4, 4, 'text']"
 
 [[test.results]]
-value = "['Ábaco', 'Zoo', '11', '2', '1']"
+value = "[1, 2, 3, 4, 4, 'text']"
 
 [[test.results]]
-value = "['1', '11', '2', 'Ábaco', 'Zoo']"
+value = "['text', 4, 4, 3, 2, 1]"
 
 [[test.results]]
-value = "['Zoo', 'Ábaco', '2', '11', '1']"
+value = "[1, 2, 3, 4, 4, 'text']"
 
 [[test.results]]
-value = "['1', '2', '11', 'Ábaco', 'Zoo']"
+value = "['text', 4, 4, 3, 2, 1]"
 
 [[test.results]]
-value = "['Zoo', 'Ábaco', '11', '2', '1']"
+value = "[|$a: any| {  }, 1..2, /a/, |a:1..2|, a:b, (1, 2), {  }, [], u'ffffffff-ffff-ffff-ffff-ffffffffffff', 1d, 1, true, NULL, NONE]"
+
+
 */
+array::sort([]);
+array::sort(3, false);
+array::sort([4,2,"text",1,3,4]);
+array::sort([4,2,"text",1,3,4], true);
+array::sort([4,2,"text",1,3,4], false);
+array::sort([4,2,"text",1,3,4], "asc");
+array::sort([4,2,"text",1,3,4], "desc");
 
-['Zoo', 'Ábaco', '1', '2', '11'].sort();
-['Zoo', 'Ábaco', '1', '2', '11'].sort("desc");
-['Zoo', 'Ábaco', '1', '2', '11'].sort_natural();
-['Zoo', 'Ábaco', '1', '2', '11'].sort_natural("desc");
-['Zoo', 'Ábaco', '1', '2', '11'].sort_lexical();
-['Zoo', 'Ábaco', '1', '2', '11'].sort_lexical("desc");
-['Zoo', 'Ábaco', '1', '2', '11'].sort_natural_lexical();
-['Zoo', 'Ábaco', '1', '2', '11'].sort_natural_lexical("desc");
-
+array::sort($type_array,false);
