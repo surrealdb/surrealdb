@@ -1178,6 +1178,10 @@ pub enum Error {
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,
 
+	#[doc(hidden)]
+	#[error("The underlying datastore does not support reversed scans")]
+	UnsupportedReversedScans,
+
 	/// Found an unexpected value in a range
 	#[error("Expected a range value of '{expected}', but found '{found}'")]
 	InvalidRangeValue {
