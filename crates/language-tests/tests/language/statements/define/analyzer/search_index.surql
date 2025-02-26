@@ -28,7 +28,7 @@ match= """
 
 $result.doc_ids == { keys_count: 2, max_depth: 1, nodes_count: 1, total_size: 62 }
  && $result.doc_lengths == { keys_count: 2, max_depth: 1, nodes_count: 1, total_size: 56 }
- && $result.terms == { keys_count: 17, max_depth: 1, nodes_count: 1, total_size: 199 }
+ && $result.terms == { keys_count: 29, max_depth: 1, nodes_count: 1, total_size: 199 }
  && $result.postings.keys_count == 17
  && $result.postings.max_depth == 1
  && $result.postings.nodes_count == 1

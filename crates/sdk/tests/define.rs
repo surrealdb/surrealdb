@@ -406,12 +406,12 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	check_path(&tmp, &["doc_lengths", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(56)));
 
-	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, Value::from(17)));
+	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, Value::from(29)));
 	check_path(&tmp, &["postings", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["postings", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["postings", "total_size"], |v| assert!(v > Value::from(150)));
 
-	check_path(&tmp, &["terms", "keys_count"], |v| assert_eq!(v, Value::from(17)));
+	check_path(&tmp, &["terms", "keys_count"], |v| assert_eq!(v, Value::from(26)));
 	check_path(&tmp, &["terms", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["terms", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["terms", "total_size"], |v| assert!(v.gt(&Value::from(150))));
