@@ -753,6 +753,7 @@ async fn select_count_group_all() -> Result<(), Error> {
 		r#"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'table'
 					},
 					operation: 'Iterate Table Count'
@@ -783,6 +784,7 @@ async fn select_count_group_all() -> Result<(), Error> {
 		r#"[
 					{
 						detail: {
+							direction: 'forward',
 							table: 'table'
 						},
 						operation: 'Iterate Table Keys'
@@ -847,6 +849,7 @@ async fn select_count_group_all_permissions(
 		Some(true) => {
 			"{
 				detail: {
+					direction: 'forward',
 					table: 'table'
 				},
 				operation: 'Iterate Table Count'
@@ -886,6 +889,7 @@ async fn select_count_group_all_permissions(
 		Some(true) => {
 			"{
 				detail: {
+					direction: 'forward',
 					range: 'a'..'z',
 					table: 'table'
 				},
@@ -895,6 +899,7 @@ async fn select_count_group_all_permissions(
 		Some(false) => {
 			"{
 				detail: {
+					direction: 'forward',
 					range: 'a'..'z',
 					table: 'table'
 				},
@@ -953,6 +958,7 @@ async fn select_count_range_keys_only() -> Result<(), Error> {
 		r#"[
 				{
 					detail: {
+						direction: 'forward',
 						range: 1..4,
 						table: 'table'
 					},
@@ -984,6 +990,7 @@ async fn select_count_range_keys_only() -> Result<(), Error> {
 		r#"[
 					{
 						detail: {
+							direction: 'forward',
 							range: 1..4,
 							table: 'table'
 						},
@@ -1055,6 +1062,7 @@ async fn select_count_range_keys_only_permissions(
 		Some(true) => {
 			"{
 				detail: {
+					direction: 'forward',
 					range: 'a'..'z',
 					table: 'table'
 				},
@@ -1064,6 +1072,7 @@ async fn select_count_range_keys_only_permissions(
 		Some(false) => {
 			"{
 				detail: {
+					direction: 'forward',
 					range: 'a'..'z',
 					table: 'table'
 				},
@@ -1095,6 +1104,7 @@ async fn select_count_range_keys_only_permissions(
 		Some(true) => {
 			"{
 				detail: {
+					direction: 'forward',
 					range: 'a'..'z',
 					table: 'table'
 				},
@@ -1104,6 +1114,7 @@ async fn select_count_range_keys_only_permissions(
 		Some(false) => {
 			"{
 				detail: {
+					direction: 'forward',
 					range: 'a'..'z',
 					table: 'table'
 				},
