@@ -103,6 +103,7 @@ async fn select_start_limit_fetch() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+                        direction: 'forward',
 						table: 'person'
 					},
 					operation: 'Iterate Table'

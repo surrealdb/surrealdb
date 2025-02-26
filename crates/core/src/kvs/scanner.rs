@@ -125,6 +125,7 @@ impl<'a, I> Scanner<'a, I> {
 									// Ensure we don't see the last result again
 									self.range.start.push(0xff);
 								}
+								#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 								ScanDirection::Backward => {
 									// Start the next scan from the last result
 									self.range.end.clone_from(key(last));
@@ -161,6 +162,7 @@ impl Stream for Scanner<'_, (Key, Val)> {
 				move |range, batch| Box::pin(store.scan(range, batch, version)),
 				|v| &v.0,
 			),
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => self.next_poll(
 				cx,
 				move |range, batch| Box::pin(store.scanr(range, batch, version)),
@@ -180,6 +182,7 @@ impl Stream for Scanner<'_, Key> {
 				move |range, batch| Box::pin(store.keys(range, batch, version)),
 				|v| v,
 			),
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => self.next_poll(
 				cx,
 				move |range, batch| Box::pin(store.keysr(range, batch, version)),

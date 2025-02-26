@@ -198,6 +198,7 @@ fn table_explain(fetch_count: usize) -> String {
 		"[
 			{{
 				detail: {{
+					direction: 'forward',
 					table: 'person'
 				}},
 				operation: 'Iterate Table'
@@ -229,6 +230,7 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 		"[
 			{{
 				detail: {{
+					direction: 'forward',
 					table: 'person'
 				}},
 				operation: 'Iterate Table'
@@ -271,6 +273,7 @@ fn three_table_explain(parallel: bool) -> String {
 		"[
 			{{
 				detail: {{
+					direction: 'forward',
 					table: 'person'
 				}},
 				operation: 'Iterate Table'
@@ -503,6 +506,7 @@ async fn select_with_no_index_unary_operator() -> Result<(), Error> {
 		r#"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'table'
 					},
 					operation: 'Iterate Table'
@@ -537,6 +541,7 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 		r#"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'table'
 					},
 					operation: 'Iterate Table'
@@ -1177,6 +1182,7 @@ const CONTAINS_CONTENT: &str = r#"
 const CONTAINS_TABLE_EXPLAIN: &str = r"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'student'
 					},
 					operation: 'Iterate Table'
@@ -2178,6 +2184,7 @@ async fn select_with_record_id_link_no_index() -> Result<(), Error> {
 		r#"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'i'
 					},
 					operation: 'Iterate Table'
@@ -2475,6 +2482,7 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Er
 		r#"[
 					{
 						detail: {
+							direction: 'forward',
 							table: 'i'
 						},
 						operation: 'Iterate Table'
@@ -2541,6 +2549,7 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 			r#"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 't'
 					},
 					operation: 'Iterate Table'
@@ -2921,6 +2930,7 @@ async fn select_from_standard_index() -> Result<(), Error> {
 		"[
 			{
 				detail: {
+					direction: 'forward',
 					table: 'session'
 				},
 				operation: 'Iterate Table'
@@ -2954,6 +2964,7 @@ async fn select_from_standard_index() -> Result<(), Error> {
 		"[
 			{
 				detail: {
+					direction: 'forward',
 					table: 'session'
 				},
 				operation: 'Iterate Table'
@@ -3093,6 +3104,7 @@ async fn select_from_unique_index() -> Result<(), Error> {
 		"[
 			{
 				detail: {
+					direction: 'forward',
 					table: 'session'
 				},
 				operation: 'Iterate Table'
@@ -3122,6 +3134,7 @@ async fn select_from_unique_index() -> Result<(), Error> {
 		" [
 			{
 				detail: {
+					direction: 'forward',
 					table: 'session'
 				},
 				operation: 'Iterate Table'
@@ -3315,6 +3328,7 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 			"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'i'
 					},
 					operation: 'Iterate Table'
@@ -3331,6 +3345,7 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 			"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'i'
 					},
 					operation: 'Iterate Table'
@@ -3390,6 +3405,7 @@ async fn select_limit_start() -> Result<(), Error> {
 			"[
 					{
 						detail: {
+							direction: 'forward',
 							table: 'item'
 						},
 						operation: 'Iterate Table'
@@ -3447,6 +3463,7 @@ async fn select_limit_start_order() -> Result<(), Error> {
 			"[
 					{
 						detail: {
+							direction: 'forward',
 							table: 'item'
 						},
 						operation: 'Iterate Table'
@@ -3490,6 +3507,7 @@ async fn select_count_group_all_with_or_without_index() -> Result<(), Error> {
 		"[
 			{
 				detail: {
+					direction: 'forward',
 					table: 'indexPerformance3'
 				},
 				operation: 'Iterate Table'

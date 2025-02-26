@@ -14,7 +14,7 @@ value = "[{ detail: { thing: person:test }, operation: 'Iterate Thing' }, { deta
 value = "[{ id: person:test, name: 'Tester' }]"
 
 [[test.results]]
-value = "[{ detail: { table: 'person' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { direction: 'forward', table: 'person' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ id: person:test, name: 'Tester' }]"

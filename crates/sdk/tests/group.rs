@@ -253,6 +253,7 @@ async fn select_aggregate() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'temperature'
 					},
 					operation: 'Iterate Table'
@@ -400,6 +401,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'test'
 					},
 					operation: 'Iterate Table'
@@ -558,6 +560,7 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'test'
 					},
 					operation: 'Iterate Table'
@@ -645,6 +648,7 @@ async fn select_array_count_subquery_group_by() -> Result<(), Error> {
 		r#"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'table'
 					},
 					operation: 'Iterate Table'
@@ -851,6 +855,7 @@ async fn select_count_group_all_permissions(
 		Some(false) => {
 			"{
 				detail: {
+					direction: 'forward',
 					table: 'table'
 				},
 				operation: 'Iterate Table'
