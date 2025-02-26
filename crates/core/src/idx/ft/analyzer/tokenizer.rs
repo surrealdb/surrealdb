@@ -197,12 +197,7 @@ impl Tokenizer {
 	}
 
 	fn should_split(&mut self, c: char) -> bool {
-		for s in &mut self.splitters {
-			if s.should_split(c) {
-				return true;
-			}
-		}
-		false
+		self.splitters.iter_mut().any(|s| s.should_split(c))
 	}
 
 	pub(super) fn tokenize(t: &[SqlTokenizer], i: String) -> Tokens {
