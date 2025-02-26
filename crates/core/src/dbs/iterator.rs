@@ -8,7 +8,9 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
-use crate::idx::planner::{IterationStage, RecordStrategy};
+use crate::idx::planner::{
+	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, StatementContext,
+};
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::mock::Mock;
@@ -151,18 +153,22 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare(&mut self, stm: &Statement<'_>, val: Value) -> Result<(), Error> {
+	pub(crate) async fn prepare(
+		&mut self,
+		stk: &mut Stk,
+		planner: &mut QueryPlanner,
+		ctx: &StatementContext<'_>,
+		val: Value,
+	) -> Result<(), Error> {
 		// Match the values
 		match val {
-			Value::Mock(v) => self.prepare_mock(stm, v)?,
-			Value::Table(v) => self.prepare_table(stm, v)?,
-			Value::Edges(v) => self.prepare_edges(stm, *v)?,
-			Value::Object(v) => self.prepare_object(stm, v)?,
-			Value::Array(v) => self.prepare_array(stm, v)?,
-			Value::Thing(v) => match v.is_range() {
-				true => self.prepare_range(stm, v, RecordStrategy::KeysAndValues)?,
-				false => self.prepare_thing(stm, v)?,
-			},
+			Value::Mock(v) => self.prepare_mock(ctx.stm, v)?,
+			Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
+			Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
+			Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
+			Value::Array(v) => self.prepare_array(stk, planner, ctx, v).await?,
+			Value::Thing(v) => self.prepare_thing(planner, ctx, v).await?,
+			v if ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
 				return Err(Error::InvalidStatementTarget {
 					value: v.to_string(),
@@ -174,15 +180,26 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_table(&mut self, stm: &Statement<'_>, v: Table) -> Result<(), Error> {
+	pub(crate) async fn prepare_table(
+		&mut self,
+		stk: &mut Stk,
+		planner: &mut QueryPlanner,
+		ctx: &StatementContext<'_>,
+		v: Table,
+	) -> Result<(), Error> {
+		// We add the iterable only if we have a permission
+		let p = planner.check_table_permission(ctx, &v).await?;
+		if matches!(p, GrantedPermission::None) {
+			return Ok(());
+		}
 		// Add the record to the iterator
-		match stm.is_deferable() {
+		match ctx.stm.is_deferable() {
 			true => self.ingest(Iterable::Yield(v)),
-			false => match stm.is_guaranteed() {
-				false => self.ingest(Iterable::Table(v, RecordStrategy::KeysAndValues)),
+			false => match ctx.stm.is_guaranteed() {
+				false => planner.add_iterables(stk, ctx, v, p, self).await?,
 				true => {
 					self.guaranteed = Some(Iterable::Yield(v.clone()));
-					self.ingest(Iterable::Table(v, RecordStrategy::KeysAndValues))
+					planner.add_iterables(stk, ctx, v, p, self).await?;
 				}
 			},
 		}
@@ -191,9 +208,21 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_thing(&mut self, stm: &Statement<'_>, v: Thing) -> Result<(), Error> {
+	pub(crate) async fn prepare_thing(
+		&mut self,
+		planner: &mut QueryPlanner,
+		ctx: &StatementContext<'_>,
+		v: Thing,
+	) -> Result<(), Error> {
+		if v.is_range() {
+			return self.prepare_range(planner, ctx, v).await;
+		}
+		// We add the iterable only if we have a permission
+		if matches!(planner.check_table_permission(ctx, &v.tb).await?, GrantedPermission::None) {
+			return Ok(());
+		}
 		// Add the record to the iterator
-		match stm.is_deferable() {
+		match ctx.stm.is_deferable() {
 			true => self.ingest(Iterable::Defer(v)),
 			false => self.ingest(Iterable::Thing(v)),
 		}
@@ -203,6 +232,9 @@ impl Iterator {
 
 	/// Prepares a value for processing
 	pub(crate) fn prepare_mock(&mut self, stm: &Statement<'_>, v: Mock) -> Result<(), Error> {
+		if stm.is_only() && !self.is_limit_one_or_zero() {
+			return Err(Error::SingleOnlyOutput);
+		}
 		// Add the records to the iterator
 		for v in v {
 			match stm.is_deferable() {
@@ -216,6 +248,9 @@ impl Iterator {
 
 	/// Prepares a value for processing
 	pub(crate) fn prepare_edges(&mut self, stm: &Statement<'_>, v: Edges) -> Result<(), Error> {
+		if stm.is_only() && !self.is_limit_one_or_zero() {
+			return Err(Error::SingleOnlyOutput);
+		}
 		// Check if this is a create statement
 		if stm.is_create() {
 			return Err(Error::InvalidStatementTarget {
@@ -229,18 +264,25 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_range(
+	pub(crate) async fn prepare_range(
 		&mut self,
-		stm: &Statement<'_>,
+		planner: &mut QueryPlanner,
+		ctx: &StatementContext<'_>,
 		v: Thing,
-		rs: RecordStrategy,
 	) -> Result<(), Error> {
+		// We add the iterable only if we have a permission
+		let p = planner.check_table_permission(ctx, &v.tb).await?;
+		if matches!(p, GrantedPermission::None) {
+			return Ok(());
+		}
 		// Check if this is a create statement
-		if stm.is_create() {
+		if ctx.stm.is_create() {
 			return Err(Error::InvalidStatementTarget {
 				value: v.to_string(),
 			});
 		}
+		// Evaluate if we can only scan keys (rather than keys AND values), or count
+		let rs = ctx.check_record_strategy(false, p).await?;
 		// Add the record to the iterator
 		if let (tb, Id::Range(v)) = (v.tb, v.id) {
 			self.ingest(Iterable::Range(tb, *v, rs));
@@ -270,18 +312,25 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_array(&mut self, stm: &Statement<'_>, v: Array) -> Result<(), Error> {
+	pub(crate) async fn prepare_array(
+		&mut self,
+		stk: &mut Stk,
+		planner: &mut QueryPlanner,
+		ctx: &StatementContext<'_>,
+		v: Array,
+	) -> Result<(), Error> {
+		if ctx.stm.is_only() && !self.is_limit_one_or_zero() {
+			return Err(Error::SingleOnlyOutput);
+		}
 		// Add the records to the iterator
 		for v in v {
 			match v {
-				Value::Mock(v) => self.prepare_mock(stm, v)?,
-				Value::Table(v) => self.prepare_table(stm, v)?,
-				Value::Edges(v) => self.prepare_edges(stm, *v)?,
-				Value::Object(v) => self.prepare_object(stm, v)?,
-				Value::Thing(v) => match v.is_range() {
-					true => self.prepare_range(stm, v, RecordStrategy::KeysAndValues)?,
-					false => self.prepare_thing(stm, v)?,
-				},
+				Value::Mock(v) => self.prepare_mock(ctx.stm, v)?,
+				Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
+				Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
+				Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
+				Value::Thing(v) => self.prepare_thing(planner, ctx, v).await?,
+				_ if ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 				_ => {
 					return Err(Error::InvalidStatementTarget {
 						value: v.to_string(),
@@ -402,13 +451,18 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Option<u32>, Error> {
+	) -> Result<(), Error> {
 		if self.limit.is_none() {
 			if let Some(v) = stm.limit() {
 				self.limit = Some(v.process(stk, ctx, opt, None).await?);
 			}
 		}
-		Ok(self.limit)
+		Ok(())
+	}
+
+	#[inline]
+	pub(crate) fn is_limit_one_or_zero(&self) -> bool {
+		self.limit.map(|v| v <= 1).unwrap_or(false)
 	}
 
 	#[inline]
@@ -461,11 +515,7 @@ impl Iterator {
 	) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {
-				if let Some(s) = self.start {
-					self.cancel_on_limit = Some(l + s);
-				} else {
-					self.cancel_on_limit = Some(l);
-				}
+				self.cancel_on_limit = Some(l);
 			}
 			// Check if we can skip processing the document below "start".
 			if let Some(false) = is_specific_permission {

@@ -389,6 +389,14 @@ impl Number {
 		}
 	}
 
+	pub fn checked_abs(self) -> Option<Self> {
+		match self {
+			Number::Int(v) => v.checked_abs().map(|x| x.into()),
+			Number::Float(v) => Some(v.abs().into()),
+			Number::Decimal(v) => Some(v.abs().into()),
+		}
+	}
+
 	pub fn acos(self) -> Self {
 		self.to_float().acos().into()
 	}

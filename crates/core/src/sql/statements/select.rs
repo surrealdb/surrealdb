@@ -1,8 +1,8 @@
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::{Iterable, Iterator, Options, Statement};
+use crate::ctx::Context;
+use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::{GrantedPermission, QueryPlanner, RecordStrategy, StatementContext};
+use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::{
 	order::{OldOrders, Order, OrderList, Ordering},
 	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
@@ -114,113 +114,24 @@ impl SelectStatement {
 			_ => None,
 		};
 		let opt = Arc::new(opt.new_with_futures(false).with_version(version));
-		// Extract the limit
-		let limit = i.setup_limit(stk, ctx, &opt, &stm).await?;
-		// Used for ONLY: is the limit 1?
-		let limit_is_one_or_zero = match limit {
-			Some(l) => l <= 1,
-			_ => false,
-		};
+		// Extract the limits
+		i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Fail for multiple targets without a limit
-		if self.only && !limit_is_one_or_zero && self.what.0.len() > 1 {
+		if self.only && !i.is_limit_one_or_zero() && self.what.0.len() > 1 {
 			return Err(Error::SingleOnlyOutput);
 		}
 		// Check if there is a timeout
-		let ctx = match self.timeout.as_ref() {
-			Some(timeout) => {
-				let mut ctx = MutableContext::new(ctx);
-				ctx.add_timeout(*timeout.0)?;
-				ctx.freeze()
-			}
-			None => ctx.clone(),
-		};
+		let ctx = stm.setup_timeout(ctx)?;
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
 		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, &opt, doc).await?;
-			match v {
-				Value::Thing(v) => {
-					let p = planner.check_table_permission(&stm_ctx, &v.tb).await?;
-					// We prepare it only if wer have a permission
-					if !matches!(p, GrantedPermission::None) {
-						match v.is_range() {
-							true => {
-								// Evaluate if we can only scan keys (rather than keys AND values), or count
-								let rs = stm_ctx.check_record_strategy(false, p).await?;
-								i.prepare_range(&stm, v, rs)?
-							}
-							false => i.prepare_thing(&stm, v)?,
-						}
-					}
-				}
-				Value::Edges(v) => {
-					if self.only && !limit_is_one_or_zero {
-						return Err(Error::SingleOnlyOutput);
-					}
-					i.prepare_edges(&stm, *v)?;
-				}
-				Value::Mock(v) => {
-					if self.only && !limit_is_one_or_zero {
-						return Err(Error::SingleOnlyOutput);
-					}
-					i.prepare_mock(&stm, v)?;
-				}
-				Value::Table(t) => {
-					if self.only && !limit_is_one_or_zero {
-						return Err(Error::SingleOnlyOutput);
-					}
-					let p = planner.check_table_permission(&stm_ctx, &t).await?;
-					// We add the iterable only if we have a permission
-					if !matches!(p, GrantedPermission::None) {
-						planner.add_iterables(stk, &stm_ctx, t, p, &mut i).await?;
-					}
-				}
-				Value::Array(v) => {
-					if self.only && !limit_is_one_or_zero {
-						return Err(Error::SingleOnlyOutput);
-					}
-					for v in v {
-						match v {
-							Value::Table(t) => {
-								let p = planner.check_table_permission(&stm_ctx, &t).await?;
-								// We add the iterable only if we have a permission
-								if !matches!(p, GrantedPermission::None) {
-									planner.add_iterables(stk, &stm_ctx, t, p, &mut i).await?;
-								}
-							}
-							Value::Mock(v) => i.prepare_mock(&stm, v)?,
-							Value::Edges(v) => i.prepare_edges(&stm, *v)?,
-							Value::Thing(v) => {
-								let p = planner.check_table_permission(&stm_ctx, &v.tb).await?;
-								// We prepare it only if wer have a permission
-								if !matches!(p, GrantedPermission::None) {
-									match v.is_range() {
-										true => {
-											// Evaluate if we can only scan keys (rather than keys AND values) or just count
-											let rs =
-												stm_ctx.check_record_strategy(false, p).await?;
-											i.prepare_range(&stm, v, rs)?
-										}
-										false => i.prepare_thing(&stm, v)?,
-									}
-								}
-							}
-							_ => i.ingest(Iterable::Value(v)),
-						}
-					}
-				}
-				v => i.ingest(Iterable::Value(v)),
-			};
+			i.prepare(stk, &mut planner, &stm_ctx, v).await?;
 		}
-		// Create a new context
-		let mut ctx = MutableContext::new(&ctx);
-		// Add query executors if any
-		if planner.has_executors() {
-			ctx.set_query_planner(planner);
-		}
-		let ctx = ctx.freeze();
+		// Attach the query planner to the context
+		let ctx = stm.setup_query_planner(planner, ctx);
 		// Process the statement
 		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout

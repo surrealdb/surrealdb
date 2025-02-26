@@ -3,7 +3,7 @@
 use reblessive::Stk;
 
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
-use crate::sql::Fetch;
+use crate::sql::{Explain, Fetch, With};
 use crate::syn::error::bail;
 use crate::{
 	sql::{
@@ -530,5 +530,31 @@ impl Parser<'_> {
 			name.0.push_str(part.0.as_str());
 		}
 		Ok(name)
+	}
+	pub(super) fn try_parse_explain(&mut self) -> ParseResult<Option<Explain>> {
+		Ok(self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL")))))
+	}
+
+	pub(super) fn try_parse_with(&mut self) -> ParseResult<Option<With>> {
+		if !self.eat(t!("WITH")) {
+			return Ok(None);
+		}
+		let next = self.next();
+		let with = match next.kind {
+			t!("NOINDEX") => With::NoIndex,
+			t!("NO") => {
+				expected!(self, t!("INDEX"));
+				With::NoIndex
+			}
+			t!("INDEX") => {
+				let mut index = vec![self.next_token_value::<Ident>()?.0];
+				while self.eat(t!(",")) {
+					index.push(self.next_token_value::<Ident>()?.0);
+				}
+				With::Index(index)
+			}
+			_ => unexpected!(self, next, "`NO`, `NOINDEX` or `INDEX`"),
+		};
+		Ok(Some(with))
 	}
 }

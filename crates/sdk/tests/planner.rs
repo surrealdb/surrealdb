@@ -2813,7 +2813,7 @@ async fn select_with_non_boolean_expression() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_from_standard_index_ascending() -> Result<(), Error> {
+async fn select_from_standard_index() -> Result<(), Error> {
 	//
 	let sql = "
 		DEFINE INDEX time ON TABLE session COLUMNS time;
@@ -2827,8 +2827,13 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 		SELECT * FROM session ORDER BY time ASC LIMIT 4;
 		SELECT * FROM session ORDER BY time ASC EXPLAIN;
 		SELECT * FROM session ORDER BY time ASC;
+		SELECT * FROM session ORDER BY time DESC LIMIT 4 EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC LIMIT 4;
+		SELECT * FROM session ORDER BY time DESC EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC;
 	";
 	let mut t = Test::new(sql).await?;
+	t.expect_size(15)?;
 	t.skip_ok(7)?;
 	//
 	t.expect_vals(&[
@@ -2913,13 +2918,86 @@ async fn select_from_standard_index_ascending() -> Result<(), Error> {
 				time: d'2024-07-01T02:00:00Z'
 			}
 		]",
+		"[
+			{
+				detail: {
+					table: 'session'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					limit: 4,
+					type: 'MemoryOrderedLimit'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			}
+		]",
+		"[
+			{
+				detail: {
+					table: 'session'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'MemoryOrdered'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			},
+			{
+				id: session:4,
+				time: NULL
+			},
+			{
+				id: session:3,
+				other: 'test'
+			}
+		]",
 	])?;
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn select_from_unique_index_ascending() -> Result<(), Error> {
+async fn select_from_unique_index() -> Result<(), Error> {
 	//
 	let sql = "
 		DEFINE INDEX time ON TABLE session COLUMNS time UNIQUE;
@@ -2933,203 +3011,85 @@ async fn select_from_unique_index_ascending() -> Result<(), Error> {
 		SELECT * FROM session ORDER BY time ASC LIMIT 3;
 		SELECT * FROM session ORDER BY time ASC EXPLAIN;
 		SELECT * FROM session ORDER BY time ASC;
-	";
-	let mut t = Test::new(sql).await?;
-	t.skip_ok(7)?;
-	//
-	t.expect_vals(&[
-		"[
-			{
-				detail: {
-					plan: {
-						index: 'time',
-						operator: 'Order'
-					},
-					table: 'session'
-				},
-				operation: 'Iterate Index'
-			},
-			{
-				detail: {
-					limit: 3,
-					type: 'MemoryOrderedLimit'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			}
-		]",
-		"[
-			{
-				detail: {
-					plan: {
-						index: 'time',
-						operator: 'Order'
-					},
-					table: 'session'
-				},
-				operation: 'Iterate Index'
-			},
-			{
-				detail: {
-					type: 'MemoryOrdered'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			}
-		]",
-	])?;
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn select_from_standard_index_descending() -> Result<(), Error> {
-	//
-	let sql = "
-		DEFINE INDEX time ON TABLE session COLUMNS time;
-		CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
-		CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
-		CREATE session:3 SET other = 'test';
-		CREATE session:4 SET time = null;
-		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
-		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
-		SELECT * FROM session ORDER BY time DESC LIMIT 4 EXPLAIN;
-		SELECT * FROM session ORDER BY time DESC LIMIT 4;
-		SELECT * FROM session ORDER BY time DESC EXPLAIN;
-		SELECT * FROM session ORDER BY time DESC;
-	";
-	let mut t = Test::new(sql).await?;
-	t.skip_ok(7)?;
-	//
-	t.expect_vals(&[
-		"[
-			{
-				detail: {
-					table: 'session'
-				},
-				operation: 'Iterate Table'
-			},
-			{
-				detail: {
-					limit: 4,
-					type: 'MemoryOrderedLimit'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			}
-		]",
-		"[
-			{
-				detail: {
-					table: 'session'
-				},
-				operation: 'Iterate Table'
-			},
-			{
-				detail: {
-					type: 'MemoryOrdered'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
-				id: session:4,
-				time: NULL
-			},
-			{
-				id: session:3,
-				other: 'test'
-			}
-		]",
-	])?;
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn select_from_unique_index_descending() -> Result<(), Error> {
-	//
-	let sql = "
-		DEFINE INDEX time ON TABLE session COLUMNS time UNIQUE;
-		CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
-		CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
-		CREATE session:3 SET other = 'test';
-		CREATE session:4 SET time = null;
-		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
-		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
 		SELECT * FROM session ORDER BY time DESC LIMIT 3 EXPLAIN;
 		SELECT * FROM session ORDER BY time DESC LIMIT 3;
 		SELECT * FROM session ORDER BY time DESC EXPLAIN;
 		SELECT * FROM session ORDER BY time DESC;
 	";
 	let mut t = Test::new(sql).await?;
+	t.expect_size(15)?;
 	t.skip_ok(7)?;
 	//
 	t.expect_vals(&[
+		"[
+			{
+				detail: {
+					plan: {
+						index: 'time',
+						operator: 'Order'
+					},
+					table: 'session'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					limit: 3,
+					type: 'MemoryOrderedLimit'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			}
+		]",
+		"[
+			{
+				detail: {
+					plan: {
+						index: 'time',
+						operator: 'Order'
+					},
+					table: 'session'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'MemoryOrdered'
+				},
+				operation: 'Collector'
+			}
+		]",
+		"[
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			},
+			{
+				id: session:1,
+				time: d'2024-07-01T01:00:00Z'
+			},
+			{
+				id: session:5,
+				time: d'2024-07-01T02:00:00Z'
+			}
+		]",
 		"[
 			{
 				detail: {
@@ -3159,7 +3119,7 @@ async fn select_from_unique_index_descending() -> Result<(), Error> {
 				time: d'2024-06-30T23:30:00Z'
 			}
 		]",
-		"[
+		" [
 			{
 				detail: {
 					table: 'session'
@@ -3448,7 +3408,7 @@ async fn select_limit_start() -> Result<(), Error> {
 					},
 					{
 						detail: {
-							CancelOnLimit: 12,
+							CancelOnLimit: 10,
 							SkipStart: 2
 						},
 						operation: 'StartLimitStrategy'
