@@ -4,6 +4,7 @@ use crate::sql::{Bytes, Object, Strand, Value};
 use crate::syn;
 
 use reqwest::header::CONTENT_TYPE;
+#[cfg(not(target_family = "wasm"))]
 use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
 use url::Url;
@@ -67,17 +68,20 @@ async fn request(
 	// Set a default client with no timeout
 	let count = *crate::cnf::MAX_HTTP_REDIRECTS;
 	let ctx_clone = ctx.clone();
-	let cli = Client::builder()
-		.redirect(Policy::custom(move |attempt| {
-			if let Err(e) = ctx_clone.check_allowed_net(attempt.url()) {
-				return attempt.error(e);
-			}
-			if attempt.previous().len() >= count {
-				return attempt.stop();
-			}
-			return attempt.follow();
-		}))
-		.build()?;
+	let builder = Client::builder();
+
+	#[cfg(not(target_family = "wasm"))]
+	let builder = builder.redirect(Policy::custom(move |attempt| {
+		if let Err(e) = ctx_clone.check_allowed_net(attempt.url()) {
+			return attempt.error(e);
+		}
+		if attempt.previous().len() >= count {
+			return attempt.stop();
+		}
+		attempt.follow()
+	}));
+
+	let cli = builder.build()?;
 	let is_head = matches!(method, Method::HEAD);
 	// Start a new HEAD request
 	let mut req = cli.request(method.clone(), url);

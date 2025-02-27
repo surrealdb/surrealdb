@@ -34,7 +34,6 @@ pub async fn fetch<'js>(
 	let query_ctx = if let Some(query_ctx) = ctx.userdata::<QueryContext<'js>>() {
 		query_ctx.context.clone()
 	} else {
-		#[cfg(debug_assertions)]
 		panic!("Trying to fetch a URL but no QueryContext is present. QueryContext is required for checking if the URL is allowed to be fetched.")
 	};
 
