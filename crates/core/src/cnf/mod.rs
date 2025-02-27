@@ -70,11 +70,8 @@ pub static SCRIPTING_MAX_MEMORY_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SCRIPTING_MAX_MEMORY_LIMIT", usize, 2 << 20);
 
 /// Used to limit allocation for builtin functions
-pub static SCRIPTING_MAX_TIME_LIMIT: LazyLock<usize> = LazyLock::new(|| {
-	std::env::var("SURREAL_SCRIPTING_MAX_TIME_LMIT")
-		.map(|s| s.parse::<usize>().unwrap_or(1000 * 5))
-		.unwrap_or(1000 * 5)
-});
+pub static SCRIPTING_MAX_TIME_LIMIT: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_SCRIPTING_MAX_TIME_LIMIT", usize, 1000 * 5);
 
 /// Forward all signup/signin/authenticate query errors to a client performing authentication. Do not use in production.
 pub static INSECURE_FORWARD_ACCESS_ERRORS: LazyLock<bool> =
