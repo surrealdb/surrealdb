@@ -863,7 +863,7 @@ mod tests {
 						)),
 				),
 				Session::owner(),
-				format!("RETURN http::get('{}')", format!("{}/redirect", server3.uri())),
+				format!("RETURN http::get('{}/redirect')", server3.uri()),
 				false,
 				format!("here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",server3.uri()),
 			),

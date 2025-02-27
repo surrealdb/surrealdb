@@ -66,20 +66,22 @@ async fn request(
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
 	ctx.check_allowed_net(&url)?;
 	// Set a default client with no timeout
-	let count = *crate::cnf::MAX_HTTP_REDIRECTS;
-	let ctx_clone = ctx.clone();
 	let builder = Client::builder();
 
 	#[cfg(not(target_family = "wasm"))]
-	let builder = builder.redirect(Policy::custom(move |attempt| {
-		if let Err(e) = ctx_clone.check_allowed_net(attempt.url()) {
-			return attempt.error(e);
-		}
-		if attempt.previous().len() >= count {
-			return attempt.stop();
-		}
-		attempt.follow()
-	}));
+	let builder = {
+		let count = *crate::cnf::MAX_HTTP_REDIRECTS;
+		let ctx_clone = ctx.clone();
+		builder.redirect(Policy::custom(move |attempt| {
+			if let Err(e) = ctx_clone.check_allowed_net(attempt.url()) {
+				return attempt.error(e);
+			}
+			if attempt.previous().len() >= count {
+				return attempt.stop();
+			}
+			attempt.follow()
+		}))
+	};
 
 	let cli = builder.build()?;
 	let is_head = matches!(method, Method::HEAD);
