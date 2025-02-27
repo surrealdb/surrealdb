@@ -655,6 +655,52 @@ impl super::api::Transaction for Transaction {
 		Ok(res)
 	}
 
+	/// Count the total number of keys within a range.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn count<K>(&mut self, rng: Range<K>) -> Result<usize, Error>
+	where
+		K: KeyEncode + Sprintable + Debug,
+	{
+		let rng = self.prepare_scan(rng, None).await?;
+		// Execute on the blocking threadpool
+		let count = affinitypool::spawn_local(move || {
+			// Create result count
+			let mut count = 0;
+			// Set the key range
+			let beg = rng.start.as_slice();
+			let end = rng.end.as_slice();
+			// Set the ReadOptions with the snapshot
+			let mut ro = ReadOptions::default();
+			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
+			ro.set_iterate_lower_bound(beg);
+			ro.set_iterate_upper_bound(end);
+			ro.set_async_io(true);
+			ro.fill_cache(true);
+			// Create the iterator
+			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
+			// Seek to the start key
+			iter.seek(&rng.start);
+			// Check the scan limit
+			while let Some(k) = iter.key() {
+				// Check the range validity
+				if k >= beg && k < end {
+					count += 1;
+					iter.next();
+					continue;
+				}
+				// Exit
+				break;
+			}
+			// Drop the iterator
+			drop(iter);
+			// Return result
+			count
+		})
+		.await;
+		// Return result
+		Ok(count)
+	}
+
 	/// Retrieve a range of keys from the databases
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan<K>(

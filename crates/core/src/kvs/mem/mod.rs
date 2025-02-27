@@ -424,6 +424,25 @@ impl super::api::Transaction for Transaction {
 		Ok(res)
 	}
 
+	/// Count the total number of keys within a range.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn count<K>(&mut self, rng: Range<K>) -> Result<usize, Error>
+	where
+		K: KeyEncode + Sprintable + Debug,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Set the key range
+		let beg = rng.start.encode_owned()?;
+		let end = rng.end.encode_owned()?;
+		// Retrieve the scan range count
+		let count = self.inner.keys(beg.as_slice()..end.as_slice(), None).count();
+		// Return result
+		Ok(count)
+	}
+
 	/// Retrieves a range of key-value pairs from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan<K>(
