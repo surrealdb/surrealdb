@@ -1,3 +1,5 @@
+use crate::iam::file::extract_allowed_paths;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 /// The characters which are supported in server record IDs.
@@ -93,7 +95,7 @@ pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 		.unwrap_or(256)
 });
 
-pub static MEMORY_THRESHOLD: LazyLock<usize> = std::sync::LazyLock::new(|| {
+pub static MEMORY_THRESHOLD: LazyLock<usize> = LazyLock::new(|| {
 	std::env::var("SURREAL_MEMORY_THRESHOLD")
 		.map(|input| {
 			// Trim the input of any spaces
@@ -123,4 +125,11 @@ pub static MEMORY_THRESHOLD: LazyLock<usize> = std::sync::LazyLock::new(|| {
 			bytes
 		})
 		.unwrap_or(0)
+});
+
+/// Used to limit file access
+pub static FILE_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
+	std::env::var("SURREAL_FILE_ALLOWLIST")
+		.map(|input| extract_allowed_paths(&input))
+		.unwrap_or_default()
 });
