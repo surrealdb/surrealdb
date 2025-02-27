@@ -1,7 +1,5 @@
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
-use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
-};
+use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
 use crate::err::Error;
 use clap::Args;
 use futures_util::StreamExt;
@@ -10,6 +8,15 @@ use surrealdb::kvs::export::TableConfig;
 use surrealdb::method::{Export, ExportConfig};
 use surrealdb::Connection;
 use tokio::io::{self, AsyncWriteExt};
+
+#[derive(Args, Debug)]
+pub struct DatabaseConnectionArguments {
+	#[arg(help = "Database endpoint to export from")]
+	#[arg(short = 'e', long = "endpoint", visible_aliases = ["conn"])]
+	#[arg(default_value = "http://localhost:8000")]
+	#[arg(value_parser = super::validator::endpoint_valid)]
+	pub(crate) endpoint: String,
+}
 
 #[derive(Args, Debug)]
 struct ExportConfigArguments {
