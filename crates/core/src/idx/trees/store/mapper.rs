@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::iam::file::is_path_allowed;
 use crate::idx::ft::analyzer::mapper::Mapper;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::Filter;
@@ -39,6 +40,8 @@ impl Mappers {
 
 	async fn insert(&self, path: &str) -> Result<(), Error> {
 		let p = Path::new(path);
+		// Check the path is allowed
+		is_path_allowed(p)?;
 		if !p.exists() || !p.is_file() {
 			return Err(Error::Internal(format!("Invalid mapper path: {p:?}")));
 		}
