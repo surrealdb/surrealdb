@@ -1226,6 +1226,9 @@ pub enum Error {
 	InvalidVersion {
 		found: Value,
 	},
+
+	#[error("File access denied: {0}")]
+	FileAccessDenied(String),
 }
 
 impl From<Error> for String {

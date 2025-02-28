@@ -1,3 +1,5 @@
+use crate::iam::file::extract_allowed_paths;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 /// The characters which are supported in server record IDs.
@@ -13,7 +15,7 @@ pub const SERVER_NAME: &str = "SurrealDB";
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
 /// Specifies how many concurrent jobs can be buffered in the worker channel.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 pub static MAX_CONCURRENT_TASKS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_MAX_CONCURRENT_TASKS", usize, 64);
 
@@ -109,4 +111,11 @@ pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 	std::env::var("SURREAL_IDIOM_RECURSION_LIMIT")
 		.map(|s| s.parse::<usize>().unwrap_or(256))
 		.unwrap_or(256)
+});
+
+/// Used to limit file access
+pub static FILE_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
+	std::env::var("SURREAL_FILE_ALLOWLIST")
+		.map(|input| extract_allowed_paths(&input))
+		.unwrap_or_default()
 });

@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::iam::file::is_path_allowed;
 use crate::idx::ft::analyzer::filter::{FilterResult, Term};
 #[cfg(target_arch = "wasm32")]
 use std::fs::File;
@@ -13,6 +14,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use vart::art::Tree;
 use vart::VariableSizeKey;
+
 #[derive(Clone, Default)]
 pub(in crate::idx) struct Mapper {
 	terms: Arc<Tree<VariableSizeKey, String>>,
@@ -21,7 +23,8 @@ pub(in crate::idx) struct Mapper {
 impl Mapper {
 	pub(in crate::idx) async fn new(path: &Path) -> Result<Self, Error> {
 		let mut terms = Tree::new();
-		Self::iterate_file(&mut terms, path).await?;
+		let path = is_path_allowed(path)?;
+		Self::iterate_file(&mut terms, &path).await?;
 		Ok(Self {
 			terms: Arc::new(terms),
 		})
