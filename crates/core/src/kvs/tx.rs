@@ -8,6 +8,7 @@ use super::Version;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
+use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
@@ -420,8 +421,9 @@ impl Transaction {
 		rng: Range<Vec<u8>>,
 		version: Option<u64>,
 		limit: Option<usize>,
+		sc: ScanDirection,
 	) -> impl Stream<Item = Result<(Key, Val), Error>> + '_ {
-		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version, limit)
+		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version, limit, sc)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
@@ -429,8 +431,9 @@ impl Transaction {
 		&self,
 		rng: Range<Vec<u8>>,
 		limit: Option<usize>,
+		sc: ScanDirection,
 	) -> impl Stream<Item = Result<Key, Error>> + '_ {
-		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, limit)
+		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, limit, sc)
 	}
 
 	// --------------------------------------------------

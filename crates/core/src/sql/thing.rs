@@ -4,6 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode as _;
 use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
@@ -168,7 +169,7 @@ impl Thing {
 
 		let range = prefix?..suffix?;
 		let txn = ctx.tx();
-		let mut stream = txn.stream_keys(range, None);
+		let mut stream = txn.stream_keys(range, None, ScanDirection::Forward);
 
 		// Collect the keys from the stream into a vec
 		let mut keys: Vec<Vec<u8>> = vec![];

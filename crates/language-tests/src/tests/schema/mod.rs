@@ -8,7 +8,7 @@ use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use surrealdb_core::{
 	dbs::capabilities::{ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget},
-	sql::Value as CoreValue,
+	sql::{Thing, Value as CoreValue},
 	syn,
 };
 
@@ -24,16 +24,6 @@ pub struct TestConfig {
 }
 
 impl TestConfig {
-	/// Returns the namespace if the environement specifies one, none otherwise
-	pub fn namespace(&self) -> Option<&str> {
-		self.env.as_ref().map(|x| x.namespace()).unwrap_or(Some("test"))
-	}
-
-	/// Returns the namespace if the environement specifies one, none otherwise
-	pub fn database(&self) -> Option<&str> {
-		self.env.as_ref().map(|x| x.database()).unwrap_or(Some("test"))
-	}
-
 	/// Returns true if the test should be run.
 	/// returns false if the test is configured to be skipped.
 	pub fn should_run(&self) -> bool {
@@ -86,8 +76,15 @@ pub struct TestEnv {
 	pub sequential: bool,
 	#[serde(default)]
 	pub clean: bool,
+
+	#[serde(default)]
+	pub auth: bool,
+
 	pub namespace: Option<BoolOr<String>>,
 	pub database: Option<BoolOr<String>>,
+
+	pub login: Option<TestLogin>,
+
 	pub imports: Option<Vec<Utf8PathBuf>>,
 	pub timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
@@ -307,6 +304,82 @@ impl<'de> Deserialize<'de> for SurrealValue {
 		bytes_hack::compute_bytes_inplace(&mut v);
 		Ok(SurrealValue(v))
 	}
+}
+
+#[derive(Clone, Debug)]
+pub struct SurrealRecordId(pub Thing);
+
+impl Serialize for SurrealRecordId {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		let v = self.0.to_string();
+		v.serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for SurrealRecordId {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		let source = String::deserialize(deserializer)?;
+		let v = syn::value(&source).map_err(<D::Error as serde::de::Error>::custom)?;
+		if let CoreValue::Thing(x) = v {
+			Ok(SurrealRecordId(x))
+		} else {
+			Err(<D::Error as serde::de::Error>::custom(format_args!(
+				"Expected a record-id, found '{source}'"
+			)))
+		}
+	}
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+#[serde(rename_all = "kebab-case")]
+pub enum TestLogin {
+	Leveled(TestLeveledLogin),
+	Record(TestRecordLogin),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TestLeveledLogin {
+	pub level: TestLevel,
+	pub role: Option<TestRole>,
+
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TestRole {
+	Viewer,
+	Editor,
+	Owner,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TestLevel {
+	Root,
+	Namespace,
+	Database,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TestRecordLogin {
+	pub access: String,
+	pub rid: SurrealRecordId,
+
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

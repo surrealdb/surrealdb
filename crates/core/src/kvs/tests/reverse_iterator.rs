@@ -33,7 +33,10 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 
 fn check(r: &mut Vec<Response>, tmp: &str) {
 	let tmp = Value::parse(tmp);
-	let val = r.remove(0).result.unwrap();
+	let val = match r.remove(0).result {
+		Ok(v) => v,
+		Err(err) => panic!("{err}"),
+	};
 	assert_eq!(format!("{val:#}"), format!("{tmp:#}"));
 }
 
@@ -145,6 +148,53 @@ pub async fn unique(new_ds: impl CreateDs) {
 	check_array_is_sorted(&r.remove(0).result.unwrap(), 1500);
 }
 
+pub async fn range(new_ds: impl CreateDs) {
+	// Create a new datastore
+	let node_id = Uuid::parse_str("056804f2-b379-4397-9ceb-af8ebd527beb").unwrap();
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
+	let (ds, _) = new_ds.create_ds(node_id, clock).await;
+
+	// Run the test
+	let sql = "
+		USE NS test; USE DB test;
+		FOR $i IN 1..1500 { CREATE t:[$i]; };
+		SELECT * FROM t:[500]..=[550] ORDER BY id DESC LIMIT 3;
+		SELECT * FROM t:[500]..[550] ORDER BY id DESC LIMIT 3;
+		SELECT * FROM t:[500]..=[550] ORDER BY id DESC LIMIT 3 EXPLAIN;
+	";
+	let mut r = ds.execute(sql, &Session::owner(), None).await.unwrap();
+	//Check the result
+	for _ in 0..3 {
+		check(&mut r, "NONE");
+	}
+	check(&mut r, "[{ id: t:[550]},{ id: t:[549] },{ id: t:[548] }]");
+	check(&mut r, "[{ id: t:[549]},{ id: t:[548] },{ id: t:[547] }]");
+	check(
+		&mut r,
+		"[
+				{
+					detail: {
+						direction: 'backward',
+						range: [
+							500
+						]..=[
+							550
+						],
+						table: 't'
+					},
+					operation: 'Iterate Range'
+				},
+				{
+					detail: {
+						limit: 3,
+						type: 'MemoryOrderedLimit'
+					},
+					operation: 'Collector'
+				}
+			]",
+	);
+}
+
 macro_rules! define_tests {
 	($new_ds:ident) => {
 		#[tokio::test]
@@ -156,6 +206,11 @@ macro_rules! define_tests {
 		#[serial_test::serial]
 		async fn reverse_iterator_unique() {
 			super::reverse_iterator::unique($new_ds).await;
+		}
+		#[tokio::test]
+		#[serial_test::serial]
+		async fn reverse_iterator_range() {
+			super::reverse_iterator::range($new_ds).await;
 		}
 	};
 }
