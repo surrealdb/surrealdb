@@ -17,7 +17,7 @@ use crate::idx::planner::iterators::{
 	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
 	UniqueUnionThingIterator, ValueType,
 };
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 use crate::idx::planner::iterators::{
 	IndexRangeReverseThingIterator, UniqueRangeReverseThingIterator,
 };
@@ -394,7 +394,11 @@ impl QueryExecutor {
 			}
 			IndexOperator::Order(reverse) => {
 				if *reverse {
-					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+					#[cfg(any(
+						feature = "kv-rocksdb",
+						feature = "kv-tikv",
+						feature = "kv-surrealkv"
+					))]
 					{
 						Some(ThingIterator::IndexRangeReverse(
 							IndexRangeReverseThingIterator::full_range(
@@ -405,7 +409,11 @@ impl QueryExecutor {
 							)?,
 						))
 					}
-					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
+					#[cfg(not(any(
+						feature = "kv-rocksdb",
+						feature = "kv-tikv",
+						feature = "kv-surrealkv"
+					)))]
 					None
 				} else {
 					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
@@ -853,7 +861,11 @@ impl QueryExecutor {
 			}
 			IndexOperator::Order(reverse) => {
 				if *reverse {
-					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+					#[cfg(any(
+						feature = "kv-rocksdb",
+						feature = "kv-tikv",
+						feature = "kv-surrealkv"
+					))]
 					{
 						Some(ThingIterator::UniqueRangeReverse(
 							UniqueRangeReverseThingIterator::full_range(
@@ -864,7 +876,11 @@ impl QueryExecutor {
 							)?,
 						))
 					}
-					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
+					#[cfg(not(any(
+						feature = "kv-rocksdb",
+						feature = "kv-tikv",
+						feature = "kv-surrealkv"
+					)))]
 					None
 				} else {
 					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
