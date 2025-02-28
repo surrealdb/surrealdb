@@ -36,7 +36,7 @@ http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
 allocator = ["dep:jemallocator", "dep:mimalloc"]
-arbitrary = ["dep:arbitrary", "dep:regex-syntax","regex-syntax/arbitrary", "rust_decimal/rust-fuzz", "geo-types/arbitrary", "uuid/arbitrary"]
+arbitrary = ["dep:arbitrary", "dep:regex-syntax", "regex-syntax/arbitrary", "rust_decimal/rust-fuzz", "geo-types/arbitrary", "uuid/arbitrary"]
 allocation-tracking = []
 # Special features
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
@@ -57,7 +57,7 @@ surrealml = { workspace = true, optional = true }
 affinitypool = { workspace = true, optional = true }
 #derive.workspace = true
 dmp.workspace = true
-indxdb = { workspace = true, optional = true}
+indxdb = { workspace = true, optional = true }
 js = { workspace = true, features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties", "rust-alloc"], optional = true }
 lexicmp.workspace = true
 reblessive = { workspace = true, features = ["tree"] }
@@ -94,7 +94,7 @@ deunicode.workspace = true
 fst.workspace = true
 futures.workspace = true
 fuzzy-matcher.workspace = true
-geo = { workspace = true, features = ["use-serde"]}
+geo = { workspace = true, features = ["use-serde"] }
 geo-types = { workspace = true }
 http.workspace = true
 hex.workspace = true
@@ -113,7 +113,7 @@ pbkdf2 = { workspace = true, features = ["simple"] }
 phf = { workspace = true, features = ["macros", "unicase"] }
 pin-project-lite.workspace = true
 quick_cache.workspace = true
-radix_trie = { workspace = true, features = ["serde"]}
+radix_trie = { workspace = true, features = ["serde"] }
 rand.workspace = true
 rayon.workspace = true
 regex.workspace = true
@@ -122,7 +122,7 @@ roaring = { workspace = true, features = ["serde"] }
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 rust-stemmers.workspace = true
 scrypt.workspace = true
-semver = { workspace = true, features = ["serde"]}
+semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha1.workspace = true
@@ -150,7 +150,7 @@ tempfile = { workspace = true, optional = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
-pprof = { workspace = true , features = ["flamegraph", "criterion"] }
+pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 serial_test.workspace = true
 temp-dir.workspace = true
 test-log = { workspace = true, features = ["trace"] }
@@ -163,7 +163,7 @@ wiremock.workspace = true
 pharos.workspace = true
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 tokio = { workspace = true, default-features = false, features = ["rt", "sync"] }
-uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
+uuid = { workspace = true, features = ["serde", "js", "v1", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 ws_stream_wasm.workspace = true

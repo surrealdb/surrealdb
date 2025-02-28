@@ -8,6 +8,7 @@ mod index;
 mod model;
 mod namespace;
 mod param;
+mod sequence;
 mod table;
 mod user;
 
@@ -21,6 +22,7 @@ pub use index::RemoveIndexStatement;
 pub use model::RemoveModelStatement;
 pub use namespace::RemoveNamespaceStatement;
 pub use param::RemoveParamStatement;
+pub use sequence::RemoveSequenceStatement;
 pub use table::RemoveTableStatement;
 pub use user::RemoveUserStatement;
 
@@ -51,6 +53,7 @@ pub enum RemoveStatement {
 	Index(RemoveIndexStatement),
 	User(RemoveUserStatement),
 	Model(RemoveModelStatement),
+	Sequence(RemoveSequenceStatement),
 }
 
 impl RemoveStatement {
@@ -78,6 +81,7 @@ impl RemoveStatement {
 			Self::Analyzer(ref v) => v.compute(ctx, opt).await,
 			Self::User(ref v) => v.compute(ctx, opt).await,
 			Self::Model(ref v) => v.compute(ctx, opt).await,
+			Self::Sequence(ref v) => v.compute(ctx, opt).await,
 		}
 	}
 }
@@ -97,6 +101,7 @@ impl Display for RemoveStatement {
 			Self::Analyzer(v) => Display::fmt(v, f),
 			Self::User(v) => Display::fmt(v, f),
 			Self::Model(v) => Display::fmt(v, f),
+			Self::Sequence(v) => Display::fmt(v, f),
 		}
 	}
 }

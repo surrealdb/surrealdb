@@ -22,6 +22,7 @@ pub struct Config {
 	pub tables: TableConfig,
 	pub versions: bool,
 	pub records: bool,
+	pub sequences: bool,
 }
 
 impl Default for Config {
@@ -35,6 +36,7 @@ impl Default for Config {
 			tables: TableConfig::default(),
 			versions: false,
 			records: true,
+			sequences: true,
 		}
 	}
 }
@@ -49,11 +51,12 @@ impl From<Config> for Value {
 			"analyzers" => config.analyzers.into(),
 			"versions" => config.versions.into(),
 			"records" => config.records.into(),
+			"sequences" => config.sequences.into(),
 			"tables" => match config.tables {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
 				TableConfig::Some(v) => v.into()
-			}
+			},
 		);
 
 		obj.into()
@@ -227,6 +230,12 @@ impl Transaction {
 		if cfg.analyzers {
 			let analyzers = self.all_db_analyzers(ns, db).await?;
 			self.export_section("ANALYZERS", analyzers.to_vec(), chn).await?;
+		}
+
+		// Output SEQUENCES
+		if cfg.sequences {
+			let sequences = self.all_db_sequences(ns, db).await?;
+			self.export_section("SEQUENCES", sequences.to_vec(), chn).await?;
 		}
 
 		Ok(())
