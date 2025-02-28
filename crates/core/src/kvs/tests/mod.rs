@@ -26,7 +26,7 @@ mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
 mod multiwriter_same_keys_conflict;
 mod raw;
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 mod reverse_iterator;
 mod snapshot;
 mod timestamp_to_versionstamp;
@@ -120,7 +120,7 @@ mod surrealkv {
 		(ds, Kvs::SurrealKV)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator);
 }
 
 #[cfg(feature = "kv-tikv")]
