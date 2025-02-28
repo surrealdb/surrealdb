@@ -16,7 +16,7 @@ macro_rules! bytes {
 macro_rules! yield_now {
 	() => {
 		if tokio::runtime::Handle::try_current().is_ok() {
-			tokio::task::yield_now().await;
+			tokio::task::consume_budget().await;
 		}
 	};
 }
