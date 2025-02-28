@@ -1,3 +1,7 @@
+[env]
+# Used to speed up the scripting timeout test, otherwise the test takes 5 seconds.
+SURREAL_SCRIPTING_MAX_TIME_LIMIT = { value = "500", condition = { env_not_set = ["SURREAL_SCRIPTING_MAX_TIME_LIMIT"] } }
+
 [tasks.ci-format]
 category = "CI - CHECK"
 dependencies = ["cargo-fmt"]

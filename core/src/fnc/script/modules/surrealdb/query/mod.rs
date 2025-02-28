@@ -22,6 +22,7 @@ pub const QUERY_DATA_PROP_NAME: &str = "__query_context__";
 
 /// A class to carry the data to run subqueries.
 #[non_exhaustive]
+#[derive(Clone)]
 pub struct QueryContext<'js> {
 	pub context: &'js Context,
 	pub opt: &'js Options,

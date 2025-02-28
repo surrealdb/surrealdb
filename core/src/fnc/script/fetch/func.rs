@@ -31,17 +31,17 @@ pub async fn fetch<'js>(
 	let url = js_req.url;
 
 	// Check if the url is allowed to be fetched.
-	if ctx.globals().contains_key(QUERY_DATA_PROP_NAME)? {
+	let query_ctx = if ctx.globals().contains_key(QUERY_DATA_PROP_NAME)? {
 		let query_ctx =
 			ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
-		query_ctx
-			.context
-			.check_allowed_net(&url)
-			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+		query_ctx.context.clone()
 	} else {
-		#[cfg(debug_assertions)]
 		panic!("Trying to fetch a URL but no QueryContext is present. QueryContext is required for checking if the URL is allowed to be fetched.")
-	}
+	};
+
+	query_ctx
+		.check_allowed_net(&url)
+		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 
 	let req = reqwest::Request::new(js_req.init.method, url.clone());
 
@@ -52,13 +52,17 @@ pub async fn fetch<'js>(
 	let mut headers = headers.inner.clone();
 
 	let redirect = js_req.init.request_redirect;
+	let redirect_limit = *crate::cnf::MAX_HTTP_REDIRECTS;
 
 	// set the policy for redirecting requests.
 	let policy = redirect::Policy::custom(move |attempt| {
+		if let Err(e) = query_ctx.check_allowed_net(attempt.url()) {
+			return attempt.error(e.to_string());
+		}
 		match redirect {
 			classes::RequestRedirect::Follow => {
-				// Fetch spec limits redirect to a max of 20
-				if attempt.previous().len() > 20 {
+				// Fetch spec limits redirect to a max of 20 but we follow the configuration.
+				if attempt.previous().len() >= redirect_limit {
 					attempt.error("too many redirects")
 				} else {
 					attempt.follow()
