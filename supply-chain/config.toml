@@ -1135,10 +1135,6 @@ criteria = "safe-to-deploy"
 version = "0.8.50"
 criteria = "safe-to-deploy"
 
-[[exemptions.ring]]
-version = "0.17.10"
-criteria = "safe-to-deploy"
-
 [[exemptions.rkyv]]
 version = "0.7.45"
 criteria = "safe-to-deploy"
