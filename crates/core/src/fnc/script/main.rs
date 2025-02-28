@@ -1,3 +1,6 @@
+use std::time::Duration;
+use std::time::Instant;
+
 use super::classes;
 use super::fetch;
 use super::globals;
@@ -51,6 +54,10 @@ pub async fn run(
 	if context.is_done(true) {
 		return Ok(Value::None);
 	}
+
+	let instant_start = Instant::now();
+	let time_limit = Duration::from_millis(*crate::cnf::SCRIPTING_MAX_TIME_LIMIT as u64);
+
 	// Create a JavaScript context
 	let run = js::AsyncRuntime::new().unwrap();
 	// Explicitly set max stack size to 256 KiB
@@ -59,7 +66,7 @@ pub async fn run(
 	run.set_memory_limit(*SCRIPTING_MAX_MEMORY_LIMIT).await;
 	// Ensure scripts are cancelled with context
 	let cancellation = context.cancellation();
-	let handler = Box::new(move || cancellation.is_done());
+	let handler = Box::new(move || cancellation.is_done() || instant_start.elapsed() > time_limit);
 	run.set_interrupt_handler(Some(handler)).await;
 	// Create an execution context
 	let ctx = js::AsyncContext::full(&run).await.unwrap();
