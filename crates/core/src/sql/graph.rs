@@ -89,6 +89,9 @@ impl Display for Graph {
 			}
 		} else {
 			write!(f, "{}(", self.dir)?;
+			if let Some(expr) = self.expr.as_ref() {
+				write!(f, "select {} FROM ", expr)?;
+			}
 			match self.what.len() {
 				0 => f.write_char('?'),
 				_ => Display::fmt(&self.what, f),
