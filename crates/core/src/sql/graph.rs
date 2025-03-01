@@ -89,7 +89,7 @@ impl Display for Graph {
 			}
 		} else {
 			write!(f, "{}(", self.dir)?;
-			if let Some(expr) = self.expr.as_ref() {
+			if let Some(ref expr) = self.expr {
 				write!(f, "SELECT {} FROM ", expr)?;
 			}
 			match self.what.len() {
