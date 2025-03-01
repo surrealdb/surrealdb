@@ -836,23 +836,23 @@ mod tests {
 
 	#[test]
 	fn graph_select() {
-		let sql = "->(select amount from likes WHERE amount > 10)";
+		let sql = "->(SELECT amount FROM likes WHERE amount > 10)";
 		let out = Value::parse(sql);
-		assert_eq!("->(select amount FROM likes WHERE amount > 10)", format!("{}", out));
+		assert_eq!("->(SELECT amount FROM likes WHERE amount > 10)", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_select_order() {
-		let sql = "->(select amount from likes WHERE amount > 10 ORDER BY amount)";
+		let sql = "->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount)";
 		let out = Value::parse(sql);
-		assert_eq!("->(select amount FROM likes WHERE amount > 10 ORDER BY amount\n)", format!("{}", out));
+		assert_eq!("->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount\n)", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_select_order_limit() {
-		let sql = "->(select amount from likes WHERE amount > 10 ORDER BY amount LIMIT 1)";
+		let sql = "->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount LIMIT 1)";
 		let out = Value::parse(sql);
-		assert_eq!("->(select amount FROM likes WHERE amount > 10 ORDER BY amount\n LIMIT 1)", format!("{}", out));
+		assert_eq!("->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount\n LIMIT 1)", format!("{}", out));
 	}
 
 	#[test]
