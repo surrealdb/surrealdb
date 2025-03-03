@@ -11,7 +11,7 @@ use std::ptr::null_mut;
 #[cfg(feature = "allocation-tracking")]
 use std::sync::atomic::AtomicPtr;
 #[cfg(feature = "allocation-tracking")]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicIsize, Ordering};
 
 /// This structure implements a wrapper around the
 /// system allocator, or around a user-specified
@@ -53,7 +53,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	/// Each node has a counter of allocated bytes.
 	#[cfg(feature = "allocation-tracking")]
 	pub fn current_usage(&self) -> (usize, usize) {
-		let mut total: usize = 0;
+		let mut total = 0;
 		let mut threads = 0;
 
 		let mut current = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
@@ -69,6 +69,10 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 				threads += 1;
 			}
 		}
+		// In rare cases, due to concurrent updates or mismatched add/sub calls,
+		// the net tracked usage can temporarily go negative.
+		// We clamp it to zero so we don't report a negative total.
+		let total = total.max(0) as usize;
 		(total, threads)
 	}
 
@@ -90,7 +94,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 			// This is safe here because:
 			// 1. `node` was allocated and initialized properly.
 			// 2. `node` never moves after insertion, and we don't free it.
-			(*node).counter.fetch_add(size, Ordering::Relaxed);
+			(*node).counter.fetch_add(size as isize, Ordering::Relaxed);
 		}
 	}
 
@@ -99,13 +103,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 		let node = self.get_thread_node();
 		unsafe {
 			// Same reasoning as in `add()`: pointer is always valid and not moved.
-			let val = (*node).counter.fetch_sub(size, Ordering::Relaxed);
-			// If we subtracted more than we had, reset to 0 to avoid underflow in usage tracking.
-			// This scenario indicates a potential double free or logic error, but resetting to 0
-			// ensures we don't get nonsensical negative values.
-			if size > val {
-				(*node).counter.store(0, Ordering::Relaxed);
-			}
+			(*node).counter.fetch_sub(size as isize, Ordering::Relaxed);
 		}
 	}
 
@@ -243,7 +241,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 #[cfg(feature = "allocation-tracking")]
 struct ThreadCounterNode {
 	next: AtomicPtr<ThreadCounterNode>,
-	counter: AtomicUsize,
+	counter: AtomicIsize,
 }
 
 /// `GLOBAL_LIST_HEAD` points to the start of the linked list of `ThreadCounterNode`s.
