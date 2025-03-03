@@ -129,51 +129,70 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	#[cfg(feature = "allocation-tracking")]
 	fn get_thread_node(&self) -> *mut ThreadCounterNode {
 		THREAD_NODE.with(|cell| {
-			let mut node_ptr = *cell.borrow();
-			if node_ptr.is_null() {
-				// Allocate a new node from the wrapped allocator, bypassing the global allocator to avoid recursion.
-				let layout = Layout::new::<ThreadCounterNode>();
-				let node_raw = unsafe { self.alloc.alloc(layout) } as *mut ThreadCounterNode;
-				if node_raw.is_null() {
-					panic!("Failed to allocate ThreadCounterNode");
-				}
-
-				// Safely initialize the memory.
-				// This is `unsafe` because we're directly writing into a raw pointer.
-				// It's safe because:
-				// - The pointer came from a successful allocation of the correct size.
-				// - We write a fully initialized `ThreadCounterNode` with known fields.
-				unsafe {
-					node_raw.write(ThreadCounterNode {
-						next: AtomicPtr::new(null_mut()),
-						counter: AtomicIsize::new(0),
-					});
-				}
-
-				// Insert this thread's node into the global list of nodes.
-				// We lock here to ensure that no other thread modifies the list concurrently,
-				// guaranteeing that when the node is visible to other threads, it is fully initialized.
-				{
-					let guard = GLOBAL_LIST_LOCK.lock();
-					let head = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
-					unsafe {
-						// The `node_raw` now points to a fully initialized `ThreadCounterNode`.
-						// It's safe to store the head in `node_raw.next` because `head` is either
-						// null or another valid `ThreadCounterNode` pointer.
-						(*node_raw).next.store(head, Ordering::Relaxed);
-					}
-					// Atomically update the global head to point to this new node.
-					GLOBAL_LIST_HEAD.store(node_raw, Ordering::Relaxed);
-					drop(guard);
-				}
-
-				// Store the node pointer in thread-local storage for fast access in future calls.
-				*cell.borrow_mut() = node_raw;
-				node_ptr = node_raw;
+			// If we already have a guard, just return the node pointer
+			if let Some(ref guard) = *cell.borrow() {
+				return guard.0;
 			}
-			node_ptr
+
+			// Otherwise, create and link a new node
+			let layout = Layout::new::<ThreadCounterNode>();
+			let node_raw = unsafe { self.alloc.alloc(layout) } as *mut ThreadCounterNode;
+			if node_raw.is_null() {
+				panic!("Failed to allocate ThreadCounterNode");
+			}
+			unsafe {
+				node_raw.write(ThreadCounterNode {
+					next: AtomicPtr::new(std::ptr::null_mut()),
+					counter: AtomicIsize::new(0),
+				});
+			}
+
+			// Lock global list, insert at head
+			{
+				let guard = GLOBAL_LIST_LOCK.lock();
+				let head = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
+				unsafe {
+					(*node_raw).next.store(head, Ordering::Relaxed);
+				}
+				GLOBAL_LIST_HEAD.store(node_raw, Ordering::Relaxed);
+				drop(guard);
+			}
+
+			// Make a guard that removes this node on drop
+			let guard = ThreadNodeGuard(node_raw);
+			// Store the guard in TLS (so on thread exit, it will drop)
+			*cell.borrow_mut() = Some(guard);
+
+			node_raw
 		})
 	}
+}
+
+#[cfg(feature = "allocation-tracking")]
+fn remove_thread_node(node_to_remove: *mut ThreadCounterNode) {
+	let guard = GLOBAL_LIST_LOCK.lock();
+
+	let mut current = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
+	let mut prev: *mut ThreadCounterNode = null_mut();
+
+	while !current.is_null() {
+		if current == node_to_remove {
+			let next = unsafe { (*current).next.load(Ordering::Relaxed) };
+			if prev.is_null() {
+				// Removing the head
+				GLOBAL_LIST_HEAD.store(next, Ordering::Relaxed);
+			} else {
+				// Fix up the previous node’s 'next' pointer
+				unsafe {
+					(*prev).next.store(next, Ordering::Relaxed);
+				}
+			}
+			break;
+		}
+		prev = current;
+		current = unsafe { (*current).next.load(Ordering::Relaxed) };
+	}
+	drop(guard);
 }
 
 #[cfg(not(feature = "allocation-tracking"))]
@@ -242,6 +261,16 @@ struct ThreadCounterNode {
 	counter: AtomicIsize,
 }
 
+#[cfg(feature = "allocation-tracking")]
+struct ThreadNodeGuard(*mut ThreadCounterNode);
+
+#[cfg(feature = "allocation-tracking")]
+impl Drop for ThreadNodeGuard {
+	fn drop(&mut self) {
+		remove_thread_node(self.0);
+	}
+}
+
 /// `GLOBAL_LIST_HEAD` points to the start of the linked list of `ThreadCounterNode`s.
 /// Each node is appended at initialization time for each thread, never removed.
 #[cfg(feature = "allocation-tracking")]
@@ -254,7 +283,7 @@ static GLOBAL_LIST_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(feature = "allocation-tracking")]
 thread_local! {
-	/// `THREAD_NODE` stores a pointer to this thread's `ThreadCounterNode`.
+	/// `THREAD_NODE` stores a pointer to this thread's `ThreadNodeGuard`.
 	/// It's initially null, and once the thread first allocates, we initialize the node and store it here.
-	static THREAD_NODE: RefCell<*mut ThreadCounterNode> = const {RefCell::new(null_mut())};
+	static THREAD_NODE: RefCell<Option<ThreadNodeGuard>> = const { RefCell::new(None) };
 }
