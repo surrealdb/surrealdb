@@ -28,7 +28,7 @@ jobs:
     uses: ./.github/workflows/publish-version.yml
     with:
       environment: nightly
-      extra-features: storage-surrealkv,ml
+      extra-features: storage-surrealkv,ml,allocation-tracking
       git-ref: main
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
     secrets: inherit
