@@ -9,9 +9,7 @@ use std::cell::RefCell;
 #[cfg(feature = "allocation-tracking")]
 use std::ptr::null_mut;
 #[cfg(feature = "allocation-tracking")]
-use std::sync::atomic::AtomicPtr;
-#[cfg(feature = "allocation-tracking")]
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicPtr, Ordering};
 
 /// This structure implements a wrapper around the
 /// system allocator, or around a user-specified
@@ -114,7 +112,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	///
 	/// **Why `unsafe` is used here:**
 	/// - We use `unsafe` when we allocate and write to raw pointers.
-	/// However, this is controlled:
+	///   However, this is controlled:
 	///   1. We allocate memory with `self.alloc` to avoid recursion, ensuring the allocation
 	///      does not go through the tracked allocator and cause infinite recursion.
 	///   2. We immediately initialize the newly allocated memory with `node_raw.write(...)`.
@@ -148,7 +146,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 				unsafe {
 					node_raw.write(ThreadCounterNode {
 						next: AtomicPtr::new(null_mut()),
-						counter: AtomicUsize::new(0),
+						counter: AtomicIsize::new(0),
 					});
 				}
 
@@ -258,5 +256,5 @@ static GLOBAL_LIST_LOCK: Mutex<()> = Mutex::new(());
 thread_local! {
 	/// `THREAD_NODE` stores a pointer to this thread's `ThreadCounterNode`.
 	/// It's initially null, and once the thread first allocates, we initialize the node and store it here.
-	static THREAD_NODE: RefCell<*mut ThreadCounterNode> = RefCell::new(null_mut());
+	static THREAD_NODE: RefCell<*mut ThreadCounterNode> = const {RefCell::new(null_mut())};
 }
