@@ -12,12 +12,12 @@ use surrealkv::Transaction as Tx;
 
 use super::{Check, KeyEncode};
 
-pub(crate) static SKV_THREADPOOL: OnceLock<affinitypool::Threadpool> = OnceLock::new();
+pub(crate) static SKV_COMMIT_POOL: OnceLock<affinitypool::Threadpool> = OnceLock::new();
 
 pub(crate) fn commit_pool() -> &'static affinitypool::Threadpool {
-	SKV_THREADPOOL.get_or_init(|| {
+	SKV_COMMIT_POOL.get_or_init(|| {
 		affinitypool::Builder::new()
-			.thread_name("surrealkv-memory-threadpool")
+			.thread_name("surrealkv-memory-commitpool")
 			.thread_stack_size(5 * 1024 * 1024)
 			.thread_per_core(false)
 			.worker_threads(1)

@@ -5757,9 +5757,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "201108f6de060718d870d2cb00c8380c2ab749072201851f765086b5934a9f6a"
+checksum = "6d43d55edab1e65c7704486016f98e9eac61c97474921dbac094af2cd16e16c3"
 dependencies = [
  "ahash 0.8.11",
  "bytes",
