@@ -472,7 +472,7 @@ pub async fn asynchronous(
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
 	) -> impl FnOnce() -> async_executor::Task<R> {
-		|| crate::exe::single_spawn(async move { function() })
+		|| crate::exe::spawn::singleton(async move { function() })
 	}
 
 	#[cfg(target_family = "wasm")]

@@ -96,7 +96,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	#[cfg(feature = "allocation-tracking")]
 	fn add(&self, size: usize) {
 		// Retrieves or initializes this thread's `ThreadCounterNode` and increments its counter.
-		let node = get_thread_node(self);
+		let node = self.get_thread_node();
 		unsafe {
 			// Using `unsafe` because we are dereferencing a raw pointer.
 			// This is safe here because:
@@ -108,82 +108,82 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 
 	#[cfg(feature = "allocation-tracking")]
 	fn sub(&self, size: usize) {
-		let node = get_thread_node(self);
+		let node = self.get_thread_node();
 		unsafe {
 			// Same reasoning as in `add()`: pointer is always valid and not moved.
 			(*node).counter.fetch_sub(size as isize, Ordering::Relaxed);
 		}
 	}
-}
 
-/// Retrieves the thread's node, creating and registering it if necessary.
-///
-/// The `ThreadCounterNode` structure holds a per-thread atomic counter of allocated bytes
-/// and a pointer to the next node in a global singly-linked list of thread counters.
-///
-/// **Why `unsafe` is used here:**
-/// - We use `unsafe` when we allocate and write to raw pointers.
-///   However, this is controlled:
-///   1. We allocate memory with `self.alloc` to avoid recursion, ensuring the allocation
-///      does not go through the tracked allocator and cause infinite recursion.
-///   2. We immediately initialize the newly allocated memory with `node_raw.write(...)`.
-///   3. Once written, we link the node into a global list.
-///      Other threads will only see a fully
-///      initialized node because the list insertion is done under a lock.
-/// - After insertion, the node remains alive for the entire program's life.
-///   We never free it, so the pointer is always valid.
-///
-/// **Thread Local Storage (TLS): **
-/// - Each thread stores a pointer to its `ThreadCounterNode` in a TLS variable (`THREAD_NODE`).
-/// - The first time this thread calls `get_thread_node()`, we allocate and insert the node.
-/// - Subsequent calls just return the cached pointer, which is guaranteed to be valid.
-#[cfg(feature = "allocation-tracking")]
-fn get_thread_node<A: GlobalAlloc>(alloc: &A) -> *mut ThreadCounterNode {
-	THREAD_NODE.with(|cell| {
-		let mut node_ptr = *cell.borrow();
-		if node_ptr.is_null() {
-			// Allocate a new node from the wrapped allocator, bypassing the global allocator to avoid recursion.
-			let layout = Layout::new::<ThreadCounterNode>();
-			let node_raw = unsafe { alloc.alloc(layout) } as *mut ThreadCounterNode;
-			if node_raw.is_null() {
-				panic!("Failed to allocate ThreadCounterNode");
-			}
-
-			// Safely initialize the memory.
-			// This is `unsafe` because we're directly writing into a raw pointer.
-			// It's safe because:
-			// - The pointer came from a successful allocation of the correct size.
-			// - We write a fully initialized `ThreadCounterNode` with known fields.
-			unsafe {
-				node_raw.write(ThreadCounterNode {
-					next: AtomicPtr::new(null_mut()),
-					counter: AtomicIsize::new(0),
-				});
-			}
-
-			// Insert this thread's node into the global list of nodes.
-			// We lock here to ensure that no other thread modifies the list concurrently,
-			// guaranteeing that when the node is visible to other threads, it is fully initialized.
-			{
-				let guard = GLOBAL_LIST_LOCK.lock();
-				let head = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
-				unsafe {
-					// The `node_raw` now points to a fully initialized `ThreadCounterNode`.
-					// It's safe to store the head in `node_raw.next` because `head` is either
-					// null or another valid `ThreadCounterNode` pointer.
-					(*node_raw).next.store(head, Ordering::Relaxed);
+	/// Retrieves the thread's node, creating and registering it if necessary.
+	///
+	/// The `ThreadCounterNode` structure holds a per-thread atomic counter of allocated bytes
+	/// and a pointer to the next node in a global singly-linked list of thread counters.
+	///
+	/// **Why `unsafe` is used here:**
+	/// - We use `unsafe` when we allocate and write to raw pointers.
+	///   However, this is controlled:
+	///   1. We allocate memory with `self.alloc` to avoid recursion, ensuring the allocation
+	///      does not go through the tracked allocator and cause infinite recursion.
+	///   2. We immediately initialize the newly allocated memory with `node_raw.write(...)`.
+	///   3. Once written, we link the node into a global list.
+	///      Other threads will only see a fully
+	///      initialized node because the list insertion is done under a lock.
+	/// - After insertion, the node remains alive for the entire program's life.
+	///   We never free it, so the pointer is always valid.
+	///
+	/// **Thread Local Storage (TLS): **
+	/// - Each thread stores a pointer to its `ThreadCounterNode` in a TLS variable (`THREAD_NODE`).
+	/// - The first time this thread calls `get_thread_node()`, we allocate and insert the node.
+	/// - Subsequent calls just return the cached pointer, which is guaranteed to be valid.
+	#[cfg(feature = "allocation-tracking")]
+	fn get_thread_node(&self) -> *mut ThreadCounterNode {
+		THREAD_NODE.with(|cell| {
+			let mut node_ptr = *cell.borrow();
+			if node_ptr.is_null() {
+				// Allocate a new node from the wrapped allocator, bypassing the global allocator to avoid recursion.
+				let layout = Layout::new::<ThreadCounterNode>();
+				let node_raw = unsafe { self.alloc.alloc(layout) } as *mut ThreadCounterNode;
+				if node_raw.is_null() {
+					panic!("Failed to allocate ThreadCounterNode");
 				}
-				// Atomically update the global head to point to this new node.
-				GLOBAL_LIST_HEAD.store(node_raw, Ordering::Relaxed);
-				drop(guard);
-			}
 
-			// Store the node pointer in thread-local storage for fast access in future calls.
-			*cell.borrow_mut() = node_raw;
-			node_ptr = node_raw;
-		}
-		node_ptr
-	})
+				// Safely initialize the memory.
+				// This is `unsafe` because we're directly writing into a raw pointer.
+				// It's safe because:
+				// - The pointer came from a successful allocation of the correct size.
+				// - We write a fully initialized `ThreadCounterNode` with known fields.
+				unsafe {
+					node_raw.write(ThreadCounterNode {
+						next: AtomicPtr::new(null_mut()),
+						counter: AtomicIsize::new(0),
+					});
+				}
+
+				// Insert this thread's node into the global list of nodes.
+				// We lock here to ensure that no other thread modifies the list concurrently,
+				// guaranteeing that when the node is visible to other threads, it is fully initialized.
+				{
+					let guard = GLOBAL_LIST_LOCK.lock();
+					let head = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
+					unsafe {
+						// The `node_raw` now points to a fully initialized `ThreadCounterNode`.
+						// It's safe to store the head in `node_raw.next` because `head` is either
+						// null or another valid `ThreadCounterNode` pointer.
+						(*node_raw).next.store(head, Ordering::Relaxed);
+					}
+					// Atomically update the global head to point to this new node.
+					GLOBAL_LIST_HEAD.store(node_raw, Ordering::Relaxed);
+					drop(guard);
+				}
+
+				// Store the node pointer in thread-local storage for fast access in future calls.
+				*cell.borrow_mut() = node_raw;
+				node_ptr = node_raw;
+			}
+			node_ptr
+		})
+	}
 }
 
 #[cfg(not(feature = "allocation-tracking"))]

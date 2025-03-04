@@ -44,7 +44,7 @@ impl FileCollector {
 	pub(super) async fn push(&mut self, value: Value) -> Result<(), Error> {
 		if let Some(mut writer) = self.writer.take() {
 			#[cfg(not(target_family = "wasm"))]
-			let writer = crate::exe::spawn(move || {
+			let writer = crate::exe::spawn::rayon(move || {
 				writer.push(value)?;
 				Ok::<FileWriter, Error>(writer)
 			})
@@ -137,7 +137,7 @@ impl FileCollector {
 				#[cfg(target_family = "wasm")]
 				let res = f();
 				#[cfg(not(target_family = "wasm"))]
-				let res = crate::exe::spawn(f).await;
+				let res = crate::exe::spawn::rayon(f).await;
 				//
 				res
 			}
@@ -168,7 +168,7 @@ impl FileCollector {
 				#[cfg(target_family = "wasm")]
 				let res = f();
 				#[cfg(not(target_family = "wasm"))]
-				let res = crate::exe::spawn(f).await;
+				let res = crate::exe::spawn::rayon(f).await;
 				//
 				res
 			}

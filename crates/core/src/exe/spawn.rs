@@ -2,6 +2,7 @@
 
 use async_executor::{Executor, Task};
 use futures::channel::oneshot;
+use rayon::ThreadPoolBuilder;
 use std::future::Future;
 use std::panic::catch_unwind;
 use std::sync::LazyLock;
@@ -23,9 +24,7 @@ use std::sync::LazyLock;
 /// you can safely run it on a single dedicated thread without fragmenting resources.
 /// Essentially, you’re avoiding contention or overhead from spawning more threads than necessary for tasks that already know
 /// how to handle parallelism internally.
-pub fn single_spawn<T: Send + 'static>(
-	future: impl Future<Output = T> + Send + 'static,
-) -> Task<T> {
+pub fn singleton<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static) -> Task<T> {
 	static GLOBAL: LazyLock<Executor<'_>> = LazyLock::new(|| {
 		// The name of the thread for the task executor
 		let name = "surrealdb-executor".to_string();
@@ -47,7 +46,7 @@ pub fn single_spawn<T: Send + 'static>(
 	GLOBAL.spawn(future)
 }
 
-pub async fn spawn<F, R>(f: F) -> R
+pub async fn rayon<F, R>(f: F) -> R
 where
 	F: FnOnce() -> R + Send + 'static,
 	R: Send + 'static,
@@ -59,4 +58,12 @@ where
 		let _ = tx.send(result);
 	});
 	rx.await.expect("Receiver dropped")
+}
+
+pub fn setup_rayon_pool_stack_size(stack_size: usize) {
+	println!("Setting up the rayon thread pool with stack size: {}", stack_size);
+	ThreadPoolBuilder::new()
+		.stack_size(stack_size)
+		.build_global()
+		.expect("Unable to setup the rayon thread pool");
 }

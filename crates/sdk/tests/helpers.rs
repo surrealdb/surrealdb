@@ -12,6 +12,7 @@ use surrealdb::err::Error;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
 use surrealdb_core::dbs::Response;
+use surrealdb_core::exe::spawn::setup_rayon_pool_stack_size;
 use surrealdb_core::sql::{value, Number, Value};
 
 pub async fn new_ds() -> Result<Datastore, Error> {
@@ -182,12 +183,16 @@ pub fn with_enough_stack(
 	#[cfg(not(debug_assertions))]
 	{
 		builder = builder.stack_size(10_000_000);
+		#[cfg(not(target_family = "wasm"))]
+		setup_rayon_pool_stack_size(24_000_000);
 	}
 
 	// Same for debug mode
 	#[cfg(debug_assertions)]
 	{
 		builder = builder.stack_size(24_000_000);
+		#[cfg(not(target_family = "wasm"))]
+		setup_rayon_pool_stack_size(24_000_000);
 	}
 
 	builder
