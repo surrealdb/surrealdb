@@ -151,7 +151,7 @@ impl Model {
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
-				let outcome: Vec<f32> = affinitypool::spawn_local(move || {
+				let outcome: Vec<f32> = crate::exe::spawn(async move {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -182,7 +182,7 @@ impl Model {
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
-				let outcome: Vec<f32> = affinitypool::spawn_local(move || {
+				let outcome: Vec<f32> = crate::exe::spawn(async move {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
