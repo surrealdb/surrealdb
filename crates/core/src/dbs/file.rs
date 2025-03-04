@@ -12,8 +12,6 @@ use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
 use std::path::{Path, PathBuf};
 use std::{fs, io, mem};
 use tempfile::{Builder, TempDir};
-#[cfg(not(target_family = "wasm"))]
-use tokio::task::spawn_blocking;
 
 pub(super) struct FileCollector {
 	dir: TempDir,
@@ -46,12 +44,11 @@ impl FileCollector {
 	pub(super) async fn push(&mut self, value: Value) -> Result<(), Error> {
 		if let Some(mut writer) = self.writer.take() {
 			#[cfg(not(target_family = "wasm"))]
-			let writer = spawn_blocking(move || {
+			let writer = affinitypool::spawn_local(move || {
 				writer.push(value)?;
 				Ok::<FileWriter, Error>(writer)
 			})
-			.await
-			.map_err(|e| Error::Internal(format!("{e}")))??;
+			.await?;
 			#[cfg(target_family = "wasm")]
 			writer.push(value)?;
 			self.len += 1;
@@ -137,12 +134,7 @@ impl FileCollector {
 					res.shuffle(&mut rng);
 					Ok(res)
 				};
-				#[cfg(target_family = "wasm")]
-				let res = f();
-				#[cfg(not(target_family = "wasm"))]
-				let res = spawn_blocking(f).await.map_err(|e| Error::OrderingError(format!("{e}")))?;
-				//
-				res
+				affinitypool::spawn_local(f).await
 			}
 			Ordering::Order(orders) => {
 				let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
@@ -168,12 +160,7 @@ impl FileCollector {
 					let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
 					Ok(r)
 				};
-				#[cfg(target_family = "wasm")]
-				let res = f();
-				#[cfg(not(target_family = "wasm"))]
-				let res = spawn_blocking(f).await.map_err(|e| Error::OrderingError(format!("{e}")))?;
-				//
-				res
+				affinitypool::spawn_local(f).await
 			}
 		}
 	}
