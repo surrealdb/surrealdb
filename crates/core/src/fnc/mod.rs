@@ -8,6 +8,8 @@ use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
 use crate::sql::Thing;
 use reblessive::tree::Stk;
+use std::future::Future;
+use std::pin::Pin;
 
 pub mod api;
 pub mod args;
@@ -471,8 +473,8 @@ pub async fn asynchronous(
 	#[cfg(not(target_family = "wasm"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> async_executor::Task<R> {
-		|| crate::exe::spawn::singleton(async move { function() })
+	) -> impl FnOnce() -> Pin<Box<dyn Future<Output = R> + Send>> {
+		|| Box::pin(crate::exe::spawn(function))
 	}
 
 	#[cfg(target_family = "wasm")]

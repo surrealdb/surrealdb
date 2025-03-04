@@ -245,7 +245,7 @@ impl MemoryOrdered {
 			let mut ordered = mem::take(&mut self.ordered);
 			let mut values = mem::take(&mut self.values);
 			let orders = self.orders.clone();
-			let result = crate::exe::spawn::rayon(move || {
+			let result = crate::exe::spawn(move || {
 				ordered.par_sort_unstable_by(|a, b| orders.compare(&values[*a], &values[*b]));
 				MemoryRandom::ordered_values_to_vec(&mut values, &ordered)
 			})

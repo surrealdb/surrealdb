@@ -23,7 +23,7 @@ mod mac;
 
 mod cf;
 mod doc;
-pub mod exe;
+mod exe;
 mod fnc;
 
 pub mod api;
