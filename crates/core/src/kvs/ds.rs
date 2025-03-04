@@ -302,7 +302,7 @@ impl Datastore {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Initialise the storage engine
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");

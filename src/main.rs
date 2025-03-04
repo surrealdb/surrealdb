@@ -36,8 +36,6 @@ fn main() -> ExitCode {
 
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.
 fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
-	#![cfg(not(target_family = "wasm"))]
-	surrealdb_core::exe::spawn::setup_rayon_pool_stack_size(*cnf::RUNTIME_STACK_SIZE);
 	// Start a Tokio runtime with custom configuration
 	tokio::runtime::Builder::new_multi_thread()
 		.enable_all()

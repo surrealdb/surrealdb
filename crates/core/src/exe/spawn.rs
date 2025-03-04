@@ -2,7 +2,6 @@
 
 use async_executor::{Executor, Task};
 use futures::channel::oneshot;
-use rayon::ThreadPoolBuilder;
 use std::future::Future;
 use std::panic::catch_unwind;
 use std::sync::LazyLock;
@@ -58,11 +57,4 @@ where
 		let _ = tx.send(result);
 	});
 	rx.await.expect("Receiver dropped")
-}
-
-pub fn setup_rayon_pool_stack_size(stack_size: usize) {
-	ThreadPoolBuilder::new()
-		.stack_size(stack_size)
-		.build_global()
-		.expect("Unable to setup the rayon thread pool");
 }
