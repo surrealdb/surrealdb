@@ -1,6 +1,7 @@
 #![cfg(not(target_family = "wasm"))]
 
 use async_executor::{Executor, Task};
+use futures::channel::oneshot;
 use std::future::Future;
 use std::panic::catch_unwind;
 use std::sync::LazyLock;
@@ -22,18 +23,15 @@ use std::sync::LazyLock;
 /// you can safely run it on a single dedicated thread without fragmenting resources.
 /// Essentially, you’re avoiding contention or overhead from spawning more threads than necessary for tasks that already know
 /// how to handle parallelism internally.
-pub fn spawn<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static) -> Task<T> {
+pub fn _single_spawn<T: Send + 'static>(
+	future: impl Future<Output = T> + Send + 'static,
+) -> Task<T> {
 	static GLOBAL: LazyLock<Executor<'_>> = LazyLock::new(|| {
 		// The name of the thread for the task executor
 		let name = "surrealdb-executor".to_string();
 		// Spawn a single thread for CPU intensive tasks
 		std::thread::Builder::new()
 			.name(name)
-			.stack_size(if cfg!(debug_assertions) {
-				20 * 1024 * 1024 // 20MiB in debug mode
-			} else {
-				10 * 1024 * 1024 // 10MiB in release mode
-			})
 			.spawn(|| {
 				catch_unwind(|| {
 					// Run the task executor indefinitely
@@ -47,4 +45,18 @@ pub fn spawn<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static
 	});
 	// Spawn any future onto the single-threaded executor
 	GLOBAL.spawn(future)
+}
+
+pub async fn spawn<F, R>(f: F) -> R
+where
+	F: FnOnce() -> R + Send + 'static,
+	R: Send + 'static,
+{
+	let (tx, rx) = oneshot::channel();
+	rayon::spawn(move || {
+		let result = f();
+		// Ignore errors in case the receiver was dropped
+		let _ = tx.send(result);
+	});
+	rx.await.expect("Spawned task was canceled before completing")
 }
