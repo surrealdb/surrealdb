@@ -29,6 +29,11 @@ pub fn spawn<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static
 		// Spawn a single thread for CPU intensive tasks
 		std::thread::Builder::new()
 			.name(name)
+			.stack_size(if cfg!(debug_assertions) {
+				20 * 1024 * 1024 // 20MiB in debug mode
+			} else {
+				10 * 1024 * 1024 // 10MiB in release mode
+			})
 			.spawn(|| {
 				catch_unwind(|| {
 					// Run the task executor indefinitely

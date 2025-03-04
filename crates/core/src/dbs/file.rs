@@ -134,7 +134,12 @@ impl FileCollector {
 					res.shuffle(&mut rng);
 					Ok(res)
 				};
-				affinitypool::spawn_local(f).await
+				#[cfg(target_family = "wasm")]
+				let res = f();
+				#[cfg(not(target_family = "wasm"))]
+				let res = crate::exe::spawn(async move { f() }).await;
+				//
+				res
 			}
 			Ordering::Order(orders) => {
 				let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
@@ -160,7 +165,12 @@ impl FileCollector {
 					let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
 					Ok(r)
 				};
-				affinitypool::spawn_local(f).await
+				#[cfg(target_family = "wasm")]
+				let res = f();
+				#[cfg(not(target_family = "wasm"))]
+				let res = crate::exe::spawn(async move { f() }).await;
+				//
+				res
 			}
 		}
 	}
