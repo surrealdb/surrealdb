@@ -10,7 +10,7 @@ use revision::Revisioned;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
 use std::path::{Path, PathBuf};
-use std::{fs, io, mem};
+use std::{fs, io};
 use tempfile::{Builder, TempDir};
 
 pub(super) struct FileCollector {
@@ -28,7 +28,7 @@ impl FileCollector {
 
 	const SORT_DIRECTORY_NAME: &'static str = "so";
 
-	const USIZE_SIZE: usize = mem::size_of::<usize>();
+	const USIZE_SIZE: usize = size_of::<usize>();
 
 	pub(super) fn new(temp_dir: &Path) -> Result<Self, Error> {
 		let dir = Builder::new().prefix("SURREAL").tempdir_in(temp_dir)?;
@@ -44,7 +44,7 @@ impl FileCollector {
 	pub(super) async fn push(&mut self, value: Value) -> Result<(), Error> {
 		if let Some(mut writer) = self.writer.take() {
 			#[cfg(not(target_family = "wasm"))]
-			let writer = affinitypool::spawn_local(move || {
+			let writer = crate::exe::spawn(async move {
 				writer.push(value)?;
 				Ok::<FileWriter, Error>(writer)
 			})

@@ -1,5 +1,5 @@
 mod fake;
-pub(crate) mod track;
+mod track;
 
 #[cfg(not(feature = "allocator"))]
 pub static ALLOC: fake::FakeAlloc = fake::FakeAlloc::new();

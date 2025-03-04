@@ -124,7 +124,7 @@ impl Model {
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
 				// Run the compute in a blocking task
-				let outcome: Vec<f32> = affinitypool::spawn_local(move || {
+				let outcome: Vec<f32> = crate::exe::spawn(async move {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
