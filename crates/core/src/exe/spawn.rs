@@ -61,7 +61,6 @@ where
 }
 
 pub fn setup_rayon_pool_stack_size(stack_size: usize) {
-	println!("Setting up the rayon thread pool with stack size: {}", stack_size);
 	ThreadPoolBuilder::new()
 		.stack_size(stack_size)
 		.build_global()
