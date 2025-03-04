@@ -65,9 +65,10 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 		let mut threads = 0;
 
 		let mut current = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
-		// We do not lock the list here because we assume the list head is stable after insertion.
-		// Thread nodes are never removed, only appended.
-		// In a more complex scenario, a lock might be needed.
+
+		// Acquire the lock here for read access
+		let guard = GLOBAL_LIST_LOCK.lock();
+
 		while !current.is_null() {
 			unsafe {
 				// `current` points to a `ThreadCounterNode` allocated by `self.alloc`.
@@ -77,6 +78,8 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 				threads += 1;
 			}
 		}
+		drop(guard);
+
 		// In rare cases, due to concurrent updates or mismatched add/sub calls,
 		// the net tracked usage can temporarily go negative.
 		// We clamp it to zero so we don't report a negative total.
@@ -184,6 +187,50 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 			node_ptr
 		})
 	}
+}
+
+#[cfg(feature = "allocation-tracking")]
+pub fn stop_tracking() {
+	THREAD_NODE.with(|cell| {
+		let node = *cell.borrow();
+		if node.is_null() {
+			return;
+		}
+
+		// We lock here to ensure that no other thread modifies the list concurrently,
+		let guard = GLOBAL_LIST_LOCK.lock();
+
+		// Load the head of the list
+		let mut current = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
+		let mut prev: *mut ThreadCounterNode = null_mut();
+
+		// Traverse the list until we find the node or reach the end
+		while !current.is_null() {
+			if current == node {
+				// Found the node to remove
+				let next = unsafe { (*current).next.load(Ordering::Relaxed) };
+
+				if prev.is_null() {
+					// Removing the head node
+					GLOBAL_LIST_HEAD.store(next, Ordering::Relaxed);
+				} else {
+					// Link the previous node to the next node in the chain
+					unsafe {
+						(*prev).next.store(next, Ordering::Relaxed);
+					}
+				}
+
+				// We can break here since we've successfully removed the node
+				break;
+			}
+
+			// Move to the next node
+			prev = current;
+			current = unsafe { (*current).next.load(Ordering::Relaxed) };
+		}
+
+		drop(guard);
+	});
 }
 
 #[cfg(not(feature = "allocation-tracking"))]

@@ -1,6 +1,9 @@
 mod fake;
 mod track;
 
+#[cfg(feature = "allocation-tracking")]
+pub use track::stop_tracking;
+
 #[cfg(not(feature = "allocator"))]
 pub static ALLOC: fake::FakeAlloc = fake::FakeAlloc::new();
 
