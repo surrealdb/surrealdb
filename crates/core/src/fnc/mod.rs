@@ -1,4 +1,5 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined in this module.
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -471,7 +472,7 @@ pub async fn asynchronous(
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
 	) -> impl FnOnce() -> async_executor::Task<R> {
-		|| crate::exe::spawn(async move { function() })
+		|| crate::exe::single_spawn(async move { function() })
 	}
 
 	#[cfg(target_family = "wasm")]

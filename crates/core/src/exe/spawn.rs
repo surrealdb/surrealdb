@@ -23,7 +23,7 @@ use std::sync::LazyLock;
 /// you can safely run it on a single dedicated thread without fragmenting resources.
 /// Essentially, you’re avoiding contention or overhead from spawning more threads than necessary for tasks that already know
 /// how to handle parallelism internally.
-pub fn _single_spawn<T: Send + 'static>(
+pub fn single_spawn<T: Send + 'static>(
 	future: impl Future<Output = T> + Send + 'static,
 ) -> Task<T> {
 	static GLOBAL: LazyLock<Executor<'_>> = LazyLock::new(|| {
@@ -58,5 +58,5 @@ where
 		// Ignore errors in case the receiver was dropped
 		let _ = tx.send(result);
 	});
-	rx.await.expect("Spawned task was canceled before completing")
+	rx.await.expect("Receiver dropped")
 }

@@ -1,4 +1,6 @@
 #[cfg(not(target_family = "wasm"))]
+pub use spawn::single_spawn;
+#[cfg(not(target_family = "wasm"))]
 pub use spawn::spawn;
 pub use try_join_all_buffered::try_join_all_buffered;
 
