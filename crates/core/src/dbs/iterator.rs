@@ -517,7 +517,11 @@ impl Iterator {
 	) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {
-				self.cancel_on_limit = Some(l);
+				if let Some(s) = self.start {
+					self.cancel_on_limit = Some(l + s);
+				} else {
+					self.cancel_on_limit = Some(l);
+				}
 			}
 			// Check if we can skip processing the document below "start".
 			if let Some(false) = is_specific_permission {
