@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
-	escape::escape_key,
+	escape::EscapeKey,
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
 	Operation, Thing, Value,
 };
@@ -259,7 +259,7 @@ impl Display for Object {
 					self.0.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
 						f,
 						"{}: {}",
-						escape_key(k),
+						EscapeKey(k),
 						v
 					))),
 				)

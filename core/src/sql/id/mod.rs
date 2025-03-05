@@ -4,7 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{escape::escape_rid, Array, Number, Object, Strand, Thing, Uuid, Value};
+use crate::sql::{escape::EscapeRid, Array, Number, Object, Strand, Thing, Uuid, Value};
 use derive::Key;
 use nanoid::nanoid;
 use range::IdRange;
@@ -226,7 +226,7 @@ impl Display for Id {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
-			Self::String(v) => Display::fmt(&escape_rid(v), f),
+			Self::String(v) => EscapeRid(v).fmt(f),
 			Self::Uuid(v) => Display::fmt(v, f),
 			Self::Array(v) => Display::fmt(v, f),
 			Self::Object(v) => Display::fmt(v, f),

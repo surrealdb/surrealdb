@@ -6,6 +6,38 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::Value;
 use channel::Sender;
+use std::fmt;
+
+struct InlineCommentWriter<'a, F>(&'a mut F);
+impl<F: fmt::Write> fmt::Write for InlineCommentWriter<'_, F> {
+	fn write_str(&mut self, s: &str) -> fmt::Result {
+		for c in s.chars() {
+			self.write_char(c)?
+		}
+		Ok(())
+	}
+
+	fn write_char(&mut self, c: char) -> fmt::Result {
+		match c {
+			'\n' => self.0.write_str("\\n"),
+			'\r' => self.0.write_str("\\r"),
+			// NEL/Next Line
+			'\u{0085}' => self.0.write_str("\\u{0085}"),
+			// line seperator
+			'\u{2028}' => self.0.write_str("\\u{2028}"),
+			// Paragraph seperator
+			'\u{2029}' => self.0.write_str("\\u{2029}"),
+			_ => self.0.write_char(c),
+		}
+	}
+}
+
+struct InlineCommentDisplay<F>(F);
+impl<F: fmt::Display> fmt::Display for InlineCommentDisplay<F> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		fmt::Write::write_fmt(&mut InlineCommentWriter(f), format_args!("{}", self.0))
+	}
+}
 
 impl Transaction {
 	/// Writes the full database contents as binary SQL.
@@ -96,7 +128,8 @@ impl Transaction {
 				for tb in tbs.iter() {
 					// Output TABLE
 					chn.send(bytes!("-- ------------------------------")).await?;
-					chn.send(bytes!(format!("-- TABLE: {}", tb.name))).await?;
+					chn.send(bytes!(format!("-- TABLE: {}", InlineCommentDisplay(&tb.name))))
+						.await?;
 					chn.send(bytes!("-- ------------------------------")).await?;
 					chn.send(bytes!("")).await?;
 					chn.send(bytes!(format!("{tb};"))).await?;
@@ -135,7 +168,8 @@ impl Transaction {
 				for tb in tbs.iter() {
 					// Start records
 					chn.send(bytes!("-- ------------------------------")).await?;
-					chn.send(bytes!(format!("-- TABLE DATA: {}", tb.name))).await?;
+					chn.send(bytes!(format!("-- TABLE DATA: {}", InlineCommentDisplay(&tb.name))))
+						.await?;
 					chn.send(bytes!("-- ------------------------------")).await?;
 					chn.send(bytes!("")).await?;
 					// Fetch records

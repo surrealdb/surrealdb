@@ -1,6 +1,4 @@
-use crate::sql::{
-	escape::escape_ident, fmt::Fmt, strand::no_nul_bytes, Duration, Id, Ident, Thing,
-};
+use crate::sql::{escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes, Duration, Id, Ident, Thing};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -104,6 +102,6 @@ impl Access {
 
 impl Display for Access {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&escape_ident(&self.0), f)
+		EscapeIdent(&self.0).fmt(f)
 	}
 }

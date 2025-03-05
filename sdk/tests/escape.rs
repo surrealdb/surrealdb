@@ -63,10 +63,10 @@ async fn complex_ids() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Database record `person:⟨100⟩` already exists"#
-	));
+	assert_eq!(
+		tmp.err().map(|x| x.to_string()),
+		Some(r#"Database record `person:⟨100⟩` already exists"#.to_string())
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
