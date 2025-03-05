@@ -83,26 +83,26 @@ pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value,
 			Ok(val.replace(&search.0, &replace).into())
 		}
 		Value::Regex(search) => {
-			// we estimate how many matches there are and
-			// approximately how much the string might grow:
-			let mut match_count = 0;
-			let mut total_match_len = 0;
+			let mut new_val = String::with_capacity(val.len());
+			let mut last = 0;
+
 			for m in search.0.find_iter(&val) {
-				match_count += 1;
-				total_match_len += m.end().saturating_sub(m.start());
+				// Push everything until the match
+				new_val.push_str(&val[last..m.start()]);
+
+				// Push replacement
+				new_val.push_str(&replace);
+
+				// Abort early if we'd exceed the allowed limit
+				limit("string::replace", new_val.len())?;
+
+				last = m.end();
 			}
 
-			// If the replacement is longer than the average matched length, compute an estimate.
-			if match_count > 0 {
-				let avg_match_len = total_match_len / match_count;
-				if replace.len() > avg_match_len {
-					let increase = replace.len().saturating_sub(avg_match_len);
-					let estimated_size =
-						val.len().saturating_add(match_count.saturating_mul(increase));
-					limit("string::replace", estimated_size)?;
-				}
-			}
-			Ok(search.0.replace_all(&val, replace).into_owned().into())
+			// Finally, push anything after the last match
+			new_val.push_str(&val[last..]);
+			limit("string::replace", new_val.len())?;
+			Ok(new_val.into())
 		}
 		_ => Err(Error::InvalidArguments {
 			name: "string::replace".to_string(),
