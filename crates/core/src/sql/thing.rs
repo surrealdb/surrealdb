@@ -4,7 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
+use crate::sql::{escape::EscapeRid, id::Id, Strand, Value};
 use crate::syn;
 use derive::Store;
 use reblessive::tree::Stk;
@@ -228,7 +228,7 @@ impl Thing {
 
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", escape_rid(&self.tb), self.id)
+		write!(f, "{}:{}", EscapeRid(&self.tb), self.id)
 	}
 }
 

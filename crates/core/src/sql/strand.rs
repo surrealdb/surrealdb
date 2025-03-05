@@ -1,5 +1,4 @@
 use crate::err::Error;
-use crate::sql::escape::quote_plain_str;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -7,6 +6,7 @@ use std::ops::Deref;
 use std::ops::{self};
 use std::str;
 
+use super::escape::QuoteStr;
 use super::value::TryAdd;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
@@ -63,7 +63,7 @@ impl Strand {
 
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&quote_plain_str(&self.0), f)
+		QuoteStr(&self.0).fmt(f)
 	}
 }
 

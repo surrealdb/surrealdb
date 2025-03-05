@@ -11,7 +11,7 @@ use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
 
-use super::escape::quote_str;
+use super::escape::QuoteStr;
 use super::value::TrySub;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
@@ -107,7 +107,7 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "d{}", &quote_str(&self.to_raw()))
+		write!(f, "d{}", &QuoteStr(&self.to_raw()))
 	}
 }
 
