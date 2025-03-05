@@ -498,6 +498,7 @@ pub mod semver {
 #[cfg(test)]
 mod tests {
 	use super::{contains, matches, replace, slice};
+	use crate::err::Error;
 	use crate::sql::Value;
 
 	#[test]
@@ -555,6 +556,21 @@ mod tests {
 
 		test("foo bar", Value::Regex("foo".parse().unwrap()), "bar", "bar bar");
 		test("foo bar", "bar".into(), "foo", "foo foo");
+	}
+
+	#[test]
+	fn string_replace_limit() {
+		let r = replace(("A".repeat(1000), Value::Regex("()".parse().unwrap()), "B".repeat(10000)));
+		match r {
+			Err(Error::InvalidArguments {
+				name,
+				message,
+			}) => {
+				assert_eq!(name, "string::replace");
+				assert_eq!(message, "Output must not exceed 1048576 bytes.");
+			}
+			_ => panic!("Unexpected result: {:?}", r),
+		}
 	}
 
 	#[test]
