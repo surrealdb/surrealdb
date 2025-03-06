@@ -12,6 +12,8 @@ use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 use tempfile::{Builder, TempDir};
+#[cfg(not(target_family = "wasm"))]
+use tokio::task::spawn_blocking;
 
 pub(super) struct FileCollector {
 	dir: TempDir,
@@ -44,11 +46,12 @@ impl FileCollector {
 	pub(super) async fn push(&mut self, value: Value) -> Result<(), Error> {
 		if let Some(mut writer) = self.writer.take() {
 			#[cfg(not(target_family = "wasm"))]
-			let writer = crate::exe::spawn(move || {
+			let writer = spawn_blocking(move || {
 				writer.push(value)?;
 				Ok::<FileWriter, Error>(writer)
 			})
-			.await?;
+			.await
+			.map_err(|e| Error::Internal(format!("{e}")))??;
 			#[cfg(target_family = "wasm")]
 			writer.push(value)?;
 			self.len += 1;

@@ -29,6 +29,7 @@ use std::sync::atomic::{AtomicIsize, AtomicPtr, Ordering};
 #[derive(Debug)]
 pub struct TrackAlloc<Alloc = System> {
 	alloc: Alloc,
+	node_layout: Layout,
 }
 
 impl<A> TrackAlloc<A> {
@@ -36,6 +37,7 @@ impl<A> TrackAlloc<A> {
 	pub const fn new(alloc: A) -> Self {
 		Self {
 			alloc,
+			node_layout: Layout::new::<ThreadCounterNode>(),
 		}
 	}
 }
@@ -78,6 +80,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 				threads += 1;
 			}
 		}
+
 		drop(guard);
 
 		// In rare cases, due to concurrent updates or mismatched add/sub calls,
@@ -99,7 +102,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	#[cfg(feature = "allocation-tracking")]
 	fn add(&self, size: usize) {
 		// Retrieves or initializes this thread's `ThreadCounterNode` and increments its counter.
-		let node = self.get_thread_node();
+		let node = self.get_or_create_thread_node();
 		unsafe {
 			// Using `unsafe` because we are dereferencing a raw pointer.
 			// This is safe here because:
@@ -111,11 +114,15 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 
 	#[cfg(feature = "allocation-tracking")]
 	fn sub(&self, size: usize) {
-		let node = self.get_thread_node();
-		unsafe {
-			// Same reasoning as in `add()`: pointer is always valid and not moved.
-			(*node).counter.fetch_sub(size as isize, Ordering::Relaxed);
-		}
+		THREAD_NODE.with(|cell| {
+			let node = *cell.borrow();
+			if !node.is_null() {
+				unsafe {
+					// Same reasoning as in `add()`: pointer is always valid and not moved.
+					(*node).counter.fetch_sub(size as isize, Ordering::Relaxed);
+				}
+			}
+		});
 	}
 
 	/// Retrieves the thread's node, creating and registering it if necessary.
@@ -137,16 +144,16 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	///
 	/// **Thread Local Storage (TLS): **
 	/// - Each thread stores a pointer to its `ThreadCounterNode` in a TLS variable (`THREAD_NODE`).
-	/// - The first time this thread calls `get_thread_node()`, we allocate and insert the node.
+	/// - The first time this thread calls `get_or_create_thread_node()`, we allocate and insert the node.
 	/// - Subsequent calls just return the cached pointer, which is guaranteed to be valid.
 	#[cfg(feature = "allocation-tracking")]
-	fn get_thread_node(&self) -> *mut ThreadCounterNode {
+	fn get_or_create_thread_node(&self) -> *mut ThreadCounterNode {
 		THREAD_NODE.with(|cell| {
 			let mut node_ptr = *cell.borrow();
 			if node_ptr.is_null() {
 				// Allocate a new node from the wrapped allocator, bypassing the global allocator to avoid recursion.
-				let layout = Layout::new::<ThreadCounterNode>();
-				let node_raw = unsafe { self.alloc.alloc(layout) } as *mut ThreadCounterNode;
+				let node_raw =
+					unsafe { self.alloc.alloc(self.node_layout) } as *mut ThreadCounterNode;
 				if node_raw.is_null() {
 					panic!("Failed to allocate ThreadCounterNode");
 				}
@@ -167,7 +174,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 				// We lock here to ensure that no other thread modifies the list concurrently,
 				// guaranteeing that when the node is visible to other threads, it is fully initialized.
 				{
-					let guard = GLOBAL_LIST_LOCK.lock();
+					let mut guard = GLOBAL_LIST_LOCK.lock();
 					let head = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
 					unsafe {
 						// The `node_raw` now points to a fully initialized `ThreadCounterNode`.
@@ -177,6 +184,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 					}
 					// Atomically update the global head to point to this new node.
 					GLOBAL_LIST_HEAD.store(node_raw, Ordering::Relaxed);
+					*guard += 1;
 					drop(guard);
 				}
 
@@ -187,18 +195,11 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 			node_ptr
 		})
 	}
-}
 
-#[cfg(feature = "allocation-tracking")]
-pub fn stop_tracking() {
-	THREAD_NODE.with(|cell| {
-		let node = *cell.borrow();
-		if node.is_null() {
-			return;
-		}
-
+	#[cfg(feature = "allocation-tracking")]
+	fn remove_tracking(&self, node: *mut ThreadCounterNode) {
 		// We lock here to ensure that no other thread modifies the list concurrently,
-		let guard = GLOBAL_LIST_LOCK.lock();
+		let mut guard = GLOBAL_LIST_LOCK.lock();
 
 		// Load the head of the list
 		let mut current = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
@@ -220,6 +221,11 @@ pub fn stop_tracking() {
 					}
 				}
 
+				unsafe {
+					self.alloc.dealloc(node as *mut u8, self.node_layout);
+				}
+
+				*guard -= 1;
 				// We can break here since we've successfully removed the node
 				break;
 			}
@@ -230,7 +236,18 @@ pub fn stop_tracking() {
 		}
 
 		drop(guard);
-	});
+	}
+
+	#[cfg(feature = "allocation-tracking")]
+	pub fn stop_tracking(&self) {
+		THREAD_NODE.with(|cell| {
+			let node = *cell.borrow();
+			if !node.is_null() {
+				self.remove_tracking(node);
+			}
+			*cell.borrow_mut() = null_mut();
+		});
+	}
 }
 
 #[cfg(not(feature = "allocation-tracking"))]
@@ -307,7 +324,7 @@ static GLOBAL_LIST_HEAD: AtomicPtr<ThreadCounterNode> = AtomicPtr::new(null_mut(
 /// A lock to ensure that only one thread at a time modifies the global list of nodes.
 /// We use `parking_lot::Mutex` because it's known not to allocate at runtime.
 #[cfg(feature = "allocation-tracking")]
-static GLOBAL_LIST_LOCK: Mutex<()> = Mutex::new(());
+static GLOBAL_LIST_LOCK: Mutex<isize> = Mutex::new(0);
 
 #[cfg(feature = "allocation-tracking")]
 thread_local! {
