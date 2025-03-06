@@ -227,7 +227,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	#[cfg(feature = "allocation-tracking")]
 	pub fn stop_tracking(&self) {
 		THREAD_NODE.with(|cell| {
-			let node = *cell.borrow();
+			let node = *cell.borrow_mut();
 			if !node.is_null() {
 				// We lock here to ensure that no other thread modifies the list concurrently,
 				let guard = GLOBAL_LIST_LOCK.lock();
