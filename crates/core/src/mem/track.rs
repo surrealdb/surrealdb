@@ -197,6 +197,8 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 
 	#[cfg(feature = "allocation-tracking")]
 	fn remove_tracking(&self, node: *mut ThreadCounterNode) {
+		// We lock here to ensure that no other thread modifies the list concurrently,
+		let guard = GLOBAL_LIST_LOCK.lock();
 		// Load the head of the list
 		let mut current = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
 		let mut prev: *mut ThreadCounterNode = null_mut();
@@ -215,6 +217,9 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 						(*prev).next.store(next, Ordering::Relaxed);
 					}
 				}
+				unsafe {
+					self.alloc.dealloc(node as *mut u8, self.node_layout);
+				}
 				// We can break here since we've successfully removed the node
 				break;
 			}
@@ -222,6 +227,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 			prev = current;
 			current = unsafe { (*current).next.load(Ordering::Relaxed) };
 		}
+		drop(guard);
 	}
 
 	#[cfg(feature = "allocation-tracking")]
@@ -229,14 +235,8 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 		THREAD_NODE.with(|cell| {
 			let node = *cell.borrow_mut();
 			if !node.is_null() {
-				// We lock here to ensure that no other thread modifies the list concurrently,
-				let guard = GLOBAL_LIST_LOCK.lock();
 				self.remove_tracking(node);
-				unsafe {
-					self.alloc.dealloc(node as *mut u8, self.node_layout);
-				}
 				*cell.borrow_mut() = null_mut();
-				drop(guard);
 			}
 		});
 	}
