@@ -174,7 +174,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 				// We lock here to ensure that no other thread modifies the list concurrently,
 				// guaranteeing that when the node is visible to other threads, it is fully initialized.
 				{
-					let mut guard = GLOBAL_LIST_LOCK.lock();
+					let guard = GLOBAL_LIST_LOCK.lock();
 					let head = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
 					unsafe {
 						// The `node_raw` now points to a fully initialized `ThreadCounterNode`.
@@ -184,7 +184,6 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 					}
 					// Atomically update the global head to point to this new node.
 					GLOBAL_LIST_HEAD.store(node_raw, Ordering::Relaxed);
-					*guard += 1;
 					drop(guard);
 				}
 
@@ -199,7 +198,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	#[cfg(feature = "allocation-tracking")]
 	fn remove_tracking(&self, node: *mut ThreadCounterNode) {
 		// We lock here to ensure that no other thread modifies the list concurrently,
-		let mut guard = GLOBAL_LIST_LOCK.lock();
+		let guard = GLOBAL_LIST_LOCK.lock();
 
 		// Load the head of the list
 		let mut current = GLOBAL_LIST_HEAD.load(Ordering::Relaxed);
@@ -225,7 +224,6 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 					self.alloc.dealloc(node as *mut u8, self.node_layout);
 				}
 
-				*guard -= 1;
 				// We can break here since we've successfully removed the node
 				break;
 			}
@@ -324,7 +322,7 @@ static GLOBAL_LIST_HEAD: AtomicPtr<ThreadCounterNode> = AtomicPtr::new(null_mut(
 /// A lock to ensure that only one thread at a time modifies the global list of nodes.
 /// We use `parking_lot::Mutex` because it's known not to allocate at runtime.
 #[cfg(feature = "allocation-tracking")]
-static GLOBAL_LIST_LOCK: Mutex<isize> = Mutex::new(0);
+static GLOBAL_LIST_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(feature = "allocation-tracking")]
 thread_local! {

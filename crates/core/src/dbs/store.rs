@@ -12,6 +12,8 @@ use rand::{thread_rng, Rng};
 use rayon::prelude::ParallelSliceMut;
 use std::mem;
 use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
+use tokio::task::spawn_blocking;
 
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
@@ -245,11 +247,12 @@ impl MemoryOrdered {
 			let mut ordered = mem::take(&mut self.ordered);
 			let mut values = mem::take(&mut self.values);
 			let orders = self.orders.clone();
-			let result = crate::exe::spawn(move || {
+			let result = spawn_blocking(move || {
 				ordered.par_sort_unstable_by(|a, b| orders.compare(&values[*a], &values[*b]));
 				MemoryRandom::ordered_values_to_vec(&mut values, &ordered)
 			})
-			.await;
+			.await
+			.map_err(|e| Error::OrderingError(format!("{e}")))?;
 			self.result = Some(result);
 		}
 		Ok(())
