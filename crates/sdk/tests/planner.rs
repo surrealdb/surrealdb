@@ -3575,3 +3575,20 @@ async fn select_count_group_all_with_or_without_index() -> Result<(), Error> {
 	}
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_limit_start_array() -> Result<(), Error> {
+	Test::new("SELECT * FROM [1,2,3,4,5,6,7,8,9,10] LIMIT 5 START 0;")
+		.await?
+		.expect_val("[1, 2, 3, 4, 5]")?;
+
+	Test::new("SELECT * FROM [1,2,3,4,5,6,7,8,9,10] LIMIT 5 START 4;")
+		.await?
+		.expect_val("[5, 6, 7, 8, 9]")?;
+
+	Test::new("SELECT * FROM [1,2,3,4,5,6,7,8,9,10] LIMIT 5 START 7;")
+		.await?
+		.expect_val("[8, 9, 10]")?;
+
+	Ok(())
+}
