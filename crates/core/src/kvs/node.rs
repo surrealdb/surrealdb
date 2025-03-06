@@ -159,8 +159,6 @@ impl Datastore {
 				trace!(target: TARGET, id = %id, "Deleting live queries for node");
 				// Scan the live queries for this node
 				while let Some(rng) = next {
-					// Pause and yield execution
-					yield_now!();
 					// Fetch the next batch of keys and values
 					let max = *NORMAL_FETCH_SIZE;
 					let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
@@ -180,6 +178,8 @@ impl Datastore {
 							catch!(txn, txn.clr(nlq).await);
 						}
 					}
+					// Pause and yield execution
+					yield_now!();
 				}
 			}
 			{
@@ -251,8 +251,6 @@ impl Datastore {
 					let mut next = Some(beg..end);
 					let txn = self.transaction(Write, Optimistic).await?;
 					while let Some(rng) = next {
-						// Pause and yield execution
-						yield_now!();
 						// Fetch the next batch of keys and values
 						let max = *NORMAL_FETCH_SIZE;
 						let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
@@ -274,6 +272,8 @@ impl Datastore {
 								catch!(txn, txn.clr(tlq).await);
 							}
 						}
+						// Pause and yield execution
+						yield_now!();
 					}
 					// Commit the changes
 					txn.commit().await?;
