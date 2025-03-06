@@ -124,7 +124,7 @@ impl Model {
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
 				// Run the compute in a blocking task
-				let outcome: Vec<f32> = crate::exe::spawn(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -135,7 +135,8 @@ impl Model {
 						Error::ModelComputation(err.message.to_string())
 					})
 				})
-				.await?;
+				.await
+				.unwrap()?;
 				// Convert the output to a value
 				Ok(outcome.into())
 			}
@@ -151,7 +152,7 @@ impl Model {
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
-				let outcome: Vec<f32> = crate::exe::spawn(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -162,7 +163,8 @@ impl Model {
 						Error::ModelComputation(err.message.to_string())
 					})
 				})
-				.await?;
+				.await
+				.unwrap()?;
 				// Convert the output to a value
 				Ok(outcome.into())
 			}
@@ -182,7 +184,7 @@ impl Model {
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
-				let outcome: Vec<f32> = crate::exe::spawn(move || {
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})?;
@@ -193,7 +195,8 @@ impl Model {
 						Error::ModelComputation(err.message.to_string())
 					})
 				})
-				.await?;
+				.await
+				.unwrap()?;
 				// Convert the output to a value
 				Ok(outcome.into())
 			}

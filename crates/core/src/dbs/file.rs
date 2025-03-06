@@ -10,7 +10,7 @@ use revision::Revisioned;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
 use std::path::{Path, PathBuf};
-use std::{fs, io};
+use std::{fs, io, mem};
 use tempfile::{Builder, TempDir};
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
@@ -30,7 +30,7 @@ impl FileCollector {
 
 	const SORT_DIRECTORY_NAME: &'static str = "so";
 
-	const USIZE_SIZE: usize = size_of::<usize>();
+	const USIZE_SIZE: usize = mem::size_of::<usize>();
 
 	pub(super) fn new(temp_dir: &Path) -> Result<Self, Error> {
 		let dir = Builder::new().prefix("SURREAL").tempdir_in(temp_dir)?;
@@ -140,7 +140,7 @@ impl FileCollector {
 				#[cfg(target_family = "wasm")]
 				let res = f();
 				#[cfg(not(target_family = "wasm"))]
-				let res = crate::exe::spawn(f).await;
+				let res = spawn_blocking(f).await.map_err(|e| Error::OrderingError(format!("{e}")))?;
 				//
 				res
 			}
@@ -171,7 +171,7 @@ impl FileCollector {
 				#[cfg(target_family = "wasm")]
 				let res = f();
 				#[cfg(not(target_family = "wasm"))]
-				let res = crate::exe::spawn(f).await;
+				let res = spawn_blocking(f).await.map_err(|e| Error::OrderingError(format!("{e}")))?;
 				//
 				res
 			}
