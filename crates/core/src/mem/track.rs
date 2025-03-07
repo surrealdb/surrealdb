@@ -218,7 +218,6 @@ thread_local! {
 /// - `counter`: the number of bytes allocated by the thread associated with this node.
 /// - `initialized`: indicates whether this particular node has already been inserted
 ///   into the global list, ensuring it is only inserted once.
-
 ///
 /// Each thread gets one `ThreadCounterNode`.
 /// The global list is used to sum memory usage.
