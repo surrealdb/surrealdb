@@ -116,14 +116,14 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	///
 	/// **Thread Local Storage (TLS):**
 	/// - Each thread stores a pointer to its `ThreadCounterNode` in a TLS variable (`THREAD_NODE`).
-	/// - The first time this thread calls `get_or_create_thread_node()`, we allocate and insert the node.
+	/// - The first time this thread calls `with_thread_node()`, we allocate and insert the node.
 	/// - Subsequent calls just return the cached pointer. As long as it has not been removed,
 	///   this pointer remains valid.
 	fn with_thread_node<F>(f: F)
 	where
 		F: FnOnce(&AtomicIsize),
 	{
-		// Thread node is fully initialzed here because we need a stable location to point to in
+		// Thread node is fully initialized here because we need a stable location to point to in
 		// the list, which cant be retrieved within the thread_local! macro.
 		let _ = THREAD_NODE.try_with(|cell| {
 			if !cell.initialized.get() {
@@ -216,6 +216,9 @@ thread_local! {
 /// `ThreadCounterNode` stores:
 /// - `next`: pointer to the next node in a singly-linked list of per-thread counters.
 /// - `counter`: the number of bytes allocated by the thread associated with this node.
+/// - `initialized`: indicates whether this particular node has already been inserted
+///   into the global list, ensuring it is only inserted once.
+
 ///
 /// Each thread gets one `ThreadCounterNode`.
 /// The global list is used to sum memory usage.
