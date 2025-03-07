@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicIsize, AtomicPtr, Ordering};
 /// will leave the node permanently active. Over time, repeatedly spawning and
 /// exiting threads without calling [`stop_tracking`] can clutter the global list
 /// with stale nodes.
-
+///
 /// # Design Note
 ///
 ///  Why an explicit `stop_tracking` instead of relying on `Drop`?
