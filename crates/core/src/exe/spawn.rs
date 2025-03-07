@@ -1,28 +1,27 @@
 #![cfg(not(target_family = "wasm"))]
+use futures::channel::oneshot;
 
-use async_executor::{Executor, Task};
-use std::future::Future;
-use std::panic::catch_unwind;
-use std::sync::LazyLock;
-
-pub fn spawn<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static) -> Task<T> {
-	static GLOBAL: LazyLock<Executor<'_>> = LazyLock::new(|| {
-		// The name of the thread for the task executor
-		let name = "surrealdb-executor".to_string();
-		// Spawn a single thread for CPU intensive tasks
-		std::thread::Builder::new()
-			.name(name)
-			.spawn(|| {
-				catch_unwind(|| {
-					// Run the task executor indefinitely
-					futures::executor::block_on(GLOBAL.run(futures::future::pending::<()>()))
-				})
-				.ok();
-			})
-			.expect("Unable to create executor task thread");
-		// Create a new executor for CPU intensive tasks
-		Executor::new()
+/// This function spawns the passed closure onto Rayon's pool of worker threads,
+/// allowing multiple CPU-intensive tasks to be executed in parallel.
+///
+/// When should use this function?
+///
+/// **Avoiding the Tokio Runtime Block**
+/// When you run CPU-intensive (or otherwise blocking) tasks on the main Tokio runtime or its worker threads,
+/// you risk blocking those threads. Because Tokio uses an asynchronous runtime,
+/// having a long-running, CPU-bound task can prevent other operations (including I/O-bound operations)
+/// from proceeding smoothly. By offloading CPU-intensive tasks to a separate executor in its own thread,
+/// your main Tokio event loop remains free to handle other futures and I/O tasks.
+pub async fn spawn<F, R>(f: F) -> R
+where
+	F: FnOnce() -> R + Send + 'static,
+	R: Send + 'static,
+{
+	let (tx, rx) = oneshot::channel();
+	rayon::spawn(move || {
+		let result = f();
+		// Ignore errors in case the receiver was dropped
+		let _ = tx.send(result);
 	});
-	// Spawn any future onto the single-threaded executor
-	GLOBAL.spawn(future)
+	rx.await.expect("Receiver dropped")
 }
