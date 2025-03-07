@@ -273,7 +273,11 @@ struct Inner {
 	waiter: Waiter,
 }
 
-/// A database client instance for embedded or remote databases
+/// A database client instance for embedded or remote databases.
+/// 
+/// See [Running SurrealDB embedded in Rust](crate#running-surrealdb-embedded-in-rust)
+/// for tips on how to optimize performance for the client when working
+/// with embedded instances.
 pub struct Surreal<C: Connection> {
 	inner: Arc<Inner>,
 	engine: PhantomData<C>,
