@@ -1,6 +1,6 @@
 #![cfg(feature = "allocator")]
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::{handle_alloc_error, GlobalAlloc, Layout, System};
 
 #[cfg(feature = "allocation-tracking")]
 use parking_lot::Mutex;
@@ -189,7 +189,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 				let node_raw =
 					unsafe { self.alloc.alloc(self.node_layout) } as *mut ThreadCounterNode;
 				if node_raw.is_null() {
-					panic!("Failed to allocate ThreadCounterNode");
+					handle_alloc_error(self.node_layout);
 				}
 
 				// Safely initialize the memory.
