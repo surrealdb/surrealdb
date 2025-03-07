@@ -274,7 +274,7 @@ struct Inner {
 }
 
 /// A database client instance for embedded or remote databases.
-/// 
+///
 /// See [Running SurrealDB embedded in Rust](crate#running-surrealdb-embedded-in-rust)
 /// for tips on how to optimize performance for the client when working
 /// with embedded instances.
