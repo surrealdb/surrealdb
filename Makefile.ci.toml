@@ -156,7 +156,7 @@ args = ["test", "--locked", "--package", "surrealdb-core", "--no-default-feature
 private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
-args = ["test", "--locked", "--package", "surrealdb", "--no-default-features", "--features", "${_TEST_FEATURES}", "--test", "api", "api_integration::${_TEST_API_ENGINE}"]
+args = ["test", "--locked", "--package", "surrealdb", "--no-default-features", "--features", "allocator,allocation-tracking,${_TEST_FEATURES}", "--test", "api", "api_integration::${_TEST_API_ENGINE}"]
 
 [tasks.ci-api-integration]
 private = true
