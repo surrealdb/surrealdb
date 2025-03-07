@@ -1,12 +1,13 @@
 #![cfg(feature = "allocator")]
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
-use std::ptr::NonNull;
-
-#[cfg(feature = "allocation-tracking")]
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 use parking_lot::Mutex;
-#[cfg(feature = "allocation-tracking")]
+use std::alloc::{GlobalAlloc, Layout, System};
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
+use std::cell::Cell;
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
+use std::ptr::NonNull;
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 use std::sync::atomic::{AtomicIsize, Ordering};
 
 /// This structure implements a wrapper around the
@@ -14,30 +15,6 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 /// allocator. It tracks the current memory which
 /// is allocated, allowing the memory use to be
 /// checked at runtime.
-///
-/// # Important Note on Thread Pools
-///
-/// While this allocator can be used with dynamic thread pools where threads may come
-/// and go (such as those created by `tokio::spawn_blocking`), it is critical to call
-/// [`stop_tracking`] whenever a thread terminates. Since tracking nodes are never
-/// physically removed from the global list, failing to halt a thread’s tracking
-/// will leave the node permanently active. Over time, repeatedly spawning and
-/// exiting threads without calling [`stop_tracking`] can clutter the global list
-/// with stale nodes.
-///
-/// # Design Note
-///
-///  Why an explicit `stop_tracking` instead of relying on `Drop`?
-///
-///  We initially considered implementing `Drop` on `ThreadCounterNode` so that,
-///  when the node goes out of scope or the thread terminates, the node would
-///  automatically be removed from the global list.
-///
-///  However, we have to manually allocate the node as part of the global
-///  allocator logic. Thus, we cannot rely on the compiler to automatically call
-///  `Drop` in every situation (particularly at program shutdown times or in
-///  complex allocation/deallocation paths). These constraints make it unreliable
-///  to depend on Rust’s destructor mechanism for a globally allocated structure.
 ///
 #[derive(Debug)]
 pub struct TrackAlloc<Alloc = System> {
@@ -53,23 +30,21 @@ impl<A> TrackAlloc<A> {
 	}
 }
 
-#[cfg(not(feature = "allocation-tracking"))]
+#[cfg(any(not(feature = "allocation-tracking"), target_os = "macos"))]
 impl<A: GlobalAlloc> TrackAlloc<A> {
 	/// Returns a tuple with the current total allocated bytes (summed across all threads),
 	/// and the number of threads that have allocated memory.
-	#[cfg(not(feature = "allocation-tracking"))]
 	pub fn current_usage(&self) -> (usize, usize) {
 		(0, 0)
 	}
 
 	/// Checks whether the allocator is above the memory limit threshold
-	#[cfg(not(feature = "allocation-tracking"))]
 	pub fn is_beyond_threshold(&self) -> bool {
 		false
 	}
 }
 
-#[cfg(feature = "allocation-tracking")]
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 impl<A: GlobalAlloc> TrackAlloc<A> {
 	/// Returns a tuple with the current total allocated bytes (summed across all threads),
 	/// and the number of threads that have allocated memory.
@@ -115,23 +90,6 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 		});
 	}
 
-	/// Subtracts the specified number of bytes from the current thread's allocated byte counter,
-	/// if a tracking node exists.
-	///
-	/// This method does **not** create a new `ThreadCounterNode` if none is present. Instead, it
-	/// immediately returns if the thread is not currently tracked. For instance, a thread may have
-	/// already called `stop_tracking`, yet deallocation requests can still arrive in that window,
-	/// so we intentionally avoid re-creating a node that would be deactivated anyway.
-	///
-	/// # Behavior
-	/// - If the thread has a valid tracking node and is still active, the specified amount is
-	///   subtracted from its total allocation counter.
-	/// - If no node exists (or tracking has been stopped), this call does nothing.
-	/// - Avoiding `get_or_create_thread_node` ensures that no new node is created after
-	///   `stop_tracking` has already concluded the tracking for this thread.
-	///
-	/// # Parameter
-	/// - `amount`: The number of bytes to subtract from the currently tracked allocation.
 	fn sub(&self, size: usize) {
 		Self::with_thread_node(|c| {
 			c.fetch_sub(size as isize, Ordering::Relaxed);
@@ -182,7 +140,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	}
 }
 
-#[cfg(not(feature = "allocation-tracking"))]
+#[cfg(any(not(feature = "allocation-tracking"), target_os = "macos"))]
 unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
 		self.alloc.alloc(layout)
@@ -201,7 +159,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 	}
 }
 
-#[cfg(feature = "allocation-tracking")]
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
 		// Allocate using the wrapped allocator and then record the allocated size.
@@ -239,10 +197,10 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 /// The list of tracking threads is protected by a mutex, this mutex only extends protection to the
 /// list itself, the counter within the values of the list are not protected and therefore use
 /// atomics.
-#[cfg(feature = "allocation-tracking")]
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 static GLOBAL_LIST: Mutex<ListHead> = Mutex::new(ListHead(None));
 
-#[cfg(feature = "allocation-tracking")]
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 thread_local! {
 	/// `THREAD_NODE` stores a pointer to this thread's `ThreadCounterNode`.
 	/// It's initially null, and once the thread first allocates, we initialize the node and store it here.
@@ -261,19 +219,23 @@ thread_local! {
 ///
 /// Each thread gets one `ThreadCounterNode`.
 /// The global list is used to sum memory usage.
-#[cfg(feature = "allocation-tracking")]
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 struct ThreadCounterNode {
 	next: Cell<Option<NonNull<ThreadCounterNode>>>,
 	counter: AtomicIsize,
 	initialized: Cell<bool>,
 }
 
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 struct ListHead(Option<NonNull<ThreadCounterNode>>);
 
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 unsafe impl Sync for ListHead {}
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 unsafe impl Send for ListHead {}
 
 // Drop impl for ThreadCounterNode removes itself from the list.
+#[cfg(all(feature = "allocation-tracking", not(target_os = "macos")))]
 impl Drop for ThreadCounterNode {
 	fn drop(&mut self) {
 		if !self.initialized.get() {
@@ -291,7 +253,7 @@ impl Drop for ThreadCounterNode {
 		}
 
 		loop {
-			// We exists somewhere in the lsit and cur isn't it so next can't be empty.
+			// We exists somewhere in the list and cur isn't it so next can't be empty.
 			let next = unsafe { cur.as_ref().next.get().unwrap() };
 			if this_ptr == next {
 				unsafe { cur.as_ref().next.set(self.next.get()) }

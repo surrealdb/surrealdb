@@ -37,13 +37,13 @@ fn main() -> ExitCode {
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.
 fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
 	// Start a Tokio runtime with custom configuration
-	let mut b = tokio::runtime::Builder::new_multi_thread();
-	let b = b
+	tokio::runtime::Builder::new_multi_thread()
 		.enable_all()
 		.max_blocking_threads(*cnf::RUNTIME_MAX_BLOCKING_THREADS)
 		.worker_threads(*cnf::RUNTIME_WORKER_THREADS)
 		.thread_stack_size(*cnf::RUNTIME_STACK_SIZE)
-		.thread_name("surrealdb-worker");
-	// Build the runtime
-	b.build().unwrap().block_on(fut)
+		.thread_name("surrealdb-worker")
+		.build()
+		.unwrap()
+		.block_on(fut)
 }
