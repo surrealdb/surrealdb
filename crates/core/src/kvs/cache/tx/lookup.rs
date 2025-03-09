@@ -41,6 +41,8 @@ pub(crate) enum Lookup<'a> {
 	Cgs(&'a str, &'a str),
 	/// A cache key for parameters (on a database)
 	Pas(&'a str, &'a str),
+	/// A cache key for sequences (on a database)
+	Sqs(&'a str, &'a str),
 	/// A cache key for tables
 	Tbs(&'a str, &'a str),
 	/// A cache key for events (on a table)
@@ -89,6 +91,8 @@ pub(crate) enum Lookup<'a> {
 	Cg(&'a str, &'a str, &'a str),
 	/// A cache key for a parameter (on a database)
 	Pa(&'a str, &'a str, &'a str),
+	/// A cache key for a sequence (on a database)
+	Sq(&'a str, &'a str, &'a str),
 	/// A cache key for a table
 	Tb(&'a str, &'a str, &'a str),
 	/// A cache key for an event (on a table)

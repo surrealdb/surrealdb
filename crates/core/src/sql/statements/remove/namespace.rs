@@ -35,6 +35,10 @@ impl RemoveNamespaceStatement {
 				.await?;
 			#[cfg(target_family = "wasm")]
 			ctx.get_index_stores().namespace_removed(&txn, &self.name).await?;
+			// Remove the sequences
+			if let Some(seq) = ctx.get_sequences() {
+				seq.namespace_removed(&txn, &self.name).await?;
+			}
 			// Get the definition
 			let ns = txn.get_ns(&self.name).await?;
 			// Delete the definition
