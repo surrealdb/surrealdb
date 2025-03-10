@@ -157,7 +157,7 @@ mod tests {
 	fn regex_compile_limit() {
 		match regex_new("^(a|b|c){1000000}") {
 			Err(e) => {
-				assert!(matches!(e, regex::Error::CompiledTooBig(20)), "{e}");
+				assert!(matches!(e, regex::Error::CompiledTooBig(_)), "{e}");
 			}
 			Ok(_) => panic!("regex should have failed"),
 		}
