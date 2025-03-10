@@ -1,7 +1,10 @@
 mod helpers;
 mod parse;
-use helpers::Test;
+use std::time::{Duration, Instant};
+
+use helpers::{new_ds, Test};
 use surrealdb::err::Error;
+use surrealdb_core::dbs::Session;
 
 #[tokio::test]
 async fn statement_timeouts() -> Result<(), Error> {
@@ -28,6 +31,28 @@ async fn statement_timeouts() -> Result<(), Error> {
 		.expect_error(error)?
 		.expect_error(error)?
 		.expect_error(error)?;
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn query_timeout() -> Result<(), Error> {
+	let sql = "
+		FOR $i in 0..1000000000{
+			FOR $i in 0..1000000000{
+				FOR $i in 0..1000000000{
+				}
+			}
+		}
+	";
+	let ds = new_ds().await?.with_query_timeout(Some(Duration::from_millis(500)));
+	let session = Session::owner();
+	let before = Instant::now();
+	let mut res = ds.execute(sql, &session, None).await.unwrap();
+	if before.elapsed() > Duration::from_millis(7050) {
+		panic!("Query did not properly timeout");
+	}
+	res.pop().unwrap().result.unwrap_err();
 
 	Ok(())
 }
