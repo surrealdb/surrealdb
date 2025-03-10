@@ -1,5 +1,6 @@
-use crate::cnf::REGEX_CACHE_SIZE;
+use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 use quick_cache::sync::{Cache, GuardResult};
+use regex::RegexBuilder;
 use revision::revisioned;
 use serde::{
 	de::{self, Visitor},
@@ -27,19 +28,19 @@ impl Regex {
 	}
 }
 
-fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
+pub(crate) fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
 	static REGEX_CACHE: LazyLock<Cache<String, regex::Regex>> =
 		LazyLock::new(|| Cache::new(REGEX_CACHE_SIZE.max(10)));
 	match REGEX_CACHE.get_value_or_guard(str, None) {
 		GuardResult::Value(v) => Ok(v),
 		GuardResult::Guard(g) => {
-			let re = regex::Regex::new(str)?;
+			let re = RegexBuilder::new(str).size_limit(*REGEX_SIZE_LIMIT).build()?;
 			g.insert(re.clone()).ok();
 			Ok(re)
 		}
 		GuardResult::Timeout => {
 			warn!("Regex cache timeout");
-			regex::Regex::new(str)
+			RegexBuilder::new(str).size_limit(*REGEX_SIZE_LIMIT).build()
 		}
 	}
 }
@@ -146,5 +147,19 @@ impl<'de> Deserialize<'de> for Regex {
 		}
 
 		deserializer.deserialize_newtype_struct(TOKEN, RegexNewtypeVisitor)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::regex_new;
+	#[test]
+	fn regex_compile_limit() {
+		match regex_new("^(a|b|c){1000000}") {
+			Err(e) => {
+				assert!(matches!(e, regex::Error::CompiledTooBig(20)), "{e}");
+			}
+			Ok(_) => panic!("regex should have failed"),
+		}
 	}
 }
