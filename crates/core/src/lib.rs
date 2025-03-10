@@ -23,6 +23,7 @@ mod mac;
 
 mod cf;
 mod doc;
+mod ent;
 mod exe;
 mod fnc;
 

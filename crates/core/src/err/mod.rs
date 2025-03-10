@@ -407,6 +407,12 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The requested api does not exist
+	#[error("The bucket '{value}' does not exist")]
+	BuNotFound {
+		value: String,
+	},
+
 	/// The requested analyzer does not exist
 	#[error("The index '{name}' does not exist")]
 	IxNotFound {
@@ -920,6 +926,12 @@ pub enum Error {
 	#[error("The analyzer '{name}' already exists")]
 	AzAlreadyExists {
 		name: String,
+	},
+
+	/// The requested api already exists
+	#[error("The bucket '{value}' already exists")]
+	BuAlreadyExists {
+		value: String,
 	},
 
 	/// The requested database already exists

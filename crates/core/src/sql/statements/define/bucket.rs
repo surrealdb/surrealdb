@@ -1,17 +1,16 @@
-use crate::api::method::Method;
-use crate::api::path::Path;
+use crate::buc::backend::BucketBackend;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::fmt::{pretty_indent, Fmt};
-use crate::sql::{Base, Ident, Object, Permission, Value};
+use crate::sql::fmt::{pretty_indent, pretty_sequence_item};
+use crate::sql::{Base, Ident, Permissions, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use url::Url;
 
-use super::config::api::ApiConfig;
 use super::CursorDoc;
 
 #[revisioned(revision = 1)]
@@ -19,12 +18,12 @@ use super::CursorDoc;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineBucketStatement {
-	pub id: Option<u32>,
 	pub if_not_exists: bool,
 	pub overwrite: bool,
 	pub name: Ident,
-	pub permissions: Permission,
-	pub metadata: Value,
+	pub backend: Option<Value>,
+	pub permissions: Permissions,
+	pub metadata: Option<Value>,
 }
 
 impl DefineBucketStatement {
@@ -41,24 +40,42 @@ impl DefineBucketStatement {
 		let txn = ctx.tx();
 		let (ns, db) = (opt.ns()?, opt.db()?);
 		// Check if the definition exists
-		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
+		if txn.get_db_bucket(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::ApAlreadyExists {
-					value: self.path.to_string(),
+				return Err(Error::BuAlreadyExists {
+					value: self.name.to_string(),
 				});
 			}
 		}
+		// Process the backend input
+		let backend = if let Some(ref v) = self.backend {
+			let v = v.compute(stk, ctx, opt, doc).await?.coerce_to_string()?;
+			let v = Url::parse(&v).map_err(|_| Error::Unreachable("Invalid backend URL".into()))?;
+
+			if !matches!(v.scheme(), "memory" | "file")
+				&& !crate::ent::file::backend_allowed(v.scheme(), false)
+			{
+				return Err(Error::Unreachable("bla".into()));
+			}
+
+			Some(v)
+		} else {
+			None
+		};
+
 		// Process the statement
 		let name = self.name.to_string();
-		let key = crate::key::database::ap::new(ns, db, &name);
+		let key = crate::key::database::bu::new(ns, db, &name);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
-		let ap = DefineBucketStatement {
+		let ap = BucketDefinition {
 			// Don't persist the `IF NOT EXISTS` clause to schema
-			if_not_exists: false,
-			overwrite: false,
+			name: self.name.clone(),
+			backend,
+			permissions: self.permissions.clone(),
+			metadata: self.metadata.clone(),
 			..Default::default()
 		};
 		txn.set(key, revision::to_vec(&ap)?, None).await?;
@@ -69,27 +86,29 @@ impl DefineBucketStatement {
 	}
 }
 
-impl Display for DefineApiStatement {
+impl Display for DefineBucketStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE API")?;
+		write!(f, "DEFINE BUCKET")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
 		}
 		if self.overwrite {
 			write!(f, " OVERWRITE")?
 		}
-		write!(f, " {}", self.path)?;
+		write!(f, " {}", self.name)?;
+
 		let indent = pretty_indent();
-		if let Some(config) = &self.config {
-			write!(f, "{}", config)?;
+
+		write!(f, " PERMISSIONS {}", self.permissions)?;
+
+		if let Some(ref backend) = self.backend {
+			pretty_sequence_item();
+			write!(f, " BACKEND {}", Value::from(backend.to_string()))?;
 		}
 
-		if let Some(fallback) = &self.fallback {
-			write!(f, "FOR any {}", fallback)?;
-		}
-
-		for action in &self.actions {
-			write!(f, "{}", action)?;
+		if let Some(ref metadata) = self.metadata {
+			pretty_sequence_item();
+			write!(f, " METADATA {}", metadata)?;
 		}
 
 		drop(indent);
@@ -97,13 +116,53 @@ impl Display for DefineApiStatement {
 	}
 }
 
-impl InfoStructure for DefineApiStatement {
+impl InfoStructure for DefineBucketStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"path".to_string() => Value::from(self.path.to_string()),
-			"config".to_string(), if let Some(config) = self.config => config.structure(),
-			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
-			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
+			"name".to_string() => self.name.structure(),
+			"permissions".to_string() => self.permissions.structure(),
+			"backend".to_string(), if let Some(backend) = self.backend => backend.structure(),
+			"metadata".to_string(), if let Some(metadata) = self.metadata => metadata.structure(),
 		})
+	}
+}
+
+// Computed bucket definition struct
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[non_exhaustive]
+pub struct BucketDefinition {
+	pub id: Option<u32>,
+	pub name: Ident,
+	pub backend: Option<Url>,
+	pub permissions: Permissions,
+	pub metadata: Option<Value>,
+}
+
+impl From<BucketDefinition> for DefineBucketStatement {
+	fn from(value: BucketDefinition) -> Self {
+		DefineBucketStatement {
+			if_not_exists: false,
+			overwrite: false,
+			name: value.name,
+			backend: value.backend.map(|v| v.to_string().into()),
+			permissions: value.permissions,
+			metadata: value.metadata,
+		}
+	}
+}
+
+impl InfoStructure for BucketDefinition {
+	fn structure(self) -> Value {
+		let db: DefineBucketStatement = self.into();
+		db.structure()
+	}
+}
+
+impl Display for BucketDefinition {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let db: DefineBucketStatement = self.clone().into();
+		db.fmt(f)
 	}
 }

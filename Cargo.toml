@@ -8,7 +8,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [workspace]
 members = [
-    "crates/core",
+    "crates/core", "crates/enterprise",
     "crates/sdk",
 ]
 

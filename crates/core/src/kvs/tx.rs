@@ -14,6 +14,7 @@ use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
 use crate::sql::statements::define::ApiDefinition;
+use crate::sql::statements::define::DefineBucketStatement;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
@@ -1250,6 +1251,31 @@ impl Transaction {
 					value: ap.to_owned(),
 				})?;
 				let val: ApiDefinition = revision::from_slice(&val)?;
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey, val.clone());
+				val
+			}
+		}
+		.try_into_type()
+	}
+
+	/// Retrieve a specific api definition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_bucket(
+		&self,
+		ns: &str,
+		db: &str,
+		bu: &str,
+	) -> Result<Arc<DefineBucketStatement>, Error> {
+		let qey = cache::tx::Lookup::Bu(ns, db, bu);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::bu::new(ns, db, bu).encode()?;
+				let val = self.get(key, None).await?.ok_or_else(|| Error::BuNotFound {
+					value: bu.to_owned(),
+				})?;
+				let val: DefineBucketStatement = revision::from_slice(&val)?;
 				let val = cache::tx::Entry::Any(Arc::new(val));
 				self.cache.insert(qey, val.clone());
 				val

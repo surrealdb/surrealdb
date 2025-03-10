@@ -7,7 +7,7 @@ use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::api::ApiConfig;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::ConfigInner;
-use crate::sql::statements::define::{ApiAction, DefineConfigStatement};
+use crate::sql::statements::define::{ApiAction, DefineBucketStatement, DefineConfigStatement};
 use crate::sql::statements::DefineApiStatement;
 use crate::sql::Value;
 use crate::syn::error::bail;
@@ -65,6 +65,7 @@ impl Parser<'_> {
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
 			t!("CONFIG") => self.parse_define_config(ctx).await.map(DefineStatement::Config),
+			t!("BUCKET") => self.parse_define_bucket(ctx).await.map(DefineStatement::Bucket),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -1392,6 +1393,52 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
+		Ok(res)
+	}
+
+	pub async fn parse_define_bucket(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineBucketStatement> {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
+		} else {
+			(false, false)
+		};
+
+		let name = self.next_token_value()?;
+
+		let mut res = DefineBucketStatement {
+			name,
+			if_not_exists,
+			overwrite,
+			..Default::default()
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("BACKEND") => {
+					self.pop_peek();
+					res.backend = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
+				}
+				t!("METADATA") => {
+					self.pop_peek();
+					res.metadata = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
+				}
+				t!("PERMISSIONS") => {
+					self.pop_peek();
+					res.permissions = stk.run(|stk| self.parse_permission(stk, true)).await?;
+				}
+				_ => {
+					break;
+				}
+			}
+		}
+
 		Ok(res)
 	}
 
