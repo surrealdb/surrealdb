@@ -60,6 +60,10 @@ pub static SCRIPTING_MAX_STACK_SIZE: LazyLock<usize> =
 pub static SCRIPTING_MAX_MEMORY_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SCRIPTING_MAX_MEMORY_LIMIT", usize, 2 << 20);
 
+/// Used to limit allocation for builtin functions
+pub static SCRIPTING_MAX_TIME_LIMIT: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_SCRIPTING_MAX_TIME_LIMIT", usize, 1000 * 5);
+
 /// Forward all signup/signin/authenticate query errors to a client performing authentication. Do not use in production.
 pub static INSECURE_FORWARD_ACCESS_ERRORS: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_INSECURE_FORWARD_ACCESS_ERRORS", bool, false);
@@ -92,3 +96,6 @@ pub static GENERATION_ALLOCATION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 		.unwrap_or(20);
 	2usize.pow(n)
 });
+
+pub static MAX_HTTP_REDIRECTS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_HTTP_REDIRECTS", usize, 10);
