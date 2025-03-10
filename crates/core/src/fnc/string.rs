@@ -82,7 +82,28 @@ pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value,
 			}
 			Ok(val.replace(&search.0, &replace).into())
 		}
-		Value::Regex(search) => Ok(search.0.replace_all(&val, replace).into_owned().into()),
+		Value::Regex(search) => {
+			let mut new_val = String::with_capacity(val.len());
+			let mut last = 0;
+
+			for m in search.0.find_iter(&val) {
+				// Push everything until the match
+				new_val.push_str(&val[last..m.start()]);
+
+				// Push replacement
+				new_val.push_str(&replace);
+
+				// Abort early if we'd exceed the allowed limit
+				limit("string::replace", new_val.len())?;
+
+				last = m.end();
+			}
+
+			// Finally, push anything after the last match
+			new_val.push_str(&val[last..]);
+			limit("string::replace", new_val.len())?;
+			Ok(new_val.into())
+		}
 		_ => Err(Error::InvalidArguments {
 			name: "string::replace".to_string(),
 			message: format!(
@@ -477,6 +498,7 @@ pub mod semver {
 #[cfg(test)]
 mod tests {
 	use super::{contains, matches, replace, slice};
+	use crate::err::Error;
 	use crate::sql::Value;
 
 	#[test]
@@ -534,6 +556,21 @@ mod tests {
 
 		test("foo bar", Value::Regex("foo".parse().unwrap()), "bar", "bar bar");
 		test("foo bar", "bar".into(), "foo", "foo foo");
+	}
+
+	#[test]
+	fn string_replace_limit() {
+		let r = replace(("A".repeat(1000), Value::Regex("()".parse().unwrap()), "B".repeat(10000)));
+		match r {
+			Err(Error::InvalidArguments {
+				name,
+				message,
+			}) => {
+				assert_eq!(name, "string::replace");
+				assert_eq!(message, "Output must not exceed 1048576 bytes.");
+			}
+			_ => panic!("Unexpected result: {:?}", r),
+		}
 	}
 
 	#[test]
