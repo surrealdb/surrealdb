@@ -96,7 +96,7 @@ pub static GENERATION_ALLOCATION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 pub static REGEX_SIZE_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 	std::env::var("SURREAL_REGEX_SIZE_LIMIT")
 		.map(|s| s.parse::<usize>().unwrap_or(10_485_760))
-		.unwrap_or(20)
+		.unwrap_or(10_485_760)
 });
 
 pub static MAX_HTTP_REDIRECTS: LazyLock<usize> =
