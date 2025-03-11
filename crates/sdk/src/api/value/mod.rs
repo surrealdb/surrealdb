@@ -26,8 +26,7 @@ pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, Error> {
 }
 
 pub fn to_value<T: Serialize + 'static>(value: T) -> Result<Value, Error> {
-	let v = surrealdb_core::sql::to_value(value)?;
-	Ok(Value(v))
+	Ok(Value(surrealdb_core::sql::to_value(value)?))
 }
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
