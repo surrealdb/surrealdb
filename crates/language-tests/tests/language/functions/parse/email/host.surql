@@ -56,10 +56,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "'INVALID'"
 
 [[test.results]]
-value = ""
+value = "'\u0000'"
 
 */
 

@@ -11,9 +11,10 @@ value = "'🜕'"
 value = "'🜕'"
 
 [[test.results]]
-value = ""
+value = "'\u0000'"
 
 */
+
 "\u{0000B0}";
 "\uD83D\uDF15";
 "\u{1F715}";
