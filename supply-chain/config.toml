@@ -444,16 +444,8 @@ version = "0.1.3"
 criteria = "safe-to-run"
 
 [[exemptions.env_logger]]
-version = "0.10.2"
-criteria = "safe-to-run"
-
-[[exemptions.env_logger]]
-version = "0.11.6"
-criteria = "safe-to-run"
-
-[[exemptions.env_logger]]
 version = "0.11.7"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.equator]]
 version = "0.2.2"
@@ -673,11 +665,11 @@ criteria = "safe-to-deploy"
 
 [[exemptions.jiff]]
 version = "0.2.4"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.jiff-static]]
 version = "0.2.4"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.jobserver]]
 version = "0.1.32"
@@ -872,10 +864,6 @@ version = "0.36.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.object_store]]
-version = "0.10.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.object_store]]
 version = "0.12.0"
 criteria = "safe-to-deploy"
 
@@ -1013,11 +1001,11 @@ criteria = "safe-to-deploy"
 
 [[exemptions.portable-atomic]]
 version = "1.11.0"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.portable-atomic-util]]
 version = "0.2.4"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.pprof]]
 version = "0.14.0"
@@ -1345,14 +1333,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.smol_str]]
 version = "0.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.snafu]]
-version = "0.7.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.snafu-derive]]
-version = "0.7.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.socket2]]
