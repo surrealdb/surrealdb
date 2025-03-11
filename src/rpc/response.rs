@@ -23,8 +23,9 @@ impl Response {
 	#[inline]
 	pub fn into_value(self) -> Value {
 		let mut value = match self.result {
-			Ok(val) => map! {
-				"result" => Value::from(val),
+			Ok(val) => match Value::try_from(val) {
+				Ok(v) => map! {"result" => v},
+				Err(e) => map!("error" => Value::from(e.to_string())),
 			},
 			Err(err) => map! {
 				"error" => Value::from(err),

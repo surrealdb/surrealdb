@@ -53,9 +53,9 @@ async fn handler(
 		Ok(res) => {
 			match accept.as_deref() {
 				// Simple serialization
-				Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-				Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-				Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+				Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+				Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+				Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 				// Return nothing
 				Some(Accept::ApplicationOctetStream) => Ok(output::none()),
 				// Internal serialization
