@@ -595,7 +595,7 @@ fn statements() -> Vec<Statement> {
 				],
 			]),
 			ignore: true,
-			update: Some(Data::UpdateExpression(vec![
+			update: Some(Data::UpdateExpression(vec![vec![
 				(
 					Idiom(vec![
 						Part::Field(Ident("a".to_owned())),
@@ -612,7 +612,7 @@ fn statements() -> Vec<Statement> {
 					Operator::Inc,
 					Value::None,
 				),
-			])),
+			]])),
 			output: Some(Output::After),
 			version: None,
 			timeout: None,

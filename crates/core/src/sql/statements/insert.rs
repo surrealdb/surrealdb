@@ -63,7 +63,44 @@ impl InsertStatement {
 			}
 			None => ctx.clone(),
 		};
-		// Parse the INTO expression
+
+		// Process the data expression
+		let data_standardized = self.process_data(stk, &ctx, opt, doc).await?;
+
+		// Parse the update expression
+		let update = self.process_update(&data_standardized).await?;
+
+		// Ingest the data
+		for (id, v) in data_standardized.iter() {
+			i.ingest(iterable(id.clone(), v.clone(), self.relation)?);
+		}
+
+		// Clone and add new update to the statement
+		let mut stm_with_update = self.clone();
+		stm_with_update.update = update;
+
+		// Assign the statement
+		let stm = Statement::from(&stm_with_update);
+		// Process the statement
+		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+		// Catch statement timeout
+		if ctx.is_timedout() {
+			return Err(Error::QueryTimedout);
+		}
+		// Output the results
+		Ok(res)
+	}
+
+	// Process the data
+	async fn process_data(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Vec<(Thing, Value)>, Error> {
+		let mut data_standardized = Vec::new();
+
 		let into = match &self.into {
 			None => None,
 			Some(into) => match into.compute(stk, &ctx, opt, doc).await? {
@@ -75,11 +112,10 @@ impl InsertStatement {
 				}
 			},
 		};
-		// Parse the data expression
+
 		match &self.data {
-			// Check if this is a traditional statement
-			Data::ValuesExpression(v) => {
-				for v in v {
+			Data::ValuesExpression(data) => {
+				for v in data {
 					// Create a new empty base object
 					let mut o = Value::base();
 					// Set each field from the expression
@@ -89,27 +125,27 @@ impl InsertStatement {
 					}
 					// Specify the new table record id
 					let id = gen_id(&o, &into)?;
-					// Pass the value to the iterator
-					i.ingest(iterable(id, o, self.relation)?)
+					// Push the id and value to the vector
+					data_standardized.push((id, o));
 				}
+				Ok(data_standardized)
 			}
-			// Check if this is a modern statement
-			Data::SingleExpression(v) => {
-				let v = v.compute(stk, &ctx, opt, doc).await?;
+			Data::SingleExpression(data) => {
+				let v = data.compute(stk, &ctx, opt, doc).await?;
 				match v {
 					Value::Array(v) => {
 						for v in v {
 							// Specify the new table record id
 							let id = gen_id(&v, &into)?;
-							// Pass the value to the iterator
-							i.ingest(iterable(id, v, self.relation)?)
+							// Push the id and value to the vector
+							data_standardized.push((id, v));
 						}
 					}
 					Value::Object(_) => {
 						// Specify the new table record id
 						let id = gen_id(&v, &into)?;
-						// Pass the value to the iterator
-						i.ingest(iterable(id, v, self.relation)?)
+						// Push the id and value to the vector
+						data_standardized.push((id, v));
 					}
 					v => {
 						return Err(Error::InsertStatement {
@@ -117,19 +153,49 @@ impl InsertStatement {
 						})
 					}
 				}
+				Ok(data_standardized)
 			}
 			v => return Err(fail!("Unknown data clause type in INSERT statement: {v:?}")),
 		}
-		// Assign the statement
-		let stm = Statement::from(self);
-		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		if ctx.is_timedout() {
-			return Err(Error::QueryTimedout);
+	}
+
+	// Process the update
+	async fn process_update(
+		&self,
+		data_standardized: &[(Thing, Value)],
+	) -> Result<Option<Data>, Error> {
+		match &self.update {
+			// no updates
+			None => Ok(self.update.clone()),
+			Some(Data::UpdateExpression(updates)) => {
+				// one update for all data
+				if updates.len() == 1 {
+					// Return the data unchanged for single update
+					return Ok(self.update.clone());
+				}
+
+				// check if data and updates are compatible
+				if updates.len() != data_standardized.len() {
+					return Err(fail!(
+						"Data and Updates don't match length in INSERT statement: {:?}, {:?}",
+						self.data,
+						self.update
+					));
+				}
+
+				// each update for each data
+				let matched_update = Some(Data::UpdatesExpression(
+					data_standardized
+						.iter()
+						.enumerate()
+						.map(|(i, (id, _v))| (id.clone(), updates[i].clone()))
+						.collect(),
+				));
+
+				Ok(matched_update.clone())
+			}
+			u => return Err(fail!("Unknown updates clause type in INSERT statement: {u:?}")),
 		}
-		// Output the results
-		Ok(res)
 	}
 }
 
@@ -146,9 +212,6 @@ impl fmt::Display for InsertStatement {
 			write!(f, " INTO {}", into)?;
 		}
 		write!(f, " {}", self.data)?;
-		if let Some(ref v) = self.update {
-			write!(f, " {v}")?
-		}
 		if let Some(ref v) = self.output {
 			write!(f, " {v}")?
 		}
