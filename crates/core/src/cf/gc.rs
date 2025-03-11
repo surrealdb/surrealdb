@@ -13,12 +13,12 @@ pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
 	let nss = tx.all_ns().await?;
 	// Loop over each namespace
 	for ns in nss.as_ref() {
-		// Pause execution
-		yield_now!();
 		// Trace for debugging
 		trace!("Performing garbage collection on {} for timestamp {ts}", ns.name);
 		// Process the namespace
 		gc_ns(tx, ts, &ns.name).await?;
+		// Pause execution
+		yield_now!();
 	}
 	Ok(())
 }
@@ -31,8 +31,6 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 	let dbs = tx.all_db(ns).await?;
 	// Loop over each database
 	for db in dbs.as_ref() {
-		// Yield execution
-		yield_now!();
 		// Trace for debugging
 		trace!("Performing garbage collection on {ns}:{} for timestamp {ts}", db.name);
 		// Fetch all tables
@@ -65,6 +63,8 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 		if let Some(watermark_vs) = watermark_vs {
 			gc_range(tx, ns, &db.name, watermark_vs).await?;
 		}
+		// Yield execution
+		yield_now!();
 	}
 	Ok(())
 }
