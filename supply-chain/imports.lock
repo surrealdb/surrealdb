@@ -1,6 +1,14 @@
 
 # cargo-vet imports lock
 
+[[unpublished.surrealdb]]
+version = "2.3.0"
+audited_as = "2.2.1"
+
+[[unpublished.surrealdb-core]]
+version = "2.3.0"
+audited_as = "2.2.1"
+
 [[publisher.addr]]
 version = "0.15.6"
 when = "2022-08-31"
@@ -393,13 +401,6 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
-[[publisher.ring]]
-version = "0.17.11"
-when = "2025-02-22"
-user-id = 2751
-user-login = "ctz"
-user-name = "Joe Birr-Pixton"
-
 [[publisher.ryu]]
 version = "1.0.18"
 when = "2024-05-07"
@@ -485,15 +486,15 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "2.2.0"
-when = "2025-02-11"
+version = "2.2.1"
+when = "2025-02-18"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "2.2.0"
-when = "2025-02-11"
+version = "2.2.1"
+when = "2025-02-18"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -506,8 +507,8 @@ user-login = "mumoshu"
 user-name = "Yusuke Kuoka"
 
 [[publisher.surrealkv]]
-version = "0.9.0"
-when = "2025-02-22"
+version = "0.9.1"
+when = "2025-03-03"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
