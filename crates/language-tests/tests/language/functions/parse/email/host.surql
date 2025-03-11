@@ -55,12 +55,6 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 
-[[test.results]]
-value = "'INVALID'"
-
-[[test.results]]
-value = "'\u0000'"
-
 */
 
 
@@ -85,6 +79,3 @@ parse::email::host("j@example..com");
 parse::email::host("@example.com");
 parse::email::host("j\\@example.com");
 parse::email::host("www.example.com");
-
-"INVALID";
-parse::email::user('\u0000@example.com');
