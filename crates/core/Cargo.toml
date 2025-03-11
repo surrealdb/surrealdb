@@ -87,6 +87,7 @@ blake3.workspace = true
 bytes.workspace = true
 castaway.workspace = true
 cedar-policy.workspace = true
+cfg-if.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true

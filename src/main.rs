@@ -42,9 +42,8 @@ fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
 		.max_blocking_threads(*cnf::RUNTIME_MAX_BLOCKING_THREADS)
 		.worker_threads(*cnf::RUNTIME_WORKER_THREADS)
 		.thread_stack_size(*cnf::RUNTIME_STACK_SIZE)
-		.thread_name("surrealdb-worker");
-	#[cfg(feature = "allocation-tracking")]
-	b.on_thread_stop(|| surrealdb_core::mem::ALLOC.stop_tracking());
-	// Build the runtime
-	b.build().unwrap().block_on(fut)
+		.thread_name("surrealdb-worker")
+		.build()
+		.unwrap()
+		.block_on(fut)
 }
