@@ -11,6 +11,7 @@ use surrealdb::dbs::capabilities::{
 };
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
+use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
@@ -44,7 +45,7 @@ pub struct StartCommandDbsOptions {
 }
 
 #[derive(Args, Debug)]
-struct DbsCapabilities {
+pub struct DbsCapabilities {
 	//
 	// Allow
 	//
@@ -432,25 +433,33 @@ impl DbsCapabilities {
 			None => Targets::None,
 		}
 	}
+
+	pub fn into_cli_capabilities(self) -> Capabilities {
+		merge_capabilities(SdkCapabilities::all().into(), self)
+	}
+}
+
+fn merge_capabilities(initial: Capabilities, caps: DbsCapabilities) -> Capabilities {
+	initial
+		.with_scripting(caps.get_scripting())
+		.with_guest_access(caps.get_allow_guests())
+		.with_functions(caps.get_allow_funcs())
+		.without_functions(caps.get_deny_funcs())
+		.with_network_targets(caps.get_allow_net())
+		.without_network_targets(caps.get_deny_net())
+		.with_rpc_methods(caps.get_allow_rpc())
+		.without_rpc_methods(caps.get_deny_rpc())
+		.with_http_routes(caps.get_allow_http())
+		.without_http_routes(caps.get_deny_http())
+		.with_experimental(caps.get_allow_experimental())
+		.without_experimental(caps.get_deny_experimental())
+		.with_arbitrary_query(caps.get_allow_arbitrary_query())
+		.without_arbitrary_query(caps.get_deny_arbitrary_query())
 }
 
 impl From<DbsCapabilities> for Capabilities {
 	fn from(caps: DbsCapabilities) -> Self {
-		Capabilities::default()
-			.with_scripting(caps.get_scripting())
-			.with_guest_access(caps.get_allow_guests())
-			.with_functions(caps.get_allow_funcs())
-			.without_functions(caps.get_deny_funcs())
-			.with_network_targets(caps.get_allow_net())
-			.without_network_targets(caps.get_deny_net())
-			.with_rpc_methods(caps.get_allow_rpc())
-			.without_rpc_methods(caps.get_deny_rpc())
-			.with_http_routes(caps.get_allow_http())
-			.without_http_routes(caps.get_deny_http())
-			.with_experimental(caps.get_allow_experimental())
-			.without_experimental(caps.get_deny_experimental())
-			.with_arbitrary_query(caps.get_allow_arbitrary_query())
-			.without_arbitrary_query(caps.get_deny_arbitrary_query())
+		merge_capabilities(Default::default(), caps)
 	}
 }
 
@@ -537,6 +546,7 @@ mod tests {
 	use surrealdb::iam::verify::verify_root_creds;
 	use surrealdb::kvs::{LockType::*, TransactionType::*};
 	use test_log::test;
+	use wiremock::matchers::path;
 	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
 	use super::*;
@@ -614,6 +624,19 @@ mod tests {
 			s.register(get).await;
 			s.register(head).await;
 
+			s
+		};
+
+		let server3 = {
+			let s = MockServer::start().await;
+			let redirect_res = ResponseTemplate::new(301).append_header("Location", server1.uri());
+
+			let redirect = Mock::given(method("GET"))
+				.and(path("redirect"))
+				.respond_with(redirect_res)
+				.expect(1);
+
+			s.register(redirect).await;
 			s
 		};
 
@@ -826,6 +849,24 @@ mod tests {
 				true,
 				"SUCCESS".to_string(),
 			),
+			(
+				// Ensure redirect fails
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str(&server3.address().to_string()).unwrap()
+							].into(),
+						))
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
+						)),
+				),
+				Session::owner(),
+				format!("RETURN http::get('{}/redirect')", server3.uri()),
+				false,
+				format!("here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",server3.uri()),
+			),
 		];
 
 		for (idx, (ds, sess, query, succeeds, contains)) in cases.into_iter().enumerate() {
@@ -860,5 +901,6 @@ mod tests {
 
 		server1.verify().await;
 		server2.verify().await;
+		server3.verify().await;
 	}
 }

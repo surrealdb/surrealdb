@@ -1,12 +1,53 @@
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
-use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
-};
+use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
 use crate::err::Error;
 use clap::Args;
 use futures_util::StreamExt;
 use surrealdb::engine::any::{connect, IntoEndpoint};
+use surrealdb::kvs::export::TableConfig;
+use surrealdb::method::{Export, ExportConfig};
+use surrealdb::Connection;
 use tokio::io::{self, AsyncWriteExt};
+
+#[derive(Args, Debug)]
+pub struct DatabaseConnectionArguments {
+	#[arg(help = "Database endpoint to export from")]
+	#[arg(short = 'e', long = "endpoint", visible_aliases = ["conn"])]
+	#[arg(default_value = "http://localhost:8000")]
+	#[arg(value_parser = super::validator::endpoint_valid)]
+	pub(crate) endpoint: String,
+}
+
+#[derive(Args, Debug)]
+struct ExportConfigArguments {
+	/// Whether only specific resources should be exported
+	#[arg(long)]
+	only: bool,
+	/// Whether users should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	users: Option<bool>,
+	/// Whether access methods should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	accesses: Option<bool>,
+	/// Whether params should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	params: Option<bool>,
+	/// Whether functions should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	functions: Option<bool>,
+	/// Whether analyzers should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	analyzers: Option<bool>,
+	/// Whether tables should be exported, optionally providing a list of tables
+	#[arg(long, num_args = 0..=1, default_missing_value = "true", value_parser = super::validator::export_tables)]
+	tables: Option<TableConfig>,
+	/// Whether versions should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	versions: Option<bool>,
+	/// Whether records should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	records: Option<bool>,
+}
 
 #[derive(Args, Debug)]
 pub struct ExportCommandArguments {
@@ -20,6 +61,8 @@ pub struct ExportCommandArguments {
 	auth: AuthArguments,
 	#[command(flatten)]
 	sel: DatabaseSelectionArguments,
+	#[command(flatten)]
+	config: ExportConfigArguments,
 }
 
 pub async fn init(
@@ -38,6 +81,7 @@ pub async fn init(
 			namespace,
 			database,
 		},
+		config,
 	}: ExportCommandArguments,
 ) -> Result<(), Error> {
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
@@ -75,11 +119,12 @@ pub async fn init(
 
 	// Use the specified namespace / database
 	client.use_ns(namespace).use_db(database).await?;
+
 	// Export the data from the database
 	debug!("Exporting data from the database");
 	if file == "-" {
 		// Prepare the backup
-		let mut backup = client.export(()).await?;
+		let mut backup = apply_config(config, client.export(())).await?;
 		// Get a handle to standard output
 		let mut stdout = io::stdout();
 		// Write the backup to standard output
@@ -87,9 +132,62 @@ pub async fn init(
 			stdout.write_all(&bytes?).await?;
 		}
 	} else {
-		client.export(file).await?;
+		apply_config(config, client.export(file)).await?;
 	}
 	info!("The SurrealQL file was exported successfully");
 	// Everything OK
 	Ok(())
+}
+
+fn apply_config<C: Connection, R>(
+	config: ExportConfigArguments,
+	export: Export<C, R>,
+) -> Export<C, R, ExportConfig> {
+	let mut export = export.with_config();
+
+	if config.only {
+		export = export
+			.users(false)
+			.accesses(false)
+			.params(false)
+			.functions(false)
+			.analyzers(false)
+			.tables(false)
+			.versions(false)
+			.records(false);
+	}
+
+	if let Some(value) = config.users {
+		export = export.users(value);
+	}
+
+	if let Some(value) = config.accesses {
+		export = export.accesses(value);
+	}
+
+	if let Some(value) = config.params {
+		export = export.params(value);
+	}
+
+	if let Some(value) = config.functions {
+		export = export.functions(value);
+	}
+
+	if let Some(value) = config.analyzers {
+		export = export.analyzers(value);
+	}
+
+	if let Some(tables) = config.tables {
+		export = export.tables(tables);
+	}
+
+	if let Some(value) = config.versions {
+		export = export.versions(value);
+	}
+
+	if let Some(value) = config.records {
+		export = export.records(value);
+	}
+
+	export
 }

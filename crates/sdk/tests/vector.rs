@@ -174,6 +174,7 @@ async fn select_where_brute_force_knn() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+                        direction: 'forward',
 						table: 'pts',
 					},
 					operation: 'Iterate Table'
@@ -276,6 +277,7 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+                        direction: 'forward',
 						table: 'pts'
 					},
 					operation: 'Iterate Table'
@@ -468,6 +470,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+                        direction: 'forward',
 						table: 'pts'
 					},
 					operation: 'Iterate Table'

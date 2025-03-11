@@ -47,8 +47,10 @@ build.allow_build_instructions = [
     "cargo:rustc-link-lib=static=ring",
     "cargo:rustc-link-lib=static=ring-core",
     "cargo:rustc-link-lib=static=ring-test",
-    "cargo:rustc-link-lib=static=ring_core_0_17_8_",
-    "cargo:rustc-link-lib=static=ring_core_0_17_8_test",
+    "cargo:rustc-link-lib=static=ring_core_0_17_10_",
+    "cargo:rustc-link-lib=static=ring_core_0_17_10__test",
+    "cargo:rustc-link-lib=static=ring_core_0_17_11_",
+    "cargo:rustc-link-lib=static=ring_core_0_17_11__test",
     "cargo:rustc-link-search=native=*",
 ]
 allow_unsafe = true
@@ -1153,6 +1155,7 @@ allow_unsafe = true
 
 [pkg.surrealkv]
 allow_apis = ["fs"]
+allow_unsafe = true
 
 [pkg.atomic-waker]
 allow_unsafe = true
@@ -1316,4 +1319,7 @@ allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.affinitypool]
+allow_unsafe = true
+
+[pkg.double-ended-peekable]
 allow_unsafe = true

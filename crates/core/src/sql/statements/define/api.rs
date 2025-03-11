@@ -51,9 +51,9 @@ impl DefineApiStatement {
 			}
 		}
 		// Process the statement
-		let name = self.path.to_string();
 		let path: Path =
 			self.path.compute(stk, ctx, opt, doc).await?.coerce_to_string()?.parse()?;
+		let name = path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;

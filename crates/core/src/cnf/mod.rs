@@ -1,3 +1,5 @@
+use crate::iam::file::extract_allowed_paths;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use object_store::{parse_url, DynObjectStore};
@@ -72,6 +74,10 @@ pub static SCRIPTING_MAX_STACK_SIZE: LazyLock<usize> =
 pub static SCRIPTING_MAX_MEMORY_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SCRIPTING_MAX_MEMORY_LIMIT", usize, 2 << 20);
 
+/// Used to limit allocation for builtin functions
+pub static SCRIPTING_MAX_TIME_LIMIT: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_SCRIPTING_MAX_TIME_LIMIT", usize, 1000 * 5);
+
 /// Forward all signup/signin/authenticate query errors to a client performing authentication. Do not use in production.
 pub static INSECURE_FORWARD_ACCESS_ERRORS: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_INSECURE_FORWARD_ACCESS_ERRORS", bool, false);
@@ -89,6 +95,9 @@ pub static GENERATION_ALLOCATION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 	2usize.pow(n)
 });
 
+pub static MAX_HTTP_REDIRECTS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_HTTP_REDIRECTS", usize, 10);
+
 /// Used to limit allocation for builtin functions
 pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 	std::env::var("SURREAL_IDIOM_RECURSION_LIMIT")
@@ -96,7 +105,7 @@ pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 		.unwrap_or(256)
 });
 
-pub static MEMORY_THRESHOLD: LazyLock<usize> = std::sync::LazyLock::new(|| {
+pub static MEMORY_THRESHOLD: LazyLock<usize> = LazyLock::new(|| {
 	std::env::var("SURREAL_MEMORY_THRESHOLD")
 		.map(|input| {
 			// Trim the input of any spaces
@@ -126,6 +135,13 @@ pub static MEMORY_THRESHOLD: LazyLock<usize> = std::sync::LazyLock::new(|| {
 			bytes
 		})
 		.unwrap_or(0)
+});
+
+/// Used to limit file access
+pub static FILE_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
+	std::env::var("SURREAL_FILE_ALLOWLIST")
+		.map(|input| extract_allowed_paths(&input))
+		.unwrap_or_default()
 });
 
 pub static GLOBAL_BUCKET: LazyLock<Option<Box<DynObjectStore>>> = std::sync::LazyLock::new(|| {

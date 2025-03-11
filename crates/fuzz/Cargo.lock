@@ -2684,15 +2684,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustls-pki-types"
-version = "1.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "917ce264624a4b4db1c364dcc35bfca9ded014d0a958cd47ad3e960e988ea51c"
-dependencies = [
- "web-time",
-]
-
-[[package]]
 name = "rustversion"
 version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3081,7 +3072,6 @@ dependencies = [
  "revision 0.10.0 (git+https://github.com/surrealdb/revision.git)",
  "ring",
  "rust_decimal",
- "rustls-pki-types",
  "semver",
  "serde",
  "serde-content",

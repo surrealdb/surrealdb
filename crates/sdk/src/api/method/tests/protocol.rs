@@ -12,7 +12,6 @@ use crate::api::Surreal;
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::watch;
 use url::Url;
@@ -37,11 +36,9 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			router: self.router.clone(),
-			engine: PhantomData,
+			surreal: self.inner.clone().into(),
 			address: address.into_endpoint(),
 			capacity: 0,
-			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}
@@ -50,21 +47,19 @@ impl Surreal<Client> {
 impl crate::api::Connection for Client {}
 
 impl Connection for Client {
-	fn connect(_address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
+	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
-			let (route_tx, route_rx) = channel::bounded(capacity);
+			let (route_tx, route_rx) = async_channel::bounded(capacity);
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
 			let router = Router {
 				features,
 				sender: route_tx,
+				config: address.config,
 				last_id: AtomicI64::new(0),
 			};
 			server::mock(route_rx);
-			Ok(Surreal::new_from_router_waiter(
-				Arc::new(OnceLock::with_value(router)),
-				Arc::new(watch::channel(None)),
-			))
+			Ok((OnceLock::with_value(router), watch::channel(None)).into())
 		})
 	}
 }

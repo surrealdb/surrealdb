@@ -271,7 +271,7 @@ async fn define_statement_index_concurrently_building_status(
 	Ok(())
 }
 
-#[test(tokio::test)]
+#[tokio::test(flavor = "multi_thread")]
 async fn define_statement_index_concurrently_building_status_standard() -> Result<(), Error> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE INDEX test ON user FIELDS email CONCURRENTLY",
@@ -282,7 +282,7 @@ async fn define_statement_index_concurrently_building_status_standard() -> Resul
 	.await
 }
 
-#[test(tokio::test)]
+#[tokio::test(flavor = "multi_thread")]
 async fn define_statement_index_concurrently_building_status_standard_overwrite(
 ) -> Result<(), Error> {
 	define_statement_index_concurrently_building_status(
@@ -1244,100 +1244,6 @@ async fn permissions_checks_define_index() {
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
-}
-
-#[tokio::test]
-
-async fn define_table_relation_in_out() -> Result<(), Error> {
-	let sql = r"
-		DEFINE TABLE likes TYPE RELATION FROM person TO person | thing SCHEMAFUL;
-		LET $first_p = CREATE person SET name = 'first person';
-		LET $second_p = CREATE person SET name = 'second person';
-		LET $thing = CREATE thing SET name = 'rust';
-		LET $other = CREATE other;
-		RELATE $first_p->likes->$thing;
-		RELATE $first_p->likes->$second_p;
-		CREATE likes;
-		RELATE $first_p->likes->$other;
-		RELATE $thing->likes->$first_p;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 10);
-	//
-	for _ in 0..7 {
-		let tmp = res.remove(0).result;
-		tmp.unwrap();
-	}
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp,
-		Err(crate::Error::TableCheck {
-			thing: _,
-			relation: _,
-			target_type: _
-		})
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	//
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn define_table_relation_redefinition() -> Result<(), Error> {
-	let sql = "
-		DEFINE TABLE likes TYPE RELATION IN person OUT person;
-		LET $person = CREATE person;
-		LET $thing = CREATE thing;
-		LET $other = CREATE other;
-		RELATE $person->likes->$thing;
-		REMOVE TABLE likes;
-		DEFINE TABLE likes TYPE RELATION IN person OUT person | thing;
-		RELATE $person->likes->$thing;
-		RELATE $person->likes->$other;
-		REMOVE FIELD out ON TABLE likes;
-		DEFINE FIELD out ON TABLE likes TYPE record<person | thing | other>;
-		RELATE $person->likes->$other;
-	";
-	let mut t = Test::new(sql).await?;
-	t.skip_ok(4)?;
-	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }))?;
-	t.skip_ok(3)?;
-	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }))?;
-	t.skip_ok(3)?;
-	Ok(())
-}
-
-#[tokio::test]
-async fn define_table_type_normal() -> Result<(), Error> {
-	let sql = "
-		DEFINE TABLE thing TYPE NORMAL;
-		CREATE thing;
-		RELATE foo:one->thing->foo:two;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	//
-	Ok(())
 }
 
 #[tokio::test]

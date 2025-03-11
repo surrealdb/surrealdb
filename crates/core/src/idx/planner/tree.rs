@@ -144,18 +144,16 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn eval_order(&mut self) -> Result<(), Error> {
 		if let Some(o) = self.first_order {
-			if o.direction {
-				if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
-					for (ixr, id_col) in &irf {
-						if *id_col == 0 {
-							self.index_map.order_limit = Some(IndexOption::new(
-								ixr.clone(),
-								Some(id),
-								IdiomPosition::None,
-								IndexOperator::Order,
-							));
-							break;
-						}
+			if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
+				for (ixr, id_col) in &irf {
+					if *id_col == 0 {
+						self.index_map.order_limit = Some(IndexOption::new(
+							ixr.clone(),
+							Some(id),
+							IdiomPosition::None,
+							IndexOperator::Order(!o.direction),
+						));
+						break;
 					}
 				}
 			}
@@ -664,7 +662,9 @@ impl IndexesMap {
 	pub(crate) fn check_compound(&mut self, ixr: &IndexReference, col: usize, val: &Arc<Value>) {
 		let cols = ixr.cols.len();
 		let values = self.compound_indexes.entry(ixr.clone()).or_insert(vec![vec![]; cols]);
-		values[col].push(val.clone());
+		if let Some(a) = values.get_mut(col) {
+			a.push(val.clone());
+		}
 	}
 
 	pub(crate) fn check_compound_array(&mut self, ixr: &IndexReference, col: usize, a: &Array) {

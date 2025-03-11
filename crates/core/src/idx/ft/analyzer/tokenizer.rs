@@ -192,18 +192,27 @@ impl Tokenizer {
 		}
 	}
 
-	fn is_valid(c: char) -> bool {
-		c.is_alphanumeric() || c.is_ascii_punctuation()
-	}
-
-	fn should_split(&mut self, c: char) -> bool {
-		let mut res = false;
+	fn character_role(&mut self, c: char) -> CharacterRole {
+		let cl: CharacterClass = c.into();
+		// If a character class is not supported, we can safely ignore the character
+		if !cl.is_valid() {
+			return CharacterRole::NotTokenizable;
+		}
+		// At this stage, by default, we consider a character being part of the current token
+		let mut r = CharacterRole::PartOfCurrentToken;
 		for s in &mut self.splitters {
-			if s.should_split(c) {
-				res = true;
+			match s.character_role(cl) {
+				// If a tokenizer considers the character being an isolated token we can immediately return
+				CharacterRole::IsolatedToken => return CharacterRole::IsolatedToken,
+				// The character is part of a new token
+				CharacterRole::StartsNewToken => r = CharacterRole::StartsNewToken,
+				// If a tokenizer considers the character being not tokenizable we can immediately return
+				CharacterRole::NotTokenizable => return CharacterRole::NotTokenizable,
+				// We keep the character being part of the current token
+				CharacterRole::PartOfCurrentToken => {}
 			}
 		}
-		res
+		r
 	}
 
 	pub(super) fn tokenize(t: &[SqlTokenizer], i: String) -> Tokens {
@@ -212,13 +221,16 @@ impl Tokenizer {
 		let mut last_byte_pos = 0;
 		let mut current_char_pos = 0;
 		let mut current_byte_pos = 0;
+		let mut previous_character_role = CharacterRole::PartOfCurrentToken;
 		let mut t = Vec::new();
 		for c in i.chars() {
 			let char_len = c.len_utf8() as Position;
-			let is_valid = Self::is_valid(c);
-			let should_split = w.should_split(c);
-			if should_split || !is_valid {
-				// The last pos may be more advanced due to the is_valid process
+			let cr = w.character_role(c);
+			// if the new character is not part of the current token,
+			if !matches!(cr, CharacterRole::PartOfCurrentToken)
+				|| matches!(previous_character_role, CharacterRole::IsolatedToken)
+			{
+				// we add a new token (if there is a pending one)
 				if last_char_pos < current_char_pos {
 					t.push(Token::Ref {
 						chars: (last_char_pos, last_char_pos, current_char_pos),
@@ -230,14 +242,16 @@ impl Tokenizer {
 				last_byte_pos = current_byte_pos;
 				// If the character is not valid for indexing (space, control...)
 				// Then we increase the last position to the next character
-				if !is_valid {
+				if matches!(cr, CharacterRole::NotTokenizable) {
 					last_char_pos += 1;
 					last_byte_pos += char_len;
 				}
 			}
+			previous_character_role = cr;
 			current_char_pos += 1;
 			current_byte_pos += char_len;
 		}
+		// Do we have a pending token?
 		if current_char_pos != last_char_pos {
 			t.push(Token::Ref {
 				chars: (last_char_pos, last_char_pos, current_char_pos),
@@ -254,85 +268,131 @@ impl Tokenizer {
 
 struct Splitter {
 	t: SqlTokenizer,
-	state: u8,
+	state: CharacterClass,
+}
+
+/// Define the character class
+#[derive(Clone, Copy)]
+enum CharacterClass {
+	Unknown,
+	Whitespace,
+	// True if uppercase
+	Alphabetic(bool),
+	Numeric,
+	Punctuation,
+	Other,
+}
+
+impl From<char> for CharacterClass {
+	fn from(c: char) -> Self {
+		if c.is_alphabetic() {
+			Self::Alphabetic(c.is_uppercase())
+		} else if c.is_numeric() {
+			Self::Numeric
+		} else if c.is_whitespace() {
+			Self::Whitespace
+		} else if c.is_ascii_punctuation() {
+			Self::Punctuation
+		} else {
+			Self::Other
+		}
+	}
+}
+
+impl CharacterClass {
+	/// Te be valid a character is either alphanumeric, punctuation or whitespace
+	fn is_valid(&self) -> bool {
+		matches!(self, Self::Alphabetic(_) | Self::Numeric | Self::Punctuation | Self::Whitespace)
+	}
+}
+
+/// Defines the role of a character in the tokenization process
+enum CharacterRole {
+	/// The character is a token on its own
+	IsolatedToken,
+	/// The character is the first character of a new token
+	StartsNewToken,
+	/// The character can't be part of a token and should be ignored
+	NotTokenizable,
+	/// The character is part of the current token
+	PartOfCurrentToken,
 }
 
 impl From<&SqlTokenizer> for Splitter {
 	fn from(t: &SqlTokenizer) -> Self {
 		Self {
 			t: t.clone(),
-			state: 0,
+			state: CharacterClass::Unknown,
 		}
 	}
 }
 
 impl Splitter {
-	fn should_split(&mut self, c: char) -> bool {
+	fn character_role(&mut self, cl: CharacterClass) -> CharacterRole {
 		match &self.t {
-			SqlTokenizer::Blank => self.blank_state(c),
-			SqlTokenizer::Camel => self.camel_state(c),
-			SqlTokenizer::Class => self.class_state(c),
-			SqlTokenizer::Punct => self.punct_state(c),
+			SqlTokenizer::Blank => self.blank_role(cl),
+			SqlTokenizer::Camel => self.camel_role(cl),
+			SqlTokenizer::Class => self.class_role(cl),
+			SqlTokenizer::Punct => self.punct_role(cl),
 		}
 	}
 
-	#[inline]
-	fn state_check(&mut self, s: u8) -> bool {
-		if s != self.state {
-			let res = self.state != 0;
-			self.state = s;
-			res
+	fn blank_role(&self, cl: CharacterClass) -> CharacterRole {
+		if matches!(cl, CharacterClass::Whitespace) {
+			CharacterRole::NotTokenizable
 		} else {
-			false
+			CharacterRole::PartOfCurrentToken
 		}
 	}
 
-	#[inline]
-	fn blank_state(&mut self, c: char) -> bool {
-		let s = if c.is_whitespace() {
-			1
-		} else {
-			9
+	fn class_role(&mut self, cl: CharacterClass) -> CharacterRole {
+		let r = match (cl, self.state) {
+			(CharacterClass::Alphabetic(_), CharacterClass::Alphabetic(_))
+			| (CharacterClass::Numeric, CharacterClass::Numeric)
+			| (CharacterClass::Punctuation, CharacterClass::Punctuation) => {
+				CharacterRole::PartOfCurrentToken
+			}
+			(CharacterClass::Other, _)
+			| (CharacterClass::Whitespace, _)
+			| (CharacterClass::Unknown, _) => CharacterRole::NotTokenizable,
+			(_, _) => CharacterRole::StartsNewToken,
 		};
-		self.state_check(s)
+		self.state = cl;
+		r
 	}
 
-	#[inline]
-	fn class_state(&mut self, c: char) -> bool {
-		let s = if c.is_alphabetic() {
-			1
-		} else if c.is_numeric() {
-			2
-		} else if c.is_whitespace() {
-			3
-		} else if c.is_ascii_punctuation() {
-			4
-		} else {
-			9
-		};
-		self.state_check(s)
-	}
-
-	#[inline]
-	fn punct_state(&mut self, c: char) -> bool {
-		c.is_ascii_punctuation()
-	}
-
-	#[inline]
-	fn camel_state(&mut self, c: char) -> bool {
-		let s = if c.is_lowercase() {
-			1
-		} else if c.is_uppercase() {
-			2
-		} else {
-			9
-		};
-		if s != self.state {
-			self.state = s;
-			s == 2
-		} else {
-			false
+	fn punct_role(&self, cl: CharacterClass) -> CharacterRole {
+		match cl {
+			CharacterClass::Whitespace
+			| CharacterClass::Alphabetic(_)
+			| CharacterClass::Numeric => CharacterRole::PartOfCurrentToken,
+			CharacterClass::Punctuation => CharacterRole::IsolatedToken,
+			CharacterClass::Other | CharacterClass::Unknown => CharacterRole::NotTokenizable,
 		}
+	}
+
+	fn camel_role(&mut self, cl: CharacterClass) -> CharacterRole {
+		let r = match cl {
+			CharacterClass::Alphabetic(next_upper) => {
+				if let CharacterClass::Alphabetic(previous_upper) = self.state {
+					if next_upper && !previous_upper {
+						CharacterRole::StartsNewToken
+					} else {
+						CharacterRole::PartOfCurrentToken
+					}
+				} else {
+					CharacterRole::StartsNewToken
+				}
+			}
+			CharacterClass::Numeric | CharacterClass::Punctuation => {
+				CharacterRole::PartOfCurrentToken
+			}
+			CharacterClass::Other | CharacterClass::Whitespace | CharacterClass::Unknown => {
+				CharacterRole::NotTokenizable
+			}
+		};
+		self.state = cl;
+		r
 	}
 }
 
@@ -397,6 +457,16 @@ static LANGUAGE: &str = "Rust";"#,
 				"\"",
 				";",
 			],
+		)
+		.await;
+	}
+
+	#[tokio::test]
+	async fn test_tokenize_punct() {
+		test_analyzer(
+			"ANALYZER test TOKENIZERS punct",
+			";anD pAss...leaving Memories-",
+			&[";", "anD pAss", ".", ".", ".", "leaving Memories", "-"],
 		)
 		.await;
 	}

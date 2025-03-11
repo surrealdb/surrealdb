@@ -30,7 +30,7 @@ use crate::{
 	opt::{IntoEndpoint, Table},
 	value::Notification,
 };
-use channel::Sender;
+use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
@@ -423,11 +423,9 @@ impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
-			router: self.router.clone(),
-			engine: PhantomData,
+			surreal: self.inner.clone().into(),
 			address: address.into_endpoint(),
 			capacity: 0,
-			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}
@@ -481,7 +479,7 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<CoreValue> {
 async fn export_file(
 	kvs: &Datastore,
 	sess: &Session,
-	chn: channel::Sender<Vec<u8>>,
+	chn: async_channel::Sender<Vec<u8>>,
 	config: Option<DbExportConfig>,
 ) -> Result<()> {
 	let res = match config {
@@ -504,7 +502,7 @@ async fn export_file(
 async fn export_ml(
 	kvs: &Datastore,
 	sess: &Session,
-	chn: channel::Sender<Vec<u8>>,
+	chn: async_channel::Sender<Vec<u8>>,
 	MlExportConfig {
 		name,
 		version,

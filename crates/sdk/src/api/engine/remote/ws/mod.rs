@@ -12,7 +12,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::IntoEndpoint;
 use crate::value::Notification;
-use channel::Sender;
+use async_channel::Sender;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -63,7 +63,7 @@ struct RouterState<Sink, Stream> {
 	/// Messages which aught to be replayed on a reconnect.
 	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries
-	live_queries: HashMap<Uuid, channel::Sender<Notification<CoreValue>>>,
+	live_queries: HashMap<Uuid, async_channel::Sender<Notification<CoreValue>>>,
 	/// Send requests which are still awaiting an awnser.
 	pending_requests: HashMap<i64, PendingRequest>,
 	/// The last time a message was recieved from the server.
@@ -131,11 +131,9 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			router: self.router.clone(),
-			engine: PhantomData,
+			surreal: self.inner.clone().into(),
 			address: address.into_endpoint(),
 			capacity: 0,
-			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}

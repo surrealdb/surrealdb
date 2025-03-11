@@ -103,7 +103,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			// Extract the router from the client
-			let router = self.client.router.extract()?;
+			let router = self.client.inner.router.extract()?;
 
 			match self.inner? {
 				ValidQuery::Raw {
@@ -177,14 +177,7 @@ where
 									.into());
 								};
 								live::register(router, uuid.0).await.map(|rx| {
-									Stream::new(
-										Surreal::new_from_router_waiter(
-											self.client.router.clone(),
-											self.client.waiter.clone(),
-										),
-										uuid.0,
-										Some(rx),
-									)
+									Stream::new(self.client.inner.clone().into(), uuid.0, Some(rx))
 								})
 							}
 							Err(_) => Err(crate::Error::from(Error::NotLiveQuery(idx))),
@@ -220,6 +213,7 @@ where
 {
 	/// Chains a query onto an existing query
 	pub fn query(self, surql: impl opt::IntoQuery) -> Self {
+		let client = self.client.clone();
 		self.map_valid(move |valid| match valid {
 			ValidQuery::Raw {
 				..
@@ -231,8 +225,11 @@ where
 				mut query,
 				register_live_queries,
 				bindings,
-			} => match surql.into_query() {
-				Ok(stmts) => {
+			} => match client.query(surql).inner {
+				Ok(ValidQuery::Normal {
+					query: stmts,
+					..
+				}) => {
 					query.extend(stmts);
 					Ok(ValidQuery::Normal {
 						query,
@@ -240,10 +237,10 @@ where
 						bindings,
 					})
 				}
-				Err(crate::Error::Api(crate::api::err::Error::RawQuery(..))) => {
-					Err(Error::InvalidParams("Appending raw queries is not supported".to_owned())
-						.into())
-				}
+				Ok(ValidQuery::Raw {
+					..
+				}) => Err(Error::InvalidParams("Appending raw queries is not supported".to_owned())
+					.into()),
 				Err(error) => Err(error),
 			},
 		})

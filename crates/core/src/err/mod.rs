@@ -1178,6 +1178,10 @@ pub enum Error {
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,
 
+	#[doc(hidden)]
+	#[error("The underlying datastore does not support reversed scans")]
+	UnsupportedReversedScans,
+
 	/// Found an unexpected value in a range
 	#[error("Expected a range value of '{expected}', but found '{found}'")]
 	InvalidRangeValue {
@@ -1303,6 +1307,9 @@ pub enum Error {
 
 	#[error("The string could not be parsed into a path: {0}")]
 	InvalidPath(String),
+
+	#[error("File access denied: {0}")]
+	FileAccessDenied(String),
 }
 
 impl From<Error> for String {

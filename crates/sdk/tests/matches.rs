@@ -81,6 +81,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 		"[
 				{
 					detail: {
+						direction: 'forward',
 						table: 'blog',
 					},
 					operation: 'Iterate Table'

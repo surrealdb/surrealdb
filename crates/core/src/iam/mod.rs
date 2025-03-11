@@ -8,6 +8,7 @@ pub mod base;
 pub mod check;
 pub mod clear;
 pub mod entities;
+pub(crate) mod file;
 pub mod issue;
 #[cfg(feature = "jwks")]
 pub mod jwks;

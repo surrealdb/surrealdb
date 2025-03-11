@@ -1,6 +1,9 @@
 #![cfg(feature = "scripting")]
 
 mod parse;
+use std::time::Duration;
+use std::time::Instant;
+
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
@@ -27,16 +30,16 @@ async fn script_function_error() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Problem with embedded script function. An exception occurred: error"
-	));
-	//
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Problem with embedded script function. An exception occurred: error\n"
+	);
+
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Problem with embedded script function. An exception occurred: error"
-	));
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Problem with embedded script function. An exception occurred: error\n"
+	);
 	//
 	Ok(())
 }
@@ -729,5 +732,39 @@ async fn script_parallel_query() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_run_too_long() -> Result<(), Error> {
+	let sql = r#"
+		RETURN function() {
+			for(let i = 0;i < 10000000;i++){
+				for(let j = 0;j < 10000000;j++){
+					for(let k = 0;k < 10000000;k++){
+						if(globalThis.test){
+							globalThis.test();
+						}
+					}
+				}
+			}
+		}
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut timeout = *surrealdb_core::cnf::SCRIPTING_MAX_TIME_LIMIT;
+	timeout += timeout / 2;
+
+	let before = Instant::now();
+	let time =
+		tokio::time::timeout(Duration::from_millis(timeout as u64), dbs.execute(sql, &ses, None))
+			.await;
+	if before.elapsed() > Duration::from_millis(timeout as u64) {
+		panic!("Scripting function didn't timeout properly")
+	}
+	// This should timeout within surreal not from the above timeout.
+	let mut resp = time.unwrap().unwrap();
+	resp.pop().unwrap().result.unwrap_err();
+
 	Ok(())
 }

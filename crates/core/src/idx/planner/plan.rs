@@ -3,7 +3,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
-use crate::idx::planner::{GrantedPermission, RecordStrategy, StatementContext};
+use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
 use crate::sql::with::With;
 use crate::sql::{Array, Expression, Idiom, Number, Object};
 use crate::sql::{Operator, Value};
@@ -24,43 +24,47 @@ pub(super) struct PlanBuilder {
 	groups: BTreeMap<GroupRef, Group>, // The order matters because we want the plan to be consistent across repeated queries.
 }
 
+pub(super) struct PlanBuilderParameters {
+	pub(super) root: Option<Node>,
+	pub(super) gp: GrantedPermission,
+	pub(super) compound_indexes: CompoundIndexes,
+	pub(super) order_limit: Option<IndexOption>,
+	pub(super) with_indexes: Option<Vec<IndexReference>>,
+	pub(super) all_and: bool,
+	pub(super) all_expressions_with_index: bool,
+	pub(super) all_and_groups: HashMap<GroupRef, bool>,
+	pub(super) reverse_scan: bool,
+}
+
 impl PlanBuilder {
-	#[allow(clippy::too_many_arguments)]
 	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn build(
-		granted_permission: GrantedPermission,
-		root: Option<Node>,
 		ctx: &StatementContext<'_>,
-		with_indexes: Option<Vec<IndexReference>>,
-		compound_indexes: CompoundIndexes,
-		order: Option<IndexOption>,
-		all_and_groups: HashMap<GroupRef, bool>,
-		all_and: bool,
-		all_expressions_with_index: bool,
+		p: PlanBuilderParameters,
 	) -> Result<Plan, Error> {
 		let mut b = PlanBuilder {
 			has_indexes: false,
 			non_range_indexes: Default::default(),
 			groups: Default::default(),
-			with_indexes,
+			with_indexes: p.with_indexes,
 		};
 
 		if let Some(With::NoIndex) = ctx.with {
-			return Self::table_iterator(ctx, Some("WITH NOINDEX"), granted_permission).await;
+			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
 		}
 
 		// Browse the AST and collect information
-		if let Some(root) = &root {
+		if let Some(root) = &p.root {
 			if let Err(e) = b.eval_node(root) {
-				return Self::table_iterator(ctx, Some(&e), granted_permission).await;
+				return Self::table_iterator(ctx, Some(&e), p.gp).await;
 			}
 		}
 
 		// If all boolean operators are AND, we can use the single index plan
-		if all_and {
+		if p.all_and {
 			// We try first the largest compound indexed
 			let mut compound_index = None;
-			for (ixr, vals) in compound_indexes {
+			for (ixr, vals) in p.compound_indexes {
 				if let Some((cols, io)) = b.check_compound_index(ixr, vals) {
 					if let Some((c, _)) = &compound_index {
 						if cols <= *c {
@@ -74,7 +78,7 @@ impl PlanBuilder {
 			}
 			if let Some((_, io)) = compound_index {
 				// Evaluate if we can use keys only
-				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
+				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
@@ -83,8 +87,7 @@ impl PlanBuilder {
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
-					let record_strategy =
-						ctx.check_record_strategy(true, granted_permission).await?;
+					let record_strategy = ctx.check_record_strategy(true, p.gp)?;
 					// Return the plan
 					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy));
 				}
@@ -93,34 +96,37 @@ impl PlanBuilder {
 			// Otherwise, we try to find the most interesting (todo: TBD) single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
+				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
 			}
 			// If there is an order option
-			if let Some(o) = order {
+			if let Some(o) = p.order_limit {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
-				// Return the plan
-				return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
+				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+				// Check it is compatible with the reverse scan capability
+				if Self::check_order_scan(p.reverse_scan, o.op()) {
+					// Return the plan
+					return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
+				}
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
-		else if all_expressions_with_index {
+		else if p.all_expressions_with_index {
 			let mut ranges = Vec::with_capacity(b.groups.len());
 			for (gr, group) in b.groups {
-				if all_and_groups.get(&gr) == Some(&true) {
+				if p.all_and_groups.get(&gr) == Some(&true) {
 					group.take_union_ranges(&mut ranges);
 				} else {
 					group.take_intersect_ranges(&mut ranges);
 				}
 			}
 			// Evaluate the record strategy
-			let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
+			let record_strategy = ctx.check_record_strategy(true, p.gp)?;
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
-		Self::table_iterator(ctx, None, granted_permission).await
+		Self::table_iterator(ctx, None, p.gp).await
 	}
 
 	async fn table_iterator(
@@ -129,10 +135,12 @@ impl PlanBuilder {
 		granted_permission: GrantedPermission,
 	) -> Result<Plan, Error> {
 		// Evaluate the record strategy
-		let record_strategy = ctx.check_record_strategy(false, granted_permission).await?;
+		let rs = ctx.check_record_strategy(false, granted_permission)?;
+		// Evaluate the scan direction
+		let sc = ctx.check_scan_direction();
 		// Collect the reason if any
 		let reason = reason.map(|s| s.to_string());
-		Ok(Plan::TableIterator(reason, record_strategy))
+		Ok(Plan::TableIterator(reason, rs, sc))
 	}
 
 	/// Check if we have an explicit list of index that we should use
@@ -153,6 +161,11 @@ impl PlanBuilder {
 			}
 		}
 		true
+	}
+
+	/// Check if the ordering is compatible with the datastore transaction capabilities
+	fn check_order_scan(has_reverse_scan: bool, op: &IndexOperator) -> bool {
+		has_reverse_scan || matches!(op, IndexOperator::Order(false))
 	}
 
 	/// Check if a compound index can be used.
@@ -267,7 +280,7 @@ pub(super) enum Plan {
 	/// Table full scan
 	/// 1: An optional reason
 	/// 2: A record strategy
-	TableIterator(Option<String>, RecordStrategy),
+	TableIterator(Option<String>, RecordStrategy, ScanDirection),
 	/// Index scan filtered on records matching a given expression
 	/// 1: The optional expression associated with the index
 	/// 2: A record strategy
@@ -309,7 +322,8 @@ pub(super) enum IndexOperator {
 	Matches(String, Option<MatchRef>),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
-	Order,
+	/// false = ascending, true = descending
+	Order(bool),
 }
 
 impl IndexOption {
@@ -397,8 +411,15 @@ impl IndexOption {
 				e.insert("operator", op);
 				e.insert("value", val);
 			}
-			IndexOperator::Order => {
-				e.insert("operator", Value::from("Order"));
+			IndexOperator::Order(reverse) => {
+				e.insert(
+					"operator",
+					Value::from(if *reverse {
+						"ReverseOrder"
+					} else {
+						"Order"
+					}),
+				);
 			}
 		};
 		Value::from(e)

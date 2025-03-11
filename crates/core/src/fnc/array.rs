@@ -20,6 +20,7 @@ use crate::sql::Closure;
 use crate::sql::Function;
 use rand::prelude::SliceRandom;
 use reblessive::tree::Stk;
+use std::cmp::Ordering;
 use std::mem::size_of_val;
 
 /// Returns an error if an array of this length is too much to allocate.
@@ -198,38 +199,23 @@ pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
 pub fn fill(
 	(mut array, value, start, end): (Array, Value, Option<isize>, Option<isize>),
 ) -> Result<Value, Error> {
-	let min = 0;
-	let max = array.len();
-	let negative_max = -(max as isize);
+	let len = array.len();
 
-	let start = match start {
-		Some(start) if negative_max <= start && start < 0 => (start + max as isize) as usize,
-		Some(start) if start < negative_max => 0,
-		Some(start) => start as usize,
-		None => min,
-	};
-	let end = match end {
-		Some(end) if negative_max <= end && end < 0 => (end + max as isize) as usize,
-		Some(end) if end < negative_max => 0,
-		Some(end) => end as usize,
-		None => max,
+	let start = start.unwrap_or(0);
+	let start = if start < 0 {
+		len.saturating_sub((-start) as usize)
+	} else {
+		(start as usize).min(len)
 	};
 
-	if start == min && end >= max {
-		array.fill(value);
-	} else if end > start {
-		let end_minus_one = end - 1;
+	let end = end.unwrap_or(len as isize);
+	let end = if end < 0 {
+		len.saturating_sub((-end) as usize)
+	} else {
+		(end as usize).min(len)
+	};
 
-		for i in start..end_minus_one {
-			if let Some(elem) = array.get_mut(i) {
-				*elem = value.clone();
-			}
-		}
-
-		if let Some(last_elem) = array.get_mut(end_minus_one) {
-			*last_elem = value;
-		}
-	}
+	array[start..end].fill(value);
 
 	Ok(array.into())
 }
@@ -652,33 +638,53 @@ pub fn slice((array, beg, lim): (Array, Option<isize>, Option<isize>)) -> Result
 	.into())
 }
 
-pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+fn sort_as_asc(order: &Option<Value>) -> bool {
 	match order {
-		// If "asc", sort ascending
-		Some(Value::Strand(s)) if s.as_str() == "asc" => {
-			array.sort_unstable();
-			Ok(array.into())
-		}
-		// If "desc", sort descending
-		Some(Value::Strand(s)) if s.as_str() == "desc" => {
-			array.sort_unstable_by(|a, b| b.cmp(a));
-			Ok(array.into())
-		}
-		// If true, sort ascending
-		Some(Value::Bool(true)) => {
-			array.sort_unstable();
-			Ok(array.into())
-		}
-		// If false, sort descending
-		Some(Value::Bool(false)) => {
-			array.sort_unstable_by(|a, b| b.cmp(a));
-			Ok(array.into())
-		}
-		// Sort ascending by default
-		_ => {
-			array.sort_unstable();
-			Ok(array.into())
-		}
+		Some(Value::Strand(s)) if s.as_str() == "asc" => true,
+		Some(Value::Strand(s)) if s.as_str() == "desc" => false,
+		Some(Value::Bool(true)) => true,
+		Some(Value::Bool(false)) => false,
+		_ => true,
+	}
+}
+
+pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+	if sort_as_asc(&order) {
+		array.sort_unstable();
+		Ok(array.into())
+	} else {
+		array.sort_unstable_by(|a, b| b.cmp(a));
+		Ok(array.into())
+	}
+}
+
+pub fn sort_natural((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+	if sort_as_asc(&order) {
+		array.sort_unstable_by(|a, b| a.natural_cmp(b).unwrap_or(Ordering::Equal));
+		Ok(array.into())
+	} else {
+		array.sort_unstable_by(|a, b| b.natural_cmp(a).unwrap_or(Ordering::Equal));
+		Ok(array.into())
+	}
+}
+
+pub fn sort_lexical((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+	if sort_as_asc(&order) {
+		array.sort_unstable_by(|a, b| a.lexical_cmp(b).unwrap_or(Ordering::Equal));
+		Ok(array.into())
+	} else {
+		array.sort_unstable_by(|a, b| b.lexical_cmp(a).unwrap_or(Ordering::Equal));
+		Ok(array.into())
+	}
+}
+
+pub fn sort_natural_lexical((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+	if sort_as_asc(&order) {
+		array.sort_unstable_by(|a, b| a.natural_lexical_cmp(b).unwrap_or(Ordering::Equal));
+		Ok(array.into())
+	} else {
+		array.sort_unstable_by(|a, b| b.natural_lexical_cmp(a).unwrap_or(Ordering::Equal));
+		Ok(array.into())
 	}
 }
 
