@@ -768,3 +768,21 @@ async fn script_run_too_long() -> Result<(), Error> {
 
 	Ok(())
 }
+
+#[tokio::test]
+async fn script_limit_massive_parallel() -> Result<(), Error> {
+	let sql = r#"
+		define function fn::crashcat() {
+			return function() {
+				let x = surrealdb.query("return fn::crashcat()");
+				let y = surrealdb.query("return fn::crashcat()");
+				return await x+y;
+			};
+		};
+		return fn::crashcat();
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	dbs.execute(sql, &ses, None).await?;
+	Ok(())
+}
