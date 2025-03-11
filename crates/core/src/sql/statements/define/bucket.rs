@@ -55,7 +55,7 @@ impl DefineBucketStatement {
 			let v = Url::parse(&v).map_err(|_| Error::Unreachable("Invalid backend URL".into()))?;
 
 			if !matches!(v.scheme(), "memory" | "file")
-				&& !crate::ent::file::backend_allowed(v.scheme(), false)
+				&& !crate::ent::file::backend_supported(v.scheme(), false)
 			{
 				return Err(Error::Unreachable("bla".into()));
 			}

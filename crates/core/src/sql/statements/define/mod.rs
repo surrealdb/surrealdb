@@ -131,7 +131,7 @@ impl DefineStatement {
 			Self::Access(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Config(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Api(ref v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Bucket(ref v) => v.compute(stk, ctx, opt).await,
+			Self::Bucket(ref v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }
