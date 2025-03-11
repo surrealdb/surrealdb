@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use js::{
 	class::{ClassId, JsClass, OwnedBorrow, Readable, Trace},
 	prelude::{Coerced, Opt},
-	Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value,
+	Ctx, Exception, FromJs, Promise, Result, Value,
 };
 use reblessive::tree::Stk;
 
@@ -61,18 +61,20 @@ pub fn query<'js>(
 	variables: Opt<classes::QueryVariables>,
 ) -> Result<Promise<'js>> {
 	let ctx_clone = ctx.clone();
-	let this = ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
+	let query_ctx =
+		ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
 
 	let mut pending_borrow = query_ctx.pending.borrow_mut();
 	let pending_query_future = pending_borrow.as_ref().map(|x| x.clone().into_future::<()>());
 
 	let promise = Promise::wrap_future(&ctx_clone, async move {
-		let query_ctx = ctx.userdata::<QueryContext<'js>>().expect("query context should be set");
-
 		// Wait on existing query ctx so that we can't spawn more then one query at the same time.
 		if let Some(x) = pending_query_future {
 			let _ = x.await;
 		}
+
+		let query_ctx =
+			ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
 
 		let mut borrow_store = None;
 		let mut query_store = None;
