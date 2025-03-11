@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -14,6 +15,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::mem::ALLOC;
 use crate::sql::value::Value;
 use js::async_with;
 use js::prelude::*;
@@ -37,6 +39,7 @@ pub unsafe fn create_query_data<'a>(
 		context,
 		opt,
 		doc,
+		pending: RefCell::new(None),
 	})
 	.expect("userdata shouldn't be in use");
 
@@ -54,6 +57,11 @@ pub async fn run(
 	if context.is_done() {
 		return Ok(Value::None);
 	}
+
+	// Scripting functions are pretty heavy so make the increase pretty heavy.
+	let opt = opt.dive(4)?;
+
+	//TODO: Maybe check memory usage?
 
 	let instant_start = Instant::now();
 	let time_limit = Duration::from_millis(*crate::cnf::SCRIPTING_MAX_TIME_LIMIT as u64);
@@ -83,7 +91,7 @@ pub async fn run(
 			let global = ctx.globals();
 			// SAFETY: This is safe because the runtime only lives for the duration of this
 			// function. For the entire duration of which context, opt, txn and doc are valid.
-			unsafe{ create_query_data(context, opt, doc, &ctx) }?;
+			unsafe{ create_query_data(context, &opt, doc, &ctx) }?;
 			// Register the fetch module as a global function
 			fetch::register(&ctx)?;
 			// Register the surrealdb module as a global object
