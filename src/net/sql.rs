@@ -45,9 +45,9 @@ async fn post_handler(
 	match db.execute(sql, &session, params.0.parse().into()).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
