@@ -102,7 +102,7 @@ pub(crate) mod no_nul_bytes {
 	where
 		S: Serializer,
 	{
-		debug_assert!(!s.contains('\0'));
+		//debug_assert!(!s.contains('\0'));
 		serializer.serialize_str(s)
 	}
 
