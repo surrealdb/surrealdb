@@ -1322,5 +1322,8 @@ allow_unsafe = true
 [pkg.double-ended-peekable]
 allow_unsafe = true
 
+[pkg.jiff]
+allow_unsafe = true
+
 [pkg.jiff-static]
 allow_proc_macro = true
