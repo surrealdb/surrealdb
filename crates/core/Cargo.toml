@@ -35,6 +35,7 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
+allocator = ["dep:jemallocator", "dep:mimalloc"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -42,6 +43,7 @@ arbitrary = [
     "geo-types/arbitrary",
     "uuid/arbitrary",
 ]
+allocation-tracking = []
 # Special features
 kv-fdb-7_1 = ["foundationdb/fdb-7_1"]
 kv-fdb-7_3 = ["foundationdb/fdb-7_3"]
@@ -109,6 +111,7 @@ ndarray-stats = "=0.5.1"
 num_cpus = "1.16.0"
 num-traits = "0.2.18"
 object_store = { version = "0.10.2", optional = false }
+parking_lot = "0.12.3"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
 phf = { version = "0.11.2", features = ["macros", "unicase"] }
 pin-project-lite = "0.2.13"
@@ -151,6 +154,7 @@ subtle = "2.6"
 surrealcs = { version = "0.4.4", optional = true }
 surrealkv = { version = "0.6.1", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
+sysinfo = "0.33.0"
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.63"
 tikv = { version = "0.3.0-surreal.1", default-features = false, package = "surrealdb-tikv-client", optional = true }
@@ -200,6 +204,12 @@ tokio = { version = "1.41.1", default-features = false, features = [
 ] }
 tokio-tungstenite = { version = "0.21.0", optional = true }
 uuid = { version = "1.10.0", features = ["serde", "v4", "v7"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
+mimalloc = { version = "0.1.39", optional = true, default-features = false }
+
+[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+jemallocator = { version = "0.5.4", optional = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

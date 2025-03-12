@@ -45,7 +45,7 @@ impl Iterator for VersionstampSequence {
 		// Now calculate next
 		let mut next_state = self.next_state.unwrap();
 		let index_to_increase =
-			next_state.iter().enumerate().rev().skip(2).find(|(_, &x)| x < 255u8).take();
+			next_state.iter().enumerate().rev().skip(2).find(|(_, &x)| x < 255u8);
 		if index_to_increase.is_none() {
 			self.next_state = None;
 			return Some(returned_state);

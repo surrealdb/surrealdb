@@ -24,7 +24,7 @@ macro_rules! impl_module_def {
 		{
 			// It is currently impossible to create closures which capture Ctx in a returned future.
 			// So instead we define a normal function for async.
-            async fn f<'js>(ctx: js::Ctx<'js>, v: js::function::Rest<crate::sql::value::Value>) -> js::Result<crate::sql::value::Value>{
+            async fn f(ctx: js::Ctx<'_>, v: js::function::Rest<crate::sql::value::Value>) -> js::Result<crate::sql::value::Value>{
                 $call(ctx,if $path == "" { $name } else { concat!($path, "::", $name) }, v.0).await
             }
 			let func = Async(f);

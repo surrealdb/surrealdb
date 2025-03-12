@@ -91,7 +91,7 @@ impl SelectStatement {
 		if self.what.iter().any(|v| v.writeable()) {
 			return true;
 		}
-		self.cond.as_ref().map_or(false, |v| v.writeable())
+		self.cond.as_ref().is_some_and(|v| v.writeable())
 	}
 
 	/// Process this type returning a computed simple Value

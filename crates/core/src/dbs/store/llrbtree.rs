@@ -92,7 +92,7 @@ impl Nodes {
 		Some(h_idx)
 	}
 	fn is_red(&self, node_idx: Option<usize>) -> bool {
-		node_idx.map_or(false, |idx| self.node(idx).is_red)
+		node_idx.is_some_and(|idx| self.node(idx).is_red)
 	}
 
 	fn rotate_left(&mut self, h_idx: usize) -> usize {

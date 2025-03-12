@@ -212,8 +212,8 @@ async fn permissions_checks_info_root() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0f, load_average: [0f, 0f, 0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"],
+		vec!["{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0f, load_average: [0f, 0f, 0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"],
 	];
 
 	let test_cases = [

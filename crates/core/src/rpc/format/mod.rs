@@ -64,7 +64,6 @@ impl Format {
 			Self::Bincode => bincode::req(&val),
 			Self::Revision => revision::req(val),
 		}
-		.map_err(Into::into)
 	}
 
 	/// Process a response using the specified format
@@ -92,6 +91,5 @@ impl Format {
 			Self::Bincode => bincode::parse_value(&val),
 			Self::Revision => revision::parse_value(val),
 		}
-		.map_err(Into::into)
 	}
 }

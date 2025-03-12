@@ -47,8 +47,8 @@ build.allow_build_instructions = [
     "cargo:rustc-link-lib=static=ring",
     "cargo:rustc-link-lib=static=ring-core",
     "cargo:rustc-link-lib=static=ring-test",
-    "cargo:rustc-link-lib=static=ring_core_0_17_8_",
-    "cargo:rustc-link-lib=static=ring_core_0_17_8_test",
+    "cargo:rustc-link-lib=static=ring_core_0_17_14_",
+    "cargo:rustc-link-lib=static=ring_core_0_17_14__test",
     "cargo:rustc-link-search=native=*",
 ]
 allow_unsafe = true
@@ -977,7 +977,7 @@ build.allow_build_instructions = ["cargo::rustc-check-cfg=*"]
 
 [pkg.surrealdb-core]
 allow_unsafe = true
-allow_apis = ["net", "fs"]
+allow_apis = ["net", "fs", "process"]
 build.allow_build_instructions = [
     "cargo:rustc-cfg=*",
     "cargo::rustc-check-cfg=*",
@@ -1297,3 +1297,12 @@ allow_unsafe = true
 [pkg.idna]
 allow_unsafe = true
 
+[pkg.windows-implement]
+allow_proc_macro = true
+
+[pkg.windows-interface]
+allow_proc_macro = true
+
+[pkg.sysinfo]
+allow_unsafe = true
+allow_apis = ["fs"]
