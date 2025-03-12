@@ -16,9 +16,9 @@ use crate::sql::{
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
 	model::Model,
-	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
-	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Tables, Thing, Uuid,
+	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, File, Function,
+	Future, Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range,
+	Regex, Strand, Subquery, Table, Tables, Thing, Uuid,
 };
 use chrono::{DateTime, Utc};
 
@@ -139,6 +139,7 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	Refs(Refs),
+	File(File),
 	// Add new variants here
 }
 
@@ -2942,6 +2943,7 @@ impl fmt::Display for Value {
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
 			Value::Refs(v) => write!(f, "{v}"),
+			Value::File(v) => write!(f, "{v}"),
 		}
 	}
 }

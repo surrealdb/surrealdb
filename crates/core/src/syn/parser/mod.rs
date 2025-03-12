@@ -68,6 +68,7 @@ use reblessive::{Stack, Stk};
 mod basic;
 mod builtin;
 mod expression;
+mod file;
 mod function;
 mod glue;
 mod idiom;

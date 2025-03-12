@@ -109,7 +109,15 @@ impl Parser<'_> {
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
-						self.parse_thing_or_range(ctx, str).await.map(Value::Thing)
+						if str.eq_ignore_ascii_case("file")
+							&& matches!(self.peek_whitespace1().kind, t!("/"))
+						{
+							self.pop_peek();
+							self.pop_peek();
+							self.parse_file().await.map(Value::File)
+						} else {
+							self.parse_thing_or_range(ctx, str).await.map(Value::Thing)
+						}
 					}
 					_ => Ok(Value::Table(self.next_token_value()?)),
 				}
@@ -327,7 +335,15 @@ impl Parser<'_> {
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
-						self.parse_thing_or_range(ctx, str).await?.into()
+						if str.eq_ignore_ascii_case("file")
+							&& matches!(self.peek_whitespace1().kind, t!("/"))
+						{
+							self.pop_peek();
+							self.pop_peek();
+							self.parse_file().await.map(Value::File)?
+						} else {
+							self.parse_thing_or_range(ctx, str).await.map(Value::Thing)?
+						}
 					}
 					_ => {
 						if self.table_as_field {
