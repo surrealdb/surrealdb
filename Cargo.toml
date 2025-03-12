@@ -18,6 +18,7 @@ members = [
 [features]
 # Public features
 default = [
+    "allocator",
     "storage-mem",
     "storage-surrealkv",
     "storage-surrealcs",
@@ -25,6 +26,7 @@ default = [
     "scripting",
     "http",
 ]
+allocator = ["surrealdb/allocator"]
 storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-tikv = ["surrealdb/kv-tikv"]
@@ -36,6 +38,7 @@ http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
+allocation-tracking = ["surrealdb/allocation-tracking"]
 performance-profiler = ["dep:pprof"]
 # Special features
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]

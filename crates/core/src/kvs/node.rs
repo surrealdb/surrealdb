@@ -22,6 +22,8 @@ impl Datastore {
 	pub async fn insert_node(&self, id: uuid::Uuid) -> Result<(), Error> {
 		// Log when this method is run
 		trace!(target: TARGET, "Inserting node in the cluster");
+		// Refresh system usage metrics
+		crate::sys::refresh().await;
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::Nd::new(id);

@@ -24,6 +24,7 @@ resolver = "2"
 [features]
 # Public features
 default = ["protocol-ws", "rustls"]
+allocator = ["surrealdb-core/allocator"]
 protocol-http = ["dep:reqwest"]
 protocol-ws = ["dep:tokio-tungstenite", "dep:trice", "tokio/time"]
 kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
@@ -48,7 +49,8 @@ rustls = [
 ml = ["surrealdb-core/ml"]
 jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
-# Special features
+allocation-tracking = ["surrealdb-core/allocation-tracking"]
+# FoundationDB features
 kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
 kv-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]
 

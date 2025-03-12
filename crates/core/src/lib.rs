@@ -38,11 +38,15 @@ pub mod key;
 #[doc(hidden)]
 pub mod kvs;
 #[doc(hidden)]
+pub mod mem;
+#[doc(hidden)]
 pub mod options;
 #[doc(hidden)]
 pub mod rpc;
 #[doc(hidden)]
 pub mod syn;
+#[doc(hidden)]
+pub mod sys;
 
 #[cfg(feature = "ml")]
 #[doc(hidden)]
