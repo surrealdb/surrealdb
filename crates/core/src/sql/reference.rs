@@ -13,7 +13,7 @@ use super::{array::Uniq, statements::info::InfoStructure, Array, Idiom, Table, T
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::Range")]
+#[serde(rename = "$surrealdb::private::sql::Reference")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Reference {
@@ -37,7 +37,7 @@ impl InfoStructure for Reference {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::Range")]
+#[serde(rename = "$surrealdb::private::sql::ReferenceDeleteStrategy")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum ReferenceDeleteStrategy {
@@ -68,7 +68,7 @@ impl InfoStructure for ReferenceDeleteStrategy {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::Range")]
+#[serde(rename = "$surrealdb::private::sql::Refs")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Refs(pub Vec<(Option<Table>, Option<Idiom>)>);
