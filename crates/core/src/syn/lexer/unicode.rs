@@ -15,10 +15,10 @@ pub mod chars {
 	pub const LF: char = '\u{000A}';
 	/// Carriage return
 	pub const CR: char = '\u{000D}';
-	/// Line separator
-	pub const LS: char = '\u{2020}';
 	/// Backspace
 	pub const BS: char = '\u{0008}';
+	/// Line separator
+	pub const LS: char = '\u{2028}';
 	/// Paragraph separator
 	pub const PS: char = '\u{2029}';
 	/// Next line
