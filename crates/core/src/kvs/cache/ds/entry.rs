@@ -4,6 +4,7 @@ use crate::sql::statements::DefineFieldStatement;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::LiveStatement;
+use object_store::ObjectStore;
 use std::any::Any;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -25,6 +26,9 @@ pub(crate) enum Entry {
 	Lvs(Arc<[LiveStatement]>),
 	/// An Uuid.
 	Lvv(Uuid),
+	/// A bucket connection
+	#[allow(unused)]
+	Buc(Arc<dyn ObjectStore>),
 }
 
 impl Entry {
@@ -85,6 +89,16 @@ impl Entry {
 		match self {
 			Entry::Lvv(v) => Ok(v),
 			_ => Err(fail!("Unable to convert type into Entry::Lvv")),
+		}
+	}
+
+	/// Converts this cache entry into an Arc<dyn ObjectStore>
+	/// This panics if called on a cache entry that is not an Arc<dyn ObjectStore>.
+	#[allow(unused)]
+	pub(crate) fn try_into_buc(self) -> Result<Arc<dyn ObjectStore>, Error> {
+		match self {
+			Entry::Buc(v) => Ok(v),
+			_ => Err(fail!("Unable to convert type into Entry::Buc")),
 		}
 	}
 }

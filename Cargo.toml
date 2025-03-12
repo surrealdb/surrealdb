@@ -35,7 +35,9 @@ trice = "0.4.0"
 vart = "0.8.1"
 
 # External Kv stores
-foundationdb = { version = "0.9.0", default-features = false, features = ["embedded-fdb-include"] }
+foundationdb = { version = "0.9.0", default-features = false, features = [
+    "embedded-fdb-include",
+] }
 rocksdb = { version = "0.23.0", features = ["lz4", "snappy"] }
 # Managed by surreal but mostly external code
 tikv = { version = "0.3.0-surreal.1", default-features = false, package = "surrealdb-tikv-client" }
@@ -129,7 +131,7 @@ tokio-tungstenite = "0.23.1"
 tracing = "0.1.40"
 ulid = "1.1.0"
 unicase = "2.7.0"
-url = "2.5.0"
+url = { version = "2.5.0", features = ["serde"] }
 uuid = "1.10.0"
 wasm-bindgen-futures = "0.4.39"
 wasmtimer = { version = "0.2.0", default-features = false }
@@ -195,11 +197,22 @@ inherits = "dev"
 
 [dependencies]
 # workspace internal dependencies
-surrealdb = { workspace = true, features = ["protocol-http", "protocol-ws", "rustls"] }
+surrealdb = { workspace = true, features = [
+    "protocol-http",
+    "protocol-ws",
+    "rustls",
+] }
 surrealdb-core.workspace = true
 
 # External surreal crates
-revision = { workspace = true, features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
+revision = { workspace = true, features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
 
 # Crates only used by the root surrealdb crate
 arc-swap = "1.7.1"
@@ -210,7 +223,12 @@ axum-extra = { version = "0.9.3", features = [
     "typed-header",
 ] }
 axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
-clap = { version = "4.4.11", features = ["env", "derive", "wrap_help", "unicode"] }
+clap = { version = "4.4.11", features = [
+    "env",
+    "derive",
+    "wrap_help",
+    "unicode",
+] }
 glob = "0.3.1"
 http-body = "1.0.0"
 http-body-util = "0.1.1"
@@ -256,7 +274,11 @@ http.workspace = true
 num_cpus.workspace = true
 pin-project-lite.workspace = true
 rand.workspace = true
-reqwest = { workspace = true, default-features = false, features = ["blocking", "gzip", "http2"] }
+reqwest = { workspace = true, default-features = false, features = [
+    "blocking",
+    "gzip",
+    "http2",
+] }
 rmpv.workspace = true
 rust_decimal.workspace = true
 semver.workspace = true
@@ -272,7 +294,10 @@ tracing.workspace = true
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 
 # Optional crates
-pprof = { workspace = true, features = ["flamegraph", "prost-codec"], optional = true }
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "prost-codec",
+], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 nu-ansi-term = "0.46.0"
@@ -286,7 +311,11 @@ nix = { version = "0.27.1", features = ["signal", "user"] }
 [dev-dependencies]
 # Crates only used by the root surrealdb crate
 assert_fs = "1.0.13"
-opentelemetry-proto = { version = "0.7.0", features = ["gen-tonic", "metrics", "logs"] }
+opentelemetry-proto = { version = "0.7.0", features = [
+    "gen-tonic",
+    "metrics",
+    "logs",
+] }
 rcgen = "0.13.2"
 tonic = "0.12.3"
 

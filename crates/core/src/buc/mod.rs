@@ -1,3 +1,7 @@
+#[cfg(not(feature = "enterprise"))]
 pub mod backend;
+#[cfg(feature = "enterprise")]
+pub use crate::ent::buc::backend;
 pub mod config;
-pub mod derived;
+mod connection;
+pub use connection::{connect, connect_global};

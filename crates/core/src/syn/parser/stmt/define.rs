@@ -1433,6 +1433,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.permissions = stk.run(|stk| self.parse_permission(stk, true)).await?;
 				}
+				t!("READONLY") => {
+					self.pop_peek();
+					res.readonly = true;
+				}
 				_ => {
 					break;
 				}

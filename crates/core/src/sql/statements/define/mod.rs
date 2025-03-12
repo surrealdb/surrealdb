@@ -38,6 +38,8 @@ pub use api::ApiAction;
 pub use api::ApiDefinition;
 pub use api::FindApi;
 
+pub use bucket::BucketDefinition;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

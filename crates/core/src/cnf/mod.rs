@@ -2,9 +2,6 @@ use crate::iam::file::extract_allowed_paths;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-use object_store::{parse_url, DynObjectStore};
-use url::Url;
-
 /// The characters which are supported in server record IDs.
 pub const ID_CHARS: [char; 36] = [
 	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i',
@@ -144,20 +141,12 @@ pub static FILE_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
 		.unwrap_or_default()
 });
 
-pub static GLOBAL_BUCKET: LazyLock<Option<Box<DynObjectStore>>> = std::sync::LazyLock::new(|| {
-	std::env::var("SURREAL_GLOBAL_BUCKET")
-		.map(|input| {
-			let url = Url::parse(&input)
-				.map_err(|_| "The value passed in `SURREAL_GLOBAL_BUCKET` is not a URL")
-				.unwrap();
-
-			Some(parse_url(&url).unwrap().0)
-		})
-		.unwrap_or(None)
-});
+pub static GLOBAL_BUCKET: LazyLock<Option<(String, Option<String>)>> =
+	std::sync::LazyLock::new(|| {
+		std::env::var("SURREAL_GLOBAL_BUCKET")
+			.map(|url| Some((url, std::env::var("SURREAL_GLOBAL_BUCKET_KEY").ok())))
+			.unwrap_or(None)
+	});
 
 pub static GLOBAL_BUCKET_ENFORCED: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_GLOBAL_BUCKET_ENFORCED", bool, false);
-
-pub static GLOBAL_BUCKET_KEY: LazyLock<Option<String>> =
-	std::sync::LazyLock::new(|| std::env::var("SURREAL_GLOBAL_BUCKET_KEY").ok());

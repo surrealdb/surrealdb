@@ -1,7 +1,7 @@
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::sql::statements::define::ApiDefinition;
-use crate::sql::statements::define::DefineBucketStatement;
+use crate::sql::statements::define::BucketDefinition;
 use crate::sql::statements::define::DefineConfigStatement;
 use crate::sql::statements::AccessGrant;
 use crate::sql::statements::DefineAccessStatement;
@@ -51,7 +51,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineAnalyzerStatement specified on a namespace.
 	Azs(Arc<[DefineAnalyzerStatement]>),
 	/// A slice of DefineBucketStatement specified on a database.
-	Bus(Arc<[DefineBucketStatement]>),
+	Bus(Arc<[BucketDefinition]>),
 	/// A slice of DefineAccessStatement specified on a database.
 	Das(Arc<[DefineAccessStatement]>),
 	/// A slice of AccessGrant specified at on a database.
@@ -205,7 +205,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineBucketStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Bus`].
-	pub(crate) fn try_into_bus(self) -> Result<Arc<[DefineBucketStatement]>, Error> {
+	pub(crate) fn try_into_bus(self) -> Result<Arc<[BucketDefinition]>, Error> {
 		match self {
 			Entry::Bus(v) => Ok(v),
 			_ => Err(fail!("Unable to convert type into Entry::Bus")),

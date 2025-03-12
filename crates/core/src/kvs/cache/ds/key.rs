@@ -19,6 +19,8 @@ pub(crate) enum Key {
 	Lvs(String, String, String, Uuid),
 	/// A cache key for live queries version (on a table)
 	Lvv(String, String, String),
+	/// A cache key for open bucket connections
+	Buc(String, String, String),
 }
 
 impl<'a> From<Lookup<'a>> for Key {
@@ -33,6 +35,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Ixs(a, b, c, d) => Key::Ixs(a.to_string(), b.to_string(), c.to_string(), d),
 			Lookup::Lvs(a, b, c, d) => Key::Lvs(a.to_string(), b.to_string(), c.to_string(), d),
 			Lookup::Lvv(a, b, c) => Key::Lvv(a.to_string(), b.to_string(), c.to_string()),
+			Lookup::Buc(a, b, c) => Key::Buc(a.to_string(), b.to_string(), c.to_string()),
 		}
 	}
 }

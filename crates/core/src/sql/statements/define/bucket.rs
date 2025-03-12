@@ -1,7 +1,8 @@
-use crate::buc::backend::BucketBackend;
+use crate::buc;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::cache;
 use crate::sql::fmt::{pretty_indent, pretty_sequence_item};
 use crate::sql::{Base, Ident, Permissions, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
@@ -9,7 +10,6 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
-use url::Url;
 
 use super::CursorDoc;
 
@@ -24,6 +24,7 @@ pub struct DefineBucketStatement {
 	pub backend: Option<Value>,
 	pub permissions: Permissions,
 	pub metadata: Option<Value>,
+	pub readonly: bool,
 }
 
 impl DefineBucketStatement {
@@ -50,32 +51,37 @@ impl DefineBucketStatement {
 			}
 		}
 		// Process the backend input
-		let backend = if let Some(ref v) = self.backend {
-			let v = v.compute(stk, ctx, opt, doc).await?.coerce_to_string()?;
-			let v = Url::parse(&v).map_err(|_| Error::Unreachable("Invalid backend URL".into()))?;
-
-			if !matches!(v.scheme(), "memory" | "file")
-				&& !crate::ent::file::backend_supported(v.scheme(), false)
-			{
-				return Err(Error::Unreachable("bla".into()));
-			}
-
-			Some(v)
+		let backend = if let Some(ref url) = self.backend {
+			Some(url.compute(stk, ctx, opt, doc).await?.coerce_to_string()?)
 		} else {
 			None
 		};
 
-		// Process the statement
+		// Validate the store
 		let name = self.name.to_string();
+		let store = if let Some(ref backend) = backend {
+			buc::connect(&backend, false, self.readonly, None)?
+		} else {
+			buc::connect_global(ns, db, &name)?
+		};
+
+		// Persist the store to cache
+		if let Some(cache) = ctx.get_cache() {
+			let key = cache::ds::Lookup::Buc(ns, db, &name);
+			let entry = cache::ds::Entry::Buc(store);
+			cache.insert(key, entry);
+		}
+
+		// Process the statement
 		let key = crate::key::database::bu::new(ns, db, &name);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		let ap = BucketDefinition {
-			// Don't persist the `IF NOT EXISTS` clause to schema
 			name: self.name.clone(),
 			backend,
 			permissions: self.permissions.clone(),
 			metadata: self.metadata.clone(),
+			readonly: self.readonly,
 			..Default::default()
 		};
 		txn.set(key, revision::to_vec(&ap)?, None).await?;
@@ -99,17 +105,23 @@ impl Display for DefineBucketStatement {
 
 		let indent = pretty_indent();
 
-		write!(f, " PERMISSIONS {}", self.permissions)?;
+		if self.readonly {
+			write!(f, "READONLY ")?;
+		}
 
 		if let Some(ref backend) = self.backend {
+			write!(f, "BACKEND {}", backend)?;
 			pretty_sequence_item();
-			write!(f, " BACKEND {}", Value::from(backend.to_string()))?;
+		} else if self.readonly {
+			pretty_sequence_item();
 		}
 
 		if let Some(ref metadata) = self.metadata {
+			write!(f, "METADATA {}", metadata)?;
 			pretty_sequence_item();
-			write!(f, " METADATA {}", metadata)?;
 		}
+
+		write!(f, "PERMISSIONS {}", self.permissions)?;
 
 		drop(indent);
 		Ok(())
@@ -121,8 +133,9 @@ impl InfoStructure for DefineBucketStatement {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
 			"permissions".to_string() => self.permissions.structure(),
-			"backend".to_string(), if let Some(backend) = self.backend => backend.structure(),
+			"backend".to_string(), if let Some(backend) = self.backend => backend.into(),
 			"metadata".to_string(), if let Some(metadata) = self.metadata => metadata.structure(),
+			"readonly".to_string() => self.readonly.into(),
 		})
 	}
 }
@@ -135,9 +148,10 @@ impl InfoStructure for DefineBucketStatement {
 pub struct BucketDefinition {
 	pub id: Option<u32>,
 	pub name: Ident,
-	pub backend: Option<Url>,
+	pub backend: Option<String>,
 	pub permissions: Permissions,
 	pub metadata: Option<Value>,
+	pub readonly: bool,
 }
 
 impl From<BucketDefinition> for DefineBucketStatement {
@@ -146,9 +160,10 @@ impl From<BucketDefinition> for DefineBucketStatement {
 			if_not_exists: false,
 			overwrite: false,
 			name: value.name,
-			backend: value.backend.map(|v| v.to_string().into()),
+			backend: value.backend.map(|v| v.into()),
 			permissions: value.permissions,
 			metadata: value.metadata,
+			readonly: value.readonly,
 		}
 	}
 }
