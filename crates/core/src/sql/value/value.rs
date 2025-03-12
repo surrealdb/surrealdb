@@ -1702,6 +1702,19 @@ impl Value {
 		}
 	}
 
+	/// Try to coerce this value to a `File`
+	pub(crate) fn coerce_to_file(self) -> Result<File, Error> {
+		match self {
+			// Files are allowed
+			Value::File(v) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "file".into(),
+			}),
+		}
+	}
+
 	/// Try to coerce this value to a `Datetime`
 	pub(crate) fn coerce_to_datetime(self) -> Result<Datetime, Error> {
 		match self {

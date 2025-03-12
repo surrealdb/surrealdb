@@ -16,6 +16,7 @@ pub mod count;
 pub mod crypto;
 pub mod duration;
 pub mod encoding;
+pub mod file;
 pub mod geo;
 pub mod http;
 pub mod math;
@@ -822,6 +823,16 @@ pub async fn idiom(
 				"week" => time::week,
 				"yday" => time::yday,
 				"year" => time::year,
+			)
+		}
+		Value::File(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the file type",
+				//
+				"put" => file::put((stk, ctx, opt, doc)).await,
+				"get" => file::get((stk, ctx, opt, doc)).await,
 			)
 		}
 		_ => Err(Error::InvalidFunction {
