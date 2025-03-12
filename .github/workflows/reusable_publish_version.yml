@@ -71,18 +71,6 @@ jobs:
       name: ${{ steps.outputs.outputs.name }}
       build-metadata: ${{ steps.outputs.outputs.build-metadata }}
     steps:
-      - name: Checkout 2.x sources
-        if: ${{ inputs.git-ref == 'patches/2.0' }}
-        uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Checkout beta sources
-        if: ${{ inputs.git-ref == 'releases/beta' }}
-        uses: actions/checkout@v4
-        with:
-          ref: main
-
       - name: Create patch branch
         if: ${{ inputs.git-ref == 'patches/2.0' }}
         run: |
