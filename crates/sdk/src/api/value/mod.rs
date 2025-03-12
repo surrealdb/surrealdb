@@ -369,6 +369,33 @@ impl Value {
 	}
 }
 
+impl Value {
+	/// Returns the value found at a certain field if the Value
+	/// is an Object and the field is present.
+	pub fn field<T: AsRef<str>>(&self, v: T) -> Option<&Value> {
+		match &self.0 {
+			CoreValue::Object(map) => match map.0.get(v.as_ref()) {
+				Some(val) => Some(Value::from_inner_ref(val)),
+				None => None,
+			},
+			_ => None,
+		}
+	}
+
+	/// Returns the value found at a certain field if the Value
+	/// is an Array and a value is found at the index.
+	pub fn index(&self, v: usize) -> Option<&Value> {
+		match &self.0 {
+			CoreValue::Array(map) => match map.0.get(v) {
+				Some(val) => Some(Value::from_inner_ref(val)),
+				None => None,
+			},
+			_ => None,
+		}
+	}
+}
+
+
 pub struct ConversionError {
 	from: &'static str,
 	expected: &'static str,
