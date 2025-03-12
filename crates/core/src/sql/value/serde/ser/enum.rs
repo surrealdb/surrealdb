@@ -44,6 +44,7 @@ pub(super) fn to_value(content: Content) -> Result<Value, Error> {
 					.map(Into::into)
 					.map_err(Into::into)
 			}
+			#[allow(clippy::useless_conversion)]
 			sql::value::TOKEN => sql::Value::deserialize(Content::Enum(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
