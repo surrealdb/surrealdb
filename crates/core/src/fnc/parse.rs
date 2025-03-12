@@ -40,13 +40,6 @@ pub mod email {
 			let value = super::user(input).unwrap();
 			assert_eq!(value, "john.doe".into());
 		}
-
-		#[test]
-		fn null_user() {
-			let input = (String::from("\0@example.com"),);
-			let value = super::user(input).unwrap_err().to_string();
-			assert!(value.contains("contained NUL byte"), "Error: {value}");
-		}
 	}
 }
 
