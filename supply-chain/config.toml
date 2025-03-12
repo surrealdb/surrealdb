@@ -343,6 +343,10 @@ criteria = "safe-to-deploy"
 version = "1.0.90"
 criteria = "safe-to-deploy"
 
+[[exemptions.cc]]
+version = "1.2.16"
+criteria = "safe-to-deploy"
+
 [[exemptions.cedar-policy]]
 version = "2.4.2"
 criteria = "safe-to-deploy"
@@ -769,6 +773,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.jobserver]]
 version = "0.1.28"
+criteria = "safe-to-deploy"
+
+[[exemptions.jobserver]]
+version = "0.1.32"
 criteria = "safe-to-deploy"
 
 [[exemptions.js-sys]]
@@ -1211,6 +1219,10 @@ criteria = "safe-to-deploy"
 version = "0.11.3"
 criteria = "safe-to-run"
 
+[[exemptions.rcgen]]
+version = "0.13.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.reblessive]]
 version = "0.4.2"
 criteria = "safe-to-deploy"
@@ -1249,6 +1261,10 @@ criteria = "safe-to-run"
 
 [[exemptions.ring]]
 version = "0.17.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.ring]]
+version = "0.17.14"
 criteria = "safe-to-deploy"
 
 [[exemptions.rkyv]]
