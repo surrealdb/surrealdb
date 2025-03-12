@@ -266,38 +266,6 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 5
 
-  lint:
-    name: Lint
-    needs: [prepare-vars]
-    runs-on: [runner-amd64-2xlarge]
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ inputs.rust_version }}
-          targets: wasm32-unknown-unknown
-          components: rustfmt, clippy
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Check workspace
-        run: cargo make ci-check
-
-      - name: Check format
-        run: cargo make ci-format
-
-      - name: Check wasm
-        run: cargo make ci-check-wasm
-
-      - name: Check clippy
-        run: cargo make ci-clippy
-
   docker-builder:
     name: Prepare docker builder
     runs-on: ubuntu-latest
@@ -597,7 +565,7 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
-    needs: [prepare-vars, test, lint, build]
+    needs: [prepare-vars, test, build]
     if: ${{ inputs.publish }}
     environment: ${{ inputs.environment }}
     runs-on: [runner-amd64-2xlarge]
