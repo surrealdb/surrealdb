@@ -1224,3 +1224,18 @@ allow_apis = [
 allow_apis = [
     "net",
 ]
+
+[pkg.zerovec-derive]
+allow_proc_macro = true
+
+[pkg.yoke-derive]
+allow_proc_macro = true
+
+[pkg.zerofrom-derive]
+allow_proc_macro = true
+
+[pkg.icu_provider_macros]
+allow_proc_macro = true
+
+[pkg.displaydoc]
+allow_proc_macro = true
