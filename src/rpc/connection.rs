@@ -1,3 +1,4 @@
+use super::RpcState;
 use crate::cnf::{
 	PKG_NAME, PKG_VERSION, WEBSOCKET_MAX_CONCURRENT_REQUESTS, WEBSOCKET_PING_FREQUENCY,
 };
@@ -8,7 +9,7 @@ use crate::rpc::CONN_CLOSED_ERR;
 use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{close_code::AGAIN, CloseFrame, Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
@@ -26,6 +27,7 @@ use surrealdb::rpc::Data;
 use surrealdb::rpc::RpcContext;
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
+use surrealdb_core::mem::ALLOC;
 use tokio::sync::{RwLock, Semaphore};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -33,7 +35,11 @@ use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
-use super::RpcState;
+/// An error string sent when the server is out of memory
+const SERVER_OVERLOADED: &str = "The server is unable to handle the request";
+
+/// An error string sent when the server is gracefully shutting down
+const SERVER_SHUTTING_DOWN: &str = "The server is gracefully shutting down";
 
 pub struct Connection {
 	/// The unique id of this WebSocket connection
@@ -248,21 +254,45 @@ impl Connection {
 					// We've received a message from the client
 					Ok(msg) => match msg {
 						Message::Text(_) => {
-							tasks.spawn(Self::handle_message(rpc.clone(), msg, internal_sender.clone()));
+							// Clone the response sending channel
+							let chn = internal_sender.clone();
+							// Check to see whether we have available memory
+							if ALLOC.is_beyond_threshold() {
+								// Reject the message
+								Self::close_socket(rpc.clone(), chn).await;
+								// Abort all tasks
+								tasks.abort_all();
+								// Exit out of the loop
+								break;
+							}
+							// Otherwise spawn and handle the message
+							tasks.spawn(Self::handle_message(rpc.clone(), msg, chn));
 						}
 						Message::Binary(_) => {
-							tasks.spawn(Self::handle_message(rpc.clone(), msg, internal_sender.clone()));
+							// Clone the response sending channel
+							let chn = internal_sender.clone();
+							// Check to see whether we have available memory
+							if ALLOC.is_beyond_threshold() {
+								// Reject the message
+								Self::close_socket(rpc.clone(), chn).await;
+								// Abort all tasks
+								tasks.abort_all();
+								// Exit out of the loop
+								break;
+							}
+							// Otherwise spawn and handle the message
+							tasks.spawn(Self::handle_message(rpc.clone(), msg, chn));
 						}
 						Message::Close(_) => {
 							// Respond with a close message
 							if let Err(err) = internal_sender.send(Message::Close(None)).await {
-								trace!("WebSocket error when replying to the Close frame: {:?}", err);
+								trace!("WebSocket error when replying to the close message: {err:?}");
 							};
 							// Cancel the WebSocket tasks
 							rpc.read().await.canceller.cancel();
 							// Exit out of the loop
 							break;
-						}
+						},
 						_ => {
 							// Ignore everything else
 						}
@@ -377,7 +407,7 @@ impl Connection {
 								// Don't start processing if we are gracefully shutting down
 								if shutdown.is_cancelled() {
 									// Process the response
-									failure(req.id, Failure::custom("Server is shutting down"))
+									failure(req.id, Failure::custom(SERVER_SHUTTING_DOWN))
 										.send(otel_cx.clone(), fmt, &chn)
 										.with_context(otel_cx.as_ref().clone())
 										.await;
@@ -428,6 +458,23 @@ impl Connection {
 			true => rpc.write().await.execute_mutable(method, params).await.map_err(Into::into),
 			false => rpc.read().await.execute_immutable(method, params).await.map_err(Into::into),
 		}
+	}
+
+	/// Reject a WebSocket message due to server overloading
+	async fn close_socket(rpc: Arc<RwLock<Connection>>, chn: Sender<Message>) {
+		// Log the error as a warning
+		warn!("The server is overloaded and is unable to process a WebSocket request");
+		// Create a custom close frame
+		let frame = CloseFrame {
+			code: AGAIN,
+			reason: SERVER_OVERLOADED.into(),
+		};
+		// Respond with a close message
+		if let Err(err) = chn.send(Message::Close(Some(frame))).await {
+			trace!("WebSocket error when sending close message: {err:?}");
+		};
+		// Cancel the WebSocket tasks
+		rpc.read().await.canceller.cancel();
 	}
 }
 
