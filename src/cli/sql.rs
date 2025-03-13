@@ -9,7 +9,9 @@ use clap::Args;
 use futures::StreamExt;
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
-use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
+use rustyline::{Completer, Editor, Helper , Hinter};
+use rustyline::highlight::Highlighter;
+use std::borrow::Cow;
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
@@ -18,6 +20,72 @@ use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::sql::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::{Notification, Response, Value};
+use lazy_static::lazy_static;
+use regex::Regex;
+
+#[derive(Completer, Helper, Hinter)]
+struct InputValidator<'a> {
+    multi: bool,
+    capabilities: &'a CoreCapabilities,
+}
+
+impl Highlighter for InputValidator<'_> {
+    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        lazy_static! {
+            static ref COMMENT_RE: Regex = Regex::new(r"--.*").unwrap();
+            static ref SINGLE_QUOTE_STR_RE: Regex = Regex::new(r#"'[^']*'"#).unwrap();
+            static ref DOUBLE_QUOTE_STR_RE: Regex = Regex::new(r#""[^"]*""#).unwrap();
+	        static ref KEYWORD_RE: Regex = Regex::new(r"(?i)\b(SELECT|FROM|WHERE|INSERT|TIMEOUT|INTO|UPDATE|PARALLEL|DELETE|CREATE|TABLE|DATABASE|NAMESPACE|USE|CONTENT|KEY|ON|TYPE|SCHEMALESS|SCHEMAFULL|DUPLICATE|SET|UNSET|LET|AS|AND|OR|NOT|ORDER\s+BY|LIMIT|GROUP\s+BY|HAVING|VALUES|INFO|FOR|ROOT|NS|DB|USER|INDEX|REMOVE|KILL|SLEEP|THROW|DEFINE|access|EVENT|FIELD|PARAM|FUNCTION|ANALYZER|LIVE|value|DIFF|FETCH|SHOW|CHANGES|SINCE|RELATE)\b").unwrap();
+            static ref NUMBER_RE: Regex = Regex::new(r"\b\d+(\.\d+)?\b").unwrap();
+            static ref OPERATOR_RE: Regex = Regex::new(r"=|!=|>|<|>=|<=|\+|-|\*|/|%").unwrap();
+			static ref FUNCTION_RE: Regex = Regex::new(r"(\b\w+)\(").unwrap();
+        }
+
+        let mut highlighted = line.to_string();
+
+        const BLUE: &str = "\x1b[34m";
+        const GREEN: &str = "\x1b[32m";
+        const CYAN: &str = "\x1b[36m";
+        const GRAY: &str = "\x1b[90m";
+        const YELLOW: &str = "\x1b[33m";
+        const MAGENTA: &str = "\x1b[35m";
+        const RESET: &str = "\x1b[0m";
+
+        highlighted = COMMENT_RE.replace_all(&highlighted, |caps: &regex::Captures| {
+            format!("{}{}{}", GRAY, &caps[0], RESET)
+        }).to_string();
+
+        highlighted = SINGLE_QUOTE_STR_RE.replace_all(&highlighted, |caps: &regex::Captures| {
+            format!("{}{}{}", GREEN, &caps[0], RESET)
+        }).to_string();
+
+        highlighted = DOUBLE_QUOTE_STR_RE.replace_all(&highlighted, |caps: &regex::Captures| {
+            format!("{}{}{}", GREEN, &caps[0], RESET)
+        }).to_string();
+
+        highlighted = KEYWORD_RE.replace_all(&highlighted, |caps: &regex::Captures| {
+            format!("{}{}{}", MAGENTA, &caps[0], RESET)
+        }).to_string();
+
+        highlighted = NUMBER_RE.replace_all(&highlighted, |caps: &regex::Captures| {
+            format!("{}{}{}", CYAN, &caps[0], RESET)
+        }).to_string();
+
+        highlighted = OPERATOR_RE.replace_all(&highlighted, |caps: &regex::Captures| {
+            format!("{}{}{}", YELLOW, &caps[0], RESET)
+        }).to_string();
+
+		highlighted = FUNCTION_RE.replace_all(&highlighted, |caps: &regex::Captures| {
+           format!("{}{}{}(", BLUE, &caps[1], RESET)
+        }).to_string();
+
+        Cow::Owned(highlighted)
+    }
+
+    fn highlight_char(&self, line: &str, _pos: usize) -> bool {
+        !line.is_empty()
+    }
+}
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -372,6 +440,7 @@ fn process(
 			serde_json::to_string(&value.into_json()).unwrap()
 		}
 		// Yes prettify the JSON response
+		//
 		(true, true) => vec
 			.into_iter()
 			.enumerate()
@@ -390,6 +459,7 @@ fn process(
 			.collect::<Vec<String>>()
 			.join("\n"),
 	})
+
 }
 
 fn print(result: Result<String, Error>) {
@@ -403,12 +473,6 @@ fn print(result: Result<String, Error>) {
 	}
 }
 
-#[derive(Completer, Helper, Highlighter, Hinter)]
-struct InputValidator<'a> {
-	/// If omitting semicolon causes newline.
-	multi: bool,
-	capabilities: &'a CoreCapabilities,
-}
 
 #[allow(clippy::if_same_then_else)]
 impl Validator for InputValidator<'_> {
@@ -445,3 +509,4 @@ fn split_prompt(prompt: &str) -> (&str, &str) {
 	let selection = prompt.split_once('>').unwrap().0;
 	selection.split_once('/').unwrap_or((selection, ""))
 }
+
