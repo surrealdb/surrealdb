@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use js::{
 	class::{JsClass, OwnedBorrow, Readable, Trace},
 	prelude::{Coerced, Opt},
-	Ctx, Exception, FromJs, Promise, Result, Value,
+	Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value,
 };
 use reblessive::tree::Stk;
 
@@ -59,24 +59,25 @@ pub fn query<'js>(
 	let pending_query_future = pending_borrow.as_ref().map(|x| x.clone().into_future::<()>());
 
 	let ctx_clone = ctx.clone();
-	let promise = Promise::wrap_future(&ctx_clone, async move {
+	let promise = Promise::wrap_future(&ctx, async move {
 		// Wait on existing query ctx so that we can't spawn more then one query at the same time.
 		if let Some(x) = pending_query_future {
 			let _ = x.await;
 		}
 
-		let query_ctx = ctx.userdata::<QueryContext<'js>>().expect("query context should be set");
+		let query_ctx =
+			ctx_clone.userdata::<QueryContext<'js>>().expect("query context should be set");
 
 		let mut borrow_store = None;
 		let mut query_store = None;
 
 		let res = async {
 			let query = if query.is_object() {
-				let borrow = OwnedBorrow::<Query>::from_js(&ctx, query)?;
+				let borrow = OwnedBorrow::<Query>::from_js(&ctx_clone, query)?;
 				&**borrow_store.insert(borrow)
 			} else {
-				let Coerced(query_text) = Coerced::<String>::from_js(&ctx, query)?;
-				query_store.insert(Query::new(ctx.clone(), query_text, variables)?)
+				let Coerced(query_text) = Coerced::<String>::from_js(&ctx_clone, query)?;
+				query_store.insert(Query::new(ctx_clone.clone(), query_text, variables)?)
 			};
 
 			let mut context = MutableContext::new(query_ctx.context);
@@ -84,14 +85,14 @@ pub fn query<'js>(
 				.clone()
 				.vars
 				.attach(&mut context)
-				.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+				.map_err(|e| Exception::throw_message(&ctx_clone, &e.to_string()))?;
 			let context = context.freeze();
 
 			Stk::enter_scope(|stk| {
 				stk.run(|stk| query.query.compute(stk, &context, query_ctx.opt, query_ctx.doc))
 			})
 			.await
-			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))
+			.map_err(|e| Exception::throw_message(&ctx_clone, &e.to_string()))
 		}
 		.await;
 
