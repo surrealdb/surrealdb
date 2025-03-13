@@ -48,9 +48,7 @@ pub trait RpcContext {
 			Method::Signup => self.signup(params).await,
 			Method::Signin => self.signin(params).await,
 			Method::Invalidate => self.invalidate().await,
-			Method::Authenticate => {
-				self.authenticate(params).await
-			}
+			Method::Authenticate => self.authenticate(params).await,
 			Method::Kill => self.kill(params).await,
 			Method::Live => self.live(params).await,
 			Method::Set => self.set(params).await,
@@ -68,9 +66,7 @@ pub trait RpcContext {
 			Method::Relate => self.relate(params).await,
 			Method::Run => self.run(params).await,
 			Method::GraphQL => self.graphql(params).await,
-			Method::InsertRelation => {
-				self.insert_relation(params).await
-			}
+			Method::InsertRelation => self.insert_relation(params).await,
 			Method::Unknown => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -92,9 +88,7 @@ pub trait RpcContext {
 			Method::Relate => self.relate(params).await,
 			Method::Run => self.run(params).await,
 			Method::GraphQL => self.graphql(params).await,
-			Method::InsertRelation => {
-				self.insert_relation(params).await
-			}
+			Method::InsertRelation => self.insert_relation(params).await,
 			Method::Unknown => Err(RpcError::MethodNotFound),
 			_ => Err(RpcError::MethodNotFound),
 		}
