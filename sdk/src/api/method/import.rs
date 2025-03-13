@@ -37,7 +37,7 @@ where
 	}
 }
 
-impl<'r, C, T> Import<'r, C, T>
+impl<C, T> Import<'_, C, T>
 where
 	C: Connection,
 {

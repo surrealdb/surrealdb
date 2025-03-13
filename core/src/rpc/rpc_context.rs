@@ -40,6 +40,7 @@ pub trait RpcContext {
 		unimplemented!("graphql_schema_cache must be implemented if GQL_SUPPORT = true")
 	}
 
+	#[allow(clippy::useless_conversion)]
 	async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
 		match method {
 			Method::Ping => Ok(Value::None.into()),
@@ -75,6 +76,7 @@ pub trait RpcContext {
 		}
 	}
 
+	#[allow(clippy::useless_conversion)]
 	async fn execute_immut(&self, method: Method, params: Array) -> Result<Data, RpcError> {
 		match method {
 			Method::Ping => Ok(Value::None.into()),

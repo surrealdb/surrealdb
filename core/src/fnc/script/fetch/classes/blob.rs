@@ -4,7 +4,7 @@ use bytes::{Bytes, BytesMut};
 use js::{
 	class::Trace,
 	prelude::{Coerced, Opt},
-	ArrayBuffer, Class, Ctx, Exception, FromJs, Object, Result, Value,
+	ArrayBuffer, Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value,
 };
 
 #[derive(Clone, Copy)]
@@ -77,7 +77,7 @@ fn normalize_type(mut ty: String) -> String {
 	}
 }
 
-#[derive(Clone, Trace)]
+#[derive(Clone, Trace, JsLifetime)]
 #[js::class]
 #[non_exhaustive]
 pub struct Blob {

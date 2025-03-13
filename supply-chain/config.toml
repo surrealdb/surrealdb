@@ -2,7 +2,7 @@
 # cargo-vet config file
 
 [cargo-vet]
-version = "0.9"
+version = "0.10"
 
 [imports.bytecode-alliance]
 url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/main/supply-chain/audits.toml"
@@ -341,6 +341,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.cc]]
 version = "1.0.90"
+criteria = "safe-to-deploy"
+
+[[exemptions.cc]]
+version = "1.2.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.cedar-policy]]
@@ -779,6 +783,10 @@ criteria = "safe-to-deploy"
 version = "0.1.28"
 criteria = "safe-to-deploy"
 
+[[exemptions.jobserver]]
+version = "0.1.32"
+criteria = "safe-to-deploy"
+
 [[exemptions.js-sys]]
 version = "0.3.69"
 criteria = "safe-to-deploy"
@@ -805,6 +813,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.libc]]
 version = "0.2.153"
+criteria = "safe-to-deploy"
+
+[[exemptions.libc]]
+version = "0.2.171"
 criteria = "safe-to-deploy"
 
 [[exemptions.libloading]]
@@ -1231,8 +1243,16 @@ criteria = "safe-to-deploy"
 version = "0.11.3"
 criteria = "safe-to-run"
 
+[[exemptions.rcgen]]
+version = "0.13.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.reblessive]]
 version = "0.4.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.reblessive]]
+version = "0.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
@@ -1265,6 +1285,10 @@ criteria = "safe-to-run"
 
 [[exemptions.ring]]
 version = "0.17.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.ring]]
+version = "0.17.14"
 criteria = "safe-to-deploy"
 
 [[exemptions.rkyv]]
@@ -1312,19 +1336,19 @@ version = "0.22.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs]]
-version = "0.6.2"
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-core]]
-version = "0.6.2"
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-macro]]
-version = "0.6.2"
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-sys]]
-version = "0.6.2"
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rstar]]

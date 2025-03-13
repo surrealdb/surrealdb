@@ -4,14 +4,14 @@ use js::{
 	class::{Class, Trace},
 	function::{Opt, Rest},
 	prelude::Coerced,
-	Ctx, Exception, FromJs, Result, String, Value,
+	Ctx, Exception, FromJs, JsLifetime, Result, String, Value,
 };
 use reqwest::multipart::{Form, Part};
 use std::{collections::HashMap, string::String as StdString};
 
 use crate::fnc::script::fetch::classes::Blob;
 
-#[derive(Clone)]
+#[derive(Clone, JsLifetime)]
 #[non_exhaustive]
 pub enum FormDataValue<'js> {
 	String(String<'js>),
@@ -45,7 +45,7 @@ impl<'js> FormDataValue<'js> {
 }
 
 #[js::class]
-#[derive(Clone, Trace)]
+#[derive(Clone, Trace, JsLifetime)]
 #[non_exhaustive]
 pub struct FormData<'js> {
 	#[qjs(skip_trace)]

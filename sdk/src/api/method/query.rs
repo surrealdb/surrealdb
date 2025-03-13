@@ -212,7 +212,7 @@ where
 	}
 }
 
-impl<'r, C> Query<'r, C>
+impl<C> Query<'_, C>
 where
 	C: Connection,
 {

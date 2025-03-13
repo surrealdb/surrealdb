@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 
 use js::{
-	class::{ClassId, JsClass, OwnedBorrow, Readable, Trace},
+	class::{JsClass, OwnedBorrow, Readable, Trace},
 	prelude::{Coerced, Opt},
-	Ctx, Exception, FromJs, Promise, Result, Value,
+	Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value,
 };
 use reblessive::tree::Stk;
 
@@ -19,11 +19,9 @@ mod classes;
 use crate::ctx::MutableContext;
 pub use classes::Query;
 
-pub const QUERY_DATA_PROP_NAME: &str = "__query_context__";
-
 /// A class to carry the data to run subqueries.
 #[non_exhaustive]
-#[derive(Clone)]
+#[derive(js::JsLifetime)]
 pub struct QueryContext<'js> {
 	pub context: &'js Context,
 	pub opt: &'js Options,
@@ -40,11 +38,6 @@ impl<'js> JsClass<'js> for QueryContext<'js> {
 
 	type Mutable = Readable;
 
-	fn class_id() -> &'static js::class::ClassId {
-		static ID: ClassId = ClassId::new();
-		&ID
-	}
-
 	fn prototype(_ctx: &js::Ctx<'js>) -> Result<Option<js::Object<'js>>> {
 		Ok(None)
 	}
@@ -60,32 +53,31 @@ pub fn query<'js>(
 	query: Value<'js>,
 	variables: Opt<classes::QueryVariables>,
 ) -> Result<Promise<'js>> {
-	let ctx_clone = ctx.clone();
-	let query_ctx =
-		ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
+	let query_ctx = ctx.userdata::<QueryContext<'js>>().expect("query context should be set");
 
 	let mut pending_borrow = query_ctx.pending.borrow_mut();
 	let pending_query_future = pending_borrow.as_ref().map(|x| x.clone().into_future::<()>());
 
-	let promise = Promise::wrap_future(&ctx_clone, async move {
+	let ctx_clone = ctx.clone();
+	let promise = Promise::wrap_future(&ctx, async move {
 		// Wait on existing query ctx so that we can't spawn more then one query at the same time.
 		if let Some(x) = pending_query_future {
 			let _ = x.await;
 		}
 
 		let query_ctx =
-			ctx.globals().get::<_, OwnedBorrow<'js, QueryContext<'js>>>(QUERY_DATA_PROP_NAME)?;
+			ctx_clone.userdata::<QueryContext<'js>>().expect("query context should be set");
 
 		let mut borrow_store = None;
 		let mut query_store = None;
 
 		let res = async {
 			let query = if query.is_object() {
-				let borrow = OwnedBorrow::<Query>::from_js(&ctx, query)?;
+				let borrow = OwnedBorrow::<Query>::from_js(&ctx_clone, query)?;
 				&**borrow_store.insert(borrow)
 			} else {
-				let Coerced(query_text) = Coerced::<String>::from_js(&ctx, query)?;
-				query_store.insert(Query::new(ctx.clone(), query_text, variables)?)
+				let Coerced(query_text) = Coerced::<String>::from_js(&ctx_clone, query)?;
+				query_store.insert(Query::new(ctx_clone.clone(), query_text, variables)?)
 			};
 
 			let mut context = MutableContext::new(query_ctx.context);
@@ -93,14 +85,14 @@ pub fn query<'js>(
 				.clone()
 				.vars
 				.attach(&mut context)
-				.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+				.map_err(|e| Exception::throw_message(&ctx_clone, &e.to_string()))?;
 			let context = context.freeze();
 
 			Stk::enter_scope(|stk| {
 				stk.run(|stk| query.query.compute(stk, &context, query_ctx.opt, query_ctx.doc))
 			})
 			.await
-			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))
+			.map_err(|e| Exception::throw_message(&ctx_clone, &e.to_string()))
 		}
 		.await;
 

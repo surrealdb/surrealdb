@@ -1,8 +1,8 @@
-use js::class::Trace;
+use js::{class::Trace, JsLifetime};
 
 use crate::sql::duration;
 
-#[derive(Clone, Trace)]
+#[derive(Clone, Trace, JsLifetime)]
 #[js::class]
 #[non_exhaustive]
 pub struct Duration {

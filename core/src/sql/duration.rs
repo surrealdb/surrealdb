@@ -250,7 +250,7 @@ impl TryAdd for Duration {
 	}
 }
 
-impl<'a, 'b> ops::Add<&'b Duration> for &'a Duration {
+impl<'b> ops::Add<&'b Duration> for &Duration {
 	type Output = Duration;
 	fn add(self, other: &'b Duration) -> Duration {
 		match self.0.checked_add(other.0) {
@@ -260,7 +260,7 @@ impl<'a, 'b> ops::Add<&'b Duration> for &'a Duration {
 	}
 }
 
-impl<'a, 'b> TryAdd<&'b Duration> for &'a Duration {
+impl<'b> TryAdd<&'b Duration> for &Duration {
 	type Output = Duration;
 	fn try_add(self, other: &'b Duration) -> Result<Duration, Error> {
 		self.0
@@ -290,7 +290,7 @@ impl TrySub for Duration {
 	}
 }
 
-impl<'a, 'b> ops::Sub<&'b Duration> for &'a Duration {
+impl<'b> ops::Sub<&'b Duration> for &Duration {
 	type Output = Duration;
 	fn sub(self, other: &'b Duration) -> Duration {
 		match self.0.checked_sub(other.0) {
@@ -300,7 +300,7 @@ impl<'a, 'b> ops::Sub<&'b Duration> for &'a Duration {
 	}
 }
 
-impl<'a, 'b> TrySub<&'b Duration> for &'a Duration {
+impl<'b> TrySub<&'b Duration> for &Duration {
 	type Output = Duration;
 	fn try_sub(self, other: &'b Duration) -> Result<Duration, Error> {
 		self.0
