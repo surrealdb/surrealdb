@@ -479,6 +479,7 @@ fn filter_from_type(
 		Kind::Point => {}
 		Kind::String => {}
 		Kind::Uuid => {}
+		Kind::Regex => {}
 		Kind::Record(_) => {}
 		Kind::Geometry(_) => {}
 		Kind::Option(_) => {}

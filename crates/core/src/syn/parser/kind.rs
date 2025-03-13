@@ -97,6 +97,7 @@ impl Parser<'_> {
 			t!("STRING") => Ok(Kind::String),
 			t!("UUID") => Ok(Kind::Uuid),
 			t!("RANGE") => Ok(Kind::Range),
+			t!("REGEX") => Ok(Kind::Regex),
 			t!("FUNCTION") => Ok(Kind::Function(Default::default(), Default::default())),
 			t!("RECORD") => {
 				let span = self.peek().span;

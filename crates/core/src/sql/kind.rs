@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -29,6 +29,8 @@ pub enum Kind {
 	Point,
 	String,
 	Uuid,
+	#[revision(start = 2)]
+	Regex,
 	Record(Vec<Table>),
 	Geometry(Vec<String>),
 	Option(Box<Kind>),
@@ -167,6 +169,7 @@ impl Kind {
 				| Kind::Point
 				| Kind::String
 				| Kind::Uuid
+				| Kind::Regex
 				| Kind::Record(_)
 				| Kind::Geometry(_)
 				| Kind::Function(_, _)
@@ -261,6 +264,7 @@ impl Display for Kind {
 			Kind::Point => f.write_str("point"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
+			Kind::Regex => f.write_str("regex"),
 			Kind::Function(_, _) => f.write_str("function"),
 			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => match k {

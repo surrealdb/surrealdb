@@ -24,8 +24,8 @@ value = "['1', '2', '11', 'Ábaco', 'Zoo']"
 
 [[test.results]]
 value = "['Zoo', 'Ábaco', '11', '2', '1']"
-*/
 
+*/
 ['Zoo', 'Ábaco', '1', '2', '11'].sort();
 ['Zoo', 'Ábaco', '1', '2', '11'].sort("desc");
 ['Zoo', 'Ábaco', '1', '2', '11'].sort_natural();
