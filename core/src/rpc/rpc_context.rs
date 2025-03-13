@@ -40,55 +40,63 @@ pub trait RpcContext {
 		unimplemented!("graphql_schema_cache must be implemented if GQL_SUPPORT = true")
 	}
 
+	#[allow(clippy::useless_conversion)]
 	async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
 		match method {
 			Method::Ping => Ok(Value::None.into()),
-			Method::Info => self.info().await,
-			Method::Use => self.yuse(params).await,
-			Method::Signup => self.signup(params).await,
-			Method::Signin => self.signin(params).await,
-			Method::Invalidate => self.invalidate().await,
-			Method::Authenticate => self.authenticate(params).await,
-			Method::Kill => self.kill(params).await,
-			Method::Live => self.live(params).await,
-			Method::Set => self.set(params).await,
-			Method::Unset => self.unset(params).await,
-			Method::Select => self.select(params).await,
-			Method::Insert => self.insert(params).await,
-			Method::Create => self.create(params).await,
-			Method::Upsert => self.upsert(params).await,
-			Method::Update => self.update(params).await,
-			Method::Merge => self.merge(params).await,
-			Method::Patch => self.patch(params).await,
-			Method::Delete => self.delete(params).await,
-			Method::Version => self.version(params).await,
-			Method::Query => self.query(params).await,
-			Method::Relate => self.relate(params).await,
-			Method::Run => self.run(params).await,
-			Method::GraphQL => self.graphql(params).await,
-			Method::InsertRelation => self.insert_relation(params).await,
+			Method::Info => self.info().await.map(Into::into).map_err(Into::into),
+			Method::Use => self.yuse(params).await.map(Into::into).map_err(Into::into),
+			Method::Signup => self.signup(params).await.map(Into::into).map_err(Into::into),
+			Method::Signin => self.signin(params).await.map(Into::into).map_err(Into::into),
+			Method::Invalidate => self.invalidate().await.map(Into::into).map_err(Into::into),
+			Method::Authenticate => {
+				self.authenticate(params).await.map(Into::into).map_err(Into::into)
+			}
+			Method::Kill => self.kill(params).await.map(Into::into).map_err(Into::into),
+			Method::Live => self.live(params).await.map(Into::into).map_err(Into::into),
+			Method::Set => self.set(params).await.map(Into::into).map_err(Into::into),
+			Method::Unset => self.unset(params).await.map(Into::into).map_err(Into::into),
+			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
+			Method::Insert => self.insert(params).await.map(Into::into).map_err(Into::into),
+			Method::Create => self.create(params).await.map(Into::into).map_err(Into::into),
+			Method::Upsert => self.upsert(params).await.map(Into::into).map_err(Into::into),
+			Method::Update => self.update(params).await.map(Into::into).map_err(Into::into),
+			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
+			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
+			Method::Delete => self.delete(params).await.map(Into::into).map_err(Into::into),
+			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
+			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
+			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
+			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
+			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
+			Method::InsertRelation => {
+				self.insert_relation(params).await.map(Into::into).map_err(Into::into)
+			}
 			Method::Unknown => Err(RpcError::MethodNotFound),
 		}
 	}
 
+	#[allow(clippy::useless_conversion)]
 	async fn execute_immut(&self, method: Method, params: Array) -> Result<Data, RpcError> {
 		match method {
 			Method::Ping => Ok(Value::None.into()),
-			Method::Info => self.info().await,
-			Method::Select => self.select(params).await,
-			Method::Insert => self.insert(params).await,
-			Method::Create => self.create(params).await,
-			Method::Upsert => self.upsert(params).await,
-			Method::Update => self.update(params).await,
-			Method::Merge => self.merge(params).await,
-			Method::Patch => self.patch(params).await,
-			Method::Delete => self.delete(params).await,
-			Method::Version => self.version(params).await,
-			Method::Query => self.query(params).await,
-			Method::Relate => self.relate(params).await,
-			Method::Run => self.run(params).await,
-			Method::GraphQL => self.graphql(params).await,
-			Method::InsertRelation => self.insert_relation(params).await,
+			Method::Info => self.info().await.map(Into::into).map_err(Into::into),
+			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
+			Method::Insert => self.insert(params).await.map(Into::into).map_err(Into::into),
+			Method::Create => self.create(params).await.map(Into::into).map_err(Into::into),
+			Method::Upsert => self.upsert(params).await.map(Into::into).map_err(Into::into),
+			Method::Update => self.update(params).await.map(Into::into).map_err(Into::into),
+			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
+			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
+			Method::Delete => self.delete(params).await.map(Into::into).map_err(Into::into),
+			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
+			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
+			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
+			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
+			Method::GraphQL => self.graphql(params).await.map(Into::into).map_err(Into::into),
+			Method::InsertRelation => {
+				self.insert_relation(params).await.map(Into::into).map_err(Into::into)
+			}
 			Method::Unknown => Err(RpcError::MethodNotFound),
 			_ => Err(RpcError::MethodNotFound),
 		}
