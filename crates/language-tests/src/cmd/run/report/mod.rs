@@ -280,7 +280,7 @@ impl TestReport {
 		job_result: TestTaskResult,
 		matching_datastore: &Datastore,
 	) -> Self {
-		let outputs = match job_result {
+		let outputs = match &job_result {
 			TestTaskResult::ParserError(ref e) => Some(TestOutputs::ParsingError(e.to_string())),
 			TestTaskResult::RunningError(_) => None,
 			TestTaskResult::Timeout => None,
@@ -289,6 +289,7 @@ impl TestReport {
 				e.iter().map(|x| x.result.as_ref().map_err(|e| e.to_string()).cloned()).collect(),
 			)),
 			TestTaskResult::Paniced(_) => None,
+			TestTaskResult::QueryParsingNotIdempotent(_, _) => None
 		};
 
 		let kind = Self::grade_result(&set[id].config, job_result, matching_datastore).await;
@@ -361,6 +362,10 @@ impl TestReport {
 				let results =
 					results.into_iter().map(|x| x.result.map_err(|x| x.to_string())).collect();
 				Self::grade_value_results(expectation, results, matcher_datastore).await
+			}
+			TestTaskResult::QueryParsingNotIdempotent(q1, q2) => {
+				TestReportKind::Error(TestError::Running(
+					format!("Query is not idempotent: \nexpected: {} \ngot: {}", q1, q2)))
 			}
 		}
 	}

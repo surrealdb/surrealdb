@@ -5,8 +5,7 @@ mod util;
 
 use core::str;
 use std::{any::Any, io, mem, panic::AssertUnwindSafe, thread, time::Duration};
-
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use camino::Utf8Path;
 use clap::ArgMatches;
 use futures::FutureExt;
@@ -24,6 +23,7 @@ use tokio::{
 	sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
 	time::{self},
 };
+use surrealdb_core::sql::Query;
 use util::core_capabilities_from_test_config;
 
 use crate::{
@@ -40,6 +40,7 @@ pub enum TestTaskResult {
 	Timeout,
 	Results(Vec<Response>),
 	Paniced(Box<dyn Any + Send + 'static>),
+	QueryParsingNotIdempotent(Query, Query),
 }
 
 pub struct TestTaskContext {
@@ -383,18 +384,33 @@ async fn run_test_with_dbs(
 		..Default::default()
 	};
 
-	let mut parser = syn::parser::Parser::new_with_settings(source, settings);
-	let mut stack = reblessive::Stack::new();
+	fn parse(source: &[u8], settings: syn::parser::ParserSettings) -> Result<Query, TestTaskResult> {
+		let mut parser = syn::parser::Parser::new_with_settings(source, settings);
+		let mut stack = reblessive::Stack::new();
 
-	let query = match stack.enter(|stk| parser.parse_query(stk)).finish() {
-		Ok(x) => {
-			if let Err(e) = parser.assert_finished() {
-				return Ok(TestTaskResult::ParserError(e.render_on_bytes(source)));
+		match stack.enter(|stk| parser.parse_query(stk)).finish() {
+			Ok(x) => {
+				if let Err(e) = parser.assert_finished() {
+					return Err(TestTaskResult::ParserError(e.render_on_bytes(source)));
+				}
+				Ok(x)
 			}
-			x
+			Err(e) => return Err(TestTaskResult::ParserError(e.render_on_bytes(source))),
 		}
-		Err(e) => return Ok(TestTaskResult::ParserError(e.render_on_bytes(source))),
+	}
+
+	let query = match parse(source, settings.clone()) {
+		Ok(x) => x,
+		Err(e) => return Ok(e),
 	};
+	let query2 = match parse(format!("{}", query).as_bytes(), settings) {
+		Ok(x) => x,
+		Err(e) => return Ok(e),
+	};
+
+	if query != query2 {
+		return Ok(TestTaskResult::QueryParsingNotIdempotent(query, query2));
+	}
 
 	let mut process_future = Box::pin(dbs.process(query, &session, None));
 	let timeout_future = time::sleep(timeout_duration);
