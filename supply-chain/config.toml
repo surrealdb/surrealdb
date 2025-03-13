@@ -2,7 +2,7 @@
 # cargo-vet config file
 
 [cargo-vet]
-version = "0.9"
+version = "0.10"
 
 [imports.bytecode-alliance]
 url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/main/supply-chain/audits.toml"
@@ -1233,6 +1233,10 @@ criteria = "safe-to-run"
 
 [[exemptions.reblessive]]
 version = "0.4.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.reblessive]]
+version = "0.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
