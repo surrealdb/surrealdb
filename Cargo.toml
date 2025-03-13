@@ -260,6 +260,8 @@ uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 
 # Optional crates
 pprof = { workspace = true, features = ["flamegraph", "prost-codec"], optional = true }
+regex.workspace = true
+lazy_static = "1.5.0"
 
 [target.'cfg(windows)'.dependencies]
 nu-ansi-term = "0.46.0"
