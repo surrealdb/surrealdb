@@ -16,6 +16,9 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
+	#[error("The server is unable to handle the request")]
+	ServerOverloaded,
+
 	#[error("The request body contains invalid data")]
 	Request,
 
