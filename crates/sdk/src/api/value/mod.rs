@@ -383,6 +383,18 @@ impl Value {
 	}
 
 	/// Returns the value found at a certain field if the Value
+	/// is an Object and the field is present.
+	pub fn field_mut<T: AsRef<str>>(&mut self, v: T) -> Option<&mut Value> {
+		match &mut self.0 {
+			CoreValue::Object(map) => match map.0.get_mut(v.as_ref()) {
+				Some(val) => Some(Value::from_inner_mut(val)),
+				None => None,
+			},
+			_ => None,
+		}
+	}
+
+	/// Returns the value found at a certain index if the Value
 	/// is an Array and a value is found at the index.
 	pub fn index(&self, v: usize) -> Option<&Value> {
 		match &self.0 {
@@ -393,8 +405,19 @@ impl Value {
 			_ => None,
 		}
 	}
-}
 
+	/// Returns the value found at a certain index if the Value
+	/// is an Array and a value is found at the index.
+	pub fn index_mut(&mut self, v: usize) -> Option<&mut Value> {
+		match &mut self.0 {
+			CoreValue::Array(map) => match map.0.get_mut(v) {
+				Some(val) => Some(Value::from_inner_mut(val)),
+				None => None,
+			},
+			_ => None,
+		}
+	}
+}
 
 pub struct ConversionError {
 	from: &'static str,

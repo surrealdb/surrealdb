@@ -1705,10 +1705,11 @@ pub async fn multi_take(new_db: impl CreateDb) {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
-	let mut response = db.query("SELECT b1 FROM CREATE something SET b1.total_peers = 74").await.unwrap();
-    let first: Value = response.take::<Value>(0).unwrap();
-    let inside = first.index(0).unwrap().field("b1").unwrap().field("total_peers").unwrap();
-    assert_eq!(inside, &Value::from_inner(CoreValue::Number(74.into())));
+	let mut response =
+		db.query("SELECT b1 FROM CREATE something SET b1.total_peers = 74").await.unwrap();
+	let first: Value = response.take::<Value>(0).unwrap();
+	let inside = first.index(0).unwrap().field("b1").unwrap().field("total_peers").unwrap();
+	assert_eq!(inside, &Value::from_inner(CoreValue::Number(74.into())));
 }
 
 pub async fn field_and_index_methods(new_db: impl CreateDb) {
