@@ -412,17 +412,34 @@ impl Connection {
 										.with_context(otel_cx.as_ref().clone())
 										.await;
 								}
+								// Check to see whether we have available memory
+								else if ALLOC.is_beyond_threshold() {
+									// Process the response
+									failure(req.id, Failure::custom(SERVER_OVERLOADED))
+										.send(otel_cx.clone(), fmt, &chn)
+										.with_context(otel_cx.as_ref().clone())
+										.await;
+								}
 								// Otherwise process the request message
 								else {
 									// Acquire concurrent request rate limiter
 									let permit = semaphore.acquire_owned().await.unwrap();
-									// Process the message when the semaphore is acquired
-									let res = Self::process_message(rpc.clone(), method, req.params).await;
-									// Process the response
-									res.into_response(req.id)
-										.send(otel_cx.clone(), fmt, &chn)
-										.with_context(otel_cx.as_ref().clone())
-										.await;
+									// Check to see whether we have available memory
+									if ALLOC.is_beyond_threshold() {
+										// Process the response
+										failure(req.id, Failure::custom(SERVER_OVERLOADED))
+											.send(otel_cx.clone(), fmt, &chn)
+											.with_context(otel_cx.as_ref().clone())
+											.await;
+									} else {
+										// Process the message when the semaphore is acquired
+										let res = Self::process_message(rpc.clone(), method, req.params).await;
+										// Process the response
+										res.into_response(req.id)
+											.send(otel_cx.clone(), fmt, &chn)
+											.with_context(otel_cx.as_ref().clone())
+											.await;
+									}
 									// Drop the rate limiter permit
 									drop(permit);
 								}
