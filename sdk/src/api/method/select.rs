@@ -88,7 +88,7 @@ where
 	into_future! {execute_vec}
 }
 
-impl<'r, C> Select<'r, C, Value>
+impl<C> Select<'_, C, Value>
 where
 	C: Connection,
 {
@@ -99,7 +99,7 @@ where
 	}
 }
 
-impl<'r, C, R> Select<'r, C, Vec<R>>
+impl<C, R> Select<'_, C, Vec<R>>
 where
 	C: Connection,
 {
