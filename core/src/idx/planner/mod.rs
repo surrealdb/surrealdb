@@ -29,7 +29,7 @@ pub(crate) struct QueryPlannerParams<'a> {
 	group: Option<&'a Groups>,
 }
 
-impl<'a> QueryPlannerParams<'a> {
+impl QueryPlannerParams<'_> {
 	pub(crate) fn is_keys_only(&self) -> bool {
 		if !self.fields.is_count_all_only() {
 			return false;

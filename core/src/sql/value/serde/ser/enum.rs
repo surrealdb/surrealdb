@@ -45,7 +45,6 @@ pub(super) fn to_value(content: Content) -> Result<Value, Error> {
 					.map_err(Into::into)
 			}
 			sql::value::TOKEN => sql::Value::deserialize(Content::Enum(v).into_deserializer())
-				.map(Into::into)
 				.map_err(Into::into),
 			_ => match v.data {
 				Data::Unit => Ok(v.variant.into_owned().into()),

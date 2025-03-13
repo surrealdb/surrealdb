@@ -130,7 +130,7 @@ pub struct MTreeChecker<'a> {
 	ctx: &'a Context,
 }
 
-impl<'a> MTreeChecker<'a> {
+impl MTreeChecker<'_> {
 	async fn convert_result(
 		&self,
 		doc_ids: &DocIds,
@@ -215,7 +215,7 @@ pub struct MTreeCondChecker<'a> {
 	cache: HashMap<DocId, CheckerCacheEntry>,
 }
 
-impl<'a> MTreeCondChecker<'a> {
+impl MTreeCondChecker<'_> {
 	async fn check_truthy(
 		&mut self,
 		stk: &mut Stk,
@@ -281,7 +281,7 @@ pub struct HnswCondChecker<'a> {
 	cache: HashMap<DocId, CheckerCacheEntry>,
 }
 
-impl<'a> HnswCondChecker<'a> {
+impl HnswCondChecker<'_> {
 	fn convert_result(&mut self, res: VecDeque<(DocId, f64)>) -> VecDeque<KnnIteratorResult> {
 		CheckerCacheEntry::convert_result(res, &mut self.cache)
 	}

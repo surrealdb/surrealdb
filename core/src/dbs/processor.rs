@@ -77,7 +77,7 @@ pub(crate) enum Processor<'a> {
 	Channel(Option<AsyncDistinct>, Sender<Processed>),
 }
 
-impl<'a> Processor<'a> {
+impl Processor<'_> {
 	async fn process(
 		&mut self,
 		stk: &mut Stk,

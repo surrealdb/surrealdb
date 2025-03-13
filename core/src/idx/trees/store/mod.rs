@@ -23,6 +23,7 @@ use std::sync::Arc;
 pub type NodeId = u64;
 pub type StoreGeneration = u64;
 
+#[allow(clippy::large_enum_variant)]
 #[non_exhaustive]
 pub enum TreeStore<N>
 where

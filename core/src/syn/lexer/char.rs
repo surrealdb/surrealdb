@@ -4,7 +4,7 @@ use crate::syn::{
 	token::{t, Token},
 };
 
-impl<'a> Lexer<'a> {
+impl Lexer<'_> {
 	/// lex non-ascii characters.
 	///
 	/// Should only be called after determining that the byte is not a valid ascii character.

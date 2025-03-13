@@ -39,7 +39,6 @@ impl SizedClock {
 
 /// FakeClock is a clock that is fully controlled externally.
 /// Use this clock for when you are testing timestamps.
-
 #[non_exhaustive]
 pub struct FakeClock {
 	// Locks necessary for Send
