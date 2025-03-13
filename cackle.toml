@@ -47,8 +47,8 @@ build.allow_build_instructions = [
     "cargo:rustc-link-lib=static=ring",
     "cargo:rustc-link-lib=static=ring-core",
     "cargo:rustc-link-lib=static=ring-test",
-    "cargo:rustc-link-lib=static=ring_core_0_17_8_",
-    "cargo:rustc-link-lib=static=ring_core_0_17_8_test",
+    "cargo:rustc-link-lib=static=ring_core_0_17_14_",
+    "cargo:rustc-link-lib=static=ring_core_0_17_14__test",
     "cargo:rustc-link-search=native=*",
 ]
 allow_unsafe = true
