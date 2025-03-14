@@ -1425,10 +1425,6 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.backend = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
 				}
-				t!("METADATA") => {
-					self.pop_peek();
-					res.metadata = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
-				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
 					res.permissions = stk.run(|stk| self.parse_permission(stk, true)).await?;

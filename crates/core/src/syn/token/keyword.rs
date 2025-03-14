@@ -129,7 +129,6 @@ keyword! {
 	M => "M",
 	M0 => "M0",
 	Mapper => "MAPPER",
-	Metadata => "METADATA",
 	Middleware => "MIDDLEWARE",
 	Merge => "MERGE",
 	Model => "MODEL",
