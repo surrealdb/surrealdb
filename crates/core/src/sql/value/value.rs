@@ -23,6 +23,7 @@ use crate::sql::{
 use chrono::{DateTime, Utc};
 
 use geo::Point;
+use object_store::ObjectMeta;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
@@ -650,6 +651,18 @@ impl From<Id> for Value {
 impl From<Query> for Value {
 	fn from(q: Query) -> Self {
 		Value::Query(q)
+	}
+}
+
+impl From<ObjectMeta> for Value {
+	fn from(value: ObjectMeta) -> Self {
+		Value::from(map! {
+			"key" => Value::from(value.location.to_string()),
+			"last_modified" => Value::from(value.last_modified),
+			"size" => Value::from(value.size),
+			"e_tag" => Value::from(value.e_tag),
+			"version" => Value::from(value.version),
+		})
 	}
 }
 
@@ -2232,11 +2245,18 @@ impl Value {
 	/// Try to convert this value to a `Strand`
 	pub(crate) fn convert_to_strand(self) -> Result<Strand, Error> {
 		match self {
-			// Bytes can't convert to strings
-			Value::Bytes(_) => Err(Error::ConvertTo {
-				from: self,
-				into: "string".into(),
-			}),
+			// Allow any bytes value
+			Value::Bytes(v) => {
+				let bytes = &v.0[..];
+				match std::str::from_utf8(bytes) {
+					Ok(s) => Ok(s.into()),
+					// Invalid UTF-8 bytes cannot be converted
+					Err(_) => Err(Error::ConvertTo {
+						from: Value::Bytes(v),
+						into: "string".into(),
+					}),
+				}
+			}
 			// None can't convert to a string
 			Value::None => Err(Error::ConvertTo {
 				from: self,
@@ -2343,6 +2363,29 @@ impl Value {
 	/// Try to convert this value to a `Bytes`
 	pub(crate) fn convert_to_bytes(self) -> Result<Bytes, Error> {
 		match self {
+			// Arrays of ints are allowed
+			Value::Array(ref v) => {
+				let mut bytes = Vec::with_capacity(v.len());
+
+				// Check each element
+				for value in v.0.iter() {
+					match value {
+						Value::Number(Number::Int(i)) if *i >= 0 && *i <= 255 => {
+							// Safe to convert to u8
+							bytes.push(*i as u8);
+						}
+						_ => {
+							// Not an int or outside u8 range
+							return Err(Error::ConvertTo {
+								from: self.clone(),
+								into: "bytes".into(),
+							});
+						}
+					}
+				}
+
+				Ok(Bytes(bytes))
+			}
 			// Bytes are allowed
 			Value::Bytes(v) => Ok(v),
 			// Strings can be converted to bytes
@@ -2378,6 +2421,8 @@ impl Value {
 				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
 				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
 			}
+			// Bytes convert to an array
+			Value::Bytes(v) => Ok(v.0.into_iter().map(Value::from).collect::<Vec<Value>>().into()),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
