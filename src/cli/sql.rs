@@ -35,8 +35,8 @@ impl Highlighter for InputValidator<'_> {
             static ref COMMENT_RE: Regex = Regex::new(r"--.*").unwrap();
             static ref SINGLE_QUOTE_STR_RE: Regex = Regex::new(r#"'[^']*'"#).unwrap();
             static ref DOUBLE_QUOTE_STR_RE: Regex = Regex::new(r#""[^"]*""#).unwrap();
-	        static ref KEYWORD_RE: Regex = Regex::new(r"(?i)\b(SELECT|FROM|WHERE|INSERT|TIMEOUT|INTO|UPDATE|PARALLEL|DELETE|CREATE|TABLE|DATABASE|NAMESPACE|USE|CONTENT|KEY|ON|TYPE|SCHEMALESS|SCHEMAFULL|DUPLICATE|SET|UNSET|LET|AS|AND|OR|NOT|ORDER\s+BY|LIMIT|GROUP\s+BY|HAVING|VALUES|INFO|FOR|ROOT|NS|DB|USER|INDEX|REMOVE|KILL|SLEEP|THROW|DEFINE|access|EVENT|FIELD|PARAM|FUNCTION|ANALYZER|LIVE|value|DIFF|FETCH|SHOW|CHANGES|SINCE|RELATE)\b").unwrap();
-            static ref NUMBER_RE: Regex = Regex::new(r"\b\d+(\.\d+)?\b").unwrap();
+	      	static ref KEYWORD_RE: Regex = Regex::new(r"(?i)\b(SELECT|FROM|WHERE|INSERT|TIMEOUT|INTO|UPDATE|PARALLEL|DELETE|CREATE|TABLE|DATABASE|NAMESPACE|USE|CONTENT|KEY|ON|IN|BY|TYPE|SCHEMALESS|SCHEMAFULL|DUPLICATE|SET|UNSET|LET|AS|AND|OR|NOT|ORDER\s+BY|LIMIT|GROUP\s+BY|HAVING|VALUES|INFO|FOR|ROOT|NS|DB|USER|INDEX|REMOVE|KILL|SLEEP|THROW|DEFINE|access|EVENT|FIELD|PARAM|FUNCTION|ANALYZER|LIVE|value|DIFF|FETCH|SHOW|CHANGES|SINCE|RELATE)\b").unwrap();
+			static ref NUMBER_RE: Regex = Regex::new(r"\b\d+(\.\d+)?\b").unwrap();
             static ref OPERATOR_RE: Regex = Regex::new(r"=|!=|>|<|>=|<=|\+|-|\*|/|%").unwrap();
 			static ref FUNCTION_RE: Regex = Regex::new(r"(\b\w+)\(").unwrap();
         }
