@@ -23,7 +23,6 @@ pub struct DefineBucketStatement {
 	pub name: Ident,
 	pub backend: Option<Value>,
 	pub permissions: Permissions,
-	pub metadata: Option<Value>,
 	pub readonly: bool,
 }
 
@@ -80,7 +79,6 @@ impl DefineBucketStatement {
 			name: self.name.clone(),
 			backend,
 			permissions: self.permissions.clone(),
-			metadata: self.metadata.clone(),
 			readonly: self.readonly,
 			..Default::default()
 		};
@@ -116,11 +114,6 @@ impl Display for DefineBucketStatement {
 			pretty_sequence_item();
 		}
 
-		if let Some(ref metadata) = self.metadata {
-			write!(f, "METADATA {}", metadata)?;
-			pretty_sequence_item();
-		}
-
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 
 		drop(indent);
@@ -134,7 +127,6 @@ impl InfoStructure for DefineBucketStatement {
 			"name".to_string() => self.name.structure(),
 			"permissions".to_string() => self.permissions.structure(),
 			"backend".to_string(), if let Some(backend) = self.backend => backend.into(),
-			"metadata".to_string(), if let Some(metadata) = self.metadata => metadata.structure(),
 			"readonly".to_string() => self.readonly.into(),
 		})
 	}
@@ -150,7 +142,6 @@ pub struct BucketDefinition {
 	pub name: Ident,
 	pub backend: Option<String>,
 	pub permissions: Permissions,
-	pub metadata: Option<Value>,
 	pub readonly: bool,
 }
 
@@ -162,7 +153,6 @@ impl From<BucketDefinition> for DefineBucketStatement {
 			name: value.name,
 			backend: value.backend.map(|v| v.into()),
 			permissions: value.permissions,
-			metadata: value.metadata,
 			readonly: value.readonly,
 		}
 	}

@@ -1,7 +1,8 @@
-use object_store::{path::Path, PutPayload};
+use object_store::path::Path;
 use reblessive::tree::Stk;
 
 use crate::{
+	buc::FileController,
 	ctx::Context,
 	dbs::Options,
 	err::Error,
@@ -11,37 +12,93 @@ use crate::{
 use super::CursorDoc;
 
 pub async fn put(
-	(_stk, ctx, opt, _doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, value): (File, Value),
 ) -> Result<Value, Error> {
-	let (ns, db) = opt.ns_db()?;
-	let store = ctx.get_bucket_store(ns, db, &file.bucket).await?;
-
-	let key = Path::parse(file.key).map_err(|_| Error::Unreachable("Invalid path".into()))?;
-	let payload = match value {
-		Value::Bytes(v) => PutPayload::from_bytes(v.0.into()),
-		// Value::Strand(v) => v.0.as_bytes(),
-		_ => return Err(Error::Unreachable("Invalid value passed".into())),
-	};
-
-	store.put(&key, payload).await.map_err(|_| Error::Unreachable("Failed to put file".into()))?;
+	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
+	controller.put(value).await?;
 
 	Ok(Value::None)
 }
 
 pub async fn get(
-	(_stk, ctx, opt, _doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file,): (File,),
 ) -> Result<Value, Error> {
-	let (ns, db) = opt.ns_db()?;
-	let store = ctx.get_bucket_store(ns, db, &file.bucket).await?;
+	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
+	let res = controller.get().await?;
+	Ok(res.map(Value::Bytes).unwrap_or_default())
+}
 
-	let key = Path::parse(file.key).map_err(|_| Error::Unreachable("Invalid path".into()))?;
-	let payload =
-		store.get(&key).await.map_err(|_| Error::Unreachable("Failed to get file".into()))?;
+pub async fn head(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(file,): (File,),
+) -> Result<Value, Error> {
+	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
+	let res = controller.head().await?;
+	Ok(res.map(Value::from).unwrap_or_default())
+}
 
-	let bytes =
-		payload.bytes().await.map_err(|_| Error::Unreachable("Failed to get bytes".into()))?;
+pub async fn delete(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(file,): (File,),
+) -> Result<Value, Error> {
+	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
+	controller.delete().await?;
 
-	Ok(Value::Bytes(bytes.to_vec().into()))
+	Ok(Value::None)
+}
+
+pub async fn copy(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(file, target): (File, String),
+) -> Result<Value, Error> {
+	let target = Path::parse(target).map_err(|_| Error::Unreachable("Invalid path".into()))?;
+	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
+	controller.copy(target).await?;
+
+	Ok(Value::None)
+}
+
+pub async fn copy_if_not_exists(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(file, target): (File, String),
+) -> Result<Value, Error> {
+	let target = Path::parse(target).map_err(|_| Error::Unreachable("Invalid path".into()))?;
+	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
+	controller.copy_if_not_exists(target).await?;
+
+	Ok(Value::None)
+}
+
+pub async fn rename(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(file, target): (File, String),
+) -> Result<Value, Error> {
+	let target = Path::parse(target).map_err(|_| Error::Unreachable("Invalid path".into()))?;
+	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
+	controller.rename(target).await?;
+
+	Ok(Value::None)
+}
+
+pub async fn rename_if_not_exists(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(file, target): (File, String),
+) -> Result<Value, Error> {
+	let target = Path::parse(target).map_err(|_| Error::Unreachable("Invalid path".into()))?;
+	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
+	controller.rename_if_not_exists(target).await?;
+
+	Ok(Value::None)
+}
+
+pub async fn exists(
+	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(file,): (File,),
+) -> Result<Value, Error> {
+	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
+	let exists = controller.exists().await?;
+
+	Ok(Value::Bool(exists))
 }

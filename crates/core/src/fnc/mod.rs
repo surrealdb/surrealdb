@@ -833,6 +833,13 @@ pub async fn idiom(
 				//
 				"put" => file::put((stk, ctx, opt, doc)).await,
 				"get" => file::get((stk, ctx, opt, doc)).await,
+				"head" => file::head((stk, ctx, opt, doc)).await,
+				"delete" => file::delete((stk, ctx, opt, doc)).await,
+				"copy" => file::copy((stk, ctx, opt, doc)).await,
+				"copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
+				"rename" => file::rename((stk, ctx, opt, doc)).await,
+				"rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
+				"exists" => file::exists((stk, ctx, opt, doc)).await,
 			)
 		}
 		_ => Err(Error::InvalidFunction {

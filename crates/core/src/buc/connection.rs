@@ -28,7 +28,7 @@ pub fn connect(
 	readonly: bool,
 	prefix: Option<&str>,
 ) -> Result<Arc<dyn ObjectStore>, Error> {
-	if *GLOBAL_BUCKET_ENFORCED {
+	if !global && *GLOBAL_BUCKET_ENFORCED {
 		return Err(Error::Unreachable("Usage of the global bucket is enforced".into()));
 	}
 

@@ -27,6 +27,7 @@ pub(crate) enum Entry {
 	/// An Uuid.
 	Lvv(Uuid),
 	/// A bucket connection
+	// TODO(kearfy): we need to find a different place to persist these
 	#[allow(unused)]
 	Buc(Arc<dyn ObjectStore>),
 }

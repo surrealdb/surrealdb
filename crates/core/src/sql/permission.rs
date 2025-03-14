@@ -52,6 +52,15 @@ impl Permissions {
 			&& self.update == Permission::Full
 			&& self.delete == Permission::Full
 	}
+
+	pub(crate) fn get_by_kind(&self, kind: PermissionKind) -> &Permission {
+		match kind {
+			PermissionKind::Select => &self.select,
+			PermissionKind::Create => &self.create,
+			PermissionKind::Update => &self.update,
+			PermissionKind::Delete => &self.delete,
+		}
+	}
 }
 
 impl Display for Permissions {

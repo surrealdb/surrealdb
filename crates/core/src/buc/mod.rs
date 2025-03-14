@@ -5,3 +5,5 @@ pub use crate::ent::buc::backend;
 pub mod config;
 mod connection;
 pub use connection::{connect, connect_global};
+mod controller;
+pub use controller::FileController;
