@@ -39,6 +39,9 @@ impl Parser<'_> {
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
 				Ok(Value::Uuid(self.next_token_value()?))
 			}
+			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
+				Ok(Value::Bytes(self.next_token_value()?))
+			}
 			t!("$param") => {
 				let value = Value::Param(self.next_token_value()?);
 				let value = self.try_parse_inline(ctx, &value).await?.unwrap_or(value);
@@ -243,6 +246,9 @@ impl Parser<'_> {
 			}
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
 				Value::Uuid(self.next_token_value()?)
+			}
+			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
+				Value::Bytes(self.next_token_value()?)
 			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;

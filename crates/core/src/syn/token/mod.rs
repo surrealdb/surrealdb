@@ -298,6 +298,10 @@ pub enum QouteKind {
 	DateTime,
 	/// `d"`
 	DateTimeDouble,
+	/// `b'`
+	Bytes,
+	/// `b"`
+	BytesDouble,
 }
 
 impl QouteKind {
@@ -307,6 +311,7 @@ impl QouteKind {
 			QouteKind::RecordId | QouteKind::RecordIdDouble => "a record-id strand",
 			QouteKind::Uuid | QouteKind::UuidDouble => "a uuid",
 			QouteKind::DateTime | QouteKind::DateTimeDouble => "a datetime",
+			QouteKind::Bytes | QouteKind::BytesDouble => "a bytestring",
 		}
 	}
 }
@@ -318,6 +323,7 @@ pub enum Glued {
 	Strand,
 	Datetime,
 	Uuid,
+	Bytes,
 }
 
 impl Glued {
@@ -328,6 +334,7 @@ impl Glued {
 			Glued::Uuid => "a uuid",
 			Glued::Datetime => "a datetime",
 			Glued::Duration => "a duration",
+			Glued::Bytes => "a bytestring",
 		}
 	}
 }

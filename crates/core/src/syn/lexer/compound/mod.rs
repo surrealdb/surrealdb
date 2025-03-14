@@ -4,6 +4,7 @@ use crate::syn::{
 	token::{Span, Token},
 };
 
+mod bytes;
 mod datetime;
 mod ident;
 mod js;
@@ -12,6 +13,7 @@ mod regex;
 mod strand;
 mod uuid;
 
+pub use bytes::bytes;
 pub use datetime::{datetime, datetime_inner};
 pub use ident::flexible_ident;
 pub use js::javascript;

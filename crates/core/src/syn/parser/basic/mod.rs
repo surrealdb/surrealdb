@@ -1,5 +1,7 @@
 use crate::{
-	sql::{language::Language, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid},
+	sql::{
+		language::Language, Bytes, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid,
+	},
 	syn::{
 		lexer::compound,
 		parser::{mac::unexpected, ParseResult, Parser},
@@ -130,6 +132,21 @@ impl TokenValue for Uuid {
 				Ok(Uuid(v))
 			}
 			_ => unexpected!(parser, token, "a uuid"),
+		}
+	}
+}
+
+impl TokenValue for Bytes {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.peek();
+		match token.kind {
+			TokenKind::Glued(token::Glued::Bytes) => Ok(pop_glued!(parser, Bytes)),
+			t!("b\"") | t!("b'") => {
+				parser.pop_peek();
+				let v = parser.lexer.lex_compound(token, compound::bytes)?.value;
+				Ok(v)
+			}
+			_ => unexpected!(parser, token, "a bytestring"),
 		}
 	}
 }

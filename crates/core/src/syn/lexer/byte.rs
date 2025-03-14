@@ -357,6 +357,19 @@ impl Lexer<'_> {
 					return self.lex_ident_from_next_byte(b'u');
 				}
 			},
+			b'b' => match self.reader.peek() {
+				Some(b'"') => {
+					self.reader.next();
+					t!("b\"")
+				}
+				Some(b'\'') => {
+					self.reader.next();
+					t!("b'")
+				}
+				_ => {
+					return self.lex_ident_from_next_byte(b'b');
+				}
+			},
 			b'r' => match self.reader.peek() {
 				Some(b'"') => {
 					self.reader.next();

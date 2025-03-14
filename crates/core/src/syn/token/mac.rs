@@ -46,6 +46,12 @@ macro_rules! t {
 	("d'") => {
 		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::DateTime)
 	};
+	("b\"") => {
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::BytesDouble)
+	};
+	("b'") => {
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::Bytes)
+	};
 	("\"") => {
 		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::PlainDouble)
 	};
