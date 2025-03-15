@@ -4,10 +4,12 @@ mod common;
 mod http_integration {
 	use std::time::Duration;
 
+	use http::header::HeaderValue;
 	use http::{header, Method};
 	use reqwest::Client;
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
+	use surrealdb::sql;
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -35,7 +37,7 @@ mod http_integration {
 			let res = client.post(url).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200);
 			let body = res.text().await?;
-			assert!(body.contains("Not enough permissions"), "body: {}", body);
+			assert!(body.contains("Not enough permissions"), "body: {body}");
 		}
 
 		// Request with invalid credentials, returns 401
@@ -51,7 +53,7 @@ mod http_integration {
 				client.post(url).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200);
 			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {}", body);
+			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
 		}
 
 		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE levels
@@ -71,7 +73,7 @@ mod http_integration {
 				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR ROOT").send().await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with ROOT level access to access NS, returns 200 and succeeds
@@ -80,7 +82,7 @@ mod http_integration {
 				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR NS").send().await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with ROOT level access to access DB, returns 200 and succeeds
@@ -89,7 +91,7 @@ mod http_integration {
 				client.post(url).basic_auth(USER, Some(PASS)).body("INFO FOR DB").send().await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with NS level access to access ROOT, returns 200 but fails
@@ -103,11 +105,10 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
+			assert_eq!(body[0]["status"], "ERR", "body: {body}");
 			assert_eq!(
 				body[0]["result"], "IAM error: Not enough permissions to perform this action",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -122,7 +123,7 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with NS level access to access DB, returns 200 and succeeds
@@ -136,7 +137,7 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with DB level access to access ROOT, returns 200 but fails
@@ -151,11 +152,10 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
+			assert_eq!(body[0]["status"], "ERR", "body: {body}");
 			assert_eq!(
 				body[0]["result"], "IAM error: Not enough permissions to perform this action",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -171,11 +171,10 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
+			assert_eq!(body[0]["status"], "ERR", "body: {body}");
 			assert_eq!(
 				body[0]["result"], "IAM error: Not enough permissions to perform this action",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -191,7 +190,7 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Request with DB level access missing NS level header, returns 401
@@ -236,7 +235,7 @@ mod http_integration {
 				.send()
 				.await?;
 			let body = res.text().await?;
-			assert!(body.contains(r#""status":"OK"#), "body: {}", body);
+			assert!(body.contains(r#""status":"OK"#), "body: {body}");
 		}
 
 		// Signin with user and get the token
@@ -266,7 +265,7 @@ mod http_integration {
 			let res = client.post(url).bearer_auth(&token).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {}", body);
+			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
 
 			// Check the selected namespace and database
 			let res = client
@@ -279,8 +278,8 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert!(body.contains(&format!(r#""result":["{ns}"]"#)), "body: {}", body);
-			assert!(body.contains(&format!(r#""result":["{db}"]"#)), "body: {}", body);
+			assert!(body.contains(&format!(r#""result":["{ns}"]"#)), "body: {body}");
+			assert!(body.contains(&format!(r#""result":["{db}"]"#)), "body: {body}");
 		}
 
 		// Request with invalid token, returns 401
@@ -296,6 +295,83 @@ mod http_integration {
 	async fn client_ip_extractor() -> Result<(), Box<dyn std::error::Error>> {
 		// TODO: test the client IP extractor
 		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn session_id() {
+		let (addr, _server) = common::start_server_with_guests().await.unwrap();
+		let url = &format!("http://{addr}/sql");
+
+		// Request without header, gives a randomly generated session identifier
+		{
+			// Prepare HTTP client without header
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+
+			let res = client.post(url).body("SELECT VALUE id FROM $session").send().await.unwrap();
+			assert_eq!(res.status(), 200);
+			let body = res.text().await.unwrap();
+			// Any randomly generated UUIDv4 will be in the format:
+			// xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+			assert!(body.contains("-4"), "body: {body}");
+		}
+
+		// Request with header, gives a the session identifier specified in the header
+		{
+			// Prepare HTTP client with header
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(
+				"surreal-id",
+				HeaderValue::from_static("00000000-0000-0000-0000-000000000000"),
+			);
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+
+			let res = client.post(url).body("SELECT VALUE id FROM $session").send().await.unwrap();
+			assert_eq!(res.status(), 200);
+			let body = res.text().await.unwrap();
+			assert!(body.contains("00000000-0000-0000-0000-000000000000"), "body: {body}");
+		}
+
+		// Request with invalid header, should fail
+		{
+			// Prepare HTTP client with header
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(
+				"surreal-id",
+				HeaderValue::from_static("123"), // Not a valid UUIDv4
+			);
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+
+			let res = client.post(url).body("SELECT VALUE id FROM $session").send().await.unwrap();
+			assert_eq!(res.status(), 401);
+		}
 	}
 
 	#[test(tokio::test)]
@@ -335,7 +411,7 @@ mod http_integration {
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert!(body.contains("DEFINE TABLE foo"), "body: {}", body);
+			assert!(body.contains("DEFINE TABLE foo"), "body: {body}");
 		}
 
 		Ok(())
@@ -347,7 +423,7 @@ mod http_integration {
 		let url = &format!("http://{addr}/health");
 
 		let res = Client::default().get(url).send().await?;
-		assert_eq!(res.status(), 200, "response: {:#?}", res);
+		assert_eq!(res.status(), 200, "response: {res:#?}");
 
 		Ok(())
 	}
@@ -445,7 +521,7 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert!(body.contains("foo:bvklxkhtxumyrfzqoc5i"), "body: {}", body);
+			assert!(body.contains("foo:bvklxkhtxumyrfzqoc5i"), "body: {body}");
 		}
 
 		Ok(())
@@ -531,7 +607,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {body}");
 		}
 
 		// Signin with invalid DB credentials returns 401
@@ -599,7 +675,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {body}");
 		}
 
 		// Signin with invalid NS credentials returns 401
@@ -684,7 +760,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {body}");
 		}
 
 		// Signin with invalid ROOT credentials returns 401
@@ -766,8 +842,7 @@ mod http_integration {
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert!(
 				body["token"].as_str().unwrap().starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"),
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -802,7 +877,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200);
 
 			let body = res.text().await?;
-			assert!(body.contains("Not enough permissions"), "body: {}", body);
+			assert!(body.contains("Not enough permissions"), "body: {body}");
 		}
 
 		// Creating a record with Accept JSON encoding is allowed
@@ -812,7 +887,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
 		}
 
 		// Creating a record with Accept CBOR encoding is allowed
@@ -884,6 +959,16 @@ mod http_integration {
 			assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
 		}
 
+		// Test nul character
+		{
+			let res =
+				client.post(url).body("parse::email::user('\\u0000@example.com')").send().await?;
+			assert_eq!(res.status(), 400);
+
+			let body = res.text().await?;
+			assert!(body.contains("contained NUL byte"), "body: {body}");
+		}
+
 		Ok(())
 	}
 
@@ -941,14 +1026,14 @@ mod http_integration {
 			let res = client.get(url).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert_eq!(body, r#"Save"#, "body: {}", body);
+			assert_eq!(body, r#"Save"#, "body: {body}");
 		}
 		// POST
 		{
 			let res = client.post(url).body("").send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
-			assert_eq!(body, r#"Load"#, "body: {}", body);
+			assert_eq!(body, r#"Load"#, "body: {body}");
 		}
 
 		Ok(())
@@ -960,16 +1045,16 @@ mod http_integration {
 		let url = &format!("http://{addr}/version");
 
 		let res = Client::default().get(url).send().await?;
-		assert_eq!(res.status(), 200, "response: {:#?}", res);
+		assert_eq!(res.status(), 200, "response: {res:#?}");
 		let body = res.text().await?;
-		assert!(body.starts_with("surrealdb-"), "body: {}", body);
+		assert!(body.starts_with("surrealdb-"), "body: {body}");
 
 		Ok(())
 	}
 
-	///
-	/// Key endpoint tests
-	///
+	//
+	// Key endpoint tests
+	//
 
 	async fn seed_table(
 		client: &Client,
@@ -988,8 +1073,7 @@ mod http_integration {
 		assert_eq!(
 			body[0]["result"].as_array().unwrap().len(),
 			num_records,
-			"error seeding the table: {}",
-			body
+			"error seeding the table: {body}"
 		);
 
 		Ok(())
@@ -1021,57 +1105,46 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 		}
 
 		// GET records with a limit
 		{
 			let res =
-				client.get(format!("{}?limit=10", url)).basic_auth(USER, Some(PASS)).send().await?;
+				client.get(format!("{url}?limit=10")).basic_auth(USER, Some(PASS)).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {body}");
 		}
 
 		// GET records with a start
 		{
 			let res =
-				client.get(format!("{}?start=10", url)).basic_auth(USER, Some(PASS)).send().await?;
+				client.get(format!("{url}?start=10")).basic_auth(USER, Some(PASS)).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(
 				body[0]["result"].as_array().unwrap().len(),
 				num_records - 10,
-				"body: {}",
-				body
+				"body: {body}"
 			);
-			assert_eq!(
-				body[0]["result"].as_array().unwrap()[0]["id"],
-				"table:11",
-				"body: {}",
-				body
-			);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:11", "body: {body}");
 		}
 
 		// GET records with a start and limit
 		{
 			let res = client
-				.get(format!("{}?start=10&limit=10", url))
+				.get(format!("{url}?start=10&limit=10"))
 				.basic_auth(USER, Some(PASS))
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {}", body);
-			assert_eq!(
-				body[0]["result"].as_array().unwrap()[0]["id"],
-				"table:11",
-				"body: {}",
-				body
-			);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:11", "body: {body}");
 		}
 
 		// GET without authentication returns no records
@@ -1080,7 +1153,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 		}
 
 		Ok(())
@@ -1108,7 +1181,7 @@ mod http_integration {
 			// Verify there are no records
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 
 			// Try to create the record
 			let res = client
@@ -1121,12 +1194,11 @@ mod http_integration {
 
 			// Verify the record was created
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["name"],
 				"record_name",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1142,7 +1214,7 @@ mod http_integration {
 			// Verify the table is empty
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 		}
 
 		Ok(())
@@ -1181,15 +1253,15 @@ mod http_integration {
 			// Verify the records were updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 
 			// Verify the records have the new data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert_eq!(record["name"], "record_name", "body: {}", body);
+				assert_eq!(record["name"], "record_name", "body: {body}");
 			}
 			// Verify the records don't have the original data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert!(record["default"].is_null(), "body: {}", body);
+				assert!(record["default"].is_null(), "body: {body}");
 			}
 		}
 
@@ -1202,15 +1274,15 @@ mod http_integration {
 			// Verify the records were not updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 
 			// Verify the records don't have the new data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert!(record["noauth"].is_null(), "body: {}", body);
+				assert!(record["noauth"].is_null(), "body: {body}");
 			}
 			// Verify the records have the original data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert_eq!(record["name"], "record_name", "body: {}", body);
+				assert_eq!(record["name"], "record_name", "body: {body}");
 			}
 		}
 
@@ -1250,15 +1322,15 @@ mod http_integration {
 			// Verify the records were modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 
 			// Verify the records have the new data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert_eq!(record["name"], "record_name", "body: {}", body);
+				assert_eq!(record["name"], "record_name", "body: {body}");
 			}
 			// Verify the records also have the original data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert_eq!(record["default"], "content", "body: {}", body);
+				assert_eq!(record["default"], "content", "body: {body}");
 			}
 		}
 
@@ -1271,15 +1343,15 @@ mod http_integration {
 			// Verify the records were not modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 
 			// Verify the records don't have the new data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert!(record["noauth"].is_null(), "body: {}", body);
+				assert!(record["noauth"].is_null(), "body: {body}");
 			}
 			// Verify the records have the original data
 			for record in body[0]["result"].as_array().unwrap() {
-				assert_eq!(record["name"], "record_name", "body: {}", body);
+				assert_eq!(record["name"], "record_name", "body: {body}");
 			}
 		}
 
@@ -1310,7 +1382,7 @@ mod http_integration {
 			// Verify there are records
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 
 			// Try to delete the records
 			let res = client.delete(url).basic_auth(USER, Some(PASS)).send().await?;
@@ -1319,7 +1391,7 @@ mod http_integration {
 			// Verify the records were deleted
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 		}
 
 		// Delete all records without authentication
@@ -1333,7 +1405,7 @@ mod http_integration {
 			// Verify the records were not deleted
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 		}
 
 		Ok(())
@@ -1364,7 +1436,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 		}
 
 		// GET without authentication returns no record
@@ -1373,7 +1445,7 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 		}
 
 		Ok(())
@@ -1409,12 +1481,11 @@ mod http_integration {
 
 			// Verify the record was created with the given ID
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["id"],
 				"table:new_id",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1436,25 +1507,22 @@ mod http_integration {
 
 			// Verify the record was created with the given ID
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["id"],
 				"table:new_id_query",
-				"body: {}",
-				body
+				"body: {body}"
 			);
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["age"], 45, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["age"], 45, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["elems"].as_array().unwrap().len(),
 				3,
-				"body: {}",
-				body
+				"body: {body}"
 			);
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["other"].as_object().unwrap()["test"],
 				true,
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1469,7 +1537,7 @@ mod http_integration {
 			// Verify the table is empty
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 0, "body: {body}");
 		}
 
 		Ok(())
@@ -1507,22 +1575,17 @@ mod http_integration {
 			// Verify the record was updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
 
 			// Verify the record has the new data
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["name"],
 				"record_name",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 
 			// Verify the record doesn't have the original data
-			assert!(
-				body[0]["result"].as_array().unwrap()[0]["default"].is_null(),
-				"body: {}",
-				body
-			);
+			assert!(body[0]["result"].as_array().unwrap()[0]["default"].is_null(), "body: {body}");
 		}
 
 		// Update one record without authentication
@@ -1534,17 +1597,16 @@ mod http_integration {
 			// Verify the record was not updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
 
 			// Verify the record doesn't have the new data
-			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {}", body);
+			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {body}");
 
 			// Verify the record has the original data
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["name"],
 				"record_name",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1583,22 +1645,20 @@ mod http_integration {
 			// Verify the records were modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
 
 			// Verify the record has the new data
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["name"],
 				"record_name",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 
 			// Verify the record has the original data too
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["default"],
 				"content",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1611,17 +1671,16 @@ mod http_integration {
 			// Verify the record was not modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
 
 			// Verify the record doesn't have the new data
-			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {}", body);
+			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {body}");
 
 			// Verify the record has the original data too
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["default"],
 				"content",
-				"body: {}",
-				body
+				"body: {body}"
 			);
 		}
 
@@ -1651,35 +1710,324 @@ mod http_integration {
 			// Verify there are records
 			let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 2, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 2, "body: {body}");
 
 			// Try to delete the record
-			let res = client
-				.delete(format!("{}/1", base_url))
-				.basic_auth(USER, Some(PASS))
-				.send()
-				.await?;
+			let res =
+				client.delete(format!("{base_url}/1")).basic_auth(USER, Some(PASS)).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			// Verify only one record was deleted
 			let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:2", "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:2", "body: {body}");
 		}
 
 		// Delete one record without authentication
 		{
 			// Try to delete the record
-			let res = client.delete(format!("{}/2", base_url)).send().await?;
+			let res = client.delete(format!("{base_url}/2")).send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 
 			// Verify the record was not deleted
 			let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {}", body);
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 		}
 
 		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn signup_mal() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let rpc_url = &format!("http://{addr}/rpc");
+
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/surrealdb".parse()?);
+		headers.insert(header::CONTENT_TYPE, "application/surrealdb".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Define a record access method
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body(
+					r#"
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+						SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+						DURATION FOR SESSION 12h
+					;
+				"#,
+				)
+				.send()
+				.await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+		}
+
+		{
+			let mut request = sql::Object::default();
+			request.insert("method".to_string(), "signup".into());
+
+			let stmt: sql::Statement = {
+				let mut tmp = sql::statements::CreateStatement::default();
+				let rid = sql::thing("foo:42").unwrap();
+				let mut tmp_values = sql::Values::default();
+				tmp_values.0 = vec![rid.into()];
+				tmp.what = tmp_values;
+				sql::Statement::Create(tmp)
+			};
+
+			let mut obj = sql::Object::default();
+			obj.insert("email".to_string(), sql::Value::Query(stmt.into()));
+			obj.insert("pass".to_string(), "foo".into());
+			request.insert(
+				"params".to_string(),
+				sql::Value::Array(vec![sql::Value::Object(obj)].into()),
+			);
+
+			let req: sql::Value = sql::Value::Object(request);
+
+			let req = sql::serde::serialize(&req).unwrap();
+
+			let res = client.post(rpc_url).body(req).send().await?;
+
+			let body = res.text().await?;
+
+			assert!(
+				body.contains("Found a non-computed value where they are not allowed"),
+				"{body:?}"
+			);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn http_capabilities() {
+		use tokio::time;
+		// Deny some
+		{
+			// Start server disallowing routes for queries, exporting and importing
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-http sql,export,import".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that denied routes are disallowed
+			let res = client
+				.post(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			let res = client
+				.post(format!("{base_url}/import"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			let res = client
+				.get(format!("{base_url}/export"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+
+			// Check that other routes are allowed
+			// GET
+			for route in ["status", "health", "version", "sync", "ml/export/test/1.0.0"] {
+				println!("Testing \"/{route}\" route...");
+
+				let res = client
+					.get(format!("{base_url}/{route}"))
+					.basic_auth(USER, Some(PASS))
+					.send()
+					.await
+					.unwrap();
+				assert_ne!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			}
+			// POST
+			for route in ["signin", "signup", "key/test", "ml/import"] {
+				println!("Testing \"/{route}\" route...");
+
+				let res = client
+					.post(format!("{base_url}/{route}"))
+					.basic_auth(USER, Some(PASS))
+					.send()
+					.await
+					.unwrap();
+				assert_ne!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			}
+			// WebSocket
+			println!("Testing \"/rpc\" route...");
+			client
+				.get(format!("{base_url}/rpc"))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+				.send()
+				.await
+				.unwrap()
+				.upgrade()
+				.await
+				.unwrap();
+		}
+		// Deny all
+		{
+			// Start server disallowing all routes except for RPC and health
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-http --allow-http rpc,health".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that denied routes are disallowed
+			// GET
+			for route in ["version", "sync", "export", "ml/export/test/1.0.0"] {
+				println!("Testing \"/{route}\" route...");
+
+				let res = client
+					.get(format!("{base_url}/{route}"))
+					.basic_auth(USER, Some(PASS))
+					.send()
+					.await
+					.unwrap();
+				assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			}
+			// POST
+			for route in ["sql", "signin", "signup", "key/test", "import", "ml/import"] {
+				println!("Testing \"/{route}\" route...");
+
+				let res = client
+					.post(format!("{base_url}/{route}"))
+					.basic_auth(USER, Some(PASS))
+					.send()
+					.await
+					.unwrap();
+				assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			}
+			// WebSocket
+			println!("Testing \"/rpc\" route...");
+			client
+				.get(format!("{base_url}/rpc"))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+				.send()
+				.await
+				.unwrap()
+				.upgrade()
+				.await
+				.unwrap();
+		}
+		// Deny RPC and health endpoints
+		{
+			// Start server disallowing the RPC and health routes
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-http rpc,health".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				// Ready check disabled as healtcheck is disallowed
+				wait_is_ready: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+			// The "is-ready" command uses the RPC and health routes
+			// We must wait for server startup rudimentarily
+			// If this introduces flakiness, drop this test case
+			time::sleep(time::Duration::from_millis(5000)).await;
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that health requests are disallowed
+			let res = client
+				.get(format!("{base_url}/health"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+
+			// Check that RPC requests are disallowed
+			println!("Testing \"/rpc\" route...");
+			let res = client
+				.get(format!("{base_url}/rpc"))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+				.send()
+				.await
+				.unwrap()
+				.upgrade()
+				.await;
+			assert!(res.is_err(), "Request to \"/rpc\" endpoint unexpectedly succeeded")
+		}
 	}
 }

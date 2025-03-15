@@ -29,6 +29,7 @@ pub async fn init(
 		auth: AuthArguments {
 			username,
 			password,
+			token,
 			auth_level,
 		},
 		sel: DatabaseSelectionArguments {
@@ -37,13 +38,10 @@ pub async fn init(
 		},
 	}: ImportCommandArguments,
 ) -> Result<(), Error> {
-	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_log_level("info").init();
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
-
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. file://local.db or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
 	let client = if username.is_some()
 		&& password.is_some()
 		&& !endpoint.clone().into_endpoint()?.parse_kind()?.is_local()
@@ -65,6 +63,11 @@ pub async fn init(
 		};
 
 		client
+	} else if token.is_some() && !endpoint.clone().into_endpoint()?.parse_kind()?.is_local() {
+		let client = connect(endpoint).await?;
+		client.authenticate(token.unwrap()).await?;
+
+		client
 	} else {
 		debug!("Connecting to the database engine without authentication");
 		connect((endpoint, config)).await?
@@ -75,6 +78,6 @@ pub async fn init(
 	// Import the data into the database
 	client.import(file).ml().await?;
 	info!("The SurrealML file was imported successfully");
-	// Everything OK
+	// All ok
 	Ok(())
 }

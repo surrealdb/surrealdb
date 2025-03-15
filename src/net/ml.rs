@@ -1,51 +1,66 @@
 //! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
-use crate::dbs::DB;
+use super::AppState;
+use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
 use crate::err::Error;
+#[cfg(feature = "ml")]
 use crate::net::output;
-use axum::extract::{BodyStream, DefaultBodyLimit, Path};
+use axum::body::Body;
+use axum::extract::{DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
+#[cfg(feature = "ml")]
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Extension;
 use axum::Router;
+#[cfg(feature = "ml")]
 use bytes::Bytes;
+#[cfg(feature = "ml")]
 use futures_util::StreamExt;
+#[cfg(feature = "ml")]
 use http::StatusCode;
-use http_body::Body as HttpBody;
-use hyper::body::Body;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
+#[cfg(feature = "ml")]
 use surrealdb::iam::check::check_ns_db;
+#[cfg(feature = "ml")]
 use surrealdb::iam::Action::{Edit, View};
+#[cfg(feature = "ml")]
 use surrealdb::iam::ResourceKind::Model;
+#[cfg(feature = "ml")]
 use surrealdb::kvs::{LockType::Optimistic, TransactionType::Read};
+#[cfg(feature = "ml")]
 use surrealdb::ml::storage::surml_file::SurMlFile;
+#[cfg(feature = "ml")]
 use surrealdb::sql::statements::{DefineModelStatement, DefineStatement};
 use tower_http::limit::RequestBodyLimitLayer;
 
-const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
-
 /// The router definition for the ML API endpoints.
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send + Into<Bytes>,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
 		.route("/ml/import", post(import))
 		.route("/ml/export/:name/:version", get(export))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(MAX))
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_ML_BODY_SIZE))
 }
 
 /// This endpoint allows the user to import a model into the database.
+#[cfg(feature = "ml")]
 async fn import(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
-	mut stream: BodyStream,
+	body: Body,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+	let mut stream = body.into_data_stream();
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Ml) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
+		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level
@@ -91,18 +106,25 @@ async fn import(
 }
 
 /// This endpoint allows the user to export a model from the database.
+#[cfg(feature = "ml")]
 async fn export(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	Path((name, version)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, Error> {
 	// Get the datastore reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Ml) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
+		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level
 	db.check(&session, View, Model.on_db(&nsv, &dbv))?;
 	// Start a new readonly transaction
-	let mut tx = db.transaction(Read, Optimistic).await?;
+	let tx = db.transaction(Read, Optimistic).await?;
 	// Attempt to get the model definition
 	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
 	// Calculate the path of the model file
@@ -110,13 +132,48 @@ async fn export(
 	// Export the file data in to the store
 	let mut data = surrealdb::obs::stream(path).await?;
 	// Create a chunked response
-	let (mut chn, body) = Body::channel();
+	let (chn, body_stream) = surrealdb::channel::bounded::<Result<Bytes, Error>>(1);
+	let body = Body::from_stream(body_stream);
 	// Process all stream values
 	tokio::spawn(async move {
 		while let Some(Ok(v)) = data.next().await {
-			let _ = chn.send_data(v).await;
+			let _ = chn.send(Ok(v)).await;
 		}
 	});
 	// Return the streamed body
 	Ok(Response::builder().status(StatusCode::OK).body(body).unwrap())
+}
+
+/// This endpoint allows the user to import a model into the database.
+#[cfg(not(feature = "ml"))]
+async fn import(
+	Extension(state): Extension<AppState>,
+	Extension(_): Extension<Session>,
+	_: Body,
+) -> Result<(), impl IntoResponse> {
+	// Get the datastore reference
+	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Ml) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
+		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
+	}
+	Err(Error::Request)
+}
+
+/// This endpoint allows the user to export a model from the database.
+#[cfg(not(feature = "ml"))]
+async fn export(
+	Extension(state): Extension<AppState>,
+	Extension(_): Extension<Session>,
+	Path((_, _)): Path<(String, String)>,
+) -> Result<(), impl IntoResponse> {
+	// Get the datastore reference
+	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Ml) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
+		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
+	}
+	Err(Error::Request)
 }

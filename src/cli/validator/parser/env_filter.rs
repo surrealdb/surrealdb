@@ -1,8 +1,7 @@
+use crate::telemetry::filter_from_value;
 use clap::builder::{NonEmptyStringValueParser, PossibleValue, TypedValueParser};
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use tracing_subscriber::EnvFilter;
-
-use crate::telemetry::filter_from_value;
 
 #[derive(Debug)]
 pub struct CustomEnvFilter(pub EnvFilter);

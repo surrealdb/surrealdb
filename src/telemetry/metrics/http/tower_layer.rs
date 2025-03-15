@@ -1,3 +1,4 @@
+use crate::cnf::TELEMETRY_NAMESPACE;
 use axum::extract::MatchedPath;
 use opentelemetry::{metrics::MetricsError, KeyValue};
 use pin_project_lite::pin_project;
@@ -181,6 +182,10 @@ impl HttpCallMetricTracker {
 			res.push(KeyValue::new("server.address", host.to_owned()));
 		}
 
+		if !TELEMETRY_NAMESPACE.trim().is_empty() {
+			res.push(KeyValue::new("namespace", TELEMETRY_NAMESPACE.clone()));
+		};
+
 		res
 	}
 
@@ -231,7 +236,7 @@ impl Drop for HttpCallMetricTracker {
 			}
 			ResultState::Result(s, v, size) => {
 				self.status_code = Some(s);
-				self.version = format!("{:?}", v);
+				self.version = format!("{v:?}");
 				self.response_size = size;
 			}
 		};

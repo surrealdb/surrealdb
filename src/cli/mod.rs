@@ -1,6 +1,7 @@
 pub(crate) mod abstraction;
 mod config;
 mod export;
+mod fix;
 mod import;
 mod isready;
 mod ml;
@@ -14,12 +15,17 @@ pub(crate) mod validator;
 mod version;
 mod version_client;
 
+use crate::cli::validator::parser::env_filter::CustomEnvFilter;
+use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
 use crate::cli::version_client::VersionClient;
-use crate::cnf::{DEBUG_BUILD_WARNING, LOGO, PKG_VERSION};
+#[cfg(debug_assertions)]
+use crate::cnf::DEBUG_BUILD_WARNING;
+use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
 use clap::{Parser, Subcommand};
 pub use config::CF;
 use export::ExportCommandArguments;
+use fix::FixCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use ml::MlCommand;
@@ -53,6 +59,12 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 struct Cli {
 	#[command(subcommand)]
 	command: Commands,
+	#[arg(help = "The logging level for the command-line tool")]
+	#[arg(env = "SURREAL_LOG", short = 'l', long = "log")]
+	#[arg(global = true)]
+	#[arg(default_value = "info")]
+	#[arg(value_parser = CustomEnvFilterParser::new())]
+	log: CustomEnvFilter,
 	#[arg(help = "Whether to allow web check for client version upgrades at start")]
 	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
 	#[arg(default_value_t = true)]
@@ -87,9 +99,17 @@ enum Commands {
 	IsReady(IsReadyCommandArguments),
 	#[command(about = "Validate SurrealQL query files")]
 	Validate(ValidateCommandArguments),
+	#[command(about = "Fix database storage issues")]
+	Fix(FixCommandArguments),
 }
 
 pub async fn init() -> ExitCode {
+	// Enables ANSI code support on Windows
+	#[cfg(windows)]
+	nu_ansi_term::enable_ansi_support().ok();
+	// Print debug mode warning
+	#[cfg(debug_assertions)]
+	println!("{DEBUG_BUILD_WARNING}");
 	// Start a new CPU profiler
 	#[cfg(feature = "performance-profiler")]
 	let guard = pprof::ProfilerGuardBuilder::default()
@@ -99,10 +119,6 @@ pub async fn init() -> ExitCode {
 		.unwrap();
 	// Parse the CLI arguments
 	let args = Cli::parse();
-
-	#[cfg(debug_assertions)]
-	println!("{DEBUG_BUILD_WARNING}");
-
 	// After parsing arguments, we check the version online
 	if args.online_version_check {
 		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
@@ -119,6 +135,12 @@ pub async fn init() -> ExitCode {
 			warn!("You can upgrade using the {} command", "surreal upgrade");
 		}
 	}
+	// Check if we are running the server
+	let server = matches!(args.command, Commands::Start(_));
+	// Initialize opentelemetry and logging
+	let telemetry = crate::telemetry::builder().with_log_level("info").with_filter(args.log);
+	// Extract the telemetry log guards
+	let (outg, errg) = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
 		Commands::Start(args) => start::init(args).await,
@@ -130,6 +152,7 @@ pub async fn init() -> ExitCode {
 		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
+		Commands::Fix(args) => fix::init(args).await,
 	};
 	// Save the flamegraph and profile
 	#[cfg(feature = "performance-profiler")]
@@ -149,9 +172,26 @@ pub async fn init() -> ExitCode {
 	};
 	// Error and exit the programme
 	if let Err(e) = output {
+		// Output any error
 		error!("{}", e);
+		// Drop the log guards
+		drop(outg);
+		drop(errg);
+		// Final message
+		if server {
+			println!("Goodbye!");
+		}
+		// Return failure
 		ExitCode::FAILURE
 	} else {
+		// Drop the log guards
+		drop(outg);
+		drop(errg);
+		// Final message
+		if server {
+			println!("Goodbye!");
+		}
+		// Return success
 		ExitCode::SUCCESS
 	}
 }

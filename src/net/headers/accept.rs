@@ -1,9 +1,10 @@
-use axum::headers;
-use axum::headers::Header;
+use axum_extra::headers;
+use axum_extra::headers::Header;
 use http::HeaderName;
 use http::HeaderValue;
 
 /// Typed header implementation for the `Accept` header.
+#[derive(Debug)]
 pub enum Accept {
 	TextPlain,
 	ApplicationJson,

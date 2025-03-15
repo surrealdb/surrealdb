@@ -10,11 +10,59 @@ on:
   pull_request:
   merge_group:
 
+concurrency:
+  # Use github.run_id on main branch
+  # Use github.event.pull_request.number on pull requests, so it's unique per pull request
+  # Use github.ref on other branches, so it's unique per branch
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash
 
 jobs:
+  # ----------------------------------------
+  # Server build
+  # ----------------------------------------
+
+  build:
+    name: Build binary (${{ matrix.name }})
+    strategy:
+      matrix:
+        include:
+          - name: amd64
+            runner: runner-amd64-large
+            target: x86_64-unknown-linux-gnu
+          - name: arm64
+            runner: runner-arm64-large
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build binary
+        run: cargo build --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: surreal-${{ matrix.name }}
+          path: target/${{ matrix.target }}/debug/surreal
+
+  # ----------------------------------------
+  # Code quality checks
+  # ----------------------------------------
+
   format:
     name: Check format
     runs-on: ubuntu-latest
@@ -22,7 +70,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: rustfmt
 
       - name: Checkout sources
@@ -39,14 +86,14 @@ jobs:
       - name: Check format
         run: cargo make ci-format
 
-  check:
-    name: Check workspace
+  clippy:
+    name: Check clippy
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
+          components: clippy
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -56,9 +103,29 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Run clippy
+        run: cargo make ci-clippy
+
+      - name: Run clippy release
+        run: cargo make ci-clippy-release
+
+  check:
+    name: Check workspace
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -66,56 +133,15 @@ jobs:
       - name: Check workspace
         run: cargo make ci-check
 
-  check-dependencies:
-    name: Check dependencies
+      - name: Check workspace release
+        run: cargo make ci-check-release
+
+  check-msrv:
+    name: Check workspace MSRV
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
+      - name: Install MSRV toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: rustfmt
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny@0.14.11
-
-      - name: Install cargo-vet
-        run: cargo install --debug --locked cargo-vet
-
-      - name: Install cargo-acl
-        run: |
-          cargo install --debug --locked cargo-acl
-          sudo apt-get install -y bubblewrap
-
-      - name: Check dependencies for known issues
-        run: cargo deny check
-
-      - name: Check dependencies for untrusted sources
-        run: cargo vet
-
-      - name: Check dependencies for unauthorized access
-        env:
-          RUSTFLAGS: "--cfg surrealdb_unstable"
-        run: cargo acl -n
-
-      - name: Dependency check failure
-        if: failure()
-        run: |
-          echo "## :warning: Dependency check failed" >> $GITHUB_STEP_SUMMARY
-          echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
-
-  check-fuzzing:
-    name: Check fuzzing
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: rustfmt
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -125,8 +151,33 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Check workspace on MSRV
+        run: cargo make ci-check
+
+      - name: Check workspace release on MSRV
+        run: cargo make ci-check-release
+
+  check-fuzzing:
+    name: Check fuzzing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: crates/fuzz
+
       - name: Check fuzzers
-        run: cargo build --manifest-path lib/fuzz/Cargo.toml
+        run: cargo build --manifest-path crates/fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
         uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
@@ -143,7 +194,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Checkout sources
@@ -160,42 +210,32 @@ jobs:
       - name: Check wasm
         run: cargo make ci-check-wasm
 
-  clippy:
-    name: Check clippy
+  check-revision:
+    name: Check revision
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: clippy
-
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
+      - name: Install revision-lock
+        run: cargo install revision-lock
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Check revision.lock
+        run: revision-lock --check
 
-      - name: Run clippy
-        run: cargo make ci-clippy
+  # ----------------------------------------
+  # Integration tests
+  # ----------------------------------------
 
-  cli:
+  cli-integration:
     name: CLI integration tests
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -204,10 +244,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -215,23 +251,12 @@ jobs:
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
 
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-          cat /tmp/surrealdb.log || true
-
-  http-server:
+  http-integration:
     name: HTTP integration tests
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -240,10 +265,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -251,14 +272,12 @@ jobs:
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
 
-  ml-support:
-    name: ML integration tests
+  ws-integration:
+    name: WebSocket integration tests
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -268,9 +287,26 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Run WebSocket integration tests
+        run: cargo make ci-ws-integration
+
+  ml-integration:
+    name: ML integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -278,14 +314,12 @@ jobs:
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
 
-  ws-server:
-    name: WebSocket integration tests
+  graphql-integration:
+    name: GraphQL integration
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -294,25 +328,23 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Run WS integration tests
-        run: cargo make ci-ws-integration
+      - name: Run GraphQL integration tests
+        run: cargo make ci-graphql-integration
+
+  # ----------------------------------------
+  # Workspace tests
+  # ----------------------------------------
 
   test:
     name: Test workspace
-    runs-on: ["self-hosted", "arm64", "builder"]
+    runs-on: [runner-arm64-2xlarge]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -323,8 +355,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
-        run: |
-          sudo apt-get -y update
+        run: sudo apt-get -y update
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -344,14 +375,16 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 5
 
-  test-sdk-build:
+  # ----------------------------------------
+  # Rust SDK tests
+  # ----------------------------------------
+
+  sdk-build:
     name: Test SDK build
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -360,10 +393,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
 
       - name: Build local
         working-directory: tests/sdk/local
@@ -373,86 +402,12 @@ jobs:
         working-directory: tests/sdk/remote
         run: cargo build
 
-  ws-engine:
-    name: WebSocket engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test ws engine
-        run: cargo make ci-api-integration-ws
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-          cat /tmp/surrealdb.log || true
-
-  http-engine:
-    name: HTTP engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test http engine
-        run: cargo make ci-api-integration-http
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-          cat /tmp/surrealdb.log || true
-
   any-engine:
-    name: Any engine
+    name: Rust SDK - Any engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -462,14 +417,10 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test any engine
+      - name: Test Any engine
         run: cargo make ci-api-integration-any
 
       - name: Debug info
@@ -479,16 +430,71 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log || true
+
+  ws-engine:
+    name: Rust SDK - WebSocket engine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test WS engine
+        run: cargo make ci-api-integration-ws
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+
+  http-engine:
+    name: Rust SDK - HTTP engine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test HTTP engine
+        run: cargo make ci-api-integration-http
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
 
   mem-engine:
-    name: Memory engine
+    name: Rust SDK - Memory engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -501,17 +507,23 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test mem engine
+      - name: Test Memory engine
         run: cargo make ci-api-integration-mem
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+
   file-engine:
-    name: File engine
+    name: Rust SDK - File engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -524,17 +536,23 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test file engine
+      - name: Test File engine
         run: cargo make ci-api-integration-file
 
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+
   rocksdb-engine:
-    name: RocksDB engine
+    name: Rust SDK - RocksDB engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -547,17 +565,23 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test rocksdb engine
+      - name: Test RocksDB engine
         run: cargo make ci-api-integration-rocksdb
 
-  tikv-engine:
-    name: TiKV engine
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+
+  surrealkv-engine:
+    name: Rust SDK - SurrealKV engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -567,9 +591,34 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test SurrealKV engine
+        run: cargo make ci-api-integration-surrealkv
+
+      - name: Debug info
+        if: always()
         run: |
-          sudo apt-get -y update
+          set -x
+          free -m
+          df -h
+          ps auxf
+
+  tikv-engine:
+    name: Rust SDK - TiKV engine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install TiUP
         timeout-minutes: 10
@@ -581,7 +630,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test tikv engine
+      - name: Test TiKV engine
         run: cargo make ci-api-integration-tikv
 
       - name: Debug info
@@ -591,16 +640,13 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log || true
 
-  fdb-engine:
-    name: FoundationDB engine
+  fdb-engine-7-1:
+    name: Rust SDK - FoundationDB engine 7.1
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -609,17 +655,17 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
         with:
-          version: "7.1.30"
+          version: "7.1.61"
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test fdb engine
-        run: cargo make ci-api-integration-fdb
+      - name: Test FoundationDB engine
+        run: cargo make ci-api-integration-fdb-7_1
 
       - name: Debug info
         if: always()
@@ -628,16 +674,13 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log || true
 
-  surrealkv-engine:
-    name: SurrealKV engine
+  fdb-engine-7-3:
+    name: Rust SDK - FoundationDB engine 7.3
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -650,8 +693,13 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test surrealkv engine
-        run: cargo make ci-api-integration-surrealkv
+      - name: Setup FoundationDB
+        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        with:
+          version: "7.3.47"
+
+      - name: Test FoundationDB engine
+        run: cargo make ci-api-integration-fdb-7_3
 
       - name: Debug info
         if: always()
@@ -660,7 +708,10 @@ jobs:
           free -m
           df -h
           ps auxf
-          cat /tmp/surrealdb.log || true
+
+  # ----------------------------------------
+  # Database upgrade tests
+  # ----------------------------------------
 
   db-upgrade:
     name: Database Upgrade from previous versions
@@ -668,8 +719,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -683,6 +732,285 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Test upgrade
-        # Allow breaking changes until v2 stabilises
-        continue-on-error: true
         run: cargo make ci-database-upgrade
+
+  # ----------------------------------------
+  # SurrealQL language tests
+  # ----------------------------------------
+
+  lang-tests:
+    name: Run SurrealQL language tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: crates/language-tests
+
+      - name: Build SurrealQL test tool
+        run: |
+          cd crates/language-tests
+          cargo build
+
+      - name: Run SurrealQL test suite
+        run: |
+          cd crates/language-tests
+          ./target/debug/surrealql-test --color always run
+
+  # ----------------------------------------
+  # Other SDK tests
+  # ----------------------------------------
+
+  sdk-javascript:
+    name: JavaScript SDK tests (${{ matrix.version }})
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.js"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup JavaScript
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ matrix.version }}
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run JavaScript tests (HTTP)
+        run: bun test
+        env:
+          SURREAL_PROTOCOL: http
+          SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
+
+      - name: Run JavaScript tests (WebSocket)
+        run: bun test
+        env:
+          SURREAL_PROTOCOL: ws
+          SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
+
+  sdk-golang:
+    name: Golang SDK tests (${{ matrix.version }})
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 1.23
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.go"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup Golang
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.version }}
+          check-latest: true
+          cache-dependency-path: go.sum
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        run: sleep 10
+
+      - name: Run Golang tests (HTTP)
+        run: go test -v -cover ./...
+        env:
+          SURREALDB_URL: http://localhost:8000/rpc
+
+      - name: Run Golang tests (WebSocket)
+        run: go test -v -cover ./...
+        env:
+          SURREALDB_URL: ws://localhost:8000/rpc
+
+  sdk-python:
+    name: Python SDK tests (${{ matrix.version }})
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 3.13
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.py"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.version }}
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        run: sleep 10
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Python tests (HTTP)
+        run: python -m unittest discover -s tests
+        env:
+          PYTHONPATH: ./src
+          SURREALDB_URL: http://localhost:8000
+
+      - name: Run Python tests (WebSocket)
+        run: python -m unittest discover -s tests
+        env:
+          PYTHONPATH: ./src
+          SURREALDB_URL: ws://localhost:8000
+
+  sdk-php:
+    name: PHP SDK tests (${{ matrix.version }})
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 8.2
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.php"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.version }}
+
+      - name: Setup Composer
+        uses: php-actions/composer@v6
+        with:
+          php_version: ${{ matrix.version }}
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        run: sleep 10
+
+      - name: Run PHP tests
+        run: composer test-coverage-v2
+
+  sdk-dotnet:
+    name: .NET SDK tests (${{ matrix.version }})
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 9.0.x
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          repository: "surrealdb/surrealdb.net"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.version }}
+
+      - name: Install dependencies
+        run: dotnet restore
+
+      - name: Disable embedded mode
+        run: sudo bash disable_embedded_mode.sh
+
+      - name: Build
+        run: dotnet build --no-restore
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        run: sleep 10
+
+      - name: Run .NET tests
+        run: >
+          dotnet test
+          ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
+          --no-restore
+          --no-build
+
+      - name: Run .NET tests (Live Query)
+        run: >
+          dotnet test
+          ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
+          --no-restore
+          --no-build

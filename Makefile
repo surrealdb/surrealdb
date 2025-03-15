@@ -45,10 +45,14 @@ serve: check-deps
 sql: check-deps
 	cargo make sql
 
-.PHONY: quick
-quick: check-deps
-	cargo make quick
+.PHONY: repl
+repl: check-deps
+	cargo make repl
 
 .PHONY: build
 build: check-deps
 	cargo make build
+
+.PHONY: release
+release: check-deps
+	cargo make release

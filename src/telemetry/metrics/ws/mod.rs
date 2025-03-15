@@ -1,47 +1,53 @@
 use std::time::Instant;
 
-use once_cell::sync::Lazy;
-use opentelemetry::KeyValue;
+use crate::cnf::TELEMETRY_NAMESPACE;
+use opentelemetry::metrics::Meter;
+use opentelemetry::{global, KeyValue};
 use opentelemetry::{
-	metrics::{Histogram, MetricsError, Unit, UpDownCounter},
+	metrics::{Histogram, MetricsError, UpDownCounter},
 	Context as TelemetryContext,
 };
+use std::sync::LazyLock;
 
-use super::{METER_DURATION, METER_SIZE};
+static METER: LazyLock<Meter> = LazyLock::new(|| global::meter("surrealdb.rpc"));
 
-pub static RPC_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
-	METER_DURATION
+pub static RPC_SERVER_DURATION: LazyLock<Histogram<u64>> = LazyLock::new(|| {
+	METER
 		.u64_histogram("rpc.server.duration")
 		.with_description("Measures duration of inbound RPC requests in milliseconds.")
-		.with_unit(Unit::new("ms"))
+		.with_unit("ms")
 		.init()
 });
 
-pub static RPC_SERVER_ACTIVE_CONNECTIONS: Lazy<UpDownCounter<i64>> = Lazy::new(|| {
-	METER_DURATION
+pub static RPC_SERVER_ACTIVE_CONNECTIONS: LazyLock<UpDownCounter<i64>> = LazyLock::new(|| {
+	METER
 		.i64_up_down_counter("rpc.server.active_connections")
 		.with_description("The number of active WebSocket connections.")
 		.init()
 });
 
-pub static RPC_SERVER_REQUEST_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
-	METER_SIZE
+pub static RPC_SERVER_REQUEST_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| {
+	METER
 		.u64_histogram("rpc.server.request.size")
 		.with_description("Measures the size of HTTP request messages.")
-		.with_unit(Unit::new("mb"))
+		.with_unit("mb")
 		.init()
 });
 
-pub static RPC_SERVER_RESPONSE_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
-	METER_SIZE
+pub static RPC_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| {
+	METER
 		.u64_histogram("rpc.server.response.size")
 		.with_description("Measures the size of HTTP response messages.")
-		.with_unit(Unit::new("mb"))
+		.with_unit("mb")
 		.init()
 });
 
 fn otel_common_attrs() -> Vec<KeyValue> {
-	vec![KeyValue::new("rpc.service", "surrealdb")]
+	let mut common = vec![KeyValue::new("rpc.service", "surrealdb")];
+	if !TELEMETRY_NAMESPACE.trim().is_empty() {
+		common.push(KeyValue::new("namespace", TELEMETRY_NAMESPACE.clone()));
+	};
+	common
 }
 
 /// Registers the callback that increases the number of active RPC connections.
@@ -56,8 +62,7 @@ pub fn on_disconnect() -> Result<(), MetricsError> {
 
 pub(super) fn observe_active_connection(value: i64) -> Result<(), MetricsError> {
 	let attrs = otel_common_attrs();
-
-	RPC_SERVER_ACTIVE_CONNECTIONS.add(&TelemetryContext::current(), value, &attrs);
+	RPC_SERVER_ACTIVE_CONNECTIONS.add(value, &attrs);
 	Ok(())
 }
 
@@ -147,7 +152,7 @@ pub fn record_rpc(cx: &TelemetryContext, res_size: usize, is_error: bool) {
 		]);
 	};
 
-	RPC_SERVER_DURATION.record(cx, duration, &attrs);
-	RPC_SERVER_REQUEST_SIZE.record(cx, req_size, &attrs);
-	RPC_SERVER_RESPONSE_SIZE.record(cx, res_size as u64, &attrs);
+	RPC_SERVER_DURATION.record(duration, &attrs);
+	RPC_SERVER_REQUEST_SIZE.record(req_size, &attrs);
+	RPC_SERVER_RESPONSE_SIZE.record(res_size as u64, &attrs);
 }

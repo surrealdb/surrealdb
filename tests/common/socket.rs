@@ -2,6 +2,7 @@ use super::format::Format;
 use crate::common::error::TestError;
 use futures::channel::oneshot::channel;
 use futures_util::{SinkExt, TryStreamExt};
+use http::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -83,10 +84,43 @@ impl Socket {
 
 	/// Connect to a WebSocket server using a specific format
 	pub async fn connect(addr: &str, format: Option<Format>, msg_format: Format) -> Result<Self> {
-		let url = format!("ws://{}/rpc", addr);
+		let url = format!("ws://{addr}/rpc");
 		let mut req = url.into_client_request().unwrap();
 		if let Some(v) = format.map(|v| v.to_string()) {
 			req.headers_mut().insert("Sec-WebSocket-Protocol", v.parse().unwrap());
+		}
+		let (stream, _) = connect_async(req).await?;
+		let (send, recv) = mpsc::channel(16);
+		let (send_other, recv_other) = mpsc::channel(16);
+
+		tokio::spawn(async move {
+			if let Err(e) = Self::ws_task(recv, stream, send_other, msg_format).await {
+				eprintln!("error in websocket task: {e}")
+			}
+		});
+
+		Ok(Self {
+			sender: send,
+			other_messages: recv_other,
+		})
+	}
+
+	/// Connect to a WebSocket server using a specific format with custom headers
+	pub async fn connect_with_headers(
+		addr: &str,
+		format: Option<Format>,
+		msg_format: Format,
+		headers: HeaderMap<HeaderValue>,
+	) -> Result<Self> {
+		let url = format!("ws://{addr}/rpc");
+		let mut req = url.into_client_request().unwrap();
+		if let Some(v) = format.map(|v| v.to_string()) {
+			req.headers_mut().insert("Sec-WebSocket-Protocol", v.parse().unwrap());
+		}
+		for (key, value) in headers.into_iter() {
+			if let Some(key) = key {
+				req.headers_mut().append(key, value);
+			}
 		}
 		let (stream, _) = connect_async(req).await?;
 		let (send, recv) = mpsc::channel(16);
@@ -340,14 +374,13 @@ impl Socket {
 				.get("result")
 				.ok_or(TestError::AssertionError {
 					message: format!(
-						"expected a result from the received object, got this instead: {:?}",
-						obj
+						"expected a result from the received object, got this instead: {obj:?}"
 					),
 				})?
 				.to_owned()),
 			_ => {
 				error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
-				Err(format!("unexpected response: {:?}", msg).into())
+				Err(format!("unexpected response: {msg:?}").into())
 			}
 		}
 	}
@@ -364,7 +397,7 @@ impl Socket {
 			Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => Ok(obj
 				.get("result")
 				.ok_or(TestError::AssertionError {
-					message: format!("expected a result from the received object, got this instead: {:?}", obj),
+					message: format!("expected a result from the received object, got this instead: {obj:?}"),
 				})?
 				.as_array()
 				.ok_or(TestError::AssertionError {
@@ -373,7 +406,7 @@ impl Socket {
 				.to_owned()),
 			_ => {
 				error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
-				Err(format!("unexpected response: {:?}", msg).into())
+				Err(format!("unexpected response: {msg:?}").into())
 			}
 		}
 	}
@@ -408,7 +441,7 @@ impl Socket {
 			Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => Ok(obj
 				.get("result")
 				.ok_or(TestError::AssertionError {
-					message: format!("expected a result from the received object, got this instead: {:?}", obj),
+					message: format!("expected a result from the received object, got this instead: {obj:?}"),
 				})?
 				.as_str()
 				.ok_or(TestError::AssertionError {
@@ -417,7 +450,7 @@ impl Socket {
 				.to_owned()),
 			_ => {
 				error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
-				Err(format!("unexpected response: {:?}", msg).into())
+				Err(format!("unexpected response: {msg:?}").into())
 			}
 		}
 	}
@@ -439,14 +472,13 @@ impl Socket {
 				.get("result")
 				.ok_or(TestError::AssertionError {
 					message: format!(
-						"expected a result from the received object, got this instead: {:?}",
-						obj
+						"expected a result from the received object, got this instead: {obj:?}"
 					),
 				})?
 				.to_owned()),
 			_ => {
 				error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
-				Err(format!("unexpected response: {:?}", msg).into())
+				Err(format!("unexpected response: {msg:?}").into())
 			}
 		}
 	}
@@ -473,14 +505,13 @@ impl Socket {
 				.get("result")
 				.ok_or(TestError::AssertionError {
 					message: format!(
-						"expected a result from the received object, got this instead: {:?}",
-						obj
+						"expected a result from the received object, got this instead: {obj:?}"
 					),
 				})?
 				.to_owned()),
 			_ => {
 				error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
-				Err(format!("unexpected response: {:?}", msg).into())
+				Err(format!("unexpected response: {msg:?}").into())
 			}
 		}
 	}

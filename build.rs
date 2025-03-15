@@ -6,7 +6,7 @@ const BUILD_METADATA: &str = "SURREAL_BUILD_METADATA";
 
 fn main() {
 	println!("cargo:rerun-if-env-changed={BUILD_METADATA}");
-	println!("cargo:rerun-if-changed=lib");
+	println!("cargo:rerun-if-changed=sdk");
 	println!("cargo:rerun-if-changed=src");
 	println!("cargo:rerun-if-changed=build.rs");
 	println!("cargo:rerun-if-changed=Cargo.toml");

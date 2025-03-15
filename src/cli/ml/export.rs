@@ -48,6 +48,7 @@ pub async fn init(
 		auth: AuthArguments {
 			username,
 			password,
+			token,
 			auth_level,
 		},
 		sel: DatabaseSelectionArguments {
@@ -56,11 +57,8 @@ pub async fn init(
 		},
 	}: ExportCommandArguments,
 ) -> Result<(), Error> {
-	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_log_level("error").init();
-
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. file://local.db or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
 	let client = if username.is_some()
 		&& password.is_some()
 		&& !endpoint.clone().into_endpoint()?.parse_kind()?.is_local()
@@ -80,6 +78,11 @@ pub async fn init(
 			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
 			CredentialsLevel::Database => client.signin(creds.database()?).await?,
 		};
+
+		client
+	} else if token.is_some() && !endpoint.clone().into_endpoint()?.parse_kind()?.is_local() {
+		let client = connect(endpoint).await?;
+		client.authenticate(token.unwrap()).await?;
 
 		client
 	} else {
@@ -112,6 +115,6 @@ pub async fn init(
 		client.export(file).ml(&name, version).await?;
 	}
 	info!("The SurrealML file was exported successfully");
-	// Everything OK
+	// All ok
 	Ok(())
 }

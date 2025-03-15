@@ -1,4 +1,6 @@
-use crate::dbs::DB;
+use super::headers::Accept;
+use super::AppState;
+use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -12,47 +14,50 @@ use axum::response::IntoResponse;
 use axum::routing::options;
 use axum::Extension;
 use axum::Router;
-use axum::TypedHeader;
+use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use http_body::Body as HttpBody;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use super::headers::Accept;
-
-const MAX: usize = 1024 * 1024; // 1 MiB
-
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
-		.route("/sql", options(|| async {}).get(ws_handler).post(post_handler))
+		.route("/sql", options(|| async {}).get(get_handler).post(post_handler))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(MAX))
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SQL_BODY_SIZE))
 }
 
 async fn post_handler(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	output: Option<TypedHeader<Accept>>,
 	params: Query<Params>,
 	sql: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
-	let db = DB.get().unwrap();
+	let db = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !db.allows_http_route(&RouteTarget::Sql) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Sql);
+		return Err(Error::ForbiddenRoute(RouteTarget::Sql.to_string()));
+	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Sql.to_string()));
+	}
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query
 	match db.execute(sql, &session, params.0.parse().into()).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
@@ -63,14 +68,15 @@ async fn post_handler(
 	}
 }
 
-async fn ws_handler(
+async fn get_handler(
 	ws: WebSocketUpgrade,
+	Extension(state): Extension<AppState>,
 	Extension(sess): Extension<Session>,
 ) -> impl IntoResponse {
-	ws.on_upgrade(move |socket| handle_socket(socket, sess))
+	ws.on_upgrade(move |socket| handle_socket(state, socket, sess))
 }
 
-async fn handle_socket(ws: WebSocket, session: Session) {
+async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 	// Split the WebSocket connection
 	let (mut tx, mut rx) = ws.split();
 	// Wait to receive the next message
@@ -78,7 +84,7 @@ async fn handle_socket(ws: WebSocket, session: Session) {
 		if let Ok(msg) = res {
 			if let Ok(sql) = msg.to_text() {
 				// Get a database reference
-				let db = DB.get().unwrap();
+				let db = &state.datastore;
 				// Execute the received sql query
 				let _ = match db.execute(sql, &session, None).await {
 					// Convert the response to JSON
