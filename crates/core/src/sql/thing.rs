@@ -171,15 +171,10 @@ impl Thing {
 		let txn = ctx.tx();
 		let mut stream = txn.stream_keys(range, None, ScanDirection::Forward);
 
-		// Collect the keys from the stream into a vec
-		let mut keys: Vec<Vec<u8>> = vec![];
-		while let Some(res) = stream.next().await {
-			keys.push(res?);
-		}
-
 		let mut ids = Vec::new();
-		for x in keys.iter() {
-			let key = Ref::decode(x)?;
+		while let Some(res) = stream.next().await {
+			let x = res?;
+			let key = Ref::decode(&x)?;
 			ids.push(Thing {
 				tb: key.ft.to_string(),
 				id: key.fk,
