@@ -163,18 +163,92 @@ impl Parser<'_> {
 		expected!(self, t!("DUPLICATE"));
 		expected!(self, t!("KEY"));
 		expected!(self, t!("UPDATE"));
-		let l = self.parse_plain_idiom(ctx).await?;
-		let o = self.parse_assigner()?;
-		let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-		let mut data = vec![(l, o, r)];
 
-		while self.eat(t!(",")) {
+		let token = self.peek();
+		// not a `[` so it has to be `ON DUPLICATE KEY UPDATE a = b`
+		if token.kind != t!("[") {
+			//first update field: required cant be empty
 			let l = self.parse_plain_idiom(ctx).await?;
 			let o = self.parse_assigner()?;
 			let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-			data.push((l, o, r))
+			let mut updates = vec![(l, o, r)];
+
+			//next update fields
+			while self.eat(t!(",")) {
+				let l = self.parse_plain_idiom(ctx).await?;
+				let o = self.parse_assigner()?;
+				let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				updates.push((l, o, r))
+			}
+
+			//wrap in a vec to match the expected return type
+			return Ok(Data::UpdateExpression(vec![updates]));
 		}
 
-		Ok(Data::UpdateExpression(data))
+		//assert it has to be a `[` now
+		match token.kind {
+			t!("[") => {
+				self.pop_peek();
+			}
+			_ => {
+				bail!("Invalid update, expected @field = @value pairs or Array in ON DUPLICATE KEY UPDATE statement.")
+			}
+		}
+
+		//loop through the array of updates for each record
+		let mut updates = Vec::new();
+		loop {
+			//assert it has to be a `{` now for each record
+			let token_inner = self.peek();
+			match token_inner.kind {
+				t!("{") => {
+					self.pop_peek();
+				}
+				_ => {
+					bail!(
+						"Invalid update, expected an Object in ON DUPLICATE KEY [...] UPDATE statement."
+					)
+				}
+			}
+
+			//allow empty object, because option to only skip update a certain record should be possible
+			if self.eat(t!("}")) {
+				updates.push(Vec::new());
+				if self.eat(t!(",")) {
+					continue;
+				} else {
+					break;
+				}
+			}
+
+			//first update field: required if it is not empty
+			let l = self.parse_plain_idiom(ctx).await?;
+			let o = self.parse_assigner()?;
+			let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			let mut data = vec![(l, o, r)];
+
+			//next update fields
+			while self.eat(t!(",")) {
+				let l = self.parse_plain_idiom(ctx).await?;
+				let o = self.parse_assigner()?;
+				let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				data.push((l, o, r));
+			}
+
+			//push update record for this record
+			updates.push(data);
+
+			self.expect_closing_delimiter(t!("}"), token_inner.span)?;
+
+			//continue as long as new records to update are found
+			if self.eat(t!(",")) {
+				continue;
+			} else {
+				break;
+			}
+		}
+		self.expect_closing_delimiter(t!("]"), token.span)?;
+
+		Ok(Data::UpdateExpression(updates))
 	}
 }

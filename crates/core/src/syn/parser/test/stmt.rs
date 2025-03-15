@@ -2503,7 +2503,7 @@ fn parse_throw() {
 }
 
 #[test]
-fn parse_insert() {
+fn parse_insert_single_update() {
 	let res = test_parse!(
 		parse_stmt,
 	r#"INSERT IGNORE INTO $foo (a,b,c) VALUES (1,2,3),(4,5,6) ON DUPLICATE KEY UPDATE a.b +?= null, c.d += none RETURN AFTER"#
@@ -2543,7 +2543,7 @@ fn parse_insert() {
 				],
 			]),
 			ignore: true,
-			update: Some(Data::UpdateExpression(vec![
+			update: Some(Data::UpdateExpression(vec![vec![
 				(
 					Idiom(vec![
 						Part::Field(Ident("a".to_owned())),
@@ -2560,6 +2560,71 @@ fn parse_insert() {
 					Operator::Inc,
 					Value::None,
 				),
+			]])),
+			output: Some(Output::After),
+			version: None,
+			timeout: None,
+			parallel: false,
+			relation: false,
+		}),
+	)
+}
+
+#[test]
+fn parse_insert_multiple_update() {
+	let res = test_parse!(
+		parse_stmt,
+	r#"INSERT IGNORE INTO $foo (a,b,c) VALUES (1,2,3),(4,5,6) ON DUPLICATE KEY UPDATE [{a +?= null, c = None}, {b -= None}] RETURN AFTER"#
+	).unwrap();
+	assert_eq!(
+		res,
+		Statement::Insert(InsertStatement {
+			into: Some(Value::Param(Param(Ident("foo".to_owned())))),
+			data: Data::ValuesExpression(vec![
+				vec![
+					(
+						Idiom(vec![Part::Field(Ident("a".to_owned()))]),
+						Value::Number(Number::Int(1)),
+					),
+					(
+						Idiom(vec![Part::Field(Ident("b".to_owned()))]),
+						Value::Number(Number::Int(2)),
+					),
+					(
+						Idiom(vec![Part::Field(Ident("c".to_owned()))]),
+						Value::Number(Number::Int(3)),
+					),
+				],
+				vec![
+					(
+						Idiom(vec![Part::Field(Ident("a".to_owned()))]),
+						Value::Number(Number::Int(4)),
+					),
+					(
+						Idiom(vec![Part::Field(Ident("b".to_owned()))]),
+						Value::Number(Number::Int(5)),
+					),
+					(
+						Idiom(vec![Part::Field(Ident("c".to_owned()))]),
+						Value::Number(Number::Int(6)),
+					),
+				],
+			]),
+			ignore: true,
+			update: Some(Data::UpdateExpression(vec![
+				vec![
+					(Idiom(vec![Part::Field(Ident("a".to_owned())),]), Operator::Ext, Value::Null),
+					(
+						Idiom(vec![Part::Field(Ident("c".to_owned())),]),
+						Operator::Equal,
+						Value::None
+					),
+				],
+				vec![(
+					Idiom(vec![Part::Field(Ident("b".to_owned())),]),
+					Operator::Dec,
+					Value::None
+				),]
 			])),
 			output: Some(Output::After),
 			version: None,
