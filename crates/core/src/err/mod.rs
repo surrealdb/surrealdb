@@ -33,6 +33,7 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
+
 	/// This error is used for breaking a loop in a foreach statement
 	#[doc(hidden)]
 	#[error("Break statement has been reached")]
@@ -689,10 +690,11 @@ pub enum Error {
 	},
 
 	/// Unable to convert a value to another value
-	#[error("Expected a {into} but cannot convert {from} into a {into}")]
+	#[error("Expected a {into} but cannot convert {from} into a {into} at path: {path}")]
 	ConvertTo {
 		from: Value,
 		into: String,
+		path: String,
 	},
 
 	/// Unable to coerce to a value to another value
