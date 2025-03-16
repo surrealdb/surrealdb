@@ -16,6 +16,34 @@ fn limit(name: &str, n: usize) -> Result<(), Error> {
 	}
 }
 
+pub fn capitalize((string, first_only): (String, Option<bool>)) -> Result<Value, Error> {
+	if string.is_empty() {
+		return Ok(string.into());
+	}
+
+	let mut new_str = String::with_capacity(string.len());
+
+	let mut is_previous_whitespace = true;
+	let mut is_first_char = true;
+
+	for c in string.chars() {
+		let should_capitalize = is_previous_whitespace && !(first_only == Some(true) && !is_first_char);
+
+		if should_capitalize && c.is_lowercase() {
+			for c in c.to_uppercase() {
+				new_str.push(c);
+			}
+		} else {
+			new_str.push(c);
+		}
+
+		is_previous_whitespace = c.is_whitespace();
+		is_first_char = false;
+	}
+
+	Ok(new_str.into())
+}
+
 pub fn concat(args: Vec<Value>) -> Result<Value, Error> {
 	let strings = args.into_iter().map(Value::as_string).collect::<Vec<_>>();
 	limit("string::concat", strings.iter().map(String::len).sum::<usize>())?;
