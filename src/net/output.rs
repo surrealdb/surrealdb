@@ -1,11 +1,11 @@
+use super::headers::Accept;
+use crate::err::Error;
 use axum::response::{IntoResponse, Response};
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
 use serde::Serialize;
 use serde_json::Value as Json;
 use surrealdb::sql;
-
-use super::headers::Accept;
 
 pub enum Output {
 	None,
@@ -67,8 +67,8 @@ where
 }
 
 /// Convert and simplify the value into JSON
-pub fn simplify<T: Serialize + 'static>(v: T) -> Json {
-	sql::to_value(v).unwrap().into()
+pub fn simplify<T: Serialize + 'static>(v: T) -> Result<Json, Error> {
+	Ok(sql::to_value(v)?.into())
 }
 
 impl IntoResponse for Output {
