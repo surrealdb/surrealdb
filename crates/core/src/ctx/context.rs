@@ -1,4 +1,4 @@
-use crate::buc;
+use crate::buc::{self, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -9,7 +9,6 @@ use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::cache;
 use crate::kvs::cache::ds::DatastoreCache;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
@@ -65,6 +64,8 @@ pub struct MutableContext {
 	transaction: Option<Arc<Transaction>>,
 	// Does not read from parent `values`.
 	isolated: bool,
+	// A map of bucket connections
+	buckets: Option<Arc<BucketConnections>>,
 }
 
 impl Default for MutableContext {
@@ -113,6 +114,7 @@ impl MutableContext {
 			temporary_directory: None,
 			transaction: None,
 			isolated: false,
+			buckets: None,
 		}
 	}
 
@@ -136,6 +138,7 @@ impl MutableContext {
 			transaction: parent.transaction.clone(),
 			isolated: false,
 			parent: Some(parent.clone()),
+			buckets: parent.buckets.clone(),
 		}
 	}
 
@@ -161,6 +164,7 @@ impl MutableContext {
 			transaction: parent.transaction.clone(),
 			isolated: true,
 			parent: Some(parent.clone()),
+			buckets: parent.buckets.clone(),
 		}
 	}
 
@@ -186,6 +190,7 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			parent: None,
+			buckets: from.buckets.clone(),
 		}
 	}
 
@@ -197,6 +202,7 @@ impl MutableContext {
 		cache: Arc<DatastoreCache>,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
+		buckets: Arc<BucketConnections>,
 	) -> Result<MutableContext, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -216,6 +222,7 @@ impl MutableContext {
 			temporary_directory,
 			transaction: None,
 			isolated: false,
+			buckets: Some(buckets),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -474,6 +481,10 @@ impl MutableContext {
 		}
 	}
 
+	pub(crate) fn get_buckets(&self) -> Option<Arc<BucketConnections>> {
+		self.buckets.clone()
+	}
+
 	/// Obtain the connection for a bucket
 	#[allow(unused)]
 	pub(crate) async fn get_bucket_store(
@@ -482,10 +493,10 @@ impl MutableContext {
 		db: &str,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>, Error> {
-		if let Some(cache) = &self.cache {
-			let key = cache::ds::Lookup::Buc(ns, db, bu);
-			if let Some(entry) = cache.get(&key) {
-				entry.try_into_buc()
+		if let Some(buckets) = &self.buckets {
+			let key = (ns.to_string(), db.to_string(), bu.to_string());
+			if let Some(bucket_ref) = buckets.get(&key) {
+				Ok((*bucket_ref).clone())
 			} else {
 				let tx = self.tx();
 				let bd = tx.get_db_bucket(ns, db, bu).await?;
@@ -496,8 +507,7 @@ impl MutableContext {
 					buc::connect_global(ns, db, bu)?
 				};
 
-				let entry = cache::ds::Entry::Buc(store.clone());
-				cache.insert(key, entry);
+				buckets.insert(key, store.clone());
 				Ok(store)
 			}
 		} else {

@@ -2,6 +2,7 @@ use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
+use crate::buc::BucketConnections;
 use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
@@ -30,6 +31,7 @@ use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
+use dashmap::DashMap;
 use futures::{Future, Stream};
 use reblessive::TreeStack;
 use std::fmt;
@@ -89,6 +91,8 @@ pub struct Datastore {
 	#[cfg(storage)]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
+	// Map of bucket connections
+	buckets: Arc<BucketConnections>,
 }
 
 #[derive(Clone)]
@@ -424,6 +428,7 @@ impl Datastore {
 				#[cfg(storage)]
 				temporary_directory: None,
 				cache: Arc::new(DatastoreCache::new()),
+				buckets: Arc::new(DashMap::new()),
 			}
 		})
 	}
@@ -449,6 +454,7 @@ impl Datastore {
 			temporary_directory: self.temporary_directory,
 			transaction_factory: self.transaction_factory,
 			cache: Arc::new(DatastoreCache::new()),
+			buckets: Arc::new(DashMap::new()),
 		}
 	}
 
@@ -1236,6 +1242,7 @@ impl Datastore {
 			self.index_builder.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
+			self.buckets.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

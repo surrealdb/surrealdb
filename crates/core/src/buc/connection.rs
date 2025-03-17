@@ -2,9 +2,12 @@ use crate::{
 	cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED},
 	err::Error,
 };
+use dashmap::DashMap;
 use object_store::{parse_url, path::Path, prefix::PrefixStore, ObjectStore};
 use std::sync::Arc;
 use url::Url;
+
+pub type BucketConnections = DashMap<(String, String, String), Arc<dyn ObjectStore>>;
 
 pub fn connect_global(ns: &str, db: &str, bu: &str) -> Result<Arc<dyn ObjectStore>, Error> {
 	// Obtain a global store

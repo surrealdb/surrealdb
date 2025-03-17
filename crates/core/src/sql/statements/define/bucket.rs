@@ -2,7 +2,6 @@ use crate::buc;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::cache;
 use crate::sql::fmt::{pretty_indent, pretty_sequence_item};
 use crate::sql::{Base, Ident, Permissions, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
@@ -65,10 +64,8 @@ impl DefineBucketStatement {
 		};
 
 		// Persist the store to cache
-		if let Some(cache) = ctx.get_cache() {
-			let key = cache::ds::Lookup::Buc(ns, db, &name);
-			let entry = cache::ds::Entry::Buc(store);
-			cache.insert(key, entry);
+		if let Some(buckets) = ctx.get_buckets() {
+			buckets.insert((ns.to_string(), db.to_string(), name.clone()), store);
 		}
 
 		// Process the statement

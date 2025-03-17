@@ -20,8 +20,6 @@ pub(crate) enum Lookup<'a> {
 	Lvs(&'a str, &'a str, &'a str, Uuid),
 	/// A cache key for live queries version (on a table)
 	Lvv(&'a str, &'a str, &'a str),
-	/// A cache key for open bucket connections
-	Buc(&'a str, &'a str, &'a str),
 }
 
 impl Equivalent<Key> for Lookup<'_> {
@@ -36,7 +34,6 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ixs(la, lb, lc, ld), Key::Ixs(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Lvs(la, lb, lc, ld), Key::Lvs(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Lvv(la, lb, lc), Key::Lvv(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
-			(Self::Buc(la, lb, lc), Key::Buc(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			_ => false,
 		}
 	}
