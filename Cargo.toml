@@ -102,7 +102,7 @@ rayon = "1.10.0"
 regex = "1.10.6"
 regex-syntax = "0.8.4"
 reqwest = { version = "0.12.7", default-features = false }
-ring = "0.17.10"
+ring = "0.17.13"
 rmpv = "1.0.1"
 roaring = "0.10.6"
 rustls = { version = "0.23.12", default-features = false }
@@ -139,7 +139,7 @@ ws_stream_wasm = "0.7.4"
 
 # used only in dev-dependencies
 criterion = "0.5.1"
-env_logger = "0.10.1"
+env_logger = "0.11.7"
 flate2 = "1.0.28"
 hashbrown = "0.14.5"
 pprof = "0.14.0"

@@ -1,5 +1,4 @@
 use crate::err::Error;
-use crate::sql::escape::quote_plain_str;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -7,6 +6,7 @@ use std::ops::Deref;
 use std::ops::{self};
 use std::str;
 
+use super::escape::QuoteStr;
 use super::value::TryAdd;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
@@ -21,14 +21,12 @@ pub struct Strand(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Strand {
 	fn from(s: String) -> Self {
-		debug_assert!(!s.contains('\0'));
 		Strand(s)
 	}
 }
 
 impl From<&str> for Strand {
 	fn from(s: &str) -> Self {
-		debug_assert!(!s.contains('\0'));
 		Self::from(String::from(s))
 	}
 }
@@ -63,7 +61,7 @@ impl Strand {
 
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&quote_plain_str(&self.0), f)
+		QuoteStr(&self.0).fmt(f)
 	}
 }
 
@@ -102,7 +100,6 @@ pub(crate) mod no_nul_bytes {
 	where
 		S: Serializer,
 	{
-		debug_assert!(!s.contains('\0'));
 		serializer.serialize_str(s)
 	}
 
