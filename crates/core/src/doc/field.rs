@@ -442,6 +442,14 @@ impl FieldEditContext<'_> {
 	}
 	/// Process any VALUE clause for the field definition
 	async fn process_value_clause(&mut self, val: Value) -> Result<Value, Error> {
+		// Check if this is an array index field
+		if self.def.name.iter().any(|p| matches!(p, Part::Index(_))) {
+			if let Some(kind) = &self.def.kind {
+				let coerced = val.coerce_to(kind)?;
+				return Ok(coerced);
+			}
+		}
+
 		// Check for a VALUE clause
 		if let Some(expr) = &self.def.value {
 			// Arc the current value
@@ -486,6 +494,7 @@ impl FieldEditContext<'_> {
 		}
 		// Check for a ASSERT clause
 		if let Some(expr) = &self.def.assert {
+			let is_array_index = self.def.name.iter().any(|p| matches!(p, Part::Index(_)));
 			// Arc the current value
 			let now = Arc::new(val.clone());
 			// Get the current document
@@ -520,6 +529,19 @@ impl FieldEditContext<'_> {
 					check: expr.to_string(),
 					value: now.to_string(),
 				});
+			}
+			if is_array_index {
+				if let Some(kind) = &self.def.kind {
+					return val.coerce_to(kind).map_err(|e| match e {
+						Error::CoerceTo { from, .. } => Error::FieldCheck {
+							thing: self.rid.to_string(),
+							field: self.def.name.clone(),
+							check: kind.to_string(),
+							value: from.to_string(),
+						},
+						e => e,
+					});
+				}
 			}
 		}
 		// Return the original value
@@ -559,7 +581,6 @@ impl FieldEditContext<'_> {
 					let doc = Some(&self.doc.current);
 					// Disable permissions
 					let opt = &self.opt.new_with_perms(false);
-					// Configure the context
 					// Configure the context
 					let ctx = match self.context.take() {
 						Some(mut ctx) => {

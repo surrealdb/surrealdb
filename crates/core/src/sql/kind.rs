@@ -235,6 +235,36 @@ impl Kind {
 			_ => false,
 		}
 	}
+
+	/// Check if this kind is valid for an array element
+	pub fn is_valid_array_element_type(&self) -> bool {
+		match self {
+			Kind::Any => true,
+			Kind::Null => true,
+			Kind::Array(_, _) => false,
+			Kind::Bool => true,
+			Kind::Bytes => true,
+			Kind::Datetime => true,
+			Kind::Decimal => true,
+			Kind::Duration => true,
+			Kind::Float => true,
+			Kind::Int => true,
+			Kind::Number => true,
+			Kind::Object => true,
+			Kind::Option(_) => true,
+			Kind::Record(_) => true,
+			Kind::Set(_, _) => true,
+			Kind::String => true,
+			Kind::Uuid => true,
+			Kind::Point => true,
+			Kind::Geometry(_) => true,
+			Kind::Function(_, _) => true,
+			Kind::Range => true,
+			Kind::Literal(_) => true,
+			Kind::References(_, _) => true,
+			Kind::Either(kinds) => kinds.iter().all(|k| k.is_valid_array_element_type()),
+		}
+	}
 }
 
 impl From<&Kind> for Box<Kind> {

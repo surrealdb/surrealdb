@@ -170,6 +170,18 @@ impl DefineFieldStatement {
 				}
 			}
 		}
+
+        // If this is an array index field, ensure proper type handling
+		if self.name.iter().any(|p| matches!(p, Part::Index(_))) {
+			if let Some(kind) = &self.kind {
+				if !kind.is_valid_array_element_type() {
+					return Err(Error::InvalidArrayElementType {
+						field: self.name.to_string(),
+						kind: kind.to_string(),
+					});
+				}
+			}
+		}
 		// If this is an `in` field then check relation definitions
 		if fd.as_str() == "in" {
 			// Get the table definition that this field belongs to
