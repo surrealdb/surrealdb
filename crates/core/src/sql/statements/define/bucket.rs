@@ -2,7 +2,6 @@ use crate::buc;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::fmt::{pretty_indent, pretty_sequence_item};
 use crate::sql::{Base, Ident, Permissions, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
 use reblessive::tree::Stk;
@@ -98,22 +97,16 @@ impl Display for DefineBucketStatement {
 		}
 		write!(f, " {}", self.name)?;
 
-		let indent = pretty_indent();
-
 		if self.readonly {
-			write!(f, "READONLY ")?;
+			write!(f, " READONLY")?;
 		}
 
 		if let Some(ref backend) = self.backend {
-			write!(f, "BACKEND {}", backend)?;
-			pretty_sequence_item();
-		} else if self.readonly {
-			pretty_sequence_item();
+			write!(f, " BACKEND {}", backend)?;
 		}
 
-		write!(f, "PERMISSIONS {}", self.permissions)?;
+		write!(f, " PERMISSIONS {}", self.permissions)?;
 
-		drop(indent);
 		Ok(())
 	}
 }
