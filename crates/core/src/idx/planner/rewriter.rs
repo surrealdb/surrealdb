@@ -33,6 +33,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Value::Query(_) => None,
 			Value::Function(f) => self.eval_value_function(f),
 			Value::Expression(e) => self.eval_value_expression(e),
+			Value::Assignment(_) => None,
 			Value::Model(m) => self.eval_value_model(m),
 			Value::None
 			| Value::Null

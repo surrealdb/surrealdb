@@ -6,13 +6,11 @@ use crate::sql::idiom::Idiom;
 use crate::sql::operator::Operator;
 use crate::sql::part::Part;
 use crate::sql::paths::ID;
-use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
@@ -30,8 +28,7 @@ pub enum Data {
 	ContentExpression(Value),
 	SingleExpression(Value),
 	ValuesExpression(Vec<Vec<(Idiom, Value)>>),
-	UpdateExpression(Vec<Vec<(Idiom, Operator, Value)>>),
-	UpdatesExpression(HashMap<Thing, Vec<(Idiom, Operator, Value)>>),
+	UpdateExpression(Value),
 }
 
 impl Default for Data {
@@ -119,59 +116,7 @@ impl Display for Data {
 					Fmt::comma_separated(v.iter().map(|(_, v)| v))
 				))))
 			),
-			Self::UpdateExpression(v) => {
-				if v.len() == 1 {
-					write!(
-						f,
-						"ON DUPLICATE KEY UPDATE {}",
-						Fmt::comma_separated(
-							v[0].iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(
-								f,
-								"{l} {o} {r}"
-							)))
-						)
-					)
-				} else {
-					write!(
-						f,
-						"ON DUPLICATE KEY UPDATE [{}]",
-						Fmt::comma_separated(v.iter().map(|v| format!(
-							"{{{}}}",
-							Fmt::comma_separated(v.iter().map(|args| Fmt::new(
-								args,
-								|(l, o, r), f| write!(f, "{l} {o} {r}",)
-							)))
-						)))
-					)
-				}
-			}
-			Self::UpdatesExpression(v) => {
-				if v.len() == 1 {
-					let (_, update) = v.iter().next().unwrap();
-					write!(
-						f,
-						"ON DUPLICATE KEY UPDATE {}",
-						Fmt::comma_separated(
-							update.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(
-								f,
-								"{l} {o} {r}"
-							)))
-						)
-					)
-				} else {
-					write!(
-						f,
-						"ON DUPLICATE KEY UPDATE [{}]",
-						Fmt::comma_separated(v.iter().map(|(_, update)| format!(
-							"{{{}}}",
-							Fmt::comma_separated(update.iter().map(|args| Fmt::new(
-								args,
-								|(l, o, r), f| write!(f, "{l} {o} {r}",)
-							)))
-						)))
-					)
-				}
-			}
+			Self::UpdateExpression(v) => write!(f, "ON DUPLICATE KEY UPDATE {v}"),
 		}
 	}
 }
@@ -192,22 +137,6 @@ impl PartialOrd for Data {
 			(Self::SingleExpression(a), Self::SingleExpression(b)) => a.partial_cmp(b),
 			(Self::ValuesExpression(a), Self::ValuesExpression(b)) => a.partial_cmp(b),
 			(Self::UpdateExpression(a), Self::UpdateExpression(b)) => a.partial_cmp(b),
-			(Self::UpdatesExpression(a), Self::UpdatesExpression(b)) => {
-				if a.len() != b.len() {
-					return a.len().partial_cmp(&b.len());
-				}
-				for (key_a, value_a) in a {
-					if let Some(value_b) = b.get(key_a) {
-						match value_a.partial_cmp(value_b) {
-							Some(Ordering::Equal) => continue,
-							non_eq => return non_eq,
-						}
-					} else {
-						return Some(Ordering::Greater);
-					}
-				}
-				Some(Ordering::Equal)
-			}
 			_ => None,
 		}
 	}
@@ -254,13 +183,6 @@ impl Hash for Data {
 			Self::UpdateExpression(v) => {
 				state.write_u8(9);
 				v.hash(state);
-			}
-			Self::UpdatesExpression(v) => {
-				state.write_u8(10);
-				for (key, value) in v {
-					key.hash(state);
-					value.hash(state);
-				}
 			}
 		}
 	}

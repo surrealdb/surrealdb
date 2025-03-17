@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{statements::InsertStatement, Data, Idiom, Subquery, Value},
+	sql::{statements::InsertStatement, Array, Assignment, Data, Idiom, Subquery, Value},
 	syn::{
 		error::bail,
 		parser::{mac::expected, ParseResult, Parser},
@@ -171,18 +171,22 @@ impl Parser<'_> {
 			let l = self.parse_plain_idiom(ctx).await?;
 			let o = self.parse_assigner()?;
 			let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-			let mut updates = vec![(l, o, r)];
+			let expression = Value::from(Assignment::from((l, o, r)));
+
+			let mut updates = Array::new();
+			updates.push(expression);
 
 			//next update fields
 			while self.eat(t!(",")) {
 				let l = self.parse_plain_idiom(ctx).await?;
 				let o = self.parse_assigner()?;
 				let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-				updates.push((l, o, r))
+				let expression = Value::from(Assignment::from((l, o, r)));
+				updates.push(expression);
 			}
 
 			//wrap in a vec to match the expected return type
-			return Ok(Data::UpdateExpression(vec![updates]));
+			return Ok(Data::UpdateExpression(Value::Array(updates)));
 		}
 
 		//assert it has to be a `[` now
@@ -196,7 +200,7 @@ impl Parser<'_> {
 		}
 
 		//loop through the array of updates for each record
-		let mut updates = Vec::new();
+		let mut updates = Array::new();
 		loop {
 			//assert it has to be a `{` now for each record
 			let token_inner = self.peek();
@@ -213,7 +217,7 @@ impl Parser<'_> {
 
 			//allow empty object, because option to only skip update a certain record should be possible
 			if self.eat(t!("}")) {
-				updates.push(Vec::new());
+				updates.push(Value::Array(Array::new()));
 				if self.eat(t!(",")) {
 					continue;
 				} else {
@@ -225,18 +229,21 @@ impl Parser<'_> {
 			let l = self.parse_plain_idiom(ctx).await?;
 			let o = self.parse_assigner()?;
 			let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-			let mut data = vec![(l, o, r)];
+			let expression = Value::from(Assignment::from((l, o, r)));
+			let mut expressions = Array::new();
+			expressions.push(expression);
 
 			//next update fields
 			while self.eat(t!(",")) {
 				let l = self.parse_plain_idiom(ctx).await?;
 				let o = self.parse_assigner()?;
 				let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-				data.push((l, o, r));
+				let expression = Value::from(Assignment::from((l, o, r)));
+				expressions.push(expression);
 			}
 
 			//push update record for this record
-			updates.push(data);
+			updates.push(Value::Array(expressions));
 
 			self.expect_closing_delimiter(t!("}"), token_inner.span)?;
 
@@ -249,6 +256,6 @@ impl Parser<'_> {
 		}
 		self.expect_closing_delimiter(t!("]"), token.span)?;
 
-		Ok(Data::UpdateExpression(updates))
+		Ok(Data::UpdateExpression(Value::Array(updates)))
 	}
 }

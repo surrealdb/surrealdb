@@ -58,6 +58,7 @@ where
 		sql::Function as v => Ok(v.into()),
 		sql::Subquery as v => Ok(v.into()),
 		sql::Expression as v => Ok(v.into()),
+		sql::Assignment as v => Ok(v.into()),
 		sql::Query as v => Ok(v.into()),
 		sql::Model as v => Ok(v.into()),
 		sql::Closure as v => Ok(v.into()),
@@ -471,6 +472,19 @@ mod tests {
 		});
 		let value = to_value(expression.clone()).unwrap();
 		let expected = Value::Expression(expression);
+		assert_eq!(value, expected);
+		assert_eq!(expected.clone(), to_value(expected).unwrap());
+	}
+
+	#[test]
+	fn asssignment() {
+		let assignment = Box::new(Assignment {
+			l: Idiom::default(),
+			o: Operator::Equal,
+			r: Value::None,
+		});
+		let value = to_value(assignment.clone()).unwrap();
+		let expected = Value::Assignment(assignment);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}

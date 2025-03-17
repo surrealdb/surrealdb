@@ -34,9 +34,9 @@ use crate::{
 		},
 		tokenizer::Tokenizer,
 		user::UserDuration,
-		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
-		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
+		Algorithm, Array, Assignment, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges,
+		Explain, Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident,
+		Idiom, Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
@@ -2543,24 +2543,24 @@ fn parse_insert_single_update() {
 				],
 			]),
 			ignore: true,
-			update: Some(Data::UpdateExpression(vec![vec![
-				(
+			update: Some(Data::UpdateExpression(Value::Array(Array(vec![
+				Value::from(Assignment::from((
 					Idiom(vec![
 						Part::Field(Ident("a".to_owned())),
 						Part::Field(Ident("b".to_owned())),
 					]),
 					Operator::Ext,
 					Value::Null,
-				),
-				(
+				))),
+				Value::from(Assignment::from((
 					Idiom(vec![
 						Part::Field(Ident("c".to_owned())),
 						Part::Field(Ident("d".to_owned())),
 					]),
 					Operator::Inc,
 					Value::None,
-				),
-			]])),
+				))),
+			])))),
 			output: Some(Output::After),
 			version: None,
 			timeout: None,
@@ -2611,21 +2611,25 @@ fn parse_insert_multiple_update() {
 				],
 			]),
 			ignore: true,
-			update: Some(Data::UpdateExpression(vec![
-				vec![
-					(Idiom(vec![Part::Field(Ident("a".to_owned())),]), Operator::Ext, Value::Null),
-					(
+			update: Some(Data::UpdateExpression(Value::Array(Array(vec![
+				Value::Array(Array(vec![
+					Value::from(Assignment::from((
+						Idiom(vec![Part::Field(Ident("a".to_owned())),]),
+						Operator::Ext,
+						Value::Null,
+					))),
+					Value::from(Assignment::from((
 						Idiom(vec![Part::Field(Ident("c".to_owned())),]),
 						Operator::Equal,
-						Value::None
-					),
-				],
-				vec![(
+						Value::None,
+					)))
+				])),
+				Value::Array(Array(vec![Value::from(Assignment::from((
 					Idiom(vec![Part::Field(Ident("b".to_owned())),]),
 					Operator::Dec,
-					Value::None
-				),]
-			])),
+					Value::None,
+				)))]))
+			])))),
 			output: Some(Output::After),
 			version: None,
 			timeout: None,

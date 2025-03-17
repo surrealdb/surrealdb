@@ -16,9 +16,9 @@ use crate::sql::{
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
 	model::Model,
-	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
-	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Tables, Thing, Uuid,
+	Array, Assignment, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression,
+	Function, Future, Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query,
+	Range, Regex, Strand, Subquery, Table, Tables, Thing, Uuid,
 };
 use chrono::{DateTime, Utc};
 
@@ -135,6 +135,7 @@ pub enum Value {
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
+	Assignment(Box<Assignment>),
 	Query(Query),
 	Model(Box<Model>),
 	Closure(Box<Closure>),
@@ -331,6 +332,12 @@ impl From<Subquery> for Value {
 impl From<Expression> for Value {
 	fn from(v: Expression) -> Self {
 		Value::Expression(Box::new(v))
+	}
+}
+
+impl From<Assignment> for Value {
+	fn from(v: Assignment) -> Self {
+		Value::Assignment(Box::new(v))
 	}
 }
 
@@ -2923,6 +2930,7 @@ impl fmt::Display for Value {
 			Value::Duration(v) => write!(f, "{v}"),
 			Value::Edges(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
+			Value::Assignment(v) => write!(f, "{v}"),
 			Value::Function(v) => write!(f, "{v}"),
 			Value::Model(v) => write!(f, "{v}"),
 			Value::Future(v) => write!(f, "{v}"),
@@ -3024,6 +3032,7 @@ impl Value {
 			Value::Model(v) => v.compute(stk, ctx, opt, doc).await,
 			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Assignment(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Refs(v) => v.compute(ctx, opt, doc).await,
 			_ => Ok(self.to_owned()),
 		}

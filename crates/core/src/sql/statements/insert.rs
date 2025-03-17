@@ -5,11 +5,12 @@ use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
-use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value, Version};
+use crate::sql::{Data, Id, Object, Output, Table, Thing, Timeout, Value, Version};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[revisioned(revision = 3)]
@@ -68,7 +69,7 @@ impl InsertStatement {
 		let data_standardized = self.process_data(stk, &ctx, opt, doc).await?;
 
 		// Parse the update expression
-		let update = self.process_update(&data_standardized).await?;
+		let update = self.process_update(stk, &ctx, opt, doc, &data_standardized).await?;
 
 		// Ingest the data
 		for (id, v) in data_standardized.iter() {
@@ -162,39 +163,47 @@ impl InsertStatement {
 	// Process the update
 	async fn process_update(
 		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
 		data_standardized: &[(Thing, Value)],
 	) -> Result<Option<Data>, Error> {
 		match &self.update {
 			// no updates
-			None => Ok(self.update.clone()),
+			None => return Ok(self.update.clone()),
 			Some(Data::UpdateExpression(updates)) => {
-				// one update for all data
-				if updates.len() == 1 {
-					// Return the data unchanged for single update
-					return Ok(self.update.clone());
+				let u = updates.compute(stk, &ctx, opt, doc).await?;
+				match u {
+					Value::Array(u) => {
+						// one update for all data
+						match u.first() {
+							// Return the data unchanged for single update
+							Some(Value::Assignment(_)) => return Ok(self.update.clone()),
+							_ => (),
+						};
+
+						// check if data and updates are compatible
+						if u.len() != data_standardized.len() {
+							return Err(fail!("Data and Updates don't match length in INSERT statement: {:?}, {:?}", self.data, self.update));
+						}
+
+						// each update for each data
+						return Ok(Some(Data::UpdateExpression(Value::Object(Object(
+							data_standardized
+								.iter()
+								.enumerate()
+								.map(|(i, (id, _v))| (id.clone().to_string(), u[i].clone()))
+								.collect::<BTreeMap<String, Value>>()
+								.into(),
+						)))));
+					}
+					u => {
+						return Err(fail!("Unknown updates clause type in INSERT statement: {u}",))
+					}
 				}
-
-				// check if data and updates are compatible
-				if updates.len() != data_standardized.len() {
-					return Err(fail!(
-						"Data and Updates don't match length in INSERT statement: {:?}, {:?}",
-						self.data,
-						self.update
-					));
-				}
-
-				// each update for each data
-				let matched_update = Some(Data::UpdatesExpression(
-					data_standardized
-						.iter()
-						.enumerate()
-						.map(|(i, (id, _v))| (id.clone(), updates[i].clone()))
-						.collect(),
-				));
-
-				Ok(matched_update.clone())
 			}
-			u => return Err(fail!("Unknown updates clause type in INSERT statement: {u:?}")),
+			u => return Err(fail!("Unknown updates clause type in INSERT statement: {:?}", u)),
 		}
 	}
 }

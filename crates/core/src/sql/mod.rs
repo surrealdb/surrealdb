@@ -6,6 +6,7 @@ pub(crate) mod algorithm;
 #[cfg(feature = "arbitrary")]
 pub(crate) mod arbitrary;
 pub(crate) mod array;
+pub(crate) mod assignment;
 pub(crate) mod base;
 pub(crate) mod block;
 pub(crate) mod bytes;
@@ -84,6 +85,7 @@ pub use self::access::Accesses;
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;
 pub use self::array::Array;
+pub use self::assignment::Assignment;
 pub use self::base::Base;
 pub use self::block::Block;
 pub use self::block::Entry;
