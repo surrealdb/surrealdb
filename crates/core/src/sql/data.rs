@@ -10,12 +10,10 @@ use crate::sql::value::Value;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
-use std::hash::{Hash, Hasher};
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Data {
@@ -117,73 +115,6 @@ impl Display for Data {
 				))))
 			),
 			Self::UpdateExpression(v) => write!(f, "ON DUPLICATE KEY UPDATE {v}"),
-		}
-	}
-}
-
-//I dont know if there is a better way to do this, not that experienced with rust,
-//I also dont know if implementation for PartialOrd and Hash is required
-//But since it was like that before, I wont remove them
-impl PartialOrd for Data {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		match (self, other) {
-			(Self::EmptyExpression, Self::EmptyExpression) => Some(Ordering::Equal),
-			(Self::SetExpression(a), Self::SetExpression(b)) => a.partial_cmp(b),
-			(Self::UnsetExpression(a), Self::UnsetExpression(b)) => a.partial_cmp(b),
-			(Self::PatchExpression(a), Self::PatchExpression(b)) => a.partial_cmp(b),
-			(Self::MergeExpression(a), Self::MergeExpression(b)) => a.partial_cmp(b),
-			(Self::ReplaceExpression(a), Self::ReplaceExpression(b)) => a.partial_cmp(b),
-			(Self::ContentExpression(a), Self::ContentExpression(b)) => a.partial_cmp(b),
-			(Self::SingleExpression(a), Self::SingleExpression(b)) => a.partial_cmp(b),
-			(Self::ValuesExpression(a), Self::ValuesExpression(b)) => a.partial_cmp(b),
-			(Self::UpdateExpression(a), Self::UpdateExpression(b)) => a.partial_cmp(b),
-			_ => None,
-		}
-	}
-}
-
-impl Hash for Data {
-	fn hash<H: Hasher>(&self, state: &mut H) {
-		match self {
-			Self::EmptyExpression => {
-				state.write_u8(0);
-			}
-			Self::SetExpression(v) => {
-				state.write_u8(1);
-				v.hash(state);
-			}
-			Self::UnsetExpression(v) => {
-				state.write_u8(2);
-				v.hash(state);
-			}
-			Self::PatchExpression(v) => {
-				state.write_u8(3);
-				v.hash(state);
-			}
-			Self::MergeExpression(v) => {
-				state.write_u8(4);
-				v.hash(state);
-			}
-			Self::ReplaceExpression(v) => {
-				state.write_u8(5);
-				v.hash(state);
-			}
-			Self::ContentExpression(v) => {
-				state.write_u8(6);
-				v.hash(state);
-			}
-			Self::SingleExpression(v) => {
-				state.write_u8(7);
-				v.hash(state);
-			}
-			Self::ValuesExpression(v) => {
-				state.write_u8(8);
-				v.hash(state);
-			}
-			Self::UpdateExpression(v) => {
-				state.write_u8(9);
-				v.hash(state);
-			}
 		}
 	}
 }
