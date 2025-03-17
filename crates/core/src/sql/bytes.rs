@@ -1,3 +1,4 @@
+use hex;
 use revision::revisioned;
 use serde::{
 	de::{self, Visitor},
@@ -40,7 +41,7 @@ impl Deref for Bytes {
 
 impl Display for Bytes {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		write!(f, "b\"{}\"", self.0.iter().map(|b| format!("{:02x}", b)).collect::<String>())
+		write!(f, "b\"{}\"", hex::encode_upper(&self.0))
 	}
 }
 
