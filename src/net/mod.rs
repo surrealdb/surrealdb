@@ -2,7 +2,6 @@ mod api;
 mod auth;
 pub mod client_ip;
 mod export;
-// mod file;
 #[cfg(surrealdb_unstable)]
 mod gql;
 pub(crate) mod headers;
