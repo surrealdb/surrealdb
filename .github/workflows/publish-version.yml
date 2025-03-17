@@ -748,6 +748,7 @@ jobs:
   docker:
     name: Docker images
     needs: [prepare-vars, publish]
+    if: ${{ inputs.publish }}
     uses: ./.github/workflows/docker.yml
     with:
       environment: ${{ inputs.environment }}
