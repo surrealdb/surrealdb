@@ -48,8 +48,7 @@ pub fn connect(
 		let store = if let Some(prefix) = prefix {
 			Arc::new(PrefixStore::new(store, prefix))
 		} else {
-			let raw = Box::into_raw(store);
-			unsafe { Arc::from_raw(raw) }
+			Arc::new(store) as Arc<dyn ObjectStore>
 		};
 
 		Ok(store)
