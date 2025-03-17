@@ -340,6 +340,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::duration") => PathKind::Function,
 		UniCase::ascii("type::field") => PathKind::Function,
 		UniCase::ascii("type::fields") => PathKind::Function,
+		UniCase::ascii("type::file") => PathKind::Function,
 		UniCase::ascii("type::float") => PathKind::Function,
 		UniCase::ascii("type::geometry") => PathKind::Function,
 		UniCase::ascii("type::int") => PathKind::Function,

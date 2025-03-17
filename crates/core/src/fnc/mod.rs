@@ -396,6 +396,7 @@ pub fn synchronous(
 		"type::datetime" => r#type::datetime,
 		"type::decimal" => r#type::decimal,
 		"type::duration" => r#type::duration,
+		"type::file" => r#type::file,
 		"type::float" => r#type::float,
 		"type::geometry" => r#type::geometry,
 		"type::int" => r#type::int,
