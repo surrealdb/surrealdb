@@ -5,7 +5,7 @@ use crate::idx::trees::vector::SharedVector;
 use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
-use crate::sql::value::Value;
+use crate::sql::value::{CastError, CoerceError, Value};
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
@@ -610,11 +610,33 @@ pub enum Error {
 	},
 
 	/// The specified value did not conform to the LET type check
-	#[error("Found {value} for param ${name}, but expected a {check}")]
-	SetCheck {
-		value: String,
+	#[error("Tried to set `${name}`, but couldn't coerce value: {error}")]
+	SetCoerce {
 		name: String,
-		check: String,
+		error: Box<CoerceError>,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Couldn't coerce return value from function `{name}`: {error}")]
+	ReturnCoerce {
+		name: String,
+		error: Box<CoerceError>,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Couldn't coerce argument `{argument_idx}` for function `{func_name}`: {error}")]
+	ArgumentCoerce {
+		func_name: String,
+		argument_idx: usize,
+		error: Box<CoerceError>,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Couldn't coerce value for field `{field_name}` of `{thing}`: {error}")]
+	FieldCoerce {
+		thing: String,
+		field_name: String,
+		error: Box<CoerceError>,
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
@@ -682,18 +704,19 @@ pub enum Error {
 	},
 
 	/// Unable to coerce to a value to another value
+	#[error("{0}")]
+	CoerceTo(#[from] CoerceError),
+
+	/// Unable to coerce to a value to another value
 	#[error("Expected a {into} but found {from}")]
-	CoerceTo {
+	CoerceOuter {
 		from: Value,
 		into: String,
 	},
 
 	/// Unable to convert a value to another value
-	#[error("Expected a {into} but cannot convert {from} into a {into}")]
-	ConvertTo {
-		from: Value,
-		into: String,
-	},
+	#[error("{0}")]
+	Cast(#[from] CastError),
 
 	/// Unable to coerce to a value to another value
 	#[error("Expected a {kind} but the array had {size} items")]
@@ -1469,35 +1492,5 @@ impl Error {
 				| Error::FieldReadonly { .. }
 				| Error::FieldUndefined { .. }
 		)
-	}
-
-	/// Convert CoerceTo errors in LET statements
-	pub fn set_check_from_coerce(self, name: String) -> Error {
-		match self {
-			Error::CoerceTo {
-				from,
-				into,
-			} => Error::SetCheck {
-				name,
-				value: from.to_string(),
-				check: into,
-			},
-			e => e,
-		}
-	}
-
-	/// Convert CoerceTo errors in functions and closures
-	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
-		match self {
-			Error::CoerceTo {
-				from,
-				into,
-			} => Error::FunctionCheck {
-				name: name.into(),
-				value: from.to_string(),
-				check: into,
-			},
-			e => e,
-		}
 	}
 }

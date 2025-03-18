@@ -23,6 +23,9 @@ use reblessive::tree::Stk;
 use std::cmp::Ordering;
 use std::mem::size_of_val;
 
+use super::args::Optional;
+use super::args::Rest;
+
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
 	if n > *GENERATION_ALLOCATION_LIMIT {
@@ -56,7 +59,7 @@ pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 
 pub async fn all(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(array, check): (Array, Option<Value>),
+	(array, Optional(check)): (Array, Optional<Value>),
 ) -> Result<Value, Error> {
 	Ok(match check {
 		Some(closure) if closure.is_closure() => {
@@ -82,7 +85,7 @@ pub async fn all(
 
 pub async fn any(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(array, check): (Array, Option<Value>),
+	(array, Optional(check)): (Array, Optional<Value>),
 ) -> Result<Value, Error> {
 	Ok(match check {
 		Some(closure) if closure.is_closure() => {
@@ -173,7 +176,7 @@ pub fn complement((array, other): (Array, Array)) -> Result<Value, Error> {
 	Ok(array.complement(other).into())
 }
 
-pub fn concat(mut arrays: Vec<Array>) -> Result<Value, Error> {
+pub fn concat(Rest(mut arrays): Rest<Array>) -> Result<Value, Error> {
 	let len = match arrays.iter().map(Array::len).reduce(|c, v| c + v) {
 		None => Err(Error::InvalidArguments {
 			name: String::from("array::concat"),
@@ -197,7 +200,12 @@ pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
 }
 
 pub fn fill(
-	(mut array, value, start, end): (Array, Value, Option<isize>, Option<isize>),
+	(mut array, value, Optional(start), Optional(end)): (
+		Array,
+		Value,
+		Optional<i64>,
+		Optional<i64>,
+	),
 ) -> Result<Value, Error> {
 	let len = array.len();
 
@@ -208,11 +216,14 @@ pub fn fill(
 		(start as usize).min(len)
 	};
 
-	let end = end.unwrap_or(len as isize);
-	let end = if end < 0 {
-		len.saturating_sub((-end) as usize)
+	let end = if let Some(end) = end {
+		if end < 0 {
+			len.saturating_sub((-end) as usize)
+		} else {
+			(end as usize).min(len)
+		}
 	} else {
-		(end as usize).min(len)
+		len
 	};
 
 	array[start..end].fill(value);
@@ -349,7 +360,7 @@ pub fn flatten((array,): (Array,)) -> Result<Value, Error> {
 
 pub async fn fold(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(array, init, mapper): (Array, Value, Closure),
+	(array, init, mapper): (Array, Value, Box<Closure>),
 ) -> Result<Value, Error> {
 	if let Some(opt) = opt {
 		let mut accum = init;
@@ -367,7 +378,9 @@ pub fn group((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.flatten().uniq().into())
 }
 
-pub fn insert((mut array, value, index): (Array, Value, Option<i64>)) -> Result<Value, Error> {
+pub fn insert(
+	(mut array, value, Optional(index)): (Array, Value, Optional<i64>),
+) -> Result<Value, Error> {
 	match index {
 		Some(mut index) => {
 			// Negative index means start from the back
@@ -488,7 +501,7 @@ pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 
 pub async fn map(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(array, mapper): (Array, Closure),
+	(array, mapper): (Array, Box<Closure>),
 ) -> Result<Value, Error> {
 	if let Some(opt) = opt {
 		let mut res = Vec::with_capacity(array.len());
@@ -551,7 +564,7 @@ pub fn range((start, count): (i64, i64)) -> Result<Value, Error> {
 
 pub async fn reduce(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(array, mapper): (Array, Closure),
+	(array, mapper): (Array, Box<Closure>),
 ) -> Result<Value, Error> {
 	if let Some(opt) = opt {
 		match array.len() {
@@ -601,7 +614,8 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
-pub fn repeat((value, count): (Value, usize)) -> Result<Value, Error> {
+pub fn repeat((value, count): (Value, i64)) -> Result<Value, Error> {
+	let count = count.max(0) as usize;
 	limit("array::repeat", size_of_val(&value).saturating_mul(count))?;
 	Ok(Array(std::iter::repeat(value).take(count).collect()).into())
 }
@@ -617,15 +631,19 @@ pub fn shuffle((mut array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
-pub fn slice((array, beg, lim): (Array, Option<isize>, Option<isize>)) -> Result<Value, Error> {
+pub fn slice(
+	(array, Optional(beg), Optional(lim)): (Array, Optional<i64>, Optional<i64>),
+) -> Result<Value, Error> {
 	let skip = match beg {
-		Some(v) if v < 0 => array.len().saturating_sub(v.unsigned_abs()),
+		Some(v) if v < 0 => array.len().saturating_sub(v.unsigned_abs() as usize),
 		Some(v) => v as usize,
 		None => 0,
 	};
 
 	let take = match lim {
-		Some(v) if v < 0 => array.len().saturating_sub(skip).saturating_sub(v.unsigned_abs()),
+		Some(v) if v < 0 => {
+			array.len().saturating_sub(skip).saturating_sub(v.unsigned_abs() as usize)
+		}
 		Some(v) => v as usize,
 		None => usize::MAX,
 	};
@@ -648,7 +666,7 @@ fn sort_as_asc(order: &Option<Value>) -> bool {
 	}
 }
 
-pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+pub fn sort((mut array, Optional(order)): (Array, Optional<Value>)) -> Result<Value, Error> {
 	if sort_as_asc(&order) {
 		array.sort_unstable();
 		Ok(array.into())
@@ -658,7 +676,9 @@ pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> 
 	}
 }
 
-pub fn sort_natural((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+pub fn sort_natural(
+	(mut array, Optional(order)): (Array, Optional<Value>),
+) -> Result<Value, Error> {
 	if sort_as_asc(&order) {
 		array.sort_unstable_by(|a, b| a.natural_cmp(b).unwrap_or(Ordering::Equal));
 		Ok(array.into())
@@ -668,7 +688,9 @@ pub fn sort_natural((mut array, order): (Array, Option<Value>)) -> Result<Value,
 	}
 }
 
-pub fn sort_lexical((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+pub fn sort_lexical(
+	(mut array, Optional(order)): (Array, Optional<Value>),
+) -> Result<Value, Error> {
 	if sort_as_asc(&order) {
 		array.sort_unstable_by(|a, b| a.lexical_cmp(b).unwrap_or(Ordering::Equal));
 		Ok(array.into())
@@ -678,7 +700,9 @@ pub fn sort_lexical((mut array, order): (Array, Option<Value>)) -> Result<Value,
 	}
 }
 
-pub fn sort_natural_lexical((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+pub fn sort_natural_lexical(
+	(mut array, Optional(order)): (Array, Optional<Value>),
+) -> Result<Value, Error> {
 	if sort_as_asc(&order) {
 		array.sort_unstable_by(|a, b| a.natural_lexical_cmp(b).unwrap_or(Ordering::Equal));
 		Ok(array.into())
@@ -688,10 +712,12 @@ pub fn sort_natural_lexical((mut array, order): (Array, Option<Value>)) -> Resul
 	}
 }
 
-pub fn swap((mut array, from, to): (Array, isize, isize)) -> Result<Value, Error> {
+pub fn swap((mut array, from, to): (Array, i64, i64)) -> Result<Value, Error> {
 	let min = 0;
 	let max = array.len();
 	let negative_max = -(max as isize);
+	let from = from as isize;
+	let to = to as isize;
 
 	let from = match from {
 		from if from < negative_max || from >= max as isize => Err(Error::InvalidArguments {
@@ -752,16 +778,22 @@ pub mod sort {
 #[cfg(test)]
 mod tests {
 	use super::{at, first, join, last, slice};
-	use crate::sql::{Array, Value};
+	use crate::{
+		fnc::args::Optional,
+		sql::{Array, Value},
+	};
 
 	#[test]
 	fn array_slice() {
-		fn test(initial: &[u8], beg: Option<isize>, lim: Option<isize>, expected: &[u8]) {
+		fn test(initial: &[u8], beg: Option<i64>, lim: Option<i64>, expected: &[u8]) {
 			let initial_values =
 				initial.iter().map(|n| Value::from(*n as i64)).collect::<Vec<_>>().into();
 			let expected_values: Array =
 				expected.iter().map(|n| Value::from(*n as i64)).collect::<Vec<_>>().into();
-			assert_eq!(slice((initial_values, beg, lim)).unwrap(), expected_values.into());
+			assert_eq!(
+				slice((initial_values, Optional(beg), Optional(lim))).unwrap(),
+				expected_values.into()
+			);
 		}
 
 		let array = b"abcdefg";

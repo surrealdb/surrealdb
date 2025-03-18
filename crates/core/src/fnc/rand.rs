@@ -10,6 +10,8 @@ use rand::prelude::IteratorRandom;
 use rand::Rng;
 use ulid::Ulid;
 
+use super::args::{Any, Optional};
+
 pub fn rand(_: ()) -> Result<Value, Error> {
 	Ok(rand::random::<f64>().into())
 }
@@ -18,7 +20,7 @@ pub fn bool(_: ()) -> Result<Value, Error> {
 	Ok(rand::random::<bool>().into())
 }
 
-pub fn r#enum(mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn r#enum(Any(mut args): Any) -> Result<Value, Error> {
 	Ok(match args.len() {
 		0 => Value::None,
 		1 => match args.remove(0) {
@@ -36,7 +38,7 @@ pub fn r#enum(mut args: Vec<Value>) -> Result<Value, Error> {
 // TODO (Delskayn): Switching of min and max if min > max is also inconsistent with rest of
 // functions and the range type. The functions should either return NONE or an error if the lowerbound
 // of the ranges here are larger then the upperbound.
-pub fn float((range,): (Option<(f64, f64)>,)) -> Result<Value, Error> {
+pub fn float((Optional(range),): (Optional<(f64, f64)>,)) -> Result<Value, Error> {
 	let res = if let Some((min, max)) = range {
 		if max < min {
 			rand::thread_rng().gen_range(max..=min)
@@ -49,7 +51,9 @@ pub fn float((range,): (Option<(f64, f64)>,)) -> Result<Value, Error> {
 	Ok(res.into())
 }
 
-pub fn guid((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
+pub fn guid(
+	(Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>),
+) -> Result<Value, Error> {
 	// Set a reasonable maximum length
 	const LIMIT: i64 = 64;
 
@@ -85,7 +89,7 @@ pub fn guid((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
 	Ok(nanoid!(len, &ID_CHARS).into())
 }
 
-pub fn int((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
+pub fn int((Optional(range),): (Optional<(i64, i64)>,)) -> Result<Value, Error> {
 	Ok(if let Some((min, max)) = range {
 		if max < min {
 			rand::thread_rng().gen_range(max..=min)
@@ -98,7 +102,9 @@ pub fn int((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 	.into())
 }
 
-pub fn string((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
+pub fn string(
+	(Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>),
+) -> Result<Value, Error> {
 	// Set a reasonable maximum length
 	const LIMIT: i64 = 65536;
 	// rand::guid(NULL,10) is not allowed by the calling infrastructure.
@@ -132,7 +138,7 @@ pub fn string((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> 
 	Ok(Alphanumeric.sample_string(&mut rand::thread_rng(), len).into())
 }
 
-pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
+pub fn time((Optional(range),): (Optional<(Value, Value)>,)) -> Result<Value, Error> {
 	// Process the arguments
 	let range = match range {
 		None => None,
@@ -189,7 +195,7 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 	Err(fail!("Expected a valid datetime, but were unable to generate one"))
 }
 
-pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn ulid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	let ulid = match timestamp {
 		Some(timestamp) => {
 			#[cfg(target_family = "wasm")]
@@ -210,7 +216,7 @@ pub fn ulid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 	Ok(ulid.to_string().into())
 }
 
-pub fn uuid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	let uuid = match timestamp {
 		Some(timestamp) => {
 			#[cfg(target_family = "wasm")]
@@ -233,6 +239,7 @@ pub fn uuid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 pub mod uuid {
 
 	use crate::err::Error;
+	use crate::fnc::args::Optional;
 	use crate::sql::uuid::Uuid;
 	use crate::sql::value::Value;
 	use crate::sql::Datetime;
@@ -241,7 +248,7 @@ pub mod uuid {
 		Ok(Uuid::new_v4().into())
 	}
 
-	pub fn v7((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
+	pub fn v7((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value, Error> {
 		let uuid = match timestamp {
 			Some(timestamp) => {
 				#[cfg(target_family = "wasm")]

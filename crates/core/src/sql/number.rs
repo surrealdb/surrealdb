@@ -156,54 +156,6 @@ impl TryFrom<Number> for Decimal {
 	}
 }
 
-impl TryFrom<&Number> for f64 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		Ok(n.to_float())
-	}
-}
-
-impl TryFrom<&Number> for f32 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		n.to_float().to_f32().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(*n),
-			into: "f32".to_string(),
-		})
-	}
-}
-
-impl TryFrom<&Number> for i64 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		Ok(n.to_int())
-	}
-}
-impl TryFrom<&Number> for i32 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		n.to_int().to_i32().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(*n),
-			into: "i32".to_string(),
-		})
-	}
-}
-
-impl TryFrom<&Number> for i16 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		n.to_int().to_i16().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(*n),
-			into: "i16".to_string(),
-		})
-	}
-}
-
 impl Display for Number {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {

@@ -5,7 +5,7 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	exe::try_join_all_buffered,
-	sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Value},
+	sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Thing, Value},
 };
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -686,7 +686,7 @@ impl RecurseInstruction {
 				inclusive,
 			} => {
 				let expects =
-					Value::from(expects.compute(stk, ctx, opt, doc).await?.coerce_to_record()?);
+					expects.compute(stk, ctx, opt, doc).await?.coerce_to::<Thing>()?.into();
 				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Some(&expects))
 			}
 			Self::Collect {

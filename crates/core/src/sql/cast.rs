@@ -50,7 +50,10 @@ impl Cast {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
 		// Compute the value to be cast and convert it
-		stk.run(|stk| self.1.compute(stk, ctx, opt, doc)).await?.convert_to(&self.0)
+		stk.run(|stk| self.1.compute(stk, ctx, opt, doc))
+			.await?
+			.cast_to_kind(&self.0)
+			.map_err(From::from)
 	}
 }
 

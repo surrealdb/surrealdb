@@ -21,6 +21,7 @@ use crate::sql::value::{Value, Values};
 use crate::sql::{Cond, Function, Groups, View};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
+use rust_decimal::Decimal;
 
 type Ops = Vec<(Idiom, Operator, Value)>;
 
@@ -478,7 +479,7 @@ impl Document {
 						Some(name) if name == "math::mean" => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
 							let val = match val {
-								val @ Value::Number(_) => val.coerce_to_decimal()?.into(),
+								val @ Value::Number(_) => val.coerce_to::<Decimal>()?.into(),
 								val => {
 									return Err(Error::InvalidAggregation {
 										name: name.to_string(),

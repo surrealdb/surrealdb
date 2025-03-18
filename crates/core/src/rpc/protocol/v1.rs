@@ -698,7 +698,7 @@ pub trait RpcProtocolV1: RpcContext {
 		};
 		// Specify the SQL query string
 		let sql = RelateStatement {
-			only: from.is_single() && with.is_single(),
+			only: from.is_singular_selector() && with.is_singular_selector(),
 			from,
 			kind: kind.could_be_table(),
 			with,
