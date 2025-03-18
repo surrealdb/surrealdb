@@ -372,24 +372,18 @@ impl Value {
 impl Value {
 	/// Returns the value found at a certain field if the Value
 	/// is an Object and the field is present.
-	pub fn field<T: AsRef<str>>(&self, v: T) -> Option<&Value> {
+	pub fn field<T: AsRef<str>>(&self, v: T) -> Option<&Self> {
 		match &self.0 {
-			CoreValue::Object(map) => match map.0.get(v.as_ref()) {
-				Some(val) => Some(Value::from_inner_ref(val)),
-				None => None,
-			},
+			CoreValue::Object(map) => map.0.get(v.as_ref()).map(Self::from_inner_ref),
 			_ => None,
 		}
 	}
 
 	/// Returns the value found at a certain index if the Value
 	/// is an Array and a value is found at the index.
-	pub fn index(&self, v: usize) -> Option<&Value> {
+	pub fn index(&self, v: usize) -> Option<&Self> {
 		match &self.0 {
-			CoreValue::Array(map) => match map.0.get(v) {
-				Some(val) => Some(Value::from_inner_ref(val)),
-				None => None,
-			},
+			CoreValue::Array(map) => map.0.get(v).map(Self::from_inner_ref),
 			_ => None,
 		}
 	}
