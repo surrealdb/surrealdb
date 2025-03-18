@@ -12,31 +12,29 @@ pub type BucketConnections = DashMap<(String, String, String), Arc<dyn ObjectSto
 pub fn connect_global(ns: &str, db: &str, bu: &str) -> Result<Arc<dyn ObjectStore>, Error> {
 	// Obtain a global store
 	let Some(ref url) = *GLOBAL_BUCKET else {
-		return Err(Error::Unreachable("No global bucket configured".into()));
+		return Err(Error::NoGlobalBucket);
 	};
 
 	let global = connect(url, true, false)?;
 
 	// Create a prefixstore for the specified bucket
-	let key = Path::parse(format!("{ns}/{db}/{bu}"))
-		.map_err(|_| Error::Unreachable("Failed to construct path segment".into()))?;
+	let key = format!("{ns}/{db}/{bu}");
+	let key = Path::parse(key.clone()).map_err(|_| Error::InvalidBucketKey(key))?;
 	Ok(Arc::new(PrefixStore::new(global, key)))
 }
 
 pub fn connect(url: &str, global: bool, readonly: bool) -> Result<Arc<dyn ObjectStore>, Error> {
 	if !global && *GLOBAL_BUCKET_ENFORCED {
-		return Err(Error::Unreachable("Usage of the global bucket is enforced".into()));
+		return Err(Error::GlobalBucketEnforced);
 	}
 
-	let url = Url::parse(url)
-		.map_err(|_| Error::Unreachable("Failed to parse bucket backend url".into()))?;
+	let url = Url::parse(url).map_err(|_| Error::InvalidBucketUrl)?;
 
-	if !super::backend::supported(url.scheme(), global, readonly) {
-		Err(Error::Unreachable("Backend not supported".into()))
+	let scheme = url.scheme();
+	if !super::backend::supported(scheme, global, readonly) {
+		Err(Error::UnsupportedBackend(scheme.into()))
 	} else {
-		let (store, _) = parse_url(&url)
-			.map_err(|_| Error::Unreachable("Failed to parse bucket backend url".into()))?;
-
+		let (store, _) = parse_url(&url).map_err(|_| Error::InvalidBucketUrl)?;
 		Ok(Arc::new(store) as Arc<dyn ObjectStore>)
 	}
 }

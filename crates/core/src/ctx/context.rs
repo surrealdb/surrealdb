@@ -510,7 +510,7 @@ impl MutableContext {
 				Ok(store)
 			}
 		} else {
-			Err(Error::Unreachable("bla".into()))
+			Err(Error::BucketUnavailable(bu.into()))
 		}
 	}
 }

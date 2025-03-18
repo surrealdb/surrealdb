@@ -53,7 +53,7 @@ pub async fn copy(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::parse(target).map_err(|_| Error::Unreachable("Invalid path".into()))?;
+	let target = Path::parse(target.clone()).map_err(|_| Error::InvalidBucketKey(target))?;
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.copy(target).await?;
 
@@ -64,7 +64,7 @@ pub async fn copy_if_not_exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::parse(target).map_err(|_| Error::Unreachable("Invalid path".into()))?;
+	let target = Path::parse(target.clone()).map_err(|_| Error::InvalidBucketKey(target))?;
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.copy_if_not_exists(target).await?;
 
@@ -75,7 +75,7 @@ pub async fn rename(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::parse(target).map_err(|_| Error::Unreachable("Invalid path".into()))?;
+	let target = Path::parse(target.clone()).map_err(|_| Error::InvalidBucketKey(target))?;
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.rename(target).await?;
 
@@ -86,7 +86,7 @@ pub async fn rename_if_not_exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::parse(target).map_err(|_| Error::Unreachable("Invalid path".into()))?;
+	let target = Path::parse(target.clone()).map_err(|_| Error::InvalidBucketKey(target))?;
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.rename_if_not_exists(target).await?;
 

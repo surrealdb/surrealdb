@@ -34,7 +34,8 @@ impl<'a> FileController<'a> {
 		let (ns, db) = opt.ns_db()?;
 		let bucket = ctx.tx().get_db_bucket(ns, db, &file.bucket).await?;
 		let store = ctx.get_bucket_store(ns, db, &file.bucket).await?;
-		let key = Path::parse(&file.key).map_err(|_| Error::Unreachable("Invalid path".into()))?;
+		let key =
+			Path::parse(&file.key).map_err(|_| Error::InvalidBucketKey(file.key.to_owned()))?;
 
 		Ok(Self {
 			stk,
@@ -55,18 +56,27 @@ impl<'a> FileController<'a> {
 		}
 	}
 
+	fn require_writeable(&self) -> Result<(), Error> {
+		if self.bucket.readonly {
+			Err(Error::ReadonlyBucket(self.bucket.name.to_raw()))
+		} else {
+			Ok(())
+		}
+	}
+
 	pub(crate) async fn put(&mut self, value: Value) -> Result<(), Error> {
 		let payload = match value {
 			Value::Bytes(v) => PutPayload::from_bytes(v.0.into()),
 			Value::Strand(v) => PutPayload::from_bytes(v.0.into_bytes().into()),
-			_ => return Err(Error::Unreachable("Invalid value passed".into())),
+			from => {
+				return Err(Error::ConvertTo {
+					from,
+					into: "bytes".into(),
+				})
+			}
 		};
 
-		if self.bucket.readonly {
-			return Err(Error::Unreachable(
-				"Write operation is not supported on a read-only bucket".into(),
-			));
-		}
+		self.require_writeable()?;
 
 		let permission_kind = if self.exists_inner(None).await? {
 			PermissionKind::Update
@@ -76,10 +86,10 @@ impl<'a> FileController<'a> {
 
 		self.check_permission(permission_kind).await?;
 
-		self.store.put(&self.key, payload).await.map_err(|e| {
-			println!("failed to put file: {e}");
-			Error::Unreachable("Failed to put file".into())
-		})?;
+		self.store
+			.put(&self.key, payload)
+			.await
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
@@ -92,7 +102,7 @@ impl<'a> FileController<'a> {
 			Err(object_store::Error::NotFound {
 				..
 			}) => Ok(None),
-			_ => Err(Error::Unreachable("Failed to get file".into())),
+			Err(e) => Err(Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string())),
 		}
 	}
 
@@ -104,40 +114,35 @@ impl<'a> FileController<'a> {
 			Err(object_store::Error::NotFound {
 				..
 			}) => return Ok(None),
-			_ => return Err(Error::Unreachable("Failed to get file".into())),
+			Err(e) => {
+				return Err(Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))
+			}
 		};
 
-		let bytes =
-			payload.bytes().await.map_err(|_| Error::Unreachable("Failed to get bytes".into()))?;
+		let bytes = payload
+			.bytes()
+			.await
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(Some(bytes.to_vec().into()))
 	}
 
 	pub(crate) async fn delete(&mut self) -> Result<(), Error> {
-		if self.bucket.readonly {
-			return Err(Error::Unreachable(
-				"Write operation is not supported on a read-only bucket".into(),
-			));
-		}
-
+		self.require_writeable()?;
 		self.check_permission(PermissionKind::Delete).await?;
 
 		self.store
 			.delete(&self.key)
 			.await
-			.map_err(|_| Error::Unreachable("Failed to delete file".into()))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
 
 	pub(crate) async fn copy(&mut self, target: Path) -> Result<(), Error> {
-		if self.bucket.readonly {
-			return Err(Error::Unreachable(
-				"Write operation is not supported on a read-only bucket".into(),
-			));
-		}
-
+		self.require_writeable()?;
 		self.check_permission(PermissionKind::Select).await?;
+
 		if self.exists_inner(Some(&target)).await? {
 			self.check_permission(PermissionKind::Update).await?;
 		} else {
@@ -147,37 +152,28 @@ impl<'a> FileController<'a> {
 		self.store
 			.copy(&self.key, &target)
 			.await
-			.map_err(|_| Error::Unreachable("Failed to copy file".into()))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
 
 	pub(crate) async fn copy_if_not_exists(&mut self, target: Path) -> Result<(), Error> {
-		if self.bucket.readonly {
-			return Err(Error::Unreachable(
-				"Write operation is not supported on a read-only bucket".into(),
-			));
-		}
-
+		self.require_writeable()?;
 		self.check_permission(PermissionKind::Select).await?;
 		self.check_permission(PermissionKind::Create).await?;
 
 		self.store
 			.copy_if_not_exists(&self.key, &target)
 			.await
-			.map_err(|_| Error::Unreachable("Failed to copy file".into()))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
 
 	pub(crate) async fn rename(&mut self, target: Path) -> Result<(), Error> {
-		if self.bucket.readonly {
-			return Err(Error::Unreachable(
-				"Write operation is not supported on a read-only bucket".into(),
-			));
-		}
-
+		self.require_writeable()?;
 		self.check_permission(PermissionKind::Select).await?;
+
 		if self.exists_inner(Some(&target)).await? {
 			self.check_permission(PermissionKind::Update).await?;
 		} else {
@@ -187,25 +183,20 @@ impl<'a> FileController<'a> {
 		self.store
 			.rename(&self.key, &target)
 			.await
-			.map_err(|_| Error::Unreachable("Failed to copy file".into()))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
 
 	pub(crate) async fn rename_if_not_exists(&mut self, target: Path) -> Result<(), Error> {
-		if self.bucket.readonly {
-			return Err(Error::Unreachable(
-				"Write operation is not supported on a read-only bucket".into(),
-			));
-		}
-
+		self.require_writeable()?;
 		self.check_permission(PermissionKind::Select).await?;
 		self.check_permission(PermissionKind::Create).await?;
 
 		self.store
 			.rename_if_not_exists(&self.key, &target)
 			.await
-			.map_err(|_| Error::Unreachable("Failed to copy file".into()))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
@@ -221,7 +212,7 @@ impl<'a> FileController<'a> {
 			Err(object_store::Error::NotFound {
 				..
 			}) => Ok(false),
-			Err(_) => Err(Error::Unreachable("Failed to check if object exists".into())),
+			Err(e) => Err(Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string())),
 		}
 	}
 

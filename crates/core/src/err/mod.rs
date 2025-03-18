@@ -1310,6 +1310,30 @@ pub enum Error {
 
 	#[error("File access denied: {0}")]
 	FileAccessDenied(String),
+
+	#[error("No global bucket has been configured")]
+	NoGlobalBucket,
+
+	#[error("Bucket `{0}` is unavailable")]
+	BucketUnavailable(String),
+
+	#[error("File key `{0}` cannot be parsed into a path")]
+	InvalidBucketKey(String),
+
+	#[error("Bucket is unavailable")]
+	GlobalBucketEnforced,
+
+	#[error("Bucket url could not be processed")]
+	InvalidBucketUrl,
+
+	#[error("Bucket backend `{0}` is not supported")]
+	UnsupportedBackend(String),
+
+	#[error("Write operation is not supported, as bucket `{0}` is in read-only mode")]
+	ReadonlyBucket(String),
+
+	#[error("Operation for bucket `{0}` failed: {1}")]
+	ObjectStoreFailure(String, String),
 }
 
 impl From<Error> for String {
