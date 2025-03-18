@@ -1,6 +1,8 @@
 #![cfg(feature = "allocator")]
 
-use std::alloc::{handle_alloc_error, GlobalAlloc, Layout, System};
+#[cfg(feature = "allocation-tracking")]
+use std::alloc::handle_alloc_error;
+use std::alloc::{GlobalAlloc, Layout, System};
 
 #[cfg(feature = "allocation-tracking")]
 use parking_lot::Mutex;
@@ -44,6 +46,7 @@ use std::sync::atomic::{AtomicIsize, AtomicPtr, Ordering};
 #[derive(Debug)]
 pub struct TrackAlloc<Alloc = System> {
 	alloc: Alloc,
+	#[cfg(feature = "allocation-tracking")]
 	node_layout: Layout,
 }
 
@@ -52,6 +55,7 @@ impl<A> TrackAlloc<A> {
 	pub const fn new(alloc: A) -> Self {
 		Self {
 			alloc,
+			#[cfg(feature = "allocation-tracking")]
 			node_layout: Layout::new::<ThreadCounterNode>(),
 		}
 	}
