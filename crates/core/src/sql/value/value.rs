@@ -186,6 +186,12 @@ impl From<Closure> for Value {
 	}
 }
 
+impl From<File> for Value {
+	fn from(v: File) -> Self {
+		Value::File(v)
+	}
+}
+
 impl From<Param> for Value {
 	fn from(v: Param) -> Self {
 		Value::Param(v)

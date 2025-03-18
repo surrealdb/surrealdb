@@ -57,7 +57,7 @@ impl DefineBucketStatement {
 		// Validate the store
 		let name = self.name.to_string();
 		let store = if let Some(ref backend) = backend {
-			buc::connect(&backend, false, self.readonly, None)?
+			buc::connect(&backend, false, self.readonly)?
 		} else {
 			buc::connect_global(ns, db, &name)?
 		};

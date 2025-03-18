@@ -58,9 +58,15 @@ impl<'a> FileController<'a> {
 	pub(crate) async fn put(&mut self, value: Value) -> Result<(), Error> {
 		let payload = match value {
 			Value::Bytes(v) => PutPayload::from_bytes(v.0.into()),
-			// Value::Strand(v) => v.0.as_bytes(),
+			Value::Strand(v) => PutPayload::from_bytes(v.0.into_bytes().into()),
 			_ => return Err(Error::Unreachable("Invalid value passed".into())),
 		};
+
+		if self.bucket.readonly {
+			return Err(Error::Unreachable(
+				"Write operation is not supported on a read-only bucket".into(),
+			));
+		}
 
 		let permission_kind = if self.exists_inner(None).await? {
 			PermissionKind::Update
@@ -108,6 +114,12 @@ impl<'a> FileController<'a> {
 	}
 
 	pub(crate) async fn delete(&mut self) -> Result<(), Error> {
+		if self.bucket.readonly {
+			return Err(Error::Unreachable(
+				"Write operation is not supported on a read-only bucket".into(),
+			));
+		}
+
 		self.check_permission(PermissionKind::Delete).await?;
 
 		self.store
@@ -119,6 +131,12 @@ impl<'a> FileController<'a> {
 	}
 
 	pub(crate) async fn copy(&mut self, target: Path) -> Result<(), Error> {
+		if self.bucket.readonly {
+			return Err(Error::Unreachable(
+				"Write operation is not supported on a read-only bucket".into(),
+			));
+		}
+
 		self.check_permission(PermissionKind::Select).await?;
 		if self.exists_inner(Some(&target)).await? {
 			self.check_permission(PermissionKind::Update).await?;
@@ -135,6 +153,12 @@ impl<'a> FileController<'a> {
 	}
 
 	pub(crate) async fn copy_if_not_exists(&mut self, target: Path) -> Result<(), Error> {
+		if self.bucket.readonly {
+			return Err(Error::Unreachable(
+				"Write operation is not supported on a read-only bucket".into(),
+			));
+		}
+
 		self.check_permission(PermissionKind::Select).await?;
 		self.check_permission(PermissionKind::Create).await?;
 
@@ -147,6 +171,12 @@ impl<'a> FileController<'a> {
 	}
 
 	pub(crate) async fn rename(&mut self, target: Path) -> Result<(), Error> {
+		if self.bucket.readonly {
+			return Err(Error::Unreachable(
+				"Write operation is not supported on a read-only bucket".into(),
+			));
+		}
+
 		self.check_permission(PermissionKind::Select).await?;
 		if self.exists_inner(Some(&target)).await? {
 			self.check_permission(PermissionKind::Update).await?;
@@ -163,6 +193,12 @@ impl<'a> FileController<'a> {
 	}
 
 	pub(crate) async fn rename_if_not_exists(&mut self, target: Path) -> Result<(), Error> {
+		if self.bucket.readonly {
+			return Err(Error::Unreachable(
+				"Write operation is not supported on a read-only bucket".into(),
+			));
+		}
+
 		self.check_permission(PermissionKind::Select).await?;
 		self.check_permission(PermissionKind::Create).await?;
 

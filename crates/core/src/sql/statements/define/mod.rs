@@ -84,7 +84,7 @@ pub enum DefineStatement {
 	Config(DefineConfigStatement),
 	#[revision(start = 3)]
 	Api(DefineApiStatement),
-	#[revision(start = 3)]
+	#[revision(start = 4)]
 	Bucket(DefineBucketStatement),
 }
 

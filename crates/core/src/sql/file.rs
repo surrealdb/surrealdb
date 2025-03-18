@@ -4,7 +4,7 @@ use std::fmt;
 
 use super::Ident;
 
-// pub(crate) const TOKEN: &str = "$surrealdb::private::sql::File";
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::File";
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]

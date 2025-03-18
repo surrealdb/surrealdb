@@ -486,7 +486,6 @@ impl MutableContext {
 	}
 
 	/// Obtain the connection for a bucket
-	#[allow(unused)]
 	pub(crate) async fn get_bucket_store(
 		&self,
 		ns: &str,
@@ -502,7 +501,7 @@ impl MutableContext {
 				let bd = tx.get_db_bucket(ns, db, bu).await?;
 
 				let store = if let Some(ref backend) = bd.backend {
-					buc::connect(&backend, false, bd.readonly, None)?
+					buc::connect(&backend, false, bd.readonly)?
 				} else {
 					buc::connect_global(ns, db, bu)?
 				};

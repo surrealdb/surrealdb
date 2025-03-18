@@ -44,11 +44,6 @@ pub static HTTP_MAX_SQL_BODY_SIZE: LazyLock<usize> =
 pub static HTTP_MAX_API_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_HTTP_MAX_API_BODY_SIZE", usize, 4 << 20);
 
-/// The maximum HTTP body size of the HTTP /api endpoint (defaults to 1 MiB)
-#[allow(unused)]
-pub static HTTP_MAX_FILE_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_HTTP_MAX_FILE_SIZE", usize, 4 << 20);
-
 /// The maximum HTTP body size of the HTTP /rpc endpoint (defaults to 4 MiB)
 pub static HTTP_MAX_RPC_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_HTTP_MAX_RPC_BODY_SIZE", usize, 4 << 20);

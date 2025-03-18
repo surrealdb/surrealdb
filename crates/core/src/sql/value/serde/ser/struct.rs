@@ -72,9 +72,9 @@ pub(super) fn to_value(content: Content) -> Result<Value, Error> {
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			// sql::file::TOKEN => sql::File::deserialize(Content::Struct(v).into_deserializer())
-			// 	.map(Into::into)
-			// 	.map_err(Into::into),
+			sql::file::TOKEN => sql::File::deserialize(Content::Struct(v).into_deserializer())
+				.map(Into::into)
+				.map_err(Into::into),
 			_ => match v.data {
 				Data::Unit => Ok(Value::None),
 				Data::NewType {
