@@ -1705,18 +1705,6 @@ pub async fn multi_take(new_db: impl CreateDb) {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
-	let mut response =
-		db.query("SELECT b1 FROM CREATE something SET b1.total_peers = 74").await.unwrap();
-	let first: Value = response.take::<Value>(0).unwrap();
-	let inside = first.index(0).unwrap().field("b1").unwrap().field("total_peers").unwrap();
-	assert_eq!(inside, &Value::from_inner(CoreValue::Number(74.into())));
-}
-
-pub async fn field_and_index_methods(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-	drop(permit);
-
 	db.query("INSERT INTO user {name: 'John', address: 'USA'};").await.unwrap();
 	db.query("INSERT INTO user {name: 'Adam', address: 'UK'};").await.unwrap();
 
@@ -1729,6 +1717,18 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	let mut addresses: Vec<String> = response.take("address").unwrap();
 	addresses.sort();
 	assert_eq!(addresses, vec!["UK".to_owned(), "USA".to_owned()]);
+}
+
+pub async fn field_and_index_methods(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	let mut response =
+		db.query("SELECT b1 FROM CREATE something SET b1.total_peers = 74").await.unwrap();
+	let first: Value = response.take::<Value>(0).unwrap();
+	let inside = first.index(0).unwrap().field("b1").unwrap().field("total_peers").unwrap();
+	assert_eq!(inside, &Value::from_inner(CoreValue::Number(74.into())));
 }
 
 define_include_tests!(basic => {
@@ -1834,4 +1834,6 @@ define_include_tests!(basic => {
 	run,
 	#[test_log::test(tokio::test)]
 	multi_take,
+	#[test_log::test(tokio::test)]
+	field_and_index_methods,
 });
