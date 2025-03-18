@@ -70,10 +70,10 @@ impl<'a> FileController<'a> {
 
 		self.check_permission(permission_kind).await?;
 
-		self.store
-			.put(&self.key, payload)
-			.await
-			.map_err(|_| Error::Unreachable("Failed to put file".into()))?;
+		self.store.put(&self.key, payload).await.map_err(|e| {
+			println!("failed to put file: {e}");
+			Error::Unreachable("Failed to put file".into())
+		})?;
 
 		Ok(())
 	}

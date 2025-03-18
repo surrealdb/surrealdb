@@ -23,7 +23,7 @@ resolver = "2"
 
 [features]
 # Public features
-default = ["kv-mem", "enterprise"]
+default = ["kv-mem"]
 kv-mem = [
     "dep:surrealkv",
     "tokio/time",
