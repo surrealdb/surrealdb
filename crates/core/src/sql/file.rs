@@ -5,6 +5,8 @@ use std::fmt::{self};
 
 use crate::err::Error;
 
+use super::Ident;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::File";
 
 #[revisioned(revision = 1)]
@@ -33,6 +35,11 @@ impl File {
 
 	pub(crate) fn get_path(&self) -> Result<Path, Error> {
 		Path::parse(&self.key).map_err(|_| Error::InvalidBucketKey(self.key.clone()))
+	}
+
+	/// Check if this File belongs to a certain bucket type
+	pub fn is_bucket_type(&self, types: &[Ident]) -> bool {
+		types.is_empty() || types.iter().any(|buc| buc.0 == self.bucket)
 	}
 }
 

@@ -10,7 +10,6 @@ use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
@@ -20,6 +19,7 @@ use crate::sql::{
 	Future, Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range,
 	Regex, Strand, Subquery, Table, Tables, Thing, Uuid,
 };
+use crate::sql::{Closure, Ident};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
@@ -1419,6 +1419,10 @@ impl Value {
 				from: self,
 				into: kind.to_string(),
 			}),
+			Kind::File(t) => match t.is_empty() {
+				true => self.coerce_to_file().map(Value::from),
+				false => self.coerce_to_file_type(t).map(Value::from),
+			},
 		};
 		// Check for any conversion errors
 		match res {
@@ -1734,6 +1738,19 @@ impl Value {
 		}
 	}
 
+	/// Try to coerce this value to a `File` belonging to a certain bucket
+	pub(crate) fn coerce_to_file_type(self, val: &[Ident]) -> Result<File, Error> {
+		match self {
+			// Records are allowed if correct type
+			Value::File(v) if v.is_bucket_type(val) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "file".into(),
+			}),
+		}
+	}
+
 	/// Try to coerce this value to a `Datetime`
 	pub(crate) fn coerce_to_datetime(self) -> Result<Datetime, Error> {
 		match self {
@@ -2031,6 +2048,10 @@ impl Value {
 				from: self,
 				into: kind.to_string(),
 			}),
+			Kind::File(t) => match t.is_empty() {
+				true => self.convert_to_file().map(Value::from),
+				false => self.convert_to_file_type(t).map(Value::from),
+			},
 		};
 		// Check for any conversion errors
 		match res {
@@ -2316,6 +2337,32 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "function".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `File`
+	pub(crate) fn convert_to_file(self) -> Result<File, Error> {
+		match self {
+			// Files are allowed
+			Value::File(v) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "file".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `File` belonging to a certain bucket
+	pub(crate) fn convert_to_file_type(self, val: &[Ident]) -> Result<File, Error> {
+		match self {
+			// Records are allowed if correct type
+			Value::File(v) if v.is_bucket_type(val) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "file".into(),
 			}),
 		}
 	}

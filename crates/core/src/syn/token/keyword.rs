@@ -266,6 +266,7 @@ keyword! {
 	MultiLine => "MULTILINE",
 	MultiPolygon => "MULTIPOLYGON",
 	Collection => "COLLECTION",
+	File => "FILE",
 
 	FN => "fn",
 	ML => "ml",

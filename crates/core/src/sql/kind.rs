@@ -1,5 +1,5 @@
 use super::escape::EscapeKey;
-use super::{Duration, Idiom, Number, Part, Strand};
+use super::{Duration, Ident, Idiom, Number, Part, Strand};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
@@ -39,6 +39,7 @@ pub enum Kind {
 	Range,
 	Literal(Literal),
 	References(Option<Table>, Option<Idiom>),
+	File(Vec<Ident>),
 }
 
 impl Default for Kind {
@@ -172,7 +173,8 @@ impl Kind {
 				| Kind::Function(_, _)
 				| Kind::Range
 				| Kind::Literal(_)
-				| Kind::References(_, _) => return None,
+				| Kind::References(_, _)
+				| Kind::File(_) => return None,
 				Kind::Option(x) => {
 					this = x;
 				}
@@ -288,6 +290,10 @@ impl Display for Kind {
 				(Some(t), None) => write!(f, "references<{}>", t),
 				(Some(t), Some(i)) => write!(f, "references<{}, {}>", t, i),
 				(None, _) => f.write_str("references"),
+			},
+			Kind::File(k) => match k {
+				k if k.is_empty() => write!(f, "file"),
+				k => write!(f, "file<{}>", Fmt::verbar_separated(k)),
 			},
 		}
 	}
