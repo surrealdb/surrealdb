@@ -34,8 +34,7 @@ impl<'a> FileController<'a> {
 		let (ns, db) = opt.ns_db()?;
 		let bucket = ctx.tx().get_db_bucket(ns, db, &file.bucket).await?;
 		let store = ctx.get_bucket_store(ns, db, &file.bucket).await?;
-		let key =
-			Path::parse(&file.key).map_err(|_| Error::InvalidBucketKey(file.key.to_owned()))?;
+		let key = file.get_path()?;
 
 		Ok(Self {
 			stk,
@@ -50,10 +49,7 @@ impl<'a> FileController<'a> {
 	}
 
 	pub(crate) fn into_file(&self) -> File {
-		File {
-			bucket: self.bucket.name.clone(),
-			key: self.key.to_string(),
-		}
+		File::new(self.bucket.name.to_string(), self.key.to_string())
 	}
 
 	fn require_writeable(&self) -> Result<(), Error> {

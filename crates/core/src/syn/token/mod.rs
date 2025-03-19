@@ -302,6 +302,10 @@ pub enum QouteKind {
 	Bytes,
 	/// `b"`
 	BytesDouble,
+	/// `f'`
+	File,
+	/// `f"`
+	FileDouble,
 }
 
 impl QouteKind {
@@ -312,6 +316,7 @@ impl QouteKind {
 			QouteKind::Uuid | QouteKind::UuidDouble => "a uuid",
 			QouteKind::DateTime | QouteKind::DateTimeDouble => "a datetime",
 			QouteKind::Bytes | QouteKind::BytesDouble => "a bytestring",
+			QouteKind::File | QouteKind::FileDouble => "a file",
 		}
 	}
 }
@@ -324,6 +329,7 @@ pub enum Glued {
 	Datetime,
 	Uuid,
 	Bytes,
+	File,
 }
 
 impl Glued {
@@ -335,6 +341,7 @@ impl Glued {
 			Glued::Datetime => "a datetime",
 			Glued::Duration => "a duration",
 			Glued::Bytes => "a bytestring",
+			Glued::File => "a file",
 		}
 	}
 }

@@ -39,6 +39,9 @@ impl Parser<'_> {
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
 				Ok(Value::Uuid(self.next_token_value()?))
 			}
+			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
+				Ok(Value::File(self.next_token_value()?))
+			}
 			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
 				Ok(Value::Bytes(self.next_token_value()?))
 			}
@@ -112,15 +115,7 @@ impl Parser<'_> {
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
-						if str.eq_ignore_ascii_case("file")
-							&& matches!(self.peek_whitespace1().kind, t!("/"))
-						{
-							self.pop_peek();
-							self.pop_peek();
-							self.parse_file().await.map(Value::File)
-						} else {
-							self.parse_thing_or_range(ctx, str).await.map(Value::Thing)
-						}
+						self.parse_thing_or_range(ctx, str).await.map(Value::Thing)
 					}
 					_ => Ok(Value::Table(self.next_token_value()?)),
 				}
@@ -250,6 +245,9 @@ impl Parser<'_> {
 			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
 				Value::Bytes(self.next_token_value()?)
 			}
+			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
+				Value::File(self.next_token_value()?)
+			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;
 				if self.settings.legacy_strands {
@@ -341,15 +339,7 @@ impl Parser<'_> {
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
-						if str.eq_ignore_ascii_case("file")
-							&& matches!(self.peek_whitespace1().kind, t!("/"))
-						{
-							self.pop_peek();
-							self.pop_peek();
-							self.parse_file().await.map(Value::File)?
-						} else {
-							self.parse_thing_or_range(ctx, str).await.map(Value::Thing)?
-						}
+						self.parse_thing_or_range(ctx, str).await.map(Value::Thing)?
 					}
 					_ => {
 						if self.table_as_field {

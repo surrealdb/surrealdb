@@ -7,7 +7,7 @@ use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{File, Ident, Kind, Strand};
+use crate::sql::{File, Kind, Strand};
 use crate::syn;
 use reblessive::tree::Stk;
 
@@ -20,10 +20,7 @@ pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub fn file((bucket, key): (String, String)) -> Result<Value, Error> {
-	Ok(Value::File(File {
-		bucket: Ident(bucket),
-		key,
-	}))
+	Ok(Value::File(File::new(bucket, key)))
 }
 
 pub fn bytes((val,): (Value,)) -> Result<Value, Error> {

@@ -6,6 +6,7 @@ use crate::syn::{
 
 mod bytes;
 mod datetime;
+mod file;
 mod ident;
 mod js;
 mod number;
@@ -15,6 +16,7 @@ mod uuid;
 
 pub use bytes::bytes;
 pub use datetime::{datetime, datetime_inner};
+pub use file::file;
 pub use ident::flexible_ident;
 pub use js::javascript;
 pub use number::{

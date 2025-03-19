@@ -55,7 +55,7 @@
 
 use self::token_buffer::TokenBuffer;
 use crate::{
-	sql::{self, Bytes, Datetime, Duration, Strand, Uuid},
+	sql::{self, Bytes, Datetime, Duration, File, Strand, Uuid},
 	syn::{
 		error::{bail, SyntaxError},
 		lexer::{compound::NumberKind, Lexer},
@@ -68,7 +68,6 @@ use reblessive::{Stack, Stk};
 mod basic;
 mod builtin;
 mod expression;
-mod file;
 mod function;
 mod glue;
 mod idiom;
@@ -121,6 +120,7 @@ pub enum GluedValue {
 	#[default]
 	None,
 	Bytes(Bytes),
+	File(File),
 }
 
 #[derive(Clone, Debug)]
