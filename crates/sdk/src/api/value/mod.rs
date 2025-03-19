@@ -5,7 +5,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
 	cmp::{Ordering, PartialEq, PartialOrd},
 	fmt,
-	ops::Deref,
+	ops::{Deref, Index},
 	str::FromStr,
 };
 use surrealdb_core::{
@@ -369,22 +369,24 @@ impl Value {
 	}
 }
 
-impl Value {
-	/// Returns the value found at a certain field if the Value
-	/// is an Object and the field is present.
-	pub fn field<T: AsRef<str>>(&self, v: T) -> Option<&Self> {
+impl Index<usize> for Value {
+	type Output = Self;
+
+	fn index(&self, index: usize) -> &Self::Output {
 		match &self.0 {
-			CoreValue::Object(map) => map.0.get(v.as_ref()).map(Self::from_inner_ref),
-			_ => None,
+			CoreValue::Array(map) => map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None)),
+			_ => &Value(CoreValue::None),
 		}
 	}
+}
 
-	/// Returns the value found at a certain index if the Value
-	/// is an Array and a value is found at the index.
-	pub fn index(&self, v: usize) -> Option<&Self> {
+impl Index<&str> for Value {
+	type Output = Self;
+
+	fn index(&self, index: &str) -> &Self::Output {
 		match &self.0 {
-			CoreValue::Array(map) => map.0.get(v).map(Self::from_inner_ref),
-			_ => None,
+			CoreValue::Object(map) => map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None)),
+			_ => &Value(CoreValue::None)
 		}
 	}
 }
