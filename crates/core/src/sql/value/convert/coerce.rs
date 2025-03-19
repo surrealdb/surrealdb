@@ -37,20 +37,20 @@ impl fmt::Display for CoerceError {
 				from,
 				into,
 			} => {
-				write!(f, "Expected a `{into}` but found a `{from}`")
+				write!(f, "Expected `{into}` but found `{from}`")
 			}
 			CoerceError::ElementOf {
 				inner,
 				into,
 			} => {
 				inner.fmt(f)?;
-				write!(f, " when coercing element of `{into}`")
+				write!(f, " when coercing an element of `{into}`")
 			}
 			CoerceError::InvalidLength {
 				len,
 				into,
 			} => {
-				write!(f, "Expected a `{into}` buf found an array of length `{len}`")
+				write!(f, "Expected `{into}` but found an collection of length `{len}`")
 			}
 		}
 	}
@@ -348,7 +348,7 @@ impl<T: Coerce + HasKind, S: BuildHasher + Default> Coerce for HashMap<String, T
 		if !v.is_object() {
 			return Err(CoerceError::InvalidKind {
 				from: v,
-				into: Object::kind().to_string(),
+				into: Kind::of::<Object>().to_string(),
 			});
 		};
 		// Unwrap checked above
@@ -391,11 +391,11 @@ macro_rules! impl_direct {
 	};
 
 	(@kindof $inner:ty = $kind:ident) => {
-		<$kind as HasKind>::kind().to_string()
+		Kind::of::<$kind>().to_string()
 	};
 
 	(@kindof $inner:ty) => {
-		<$inner as HasKind>::kind().to_string()
+		Kind::of::<$inner>().to_string()
 	};
 }
 
@@ -593,10 +593,21 @@ impl Value {
 			// Records are allowed if correct type
 			Value::Thing(v) if v.is_record_type(val) => Ok(v),
 			// Anything else raises an error
-			this => Err(CoerceError::InvalidKind {
-				from: this,
-				into: "record".into(),
-			}),
+			this => {
+				let mut kind = "record<".to_string();
+				for (idx, t) in val.iter().enumerate() {
+					if idx != 0 {
+						kind.push('|');
+					}
+					kind.push_str(t.as_str())
+				}
+				kind.push('>');
+
+				Err(CoerceError::InvalidKind {
+					from: this,
+					into: kind,
+				})
+			}
 		}
 	}
 

@@ -2,10 +2,10 @@
 [test]
 
 [[test.results]]
-error = false
+value = "NONE"
 
 [[test.results]]
-error = 'Expected a array<record<employee>, 5> but the array had 6 items'
+error = "Couldn't coerce value for field `employees` of `team:1ku9gw0kgmbc6z64o3r0`: Expected `array<record<employee>,5>` but found an collection of length `6`"
 */
 
 DEFINE FIELD employees ON TABLE team TYPE array<record<employee>, 5>;

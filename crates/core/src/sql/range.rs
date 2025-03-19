@@ -6,7 +6,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Number, Subquery, Value};
+use crate::sql::{Subquery, Value};
 use crate::syn;
 use reblessive::tree::Stk;
 use revision::revisioned;

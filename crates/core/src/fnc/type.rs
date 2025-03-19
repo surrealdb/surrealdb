@@ -13,7 +13,7 @@ use geo::Point;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 
-use super::args::{Optional, Rest};
+use super::args::Optional;
 
 pub fn array((val,): (Value,)) -> Result<Value, Error> {
 	Ok(val.cast_to::<Array>()?.into())
@@ -56,7 +56,7 @@ pub async fn field(
 
 pub async fn fields(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(Rest(val),): (Rest<String>,),
+	(val,): (Vec<String>,),
 ) -> Result<Value, Error> {
 	match opt {
 		Some(opt) => {

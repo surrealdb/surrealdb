@@ -28,7 +28,7 @@ value = "[{ id: likes:4iz6dy5ylsy3si35iym1, in: person:gnirh7xd5itm6s2axxf5, out
 skip-record-id-key = true
 
 [[test.results]]
-match = '''string::matches($error,"Found other:[a-zA-Z0-9]* for field `out`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person \\| thing>")'''
+match = '''string::matches($error,"Couldn't coerce value for field `out` of `likes:[a-zA-Z0-9]+`,: Expected a `record<person\\|thing>` but found `outer:[a-zA-Z0-9]+`")'''
 error = true
 
 [[test.results]]

@@ -1,4 +1,4 @@
-use super::escape::escape_key;
+use super::escape::EscapeKey;
 use super::{
 	Array, Bytes, Closure, Datetime, Duration, Geometry, Idiom, Number, Object, Part, Range,
 	Strand, Thing, Uuid,

@@ -6,19 +6,17 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::id::range::IdRange;
-use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Closure;
 use crate::sql::{
-	array::Uniq,
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
 	model::Model,
 	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
-	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Tables, Thing, Uuid,
+	Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex, Strand,
+	Subquery, Table, Tables, Thing, Uuid,
 };
 use chrono::{DateTime, Utc};
 

@@ -40,20 +40,20 @@ impl fmt::Display for CastError {
 				from,
 				into,
 			} => {
-				write!(f, "Expected a `{into}` but found a `{from}`")
+				write!(f, "Expected `{into}` but found a `{from}`")
 			}
 			CastError::ElementOf {
 				inner,
 				into,
 			} => {
 				inner.fmt(f)?;
-				write!(f, " when coercing element of `{into}`")
+				write!(f, " when coercing an element of `{into}`")
 			}
 			CastError::InvalidLength {
 				len,
 				into,
 			} => {
-				write!(f, "Expected a `{into}` buf found an array of length `{len}`")
+				write!(f, "Expected `{into}` buf found an collection of length `{len}`")
 			}
 			CastError::RangeSizeLimit {
 				value,
@@ -776,23 +776,40 @@ impl Value {
 	/// Try to convert this value to a Record of a certain type
 	fn cast_to_record(self, val: &[Table]) -> Result<Thing, CastError> {
 		match self {
-			// Records are allowed if correct type
-			Value::Thing(v) if self.is_record_type(val) => Ok(v),
-			// Attempt to parse a string
-			Value::Strand(ref v) => match Thing::from_str(v) {
-				// The string can be parsed as a record of this type
-				Ok(v) if v.is_record_type(val) => Ok(v),
-				// This string is not a record of this type
-				_ => Err(CastError::InvalidKind {
-					from: self,
-					into: "record".into(),
-				}),
+			Value::Thing(v) if v.is_record_type(val) => Ok(v),
+			Value::Strand(v) => match Thing::from_str(v.as_str()) {
+				Ok(x) if x.is_record_type(val) => Ok(x),
+				_ => {
+					let mut kind = "record<".to_string();
+					for (idx, t) in val.iter().enumerate() {
+						if idx != 0 {
+							kind.push('|');
+						}
+						kind.push_str(t.as_str())
+					}
+					kind.push('>');
+
+					Err(CastError::InvalidKind {
+						from: Value::Strand(v),
+						into: kind,
+					})
+				}
 			},
-			// Anything else raises an error
-			_ => Err(CastError::InvalidKind {
-				from: self,
-				into: "record".into(),
-			}),
+			x => {
+				let mut kind = "record<".to_string();
+				for (idx, t) in val.iter().enumerate() {
+					if idx != 0 {
+						kind.push('|');
+					}
+					kind.push_str(t.as_str())
+				}
+				kind.push('>');
+
+				Err(CastError::InvalidKind {
+					from: x,
+					into: kind,
+				})
+			}
 		}
 	}
 

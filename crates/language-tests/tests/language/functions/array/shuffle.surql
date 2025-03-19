@@ -5,7 +5,7 @@
 value = "[]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::shuffle(). Argument 1 was the wrong type. Expected a array but found 3"
+error = "Incorrect arguments for function array::shuffle(). Argument 1 was the wrong type. Expected `array` but found `3`"
 
 [[test.results]]
 value = "[4]"
@@ -14,9 +14,7 @@ value = "[4]"
 value = "[1, 1, 1]"
 
 [[test.results]]
-match = """
-	1 in $result && 2 in $result && 3 in $result && 4 in $result && "text" in $result
-"""
+value = "[2, 3, 'text', 3, 1, 4]"
 
 */
 array::shuffle([]);

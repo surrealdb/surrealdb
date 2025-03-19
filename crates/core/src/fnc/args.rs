@@ -1,9 +1,10 @@
 use std::vec::IntoIter;
 
 use crate::err::Error;
-use crate::sql::value::{Coerce, Value};
+use crate::sql::value::{Cast as CastTrait, Coerce, Value};
 
 /// The number of arguments a function takes.
+#[derive(Debug)]
 pub struct Arity {
 	pub lower: usize,
 	pub upper: Option<usize>,
@@ -36,7 +37,7 @@ impl Args {
 	pub fn from_vec(args: Vec<Value>) -> Self {
 		Args {
 			next: None,
-			count: 0,
+			count: 1,
 			iter: args.into_iter(),
 		}
 	}
@@ -141,7 +142,7 @@ impl<T: Coerce> FromArg for T {
 		// checked.
 		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Invalid number of arguments"),
+			message: "Missing an argument".to_string(),
 		})?;
 
 		let v = x.coerce_to::<T>().map_err(|e| Error::InvalidArguments {
@@ -152,32 +153,62 @@ impl<T: Coerce> FromArg for T {
 	}
 }
 
+/// Wrapper type for arguments which use coercing rules instead of coercing rules.
+pub struct Cast<T>(pub T);
+
+impl<T: CastTrait> FromArg for Cast<T> {
+	fn arity() -> Arity {
+		Arity {
+			lower: 1,
+			upper: Some(1),
+		}
+	}
+
+	fn from_arg(name: &str, iter: &mut Args) -> Result<Self, Error> {
+		// The error should not happen when called with the FromArgs traits as the arity is already
+		// checked.
+		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidArguments {
+			name: name.to_owned(),
+			message: "Missing an argument".to_string(),
+		})?;
+
+		let v = x.cast_to::<T>().map_err(|e| Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!("Argument {idx} was the wrong type. {e}"),
+		})?;
+		Ok(Cast(v))
+	}
+}
+
 impl<T: FromArg> FromArgs for T {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let arity = T::arity();
 
-		if args.len() < arity.lower {
+		if args.len() < arity.lower || arity.upper.map(|x| args.len() > x).unwrap_or(false) {
+			let message = if let Some(upper) = arity.upper {
+				if upper == arity.lower {
+					if upper == 0 {
+						format!("Expected no arguments")
+					} else if upper == 1 {
+						format!("Expected 1 argument")
+					} else {
+						format!("Expected {upper} arguments")
+					}
+				} else {
+					format!("Expected {} to {} arguments", arity.lower, upper)
+				}
+			} else {
+				if arity.lower == 0 {
+					format!("Expected zero or more arguments")
+				} else {
+					format!("Expected {} or more arguments", arity.lower)
+				}
+			};
+
 			return Err(Error::InvalidArguments {
 				name: name.to_owned(),
-				message: match arity.lower {
-					0 => "Expected no arguments".to_string(),
-					1 => "Expected 1 argument".to_string(),
-					x => format!("Expected {x} arguments"),
-				},
+				message,
 			});
-		}
-
-		if let Some(upper) = arity.upper {
-			if args.len() > upper {
-				return Err(Error::InvalidArguments {
-					name: name.to_owned(),
-					message: match arity.lower {
-						0 => "Expected no arguments".to_string(),
-						1 => "Expected 1 argument".to_string(),
-						x => format!("Expected {x} arguments"),
-					},
-				});
-			}
 		}
 
 		let mut args = Args::from_vec(args);

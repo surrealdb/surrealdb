@@ -4,7 +4,7 @@ use crate::fnc::util::string;
 use crate::sql::value::Value;
 use crate::sql::Regex;
 
-use super::args::{Any, Optional};
+use super::args::{Any, Cast, Optional};
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -69,7 +69,7 @@ pub fn repeat((val, num): (String, i64)) -> Result<Value, Error> {
 	Ok(val.repeat(num).into())
 }
 
-pub fn matches((val, regex): (String, Regex)) -> Result<Value, Error> {
+pub fn matches((val, Cast(regex)): (String, Cast<Regex>)) -> Result<Value, Error> {
 	Ok(regex.0.is_match(&val).into())
 }
 
@@ -141,7 +141,7 @@ pub fn slice(
 	let end = match lim {
 		Some(v) => {
 			if v < 0 {
-				str_len().saturating_add(v) as usize
+				str_len().saturating_add(v).max(0) as usize
 			} else {
 				v as usize
 			}
@@ -516,7 +516,7 @@ pub mod semver {
 #[cfg(test)]
 mod tests {
 	use super::{contains, matches, replace, slice};
-	use crate::{fnc::args::Optional, sql::Value};
+	use crate::{err::Error, fnc::args::Optional, sql::Value};
 
 	#[test]
 	fn string_slice() {

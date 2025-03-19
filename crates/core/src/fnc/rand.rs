@@ -10,7 +10,7 @@ use rand::prelude::IteratorRandom;
 use rand::Rng;
 use ulid::Ulid;
 
-use super::args::{Any, Optional};
+use super::args::{Any, Args, Arity, FromArg, Optional};
 
 pub fn rand(_: ()) -> Result<Value, Error> {
 	Ok(rand::random::<f64>().into())
@@ -31,6 +31,36 @@ pub fn r#enum(Any(mut args): Any) -> Result<Value, Error> {
 	})
 }
 
+pub struct NoneOrRange<T>(Option<(T, T)>);
+
+impl<T: FromArg> FromArg for NoneOrRange<T> {
+	fn arity() -> Arity {
+		Arity {
+			lower: 0,
+			upper: Some(2),
+		}
+	}
+
+	fn from_arg(name: &str, args: &mut Args) -> Result<Self, Error> {
+		if !args.has_next() {
+			return Ok(NoneOrRange(None));
+		}
+
+		let a = T::from_arg(name, args)?;
+
+		if !args.has_next() {
+			return Err(Error::InvalidArguments {
+				name: name.to_owned(),
+				message: "Expected 0 or 2 arguments".to_string(),
+			});
+		}
+
+		let b = T::from_arg(name, args)?;
+
+		Ok(NoneOrRange(Some((a, b))))
+	}
+}
+
 // TODO (Delskayn): Don't agree with the inclusive ranges in the functions here,
 // seems inconsistent with general use of ranges not including the upperbound.
 // These should probably all be exclusive.
@@ -38,8 +68,8 @@ pub fn r#enum(Any(mut args): Any) -> Result<Value, Error> {
 // TODO (Delskayn): Switching of min and max if min > max is also inconsistent with rest of
 // functions and the range type. The functions should either return NONE or an error if the lowerbound
 // of the ranges here are larger then the upperbound.
-pub fn float((Optional(range),): (Optional<(f64, f64)>,)) -> Result<Value, Error> {
-	let res = if let Some((min, max)) = range {
+pub fn float((NoneOrRange(range),): (NoneOrRange<f64>,)) -> Result<Value, Error> {
+	let v = if let Some((min, max)) = range {
 		if max < min {
 			rand::thread_rng().gen_range(max..=min)
 		} else {
@@ -48,7 +78,7 @@ pub fn float((Optional(range),): (Optional<(f64, f64)>,)) -> Result<Value, Error
 	} else {
 		rand::random::<f64>()
 	};
-	Ok(res.into())
+	Ok(Value::from(v))
 }
 
 pub fn guid(
@@ -89,7 +119,7 @@ pub fn guid(
 	Ok(nanoid!(len, &ID_CHARS).into())
 }
 
-pub fn int((Optional(range),): (Optional<(i64, i64)>,)) -> Result<Value, Error> {
+pub fn int((NoneOrRange(range),): (NoneOrRange<i64>,)) -> Result<Value, Error> {
 	Ok(if let Some((min, max)) = range {
 		if max < min {
 			rand::thread_rng().gen_range(max..=min)
@@ -138,7 +168,7 @@ pub fn string(
 	Ok(Alphanumeric.sample_string(&mut rand::thread_rng(), len).into())
 }
 
-pub fn time((Optional(range),): (Optional<(Value, Value)>,)) -> Result<Value, Error> {
+pub fn time((NoneOrRange(range),): (NoneOrRange<Value>,)) -> Result<Value, Error> {
 	// Process the arguments
 	let range = match range {
 		None => None,
