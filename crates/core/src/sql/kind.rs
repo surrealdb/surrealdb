@@ -1,4 +1,4 @@
-use super::escape::escape_key;
+use super::escape::EscapeKey;
 use super::{Duration, Idiom, Number, Part, Strand};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
@@ -514,7 +514,7 @@ impl Display for Literal {
 						"{}",
 						Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
 							args,
-							|(k, v), f| write!(f, "{}: {}", escape_key(k), v)
+							|(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
 						)),)
 					)?;
 					drop(indent);
@@ -545,7 +545,7 @@ impl Display for Literal {
 							"{}",
 							Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
 								args,
-								|(k, v), f| write!(f, "{}: {}", escape_key(k), v)
+								|(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
 							)),)
 						)?;
 						drop(indent);
