@@ -642,7 +642,7 @@ impl Display for Literal {
 						"{}",
 						Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
 							args,
-							|(k, v), f| write!(f, "{}: {}", escape_key(k), v)
+							|(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
 						)),)
 					)?;
 					drop(indent);
@@ -673,7 +673,7 @@ impl Display for Literal {
 							"{}",
 							Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
 								args,
-								|(k, v), f| write!(f, "{}: {}", escape_key(k), v)
+								|(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
 							)),)
 						)?;
 						drop(indent);
