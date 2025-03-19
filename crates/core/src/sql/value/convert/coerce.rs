@@ -438,6 +438,7 @@ impl Value {
 			Kind::Point => self.can_coerce_to::<Point<f64>>(),
 			Kind::Bytes => self.can_coerce_to::<Bytes>(),
 			Kind::Uuid => self.can_coerce_to::<Uuid>(),
+			Kind::Regex => self.can_coerce_to::<Regex>(),
 			Kind::Range => self.can_coerce_to::<Box<Range>>(),
 			Kind::Function(_, _) => self.can_coerce_to::<Box<Closure>>(),
 			Kind::Set(t, l) => match l {
@@ -532,6 +533,7 @@ impl Value {
 			Kind::Point => self.coerce_to::<Point<f64>>().map(Value::from),
 			Kind::Bytes => self.coerce_to::<Bytes>().map(Value::from),
 			Kind::Uuid => self.coerce_to::<Uuid>().map(Value::from),
+			Kind::Regex => self.coerce_to::<Regex>().map(Value::from),
 			Kind::Range => self.coerce_to::<Box<Range>>().map(Value::from),
 			Kind::Function(_, _) => self.coerce_to::<Box<Closure>>().map(Value::from),
 			Kind::Set(t, l) => match l {

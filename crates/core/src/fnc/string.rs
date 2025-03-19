@@ -516,7 +516,11 @@ pub mod semver {
 #[cfg(test)]
 mod tests {
 	use super::{contains, matches, replace, slice};
-	use crate::{err::Error, fnc::args::Optional, sql::Value};
+	use crate::{
+		err::Error,
+		fnc::args::{Cast, Optional},
+		sql::Value,
+	};
 
 	#[test]
 	fn string_slice() {
@@ -597,7 +601,7 @@ mod tests {
 	fn string_matches() {
 		fn test(base: &str, regex: &str, expected: bool) {
 			assert_eq!(
-				matches((base.to_string(), regex.parse().unwrap())).unwrap(),
+				matches((base.to_string(), Cast(regex.parse().unwrap()))).unwrap(),
 				Value::from(expected),
 				"matches({},{})",
 				base,

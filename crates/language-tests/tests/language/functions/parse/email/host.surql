@@ -79,4 +79,3 @@ parse::email::host("j@example..com");
 parse::email::host("@example.com");
 parse::email::host("j\\@example.com");
 parse::email::host("www.example.com");
-

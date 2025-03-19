@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 
 use crate::sql::{
 	array::Uniq as _, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, Duration,
-	Geometry, Kind, Literal, Number, Object, Range, Strand, Table, Thing, Uuid, Value,
+	Geometry, Kind, Literal, Number, Object, Range, Regex, Strand, Table, Thing, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -462,6 +462,33 @@ impl Cast for Array {
 	}
 }
 
+impl Cast for Regex {
+	fn can_cast(v: &Value) -> bool {
+		match v {
+			Value::Regex(_) => true,
+			Value::Strand(x) => Regex::from_str(x).is_ok(),
+			_ => false,
+		}
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		match v {
+			Value::Regex(x) => Ok(x),
+			Value::Strand(x) => match Regex::from_str(&x) {
+				Ok(x) => Ok(x),
+				Err(_) => Err(CastError::InvalidKind {
+					from: Value::Strand(x),
+					into: "regex".to_string(),
+				}),
+			},
+			x => Err(CastError::InvalidKind {
+				from: x,
+				into: "regex".to_string(),
+			}),
+		}
+	}
+}
+
 impl Cast for Box<Range> {
 	fn can_cast(v: &Value) -> bool {
 		match v {
@@ -634,6 +661,7 @@ impl Value {
 			Kind::Point => self.can_cast_to::<Point<f64>>(),
 			Kind::Bytes => self.can_cast_to::<Bytes>(),
 			Kind::Uuid => self.can_cast_to::<Uuid>(),
+			Kind::Regex => self.can_cast_to::<Regex>(),
 			Kind::Range => self.can_cast_to::<Box<Range>>(),
 			Kind::Function(_, _) => self.can_cast_to::<Box<Closure>>(),
 			Kind::Set(t, l) => match l {
@@ -719,6 +747,7 @@ impl Value {
 			Kind::Point => self.cast_to::<Point<f64>>().map(Value::from),
 			Kind::Bytes => self.cast_to::<Bytes>().map(Value::from),
 			Kind::Uuid => self.cast_to::<Uuid>().map(Value::from),
+			Kind::Regex => self.cast_to::<Regex>().map(Value::from),
 			Kind::Range => self.cast_to::<Box<Range>>().map(Value::from),
 			Kind::Function(_, _) => self.cast_to::<Box<Closure>>().map(Value::from),
 			Kind::Set(t, l) => match l {
