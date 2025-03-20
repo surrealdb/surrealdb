@@ -58,6 +58,7 @@ mod tests;
 
 pub use authenticate::Authenticate;
 pub use begin::Begin;
+pub use begin::Transaction;
 pub use cancel::Cancel;
 pub use commit::Commit;
 pub use content::Content;
