@@ -489,6 +489,7 @@ fn filter_from_type(
 		Kind::Range => {}
 		Kind::Literal(_) => {}
 		Kind::References(_, _) => {}
+		Kind::File(_) => {}
 	};
 	Ok(filter)
 }
