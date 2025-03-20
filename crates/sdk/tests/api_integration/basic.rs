@@ -6,9 +6,11 @@ use serde_json::json;
 use std::borrow::Cow;
 use std::ops::Bound;
 use std::time::Duration;
+use surrealdb::Connection;
 use surrealdb::RecordId;
 use surrealdb::Response;
 use surrealdb::Value;
+use surrealdb::method::Transaction;
 use surrealdb::opt::Raw;
 use surrealdb::opt::Resource;
 use surrealdb::opt::auth::Database;
@@ -1719,7 +1721,46 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	assert_eq!(inside.into_option(), None);
 }
 
+pub async fn client_side_transactions(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	let table = "foo";
+
+	async fn insert_data<C: Connection>(txn: &Transaction<C>, table: &str) {
+		txn.create(Resource::from((table, "bar"))).await.unwrap();
+		txn.query(format!("CREATE {table}:baz")).await.unwrap().check().unwrap();
+	}
+
+	fn to_records<T>(tuples: T) -> Vec<ApiRecordId>
+	where
+		T: IntoIterator<Item = (&'static str, &'static str)>,
+	{
+		tuples.into_iter().map(RecordId::from).map(Into::into).collect()
+	}
+
+	let txn = db.transaction().await.unwrap();
+	insert_data(&txn, table).await;
+	let records: Vec<ApiRecordId> = txn.select(table).await.unwrap();
+	assert_eq!(records, to_records([(table, "bar"), (table, "baz")]));
+	let records: Vec<ApiRecordId> = db.select(table).await.unwrap();
+	assert!(records.is_empty());
+
+	txn.cancel().await.unwrap();
+	let records: Vec<ApiRecordId> = db.select(table).await.unwrap();
+	assert!(records.is_empty());
+
+	let txn = db.transaction().await.unwrap();
+	insert_data(&txn, table).await;
+	txn.commit().await.unwrap();
+	let records: Vec<ApiRecordId> = db.select(table).await.unwrap();
+	assert_eq!(records, to_records([(table, "bar"), (table, "baz")]));
+}
+
 define_include_tests!(basic => {
+	#[test_log::test(tokio::test)]
+	client_side_transactions,
 	#[test_log::test(tokio::test)]
 	connect,
 	#[test_log::test(tokio::test)]

@@ -62,6 +62,14 @@ struct ApiRecordId {
 	id: RecordId,
 }
 
+impl From<RecordId> for ApiRecordId {
+	fn from(id: RecordId) -> Self {
+		Self {
+			id,
+		}
+	}
+}
+
 #[derive(Debug, Deserialize)]
 struct RecordName {
 	name: String,
