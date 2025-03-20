@@ -188,21 +188,19 @@ impl<T: FromArg> FromArgs for T {
 			let message = if let Some(upper) = arity.upper {
 				if upper == arity.lower {
 					if upper == 0 {
-						format!("Expected no arguments")
+						"Expected no arguments".to_string()
 					} else if upper == 1 {
-						format!("Expected 1 argument")
+						"Expected 1 argument".to_string()
 					} else {
 						format!("Expected {upper} arguments")
 					}
 				} else {
 					format!("Expected {} to {} arguments", arity.lower, upper)
 				}
+			} else if arity.lower == 0 {
+				"Expected zero or more arguments".to_string()
 			} else {
-				if arity.lower == 0 {
-					format!("Expected zero or more arguments")
-				} else {
-					format!("Expected {} or more arguments", arity.lower)
-				}
+				format!("Expected {} or more arguments", arity.lower)
 			};
 
 			return Err(Error::InvalidArguments {

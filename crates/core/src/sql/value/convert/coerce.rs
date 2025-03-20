@@ -250,12 +250,12 @@ impl Coerce for Regex {
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
 		if let Value::Regex(x) = v {
-			return Ok(x);
+			Ok(x)
 		} else {
-			return Err(CoerceError::InvalidKind {
+			Err(CoerceError::InvalidKind {
 				from: v,
 				into: "regex".to_string(),
-			});
+			})
 		}
 	}
 }
@@ -267,12 +267,12 @@ impl Coerce for Point<f64> {
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
 		if let Value::Geometry(Geometry::Point(x)) = v {
-			return Ok(x);
+			Ok(x)
 		} else {
-			return Err(CoerceError::InvalidKind {
+			Err(CoerceError::InvalidKind {
 				from: v,
 				into: "point".to_string(),
-			});
+			})
 		}
 	}
 }
@@ -501,7 +501,7 @@ impl Value {
 	}
 
 	fn can_coerce_to_literal(&self, val: &Literal) -> bool {
-		val.validate_value(&self)
+		val.validate_value(self)
 	}
 
 	/// Convert the value using coercion rules.
@@ -687,7 +687,7 @@ impl Value {
 		if array.len() as u64 != len {
 			return Err(CoerceError::InvalidLength {
 				into: format!("set<{kind}, {len}>"),
-				len: array.len() as usize,
+				len: array.len(),
 			});
 		}
 

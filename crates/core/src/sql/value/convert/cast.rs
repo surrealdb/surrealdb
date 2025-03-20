@@ -346,7 +346,7 @@ impl Cast for Uuid {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Uuid(u) => Ok(u),
-			Value::Strand(ref s) => Uuid::from_str(&**s).map_err(|_| CastError::InvalidKind {
+			Value::Strand(ref s) => Uuid::from_str(s).map_err(|_| CastError::InvalidKind {
 				from: v,
 				into: "uuid".into(),
 			}),
@@ -539,7 +539,7 @@ impl Cast for Point<f64> {
 
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
-			Value::Geometry(Geometry::Point(v)) => Ok(v.into()),
+			Value::Geometry(Geometry::Point(v)) => Ok(v),
 			Value::Array(x) => {
 				if x.len() != 2 {
 					return Err(CastError::InvalidKind {
@@ -585,19 +585,15 @@ impl Cast for Thing {
 			Value::Thing(x) => Ok(x),
 			Value::Strand(x) => match Thing::from_str(x.as_ref()) {
 				Ok(x) => Ok(x),
-				Err(_) => {
-					return Err(CastError::InvalidKind {
-						from: Value::Strand(x),
-						into: "record".to_string(),
-					})
-				}
-			},
-			from => {
-				return Err(CastError::InvalidKind {
-					from,
+				Err(_) => Err(CastError::InvalidKind {
+					from: Value::Strand(x),
 					into: "record".to_string(),
-				})
-			}
+				}),
+			},
+			from => Err(CastError::InvalidKind {
+				from,
+				into: "record".to_string(),
+			}),
 		}
 	}
 }
@@ -722,7 +718,7 @@ impl Value {
 	}
 
 	fn can_cast_to_literal(&self, val: &Literal) -> bool {
-		val.validate_value(&self)
+		val.validate_value(self)
 	}
 
 	pub fn cast_to<T: Cast>(self) -> Result<T, CastError> {

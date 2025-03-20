@@ -463,7 +463,7 @@ impl Vector {
 				Ok(())
 			}
 			Value::Number(n) => {
-				vec.push(n.clone().try_into()?);
+				vec.push(n.try_into()?);
 				Ok(())
 			}
 			_ => Err(Error::InvalidVectorValue(value.clone().to_raw_string())),
@@ -506,7 +506,7 @@ impl Vector {
 		T: TryFrom<Number, Error = Error>,
 	{
 		for n in v {
-			vec.push(n.clone().try_into()?);
+			vec.push(n.try_into()?);
 		}
 		Ok(())
 	}
