@@ -57,17 +57,9 @@ mod version;
 mod tests;
 
 pub use authenticate::Authenticate;
-/// Not supported yet
-#[doc(hidden)]
 pub use begin::Begin;
-/// Not supported yet
-#[doc(hidden)]
 pub use begin::Transaction;
-/// Not supported yet
-#[doc(hidden)]
 pub use cancel::Cancel;
-/// Not supported yet
-#[doc(hidden)]
 pub use commit::Commit;
 pub use content::Content;
 pub use create::Create;
@@ -257,6 +249,12 @@ where
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
+		}
+	}
+
+	pub fn transaction(self) -> Begin<C> {
+		Begin {
+			client: self,
 		}
 	}
 
