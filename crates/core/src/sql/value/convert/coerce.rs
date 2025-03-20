@@ -515,7 +515,6 @@ impl Value {
 	}
 
 	/// Try to coerce this value to the specified `Kind`
-	#[must_use]
 	pub(crate) fn coerce_to_kind(self, kind: &Kind) -> Result<Value, CoerceError> {
 		// Attempt to convert to the desired type
 		match kind {
