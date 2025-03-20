@@ -591,15 +591,6 @@ pub enum Error {
 		target_type: String,
 	},
 
-	/// The specified field did not conform to the field type check
-	#[error("Found {value} for field `{field}`, with record `{thing}`, but expected a {check}")]
-	FieldCheck {
-		thing: String,
-		value: String,
-		field: Idiom,
-		check: String,
-	},
-
 	/// The specified field did not conform to the field ASSERT clause
 	#[error("Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}")]
 	FieldValue {
@@ -705,14 +696,7 @@ pub enum Error {
 
 	/// Unable to coerce to a value to another value
 	#[error("{0}")]
-	CoerceTo(#[from] CoerceError),
-
-	/// Unable to coerce to a value to another value
-	#[error("Expected a {into} but found {from}")]
-	CoerceOuter {
-		from: Value,
-		into: String,
-	},
+	Coerce(#[from] CoerceError),
 
 	/// Unable to convert a value to another value
 	#[error("{0}")]
@@ -1487,7 +1471,7 @@ impl Error {
 	pub fn is_schema_related(&self) -> bool {
 		matches!(
 			self,
-			Error::FieldCheck { .. }
+			Error::FieldCoerce { .. }
 				| Error::FieldValue { .. }
 				| Error::FieldReadonly { .. }
 				| Error::FieldUndefined { .. }

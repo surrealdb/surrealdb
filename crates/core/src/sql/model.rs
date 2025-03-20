@@ -115,7 +115,7 @@ impl Model {
 				// Compute the model function arguments
 				let mut args = v
 					.into_iter()
-					.map(|(k, v)| Ok((k, Value::try_into(v)?)))
+					.map(|(k, v)| Ok((k, v.coerce_to::<f64>()? as f32)))
 					.collect::<Result<HashMap<String, f32>, Error>>()
 					.map_err(|_| Error::InvalidArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),

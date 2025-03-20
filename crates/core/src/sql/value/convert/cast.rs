@@ -29,7 +29,7 @@ pub enum CastError {
 	//
 	// Remove once the move to anyhow is complete.
 	RangeSizeLimit {
-		value: Range,
+		value: Box<Range>,
 	},
 }
 impl std::error::Error for CastError {}
@@ -451,7 +451,7 @@ impl Cast for Array {
 				// unwrap checked above
 				let range = range.coerce_to_typed::<i64>().unwrap();
 				range.clone().cast_to_array().ok_or_else(|| CastError::RangeSizeLimit {
-					value: Range::from(range),
+					value: Box::new(Range::from(range)),
 				})
 			}
 			_ => Err(CastError::InvalidKind {

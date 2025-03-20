@@ -138,10 +138,11 @@ pub fn slice(
 		0
 	};
 
-	let end = match lim {
+	let take = match lim {
 		Some(v) => {
 			if v < 0 {
-				str_len().saturating_add(v).max(0) as usize
+				let len = str_len().saturating_add(v).max(0) as usize;
+				len.saturating_sub(beg)
 			} else {
 				v as usize
 			}
@@ -149,7 +150,6 @@ pub fn slice(
 		None => usize::MAX,
 	};
 
-	let take = end.saturating_sub(beg);
 	if take == 0 {
 		return Ok(String::new().into());
 	}
@@ -524,6 +524,7 @@ mod tests {
 
 	#[test]
 	fn string_slice() {
+		#[track_caller]
 		fn test(initial: &str, beg: Option<i64>, end: Option<i64>, expected: &str) {
 			assert_eq!(
 				slice((initial.to_owned(), Optional(beg), Optional(end))).unwrap(),
@@ -549,6 +550,7 @@ mod tests {
 
 	#[test]
 	fn string_contains() {
+		#[track_caller]
 		fn test(base: &str, contained: &str, expected: bool) {
 			assert_eq!(
 				contains((base.to_string(), contained.to_string())).unwrap(),
@@ -567,6 +569,7 @@ mod tests {
 
 	#[test]
 	fn string_replace() {
+		#[track_caller]
 		fn test(base: &str, pattern: Value, replacement: &str, expected: &str) {
 			assert_eq!(
 				replace((base.to_string(), pattern.clone(), replacement.to_string())).unwrap(),
@@ -599,6 +602,7 @@ mod tests {
 
 	#[test]
 	fn string_matches() {
+		#[track_caller]
 		fn test(base: &str, regex: &str, expected: bool) {
 			assert_eq!(
 				matches((base.to_string(), Cast(regex.parse().unwrap()))).unwrap(),
