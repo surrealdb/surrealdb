@@ -5,7 +5,6 @@ use crate::api::method::BoxFuture;
 use crate::api::method::Cancel;
 use crate::api::method::Commit;
 use std::future::IntoFuture;
-use std::ops::Deref;
 use surrealdb_core::sql::statements::BeginStatement;
 
 /// A beginning of a transaction
@@ -55,16 +54,5 @@ where
 		Cancel {
 			client: self.client,
 		}
-	}
-}
-
-impl<C> Deref for Transaction<C>
-where
-	C: Connection,
-{
-	type Target = Surreal<C>;
-
-	fn deref(&self) -> &Self::Target {
-		&self.client
 	}
 }
