@@ -14,9 +14,10 @@ value = "[4]"
 value = "[1, 1, 1]"
 
 [[test.results]]
-value = "[2, 3, 'text', 3, 1, 4]"
-
+match = "$results CONSTAINSALL [1,2,'text',3,4]"
+error = false
 */
+
 array::shuffle([]);
 array::shuffle(3);
 array::shuffle([4]);
