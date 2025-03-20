@@ -1400,6 +1400,10 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineBucketStatement> {
+		if !self.settings.files_enabled {
+			bail!("Cannot define a bucket, as the experimental files capability is not enabled", @self.last_span);
+		}
+
 		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));

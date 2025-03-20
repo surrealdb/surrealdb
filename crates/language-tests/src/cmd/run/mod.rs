@@ -380,6 +380,7 @@ async fn run_test_with_dbs(
 		define_api_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::DefineApi),
+		files_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
 		..Default::default()
 	};
 

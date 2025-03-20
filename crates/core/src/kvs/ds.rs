@@ -865,6 +865,7 @@ impl Datastore {
 			define_api_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),
+			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
 			..Default::default()
 		};
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);

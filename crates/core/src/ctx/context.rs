@@ -2,6 +2,7 @@ use crate::buc::{self, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
@@ -492,6 +493,10 @@ impl MutableContext {
 		db: &str,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>, Error> {
+		if !self.capabilities.allows_experimental(&ExperimentalTarget::Files) {
+			return Err(Error::Unreachable("Experimental files capability is not enabled".into()));
+		}
+
 		if let Some(buckets) = &self.buckets {
 			let key = (ns.to_string(), db.to_string(), bu.to_string());
 			if let Some(bucket_ref) = buckets.get(&key) {
