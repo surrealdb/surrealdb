@@ -7,6 +7,8 @@ use crate::{
 	},
 };
 
+use std::mem;
+
 pub fn file(lexer: &mut Lexer, start: Token) -> Result<File, SyntaxError> {
 	let close_char = match start.kind {
 		t!("f\"") => '"',
@@ -19,12 +21,14 @@ pub fn file(lexer: &mut Lexer, start: Token) -> Result<File, SyntaxError> {
 		bail!("Unexpected {found}, expected a valid bucket name", @lexer.current_span());
 	};
 
+	// Expect `:/`, however `/` is part of the parsed key
 	lexer.expect(':')?;
-	lexer.expect('/')?;
+	lexer.advance_span();
 
-	let key = if let Some(key) = eat_segment(lexer, true)? {
-		format!("/{key}")
-	} else {
+	lexer.expect('/')?;
+	lexer.scratch.push('/');
+
+	let Some(key) = eat_segment(lexer, true)? else {
 		let found = lexer.reader.peek().map(|x| format!("`{x}`")).unwrap_or("end of file".into());
 		bail!("Unexpected {found}, expected a valid file path", @lexer.current_span());
 	};
@@ -38,39 +42,44 @@ pub fn file(lexer: &mut Lexer, start: Token) -> Result<File, SyntaxError> {
 }
 
 fn eat_segment(lexer: &mut Lexer, eat_slash: bool) -> Result<Option<String>, SyntaxError> {
-	let mut segment = String::new();
-	while let Some(char) = eat_char(lexer, eat_slash)? {
-		segment.push(char as char);
-	}
-
-	if segment.is_empty() {
+	// Expect a first character, otherwise return None
+	// We check this here instead of based on the lexer's scratch,
+	// as the main function may have already pushed a `/` onto the scratch
+	if !eat_char(lexer, eat_slash)? {
 		return Ok(None);
 	}
 
+	// Keep eating characters until we're done
+	while eat_char(lexer, eat_slash)? {}
+
+	// Return the eaten segment
 	lexer.advance_span();
-	Ok(Some(segment))
+	Ok(Some(mem::take(&mut lexer.scratch)))
 }
 
-fn eat_char(lexer: &mut Lexer, eat_slash: bool) -> Result<Option<u8>, SyntaxError> {
-	if let Some(peek) = lexer.reader.peek() {
+fn eat_char(lexer: &mut Lexer, eat_slash: bool) -> Result<bool, SyntaxError> {
+	let x = if let Some(peek) = lexer.reader.peek() {
 		if peek.is_ascii_alphanumeric()
 			|| matches!(peek, b'-' | b'_' | b'.')
 			|| (eat_slash && peek == b'/')
 		{
 			lexer.reader.next();
-			Ok(Some(peek))
+			peek
 		} else if peek == b'\\' {
 			lexer.reader.next();
-			let Some(char) = lexer.reader.next() else {
+			let Some(x) = lexer.reader.next() else {
 				lexer.advance_span();
-				bail!("Unexpected end of file, expected byte to finish",@lexer.current_span());
+				bail!("Unexpected end of file, expected escape sequence to finish",@lexer.current_span());
 			};
 
-			Ok(Some(char))
+			x
 		} else {
-			Ok(None)
+			return Ok(false);
 		}
 	} else {
-		Ok(None)
-	}
+		return Ok(false);
+	};
+
+	lexer.scratch.push(lexer.reader.convert_to_char(x)?);
+	Ok(true)
 }
