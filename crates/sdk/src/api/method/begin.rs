@@ -1,3 +1,5 @@
+use crate::api::method::BoxFuture;
+use crate::api::method::Transaction;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::Surreal;
@@ -28,31 +30,5 @@ where
 				client: self.client,
 			})
 		})
-	}
-}
-
-/// An ongoing transaction
-#[derive(Debug)]
-#[must_use = "transactions must be committed or cancelled to complete them"]
-pub struct Transaction<C: Connection> {
-	client: Surreal<C>,
-}
-
-impl<C> Transaction<C>
-where
-	C: Connection,
-{
-	/// Creates a commit future
-	pub fn commit(self) -> Commit<C> {
-		Commit {
-			client: self.client,
-		}
-	}
-
-	/// Creates a cancel future
-	pub fn cancel(self) -> Cancel<C> {
-		Cancel {
-			client: self.client,
-		}
 	}
 }
