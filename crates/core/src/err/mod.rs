@@ -1298,6 +1298,12 @@ pub enum Error {
 
 	#[error("File access denied: {0}")]
 	FileAccessDenied(String),
+
+	#[error("Invalid array element type for field '{field}': {kind}")]
+	InvalidArrayElementType {
+		field: String,
+		kind: String,
+	},
 }
 
 impl From<Error> for String {
