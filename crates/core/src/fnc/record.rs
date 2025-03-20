@@ -9,6 +9,8 @@ use crate::sql::value::Value;
 use crate::sql::{Array, Idiom, Kind, Literal, Part, Table};
 use reblessive::tree::Stk;
 
+use super::args::Optional;
+
 pub async fn exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(arg,): (Thing,),
@@ -33,7 +35,7 @@ pub fn tb((arg,): (Thing,)) -> Result<Value, Error> {
 
 pub async fn refs(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(id, ft, ff): (Thing, Option<String>, Option<String>),
+	(id, Optional(ft), Optional(ff)): (Thing, Optional<String>, Optional<String>),
 ) -> Result<Value, Error> {
 	if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 		return Err(Error::InvalidFunction {

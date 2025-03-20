@@ -9,7 +9,7 @@ use reblessive::tree::Stk;
 
 pub async fn chain(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(value, worker): (Value, Closure),
+	(value, worker): (Value, Box<Closure>),
 ) -> Result<Value, Error> {
 	if let Some(opt) = opt {
 		let fnc = Function::Anonymous(worker.into(), vec![value], false);

@@ -8,7 +8,7 @@ value = "5562851.11270021f"
 value = "5562851.11270021f"
 
 [[test.results]]
-error = "Incorrect arguments for function geo::distance(). Argument 1 was the wrong type. Expected a geometry but found 1"
+error = "Incorrect arguments for function geo::distance(). Argument 1 was the wrong type. Expected `geometry` but found `1`"
 
 [[test.results]]
 value = "NONE"

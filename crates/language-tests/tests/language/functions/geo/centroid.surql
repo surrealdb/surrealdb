@@ -8,7 +8,7 @@ value = "(-0.10231019499999999, 51.49576478)"
 value = "(-1, 1)"
 
 [[test.results]]
-error = "Incorrect arguments for function geo::centroid(). Argument 1 was the wrong type. Expected a geometry but found 1"
+error = "Incorrect arguments for function geo::centroid(). Argument 1 was the wrong type. Expected `geometry` but found `1`"
 
 */
 geo::centroid({

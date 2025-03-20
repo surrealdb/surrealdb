@@ -243,7 +243,7 @@ impl Segment {
 					let val: Value = current.to_owned().into();
 					let val: Option<Value> = match k {
 						None => Some(val),
-						Some(k) => val.convert_to(k).ok(),
+						Some(k) => val.cast_to_kind(k).ok(),
 					};
 
 					val.map(|val| Some((x.to_owned(), val)))

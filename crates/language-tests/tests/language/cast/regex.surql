@@ -8,7 +8,7 @@ value = "/a/"
 value = "/a/"
 
 [[test.results]]
-error = "Expected a regex but cannot convert 1 into a regex"
+error = "Expected `regex` but found a `1`"
 
 */
 

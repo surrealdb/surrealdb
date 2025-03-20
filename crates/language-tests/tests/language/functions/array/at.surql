@@ -35,7 +35,7 @@ value = "NONE"
 value = "2"
 
 [[test.results]]
-error = "Incorrect arguments for function array::at(). Argument 2 was the wrong type. Expected a i64 but found [1, 2]"
+error = "Incorrect arguments for function array::at(). Argument 2 was the wrong type. Expected `int` but found `[1, 2]`"
 
 */
 

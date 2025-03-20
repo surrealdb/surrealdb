@@ -116,7 +116,7 @@ impl Value {
 					let v = v.compute(stk, ctx, opt, None).await?;
 					match this {
 						Value::Object(obj) => {
-							let Some(x) = obj.get_mut(v.coerce_to_string()?.as_str()) else {
+							let Some(x) = obj.get_mut(v.coerce_to::<String>()?.as_str()) else {
 								return Ok(());
 							};
 							this = x;
@@ -131,7 +131,9 @@ impl Value {
 									.run(|stk| range.fetch(stk, ctx, opt, iter.as_slice()))
 									.await;
 							}
-							let Some(x) = array.get_mut(v.coerce_to_u64()? as usize) else {
+							let idx = v.coerce_to::<i64>()?;
+							// TODO: i64 here is truncated, should probably be handled differently.
+							let Some(x) = array.get_mut(idx as usize) else {
 								return Ok(());
 							};
 							this = x;

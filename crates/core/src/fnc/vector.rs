@@ -53,6 +53,7 @@ pub mod distance {
 	use crate::ctx::Context;
 	use crate::doc::CursorDoc;
 	use crate::err::Error;
+	use crate::fnc::args::Optional;
 	use crate::fnc::get_execution_context;
 	use crate::fnc::util::math::vector::{
 		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
@@ -74,7 +75,7 @@ pub mod distance {
 
 	pub fn knn(
 		(ctx, doc): (&Context, Option<&CursorDoc>),
-		(knn_ref,): (Option<Value>,),
+		(Optional(knn_ref),): (Optional<Value>,),
 	) -> Result<Value, Error> {
 		if let Some((_exe, doc, thg)) = get_execution_context(ctx, doc) {
 			if let Some(ir) = &doc.ir {
@@ -133,36 +134,6 @@ pub mod similarity {
 		Err(Error::FeatureNotYetImplemented {
 			feature: "vector::similarity::spearman() function".to_string(),
 		})
-	}
-}
-
-impl TryFrom<&Value> for Vec<Number> {
-	type Error = Error;
-
-	fn try_from(val: &Value) -> Result<Self, Self::Error> {
-		if let Value::Array(a) = val {
-			a.iter()
-				.map(|v| v.try_into())
-				.collect::<Result<Self, Error>>()
-				.map_err(|e| Error::InvalidVectorValue(e.to_string()))
-		} else {
-			Err(Error::InvalidVectorValue(val.to_string()))
-		}
-	}
-}
-
-impl TryFrom<Value> for Vec<Number> {
-	type Error = Error;
-
-	fn try_from(val: Value) -> Result<Self, Self::Error> {
-		if let Value::Array(a) = val {
-			a.into_iter()
-				.map(Value::try_into)
-				.collect::<Result<Self, Error>>()
-				.map_err(|e| Error::InvalidVectorValue(e.to_string()))
-		} else {
-			Err(Error::InvalidVectorValue(val.to_string()))
-		}
 	}
 }
 

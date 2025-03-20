@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-error = "Incorrect arguments for function array::last(). Expected 1 argument."
+error = "Incorrect arguments for function array::last(). Expected 1 argument"
 
 [[test.results]]
 value = "'world'"

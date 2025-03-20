@@ -40,9 +40,10 @@ impl SetStatement {
 			false => {
 				let result = self.what.compute(stk, ctx, opt, doc).await?;
 				match self.kind {
-					Some(ref kind) => result
-						.coerce_to(kind)
-						.map_err(|e| e.set_check_from_coerce(self.name.to_string())),
+					Some(ref kind) => result.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
+						name: self.name.to_string(),
+						error: Box::new(e),
+					}),
 					None => Ok(result),
 				}
 			}

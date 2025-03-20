@@ -29,7 +29,7 @@ value = "true"
 value = "true"
 
 [[test.results]]
-error = "Incorrect arguments for function rand::string(). Argument 1 was the wrong type. Expected a i64 but found NULL"
+error = "Incorrect arguments for function rand::string(). Argument 1 was the wrong type. Expected `int` but found `NULL`"
 
 */
 

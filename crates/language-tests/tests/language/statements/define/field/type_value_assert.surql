@@ -14,13 +14,13 @@ value = "NONE"
 value = '''{ events: {  }, fields: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z0-9]{3}/ PERMISSIONS FULL" }, indexes: {  }, lives: {  }, tables: {  } }'''
 
 [[test.results]]
-error = "Found NONE for field `test`, with record `user:a`, but expected a string"
+error = "Couldn't coerce value for field `test` of `user:a`: Expected `string` but found `NONE`"
 
 [[test.results]]
 value = "[{ id: user:b, test: '111' }]"
 
 [[test.results]]
-error = "Found 111 for field `test`, with record `user:c`, but expected a string"
+error = "Couldn't coerce value for field `test` of `user:c`: Expected `string` but found `111`"
 
 [[test.results]]
 value = "[{ id: user:d, test: 'AAA' }]"
