@@ -253,9 +253,9 @@ where
 		}
 	}
 
-	pub fn transaction(self) -> Begin<C> {
+	pub fn transaction(&self) -> Begin<C> {
 		Begin {
-			client: self,
+			client: self.clone(),
 		}
 	}
 
