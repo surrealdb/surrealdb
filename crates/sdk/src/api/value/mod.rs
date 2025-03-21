@@ -5,7 +5,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
 	cmp::{Ordering, PartialEq, PartialOrd},
 	fmt,
-	ops::Deref,
+	ops::{Deref, Index},
 	str::FromStr,
 };
 use surrealdb_core::{
@@ -365,6 +365,44 @@ impl Value {
 			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
 			// is safe.
 			std::mem::transmute::<&mut Vec<Value>, &mut Vec<CoreValue>>(v)
+		}
+	}
+}
+
+impl Index<usize> for Value {
+	type Output = Self;
+
+	fn index(&self, index: usize) -> &Self::Output {
+		match &self.0 {
+			CoreValue::Array(map) => {
+				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
+			}
+			_ => &Value(CoreValue::None),
+		}
+	}
+}
+
+impl Index<&str> for Value {
+	type Output = Self;
+
+	fn index(&self, index: &str) -> &Self::Output {
+		match &self.0 {
+			CoreValue::Object(map) => {
+				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
+			}
+			_ => &Value(CoreValue::None),
+		}
+	}
+}
+
+impl Value {
+	pub fn get<Idx>(&self, index: Idx) -> Option<&Value>
+	where
+		Value: Index<Idx, Output = Value>,
+	{
+		match self.index(index) {
+			Value(CoreValue::None) => None,
+			v => Some(v),
 		}
 	}
 }
