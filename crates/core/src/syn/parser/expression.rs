@@ -6,7 +6,7 @@ use reblessive::Stk;
 
 use super::mac::{expected_whitespace, unexpected};
 use crate::sql::Range;
-use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
+use crate::sql::{value::TryNeg, Assignment, Cast, Expression, Number, Operator, Value};
 use crate::syn::error::bail;
 use crate::syn::token::{self, Token};
 use crate::syn::{
@@ -515,6 +515,24 @@ impl Parser<'_> {
 		Ok(Value::Range(Box::new(range)))
 	}
 
+	// Parses assignment
+	async fn parse_assignment(&mut self, ctx: &mut Stk, lhs: Value) -> ParseResult<Value> {
+		let token = self.next();
+		let operator = match token.kind {
+			t!("=") => Operator::Equal,
+			t!("+=") => Operator::Inc,
+			t!("-=") => Operator::Dec,
+			t!("+?=") => Operator::Ext,
+			_ => unexpected!(self, token, "an assign operator"),
+		};
+		let rhs = ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Base)).await?;
+		Ok(Value::Assignment(Box::new(Assignment {
+			l: lhs.to_idiom(),
+			o: operator,
+			r: rhs,
+		})))
+	}
+
 	/// The pratt parsing loop.
 	/// Parses expression according to binding power.
 	async fn pratt_parse_expr(
@@ -532,12 +550,13 @@ impl Parser<'_> {
 		loop {
 			let token = self.peek();
 			let Some(bp) = self.infix_binding_power(token.kind) else {
-				// explain that assignment operators can't be used in normal expressions.
-				if let t!("+=") | t!("*=") | t!("-=") | t!("+?=") = token.kind {
-					unexpected!(self,token,"an operator",
-						=> "assignment operators are only allowed in SET and DUPLICATE KEY UPDATE clauses")
-				}
-				break;
+				// If the token is an assignment operator, Value shouldnt be variant expression.
+				match token.kind {
+					t!("=") | t!("+=") | t!("-=") | t!("+?=") => {
+						return Ok(self.parse_assignment(ctx, lhs).await?);
+					}
+					_ => break,
+				};
 			};
 
 			if bp <= min_bp {

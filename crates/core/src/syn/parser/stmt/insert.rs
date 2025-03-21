@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{statements::InsertStatement, Array, Assignment, Data, Idiom, Subquery, Value},
+	sql::{statements::InsertStatement, Array, Data, Idiom, Subquery, Value},
 	syn::{
 		error::bail,
 		parser::{mac::expected, ParseResult, Parser},
@@ -168,21 +168,15 @@ impl Parser<'_> {
 		// not a `[` so it has to be `ON DUPLICATE KEY UPDATE a = b`
 		if token.kind != t!("[") {
 			//first update field: required cant be empty
-			let l = self.parse_plain_idiom(ctx).await?;
-			let o = self.parse_assigner()?;
-			let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-			let expression = Value::from(Assignment::from((l, o, r)));
+			let assignment = self.parse_value_field(ctx).await?;
 
 			let mut updates = Array::new();
-			updates.push(expression);
+			updates.push(assignment);
 
 			//next update fields
 			while self.eat(t!(",")) {
-				let l = self.parse_plain_idiom(ctx).await?;
-				let o = self.parse_assigner()?;
-				let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-				let expression = Value::from(Assignment::from((l, o, r)));
-				updates.push(expression);
+				let assignment = self.parse_value_field(ctx).await?;
+				updates.push(assignment);
 			}
 
 			//wrap in a vec to match the expected return type
@@ -226,24 +220,18 @@ impl Parser<'_> {
 			}
 
 			//first update field: required if it is not empty
-			let l = self.parse_plain_idiom(ctx).await?;
-			let o = self.parse_assigner()?;
-			let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-			let expression = Value::from(Assignment::from((l, o, r)));
-			let mut expressions = Array::new();
-			expressions.push(expression);
+			let assignment = self.parse_value_field(ctx).await?;
+			let mut update = Array::new();
+			update.push(assignment);
 
 			//next update fields
 			while self.eat(t!(",")) {
-				let l = self.parse_plain_idiom(ctx).await?;
-				let o = self.parse_assigner()?;
-				let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-				let expression = Value::from(Assignment::from((l, o, r)));
-				expressions.push(expression);
+				let assignment = self.parse_value_field(ctx).await?;
+				update.push(assignment);
 			}
 
 			//push update record for this record
-			updates.push(Value::Array(expressions));
+			updates.push(Value::Array(update));
 
 			self.expect_closing_delimiter(t!("}"), token_inner.span)?;
 
