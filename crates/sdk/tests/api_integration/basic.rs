@@ -1726,8 +1726,8 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 
 	let mut response =
 		db.query("SELECT b1 FROM CREATE something SET b1.total_peers = 74").await.unwrap();
-	let first: Value = response.take::<Value>(0).unwrap();
-	let inside = first.index(0).unwrap().field("b1").unwrap().field("total_peers").unwrap();
+	let as_value: Value = response.take::<Value>(0).unwrap();
+	let inside = as_value.get(0).unwrap().get("b1").unwrap().get("total_peers").unwrap();
 	assert_eq!(inside, &Value::from_inner(CoreValue::Number(74.into())));
 }
 

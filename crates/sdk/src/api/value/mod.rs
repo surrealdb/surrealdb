@@ -374,7 +374,9 @@ impl Index<usize> for Value {
 
 	fn index(&self, index: usize) -> &Self::Output {
 		match &self.0 {
-			CoreValue::Array(map) => map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None)),
+			CoreValue::Array(map) => {
+				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
+			}
 			_ => &Value(CoreValue::None),
 		}
 	}
@@ -385,8 +387,22 @@ impl Index<&str> for Value {
 
 	fn index(&self, index: &str) -> &Self::Output {
 		match &self.0 {
-			CoreValue::Object(map) => map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None)),
-			_ => &Value(CoreValue::None)
+			CoreValue::Object(map) => {
+				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
+			}
+			_ => &Value(CoreValue::None),
+		}
+	}
+}
+
+impl Value {
+	pub fn get<Idx>(&self, index: Idx) -> Option<&Value>
+	where
+		Value: Index<Idx, Output = Value>,
+	{
+		match self.index(index) {
+			Value(CoreValue::None) => None,
+			v => Some(v),
 		}
 	}
 }
