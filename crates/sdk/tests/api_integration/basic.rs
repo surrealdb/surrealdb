@@ -1733,17 +1733,14 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 		txn.query(format!("CREATE {table}:baz")).await.unwrap().check().unwrap();
 	}
 
-	fn to_records<T>(tuples: T) -> Vec<ApiRecordId>
-	where
-		T: IntoIterator<Item = (&'static str, &'static str)>,
-	{
-		tuples.into_iter().map(RecordId::from).map(Into::into).collect()
+	fn expected(table: &str) -> Vec<ApiRecordId> {
+		[(table, "bar"), (table, "baz")].into_iter().map(RecordId::from).map(Into::into).collect()
 	}
 
 	let txn = db.transaction().await.unwrap();
 	insert_data(&txn, table).await;
 	let records: Vec<ApiRecordId> = txn.select(table).await.unwrap();
-	assert_eq!(records, to_records([(table, "bar"), (table, "baz")]));
+	assert_eq!(records, expected(table));
 	let records: Vec<ApiRecordId> = db.select(table).await.unwrap();
 	assert!(records.is_empty());
 
@@ -1755,7 +1752,7 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 	insert_data(&txn, table).await;
 	txn.commit().await.unwrap();
 	let records: Vec<ApiRecordId> = db.select(table).await.unwrap();
-	assert_eq!(records, to_records([(table, "bar"), (table, "baz")]));
+	assert_eq!(records, expected(table));
 }
 
 define_include_tests!(basic => {
