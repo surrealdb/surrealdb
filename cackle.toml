@@ -306,6 +306,7 @@ from.build.allow_apis = ["process"]
 
 [pkg.zerocopy]
 allow_unsafe = true
+build.allow_apis = ["fs", "process"]
 
 [pkg.futures-sink]
 allow_unsafe = true
