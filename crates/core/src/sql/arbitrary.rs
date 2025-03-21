@@ -1,3 +1,4 @@
+use crate::sql::regex::regex_new;
 use crate::sql::{
 	changefeed::ChangeFeed, datetime::Datetime, duration::Duration, regex::Regex,
 	statements::SleepStatement,
@@ -22,9 +23,7 @@ impl<'a> Arbitrary<'a> for Datetime {
 impl<'a> Arbitrary<'a> for Regex {
 	fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
 		let ast = Ast::arbitrary(u)?;
-		Ok(Self(
-			regex::Regex::new(&format!("{ast}")).map_err(|_| arbitrary::Error::IncorrectFormat)?,
-		))
+		Ok(Self(regex_new(&format!("{ast}")).map_err(|_| arbitrary::Error::IncorrectFormat)?))
 	}
 }
 
