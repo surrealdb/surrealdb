@@ -1,4 +1,4 @@
-use crate::sql::{escape::escape_ident, fmt::Fmt, strand::no_nul_bytes, Id, Ident, Thing};
+use crate::sql::{escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes, Id, Ident, Thing};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -75,6 +75,6 @@ impl Table {
 
 impl Display for Table {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&escape_ident(&self.0), f)
+		EscapeIdent(&self.0).fmt(f)
 	}
 }
