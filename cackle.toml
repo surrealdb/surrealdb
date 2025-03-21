@@ -344,6 +344,7 @@ from.build.allow_apis = ["fs"]
 
 [pkg.getrandom]
 allow_unsafe = true
+build.allow_apis = ["process"]
 
 [pkg.syn]
 allow_unsafe = true
