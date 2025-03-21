@@ -5,7 +5,6 @@ use reblessive::Stk;
 use crate::{
 	sql::{Block, Geometry, Object, Strand, Value},
 	syn::{
-		error::bail,
 		lexer::compound,
 		parser::{enter_object_recursion, mac::expected, ParseResult, Parser},
 		token::{t, Glued, Span, TokenKind},
@@ -41,386 +40,78 @@ impl Parser<'_> {
 		self.parse_block(ctx, start).await.map(Box::new).map(Value::Block)
 	}
 
-	async fn parse_object_or_geometry_after_type(
-		&mut self,
-		ctx: &mut Stk,
-		start: Span,
-		key: String,
-	) -> ParseResult<Value> {
-		expected!(self, t!(":"));
-		// for it to be geometry the next value must be a strand like.
-		let (t!("\"") | t!("'") | TokenKind::Glued(Glued::Strand)) = self.peek_kind() else {
-			return self
-				.parse_object_from_key(ctx, key, BTreeMap::new(), start)
+	async fn convert_to_geometry(&mut self, geometry_type: &str, object: Object) -> Value {
+		match geometry_type {
+			"GeometryCollection" => self
+				.convert_to_geometry_collection(object.clone())
 				.await
-				.map(Value::Object);
-		};
-
-		// We know it is a strand so check if the type is one of the allowe geometry types.
-		// If it is, there are some which all take roughly the save type of value and produce a
-		// similar output, which is parsed with parse_geometry_after_type
-		//
-		// GeometryCollection however has a different object key for its value, so it is handled
-		// appart from the others.
-		let type_value = self.next_token_value::<Strand>()?.0;
-		match type_value.as_str() {
-			"Point" => {
-				// we matched a type correctly but the field containing the geometry value
-				// can still be wrong.
-				//
-				// we can unwrap strand since we just matched it to not be an err.
-				self.parse_geometry_after_type(
-					ctx,
-					start,
-					key,
-					type_value,
-					Geometry::array_to_point,
-					|x| Value::Geometry(Geometry::Point(x)),
-				)
+				.unwrap_or(Value::Object(object)),
+			"Point" | "LineString" | "Polygon" | "MultiPoint" | "MultiLineString"
+			| "MultiPolygon" => self
+				.convert_to_geometry_non_collections(geometry_type, object.clone())
 				.await
-			}
-			"LineString" => {
-				self.parse_geometry_after_type(
-					ctx,
-					start,
-					key,
-					type_value,
-					Geometry::array_to_line,
-					|x| Value::Geometry(Geometry::Line(x)),
-				)
-				.await
-			}
-			"Polygon" => {
-				self.parse_geometry_after_type(
-					ctx,
-					start,
-					key,
-					type_value,
-					Geometry::array_to_polygon,
-					|x| Value::Geometry(Geometry::Polygon(x)),
-				)
-				.await
-			}
-			"MultiPoint" => {
-				self.parse_geometry_after_type(
-					ctx,
-					start,
-					key,
-					type_value,
-					Geometry::array_to_multipoint,
-					|x| Value::Geometry(Geometry::MultiPoint(x)),
-				)
-				.await
-			}
-			"MultiLineString" => {
-				self.parse_geometry_after_type(
-					ctx,
-					start,
-					key,
-					type_value,
-					Geometry::array_to_multiline,
-					|x| Value::Geometry(Geometry::MultiLine(x)),
-				)
-				.await
-			}
-			"MultiPolygon" => {
-				self.parse_geometry_after_type(
-					ctx,
-					start,
-					key,
-					type_value,
-					Geometry::array_to_multipolygon,
-					|x| Value::Geometry(Geometry::MultiPolygon(x)),
-				)
-				.await
-			}
-			"GeometryCollection" => {
-				if !self.eat(t!(",")) {
-					// missing next field, not a geometry.
-					return self
-						.parse_object_from_map(
-							ctx,
-							BTreeMap::from([(key, Value::Strand(type_value.into()))]),
-							start,
-						)
-						.await
-						.map(Value::Object);
-				}
-
-				let coord_key = self.parse_object_key()?;
-				if coord_key != "geometries" {
-					expected!(self, t!(":"));
-					// invalid field key, not a Geometry
-					return self
-						.parse_object_from_key(
-							ctx,
-							coord_key,
-							BTreeMap::from([(key, Value::Strand(type_value.into()))]),
-							start,
-						)
-						.await
-						.map(Value::Object);
-				}
-
-				expected!(self, t!(":"));
-
-				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-
-				// check for an object end, if it doesn't end it is not a geometry.
-				if !self.eat(t!(",")) {
-					self.expect_closing_delimiter(t!("}"), start)?;
-				} else {
-					if self.peek_kind() != t!("}") {
-						// A comma and then no brace. more then two fields, not a geometry.
-						return self
-							.parse_object_from_map(
-								ctx,
-								BTreeMap::from([
-									(key, Value::Strand(type_value.into())),
-									(coord_key, value),
-								]),
-								start,
-							)
-							.await
-							.map(Value::Object);
-					}
-					self.pop_peek();
-				}
-
-				// try to convert to the right value.
-				if let Value::Array(x) = value {
-					// test first to avoid a cloning.
-					if x.iter().all(|x| matches!(x, Value::Geometry(_))) {
-						let geometries =
-							x.0.into_iter()
-								.map(|x| {
-									if let Value::Geometry(x) = x {
-										x
-									} else {
-										unreachable!()
-									}
-								})
-								.collect();
-
-						return Ok(Value::Geometry(Geometry::Collection(geometries)));
-					}
-
-					return Ok(Value::Object(Object(BTreeMap::from([
-						(key, Value::Strand(type_value.into())),
-						(coord_key, Value::Array(x)),
-					]))));
-				}
-
-				// Couldn't convert so it is a normal object.
-				Ok(Value::Object(Object(BTreeMap::from([
-					(key, Value::Strand(type_value.into())),
-					(coord_key, value),
-				]))))
-			}
-			// key was not one of the allowed keys so it is a normal object.
-			_ => {
-				let object = BTreeMap::from([(key, Value::Strand(type_value.into()))]);
-
-				if self.eat(t!(",")) {
-					self.parse_object_from_map(ctx, object, start).await.map(Value::Object)
-				} else {
-					self.expect_closing_delimiter(t!("}"), start)?;
-					Ok(Value::Object(Object(object)))
-				}
-			}
+				.unwrap_or(Value::Object(object)),
+			_ => Value::Object(object),
 		}
 	}
 
-	async fn parse_object_or_geometry_after_coordinates(
-		&mut self,
-		ctx: &mut Stk,
-		start: Span,
-		key: String,
-	) -> ParseResult<Value> {
-		expected!(self, t!(":"));
+	async fn convert_to_geometry_collection(&mut self, object: Object) -> ParseResult<Value> {
+		// check if the object has the correct fields.
+		// try to convert to the right value.
+		if let Some(Value::Array(x)) = object.get("geometries") {
+			if x.iter().all(|x| matches!(x, Value::Geometry(_))) {
+				let geometries = x
+					.iter()
+					.map(|x| {
+						if let Value::Geometry(x) = x {
+							x.clone()
+						} else {
+							unreachable!()
+						}
+					})
+					.collect();
 
-		// found coordinates field, next must be a coordinates value but we don't know
-		// which until we match type.
-		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-
-		if !self.eat(t!(",")) {
-			// no comma object must end early.
-			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
+				return Ok(Value::Geometry(Geometry::Collection(geometries)));
+			}
 		}
-
-		if self.eat(t!("}")) {
-			// object ends early.
-			return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
-		}
-
-		let type_key = self.parse_object_key()?;
-		if type_key != "type" {
-			expected!(self, t!(":"));
-			// not the right field, return object.
-			return self
-				.parse_object_from_key(ctx, type_key, BTreeMap::from([(key, value)]), start)
-				.await
-				.map(Value::Object);
-		}
-		expected!(self, t!(":"));
-
-		let (t!("\"") | t!("'")) = self.peek_kind() else {
-			// not the right value also move back to parsing an object.
-			return self
-				.parse_object_from_key(ctx, type_key, BTreeMap::from([(key, value)]), start)
-				.await
-				.map(Value::Object);
-		};
-
-		let type_value = self.next_token_value::<Strand>()?.0;
-		let ate_comma = self.eat(t!(","));
-		// match the type and then match the coordinates field to a value of that type.
-		match type_value.as_str() {
-			"Point" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_point(&value) {
-						return Ok(Value::Geometry(Geometry::Point(point)));
-					}
-				}
-			}
-			"LineString" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_line(&value) {
-						return Ok(Value::Geometry(Geometry::Line(point)));
-					}
-				}
-			}
-			"Polygon" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_polygon(&value) {
-						return Ok(Value::Geometry(Geometry::Polygon(point)));
-					}
-				}
-			}
-			"MultiPoint" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_multipolygon(&value) {
-						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
-					}
-				}
-			}
-			"MultiLineString" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_multiline(&value) {
-						return Ok(Value::Geometry(Geometry::MultiLine(point)));
-					}
-				}
-			}
-			"MultiPolygon" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_multipolygon(&value) {
-						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
-					}
-				}
-			}
-			_ => {}
-		};
-
-		// type field or coordinates value didn't match or the object continues after to
-		// fields.
-
-		if !ate_comma {
-			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([
-				(key, value),
-				(type_key, Value::Strand(type_value.into())),
-			]))));
-		}
-
-		self.parse_object_from_map(
-			ctx,
-			BTreeMap::from([(key, value), (type_key, Value::Strand(type_value.into()))]),
-			start,
-		)
-		.await
-		.map(Value::Object)
+		return Ok(Value::Object(object));
 	}
 
-	async fn parse_object_or_geometry_after_geometries(
+	async fn convert_to_geometry_non_collections(
 		&mut self,
-		ctx: &mut Stk,
-		start: Span,
-		key: String,
+		geometry_type: &str,
+		object: Object,
 	) -> ParseResult<Value> {
-		// 'geometries' key can only happen in a GeometryCollection, so try to parse that.
-		expected!(self, t!(":"));
-
-		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-
-		// if the object ends here, it is not a geometry.
-		if !self.eat(t!(",")) || self.peek_kind() == t!("}") {
-			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
-		}
-
-		// parse the next objectkey
-		let type_key = self.parse_object_key()?;
-		// it if isn't 'type' this object is not a geometry, so bail.
-		if type_key != "type" {
-			expected!(self, t!(":"));
-			return self
-				.parse_object_from_key(ctx, type_key, BTreeMap::from([(key, value)]), start)
-				.await
-				.map(Value::Object);
-		}
-		expected!(self, t!(":"));
-		// check if the next key is a strand.
-		let (t!("\"") | t!("'")) = self.peek_kind() else {
-			// not the right value also move back to parsing an object.
-			return self
-				.parse_object_from_key(ctx, type_key, BTreeMap::from([(key, value)]), start)
-				.await
-				.map(Value::Object);
+		// check if the object has the correct fields.
+		let coordinates = match object.get("coordinates") {
+			Some(Value::Array(v)) => Value::Array(v.clone()),
+			_ => return Ok(Value::Object(object)),
+		};
+		// convert the coordinates to a geometry.
+		let g = match geometry_type {
+			"Point" => {
+				Geometry::array_to_point(&coordinates).and_then(|x| Some(Geometry::Point(x)))
+			}
+			"LineString" => {
+				Geometry::array_to_line(&coordinates).and_then(|x| Some(Geometry::Line(x)))
+			}
+			"Polygon" => {
+				Geometry::array_to_polygon(&coordinates).and_then(|x| Some(Geometry::Polygon(x)))
+			}
+			"MultiPoint" => Geometry::array_to_multipoint(&coordinates)
+				.and_then(|x| Some(Geometry::MultiPoint(x))),
+			"MultiLineString" => Geometry::array_to_multiline(&coordinates)
+				.and_then(|x| Some(Geometry::MultiLine(x))),
+			"MultiPolygon" => Geometry::array_to_multipolygon(&coordinates)
+				.and_then(|x| Some(Geometry::MultiPolygon(x))),
+			_ => unreachable!(),
 		};
 
-		let type_value = self.next_token_value::<Strand>()?.0;
-		let ate_comma = self.eat(t!(","));
-
-		if type_value == "GeometryCollection" && self.eat(t!("}")) {
-			if let Value::Array(ref x) = value {
-				if x.iter().all(|x| matches!(x, Value::Geometry(_))) {
-					let Value::Array(x) = value else {
-						unreachable!()
-					};
-					let geometries = x
-						.into_iter()
-						.map(|x| {
-							if let Value::Geometry(x) = x {
-								x
-							} else {
-								unreachable!()
-							}
-						})
-						.collect();
-					return Ok(Value::Geometry(Geometry::Collection(geometries)));
-				}
-			}
+		if let Some(g) = g {
+			return Ok(Value::Geometry(Geometry::from(g)));
+		} else {
+			return Ok(Value::Object(object));
 		}
-
-		// Either type value didn't match or gemoetry value didn't match.
-		// Regardless the current object is not a geometry.
-
-		if !ate_comma {
-			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([
-				(key, value),
-				(type_key, Value::Strand(type_value.into())),
-			]))));
-		}
-
-		self.parse_object_from_map(
-			ctx,
-			BTreeMap::from([(key, value), (type_key, Value::Strand(type_value.into()))]),
-			start,
-		)
-		.await
-		.map(Value::Object)
 	}
 
 	/// Parse a production starting with an `{` as either an object or a geometry.
@@ -430,89 +121,43 @@ impl Parser<'_> {
 	async fn parse_object_or_geometry(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Value> {
 		// empty object was already matched previously so next must be a key.
 		let key = self.parse_object_key()?;
+
+		//parse object and then check if there are geometrys.
+		expected!(self, t!(":"));
+		let object = self.parse_object_from_key(ctx, key, BTreeMap::new(), start).await?;
+
 		// the order of fields of a geometry does not matter so check if it is any of geometry like keys
 		// "type" : could be the type of the object.
 		// "collections": could be a geometry collection.
 		// "geometry": could be the values of geometry.
-		match key.as_str() {
-			"type" => self.parse_object_or_geometry_after_type(ctx, start, key).await,
-			"coordinates" => self.parse_object_or_geometry_after_coordinates(ctx, start, key).await,
-			"geometries" => self.parse_object_or_geometry_after_geometries(ctx, start, key).await,
-			_ => {
-				expected!(self, t!(":"));
-				self.parse_object_from_key(ctx, key, BTreeMap::new(), start)
-					.await
-					.map(Value::Object)
-			}
-		}
-	}
 
-	async fn parse_geometry_after_type<F, Fm, R>(
-		&mut self,
-		ctx: &mut Stk,
-		start: Span,
-		key: String,
-		strand: String,
-		capture: F,
-		map: Fm,
-	) -> ParseResult<Value>
-	where
-		F: FnOnce(&Value) -> Option<R>,
-		Fm: FnOnce(R) -> Value,
-	{
-		if !self.eat(t!(",")) {
-			// there is not second field. not a geometry
-			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([(
-				key,
-				Value::Strand(strand.into()),
-			)]))));
-		}
-		let coord_key = self.parse_object_key()?;
-		if coord_key != "coordinates" {
-			expected!(self, t!(":"));
-			// next field was not correct, fallback to parsing plain object.
-			return self
-				.parse_object_from_key(
-					ctx,
-					coord_key,
-					BTreeMap::from([(key, Value::Strand(strand.into()))]),
-					start,
-				)
-				.await
-				.map(Value::Object);
-		}
-		expected!(self, t!(":"));
-		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-		let comma = self.eat(t!(","));
-		if !self.eat(t!("}")) {
-			// the object didn't end, either an error or not a geometry.
-			if !comma {
-				bail!("Unexpected token, expected delimiter `}}`",
-					@self.recent_span(),
-					@start => "expected this delimiter to close"
-				);
-			}
-
-			return self
-				.parse_object_from_map(
-					ctx,
-					BTreeMap::from([(key, Value::Strand(strand.into())), (coord_key, value)]),
-					start,
-				)
-				.await
-				.map(Value::Object);
-		}
-
-		let Some(v) = capture(&value) else {
-			// failed to match the geometry value, just a plain object.
-			return Ok(Value::Object(Object(BTreeMap::from([
-				(key, Value::Strand(strand.into())),
-				(coord_key, value),
-			]))));
+		//check if type + any is a possiblity
+		if object.len() != 2 {
+			// object has more then one field, not a geometry.
+			return Ok(Value::Object(object));
 		};
-		// successfully matched the value, it is a geometry.
-		Ok(map(v))
+
+		//check if type is present
+		match object.get("type") {
+			Some(Value::Strand(s)) => {
+				let o_type = s.as_str();
+				if o_type == "Point"
+					|| o_type == "LineString"
+					|| o_type == "Polygon"
+					|| o_type == "MultiPoint"
+					|| o_type == "MultiLineString"
+					|| o_type == "MultiPolygon"
+					|| o_type == "GeometryCollection"
+				{
+					return Ok(self.convert_to_geometry(o_type, object.clone()).await);
+				}
+				return Ok(Value::Object(object));
+			}
+			_ => {
+				// type field was not a strand, not a geometry.
+				return Ok(Value::Object(object));
+			}
+		}
 	}
 
 	async fn parse_object_from_key(
