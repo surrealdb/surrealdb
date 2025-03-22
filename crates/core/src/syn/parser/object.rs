@@ -41,6 +41,7 @@ impl Parser<'_> {
 	}
 
 	async fn convert_to_geometry(&mut self, geometry_type: &str, object: Object) -> Value {
+		// since geometry differ in the second key (geometries or coordinates), they are handled differently
 		match geometry_type {
 			"GeometryCollection" => self
 				.convert_to_geometry_collection(object.clone())
@@ -57,8 +58,8 @@ impl Parser<'_> {
 
 	async fn convert_to_geometry_collection(&mut self, object: Object) -> ParseResult<Value> {
 		// check if the object has the correct fields.
-		// try to convert to the right value.
 		if let Some(Value::Array(x)) = object.get("geometries") {
+			// try to convert to a geometry collection.
 			if x.iter().all(|x| matches!(x, Value::Geometry(_))) {
 				let geometries = x
 					.iter()
@@ -66,6 +67,7 @@ impl Parser<'_> {
 						if let Value::Geometry(x) = x {
 							x.clone()
 						} else {
+							// unsure if unreachable or error here or just default back to return object
 							unreachable!()
 						}
 					})
@@ -104,11 +106,12 @@ impl Parser<'_> {
 				.and_then(|x| Some(Geometry::MultiLine(x))),
 			"MultiPolygon" => Geometry::array_to_multipolygon(&coordinates)
 				.and_then(|x| Some(Geometry::MultiPolygon(x))),
+			// unsure if unreachable or error here or just default back to return object
 			_ => unreachable!(),
 		};
 
 		if let Some(g) = g {
-			return Ok(Value::Geometry(Geometry::from(g)));
+			return Ok(Value::Geometry(g));
 		} else {
 			return Ok(Value::Object(object));
 		}
@@ -122,24 +125,21 @@ impl Parser<'_> {
 		// empty object was already matched previously so next must be a key.
 		let key = self.parse_object_key()?;
 
-		//parse object and then check if there are geometrys.
+		//parse object
 		expected!(self, t!(":"));
 		let object = self.parse_object_from_key(ctx, key, BTreeMap::new(), start).await?;
 
-		// the order of fields of a geometry does not matter so check if it is any of geometry like keys
-		// "type" : could be the type of the object.
-		// "collections": could be a geometry collection.
-		// "geometry": could be the values of geometry.
-
 		//check if type + any is a possiblity
 		if object.len() != 2 {
-			// object has more then one field, not a geometry.
+			// object has more then two fields, not a geometry.
 			return Ok(Value::Object(object));
 		};
 
 		//check if type is present
 		match object.get("type") {
 			Some(Value::Strand(s)) => {
+				//check if type value is a sign to convert to data type 
+				//add new data types conversions here
 				let o_type = s.as_str();
 				if o_type == "Point"
 					|| o_type == "LineString"
@@ -151,6 +151,7 @@ impl Parser<'_> {
 				{
 					return Ok(self.convert_to_geometry(o_type, object.clone()).await);
 				}
+				//unknown type, just return object
 				return Ok(Value::Object(object));
 			}
 			_ => {
