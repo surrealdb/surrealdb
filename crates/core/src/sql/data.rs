@@ -12,7 +12,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -26,7 +26,7 @@ pub enum Data {
 	ContentExpression(Value),
 	SingleExpression(Value),
 	ValuesExpression(Vec<Vec<(Idiom, Value)>>),
-	UpdateExpression(Vec<(Idiom, Operator, Value)>),
+	UpdateExpression(Value),
 }
 
 impl Default for Data {
@@ -114,13 +114,7 @@ impl Display for Data {
 					Fmt::comma_separated(v.iter().map(|(_, v)| v))
 				))))
 			),
-			Self::UpdateExpression(v) => write!(
-				f,
-				"ON DUPLICATE KEY UPDATE {}",
-				Fmt::comma_separated(
-					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
-				)
-			),
+			Self::UpdateExpression(v) => write!(f, "ON DUPLICATE KEY UPDATE {v}"),
 		}
 	}
 }

@@ -329,62 +329,86 @@ impl Document {
 					}
 					// Freeze the context
 					let ctx = ctx.freeze();
+
+					let update = match x {
+						//one update for all records
+						Value::Array(u) => u.clone(),
+						//each update for each record
+						Value::Object(u) => match u.get(&rid.to_string()) {
+							Some(value) => Value::convert_to_array(value.clone())?.clone(),
+							None => return Err(fail!("Key not found: {rid}")),
+						},
+						u => {
+							return Err(fail!("Unexpected Value in UPDATE clause: {u:?}"));
+						}
+					};
+
 					// Process ON DUPLICATE KEY clause
 					match self.reduced(stk, &ctx, opt, Current).await? {
 						true => {
-							for x in x.iter() {
-								#[rustfmt::skip]
-								let v = x.2.compute(stk, &ctx, opt, Some(&self.current_reduced)).await?;
-								match &x.1 {
-									#[rustfmt::skip]
-									Operator::Equal => match v {
-										Value::None => {
-											self.current_reduced.doc.to_mut().del(stk, &ctx, opt, &x.0).await?;
-											self.current.doc.to_mut().del(stk, &ctx, opt, &x.0).await?;
-										},
-										_ => {
-											self.current_reduced.doc.to_mut().set(stk, &ctx, opt, &x.0, v.clone()).await?;
-											self.current.doc.to_mut().set(stk, &ctx, opt, &x.0, v).await?;
-										},
-									},
-									#[rustfmt::skip]
-									Operator::Inc => {
-										self.current_reduced.doc.to_mut().increment(stk, &ctx, opt, &x.0, v.clone()).await?;
-										self.current.doc.to_mut().increment(stk, &ctx, opt, &x.0, v).await?;
+							for u in update.iter() {
+								match u {
+									Value::Assignment(u) => {
+										#[rustfmt::skip]
+										let v = u.r.compute(stk, &ctx, opt, Some(&self.current_reduced)).await?;
+										match &u.o {
+											#[rustfmt::skip]
+											Operator::Equal => match v {
+												Value::None => {
+													self.current_reduced.doc.to_mut().del(stk, &ctx, opt, &u.l).await?;
+													self.current.doc.to_mut().del(stk, &ctx, opt, &u.l).await?;
+												},
+												_ => {
+													self.current_reduced.doc.to_mut().set(stk, &ctx, opt, &u.l, v.clone()).await?;
+													self.current.doc.to_mut().set(stk, &ctx, opt, &u.l, v).await?;
+												},
+											},
+											#[rustfmt::skip]
+											Operator::Inc => {
+												self.current_reduced.doc.to_mut().increment(stk, &ctx, opt, &u.l, v.clone()).await?;
+												self.current.doc.to_mut().increment(stk, &ctx, opt, &u.l, v).await?;
+											}
+											#[rustfmt::skip]
+											Operator::Dec => {
+												self.current_reduced.doc.to_mut().decrement(stk, &ctx, opt, &u.l, v.clone()).await?;
+												self.current.doc.to_mut().decrement(stk, &ctx, opt, &u.l, v).await?;
+											}
+											#[rustfmt::skip]
+											Operator::Ext => {
+												self.current_reduced.doc.to_mut().extend(stk, &ctx, opt, &u.l, v.clone()).await?;
+												self.current.doc.to_mut().extend(stk, &ctx, opt, &u.l, v).await?;
+											}
+											#[rustfmt::skip]
+											o => { return Err(fail!("Unexpected operator in UPDATE clause: {o:?}")); }
+										}
 									}
-									#[rustfmt::skip]
-									Operator::Dec => {
-										self.current_reduced.doc.to_mut().decrement(stk, &ctx, opt, &x.0, v.clone()).await?;
-										self.current.doc.to_mut().decrement(stk, &ctx, opt, &x.0, v).await?;
-									}
-									#[rustfmt::skip]
-									Operator::Ext => {
-										self.current_reduced.doc.to_mut().extend(stk, &ctx, opt, &x.0, v.clone()).await?;
-										self.current.doc.to_mut().extend(stk, &ctx, opt, &x.0, v).await?;
-									}
-									#[rustfmt::skip]
-									o => { return Err(fail!("Unexpected operator in UPDATE clause: {o:?}")); }
+									_ => return Err(fail!("Unexpected data clause type: {x:?}")),
 								}
 							}
 						}
 						false => {
-							for x in x.iter() {
-								#[rustfmt::skip]
-								let v = x.2.compute(stk, &ctx, opt, Some(&self.current)).await?;
-								match &x.1 {
-									#[rustfmt::skip]
-									Operator::Equal => match v {
-										Value::None => self.current.doc.to_mut().del(stk, &ctx, opt, &x.0).await?,
-										_ => self.current.doc.to_mut().set(stk, &ctx, opt, &x.0, v).await?,
-									},
-									#[rustfmt::skip]
-									Operator::Inc => self.current.doc.to_mut().increment(stk, &ctx, opt, &x.0, v).await?,
-									#[rustfmt::skip]
-									Operator::Dec => self.current.doc.to_mut().decrement(stk, &ctx, opt, &x.0, v).await?,
-									#[rustfmt::skip]
-									Operator::Ext => self.current.doc.to_mut().extend(stk, &ctx, opt, &x.0, v).await?,
-									#[rustfmt::skip]
-									o => { return Err(fail!("Unexpected operator in UPDATE clause: {o:?}")); }
+							for u in update.iter() {
+								match u {
+									Value::Assignment(u) => {
+										#[rustfmt::skip]
+										let v = u.r.compute(stk, &ctx, opt, Some(&self.current)).await?;
+										match &u.o {
+											#[rustfmt::skip]
+											Operator::Equal => match v {
+												Value::None => self.current.doc.to_mut().del(stk, &ctx, opt, &u.l).await?,
+												_ => self.current.doc.to_mut().set(stk, &ctx, opt, &u.l, v).await?,
+											},
+											#[rustfmt::skip]
+											Operator::Inc => self.current.doc.to_mut().increment(stk, &ctx, opt, &u.l, v).await?,
+											#[rustfmt::skip]
+											Operator::Dec => self.current.doc.to_mut().decrement(stk, &ctx, opt, &u.l, v).await?,
+											#[rustfmt::skip]
+											Operator::Ext => self.current.doc.to_mut().extend(stk, &ctx, opt, &u.l, v).await?,
+											#[rustfmt::skip]
+											o => { return Err(fail!("Unexpected operator in UPDATE clause: {o:?}")); }
+										}
+									}
+									_ => return Err(fail!("Unexpected data clause type: {x:?}")),
 								}
 							}
 						}
