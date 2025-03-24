@@ -396,6 +396,12 @@ impl Index<&str> for Value {
 }
 
 impl Value {
+	/// Accesses the value found at a certain field
+	/// if an object, and a certain index if an array.
+	/// Will not err if no value is found at this point,
+	/// instead returning a Value::None. If an Option<&Value>
+	/// is desired, the .into_option() method can be used
+	/// to perform the conversion.
 	pub fn get<Idx>(&self, index: Idx) -> &Value
 	where
 		Value: Index<Idx, Output = Value>,
@@ -403,6 +409,8 @@ impl Value {
 		self.index(index)
 	}
 
+	/// Converts a Value into an Option<&Value>, returning
+	/// a Some in all cases except Value::None.
 	pub fn into_option(&self) -> Option<&Value> {
 		match self {
 			Value(CoreValue::None) => None,
@@ -410,6 +418,7 @@ impl Value {
 		}
 	}
 
+	// Checks to see if a Value is a Value::None.
 	pub fn is_none(&self) -> bool {
 		matches!(&self, Value(CoreValue::None))
 	}
