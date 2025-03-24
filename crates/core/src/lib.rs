@@ -23,8 +23,6 @@ mod mac;
 
 mod cf;
 mod doc;
-#[cfg(feature = "enterprise")]
-mod ent;
 mod exe;
 mod fnc;
 
@@ -50,6 +48,9 @@ pub mod sql;
 pub mod syn;
 pub mod sys;
 pub mod vs;
+
+#[cfg(feature = "enterprise")]
+mod ent;
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;

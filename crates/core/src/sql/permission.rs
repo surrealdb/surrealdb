@@ -143,7 +143,7 @@ impl InfoStructure for Permissions {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub(crate) enum PermissionKind {
+pub enum PermissionKind {
 	Select,
 	Create,
 	Update,
@@ -158,6 +158,12 @@ impl PermissionKind {
 			PermissionKind::Update => "update",
 			PermissionKind::Delete => "delete",
 		}
+	}
+}
+
+impl Display for PermissionKind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		f.write_str(self.as_str())
 	}
 }
 

@@ -4,6 +4,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
 use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
+use crate::sql::permission::PermissionKind;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::syn::error::RenderedError as RenderedParserError;
@@ -567,6 +568,13 @@ pub enum Error {
 	#[error("You don't have permission to run the fn::{name} function")]
 	FunctionPermissions {
 		name: String,
+	},
+
+	/// The permissions do not allow this query to be run on this table
+	#[error("You don't have permission to {kind} this file in the `{name}` bucket")]
+	BucketPermissions {
+		name: String,
+		kind: PermissionKind,
 	},
 
 	/// The specified table can not be written as it is setup as a foreign table view

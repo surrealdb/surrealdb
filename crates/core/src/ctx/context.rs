@@ -493,24 +493,30 @@ impl MutableContext {
 		db: &str,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>, Error> {
+		// Check if experimental capability is enabled
 		if !self.capabilities.allows_experimental(&ExperimentalTarget::Files) {
 			return Err(Error::Unreachable("Experimental files capability is not enabled".into()));
 		}
 
+		// Do we have a buckets context?
 		if let Some(buckets) = &self.buckets {
+			// Attempt to obtain an existing bucket connection
 			let key = (ns.to_string(), db.to_string(), bu.to_string());
 			if let Some(bucket_ref) = buckets.get(&key) {
 				Ok((*bucket_ref).clone())
 			} else {
+				// Obtain the bucket definition
 				let tx = self.tx();
 				let bd = tx.get_db_bucket(ns, db, bu).await?;
 
+				// Connect to the bucket
 				let store = if let Some(ref backend) = bd.backend {
 					buc::connect(&backend, false, bd.readonly)?
 				} else {
 					buc::connect_global(ns, db, bu)?
 				};
 
+				// Persist the bucket connection
 				buckets.insert(key, store.clone());
 				Ok(store)
 			}

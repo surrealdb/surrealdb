@@ -131,7 +131,7 @@ tokio-tungstenite = "0.23.1"
 tracing = "0.1.40"
 ulid = "1.1.0"
 unicase = "2.7.0"
-url = { version = "2.5.0", features = ["serde"] }
+url = "2.5.0"
 uuid = "1.10.0"
 wasm-bindgen-futures = "0.4.39"
 wasmtimer = { version = "0.2.0", default-features = false }

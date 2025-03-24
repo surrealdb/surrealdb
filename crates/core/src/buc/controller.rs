@@ -12,6 +12,7 @@ use object_store::{path::Path, ObjectMeta, ObjectStore, PutPayload};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
+/// Allows you to control a specific in the context of the current user
 pub struct FileController<'a> {
 	stk: &'a mut Stk,
 	ctx: &'a Context,
@@ -24,6 +25,8 @@ pub struct FileController<'a> {
 }
 
 impl<'a> FileController<'a> {
+	/// Create a `FileController` for a specified file
+	/// Will obtain a bucket connection and return back a `FileController` or `Error`
 	pub(crate) async fn from_file(
 		stk: &'a mut Stk,
 		ctx: &'a Context,
@@ -48,10 +51,12 @@ impl<'a> FileController<'a> {
 		})
 	}
 
+	/// Generate a `File` based on the current `FileController`
 	pub(crate) fn into_file(&self) -> File {
 		File::new(self.bucket.name.to_string(), self.key.to_string())
 	}
 
+	/// Checks if the bucket allows writes, and if not, return an `Error::ReadonlyBucket`
 	fn require_writeable(&self) -> Result<(), Error> {
 		if self.bucket.readonly {
 			Err(Error::ReadonlyBucket(self.bucket.name.to_raw()))
@@ -60,6 +65,9 @@ impl<'a> FileController<'a> {
 		}
 	}
 
+	/// Attempt to put a file
+	/// `Bytes` and `Strand` values are supported, and will be converted into `Bytes`
+	/// Create or update permissions will be used, based on if the remote file already exists
 	pub(crate) async fn put(&mut self, value: Value) -> Result<(), Error> {
 		let payload = match value {
 			Value::Bytes(v) => PutPayload::from_bytes(v.0.into()),
@@ -215,7 +223,12 @@ impl<'a> FileController<'a> {
 	pub(crate) async fn check_permission(&mut self, kind: PermissionKind) -> Result<(), Error> {
 		if self.opt.check_perms(kind.into())? {
 			match self.bucket.permissions.get_by_kind(kind) {
-				Permission::None => return Err(Error::Ignore),
+				Permission::None => {
+					return Err(Error::BucketPermissions {
+						name: self.bucket.name.to_raw(),
+						kind,
+					})
+				}
 				Permission::Full => (),
 				Permission::Specific(e) => {
 					// Disable permissions
@@ -227,7 +240,10 @@ impl<'a> FileController<'a> {
 
 					// Process the PERMISSION clause
 					if !e.compute(self.stk, &ctx, opt, self.doc).await?.is_truthy() {
-						return Err(Error::Ignore);
+						return Err(Error::BucketPermissions {
+							name: self.bucket.name.to_raw(),
+							kind,
+						});
 					}
 				}
 			}

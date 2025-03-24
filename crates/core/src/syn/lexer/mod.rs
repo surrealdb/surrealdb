@@ -153,7 +153,7 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	pub(crate) fn advance_span(&mut self) -> Span {
+	fn advance_span(&mut self) -> Span {
 		let span = self.current_span();
 		self.last_offset = self.reader.offset() as u32;
 		span
