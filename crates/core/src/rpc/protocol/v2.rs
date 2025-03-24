@@ -18,7 +18,7 @@ use crate::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
-		Array, Assignment, Fields, Function, Model, Output, Query, Strand, Value,
+		Array, Fields, Function, Model, Output, Query, Strand, Value,
 	},
 };
 
@@ -431,7 +431,7 @@ pub trait RpcProtocolV2: RpcContext {
 			},
 			data: crate::sql::Data::SingleExpression(data),
 			update: match update.is_none_or_null() {
-				false => Some(crate::sql::Data::UpdateExpression(formated_update)),
+				false => Some(crate::sql::Data::UpdateExpression(update)),
 				true => None,
 			},
 			output: Some(Output::After),

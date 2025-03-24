@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Block, Geometry, Object, Strand, Value},
+	sql::{Assignment, Block, Geometry, Idiom, Object, Operator, Strand, Value},
 	syn::{
 		lexer::compound,
 		parser::{enter_object_recursion, mac::expected, ParseResult, Parser},
@@ -117,6 +117,40 @@ impl Parser<'_> {
 		}
 	}
 
+	async fn convert_to_assignment(&mut self, object: Object) -> Value {
+		// check if the object has the correct fields.
+		let assignment = match object.get("value") {
+			Some(Value::Array(v)) => v.clone(),
+			_ => return Value::Object(object),
+		};
+
+		//assignments require 3 fields, idiom, assigner and value
+		if assignment.len() != 3 {
+			return Value::Object(object);
+		}
+
+		//assert idiom and assigner are Strand
+		let (idiom, operator, value) =
+			(assignment[0].clone(), assignment[1].clone(), assignment[2].clone());
+		let idiom_assert = match idiom {
+			Value::Strand(v) => Idiom::from(v.as_str()),
+			_ => return Value::Object(object),
+		};
+
+		//assert operator is assigner 
+		let assigner = match operator {
+			Value::Strand(s) => match s.as_str() {
+				"=" => Operator::Equal,
+				"+=" => Operator::Inc,
+				"-=" => Operator::Dec,
+				"+?=" => Operator::Ext,
+				_ => return Value::Object(object),
+			},
+			_ => return Value::Object(object),
+		};
+
+		return Value::from(Assignment::from((idiom_assert, assigner, value)));
+	}
 	/// Parse a production starting with an `{` as either an object or a geometry.
 	///
 	/// This function tries to match an object to an geometry like object and if it is unable
@@ -138,21 +172,21 @@ impl Parser<'_> {
 		//check if type is present
 		match object.get("type") {
 			Some(Value::Strand(s)) => {
-				//check if type value is a sign to convert to data type 
+				//check if type value is a sign to convert to data type
 				//add new data types conversions here
 				let o_type = s.as_str();
-				if o_type == "Point"
-					|| o_type == "LineString"
-					|| o_type == "Polygon"
-					|| o_type == "MultiPoint"
-					|| o_type == "MultiLineString"
-					|| o_type == "MultiPolygon"
-					|| o_type == "GeometryCollection"
-				{
-					return Ok(self.convert_to_geometry(o_type, object.clone()).await);
+				match o_type {
+					"Point" | "LineString" | "Polygon" | "MultiPoint" | "MultiLineString"
+					| "MultiPolygon" | "GeometryCollection" => {
+						return Ok(self.convert_to_geometry(o_type, object.clone()).await);
+					}
+					"assignment" => {
+						//assignment is a special case, it is not a geometry but a object
+						return Ok(self.convert_to_assignment(object.clone()).await);
+					}
+					//unknown type, just return object
+					_ => return Ok(Value::Object(object)),
 				}
-				//unknown type, just return object
-				return Ok(Value::Object(object));
 			}
 			_ => {
 				// type field was not a strand, not a geometry.
