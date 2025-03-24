@@ -396,14 +396,22 @@ impl Index<&str> for Value {
 }
 
 impl Value {
-	pub fn get<Idx>(&self, index: Idx) -> Option<&Value>
+	pub fn get<Idx>(&self, index: Idx) -> &Value
 	where
 		Value: Index<Idx, Output = Value>,
 	{
-		match self.index(index) {
+		self.index(index)
+	}
+
+	pub fn into_option(&self) -> Option<&Value> {
+		match self {
 			Value(CoreValue::None) => None,
 			v => Some(v),
 		}
+	}
+
+	pub fn is_none(&self) -> bool {
+		matches!(&self, Value(CoreValue::None))
 	}
 }
 
