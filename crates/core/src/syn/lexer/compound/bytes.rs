@@ -9,8 +9,8 @@ use crate::{
 
 pub fn bytes(lexer: &mut Lexer, start: Token) -> Result<Bytes, SyntaxError> {
 	let close_char = match start.kind {
-		t!("b\"") => '"' as u8,
-		t!("b'") => '\'' as u8,
+		t!("b\"") => b'"',
+		t!("b'") => b'\'',
 		x => panic!("Invalid start token of bytes compound: {x}"),
 	};
 

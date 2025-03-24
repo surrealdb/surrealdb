@@ -511,7 +511,7 @@ impl MutableContext {
 
 				// Connect to the bucket
 				let store = if let Some(ref backend) = bd.backend {
-					buc::connect(&backend, false, bd.readonly)?
+					buc::connect(backend, false, bd.readonly)?
 				} else {
 					buc::connect_global(ns, db, bu)?
 				};

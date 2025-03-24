@@ -52,7 +52,7 @@ impl<'a> FileController<'a> {
 	}
 
 	/// Generate a `File` based on the current `FileController`
-	pub(crate) fn into_file(&self) -> File {
+	pub(crate) fn to_file(&self) -> File {
 		File::new(self.bucket.name.to_string(), self.key.to_string())
 	}
 
@@ -235,7 +235,7 @@ impl<'a> FileController<'a> {
 					let opt = &self.opt.new_with_perms(false);
 					// Add $file to context
 					let mut ctx = MutableContext::new(self.ctx);
-					ctx.add_value("file", Value::File(self.into_file()).into());
+					ctx.add_value("file", Value::File(self.to_file()).into());
 					let ctx = ctx.freeze();
 
 					// Process the PERMISSION clause

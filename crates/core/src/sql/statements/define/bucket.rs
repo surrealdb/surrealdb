@@ -62,7 +62,7 @@ impl DefineBucketStatement {
 		// Validate the store
 		let name = self.name.to_string();
 		let store = if let Some(ref backend) = backend {
-			buc::connect(&backend, false, self.readonly)?
+			buc::connect(backend, false, self.readonly)?
 		} else {
 			buc::connect_global(ns, db, &name)?
 		};
@@ -121,7 +121,7 @@ impl InfoStructure for DefineBucketStatement {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
 			"permissions".to_string() => self.permissions.structure(),
-			"backend".to_string(), if let Some(backend) = self.backend => backend.into(),
+			"backend".to_string(), if let Some(backend) = self.backend => backend,
 			"readonly".to_string() => self.readonly.into(),
 		})
 	}
