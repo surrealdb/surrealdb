@@ -138,21 +138,17 @@ impl Parser<'_> {
 		//check if type is present
 		match object.get("type") {
 			Some(Value::Strand(s)) => {
-				//check if type value is a sign to convert to data type 
+				//check if type value is a sign to convert to data type
 				//add new data types conversions here
 				let o_type = s.as_str();
-				if o_type == "Point"
-					|| o_type == "LineString"
-					|| o_type == "Polygon"
-					|| o_type == "MultiPoint"
-					|| o_type == "MultiLineString"
-					|| o_type == "MultiPolygon"
-					|| o_type == "GeometryCollection"
-				{
-					return Ok(self.convert_to_geometry(o_type, object.clone()).await);
+				match o_type {
+					"Point" | "LineString" | "Polygon" | "MultiPoint" | "MultiLineString"
+					| "MultiPolygon" | "GeometryCollection" => {
+						return Ok(self.convert_to_geometry(o_type, object.clone()).await);
+					}
+					//unknown type, just return object
+					_ => return Ok(Value::Object(object)),
 				}
-				//unknown type, just return object
-				return Ok(Value::Object(object));
 			}
 			_ => {
 				// type field was not a strand, not a geometry.
