@@ -418,7 +418,7 @@ impl Value {
 		}
 	}
 
-	// Checks to see if a Value is a Value::None.
+	/// Checks to see if a Value is a Value::None.
 	pub fn is_none(&self) -> bool {
 		matches!(&self, Value(CoreValue::None))
 	}
