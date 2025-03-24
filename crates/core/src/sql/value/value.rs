@@ -1375,6 +1375,7 @@ impl Value {
 			Kind::Point => self.coerce_to_point().map(Value::from),
 			Kind::Bytes => self.coerce_to_bytes().map(Value::from),
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
+			Kind::Regex => self.coerce_to_regex().map(Value::from),
 			Kind::Range => self.coerce_to_range().map(Value::from),
 			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
@@ -2004,6 +2005,7 @@ impl Value {
 			Kind::Point => self.convert_to_point().map(Value::from),
 			Kind::Bytes => self.convert_to_bytes().map(Value::from),
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
+			Kind::Regex => self.convert_to_regex().map(Value::from),
 			Kind::Range => self.convert_to_range().map(Value::from),
 			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
@@ -2324,6 +2326,29 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "uuid".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `Uuid`
+	pub(crate) fn convert_to_regex(self) -> Result<Regex, Error> {
+		match self {
+			// Uuids are allowed
+			Value::Regex(v) => Ok(v),
+			// Attempt to parse a string
+			Value::Strand(ref v) => match Regex::from_str(v) {
+				// The string can be parsed as a uuid
+				Ok(v) => Ok(v),
+				// This string is not a uuid
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "regex".into(),
+				}),
+			},
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "regex".into(),
 			}),
 		}
 	}
