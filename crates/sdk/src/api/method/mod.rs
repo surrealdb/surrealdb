@@ -38,7 +38,6 @@ mod export;
 mod health;
 mod import;
 mod insert;
-mod insert_relation;
 mod invalidate;
 mod merge;
 mod patch;
@@ -905,7 +904,9 @@ where
 			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
+			relation_cmd: None,
 			response_type: PhantomData,
+			insertion_type: PhantomData,
 		}
 	}
 
