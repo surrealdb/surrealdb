@@ -67,6 +67,7 @@ pub async fn run(
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
 		|| name.eq("value::patch")
+		|| name.starts_with("file")
 		|| name.starts_with("http")
 		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
@@ -512,6 +513,16 @@ pub async fn asynchronous(
 		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
 		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		//
+		"file::put" => file::put((stk, ctx, opt, doc)).await,
+		"file::get" => file::get((stk, ctx, opt, doc)).await,
+		"file::head" => file::head((stk, ctx, opt, doc)).await,
+		"file::delete" => file::delete((stk, ctx, opt, doc)).await,
+		"file::copy" => file::copy((stk, ctx, opt, doc)).await,
+		"file::copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
+		"file::rename" => file::rename((stk, ctx, opt, doc)).await,
+		"file::rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
+		"file::exists" => file::exists((stk, ctx, opt, doc)).await,
 		//
 		"http::head" => http::head(ctx).await,
 		"http::get" => http::get(ctx).await,

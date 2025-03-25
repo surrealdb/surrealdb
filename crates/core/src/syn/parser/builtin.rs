@@ -123,6 +123,16 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("encoding::base64::decode") => PathKind::Function,
 		UniCase::ascii("encoding::base64::encode") => PathKind::Function,
 		//
+		UniCase::ascii("file::put") => PathKind::Function,
+		UniCase::ascii("file::get") => PathKind::Function,
+		UniCase::ascii("file::head") => PathKind::Function,
+		UniCase::ascii("file::delete") => PathKind::Function,
+		UniCase::ascii("file::copy") => PathKind::Function,
+		UniCase::ascii("file::copy_if_not_exists") => PathKind::Function,
+		UniCase::ascii("file::rename") => PathKind::Function,
+		UniCase::ascii("file::rename_if_not_exists") => PathKind::Function,
+		UniCase::ascii("file::exists") => PathKind::Function,
+		//
 		UniCase::ascii("geo::area") => PathKind::Function,
 		UniCase::ascii("geo::bearing") => PathKind::Function,
 		UniCase::ascii("geo::centroid") => PathKind::Function,
