@@ -30,8 +30,8 @@ pub enum Format {
 	Unsupported, // Unsupported format
 }
 
-pub trait ResTrait: Serialize + Into<Value> + Revisioned {}
-impl<T: Serialize + Into<Value> + Revisioned> ResTrait for T {}
+pub trait ResTrait: Serialize + TryInto<Value> + Revisioned {}
+impl<T: Serialize + TryInto<Value> + Revisioned> ResTrait for T {}
 
 impl From<&str> for Format {
 	fn from(v: &str) -> Self {
