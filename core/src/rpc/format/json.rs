@@ -13,7 +13,7 @@ pub fn req(val: &[u8]) -> Result<Request, RpcError> {
 
 pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {
 	// Convert the response into simplified JSON
-	let val: Value = res.into();
+	let val: Value = res.try_into().map_err(|e| RpcError::ParseError)?;
 	let val = val.into_json();
 	// Serialize the response with simplified type information
 	let res = serde_json::to_string(&val).unwrap();

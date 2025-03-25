@@ -18,7 +18,7 @@ pub fn req(val: Vec<u8>) -> Result<Request, RpcError> {
 
 pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {
 	// Convert the response into a value
-	let val: Value = res.into();
+	let val: Value = res.try_into().map_err(|e| RpcError::ParseError)?;
 	let val: Cbor = val.try_into()?;
 	// Create a new vector for encoding output
 	let mut res = Vec::new();
