@@ -15,6 +15,8 @@ impl Document {
 		opt: &Options,
 		stm: &InsertStatement,
 	) -> Result<Value, Error> {
+		// Even though this is no longer an iterated, it can still not be the initial iteration if
+		// the initial doc is not set.
 		if !self.is_iteration_initial() {
 			return self.insert_create(stk, ctx, opt, &Statement::Insert(stm)).await;
 		}

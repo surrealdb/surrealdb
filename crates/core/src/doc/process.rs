@@ -43,7 +43,7 @@ impl Document {
 			Statement::Relate(_) => doc.relate(stk, ctx, opt, stm).await,
 			Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
 			Statement::Insert(stm) => doc.insert(stk, ctx, opt, stm).await,
-			stm => return Err(fail!("Unexpected statement type: {stm:?}")),
+			stm => Err(fail!("Unexpected statement type: {stm:?}")),
 		}
 	}
 }
