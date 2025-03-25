@@ -9,6 +9,7 @@ use crate::Surreal;
 use crate::Value;
 use serde::de::DeserializeOwned;
 use serde_content::Value as Content;
+use uuid::Uuid;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -18,6 +19,7 @@ use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Patch<'r, C: Connection, R> {
+	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) patches: Vec<serde_content::Result<Content<'static>>>,

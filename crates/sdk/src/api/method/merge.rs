@@ -9,6 +9,7 @@ use crate::value::Value;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use uuid::Uuid;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -18,6 +19,7 @@ use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Merge<'r, C: Connection, D, R> {
+	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) content: D,

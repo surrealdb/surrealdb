@@ -1,3 +1,6 @@
+use super::transaction::WithTransaction;
+use super::validate_data;
+use super::Content;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
@@ -12,19 +15,27 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
-
-use super::validate_data;
-use super::Content;
+use uuid::Uuid;
 
 /// A record create future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Create<'r, C: Connection, R> {
+	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) response_type: PhantomData<R>,
 }
 
+impl<C, R> WithTransaction for Create<'_, C, R>
+where
+	C: Connection,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
+}
 impl<C, R> Create<'_, C, R>
 where
 	C: Connection,
@@ -88,7 +99,7 @@ where
 	where
 		D: Serialize + 'static,
 	{
-		Content::from_closure(self.client, || {
+		Content::from_closure(self.client, self.txn, || {
 			let content = to_core_value(data)?;
 
 			validate_data(&content, "Tried to create non-object-like data as content, only structs and objects are supported")?;
@@ -115,7 +126,7 @@ where
 	where
 		D: Serialize + 'static,
 	{
-		Content::from_closure(self.client, || {
+		Content::from_closure(self.client, self.txn, || {
 			let content = to_core_value(data)?;
 
 			validate_data(&content, "Tried to create non-object-like data as content, only structs and objects are supported")?;

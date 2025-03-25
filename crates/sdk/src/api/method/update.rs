@@ -1,3 +1,5 @@
+use super::transaction::WithTransaction;
+use super::validate_data;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::method::Content;
@@ -17,16 +19,26 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
-
-use super::validate_data;
+use uuid::Uuid;
 
 /// An update future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Update<'r, C: Connection, R> {
+	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) response_type: PhantomData<R>,
+}
+
+impl<C, R> WithTransaction for Update<'_, C, R>
+where
+	C: Connection,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
 }
 
 impl<C, R> Update<'_, C, R>
@@ -127,7 +139,7 @@ where
 	where
 		D: Serialize + 'static,
 	{
-		Content::from_closure(self.client, || {
+		Content::from_closure(self.client, self.txn, || {
 			let data = to_core_value(data)?;
 
 			validate_data(&data, "Tried to update non-object-like data as content, only structs and objects are supported")?;
@@ -152,6 +164,7 @@ where
 		D: Serialize,
 	{
 		Merge {
+			txn: self.txn,
 			client: self.client,
 			resource: self.resource,
 			content: data,
@@ -170,6 +183,7 @@ where
 		};
 		Patch {
 			patches,
+			txn: self.txn,
 			client: self.client,
 			resource: self.resource,
 			upsert: false,

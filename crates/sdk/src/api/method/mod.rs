@@ -1,4 +1,5 @@
 //! Methods to use when interacting with a SurrealDB instance
+
 use self::query::ValidQuery;
 use crate::api::opt;
 use crate::api::opt::auth;
@@ -668,6 +669,7 @@ where
 		};
 
 		Query {
+			txn: None,
 			inner,
 			client: Cow::Borrowed(self),
 		}
@@ -714,6 +716,7 @@ where
 	/// ```
 	pub fn select<O>(&self, resource: impl IntoResource<O>) -> Select<C, O> {
 		Select {
+			txn: None,
 			client: Cow::Borrowed(self),
 			#[expect(deprecated)]
 			resource: resource.into_resource(),
@@ -770,6 +773,7 @@ where
 	/// ```
 	pub fn create<R>(&self, resource: impl CreateResource<R>) -> Create<C, R> {
 		Create {
+			txn: None,
 			client: Cow::Borrowed(self),
 			#[expect(deprecated)]
 			resource: resource.into_resource(),
@@ -916,6 +920,7 @@ where
 	/// ```
 	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<C, O> {
 		Insert {
+			txn: None,
 			client: Cow::Borrowed(self),
 			#[expect(deprecated)]
 			resource: resource.into_resource(),
@@ -1075,6 +1080,7 @@ where
 	/// ```
 	pub fn upsert<O>(&self, resource: impl IntoResource<O>) -> Upsert<C, O> {
 		Upsert {
+			txn: None,
 			client: Cow::Borrowed(self),
 			#[expect(deprecated)]
 			resource: resource.into_resource(),
@@ -1234,6 +1240,7 @@ where
 	/// ```
 	pub fn update<O>(&self, resource: impl IntoResource<O>) -> Update<C, O> {
 		Update {
+			txn: None,
 			client: Cow::Borrowed(self),
 			#[expect(deprecated)]
 			resource: resource.into_resource(),
@@ -1267,6 +1274,7 @@ where
 	/// ```
 	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
 		Delete {
+			txn: None,
 			client: Cow::Borrowed(self),
 			#[expect(deprecated)]
 			resource: resource.into_resource(),
