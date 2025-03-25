@@ -18,12 +18,12 @@ pub fn req(val: Vec<u8>) -> Result<Request, RpcError> {
 
 pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {
 	// Convert the response into a value
-	let val: Value = res.try_into().map_err(|e| RpcError::ParseError)?;
+	let val: Value = res.try_into().map_err(|_| RpcError::ParseError)?;
 	let val: Cbor = val.try_into()?;
 	// Create a new vector for encoding output
 	let mut res = Vec::new();
 	// Serialize the value into CBOR binary data
-	ciborium::into_writer(&val.0, &mut res).unwrap();
+	ciborium::into_writer(&val.0, &mut res).map_err(|e| RpcError::Thrown(e.to_string()))?;
 	// Return the message length, and message as binary
 	Ok(res)
 }
