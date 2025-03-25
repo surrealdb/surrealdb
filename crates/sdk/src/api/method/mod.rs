@@ -1,4 +1,6 @@
 //! Methods to use when interacting with a SurrealDB instance
+
+use self::query::ValidQuery;
 use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::OnceLockExt;

@@ -1,4 +1,6 @@
+use super::insert_relation::InsertRelation;
 use super::transaction::WithTransaction;
+use super::validate_data;
 use crate::Surreal;
 use crate::Value;
 use crate::api::Connection;
@@ -16,9 +18,6 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
 use uuid::Uuid;
-
-use super::insert_relation::InsertRelation;
-use super::validate_data;
 
 /// An insert future
 #[derive(Debug)]
@@ -191,7 +190,7 @@ where
 	where
 		D: Serialize + 'static,
 	{
-		InsertRelation::from_closure(self.client, || {
+		InsertRelation::from_closure(self.client, self.txn, || {
 			let mut data = to_core_value(data)?;
 			validate_data(
 				&data,

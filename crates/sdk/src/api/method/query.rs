@@ -25,9 +25,9 @@ use std::future::IntoFuture;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
-use surrealdb_core::sql;
-use surrealdb_core::sql::Statement;
+use surrealdb_core::sql::{
+	self, Object as CoreObject, Statement, Value as CoreValue, to_value as to_core_value,
+};
 use uuid::Uuid;
 
 /// A query future
