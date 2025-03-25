@@ -6,10 +6,10 @@ use crate::method::OnceLockExt;
 use crate::Surreal;
 use crate::Value;
 use serde::de::DeserializeOwned;
-use uuid::Uuid;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use uuid::Uuid;
 
 /// A content future
 ///

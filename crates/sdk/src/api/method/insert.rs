@@ -1,6 +1,6 @@
-use super::insert_relation::InsertRelation;
 use super::transaction::WithTransaction;
 use super::validate_data;
+use super::Relation;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
@@ -22,11 +22,13 @@ use uuid::Uuid;
 /// An insert future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Insert<'r, C: Connection, R> {
+pub struct Insert<'r, C: Connection, R, T = ()> {
 	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
+	pub(super) relation_cmd: Option<Result<Command>>,
 	pub(super) response_type: PhantomData<R>,
+	pub(super) insertion_type: PhantomData<T>,
 }
 
 impl<C, R> WithTransaction for Insert<'_, C, R>
@@ -58,6 +60,7 @@ macro_rules! into_future {
 			let Insert {
 				client,
 				resource,
+				relation_cmd,
 				..
 			} = self;
 			Box::pin(async move {
@@ -79,9 +82,13 @@ macro_rules! into_future {
 					} => return Err(Error::InsertOnRange.into()),
 					Resource::Unspecified => return Err(Error::InsertOnUnspecified.into()),
 				};
-				let cmd = Command::Insert {
-					what: Some(table.to_string()),
-					data: data.into(),
+
+				let cmd = match relation_cmd {
+					Some(result) => result?,
+					None => Command::Insert {
+						what: Some(table.to_string()),
+						data: data.into(),
+					},
 				};
 
 				let router = client.inner.router.extract()?;
@@ -91,7 +98,7 @@ macro_rules! into_future {
 	};
 }
 
-impl<'r, Client> IntoFuture for Insert<'r, Client, Value>
+impl<'r, Client, T> IntoFuture for Insert<'r, Client, Value, T>
 where
 	Client: Connection,
 {
@@ -101,7 +108,7 @@ where
 	into_future! {execute_value}
 }
 
-impl<'r, Client, R> IntoFuture for Insert<'r, Client, Option<R>>
+impl<'r, Client, R, T> IntoFuture for Insert<'r, Client, Option<R>, T>
 where
 	Client: Connection,
 	R: DeserializeOwned,
@@ -112,7 +119,7 @@ where
 	into_future! {execute_opt}
 }
 
-impl<'r, Client, R> IntoFuture for Insert<'r, Client, Vec<R>>
+impl<'r, Client, R, T> IntoFuture for Insert<'r, Client, Vec<R>, T>
 where
 	Client: Connection,
 	R: DeserializeOwned,
@@ -178,45 +185,35 @@ where
 	R: DeserializeOwned,
 {
 	/// Specifies the data to insert into the table
-	pub fn relation<D>(self, data: D) -> InsertRelation<'r, C, R>
+	pub fn relation<D>(mut self, data: D) -> Insert<'r, C, R, Relation>
 	where
 		D: Serialize + 'static,
 	{
-		InsertRelation::from_closure(self.client, self.txn, || {
-			let mut data = to_core_value(data)?;
-			validate_data(&data, "Tried to insert non-object-like data as relation data, only structs and objects are supported")?;
-			match self.resource? {
-				Resource::Table(table) => Ok(Command::InsertRelation {
-					what: Some(table),
-					data,
-				}),
-				Resource::RecordId(thing) => {
-					if data.is_array() {
-						Err(Error::InvalidParams(
-							"Tried to insert multiple records on a record ID".to_owned(),
-						)
-						.into())
-					} else {
-						let thing = thing.into_inner();
-						if let CoreValue::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.id.into());
-						}
-
-						Ok(Command::InsertRelation {
-							what: Some(thing.tb),
-							data,
-						})
-					}
-				}
-				Resource::Unspecified => Ok(Command::InsertRelation {
-					what: None,
-					data,
-				}),
-				Resource::Object(_) => Err(Error::InsertOnObject.into()),
-				Resource::Array(_) => Err(Error::InsertOnArray.into()),
-				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
-				Resource::Range(_) => Err(Error::InsertOnRange.into()),
-			}
-		})
+		let resource = self.resource;
+		// A dummy resource. Content doesn't need this so it's ignored.
+		self.resource = Ok(Resource::Unspecified);
+		let content = self.content(data);
+		let command = match content.command {
+			Ok(Command::Insert {
+				what,
+				data,
+			}) => Ok(Command::InsertRelation {
+				what,
+				data,
+			}),
+			Ok(cmd) => Err(crate::error::Db::Unreachable(format!(
+				"found {cmd:?}, expected Command::Insert"
+			))
+			.into()),
+			Err(error) => Err(error),
+		};
+		Insert {
+			resource,
+			txn: content.txn,
+			client: content.client,
+			relation_cmd: Some(command),
+			response_type: PhantomData,
+			insertion_type: PhantomData,
+		}
 	}
 }

@@ -9,11 +9,11 @@ use crate::value::Value;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use uuid::Uuid;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
+use uuid::Uuid;
 
 /// A merge future
 #[derive(Debug)]

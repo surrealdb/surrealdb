@@ -38,7 +38,6 @@ mod export;
 mod health;
 mod import;
 mod insert;
-mod insert_relation;
 mod invalidate;
 mod merge;
 mod patch;
@@ -114,6 +113,9 @@ pub struct ExportConfig;
 
 /// Live query marker type
 pub struct Live;
+
+/// Relation marker type
+pub struct Relation;
 
 /// Responses returned with statistics
 #[derive(Debug)]
@@ -924,7 +926,9 @@ where
 			client: Cow::Borrowed(self),
 			#[expect(deprecated)]
 			resource: resource.into_resource(),
+			relation_cmd: None,
 			response_type: PhantomData,
+			insertion_type: PhantomData,
 		}
 	}
 
