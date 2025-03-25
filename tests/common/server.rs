@@ -1,4 +1,5 @@
 use rand::{thread_rng, Rng};
+use rcgen::CertifiedKey;
 use std::collections::btree_set::Iter;
 use std::collections::HashMap;
 use std::error::Error;
@@ -260,9 +261,12 @@ pub async fn start_server(
 		let crt_path = tmp_file("crt.crt");
 		let key_path = tmp_file("key.pem");
 
-		let cert = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
-		fs::write(&crt_path, cert.serialize_pem().unwrap()).unwrap();
-		fs::write(&key_path, cert.serialize_private_key_pem().into_bytes()).unwrap();
+		let CertifiedKey {
+			cert,
+			key_pair,
+		} = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
+		fs::write(&crt_path, cert.pem()).unwrap();
+		fs::write(&key_path, key_pair.serialize_pem()).unwrap();
 
 		extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
 	}

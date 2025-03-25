@@ -5,11 +5,11 @@ use crate::sql::{self, Value as SurValue};
 use js::{
 	class::Trace,
 	prelude::{Coerced, Opt},
-	Array, Ctx, Exception, FromJs, Result, Value,
+	Array, Ctx, Exception, FromJs, JsLifetime, Result, Value,
 };
 
 #[js::class]
-#[derive(Trace, Clone)]
+#[derive(Trace, Clone, JsLifetime)]
 #[non_exhaustive]
 pub struct Query {
 	#[qjs(skip_trace)]

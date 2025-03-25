@@ -79,7 +79,7 @@ pub trait HttpFormat {
 
 impl HttpFormat for Format {
 	fn req_http(&self, body: Bytes) -> Result<Request, RpcError> {
-		self.req(body).map_err(Into::into)
+		self.req(body)
 	}
 
 	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {

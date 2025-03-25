@@ -1052,9 +1052,9 @@ mod http_integration {
 		Ok(())
 	}
 
-	///
-	/// Key endpoint tests
-	///
+	//
+	// Key endpoint tests
+	//
 
 	async fn seed_table(
 		client: &Client,

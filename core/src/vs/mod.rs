@@ -39,6 +39,7 @@ pub struct VersionstampSequence {
 impl Iterator for VersionstampSequence {
 	type Item = Versionstamp;
 
+	#[allow(clippy::needless_option_take)]
 	fn next(&mut self) -> Option<Self::Item> {
 		self.next_state?;
 		let returned_state = self.next_state.unwrap();

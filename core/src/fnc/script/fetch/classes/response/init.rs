@@ -2,14 +2,13 @@ use std::string::String as StdString;
 
 use js::{
 	class::{Trace, Tracer},
-	prelude::*,
-	Class, Ctx, Exception, Object, Result, Value,
+	Class, Coerced, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value,
 };
 
 use crate::fnc::script::fetch::{classes::Headers, util};
 
 /// Struct containing data from the init argument from the Response constructor.
-#[derive(Clone)]
+#[derive(Clone, JsLifetime)]
 #[non_exhaustive]
 pub struct ResponseInit<'js> {
 	// u16 instead of reqwest::StatusCode since javascript allows non valid status codes in some

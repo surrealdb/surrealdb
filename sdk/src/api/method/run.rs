@@ -76,7 +76,7 @@ where
 	}
 }
 
-impl<'r, Client, R> Run<'r, Client, R>
+impl<Client, R> Run<'_, Client, R>
 where
 	Client: Connection,
 {

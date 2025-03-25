@@ -1,7 +1,7 @@
 //! stub implementations for the fetch API when `http` is not enabled.
 
 use js::{
-	class::{ClassId, JsClass, Trace, Tracer},
+	class::{JsClass, Trace, Tracer},
 	function::Constructor,
 	Class, Ctx, Exception, Function, Object, Result,
 };
@@ -35,6 +35,10 @@ macro_rules! impl_stub_class {
 
 				#[non_exhaustive] pub struct $name;
 
+				unsafe impl<'js> js::JsLifetime<'js> for $name{
+					type Changed<'to> = $name;
+				}
+
 				impl<'js> Trace<'js> for $name{
 					fn trace<'a>(&self, _tracer: Tracer<'a, 'js>){}
 				}
@@ -43,12 +47,6 @@ macro_rules! impl_stub_class {
 					const NAME: &'static str = stringify!($name);
 
 					type Mutable = js::class::Readable;
-
-					/// A unique id for the class.
-					fn class_id() -> &'static ClassId{
-						static ID: ClassId = ClassId::new();
-						&ID
-					}
 
 					/// Returns the class prototype,
 					fn prototype(ctx: &Ctx<'js>) -> Result<Option<Object<'js>>>{

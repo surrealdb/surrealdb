@@ -888,7 +888,7 @@ impl ops::Add for Number {
 	}
 }
 
-impl<'a, 'b> ops::Add<&'b Number> for &'a Number {
+impl<'b> ops::Add<&'b Number> for &Number {
 	type Output = Number;
 	fn add(self, other: &'b Number) -> Number {
 		match (self, other) {
@@ -916,7 +916,7 @@ impl ops::Sub for Number {
 	}
 }
 
-impl<'a, 'b> ops::Sub<&'b Number> for &'a Number {
+impl<'b> ops::Sub<&'b Number> for &Number {
 	type Output = Number;
 	fn sub(self, other: &'b Number) -> Number {
 		match (self, other) {
@@ -944,7 +944,7 @@ impl ops::Mul for Number {
 	}
 }
 
-impl<'a, 'b> ops::Mul<&'b Number> for &'a Number {
+impl<'b> ops::Mul<&'b Number> for &Number {
 	type Output = Number;
 	fn mul(self, other: &'b Number) -> Number {
 		match (self, other) {
@@ -972,7 +972,7 @@ impl ops::Div for Number {
 	}
 }
 
-impl<'a, 'b> ops::Div<&'b Number> for &'a Number {
+impl<'b> ops::Div<&'b Number> for &Number {
 	type Output = Number;
 	fn div(self, other: &'b Number) -> Number {
 		match (self, other) {
