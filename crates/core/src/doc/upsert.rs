@@ -64,7 +64,10 @@ impl Document {
 			// after fetching the initial record value
 			// from storage before processing schema again.
 			Err(e) if e.is_schema_related() && stm.is_repeatable() => self.inner_id()?,
-			Err(Error::Ignore) => return Err(Error::Ignore),
+			Err(Error::Ignore) => {
+				ctx.tx().lock().await.release_last_save_point().await?;
+				return Err(Error::Ignore);
+			}
 			Err(e) => {
 				ctx.tx().lock().await.rollback_to_save_point().await?;
 				return Err(e);

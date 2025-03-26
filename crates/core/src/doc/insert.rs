@@ -90,9 +90,12 @@ impl Document {
 				}
 				thing
 			}
-			// No rollback or release of rollback on ignore.
-			// TODO: Figure out if this is correct.
-			Err(Error::Ignore) => return Err(Error::Ignore),
+			Err(Error::Ignore) => {
+				if retryable {
+					ctx.tx().lock().await.release_last_save_point().await?;
+				}
+				return Err(Error::Ignore);
+			}
 			Err(e) => {
 				// if retryable we need to do something with the savepoint.
 				if retryable {
