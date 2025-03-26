@@ -43,11 +43,6 @@ pub enum Error {
 	#[error("Continue statement has been reached")]
 	Continue,
 
-	/// This error is used for retrying document processing with a new id
-	#[doc(hidden)]
-	#[error("This document should be retried with a new ID")]
-	RetryWithId(Thing),
-
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),
