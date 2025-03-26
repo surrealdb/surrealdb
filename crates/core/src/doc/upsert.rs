@@ -14,7 +14,7 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
-		// Even though we haven't tried to create first this still not be the 'initial iteration' if
+		// Even though we haven't tried to create first this can still not be the 'initial iteration' if
 		// the initial doc is not set.
 		//
 		// If this is not the initial iteration we immediatly skip trying to create and go straight
