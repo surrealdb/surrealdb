@@ -15,18 +15,28 @@ impl Document {
 		opt: &Options,
 		stm: &InsertStatement,
 	) -> Result<Value, Error> {
-		// Even though this is no longer an iterated, it can still not be the initial iteration if
+		// Even though we haven't tried to create first this still not be the 'initial iteration' if
 		// the initial doc is not set.
+		//
+		// If this is not the initial iteration we immediatly skip trying to create and go straight
+		// to updating.
 		if !self.is_iteration_initial() {
-			return self.insert_create(stk, ctx, opt, &Statement::Insert(stm)).await;
+			return self.insert_update(stk, ctx, opt, &Statement::Insert(stm)).await;
 		}
 
-		// is this retryable retryable.
+		// is this retryable?
+		// it is retryable when some data is present on the insert statement to update.
 		let retryable = stm.update.is_some();
 		if retryable {
+			// it is retryable so generate a save point we can roll back to.
 			ctx.tx().lock().await.new_save_point().await;
 		}
 
+		// First try to create the value and if that is not possible due to an existing value fall
+		// back to update instead.
+		//
+		// This is done this way to make the create path fast and take priority over the update
+		// path.
 		let retry = match self.insert_create(stk, ctx, opt, &Statement::Insert(stm)).await {
 			// We received an index exists error, so we
 			// ignore the error, and attempt to update the
@@ -37,19 +47,26 @@ impl Document {
 				index,
 				value,
 			}) => {
+				// if not retryable return the error.
+				//
+				// or if the statement contained a specific record id, we
+				// don't retry to
 				if !retryable || self.is_specific_record_id() {
 					if retryable {
 						ctx.tx().lock().await.rollback_to_save_point().await?;
 					}
+
+					// Ignore flag; disables error.
+					// Error::Ignore is never raised to the user.
 					if stm.ignore {
 						return Err(Error::Ignore);
-					} else {
-						return Err(Error::IndexExists {
-							thing,
-							index,
-							value,
-						});
 					}
+
+					return Err(Error::IndexExists {
+						thing,
+						index,
+						value,
+					});
 				}
 				thing
 			}
@@ -60,14 +77,16 @@ impl Document {
 			Err(Error::RecordExists {
 				thing,
 			}) => {
+				// if not retryable return the error.
 				if !retryable {
+					// Ignore flag; disables error.
+					// Error::Ignore is never raised to the user.
 					if stm.ignore {
 						return Err(Error::Ignore);
-					} else {
-						return Err(Error::RecordExists {
-							thing,
-						});
 					}
+					return Err(Error::RecordExists {
+						thing,
+					});
 				}
 				thing
 			}
@@ -75,6 +94,7 @@ impl Document {
 			// TODO: Figure out if this is correct.
 			Err(Error::Ignore) => return Err(Error::Ignore),
 			Err(e) => {
+				// if retryable we need to do something with the savepoint.
 				if retryable {
 					ctx.tx().lock().await.rollback_to_save_point().await?;
 				}
@@ -101,6 +121,7 @@ impl Document {
 
 		self.modify_for_update_retry(retry, val);
 
+		// we restarted, so we might need to generate a record id again?
 		self.generate_record_id(stk, ctx, opt, &Statement::Insert(stm)).await?;
 
 		self.insert_update(stk, ctx, opt, &Statement::Insert(stm)).await

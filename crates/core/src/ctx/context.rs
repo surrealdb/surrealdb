@@ -376,7 +376,10 @@ impl MutableContext {
 		self.done(check_deadline).is_none()
 	}
 
-	/// Check if the context is not ok to continue.
+	/// Check if there is some reason to stop processing the current query.
+	///
+	/// Returns true when the query is canceled or if check_deadline is true when the query
+	/// deadline is met.
 	pub(crate) fn is_done(&self, check_deadline: bool) -> bool {
 		self.done(check_deadline).is_some()
 	}
