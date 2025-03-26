@@ -36,6 +36,7 @@ args = ["clippy", "--all-targets", "--features", "storage-mem,storage-surrealkv,
 [tasks.ci-check-wasm]
 category = "CI - CHECK"
 command = "cargo"
+env = { RUSTFLAGS='--cfg getrandom_backend="wasm_js"' }
 args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks", "--target", "wasm32-unknown-unknown"]
 
 #
@@ -80,7 +81,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
     "--",
     "--skip",
@@ -214,17 +215,17 @@ run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel 
 [tasks.ci-api-integration-tikv]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
-run_task = { name = ["start-tikv", "test-kvs", "stop-tikv", "start-tikv","test-api-integration", "stop-tikv"], fork = true, parallel = false }
+run_task = { name = ["start-tikv", "test-kvs", "stop-tikv", "start-tikv", "test-api-integration", "stop-tikv"], fork = true, parallel = false }
 
 [tasks.ci-api-integration-fdb-7_1]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
-run_task = { name = ["test-kvs","clear-fdb", "test-api-integration"], fork = true, parallel = false }
+run_task = { name = ["test-kvs", "clear-fdb", "test-api-integration"], fork = true, parallel = false }
 
 [tasks.ci-api-integration-fdb-7_3]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_3" }
-run_task = { name = ["test-kvs","clear-fdb", "test-api-integration"], fork = true, parallel = false }
+run_task = { name = ["test-kvs", "clear-fdb", "test-api-integration"], fork = true, parallel = false }
 
 #
 # Services
@@ -297,7 +298,7 @@ ${HOME}/.tiup/bin/tiup clean --all
 [tasks.clear-fdb]
 category = "CI - SERVICES"
 command = "fdbcli"
-args = ["-C","/etc/foundationdb/fdb.cluster","--exec","writemode on; clearrange \"\" \\xFF","--timeout","20"]
+args = ["-C", "/etc/foundationdb/fdb.cluster", "--exec", "writemode on; clearrange \"\" \\xFF", "--timeout", "20"]
 
 #
 # Builds

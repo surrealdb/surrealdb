@@ -51,7 +51,7 @@ fn check_array_is_sorted(v: &Value, expected_len: usize) {
 }
 
 pub async fn standard(new_ds: impl CreateDs) {
-	let ref mut r = test(new_ds, "DEFINE INDEX idx ON TABLE i COLUMNS v").await;
+	let r = &mut (test(new_ds, "DEFINE INDEX idx ON TABLE i COLUMNS v").await);
 	check(
 		r,
 		"[
@@ -100,7 +100,7 @@ pub async fn standard(new_ds: impl CreateDs) {
 }
 
 pub async fn unique(new_ds: impl CreateDs) {
-	let ref mut r = test(new_ds, "DEFINE INDEX idx ON TABLE i COLUMNS v UNIQUE").await;
+	let r = &mut (test(new_ds, "DEFINE INDEX idx ON TABLE i COLUMNS v UNIQUE").await);
 	check(
 		r,
 		"[

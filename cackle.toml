@@ -47,10 +47,8 @@ build.allow_build_instructions = [
     "cargo:rustc-link-lib=static=ring",
     "cargo:rustc-link-lib=static=ring-core",
     "cargo:rustc-link-lib=static=ring-test",
-    "cargo:rustc-link-lib=static=ring_core_0_17_10_",
-    "cargo:rustc-link-lib=static=ring_core_0_17_10__test",
-    "cargo:rustc-link-lib=static=ring_core_0_17_11_",
-    "cargo:rustc-link-lib=static=ring_core_0_17_11__test",
+    "cargo:rustc-link-lib=static=ring_core_0_17_14_",
+    "cargo:rustc-link-lib=static=ring_core_0_17_14__test",
     "cargo:rustc-link-search=native=*",
 ]
 allow_unsafe = true
@@ -308,6 +306,7 @@ from.build.allow_apis = ["process"]
 
 [pkg.zerocopy]
 allow_unsafe = true
+build.allow_apis = ["fs", "process"]
 
 [pkg.futures-sink]
 allow_unsafe = true
@@ -345,6 +344,7 @@ from.build.allow_apis = ["fs"]
 
 [pkg.getrandom]
 allow_unsafe = true
+build.allow_apis = ["process"]
 
 [pkg.syn]
 allow_unsafe = true
@@ -1323,3 +1323,12 @@ allow_unsafe = true
 
 [pkg.double-ended-peekable]
 allow_unsafe = true
+
+[pkg.jiff]
+allow_unsafe = true
+
+[pkg.jiff-static]
+allow_proc_macro = true
+
+[pkg.fs-err]
+allow_apis = ["fs"]

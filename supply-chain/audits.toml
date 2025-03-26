@@ -349,7 +349,7 @@ end = "2026-02-10"
 
 [[trusted.ring]]
 criteria = "safe-to-deploy"
-user-id = 2751 # Joe Birr-Pixton (ctz)
+user-id = 2751
 start = "2025-02-22"
 end = "2026-02-26"
 
