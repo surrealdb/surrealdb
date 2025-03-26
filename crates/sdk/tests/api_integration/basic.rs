@@ -1730,7 +1730,7 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	let inside = as_value.get(0).get("b1").get("total_peers");
 
 	assert_eq!(inside, &Value::from_inner(CoreValue::Number(74.into())));
-	assert_eq!(inside.is_none(), false);
+	assert!(!inside.is_none());
 	assert_eq!(inside.into_option(), Some(&Value::from_inner(CoreValue::Number(74.into()))));
 
 	let mut response =
@@ -1740,7 +1740,7 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	let inside = as_value.get(0).get("b1111111").get("total_peers");
 
 	assert_eq!(inside, &Value::from_inner(CoreValue::None));
-	assert_eq!(inside.is_none(), true);
+	assert!(inside.is_none());
 	assert_eq!(inside.into_option(), None);
 }
 
