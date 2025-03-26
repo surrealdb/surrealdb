@@ -53,6 +53,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Create {
+				txn,
 				client,
 				resource,
 				..
@@ -60,6 +61,7 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Create {
+					txn,
 					what: resource?,
 					data: None,
 				};
@@ -110,6 +112,7 @@ where
 			};
 
 			Ok(Command::Create {
+				txn: self.txn,
 				what: self.resource?,
 				data,
 			})
@@ -137,6 +140,7 @@ where
 			};
 
 			Ok(Command::Create {
+				txn: self.txn,
 				what: self.resource?,
 				data,
 			})

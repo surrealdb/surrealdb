@@ -58,6 +58,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Update {
+				txn,
 				client,
 				resource,
 				..
@@ -66,6 +67,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Update {
+						txn,
 						what: resource?,
 						data: None,
 					})
@@ -154,6 +156,7 @@ where
 			Ok(Command::Update {
 				what,
 				data,
+				txn: self.txn,
 			})
 		})
 	}

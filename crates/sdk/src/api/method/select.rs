@@ -53,6 +53,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Select {
+				txn,
 				client,
 				resource,
 				..
@@ -61,6 +62,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Select {
+						txn,
 						what: resource?,
 					})
 					.await

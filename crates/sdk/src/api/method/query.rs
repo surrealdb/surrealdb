@@ -130,6 +130,7 @@ where
 					router
 						.execute_query(Command::RawQuery {
 							query,
+							txn: self.txn,
 							variables: bindings,
 						})
 						.await
@@ -173,6 +174,7 @@ where
 
 					let mut response = router
 						.execute_query(Command::Query {
+							txn: self.txn,
 							query,
 							variables: bindings,
 						})

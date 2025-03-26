@@ -44,6 +44,7 @@ macro_rules! into_future {
 	() => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Patch {
+				txn,
 				client,
 				resource,
 				patches,
@@ -60,6 +61,7 @@ macro_rules! into_future {
 				let patches = CoreValue::from(vec);
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Patch {
+					txn,
 					upsert,
 					what: resource?,
 					data: Some(patches),

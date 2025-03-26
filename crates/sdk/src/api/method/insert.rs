@@ -58,6 +58,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Insert {
+				txn,
 				client,
 				resource,
 				relation_cmd,
@@ -86,6 +87,7 @@ macro_rules! into_future {
 				let cmd = match relation_cmd {
 					Some(result) => result?,
 					None => Command::Insert {
+						txn,
 						what: Some(table.to_string()),
 						data: data.into(),
 					},
@@ -145,6 +147,7 @@ where
 			validate_data(&data, "Tried to insert non-object-like data as content, only structs and objects are supported")?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::Insert {
+					txn: self.txn,
 					what: Some(table),
 					data,
 				}),
@@ -161,6 +164,7 @@ where
 						}
 
 						Ok(Command::Insert {
+							txn: self.txn,
 							what: Some(thing.tb),
 							data,
 						})
@@ -171,6 +175,7 @@ where
 				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
 				Resource::Range(_) => Err(Error::InsertOnRange.into()),
 				Resource::Unspecified => Ok(Command::Insert {
+					txn: self.txn,
 					what: None,
 					data,
 				}),
@@ -195,9 +200,11 @@ where
 		let content = self.content(data);
 		let command = match content.command {
 			Ok(Command::Insert {
+				txn,
 				what,
 				data,
 			}) => Ok(Command::InsertRelation {
+				txn,
 				what,
 				data,
 			}),

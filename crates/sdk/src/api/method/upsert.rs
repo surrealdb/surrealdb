@@ -58,6 +58,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Upsert {
+				txn,
 				client,
 				resource,
 				..
@@ -66,6 +67,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Upsert {
+						txn,
 						what: resource?,
 						data: None,
 					})
@@ -150,6 +152,7 @@ where
 			};
 
 			Ok(Command::Upsert {
+				txn: self.txn,
 				what: self.resource?,
 				data,
 			})

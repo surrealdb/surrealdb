@@ -44,6 +44,7 @@ macro_rules! into_future {
 	() => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Merge {
+				txn,
 				client,
 				resource,
 				content,
@@ -62,6 +63,7 @@ macro_rules! into_future {
 
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Merge {
+					txn,
 					upsert,
 					what: resource?,
 					data: content,

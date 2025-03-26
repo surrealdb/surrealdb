@@ -51,6 +51,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Delete {
+				txn,
 				client,
 				resource,
 				..
@@ -59,6 +60,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Delete {
+						txn,
 						what: resource?,
 					})
 					.await
