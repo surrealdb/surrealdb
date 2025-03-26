@@ -88,6 +88,7 @@ macro_rules! into_future {
 					txn,
 					Some(result) => result?,
 					None => Command::Insert {
+						txn,
 						what: Some(table.to_string()),
 						data: data.into(),
 					},
@@ -203,9 +204,11 @@ where
 		let content = self.content(data);
 		let command = match content.command {
 			Ok(Command::Insert {
+				txn,
 				what,
 				data,
 			}) => Ok(Command::InsertRelation {
+				txn,
 				what,
 				data,
 			}),
