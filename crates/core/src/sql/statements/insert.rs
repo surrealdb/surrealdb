@@ -20,6 +20,7 @@ use std::fmt;
 pub struct InsertStatement {
 	pub into: Option<Value>,
 	pub data: Data,
+	/// Does the statement have the ignore clause.
 	pub ignore: bool,
 	pub update: Option<Data>,
 	pub output: Option<Output>,

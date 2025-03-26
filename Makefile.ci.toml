@@ -36,6 +36,7 @@ args = ["clippy", "--all-targets", "--features", "storage-mem,storage-surrealkv,
 [tasks.ci-check-wasm]
 category = "CI - CHECK"
 command = "cargo"
+env = { RUSTFLAGS='--cfg getrandom_backend="wasm_js"' }
 args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks", "--target", "wasm32-unknown-unknown"]
 
 #
