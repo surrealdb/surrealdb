@@ -835,6 +835,61 @@ mod tests {
 	}
 
 	#[test]
+	fn graph_select() {
+		let sql = "->(SELECT amount FROM likes WHERE amount > 10)";
+		let out = Value::parse(sql);
+		assert_eq!("->(SELECT amount FROM likes WHERE amount > 10)", format!("{}", out));
+	}
+
+	#[test]
+	fn graph_select_wildcard() {
+		let sql = "->(SELECT * FROM likes WHERE amount > 10)";
+		let out = Value::parse(sql);
+		assert_eq!("->(SELECT * FROM likes WHERE amount > 10)", format!("{}", out));
+	}
+
+	#[test]
+	fn graph_select_where_order() {
+		let sql = "->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount)";
+		let out = Value::parse(sql);
+		assert_eq!(
+			"->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount\n)",
+			format!("{}", out)
+		);
+	}
+
+	#[test]
+	fn graph_select_where_order_limit() {
+		let sql = "->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount LIMIT 1)";
+		let out = Value::parse(sql);
+		assert_eq!(
+			"->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount\n LIMIT 1)",
+			format!("{}", out)
+		);
+	}
+
+	#[test]
+	fn graph_select_limit() {
+		let sql = "->(SELECT amount FROM likes LIMIT 1)";
+		let out = Value::parse(sql);
+		assert_eq!("->(SELECT amount FROM likes LIMIT 1)", format!("{}", out));
+	}
+
+	#[test]
+	fn graph_select_order() {
+		let sql = "->(SELECT amount FROM likes ORDER BY amount)";
+		let out = Value::parse(sql);
+		assert_eq!("->(SELECT amount FROM likes ORDER BY amount\n)", format!("{}", out));
+	}
+
+	#[test]
+	fn graph_select_order_limit() {
+		let sql = "->(SELECT amount FROM likes ORDER BY amount LIMIT 1)";
+		let out = Value::parse(sql);
+		assert_eq!("->(SELECT amount FROM likes ORDER BY amount\n LIMIT 1)", format!("{}", out));
+	}
+
+	#[test]
 	fn idiom_normal() {
 		let sql = "test";
 		let out = Value::parse(sql);
