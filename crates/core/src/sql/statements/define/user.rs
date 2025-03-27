@@ -223,9 +223,7 @@ impl Display for DefineUserStatement {
 			self.name,
 			self.base,
 			QuoteStr(&self.hash),
-			Fmt::comma_separated(
-				&self.roles
-			),
+			Fmt::comma_separated(&self.roles),
 		)?;
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
@@ -286,9 +284,5 @@ impl InfoStructure for DefineUserStatement {
 
 #[inline]
 fn generate_code() -> String {
-	rand::thread_rng()
-		.sample_iter(&Alphanumeric)
-		.take(128)
-		.map(char::from)
-		.collect::<String>()
+	rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
 }
