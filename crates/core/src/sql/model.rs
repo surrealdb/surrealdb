@@ -83,18 +83,18 @@ impl Model {
 			match &val.permissions {
 				Permission::Full => (),
 				Permission::None => {
-					return Err(Error::FunctionPermissions {
+					return Err(ControlFlow::from(Error::FunctionPermissions {
 						name: self.name.to_owned(),
-					})
+					}))
 				}
 				Permission::Specific(e) => {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
 					if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
-						return Err(Error::FunctionPermissions {
+						return Err(ControlFlow::from(Error::FunctionPermissions {
 							name: self.name.to_owned(),
-						});
+						}));
 					}
 				}
 			}
@@ -211,10 +211,10 @@ impl Model {
 				Ok(outcome.into())
 			}
 			//
-			_ => Err(Error::InvalidArguments {
+			_ => Err(ControlFlow::from(Error::InvalidArguments {
 				name: format!("ml::{}<{}>", self.name, self.version),
 				message: ARGUMENTS.into(),
-			}),
+			})),
 		}
 	}
 
