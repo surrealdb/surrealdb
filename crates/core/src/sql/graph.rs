@@ -81,7 +81,11 @@ impl Graph {
 
 impl Display for Graph {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		if self.what.0.len() <= 1 && self.cond.is_none() && self.alias.is_none() && self.expr.is_none() {
+		if self.what.0.len() <= 1
+			&& self.cond.is_none()
+			&& self.alias.is_none()
+			&& self.expr.is_none()
+		{
 			Display::fmt(&self.dir, f)?;
 			match self.what.len() {
 				0 => f.write_char('?'),
