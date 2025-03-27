@@ -150,7 +150,7 @@ pub async fn signin_record(new_db: impl CreateDb) {
         DEFINE ACCESS `{access}` ON DB TYPE RECORD
         SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
         SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
-		DURATION FOR SESSION 1d FOR TOKEN 15s
+		DURATION FOR SESSION 1d FOR TOKEN 15s;
     "
 	);
 	let response = db.query(sql).await.unwrap();
@@ -167,6 +167,18 @@ pub async fn signin_record(new_db: impl CreateDb) {
 	})
 	.await
 	.unwrap();
+	db.signin(RecordAccess {
+		namespace: NS,
+		database: &database,
+		access: &access,
+		params: AuthParams {
+			pass,
+			email: &email,
+		},
+	})
+	.await
+	.unwrap();
+	db.query("UPDATE user SET name='Billy'").await.unwrap();
 	db.signin(RecordAccess {
 		namespace: NS,
 		database: &database,
