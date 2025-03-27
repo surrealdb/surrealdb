@@ -45,11 +45,7 @@ impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
 				.unwrap()
 				.to_string(),
-			code: rand::thread_rng()
-				.sample_iter(&Alphanumeric)
-				.take(128)
-				.map(char::from)
-				.collect::<String>(),
+			code: generate_code(),
 			roles: vec![role.to_uppercase().into()],
 			duration: UserDuration::default(),
 			comment: None,
@@ -71,11 +67,7 @@ impl DefineUserStatement {
 			base,
 			roles: roles.into_iter().map(|r| r.to_uppercase().into()).collect(),
 			duration,
-			code: rand::thread_rng()
-				.sample_iter(&Alphanumeric)
-				.take(128)
-				.map(char::from)
-				.collect::<String>(),
+			code: generate_code(),
 			..Default::default()
 		}
 	}
@@ -290,4 +282,13 @@ impl InfoStructure for DefineUserStatement {
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}
+}
+
+#[inline]
+fn generate_code() -> String {
+	rand::thread_rng()
+		.sample_iter(&Alphanumeric)
+		.take(128)
+		.map(char::from)
+		.collect::<String>()
 }
