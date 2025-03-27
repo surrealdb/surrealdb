@@ -139,7 +139,11 @@ impl Display for AlterTableStatement {
 			})?;
 		}
 		if let Some(comment) = &self.comment {
-			write!(f, " COMMENT {}", comment.clone().unwrap_or("NONE".into()))?
+			if let Some(comment) = comment {
+				write!(f, " COMMENT {}", comment)?;
+			} else {
+				write!(f, " COMMENT NONE")?;
+			}
 		}
 		if let Some(changefeed) = &self.changefeed {
 			write!(f, " {}", changefeed.map_or("CHANGEFEED NONE".into(), |v| v.to_string()))?
