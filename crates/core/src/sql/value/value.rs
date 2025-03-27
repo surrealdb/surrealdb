@@ -29,6 +29,7 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -2285,6 +2286,38 @@ impl Value {
 						into: "string".into(),
 					}),
 				}
+			}
+			// None can't convert to a string
+			Value::None => Err(Error::ConvertTo {
+				from: self,
+				into: "string".into(),
+			}),
+			// Null can't convert to a string
+			Value::Null => Err(Error::ConvertTo {
+				from: self,
+				into: "string".into(),
+			}),
+			// Allow any string value
+			Value::Strand(v) => Ok(v),
+			// Stringify anything else
+			Value::Uuid(v) => Ok(v.to_raw().into()),
+			// Stringify anything else
+			Value::Datetime(v) => Ok(v.to_raw().into()),
+			// Stringify anything else
+			_ => Ok(self.to_string().into()),
+		}
+	}
+
+	/// Try to convert this value to a `Strand`
+	pub(crate) fn convert_to_strand_lossy(self) -> Result<Strand, Error> {
+		match self {
+			// Allow any bytes value
+			Value::Bytes(v) => {
+				let bytes = &v.0[..];
+				Ok(match String::from_utf8_lossy(bytes) {
+					Cow::Owned(s) => s.into(),
+					Cow::Borrowed(s) => s.into(),
+				})
 			}
 			// None can't convert to a string
 			Value::None => Err(Error::ConvertTo {

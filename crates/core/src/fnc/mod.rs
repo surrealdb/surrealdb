@@ -406,6 +406,7 @@ pub fn synchronous(
 		"type::range" => r#type::range,
 		"type::record" => r#type::record,
 		"type::string" => r#type::string,
+		"type::string_lossy" => r#type::string_lossy,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
 		"type::uuid" => r#type::uuid,
@@ -909,6 +910,7 @@ pub async fn idiom(
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,

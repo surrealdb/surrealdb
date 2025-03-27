@@ -119,6 +119,10 @@ pub fn string((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_strand().map(Value::from)
 }
 
+pub fn string_lossy((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_strand_lossy().map(Value::from)
+}
+
 pub fn table((val,): (Value,)) -> Result<Value, Error> {
 	Ok(Value::Table(Table(match val {
 		Value::Thing(t) => t.tb,
