@@ -33,11 +33,6 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
-	/// This error is used for retrying document processing with a new id
-	#[doc(hidden)]
-	#[error("This document should be retried with a new ID")]
-	RetryWithId(Thing),
-
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),

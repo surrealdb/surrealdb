@@ -256,6 +256,18 @@ impl Document {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}
 
+	/// Update the document for a retry to update after an insert failed.
+	pub fn modify_for_update_retry(&mut self, id: Thing, value: Arc<Value>) {
+		let retry = Arc::new(id);
+		self.id = Some(retry.clone());
+		self.gen = None;
+		self.retry = true;
+		self.record_strategy = RecordStrategy::KeysAndValues;
+
+		self.current = CursorDoc::new(Some(retry), None, value);
+		self.initial = self.current.clone();
+	}
+
 	/// Checks if permissions are required to be run
 	/// over a document. If permissions don't need to
 	/// be processed, then we don't process the initial
