@@ -85,6 +85,7 @@ impl Display for Graph {
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
+			&& self.limit.is_none()
 		{
 			Display::fmt(&self.dir, f)?;
 			match self.what.len() {
