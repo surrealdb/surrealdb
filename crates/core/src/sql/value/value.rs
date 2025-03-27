@@ -10,24 +10,26 @@ use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
 	model::Model,
-	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
-	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Tables, Thing, Uuid,
+	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, File, Function,
+	Future, Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range,
+	Regex, Strand, Subquery, Table, Tables, Thing, Uuid,
 };
+use crate::sql::{Closure, Ident};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
+use object_store::ObjectMeta;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -139,6 +141,7 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	Refs(Refs),
+	File(File),
 	// Add new variants here
 }
 
@@ -181,6 +184,12 @@ impl From<Uuid> for Value {
 impl From<Closure> for Value {
 	fn from(v: Closure) -> Self {
 		Value::Closure(Box::new(v))
+	}
+}
+
+impl From<File> for Value {
+	fn from(v: File) -> Self {
+		Value::File(v)
 	}
 }
 
@@ -649,6 +658,18 @@ impl From<Id> for Value {
 impl From<Query> for Value {
 	fn from(q: Query) -> Self {
 		Value::Query(q)
+	}
+}
+
+impl From<ObjectMeta> for Value {
+	fn from(value: ObjectMeta) -> Self {
+		Value::from(map! {
+			"key" => Value::from(value.location.to_string()),
+			"last_modified" => Value::from(value.last_modified),
+			"size" => Value::from(value.size),
+			"e_tag" => Value::from(value.e_tag),
+			"version" => Value::from(value.version),
+		})
 	}
 }
 
@@ -1400,6 +1421,10 @@ impl Value {
 				from: self,
 				into: kind.to_string(),
 			}),
+			Kind::File(t) => match t.is_empty() {
+				true => self.coerce_to_file().map(Value::from),
+				false => self.coerce_to_file_type(t).map(Value::from),
+			},
 		};
 		// Check for any conversion errors
 		match res {
@@ -1702,6 +1727,32 @@ impl Value {
 		}
 	}
 
+	/// Try to coerce this value to a `File`
+	pub(crate) fn coerce_to_file(self) -> Result<File, Error> {
+		match self {
+			// Files are allowed
+			Value::File(v) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "file".into(),
+			}),
+		}
+	}
+
+	/// Try to coerce this value to a `File` belonging to a certain bucket
+	pub(crate) fn coerce_to_file_type(self, val: &[Ident]) -> Result<File, Error> {
+		match self {
+			// Records are allowed if correct type
+			Value::File(v) if v.is_bucket_type(val) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "file".into(),
+			}),
+		}
+	}
+
 	/// Try to coerce this value to a `Datetime`
 	pub(crate) fn coerce_to_datetime(self) -> Result<Datetime, Error> {
 		match self {
@@ -2000,6 +2051,10 @@ impl Value {
 				from: self,
 				into: kind.to_string(),
 			}),
+			Kind::File(t) => match t.is_empty() {
+				true => self.convert_to_file().map(Value::from),
+				false => self.convert_to_file_type(t).map(Value::from),
+			},
 		};
 		// Check for any conversion errors
 		match res {
@@ -2220,11 +2275,50 @@ impl Value {
 	/// Try to convert this value to a `Strand`
 	pub(crate) fn convert_to_strand(self) -> Result<Strand, Error> {
 		match self {
-			// Bytes can't convert to strings
-			Value::Bytes(_) => Err(Error::ConvertTo {
+			// Allow any bytes value
+			Value::Bytes(v) => {
+				let bytes = &v.0[..];
+				match std::str::from_utf8(bytes) {
+					Ok(s) => Ok(s.into()),
+					// Invalid UTF-8 bytes cannot be converted
+					Err(_) => Err(Error::ConvertTo {
+						from: Value::Bytes(v),
+						into: "string".into(),
+					}),
+				}
+			}
+			// None can't convert to a string
+			Value::None => Err(Error::ConvertTo {
 				from: self,
 				into: "string".into(),
 			}),
+			// Null can't convert to a string
+			Value::Null => Err(Error::ConvertTo {
+				from: self,
+				into: "string".into(),
+			}),
+			// Allow any string value
+			Value::Strand(v) => Ok(v),
+			// Stringify anything else
+			Value::Uuid(v) => Ok(v.to_raw().into()),
+			// Stringify anything else
+			Value::Datetime(v) => Ok(v.to_raw().into()),
+			// Stringify anything else
+			_ => Ok(self.to_string().into()),
+		}
+	}
+
+	/// Try to convert this value to a `Strand`
+	pub(crate) fn convert_to_strand_lossy(self) -> Result<Strand, Error> {
+		match self {
+			// Allow any bytes value
+			Value::Bytes(v) => {
+				let bytes = &v.0[..];
+				Ok(match String::from_utf8_lossy(bytes) {
+					Cow::Owned(s) => s.into(),
+					Cow::Borrowed(s) => s.into(),
+				})
+			}
 			// None can't convert to a string
 			Value::None => Err(Error::ConvertTo {
 				from: self,
@@ -2305,6 +2399,32 @@ impl Value {
 		}
 	}
 
+	/// Try to convert this value to a `File`
+	pub(crate) fn convert_to_file(self) -> Result<File, Error> {
+		match self {
+			// Files are allowed
+			Value::File(v) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "file".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `File` belonging to a certain bucket
+	pub(crate) fn convert_to_file_type(self, val: &[Ident]) -> Result<File, Error> {
+		match self {
+			// Records are allowed if correct type
+			Value::File(v) if v.is_bucket_type(val) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "file".into(),
+			}),
+		}
+	}
+
 	/// Try to convert this value to a `Datetime`
 	pub(crate) fn convert_to_datetime(self) -> Result<Datetime, Error> {
 		match self {
@@ -2354,6 +2474,29 @@ impl Value {
 	/// Try to convert this value to a `Bytes`
 	pub(crate) fn convert_to_bytes(self) -> Result<Bytes, Error> {
 		match self {
+			// Arrays of ints are allowed
+			Value::Array(ref v) => {
+				let mut bytes = Vec::with_capacity(v.len());
+
+				// Check each element
+				for value in v.0.iter() {
+					match value {
+						Value::Number(Number::Int(i)) if *i >= 0 && *i <= 255 => {
+							// Safe to convert to u8
+							bytes.push(*i as u8);
+						}
+						_ => {
+							// Not an int or outside u8 range
+							return Err(Error::ConvertTo {
+								from: self.clone(),
+								into: "bytes".into(),
+							});
+						}
+					}
+				}
+
+				Ok(Bytes(bytes))
+			}
 			// Bytes are allowed
 			Value::Bytes(v) => Ok(v),
 			// Strings can be converted to bytes
@@ -2389,6 +2532,8 @@ impl Value {
 				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
 				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
 			}
+			// Bytes convert to an array
+			Value::Bytes(v) => Ok(v.0.into_iter().map(Value::from).collect::<Vec<Value>>().into()),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -2967,6 +3112,7 @@ impl fmt::Display for Value {
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
 			Value::Refs(v) => write!(f, "{v}"),
+			Value::File(v) => write!(f, "{v}"),
 		}
 	}
 }

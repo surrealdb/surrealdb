@@ -52,6 +52,15 @@ impl Permissions {
 			&& self.update == Permission::Full
 			&& self.delete == Permission::Full
 	}
+
+	pub(crate) fn get_by_kind(&self, kind: PermissionKind) -> &Permission {
+		match kind {
+			PermissionKind::Select => &self.select,
+			PermissionKind::Create => &self.create,
+			PermissionKind::Update => &self.update,
+			PermissionKind::Delete => &self.delete,
+		}
+	}
 }
 
 impl Display for Permissions {
@@ -134,7 +143,7 @@ impl InfoStructure for Permissions {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub(crate) enum PermissionKind {
+pub enum PermissionKind {
 	Select,
 	Create,
 	Update,
@@ -149,6 +158,12 @@ impl PermissionKind {
 			PermissionKind::Update => "update",
 			PermissionKind::Delete => "delete",
 		}
+	}
+}
+
+impl Display for PermissionKind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		f.write_str(self.as_str())
 	}
 }
 

@@ -55,7 +55,7 @@
 
 use self::token_buffer::TokenBuffer;
 use crate::{
-	sql::{self, Datetime, Duration, Strand, Uuid},
+	sql::{self, Bytes, Datetime, Duration, File, Strand, Uuid},
 	syn::{
 		error::{bail, SyntaxError},
 		lexer::{compound::NumberKind, Lexer},
@@ -119,6 +119,8 @@ pub enum GluedValue {
 	Strand(Strand),
 	#[default]
 	None,
+	Bytes(Bytes),
+	File(File),
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +145,8 @@ pub struct ParserSettings {
 	pub bearer_access_enabled: bool,
 	/// Whether bearer access is enabled
 	pub define_api_enabled: bool,
+	/// Whether the files feature is enabled
+	pub files_enabled: bool,
 }
 
 impl Default for ParserSettings {
@@ -155,6 +159,7 @@ impl Default for ParserSettings {
 			references_enabled: false,
 			bearer_access_enabled: false,
 			define_api_enabled: false,
+			files_enabled: false,
 		}
 	}
 }

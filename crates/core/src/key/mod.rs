@@ -28,6 +28,7 @@
 /// crate::key::database::all            /*{ns}*{db}
 /// crate::key::database::ac             /*{ns}*{db}!ac{ac}
 /// crate::key::database::az             /*{ns}*{db}!az{az}
+/// crate::key::database::bu             /*{ns}*{db}!bu{bu}
 /// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 /// crate::key::database::ml             /*{ns}*{db}!ml{ml}{vn}
 /// crate::key::database::pa             /*{ns}*{db}!pa{pa}

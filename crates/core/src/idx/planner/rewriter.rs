@@ -50,7 +50,8 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Value::Regex(_)
 			| Value::Constant(_)
 			| Value::Closure(_)
-			| Value::Refs(_) => Some(v.clone()),
+			| Value::Refs(_)
+			| Value::File(_) => Some(v.clone()),
 		}
 	}
 

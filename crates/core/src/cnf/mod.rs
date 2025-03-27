@@ -147,3 +147,9 @@ pub static FILE_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
 		.map(|input| extract_allowed_paths(&input))
 		.unwrap_or_default()
 });
+
+pub static GLOBAL_BUCKET: LazyLock<Option<String>> =
+	std::sync::LazyLock::new(|| std::env::var("SURREAL_GLOBAL_BUCKET").ok());
+
+pub static GLOBAL_BUCKET_ENFORCED: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_GLOBAL_BUCKET_ENFORCED", bool, false);

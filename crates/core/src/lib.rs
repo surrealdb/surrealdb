@@ -27,6 +27,7 @@ mod exe;
 mod fnc;
 
 pub mod api;
+pub mod buc;
 pub mod cnf;
 pub mod ctx;
 pub mod dbs;
@@ -47,6 +48,10 @@ pub mod sql;
 pub mod syn;
 pub mod sys;
 pub mod vs;
+
+#[cfg(feature = "enterprise")]
+#[rustfmt::skip]
+mod ent;
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;

@@ -16,6 +16,7 @@ pub mod count;
 pub mod crypto;
 pub mod duration;
 pub mod encoding;
+pub mod file;
 pub mod geo;
 pub mod http;
 pub mod math;
@@ -66,6 +67,7 @@ pub async fn run(
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
 		|| name.eq("value::patch")
+		|| name.starts_with("file")
 		|| name.starts_with("http")
 		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
@@ -395,6 +397,7 @@ pub fn synchronous(
 		"type::datetime" => r#type::datetime,
 		"type::decimal" => r#type::decimal,
 		"type::duration" => r#type::duration,
+		"type::file" => r#type::file,
 		"type::float" => r#type::float,
 		"type::geometry" => r#type::geometry,
 		"type::int" => r#type::int,
@@ -403,6 +406,7 @@ pub fn synchronous(
 		"type::range" => r#type::range,
 		"type::record" => r#type::record,
 		"type::string" => r#type::string,
+		"type::string_lossy" => r#type::string_lossy,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
 		"type::uuid" => r#type::uuid,
@@ -510,6 +514,16 @@ pub async fn asynchronous(
 		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
 		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		//
+		"file::put" => file::put((stk, ctx, opt, doc)).await,
+		"file::get" => file::get((stk, ctx, opt, doc)).await,
+		"file::head" => file::head((stk, ctx, opt, doc)).await,
+		"file::delete" => file::delete((stk, ctx, opt, doc)).await,
+		"file::copy" => file::copy((stk, ctx, opt, doc)).await,
+		"file::copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
+		"file::rename" => file::rename((stk, ctx, opt, doc)).await,
+		"file::rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
+		"file::exists" => file::exists((stk, ctx, opt, doc)).await,
 		//
 		"http::head" => http::head(ctx).await,
 		"http::get" => http::get(ctx).await,
@@ -824,6 +838,23 @@ pub async fn idiom(
 				"year" => time::year,
 			)
 		}
+		Value::File(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the file type",
+				//
+				"put" => file::put((stk, ctx, opt, doc)).await,
+				"get" => file::get((stk, ctx, opt, doc)).await,
+				"head" => file::head((stk, ctx, opt, doc)).await,
+				"delete" => file::delete((stk, ctx, opt, doc)).await,
+				"copy" => file::copy((stk, ctx, opt, doc)).await,
+				"copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
+				"rename" => file::rename((stk, ctx, opt, doc)).await,
+				"rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
+				"exists" => file::exists((stk, ctx, opt, doc)).await,
+			)
+		}
 		_ => Err(Error::InvalidFunction {
 			name: "".into(),
 			message: "".into(),
@@ -879,6 +910,7 @@ pub async fn idiom(
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,

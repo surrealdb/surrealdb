@@ -3118,6 +3118,26 @@ async fn function_type_string() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_type_string_lossy() -> Result<(), Error> {
+	// First bytes are a bit invalid, second are fine
+	let sql = r#"
+		type::string_lossy(<bytes>[83, 117, 114, 255, 114, 101, 97, 254, 108, 68, 66]);
+		type::string_lossy(<bytes>[ 83, 117, 114, 114, 101, 97, 108, 68, 66 ]);
+	"#;
+	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("Sur�rea�lDB");
+	assert_eq!(tmp, val);
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::from("SurrealDB");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_type_table() -> Result<(), Error> {
 	let sql = r#"
 		RETURN type::table("person");
