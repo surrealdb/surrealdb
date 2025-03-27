@@ -125,7 +125,11 @@ impl Display for AlterTableStatement {
 			}
 		}
 		if let Some(drop) = self.drop {
-			write!(f, " DROP {drop}")?;
+			if drop {
+				write!(f, " DROP")?;
+			} else {
+				write!(f, " DROP false")?;
+			}
 		}
 		if let Some(full) = self.full {
 			f.write_str(if full {
@@ -138,7 +142,7 @@ impl Display for AlterTableStatement {
 			write!(f, " COMMENT {}", comment.clone().unwrap_or("NONE".into()))?
 		}
 		if let Some(changefeed) = &self.changefeed {
-			write!(f, " CHANGEFEED {}", changefeed.map_or("NONE".into(), |v| v.to_string()))?
+			write!(f, " {}", changefeed.map_or("CHANGEFEED NONE".into(), |v| v.to_string()))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
