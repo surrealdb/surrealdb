@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
 use super::TestTaskResult;
 use crate::tests::schema::{self, TestConfig};
@@ -10,7 +9,7 @@ use crate::tests::{
 };
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::sql::Value as SurValue;
+use surrealdb_core::sql::{Value as SurValue};
 
 mod display;
 mod update;
@@ -282,6 +281,7 @@ impl TestReport {
 	) -> Self {
 		let outputs = match &job_result {
 			TestTaskResult::ParserError(ref e) => Some(TestOutputs::ParsingError(e.to_string())),
+			TestTaskResult::ReParserError(_, _) => None,
 			TestTaskResult::RunningError(_) => None,
 			TestTaskResult::Timeout => None,
 			TestTaskResult::Import(_, _) => None,
@@ -357,6 +357,11 @@ impl TestReport {
 					expected: expected_error,
 				}
 			}
+			TestTaskResult::ReParserError(source, query) => {
+				TestReportKind::Error(TestError::Running(format!(
+					"Displayed query could not be parsed: \nsource:\n{}\nquery:\n{}\n{:#?}", source, query, query
+				)))
+			}
 			TestTaskResult::Results(results) => {
 				let expectation = TestExpectation::from_test_config(config);
 				let results =
@@ -365,7 +370,7 @@ impl TestReport {
 			}
 			TestTaskResult::QueryParsingNotIdempotent(q1, q2) => {
 				TestReportKind::Error(TestError::Running(
-					format!("Query is not idempotent: \nexpected: {} \ngot: {}", q1, q2)))
+					format!("Query is not idempotent: \nexpected:\n {}\n{:#?} \ngot:\n {:?}\n{:#?}", q1, q1, q2.clone().map(|x| x.to_string()), q2)))
 			}
 		}
 	}

@@ -3,14 +3,15 @@ mod progress;
 mod report;
 mod util;
 
-use core::str;
-use std::{any::Any, io, mem, panic::AssertUnwindSafe, thread, time::Duration};
 use anyhow::{anyhow, bail, Context, Result};
 use camino::Utf8Path;
 use clap::ArgMatches;
+use core::str;
 use futures::FutureExt;
 use progress::Progress;
 use report::{TestGrade, TestReport};
+use std::{any::Any, io, mem, panic::AssertUnwindSafe, thread, time::Duration};
+use surrealdb_core::sql::{Query, Statement};
 use surrealdb_core::{
 	dbs::{capabilities::ExperimentalTarget, Capabilities, Response, Session},
 	err::Error as CoreError,
@@ -23,7 +24,6 @@ use tokio::{
 	sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
 	time::{self},
 };
-use surrealdb_core::sql::Query;
 use util::core_capabilities_from_test_config;
 
 use crate::{
@@ -35,12 +35,13 @@ use crate::{
 #[derive(Debug)]
 pub enum TestTaskResult {
 	ParserError(RenderedError),
+	ReParserError(String, Query),
 	RunningError(CoreError),
 	Import(String, String),
 	Timeout,
 	Results(Vec<Response>),
 	Paniced(Box<dyn Any + Send + 'static>),
-	QueryParsingNotIdempotent(Query, Query),
+	QueryParsingNotIdempotent(Statement, Option<Statement>),
 }
 
 pub struct TestTaskContext {
@@ -384,32 +385,44 @@ async fn run_test_with_dbs(
 		..Default::default()
 	};
 
-	fn parse(source: &[u8], settings: syn::parser::ParserSettings) -> Result<Query, TestTaskResult> {
+	fn parse(source: &[u8], settings: syn::parser::ParserSettings) -> Result<Query, RenderedError> {
 		let mut parser = syn::parser::Parser::new_with_settings(source, settings);
 		let mut stack = reblessive::Stack::new();
 
 		match stack.enter(|stk| parser.parse_query(stk)).finish() {
 			Ok(x) => {
 				if let Err(e) = parser.assert_finished() {
-					return Err(TestTaskResult::ParserError(e.render_on_bytes(source)));
+					return Err(e.render_on_bytes(source));
 				}
 				Ok(x)
 			}
-			Err(e) => return Err(TestTaskResult::ParserError(e.render_on_bytes(source))),
+			Err(e) => Err(e.render_on_bytes(source)),
 		}
 	}
 
 	let query = match parse(source, settings.clone()) {
 		Ok(x) => x,
-		Err(e) => return Ok(e),
+		Err(e) => return Ok(TestTaskResult::ParserError(e)),
 	};
 	let query2 = match parse(format!("{}", query).as_bytes(), settings) {
 		Ok(x) => x,
-		Err(e) => return Ok(e),
+		Err(e) => { 
+			return Ok(TestTaskResult::ReParserError(String::from_utf8_lossy(source).to_string(), query.clone()))
+		}
 	};
 
-	if query != query2 {
-		return Ok(TestTaskResult::QueryParsingNotIdempotent(query, query2));
+	let mut query2 = query2.iter();
+	for expected in query.iter() {
+		match query2.next() {
+			Some(actual) if expected != actual => {
+				return Ok(TestTaskResult::QueryParsingNotIdempotent(
+					expected.clone(),
+					Some(actual.clone()),
+				))
+			}
+			None => return Ok(TestTaskResult::QueryParsingNotIdempotent(expected.clone(), None)),
+			_ => continue,
+		}
 	}
 
 	let mut process_future = Box::pin(dbs.process(query, &session, None));
