@@ -28,7 +28,7 @@ array::max([1,2,3]);
 array::max([1,2,"text",3,3,4]);
 
 BEGIN;
-for $a in (<array> 0..$type_array.len()).map(|$x,$i| { i: $i, range: 0..($x+1) }){
+for $a in (<array> 0..($type_array.len())).map(|$x,$i| { i: $i, range: 0..($x+1) }){
 	CREATE type::thing('t',$a.i) SET v = array::max($type_array[$a.range]);
 };
 RETURN SELECT v,id FROM t;
