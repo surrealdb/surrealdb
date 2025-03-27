@@ -65,6 +65,7 @@ impl Value {
 			Value::Function(v) => serializer.serialize(v).map_err(Into::into),
 			Value::Subquery(v) => serializer.serialize(v).map_err(Into::into),
 			Value::Expression(v) => serializer.serialize(v).map_err(Into::into),
+			Value::Assignment(v) => serializer.serialize(v).map_err(Into::into),
 			Value::Query(v) => serializer.serialize(v).map_err(Into::into),
 			Value::Model(v) => serializer.serialize(v).map_err(Into::into),
 			Value::Closure(v) => serializer.serialize(v).map_err(Into::into),

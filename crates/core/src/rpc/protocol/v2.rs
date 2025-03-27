@@ -419,9 +419,10 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_two() else {
+		let Ok((what, data, update)) = params.needs_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
+
 		// Specify the SQL query string
 		let sql = InsertStatement {
 			into: match what.is_none_or_null() {
@@ -429,6 +430,10 @@ pub trait RpcProtocolV2: RpcContext {
 				true => None,
 			},
 			data: crate::sql::Data::SingleExpression(data),
+			update: match update.is_none_or_null() {
+				false => Some(crate::sql::Data::UpdateExpression(update)),
+				true => None,
+			},
 			output: Some(Output::After),
 			..Default::default()
 		}
