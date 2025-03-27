@@ -123,7 +123,7 @@ impl Block {
 				Entry::Value(v) => {
 					if i == self.len() - 1 {
 						// If the last entry then return the value
-						return v.compute(stk, &ctx, opt, doc).await.map_err(From::from);
+						return v.compute(stk, &ctx, opt, doc).await;
 					} else {
 						// Otherwise just process the value
 						v.compute(stk, &ctx, opt, doc).await?;

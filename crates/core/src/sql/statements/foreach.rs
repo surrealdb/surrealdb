@@ -111,9 +111,7 @@ impl ForeachStatement {
 					Entry::Output(v) => {
 						return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
 					}
-					Entry::Throw(v) => {
-						return Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?);
-					}
+					Entry::Throw(v) => return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 				};
 				// Catch any special errors
 				match res {
