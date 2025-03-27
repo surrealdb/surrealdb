@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineUserStatement {
@@ -50,7 +50,7 @@ impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 				.take(128)
 				.map(char::from)
 				.collect::<String>(),
-			roles: vec![role.into()],
+			roles: vec![role.to_uppercase().into()],
 			duration: UserDuration::default(),
 			comment: None,
 			if_not_exists: false,
@@ -69,7 +69,7 @@ impl DefineUserStatement {
 		DefineUserStatement {
 			name,
 			base,
-			roles,
+			roles: roles.into_iter().map(|r| r.to_uppercase().into()).collect(),
 			duration,
 			code: rand::thread_rng()
 				.sample_iter(&Alphanumeric)
@@ -232,7 +232,7 @@ impl Display for DefineUserStatement {
 			self.base,
 			QuoteStr(&self.hash),
 			Fmt::comma_separated(
-				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
+				&self.roles
 			),
 		)?;
 		// Always print relevant durations so defaults can be changed in the future
@@ -259,6 +259,20 @@ impl Display for DefineUserStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
+	}
+}
+
+// Implementing the `PartialEq` trait to ignore `code` since it is randomly generated
+impl PartialEq for DefineUserStatement {
+	fn eq(&self, other: &Self) -> bool {
+		self.name == other.name
+			&& self.base == other.base
+			&& self.hash == other.hash
+			&& self.roles == other.roles
+			&& self.duration == other.duration
+			&& self.comment == other.comment
+			&& self.if_not_exists == other.if_not_exists
+			&& self.overwrite == other.overwrite
 	}
 }
 
