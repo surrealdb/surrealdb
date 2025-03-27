@@ -885,6 +885,10 @@ impl Parser<'_> {
 			}
 		}
 
+		if self.eat(t!("COMMENT")) {
+			res.comment = Some(self.next_token_value()?);
+		}
+
 		Ok(res)
 	}
 
@@ -1436,6 +1440,10 @@ impl Parser<'_> {
 				t!("READONLY") => {
 					self.pop_peek();
 					res.readonly = true;
+				}
+				t!("COMMENT") => {
+					self.pop_peek();
+					res.comment = Some(self.next_token_value()?);
 				}
 				_ => {
 					break;

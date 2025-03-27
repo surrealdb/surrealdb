@@ -3,7 +3,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Ident, Permissions, Value};
+use crate::sql::{Base, Ident, Permissions, Strand, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -23,6 +23,7 @@ pub struct DefineBucketStatement {
 	pub backend: Option<Value>,
 	pub permissions: Permissions,
 	pub readonly: bool,
+	pub comment: Option<Strand>,
 }
 
 impl DefineBucketStatement {
@@ -81,6 +82,7 @@ impl DefineBucketStatement {
 			backend,
 			permissions: self.permissions.clone(),
 			readonly: self.readonly,
+			comment: self.comment.clone(),
 			..Default::default()
 		};
 		txn.set(key, revision::to_vec(&ap)?, None).await?;
@@ -112,6 +114,10 @@ impl Display for DefineBucketStatement {
 
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {}", comment)?;
+		}
+
 		Ok(())
 	}
 }
@@ -123,6 +129,7 @@ impl InfoStructure for DefineBucketStatement {
 			"permissions".to_string() => self.permissions.structure(),
 			"backend".to_string(), if let Some(backend) = self.backend => backend,
 			"readonly".to_string() => self.readonly.into(),
+			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
 		})
 	}
 }
@@ -138,6 +145,7 @@ pub struct BucketDefinition {
 	pub backend: Option<String>,
 	pub permissions: Permissions,
 	pub readonly: bool,
+	pub comment: Option<Strand>,
 }
 
 impl From<BucketDefinition> for DefineBucketStatement {
@@ -149,6 +157,7 @@ impl From<BucketDefinition> for DefineBucketStatement {
 			backend: value.backend.map(|v| v.into()),
 			permissions: value.permissions,
 			readonly: value.readonly,
+			comment: value.comment,
 		}
 	}
 }
