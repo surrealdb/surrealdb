@@ -205,7 +205,7 @@ impl fmt::Display for Expression {
 			Self::Unary {
 				o,
 				v,
-			} => write!(f, "{o}{v}"),
+			} => write!(f, "{o} {v}"),
 			Self::Binary {
 				l,
 				o,
