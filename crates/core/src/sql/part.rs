@@ -291,9 +291,12 @@ impl<'a> RecursionPlan {
 				plan,
 				after,
 			} => {
-				let v = stk.run(|stk| rec.current.get(stk, ctx, opt, doc, before)).await?;
+				let v = stk
+					.run(|stk| rec.current.get(stk, ctx, opt, doc, before))
+					.await
+					.catch_return()?;
 				let v = plan.compute(stk, ctx, opt, doc, rec.with_current(&v)).await?;
-				let v = stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await?;
+				let v = stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await.catch_return()?;
 				let v = clean_iteration(v);
 
 				if rec.iterated < rec.min && is_final(&v) {
@@ -305,7 +308,11 @@ impl<'a> RecursionPlan {
 				}
 
 				let path = &[Part::Destructure(parts.to_owned())];
-				match stk.run(|stk| rec.current.get(stk, ctx, opt, doc, path)).await? {
+				match stk
+					.run(|stk| rec.current.get(stk, ctx, opt, doc, path))
+					.await
+					.catch_return()?
+				{
 					Value::Object(mut obj) => {
 						obj.insert(field.to_raw(), v);
 						Ok(Value::Object(obj))
@@ -597,7 +604,9 @@ macro_rules! walk_paths {
 			};
 
 			// Apply the recursed path to the last value
-			let res = $stk.run(|stk| last.get(stk, $ctx, $opt, $doc, $rec.path)).await?;
+			let res = $crate::sql::FlowResultExt::catch_return(
+				$stk.run(|stk| last.get(stk, $ctx, $opt, $doc, $rec.path)).await,
+			)?;
 
 			// If we encounter a final value, we add it to the finished collection.
 			// - If expects is some, we are seeking for the shortest path, in which
@@ -720,7 +729,10 @@ impl RecurseInstruction {
 				}
 
 				// Apply the recursed path to the current values
-				let res = stk.run(|stk| rec.current.get(stk, ctx, opt, doc, rec.path)).await?;
+				let res = stk
+					.run(|stk| rec.current.get(stk, ctx, opt, doc, rec.path))
+					.await
+					.catch_return()?;
 				// Clean the iteration
 				let res = clean_iteration(res);
 

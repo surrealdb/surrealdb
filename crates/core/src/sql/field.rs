@@ -181,7 +181,8 @@ impl Fields {
 								// Continue fetching the next idiom part
 								let x = x
 									.get(stk, ctx, opt, Some(doc), v)
-									.await?
+									.await
+									.catch_return()?
 									.compute(stk, ctx, opt, Some(doc))
 									.await
 									// TODO: Controlflow winding up to here has some strange

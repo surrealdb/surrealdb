@@ -108,7 +108,7 @@ impl GroupsCollector {
 			let val = if let Some(ref v) = count_value {
 				v.clone()
 			} else {
-				stk.run(|stk| obj.get(stk, ctx, opt, None, idiom)).await?
+				stk.run(|stk| obj.get(stk, ctx, opt, None, idiom)).await.catch_return()?
 			};
 			agr.push(stk, ctx, opt, rs, val).await?;
 		}

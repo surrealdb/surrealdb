@@ -175,6 +175,7 @@ pub type FlowResult<T> = Result<T, ControlFlow>;
 /// An enum carrying control flow information.
 ///
 /// Returned by compute functions which can impact control flow.
+#[derive(Debug)]
 pub enum ControlFlow {
 	Break,
 	Continue,

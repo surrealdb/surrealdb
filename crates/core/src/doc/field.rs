@@ -624,7 +624,8 @@ impl FieldEditContext<'_> {
 					.current
 					.doc
 					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
-					.await?;
+					.await
+					.catch_return()?;
 				// If the reference is contained in an array, we only delete it from the array
 				// if there is no other reference to the same record id in the array
 				if let Value::Array(arr) = others {

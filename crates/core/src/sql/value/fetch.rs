@@ -61,7 +61,8 @@ impl Value {
 							.await?
 							.all()
 							.get(stk, ctx, opt, None, path.next())
-							.await?
+							.await
+							.catch_return()?
 							.flatten()
 							.ok()?;
 						return Ok(());

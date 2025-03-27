@@ -200,7 +200,8 @@ impl Document {
 										None,
 										&[Part::All],
 									)
-									.await?
+									.await
+									.catch_return()?
 									.into();
 								// Construct the document for the compute method
 								let doc = CursorDoc::new(None, None, doc);

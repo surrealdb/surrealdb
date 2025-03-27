@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::sql::array::Uniq;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
+use crate::sql::FlowResultExt as _;
 use reblessive::tree::Stk;
 
 impl Value {
@@ -15,7 +16,7 @@ impl Value {
 		path: &[Part],
 		val: Value,
 	) -> Result<(), Error> {
-		match self.get(stk, ctx, opt, None, path).await? {
+		match self.get(stk, ctx, opt, None, path).await.catch_return()? {
 			Value::Array(v) => match val {
 				Value::Array(x) => self.set(stk, ctx, opt, path, Value::from((v + x).uniq())).await,
 				x => self.set(stk, ctx, opt, path, Value::from((v + x).uniq())).await,
