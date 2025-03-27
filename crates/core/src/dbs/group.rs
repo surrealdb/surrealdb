@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
 use crate::sql::function::OptimisedAggregate;
 use crate::sql::value::{TryAdd, TryFloatDiv, Value};
-use crate::sql::{Array, Field, Function, Idiom};
+use crate::sql::{Array, Field, FlowResultExt as _, Function, Idiom};
 use reblessive::tree::Stk;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
@@ -154,7 +154,10 @@ impl GroupsCollector {
 										let x = if matches!(a, OptimisedAggregate::None) {
 											// The aggregation is not optimised, let's compute it with the values
 											let vals = agr.take();
-											f.aggregate(vals)?.compute(stk, ctx, opt, None).await?
+											f.aggregate(vals)?
+												.compute(stk, ctx, opt, None)
+												.await
+												.catch_return()?
 										} else {
 											// The aggregation is optimised, just get the value
 											agr.compute(a)?
@@ -285,7 +288,12 @@ impl Aggregator {
 			*c += count;
 		}
 		if let Some((ref f, ref mut c)) = self.count_function {
-			if f.aggregate(val.clone())?.compute(stk, ctx, opt, None).await?.is_truthy() {
+			if f.aggregate(val.clone())?
+				.compute(stk, ctx, opt, None)
+				.await
+				.catch_return()?
+				.is_truthy()
+			{
 				*c += 1;
 			}
 		}

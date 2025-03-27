@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::AccessStatement;
 use crate::sql::{
@@ -24,6 +23,8 @@ use std::{
 	fmt::{self, Display, Formatter, Write},
 	ops::Deref,
 };
+
+use super::{ControlFlow, FlowResult};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -140,7 +141,7 @@ impl Statement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		let stm = match (opt.import, self) {
 			// All exports in SurrealDB 1.x are done with `UPDATE`, but
 			// because `UPDATE` works different in SurrealDB 2.x, we need
@@ -159,40 +160,42 @@ impl Statement {
 			(_, stm) => stm,
 		};
 
-		match stm {
+		let res = match stm {
 			Self::Access(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
-			Self::Break(v) => v.compute(ctx, opt, doc).await,
-			Self::Continue(v) => v.compute(ctx, opt, doc).await,
+			Self::Break(v) => return v.compute(ctx, opt, doc).await,
+			Self::Continue(v) => return v.compute(ctx, opt, doc).await,
 			Self::Create(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Delete(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Define(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Foreach(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Ifelse(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Foreach(v) => return v.compute(stk, ctx, opt, doc).await,
+			Self::Ifelse(v) => return v.compute(stk, ctx, opt, doc).await,
 			Self::Info(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Insert(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Kill(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Live(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Output(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Output(v) => return v.compute(stk, ctx, opt, doc).await,
 			Self::Relate(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Rebuild(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Remove(v) => v.compute(ctx, opt, doc).await,
 			Self::Select(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Set(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Set(v) => return v.compute(stk, ctx, opt, doc).await,
 			Self::Show(v) => v.compute(ctx, opt, doc).await,
 			Self::Sleep(v) => v.compute(ctx, opt, doc).await,
-			Self::Throw(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Throw(v) => return v.compute(stk, ctx, opt, doc).await,
 			Self::Update(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Upsert(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Value(v) => {
 				// Ensure futures are processed
 				let opt = &opt.new_with_futures(true);
 				// Process the output value
-				v.compute_unbordered(stk, ctx, opt, doc).await
+				return v.compute(stk, ctx, opt, doc).await;
 			}
 			_ => Err(fail!("Unexpected statement type encountered: {self:?}")),
-		}
+		};
+
+		res.map_err(ControlFlow::from)
 	}
 }
 

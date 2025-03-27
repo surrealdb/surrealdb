@@ -17,8 +17,8 @@ use crate::{
 	err::Error,
 	kvs::{Datastore, Transaction},
 	sql::{
-		statements::{define::config::api::ApiConfig, define::ApiDefinition},
-		Object, Value,
+		statements::define::{config::api::ApiConfig, ApiDefinition},
+		FlowResultExt as _, Object, Value,
 	},
 };
 
@@ -126,7 +126,7 @@ impl ApiInvocation {
 
 		// Compute the action
 
-		let res = action.compute(stk, &ctx, &opt, None).await?;
+		let res = action.compute(stk, &ctx, &opt, None).await.catch_return()?;
 
 		let mut res = ApiResponse::try_from(res)?;
 		if let Some(headers) = inv_ctx.response_headers {

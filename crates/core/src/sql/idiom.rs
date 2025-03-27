@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
@@ -16,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
+
+use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
@@ -165,7 +166,7 @@ impl Idiom {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		match self.first() {
 			// The starting part is a value
 			Some(Part::Start(v)) => {

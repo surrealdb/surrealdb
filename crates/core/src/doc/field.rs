@@ -15,7 +15,7 @@ use crate::sql::statements::DefineFieldStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::every::ArrayBehaviour;
 use crate::sql::value::Value;
-use crate::sql::Part;
+use crate::sql::{FlowResultExt as _, Part};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -431,7 +431,7 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val = expr.compute(self.stk, &ctx, self.opt, doc).await?;
+			let val = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Return the modified value
@@ -467,7 +467,7 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val = expr.compute(self.stk, &ctx, self.opt, doc).await?;
+			let val = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Return the modified value
@@ -509,7 +509,7 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the ASSERT clause
-			let res = expr.compute(self.stk, &ctx, self.opt, doc).await?;
+			let res = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Check the ASSERT clause result
@@ -579,7 +579,7 @@ impl FieldEditContext<'_> {
 					// Freeze the new context
 					let ctx = ctx.freeze();
 					// Process the PERMISSION clause
-					let res = expr.compute(self.stk, &ctx, opt, doc).await?;
+					let res = expr.compute(self.stk, &ctx, opt, doc).await.catch_return()?;
 					// Unfreeze the new context
 					self.context = Some(MutableContext::unfreeze(ctx)?);
 					// If the specific permissions

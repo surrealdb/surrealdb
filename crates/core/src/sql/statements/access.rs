@@ -5,7 +5,8 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::access_type::BearerAccessSubject;
 use crate::sql::{
-	AccessType, Array, Base, Cond, Datetime, Duration, Ident, Object, Strand, Thing, Uuid, Value,
+	AccessType, Array, Base, Cond, Datetime, Duration, FlowResultExt as _, Ident, Object, Strand,
+	Thing, Uuid, Value,
 };
 use md5::Digest;
 use rand::Rng;
@@ -603,7 +604,8 @@ async fn compute_show(
 								doc: redacted_gr.into(),
 							}),
 						)
-						.await?
+						.await
+						.catch_return()?
 						.is_truthy()
 					{
 						// Skip grant if it does not match the provided conditions.
@@ -748,7 +750,8 @@ pub async fn revoke_grant(
 								doc: redacted_gr.into(),
 							}),
 						)
-						.await?
+						.await
+						.catch_return()?
 						.is_truthy()
 					{
 						// Skip grant if it does not match the provided conditions.

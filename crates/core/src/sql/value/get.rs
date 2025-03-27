@@ -16,7 +16,7 @@ use crate::sql::part::{Part, Skip};
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
-use crate::sql::Function;
+use crate::sql::{FlowResultExt as _, Function};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
@@ -146,10 +146,11 @@ impl Value {
 					Part::Method(name, args) => {
 						let a = stk
 							.scope(|scope| {
-								try_join_all(
-									args.iter()
-										.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
-								)
+								try_join_all(args.iter().map(|v| {
+									scope.run(|stk| async {
+										v.compute(stk, ctx, opt, doc).await.catch_return()
+									})
+								}))
 							})
 							.await?;
 						let v = stk
@@ -224,7 +225,11 @@ impl Value {
 							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
 						}
 					},
-					Part::Value(x) => match stk.run(|stk| x.compute(stk, ctx, opt, doc)).await? {
+					Part::Value(x) => match stk
+						.run(|stk| x.compute(stk, ctx, opt, doc))
+						.await
+						.catch_return()?
+					{
 						Value::Strand(f) => match v.get(f.as_str()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
@@ -256,10 +261,11 @@ impl Value {
 					Part::Method(name, args) => {
 						let a = stk
 							.scope(|scope| {
-								try_join_all(
-									args.iter()
-										.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
-								)
+								try_join_all(args.iter().map(|v| {
+									scope.run(|stk| async {
+										v.compute(stk, ctx, opt, doc).await.catch_return()
+									})
+								}))
 							})
 							.await?;
 						let res = stk
@@ -274,7 +280,11 @@ impl Value {
 							}) => match v.get(name) {
 								Some(v) => {
 									let fnc = Function::Anonymous(v.clone(), a, true);
-									match stk.run(|stk| fnc.compute(stk, ctx, opt, doc)).await {
+									match stk
+										.run(|stk| fnc.compute(stk, ctx, opt, doc))
+										.await
+										.catch_return()
+									{
 										Ok(v) => Ok(v),
 										Err(Error::InvalidFunction {
 											..
@@ -331,7 +341,8 @@ impl Value {
 							let cur = v.clone().into();
 							if stk
 								.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
-								.await?
+								.await
+								.catch_return()?
 								.is_truthy()
 							{
 								a.push(v.clone());
@@ -340,7 +351,11 @@ impl Value {
 						let v = Value::from(a);
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
-					Part::Value(x) => match stk.run(|stk| x.compute(stk, ctx, opt, doc)).await? {
+					Part::Value(x) => match stk
+						.run(|stk| x.compute(stk, ctx, opt, doc))
+						.await
+						.catch_return()?
+					{
 						Value::Number(i) => match v.get(i.to_usize()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
@@ -358,10 +373,11 @@ impl Value {
 					Part::Method(name, args) => {
 						let a = stk
 							.scope(|scope| {
-								try_join_all(
-									args.iter()
-										.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
-								)
+								try_join_all(args.iter().map(|v| {
+									scope.run(|stk| async {
+										v.compute(stk, ctx, opt, doc).await.catch_return()
+									})
+								}))
 							})
 							.await?;
 						let v = stk
@@ -484,7 +500,9 @@ impl Value {
 								let a = stk
 									.scope(|scope| {
 										try_join_all(args.iter().map(|v| {
-											scope.run(|stk| v.compute(stk, ctx, opt, doc))
+											scope.run(|stk| async {
+												v.compute(stk, ctx, opt, doc).await.catch_return()
+											})
 										}))
 									})
 									.await?;
@@ -534,11 +552,11 @@ impl Value {
 						Part::Method(name, args) => {
 							let a = stk
 								.scope(|scope| {
-									try_join_all(
-										args.iter().map(|v| {
-											scope.run(|stk| v.compute(stk, ctx, opt, doc))
-										}),
-									)
+									try_join_all(args.iter().map(|v| {
+										scope.run(|stk| async {
+											v.compute(stk, ctx, opt, doc).await.catch_return()
+										})
+									}))
 								})
 								.await?;
 							let v = stk

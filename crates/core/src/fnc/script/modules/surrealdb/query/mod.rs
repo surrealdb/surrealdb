@@ -11,6 +11,7 @@ use crate::{
 	ctx::Context,
 	dbs::{Attach, Options},
 	doc::CursorDoc,
+	sql::FlowResultExt as _,
 };
 
 #[allow(clippy::module_inception)]
@@ -90,6 +91,7 @@ pub fn query<'js>(
 				stk.run(|stk| query.query.compute(stk, &context, query_ctx.opt, query_ctx.doc))
 			})
 			.await
+			.catch_return()
 			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))
 		}
 		.await;

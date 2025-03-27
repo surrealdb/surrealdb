@@ -33,16 +33,6 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
-	/// This error is used for breaking a loop in a foreach statement
-	#[doc(hidden)]
-	#[error("Break statement has been reached")]
-	Break,
-
-	/// This error is used for skipping a loop in a foreach statement
-	#[doc(hidden)]
-	#[error("Continue statement has been reached")]
-	Continue,
-
 	/// This error is used for retrying document processing with a new id
 	#[doc(hidden)]
 	#[error("This document should be retried with a new ID")]
@@ -280,6 +270,10 @@ pub enum Error {
 	/// Invalid timeout
 	#[error("Invalid timeout: {0:?} seconds")]
 	InvalidTimeout(u64),
+
+	/// Invalid timeout
+	#[error("Invalid control flow statement, break or continue statement found outside of loop.")]
+	InvalidControlFlow,
 
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
@@ -1147,13 +1141,6 @@ pub enum Error {
 	#[error("Found {value} for the Record ID but this is not a valid table name")]
 	TbInvalid {
 		value: String,
-	},
-
-	/// This error is used for breaking execution when a value is returned
-	#[doc(hidden)]
-	#[error("Return statement has been reached")]
-	Return {
-		value: Value,
 	},
 
 	/// A destructuring variant was used in a context where it is not supported

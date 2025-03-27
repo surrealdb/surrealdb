@@ -13,6 +13,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 use super::paths::ID;
+use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -134,7 +135,7 @@ impl Fields {
 		let opt = &opt.new_with_futures(true);
 		// Process the desired output
 		let mut out = match self.is_all() {
-			true => doc.doc.as_ref().compute(stk, ctx, opt, Some(doc)).await?,
+			true => doc.doc.as_ref().compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
 			false => Value::base(),
 		};
 		for v in self.other() {
@@ -153,9 +154,12 @@ impl Fields {
 						Value::Function(f) if group && f.is_aggregate() => {
 							let x = match f.args().len() {
 								// If no function arguments, then compute the result
-								0 => f.compute(stk, ctx, opt, Some(doc)).await?,
+								0 => f.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
 								// If arguments, then pass the first value through
-								_ => f.args()[0].compute(stk, ctx, opt, Some(doc)).await?,
+								_ => f.args()[0]
+									.compute(stk, ctx, opt, Some(doc))
+									.await
+									.catch_return()?,
 							};
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
@@ -179,7 +183,10 @@ impl Fields {
 									.get(stk, ctx, opt, Some(doc), v)
 									.await?
 									.compute(stk, ctx, opt, Some(doc))
-									.await?
+									.await
+									// TODO: Controlflow winding up to here has some strange
+									// implications, check validity.
+									.catch_return()?
 									.flatten();
 								// Add the result to the temporary store
 								res.push((v, x));
@@ -205,7 +212,8 @@ impl Fields {
 						// This expression is a variable fields expression
 						Value::Function(f) if f.name() == Some("type::fields") => {
 							// Process the function using variable field projections
-							let expr = expr.compute(stk, ctx, opt, Some(doc)).await?;
+							let expr =
+								expr.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
 								false => {
@@ -234,7 +242,8 @@ impl Fields {
 						// This expression is a variable field expression
 						Value::Function(f) if f.name() == Some("type::field") => {
 							// Process the function using variable field projections
-							let expr = expr.compute(stk, ctx, opt, Some(doc)).await?;
+							let expr =
+								expr.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
 								false => {
@@ -260,7 +269,8 @@ impl Fields {
 						}
 						// This expression is a normal field expression
 						_ => {
-							let expr = expr.compute(stk, ctx, opt, Some(doc)).await?;
+							let expr =
+								expr.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
 							// Check if this is a single VALUE field expression
 							if self.single().is_some() {
 								out = expr;
