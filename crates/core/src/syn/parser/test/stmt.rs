@@ -244,7 +244,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert!(stmt.hash.starts_with("$argon2id$"));
-		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(stmt.roles, vec![Ident("VIEWER".to_string())]);
 		assert_eq!(stmt.comment, Some(Strand("*******".to_string())));
 		assert_eq!(
 			stmt.duration,
@@ -269,7 +269,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.hash, "hunter2".to_owned());
-		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(stmt.roles, vec![Ident("VIEWER".to_string())]);
 		assert_eq!(stmt.comment, Some(Strand("*******".to_string())));
 		assert_eq!(
 			stmt.duration,
@@ -318,7 +318,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.hash, "hunter2".to_owned());
-		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(stmt.roles, vec![Ident("VIEWER".to_string())]);
 		assert_eq!(
 			stmt.duration,
 			UserDuration {
@@ -342,7 +342,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.name, Ident("user".to_string()));
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.hash, "hunter2".to_owned());
-		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(stmt.roles, vec![Ident("VIEWER".to_string())]);
 		assert_eq!(
 			stmt.duration,
 			UserDuration {
