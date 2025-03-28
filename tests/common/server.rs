@@ -1,4 +1,5 @@
 use rand::{thread_rng, Rng};
+use rcgen::CertifiedKey;
 use std::collections::btree_set::Iter;
 use std::collections::HashMap;
 use std::error::Error;
@@ -40,11 +41,12 @@ impl Child {
 		let a = self
 			.inner
 			.as_mut()
-			.map(|child| child.kill().map_err(|e| format!("failed to kill: {e}")))
+			.map(|child| child.kill().map_err(|e| format!("Failed to kill: {e}")))
 			.unwrap_or(Err("no inner".to_string()));
 		a.map(|_ok| self)
 	}
 
+	#[cfg(unix)]
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
 		nix::sys::signal::kill(
 			nix::unistd::Pid::from_raw(self.inner.as_ref().unwrap().id() as i32),
@@ -64,18 +66,22 @@ impl Child {
 		std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file")
 	}
 
+	pub fn stdout_and_stderr(&self) -> String {
+		let mut output: String = String::new();
+		output.push_str(self.stdout().as_str());
+		output.push_str(self.stderr().as_str());
+		output
+	}
+
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
 	/// returns successfully, Err otherwise.
 	pub fn output(&mut self) -> Result<String, String> {
 		let status = self.inner.as_mut().map(|child| child.wait().unwrap()).unwrap();
-
-		let mut buf = self.stdout();
-		buf.push_str(&self.stderr());
-
+		let buffer = self.stdout_and_stderr();
 		if status.success() {
-			Ok(buf)
+			Ok(buffer)
 		} else {
-			Err(buf)
+			Err(buffer)
 		}
 	}
 }
@@ -83,15 +89,17 @@ impl Child {
 impl Drop for Child {
 	fn drop(&mut self) {
 		if let Some(inner) = self.inner.as_mut() {
-			println!("Server process dropped! Assuming error happend");
+			// Ensure the task is killed
 			let _ = inner.kill();
+			// Print out the stdout logs
 			let stdout =
 				std::fs::read_to_string(&self.stdout_path).expect("Failed to read the stdout file");
-			println!("Server STDOUT: \n{stdout}");
+			println!("Command STDOUT: \n{stdout}");
 			let stderr =
 				std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file");
-			println!("Server STDERR: \n{stderr}");
+			println!("Command STDERR: \n{stderr}");
 		}
+		// Remove the stdout and stderr files
 		let _ = std::fs::remove_file(&self.stdout_path);
 		let _ = std::fs::remove_file(&self.stderr_path);
 	}
@@ -117,8 +125,8 @@ pub fn run_internal<P: AsRef<Path>>(
 	}
 
 	// Use local files instead of pipes to avoid deadlocks. See https://github.com/rust-lang/rust/issues/45572
-	let stdout_path = tmp_file("server-stdout.log");
-	let stderr_path = tmp_file("server-stderr.log");
+	let stdout_path = tmp_file("stdout.log");
+	let stderr_path = tmp_file("stderr.log");
 	debug!("Redirecting output. args=`{args}` stdout={stdout_path} stderr={stderr_path})");
 	let stdout = Stdio::from(File::create(&stdout_path).unwrap());
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());
@@ -159,8 +167,8 @@ pub struct StartServerArguments {
 	pub auth: bool,
 	pub tls: bool,
 	pub wait_is_ready: bool,
-	pub tick_interval: time::Duration,
 	pub temporary_directory: Option<String>,
+	pub import_file: Option<String>,
 	pub args: String,
 	pub vars: Option<HashMap<String, String>>,
 }
@@ -172,8 +180,8 @@ impl Default for StartServerArguments {
 			auth: true,
 			tls: false,
 			wait_is_ready: true,
-			tick_interval: time::Duration::new(1, 0),
 			temporary_directory: None,
+			import_file: None,
 			args: "".to_string(),
 			vars: None,
 		}
@@ -183,14 +191,6 @@ impl Default for StartServerArguments {
 pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		auth: false,
-		..Default::default()
-	})
-	.await
-}
-
-pub async fn start_server_with_functions() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments {
-		args: "--allow-funcs".to_string(),
 		..Default::default()
 	})
 	.await
@@ -218,12 +218,31 @@ pub async fn start_server_with_temporary_directory(
 	.await
 }
 
+pub async fn start_server_with_import_file(path: &str) -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		import_file: Some(path.to_string()),
+		..Default::default()
+	})
+	.await
+}
+
+pub async fn start_server_gql() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		vars: Some(HashMap::from([(
+			"SURREAL_CAPS_ALLOW_EXPERIMENTAL".to_string(),
+			"graphql".to_string(),
+		)])),
+		..Default::default()
+	})
+	.await
+}
+
 pub async fn start_server_gql_without_auth() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		auth: false,
 		vars: Some(HashMap::from([(
-			"SURREAL_EXPERIMENTAL_GRAPHQL".to_string(),
-			"true".to_string(),
+			"SURREAL_CAPS_ALLOW_EXPERIMENTAL".to_string(),
+			"graphql".to_string(),
 		)])),
 		..Default::default()
 	})
@@ -236,8 +255,8 @@ pub async fn start_server(
 		auth,
 		tls,
 		wait_is_ready,
-		tick_interval,
 		temporary_directory,
+		import_file,
 		args,
 		vars,
 	}: StartServerArguments,
@@ -252,9 +271,12 @@ pub async fn start_server(
 		let crt_path = tmp_file("crt.crt");
 		let key_path = tmp_file("key.pem");
 
-		let cert = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
-		fs::write(&crt_path, cert.serialize_pem().unwrap()).unwrap();
-		fs::write(&key_path, cert.serialize_private_key_pem().into_bytes()).unwrap();
+		let CertifiedKey {
+			cert,
+			key_pair,
+		} = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
+		fs::write(&crt_path, cert.pem()).unwrap();
+		fs::write(&key_path, key_pair.serialize_pem()).unwrap();
 
 		extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
 	}
@@ -263,13 +285,12 @@ pub async fn start_server(
 		extra_args.push_str(" --unauthenticated");
 	}
 
-	if !tick_interval.is_zero() {
-		let sec = tick_interval.as_secs();
-		extra_args.push_str(format!(" --tick-interval {sec}s").as_str());
-	}
-
 	if let Some(path) = temporary_directory {
 		extra_args.push_str(format!(" --temporary-directory {path}").as_str());
+	}
+
+	if let Some(path) = import_file {
+		extra_args.push_str(format!(" --import-file {path}").as_str());
 	}
 
 	'retry: for _ in 0..3 {
@@ -293,7 +314,7 @@ pub async fn start_server(
 		for _i in 0..10 {
 			interval.tick().await;
 
-			let out = server.stderr();
+			let out = server.stdout_and_stderr();
 			if out.contains("Address already in use") {
 				continue 'retry;
 			}

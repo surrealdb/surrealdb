@@ -45,6 +45,10 @@ serve: check-deps
 sql: check-deps
 	cargo make sql
 
+.PHONY: repl
+repl: check-deps
+	cargo make repl
+
 .PHONY: build
 build: check-deps
 	cargo make build

@@ -58,7 +58,7 @@ where
 		Ok(TypedHeader(val)) => Ok(Some(val.to_string())),
 		Err(e) => match e.reason() {
 			TypedHeaderRejectionReason::Missing => Ok(None),
-			_ => Err(Error::InvalidHeader(H::name().to_owned(), e)),
+			_ => Err(Error::InvalidHeader(H::name().to_owned(), e.to_string())),
 		},
 	}
 }

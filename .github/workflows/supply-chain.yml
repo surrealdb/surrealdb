@@ -8,10 +8,10 @@ on:
     paths:
       - Cargo.lock
       - Cargo.toml
-      - core/Cargo.toml
-      - sdk/Cargo.toml
+      - crates/core/Cargo.toml
+      - crates/sdk/Cargo.toml
       - build.rs
-      - sdk/build.rs
+      - crates/sdk/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
@@ -23,10 +23,10 @@ on:
     paths:
       - Cargo.lock
       - Cargo.toml
-      - core/Cargo.toml
-      - sdk/Cargo.toml
+      - crates/core/Cargo.toml
+      - crates/sdk/Cargo.toml
       - build.rs
-      - sdk/build.rs
+      - crates/sdk/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
@@ -85,7 +85,7 @@ jobs:
         run: cargo install --debug --locked cargo-vet
 
       - name: Check dependencies for untrusted sources
-        run: cargo vet
+        run: cargo vet check
 
       - name: Dependency check failure
         if: failure()
@@ -108,6 +108,23 @@ jobs:
         run: |
           cargo install --debug --locked cargo-acl
           sudo apt-get install -y bubblewrap
+      
+      # See https://etbe.coker.com.au/2024/04/24/ubuntu-24-04-bubblewrap/
+      - name: Configure bubblewrap
+        run: |
+          cat << EOF > bwrap
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+
+            # Site-specific additions and overrides. See local/README for details.
+            include if exists <local/bwrap>
+          }
+          EOF
+          sudo mv bwrap /etc/apparmor.d/
+          sudo systemctl reload apparmor
 
       - name: Check dependencies for unauthorized access
         env:

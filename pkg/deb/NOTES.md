@@ -66,7 +66,7 @@ Below is an example response
       Tasks: 5 (limit: 4605)
      Memory: 3.2M
      CGroup: /system.slice/surreal.service
-             └─23177 /usr/share/surreal/surreal start --log trace --user root --pass root
+             └─23177 /usr/share/surreal/surreal start --log info --user root --pass root
 ```
 
 #### View service logs

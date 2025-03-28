@@ -1,3 +1,6 @@
+[env]
+RUSTFLAGS = { value = "-D warnings --cfg surrealdb_unstable", condition = { env_not_set = ["RUSTFLAGS"] } }
+
 # Setup
 [tasks.cargo-upgrade]
 private = true
@@ -23,7 +26,6 @@ args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "r
 [tasks.test]
 category = "LOCAL USAGE"
 command = "cargo"
-env = { RUST_MIN_STACK={ value = "4194304", condition = { env_not_set = ["RUST_MIN_STACK"] } } }
 args = ["test", "--profile", "make", "--workspace", "--no-fail-fast"]
 
 # Format
@@ -80,7 +82,15 @@ args = ["run", "--profile", "make", "--no-default-features", "--features", "${DE
 [tasks.sql]
 category = "LOCAL USAGE"
 command = "cargo"
+env = { SURREAL_LOG = "error" }
 args = ["run", "--profile", "make", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "sql", "--pretty", "${@}"]
+
+# REPL
+[tasks.repl]
+category = "LOCAL USAGE"
+command = "cargo"
+env = { SURREAL_LOG = "error" }
+args = ["run", "--profile", "make", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "sql", "--pretty", "--conn", "memory", "--ns", "test", "--db", "test", "${@}"]
 
 # Build
 [tasks.build]

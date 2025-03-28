@@ -2,7 +2,7 @@
 
 name: Alpha release
 
-run-name: "Alpha release '${{ inputs.git-ref }}' (version: 2.0.0-alpha.${{ inputs.patch }}, publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
+run-name: "Alpha release '${{ inputs.git-ref }}' (version: 2.1.0-alpha.${{ inputs.patch }}, publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ permissions:
 jobs:
   release:
     name: Prepare alpha release
-    uses: ./.github/workflows/reusable_publish_version.yml
+    uses: ./.github/workflows/publish-version.yml
     with:
       environment: alpha
       extra-features: storage-surrealkv,ml
