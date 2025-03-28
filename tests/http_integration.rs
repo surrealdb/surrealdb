@@ -966,7 +966,7 @@ mod http_integration {
 			assert_eq!(res.status(), 400);
 
 			let body = res.text().await?;
-			assert!(body.contains("contained NUL byte"), "body: {body}");
+			assert!(body.contains("Null bytes are not allowed"), "body: {body}");
 		}
 
 		Ok(())

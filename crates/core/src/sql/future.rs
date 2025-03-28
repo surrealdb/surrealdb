@@ -9,6 +9,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use super::FlowResultExt as _;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
 #[revisioned(revision = 1)]
@@ -35,7 +37,9 @@ impl Future {
 	) -> Result<Value, Error> {
 		// Process the future if enabled
 		match opt.futures {
-			Futures::Enabled => stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await?.ok(),
+			Futures::Enabled => {
+				stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return()?.ok()
+			}
 			_ => Ok(self.clone().into()),
 		}
 	}
