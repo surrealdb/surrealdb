@@ -25,6 +25,7 @@ use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::sql::FlowResultExt as _;
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
@@ -1030,7 +1031,8 @@ impl Datastore {
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
+		let res =
+			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1102,7 +1104,8 @@ impl Datastore {
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
+		let res =
+			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1260,6 +1263,8 @@ impl Datastore {
 
 #[cfg(test)]
 mod test {
+	use crate::sql::FlowResultExt as _;
+
 	use super::*;
 
 	#[tokio::test]
@@ -1308,7 +1313,12 @@ mod test {
 		let ctx = ctx.freeze();
 		// Compute the value
 		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.unwrap();
+		let res = stack
+			.enter(|stk| val.compute(stk, &ctx, &opt, None))
+			.finish()
+			.await
+			.catch_return()
+			.unwrap();
 		assert_eq!(res, Value::Number(Number::Int(2)));
 		Ok(())
 	}

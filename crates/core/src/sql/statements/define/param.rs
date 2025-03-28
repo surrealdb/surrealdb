@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Permission, Strand, Value};
+use crate::sql::{Base, FlowResultExt as _, Ident, Permission, Strand, Value};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -38,6 +38,9 @@ impl DefineParamStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
+
+		let value = self.value.compute(stk, ctx, opt, doc).await.catch_return()?;
+
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
@@ -59,7 +62,7 @@ impl DefineParamStatement {
 			key,
 			revision::to_vec(&DefineParamStatement {
 				// Compute the param
-				value: self.value.compute(stk, ctx, opt, doc).await?,
+				value,
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,

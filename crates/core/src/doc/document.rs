@@ -19,6 +19,7 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
+use crate::sql::FlowResultExt as _;
 use reblessive::tree::Stk;
 use std::fmt::{Debug, Formatter};
 use std::mem;
@@ -325,7 +326,8 @@ impl Document {
 			// Get the full document
 			let full = target.0;
 			// Process the full document
-			let mut out = full.doc.as_ref().compute(stk, ctx, opt, Some(full)).await?;
+			let mut out =
+				full.doc.as_ref().compute(stk, ctx, opt, Some(full)).await.catch_return()?;
 			// Loop over each field in document
 			for fd in fds.iter() {
 				// Loop over each field in document
@@ -344,7 +346,12 @@ impl Document {
 							ctx.add_value("value", val);
 							let ctx = ctx.freeze();
 							// Process the PERMISSION clause
-							if !e.compute(stk, &ctx, opt, Some(full)).await?.is_truthy() {
+							if !e
+								.compute(stk, &ctx, opt, Some(full))
+								.await
+								.catch_return()?
+								.is_truthy()
+							{
 								out.cut(k);
 							}
 						}

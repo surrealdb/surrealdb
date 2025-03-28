@@ -14,10 +14,10 @@ value = "'hello world'"
 value = "NONE"
 
 [[test.results]]
-error = "Continue statement has been reached"
+error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 [[test.results]]
-error = "Break statement has been reached"
+error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 */
 array::find([], |$v| $v >= 6);
