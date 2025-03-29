@@ -1,18 +1,14 @@
-use crate::{
-	api::{err::Error, Response as QueryResponse, Result},
-	method::{self, Stats, Stream},
-	value::Notification,
-	Value,
-};
+use crate::{api::{err::Error, Response as QueryResponse, Result}, error, method::{self, Stats, Stream}, value::Notification, Value};
 use futures::future::Either;
 use futures::stream::select_all;
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
+use reblessive::Stack;
 use surrealdb_core::sql::{
 	self, from_value as from_core_value, statements::*, Statement, Statements, Value as CoreValue,
 };
-
+use surrealdb_core::syn::parser::Parser;
 use super::Raw;
 
 /// A trait for converting inputs into SQL statements
@@ -171,9 +167,17 @@ impl IntoQuery for OptionStatement {
 	}
 }
 
+
+/// Uses Parser to parse a string into SQL statements with [`surrealdb_core::syn::parser::ParserSettings::default`]
+/// 
+/// *warning:* This function ignores capabilities of the connection (server)
 impl IntoQuery for &str {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(Vec::new())
+		let mut parser = Parser::new(self.as_bytes());
+		let mut stack = Stack::new();
+		stack.enter(|stack| parser.parse_query(stack)).finish()
+			.map(|x| x.0.0)
+			.map_err(|e| error::Api::ParseError(e.render_on(self).to_string()).into())
 	}
 
 	fn as_str(&self) -> Option<&str> {
@@ -181,9 +185,12 @@ impl IntoQuery for &str {
 	}
 }
 
+/// Uses Parser to parse a string into SQL statements with [`surrealdb_core::syn::parser::ParserSettings::default`]
+///
+/// *warning:* This function ignores capabilities of the connection (server)
 impl IntoQuery for &String {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(Vec::new())
+		self.as_str().into_query()
 	}
 
 	fn as_str(&self) -> Option<&str> {
@@ -191,9 +198,12 @@ impl IntoQuery for &String {
 	}
 }
 
+/// Uses Parser to parse a string into SQL statements with [`surrealdb_core::syn::parser::ParserSettings::default`]
+///
+/// *warning:* This function ignores capabilities of the connection (server)
 impl IntoQuery for String {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(Vec::new())
+		self.as_str().into_query()
 	}
 
 	fn as_str(&self) -> Option<&str> {
