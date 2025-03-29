@@ -139,6 +139,7 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 			tb: arg1.as_string(),
 			id: match arg2 {
 				Value::Thing(v) => v.id,
+				Value::Uuid(v) => v.into(),
 				Value::Array(v) => v.into(),
 				Value::Object(v) => v.into(),
 				Value::Number(v) => v.into(),
@@ -277,6 +278,8 @@ pub mod is {
 mod tests {
 	use crate::err::Error;
 	use crate::sql::value::Value;
+	use crate::sql::{Id, IdRange, Object, Range, Thing};
+	use std::collections::{BTreeMap, Bound};
 
 	#[test]
 	fn is_array() {
@@ -304,5 +307,62 @@ mod tests {
 		if !matches!(value, Err(_expected)) {
 			panic!("An empty thing id part should result in an error");
 		}
+	}
+
+	#[test]
+	fn test_thing_string() {
+		assert_eq!(
+			super::thing(("table".into(), Some("id".into()))).unwrap(),
+			Value::Thing(Thing::from(("table", Id::from("id"))))
+		);
+	}
+
+	#[test]
+	fn test_thing_number() {
+		assert_eq!(
+			super::thing(("table".into(), Some(1.into()))).unwrap(),
+			Value::Thing(Thing::from(("table", Id::from(1))))
+		);
+	}
+
+	#[test]
+	fn test_thing_uuid() {
+		assert_eq!(
+			super::thing(("table".into(), Some(uuid::Uuid::from_u128_le(0).into()))).unwrap(),
+			Value::Thing(Thing::from(("table", Id::from(uuid::Uuid::from_u128_le(0)))))
+		);
+	}
+
+	#[test]
+	fn test_thing_array() {
+		assert_eq!(
+			super::thing(("table".into(), Some(vec![Value::from(1), Value::from(2)].into())))
+				.unwrap(),
+			Value::Thing(Thing::from(("table", Id::from(vec![Value::from(1), Value::from(2)]))))
+		);
+	}
+
+	#[test]
+	fn test_thing_object() {
+		let mut obj = BTreeMap::new();
+		obj.insert("key".into(), Value::from(1));
+		obj.insert("key2".into(), Value::from("value"));
+		let obj1 = Object(obj.clone());
+		let obj2 = Object(obj.clone());
+
+		assert_eq!(
+			super::thing(("table".into(), Some(Value::Object(obj1)))).unwrap(),
+			Value::Thing(Thing::from(("table", Id::from(obj2))))
+		);
+	}
+
+	#[test]
+	fn test_thing_range() {
+		let range = Range::new(Bound::Unbounded, Bound::Excluded(10.into()));
+		let id_range = IdRange::try_from(range.clone()).unwrap();
+		assert_eq!(
+			super::thing(("table".into(), Some(Value::Range(Box::new(range))))).unwrap(),
+			Value::Thing(Thing::from(("table", Id::Range(Box::new(id_range)))))
+		);
 	}
 }
