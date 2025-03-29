@@ -37,6 +37,7 @@ impl Parser<'_> {
 		let mut res = AlterTableStatement {
 			name,
 			if_exists,
+			comment: None,
 			..Default::default()
 		};
 
