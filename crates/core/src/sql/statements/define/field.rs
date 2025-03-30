@@ -449,6 +449,7 @@ impl InfoStructure for DefineFieldStatement {
 			"kind".to_string(), if let Some(v) = self.kind => v.structure(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),
 			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
+			"default_always".to_string(), if self.default.is_some() => self.default_always.into(), // Only reported if DEFAULT is also enabled for this field
 			"default".to_string(), if let Some(v) = self.default => v.structure(),
 			"reference".to_string(), if let Some(v) = self.reference => v.structure(),
 			"readonly".to_string() => self.readonly.into(),
