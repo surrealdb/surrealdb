@@ -3,7 +3,7 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::{Data, FlowResultExt as _, Output, Timeout, Value, Values, Version};
+use crate::sql::{Data, FlowResultExt as _, Kind, Literal, Output, Timeout, Value, Values, Version};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -31,6 +31,8 @@ pub struct CreateStatement {
 	// Version as nanosecond timestamp passed down to Datastore
 	#[revision(start = 3)]
 	pub version: Option<Version>,
+	// The kind of the record being created
+	pub kind: Option<Kind>,
 }
 
 impl CreateStatement {
@@ -85,7 +87,7 @@ impl CreateStatement {
 			return Err(Error::QueryTimedout);
 		}
 		// Output the results
-		match res {
+		let res = match res {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result
@@ -95,7 +97,38 @@ impl CreateStatement {
 			},
 			// This is standard query result
 			v => Ok(v),
+		};
+
+		// Validate custom types
+		if let Some(ref kind) = self.kind {
+			if let Some(ref data) = self.data {
+				match data {
+					Data::SetExpression(v) => {
+						for (idiom, _, val) in v {
+							if let Kind::Literal(Literal::Object(fields)) = kind {
+								if let Some(field_kind) = fields.get(&idiom.to_string()) {
+									val.validate_custom_type(field_kind, &*ctx).await?;
+								}
+							}
+						}
+					}
+					Data::MergeExpression(v) | Data::ReplaceExpression(v) | Data::ContentExpression(v) => {
+						if let Value::Object(obj) = v {
+							if let Kind::Literal(Literal::Object(fields)) = kind {
+								for (key, val) in obj.iter() {
+									if let Some(field_kind) = fields.get(key) {
+										val.validate_custom_type(field_kind, &*ctx).await?;
+									}
+								}
+							}
+						}
+					}
+					_ => {}
+				}
+			}
 		}
+
+		res
 	}
 }
 

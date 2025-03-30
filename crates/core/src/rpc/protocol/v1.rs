@@ -18,7 +18,7 @@ use crate::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
-		Array, Fields, Function, Model, Output, Query, Strand, Value,
+		Array, Fields, Function, Kind, Literal, Model, Output, Query, Strand, Value, Table, Thing,
 	},
 };
 
@@ -693,14 +693,20 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((from, kind, with, data)) = params.needs_three_or_four() else {
+		let Ok((from, kind_val, with, data)) = params.needs_three_or_four() else {
 			return Err(RpcError::InvalidParams);
+		};
+		// Convert Value to Kind
+		let kind = match kind_val {
+			Value::Table(t) => Kind::Record(vec![t]),
+			Value::Thing(Thing { tb, .. }) => Kind::Record(vec![Table::from(tb)]),
+			_ => Kind::Literal(Literal::Object([(String::from("id"), Kind::Any)].into())),
 		};
 		// Specify the SQL query string
 		let sql = RelateStatement {
 			only: from.is_single() && with.is_single(),
 			from,
-			kind: kind.could_be_table(),
+			kind,
 			with,
 			data: match data.is_none_or_null() {
 				false => Some(crate::sql::Data::ContentExpression(data)),

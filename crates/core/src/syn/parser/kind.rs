@@ -172,6 +172,11 @@ impl Parser<'_> {
 
 				Ok(Kind::References(table, path))
 			}
+			TokenKind::Identifier => {
+				// Check if this is a user-defined type
+				let name = self.next_token_value()?;
+				Ok(Kind::UserDefined(name))
+			}
 			_ => unexpected!(self, next, "a kind name"),
 		}
 	}

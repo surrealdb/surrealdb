@@ -1,7 +1,15 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{statements::RelateStatement, Subquery, Value},
+	sql::{
+		statements::RelateStatement,
+		Subquery,
+		Value,
+		Kind,
+		Literal,
+		Thing,
+		Table,
+	},
 	syn::{
 		parser::{
 			mac::{expected, expected_whitespace, unexpected},
@@ -14,8 +22,13 @@ use crate::{
 impl Parser<'_> {
 	pub async fn parse_relate_stmt(&mut self, stk: &mut Stk) -> ParseResult<RelateStatement> {
 		let only = self.eat(t!("ONLY"));
-		let (kind, from, with) = stk.run(|stk| self.parse_relation(stk)).await?;
+		let (kind_val, from, with) = stk.run(|stk| self.parse_relation(stk)).await?;
 		let uniq = self.eat(t!("UNIQUE"));
+		let kind = match kind_val {
+			Value::Table(t) => Kind::Record(vec![t]),
+			Value::Thing(Thing { tb, .. }) => Kind::Record(vec![Table::from(tb)]),
+			_ => Kind::Literal(Literal::Object([(String::from("id"), Kind::Any)].into())),
+		};
 
 		let data = self.try_parse_data(stk).await?;
 		let output = self.try_parse_output(stk).await?;

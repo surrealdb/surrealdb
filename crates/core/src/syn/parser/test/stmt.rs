@@ -23,9 +23,9 @@ use crate::{
 			ContinueStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
 			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
-			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-			OptionStatement, OutputStatement, RelateStatement, RemoveAccessStatement,
+			DefineParamStatement, DefineStatement, DefineTableStatement, DefineTypeStatement,
+			DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
+			KillStatement, OptionStatement, OutputStatement, RelateStatement, RemoveAccessStatement,
 			RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
 			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
 			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
@@ -108,6 +108,7 @@ fn parse_create() {
 		Statement::Create(CreateStatement {
 			only: true,
 			what: Values(vec![Value::Table(Table("foo".to_owned()))]),
+			kind: Some(Kind::Any),
 			data: Some(Data::SetExpression(vec![
 				(
 					Idiom(vec![Part::Field(Ident("bar".to_owned()))]),
@@ -223,7 +224,7 @@ fn parse_define_function() {
 			if_not_exists: false,
 			overwrite: false,
 			returns: None,
-		}))
+		})),
 	)
 }
 
@@ -1929,6 +1930,34 @@ fn parse_define_field() {
 		)
 	}
 
+	// Custom type
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE FIELD email ON TABLE user TYPE email_type"#
+		).unwrap();
+
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Field(DefineFieldStatement {
+				name: Idiom(vec![Part::Field(Ident("email".to_owned()))]),
+				what: Ident("user".to_owned()),
+				flex: false,
+				kind: Some(Kind::UserDefined(Ident("email_type".to_owned()))),
+				readonly: false,
+				value: None,
+				assert: None,
+				default: None,
+				permissions: Permissions::default(),
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+				reference: None,
+				default_always: false,
+			}))
+		)
+	}
+
 	// Invalid DELETE permission
 	{
 		// TODO(gguillemas): Providing the DELETE permission should return a parse error in 3.0.0.
@@ -2114,6 +2143,48 @@ fn parse_define_analyzer() {
 			overwrite: false,
 		})),
 	)
+}
+
+#[test]
+fn parse_define_type() {
+	let res = test_parse!(parse_stmt, "DEFINE TYPE example AS 'tall' | 'short' COMMENT 'Height type'").unwrap();
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Type(DefineTypeStatement {
+			name: Ident("example".to_string()),
+			kind: Kind::Set(Box::new(Kind::String), None),
+			comment: Some(Strand("Height type".to_string())),
+			permissions: Permission::default(),
+			if_not_exists: false,
+			overwrite: false,
+		}))
+	);
+
+	let res = test_parse!(parse_stmt, "DEFINE TYPE IF NOT EXISTS example AS 'tall' | 'short'").unwrap();
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Type(DefineTypeStatement {
+			name: Ident("example".to_string()),
+			kind: Kind::Set(Box::new(Kind::String), None),
+			comment: None,
+			permissions: Permission::default(),
+			if_not_exists: true,
+			overwrite: false,
+		}))
+	);
+
+	let res = test_parse!(parse_stmt, "DEFINE TYPE OVERWRITE example AS 'tall' | 'short' PERMISSIONS FOR select WHERE true").unwrap();
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Type(DefineTypeStatement {
+			name: Ident("example".to_string()),
+			kind: Kind::Set(Box::new(Kind::String), None),
+			comment: None,
+			permissions: Permission::Specific(Value::Bool(true)),
+			if_not_exists: false,
+			overwrite: true,
+		}))
+	);
 }
 
 #[test]
@@ -2708,10 +2779,7 @@ fn parse_relate() {
 		res,
 		Statement::Relate(RelateStatement {
 			only: true,
-			kind: Value::Thing(Thing {
-				tb: "a".to_owned(),
-				id: Id::from("b"),
-			}),
+			kind: Kind::Record(vec![Table("a".to_owned())]),
 			from: Value::Array(Array(vec![
 				Value::Number(Number::Int(1)),
 				Value::Number(Number::Int(2)),
@@ -2719,6 +2787,7 @@ fn parse_relate() {
 			with: Value::Subquery(Box::new(Subquery::Create(CreateStatement {
 				only: false,
 				what: Values(vec![Value::Table(Table("foo".to_owned()))]),
+				kind: Some(Kind::Any),
 				data: None,
 				output: None,
 				timeout: None,

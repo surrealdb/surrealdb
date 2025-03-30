@@ -1280,6 +1280,18 @@ pub enum Error {
 
 	#[error("File access denied: {0}")]
 	FileAccessDenied(String),
+
+	#[error("Type '{0}' already exists")]
+	TypeExists(String),
+
+	#[error("Type '{0}' not found")]
+	TypeNotFound(String),
+
+	#[error("Expected a {expected} but found {found}")]
+	InvalidType {
+		expected: String,
+		found: String,
+	},
 }
 
 impl From<Error> for String {
