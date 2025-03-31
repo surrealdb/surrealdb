@@ -124,10 +124,19 @@ mod database_upgrade {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn upgrade_test_from_2_1_3() {
+		run!(upgrade_test_from_2_0("v2.1.3"));
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn upgrade_test_from_2_1_4() {
 		run!(upgrade_test_from_2_0("v2.1.4"));
 	}
 
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn upgrade_test_from_2_2_0() {
+		run!(upgrade_test_from_2_0("v2.2.0"));
+	}
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn upgrade_test_from_2_2_1() {
 		run!(upgrade_test_from_2_0("v2.2.1"));
