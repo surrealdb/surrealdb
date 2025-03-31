@@ -41,7 +41,7 @@ mod database_upgrade {
 		check_data_on_docker(&client, "DB", &CHECK_DB).await;
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
 
-		// Generate INFO FOR
+		// Collect INFO FOR NS & INFO FOR DB
 		let info_ns_db = get_info_ns_db(&client).await;
 
 		// Stop the docker instance
@@ -60,9 +60,11 @@ mod database_upgrade {
 		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
 		check_migrated_data(&db, "KNN_BRUTEFORCE", &CHECK_KNN_BRUTEFORCE).await;
 
-		// Get INFO
+		// Collect INFO FOR NS/DB on the migrated database
 		let migrated_info_ns_db = get_info_ns_db(&db).await;
+		// Check that INFO FOR NS is matching
 		check_info_ns(info_ns_db.0, migrated_info_ns_db.0);
+		// Check that INFO FOR DB is matching
 		check_info_db(info_ns_db.1, migrated_info_ns_db.1);
 	}
 
