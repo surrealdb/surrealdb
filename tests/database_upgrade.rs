@@ -21,7 +21,7 @@ mod database_upgrade {
 	const USER: &str = "root";
 	const PASS: &str = "root";
 
-	const DEMO_DATA: &str = "tests/data/surreal-deal-store-mini.surql";
+	const DEAL_STORE_DATASET: &str = "tests/data/surreal-deal-store-mini.surql";
 
 	const TIMEOUT_DURATION: Duration = Duration::from_secs(180);
 
@@ -31,7 +31,7 @@ mod database_upgrade {
 		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
-		import_data_on_docker(&client, "DEMO_DATA", DEMO_DATA).await;
+		import_data_on_docker(&client, "DEMO_DATA", DEAL_STORE_DATASET).await;
 		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
 		create_data_on_docker(&client, "MTREE", &DATA_MTREE).await;
@@ -40,6 +40,9 @@ mod database_upgrade {
 		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
 		check_data_on_docker(&client, "DB", &CHECK_DB).await;
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
+
+		// Generate INFO FOR
+		let info_ns_db = get_info_ns_db(&client).await;
 
 		// Stop the docker instance
 		docker.stop();
@@ -56,6 +59,11 @@ mod database_upgrade {
 		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
 		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
 		check_migrated_data(&db, "KNN_BRUTEFORCE", &CHECK_KNN_BRUTEFORCE).await;
+
+		// Get INFO
+		let migrated_info_ns_db = get_info_ns_db(&db).await;
+		check_info_ns(info_ns_db.0, migrated_info_ns_db.0);
+		check_info_db(info_ns_db.1, migrated_info_ns_db.1);
 	}
 
 	macro_rules! run {
@@ -237,6 +245,30 @@ mod database_upgrade {
 				}
 			}
 		}
+	}
+
+	async fn get_info_ns_db(client: &Surreal<Any>) -> (Value, Value) {
+		info!("Get INFO NS/DB for the database");
+		let mut results = client.query("INFO FOR NS; INFO FOR DB").await.unwrap();
+		let info_ns: Value = results.take(0).unwrap();
+		let info_db: Value = results.take(1).unwrap();
+		(info_ns, info_db)
+	}
+
+	fn check_info(prev: Value, next: Value, keys: &[&str]) {
+		for key in keys {
+			let prev_value = prev.get(*key);
+			let next_value = next.get(*key);
+			assert_eq!(format!("{prev_value:#}"), format!("{next_value:#}"));
+		}
+	}
+
+	fn check_info_ns(prev: Value, next: Value) {
+		assert_eq!(format!("{prev:#}"), format!("{next:#}"));
+	}
+
+	fn check_info_db(prev: Value, next: Value) {
+		check_info(prev, next, &["analyzers", "tables", "users"]);
 	}
 
 	async fn check_migrated_data(db: &Surreal<Any>, info: &str, queries: &[Check]) {
