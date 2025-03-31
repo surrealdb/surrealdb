@@ -427,7 +427,20 @@ pub trait RpcProtocolV1: RpcContext {
 		let update = match update {
 			Value::Object(v) => Some(
 				v.iter()
-					.map(|(key, value)| (Idiom::from(key.clone()), Operator::Equal, value.clone()))
+					.map(|(key, value)| match value {
+						//check for optional Operator or default to Operator::Equal
+						Value::Array(arr) if arr.len() == 2 => match &arr[0] {
+							Value::Strand(op) => match op.as_str() {
+								"=" => (Idiom::from(key.clone()), Operator::Equal, arr[1].clone()),
+								"-=" => (Idiom::from(key.clone()), Operator::Dec, arr[1].clone()),
+								"+=" => (Idiom::from(key.clone()), Operator::Inc, arr[1].clone()),
+								"+?=" => (Idiom::from(key.clone()), Operator::Ext, arr[1].clone()),
+								_ => (Idiom::from(key.clone()), Operator::Equal, value.clone()),
+							},
+							_ => (Idiom::from(key.clone()), Operator::Equal, value.clone()),
+						},
+						_ => (Idiom::from(key.clone()), Operator::Equal, value.clone()),
+					})
 					.collect::<Vec<_>>(),
 			),
 			Value::None | Value::Null => None,
