@@ -336,7 +336,7 @@ mod database_upgrade {
 		info!("Collect ROWS for the database {info}");
 		let mut tables_rows = vec![];
 		for n in table_names {
-			let q = format!("SELECT * FROM `{n}` ORDER BY id");
+			let q = format!("SELECT * FROM `{n}`");
 			info!("{q}");
 			let rows: Value = client.query(q).await.unwrap().take(0).unwrap();
 			tables_rows.push(rows);
