@@ -63,9 +63,9 @@ mod database_upgrade {
 		// Collect INFO FOR NS/DB on the migrated database
 		let migrated_info_ns_db = get_info_ns_db(&db, "Current").await;
 		// Check that INFO FOR NS is matching
-		check_info_ns(info_ns_db.0, migrated_info_ns_db.0, version);
+		check_info_ns(&info_ns_db.0, &migrated_info_ns_db.0, version);
 		// Check that INFO FOR DB is matching
-		check_info_db(info_ns_db.1, migrated_info_ns_db.1, version);
+		check_info_db(&info_ns_db.1, &migrated_info_ns_db.1, version);
 	}
 
 	macro_rules! run {
@@ -251,28 +251,46 @@ mod database_upgrade {
 
 	async fn get_info_ns_db(client: &Surreal<Any>, info: &str) -> (Value, Value) {
 		info!("Collect INFO NS/DB for the database {info}");
-		let mut results = client.query("INFO FOR NS; INFO FOR DB").await.unwrap();
+		let mut results = client.query("INFO FOR NS; INFO FOR DB STRUCTURE").await.unwrap();
 		let info_ns: Value = results.take(0).unwrap();
 		let info_db: Value = results.take(1).unwrap();
 		(info_ns, info_db)
 	}
 
-	fn check_info(prev: Value, next: Value, keys: &[&str]) {
-		for key in keys {
-			let prev_value = prev.get(*key);
-			let next_value = next.get(*key);
-			assert_eq!(format!("{prev_value:#}"), format!("{next_value:#}"));
-		}
+	fn check_info_key<'a>(prev: &'a Value, next: &'a Value, key: &str) -> (&'a Value, &'a Value) {
+		let prev_value = prev.get(key);
+		let next_value = next.get(key);
+		assert_eq!(format!("{prev_value:#}"), format!("{next_value:#}"));
+		(prev_value, next_value)
 	}
 
-	fn check_info_ns(prev: Value, next: Value, version: &str) {
+	fn check_info_ns(prev: &Value, next: &Value, version: &str) {
 		info!("Check INFO NS - migrated from {version}");
 		assert_eq!(format!("{prev:#}"), format!("{next:#}"));
 	}
 
-	fn check_info_db(prev: Value, next: Value, version: &str) {
+	fn check_info_db(prev: &Value, next: &Value, version: &str) {
 		info!("Check INFO DB (analyzers, tables, users) - migrated from {version}");
-		check_info(prev, next, &["analyzers", "tables", "users"]);
+		check_info_key(prev, next, "analyzers");
+		check_info_key(prev, next, "users");
+		check_info_key(prev, next, "indexes");
+		check_info_tables(prev, next, version);
+	}
+
+	fn check_info_tables(prev: &Value, next: &Value, version: &str) {
+		info!("Check INFO TABLES - migrated from {version}");
+		let (prev, next) = check_info_key(prev, next, "tables");
+		let mut index = 0;
+		loop {
+			let p = prev.get(index);
+			let n = next.get(index);
+			if p.is_none() && n.is_none() {
+				break;
+			}
+			assert_eq!(format!("{p:#}"), format!("{n:#}"));
+			index += 1;
+		}
+		assert_eq!(index, 15, "The number of tables should be 15");
 	}
 
 	async fn check_migrated_data(db: &Surreal<Any>, info: &str, queries: &[Check]) {
