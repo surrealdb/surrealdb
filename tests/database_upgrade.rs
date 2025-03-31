@@ -42,7 +42,9 @@ mod database_upgrade {
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
 
 		// Collect INFO FOR NS & INFO FOR DB
-		let info_ns_db = get_info_ns_db(&client, version).await;
+		let (info_ns, info_db) = get_info_ns_db(&client, version).await;
+		// Collect INFO FOR TABLE for each table
+		let info_tables = get_info_tables(&client, &info_db, version, 15).await;
 
 		// Stop the docker instance
 		docker.stop();
@@ -61,11 +63,15 @@ mod database_upgrade {
 		check_migrated_data(&db, "KNN_BRUTEFORCE", &CHECK_KNN_BRUTEFORCE).await;
 
 		// Collect INFO FOR NS/DB on the migrated database
-		let migrated_info_ns_db = get_info_ns_db(&db, "Current").await;
+		let (migrated_info_ns, migrated_info_db) = get_info_ns_db(&db, "current").await;
+		// Collect INFO FOR TABLE for each table
+		let migrated_info_tables = get_info_tables(&db, &migrated_info_db, version, 15).await;
 		// Check that INFO FOR NS is matching
-		check_info_ns(&info_ns_db.0, &migrated_info_ns_db.0, version);
+		check_value(&info_ns, &migrated_info_ns, "INFO FOR NS");
 		// Check that INFO FOR DB is matching
-		check_info_db(&info_ns_db.1, &migrated_info_ns_db.1, version);
+		check_info_db(&info_db, &migrated_info_db);
+		// Check that INFO FOR TABLE is matching
+		check_info_table(&info_tables, &migrated_info_tables);
 	}
 
 	macro_rules! run {
@@ -257,40 +263,55 @@ mod database_upgrade {
 		(info_ns, info_db)
 	}
 
+	async fn get_info_tables(
+		client: &Surreal<Any>,
+		info_for_db: &Value,
+		info: &str,
+		expected_size: usize,
+	) -> Vec<Value> {
+		info!("Check INFO TABLE(S) for the database {info}");
+		let mut index = 0;
+		let mut result = vec![];
+		let tables = info_for_db.get("tables");
+		loop {
+			let t = tables.get(index);
+			if t.is_none() {
+				break;
+			}
+			let n = t.get("name").to_string().replace("'", "`");
+			let table = client.query(format!("INFO FOR TABLE {n}")).await.unwrap().take(0).unwrap();
+			result.push(table);
+			index += 1;
+		}
+		assert_eq!(result.len(), expected_size);
+		result
+	}
+
 	fn check_info_key<'a>(prev: &'a Value, next: &'a Value, key: &str) -> (&'a Value, &'a Value) {
 		let prev_value = prev.get(key);
 		let next_value = next.get(key);
-		assert_eq!(format!("{prev_value:#}"), format!("{next_value:#}"));
+		check_value(prev_value, next_value, key);
 		(prev_value, next_value)
 	}
 
-	fn check_info_ns(prev: &Value, next: &Value, version: &str) {
-		info!("Check INFO NS - migrated from {version}");
+	fn check_info_table(prev: &[Value], next: &[Value]) {
+		info!("Check INFO FOR TABLE(s) {}/{}", prev.len(), next.len());
+		for (i, (p, n)) in prev.iter().zip(next.iter()).enumerate() {
+			check_value(p, n, format!("INFO FOR TABLE {}", i).as_str());
+		}
+	}
+
+	fn check_value(prev: &Value, next: &Value, info: &str) {
+		info!("Check {info}");
 		assert_eq!(format!("{prev:#}"), format!("{next:#}"));
 	}
 
-	fn check_info_db(prev: &Value, next: &Value, version: &str) {
-		info!("Check INFO DB (analyzers, tables, users) - migrated from {version}");
+	fn check_info_db(prev: &Value, next: &Value) {
+		info!("Check INFO DB (analyzers, tables, indexes, users)");
 		check_info_key(prev, next, "analyzers");
 		check_info_key(prev, next, "users");
 		check_info_key(prev, next, "indexes");
-		check_info_tables(prev, next, version);
-	}
-
-	fn check_info_tables(prev: &Value, next: &Value, version: &str) {
-		info!("Check INFO TABLES - migrated from {version}");
-		let (prev, next) = check_info_key(prev, next, "tables");
-		let mut index = 0;
-		loop {
-			let p = prev.get(index);
-			let n = next.get(index);
-			if p.is_none() && n.is_none() {
-				break;
-			}
-			assert_eq!(format!("{p:#}"), format!("{n:#}"));
-			index += 1;
-		}
-		assert_eq!(index, 15, "The number of tables should be 15");
+		check_info_key(prev, next, "tables");
 	}
 
 	async fn check_migrated_data(db: &Surreal<Any>, info: &str, queries: &[Check]) {
