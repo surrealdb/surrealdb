@@ -43,8 +43,12 @@ mod database_upgrade {
 
 		// Collect INFO FOR NS & INFO FOR DB
 		let (info_ns, info_db) = get_info_ns_db(&client, version).await;
+		// Extract the table names
+		let table_names = extract_table_names(&info_db, version, 15);
 		// Collect INFO FOR TABLE for each table
-		let info_tables = get_info_tables(&client, &info_db, version, 15).await;
+		let info_tables = get_info_tables(&client, &table_names, version).await;
+		// Collect rows from every table
+		let table_rows = get_table_rows(&client, &table_names, version).await;
 
 		// Stop the docker instance
 		docker.stop();
@@ -64,14 +68,23 @@ mod database_upgrade {
 
 		// Collect INFO FOR NS/DB on the migrated database
 		let (migrated_info_ns, migrated_info_db) = get_info_ns_db(&db, "current").await;
+		// Extract the table names
+		let migrated_table_names = extract_table_names(&migrated_info_db, version, 15);
 		// Collect INFO FOR TABLE for each table
-		let migrated_info_tables = get_info_tables(&db, &migrated_info_db, version, 15).await;
+		let migrated_info_tables = get_info_tables(&db, &migrated_table_names, version).await;
+		// Collect rows from every table
+		let migrated_table_rows = get_table_rows(&db, &migrated_table_names, version).await;
+
+		// Check that the table names are matching
+		assert_eq!(table_names, migrated_table_names);
 		// Check that INFO FOR NS is matching
 		check_value(&info_ns, &migrated_info_ns, "INFO FOR NS");
 		// Check that INFO FOR DB is matching
 		check_info_db(&info_db, &migrated_info_db);
 		// Check that INFO FOR TABLE is matching
-		check_info_table(&info_tables, &migrated_info_tables);
+		check_values(&info_tables, &migrated_info_tables, "INFO FOR TABLE");
+		// Check that the table rows are matching
+		check_values(&table_rows, &migrated_table_rows, "SELECT * FROM {table}");
 	}
 
 	macro_rules! run {
@@ -282,28 +295,53 @@ mod database_upgrade {
 		(info_ns, info_db)
 	}
 
-	async fn get_info_tables(
-		client: &Surreal<Any>,
-		info_for_db: &Value,
-		info: &str,
-		expected_size: usize,
-	) -> Vec<Value> {
-		info!("Check INFO TABLE(S) for the database {info}");
+	fn extract_table_names(info_for_db: &Value, info: &str, expected_size: usize) -> Vec<String> {
+		info!("Extract table names for the database {info}");
 		let mut index = 0;
-		let mut result = vec![];
+		let mut names = vec![];
 		let tables = info_for_db.get("tables");
 		loop {
 			let t = tables.get(index);
 			if t.is_none() {
 				break;
 			}
-			let n = t.get("name").to_string().replace("'", "`");
-			let table = client.query(format!("INFO FOR TABLE {n}")).await.unwrap().take(0).unwrap();
-			result.push(table);
+			let n = t.get("name").to_string().replace("'", "");
+			names.push(n);
 			index += 1;
 		}
-		assert_eq!(result.len(), expected_size);
-		result
+		assert_eq!(names.len(), expected_size);
+		names
+	}
+
+	async fn get_info_tables(
+		client: &Surreal<Any>,
+		table_names: &[String],
+		info: &str,
+	) -> Vec<Value> {
+		info!("Collect INFO TABLE(S) for the database {info}");
+		let mut tables = vec![];
+		for n in table_names {
+			let table =
+				client.query(format!("INFO FOR TABLE `{n}`")).await.unwrap().take(0).unwrap();
+			tables.push(table);
+		}
+		tables
+	}
+
+	async fn get_table_rows(
+		client: &Surreal<Any>,
+		table_names: &[String],
+		info: &str,
+	) -> Vec<Value> {
+		info!("Collect ROWS for the database {info}");
+		let mut tables_rows = vec![];
+		for n in table_names {
+			let q = format!("SELECT * FROM `{n}` ORDER BY id");
+			info!("{q}");
+			let rows: Value = client.query(q).await.unwrap().take(0).unwrap();
+			tables_rows.push(rows);
+		}
+		tables_rows
 	}
 
 	fn check_info_key<'a>(prev: &'a Value, next: &'a Value, key: &str) -> (&'a Value, &'a Value) {
@@ -313,16 +351,15 @@ mod database_upgrade {
 		(prev_value, next_value)
 	}
 
-	fn check_info_table(prev: &[Value], next: &[Value]) {
-		info!("Check INFO FOR TABLE(s) {}/{}", prev.len(), next.len());
+	fn check_values(prev: &[Value], next: &[Value], info: &str) {
+		info!("Check {info}s {}/{}", prev.len(), next.len());
 		for (i, (p, n)) in prev.iter().zip(next.iter()).enumerate() {
-			check_value(p, n, format!("INFO FOR TABLE {}", i).as_str());
+			check_value(p, n, format!("{info} {i}").as_str());
 		}
 	}
 
 	fn check_value(prev: &Value, next: &Value, info: &str) {
-		info!("Check {info}");
-		assert_eq!(format!("{prev:#}"), format!("{next:#}"));
+		assert_eq!(prev, next, "{info}");
 	}
 
 	fn check_info_db(prev: &Value, next: &Value) {
