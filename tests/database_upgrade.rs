@@ -21,14 +21,17 @@ mod database_upgrade {
 	const USER: &str = "root";
 	const PASS: &str = "root";
 
+	const DEMO_DATA: &str = "tests/data/surreal-deal-store-mini.surql";
+
 	const TIMEOUT_DURATION: Duration = Duration::from_secs(180);
 
-	// This test include a feature set that is supported since v2.0
+	// This test includes a feature set supported since v2.0
 	async fn upgrade_test_from_2_0(version: &str) {
 		// Start the docker instance
 		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
+		import_data_on_docker(&client, "DEMO_DATA", DEMO_DATA).await;
 		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
 		create_data_on_docker(&client, "MTREE", &DATA_MTREE).await;
@@ -110,20 +113,20 @@ mod database_upgrade {
 
 	// Set of DATA for Standard and unique indexes
 	const DATA_IDX: [&str; 4] = [
-		"DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE",
-		"DEFINE INDEX idx_company ON TABLE person COLUMNS company",
-		"CREATE person:tobie SET name = 'Tobie', company='SurrealDB'",
-		"CREATE person:jaime SET name = 'Jaime', company='SurrealDB'",
+		"DEFINE INDEX idx_people_uniq_name ON TABLE people COLUMNS name UNIQUE",
+		"DEFINE INDEX idx_org ON TABLE people COLUMNS org",
+		"CREATE people:tobie SET name = 'Tobie', org='SurrealDB'",
+		"CREATE people:jaime SET name = 'Jaime', org='SurrealDB'",
 	];
 
 	// Set of QUERY and RESULT to check for standard and unique indexes
 	const CHECK_IDX: [Check; 2] = [
 		(
-			"SELECT name FROM person WITH INDEX uniq_name WHERE name = 'Tobie'",
+			"SELECT name FROM people WITH INDEX idx_people_uniq_name WHERE name = 'Tobie'",
 			Some("[{ name: 'Tobie' }]"),
 		),
 		(
-			"SELECT name FROM person WITH INDEX idx_company WHERE company = 'SurrealDB'",
+			"SELECT name FROM people WITH INDEX idx_org WHERE org = 'SurrealDB'",
 			Some("[{ name: 'Jaime' }, { name: 'Tobie' }]"),
 		),
 	];
@@ -181,7 +184,8 @@ mod database_upgrade {
 		let client = Surreal::<Any>::init();
 		let db = client.clone();
 		let localhost = Ipv4Addr::LOCALHOST;
-		let endpoint = format!("ws://{localhost}:{port}");
+		// We need HTTP because we are using the import method which is not available with WS
+		let endpoint = format!("http://{localhost}:{port}");
 		info!("Wait for the database to be ready; endpoint => {endpoint}");
 		tokio::spawn(async move {
 			loop {
@@ -211,6 +215,11 @@ mod database_upgrade {
 			info!("Run `{l}`");
 			client.query(*l).await.expect(l).check().expect(l);
 		}
+	}
+
+	async fn import_data_on_docker(client: &Surreal<Any>, info: &str, path: &str) {
+		info!("Import {info} data on Docker's instance: {path}");
+		client.import(path).await.expect(info);
 	}
 
 	async fn check_data_on_docker(client: &Surreal<Any>, info: &str, queries: &[Check]) {
