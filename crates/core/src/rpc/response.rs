@@ -45,12 +45,14 @@ impl From<Vec<dbs::Response>> for Data {
 	}
 }
 
-impl From<Data> for Value {
-	fn from(val: Data) -> Self {
+impl TryFrom<Data> for Value {
+	type Error = crate::err::Error;
+
+	fn try_from(val: Data) -> Result<Self, Self::Error> {
 		match val {
-			Data::Query(v) => sql::to_value(v).unwrap(),
-			Data::Live(v) => sql::to_value(v).unwrap(),
-			Data::Other(v) => v,
+			Data::Query(v) => sql::to_value(v),
+			Data::Live(v) => sql::to_value(v),
+			Data::Other(v) => Ok(v),
 		}
 	}
 }

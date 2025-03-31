@@ -1,4 +1,4 @@
-use crate::sql::{escape::escape_ident, Id, Thing};
+use crate::sql::{escape::EscapeIdent, Id, Thing};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -70,10 +70,10 @@ impl fmt::Display for Mock {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Mock::Count(tb, c) => {
-				write!(f, "|{}:{}|", escape_ident(tb), c)
+				write!(f, "|{}:{}|", EscapeIdent(tb), c)
 			}
 			Mock::Range(tb, b, e) => {
-				write!(f, "|{}:{}..{}|", escape_ident(tb), b, e)
+				write!(f, "|{}:{}..{}|", EscapeIdent(tb), b, e)
 			}
 		}
 	}

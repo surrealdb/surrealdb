@@ -1,8 +1,8 @@
-use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::Value;
+use crate::sql::{ControlFlow, Value};
+use crate::{ctx::Context, sql::FlowResult};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -29,8 +29,10 @@ impl ThrowStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		Err(Error::Thrown(self.error.compute(stk, ctx, opt, doc).await?.to_raw_string()))
+	) -> FlowResult<Value> {
+		Err(ControlFlow::from(Error::Thrown(
+			self.error.compute(stk, ctx, opt, doc).await?.to_raw_string(),
+		)))
 	}
 }
 

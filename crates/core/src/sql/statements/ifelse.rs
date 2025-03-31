@@ -1,9 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::Value;
+use crate::sql::{FlowResult, Value};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -44,15 +43,15 @@ impl IfelseStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		for (ref cond, ref then) in &self.exprs {
 			let v = cond.compute(stk, ctx, opt, doc).await?;
 			if v.is_truthy() {
-				return then.compute_unbordered(stk, ctx, opt, doc).await;
+				return then.compute(stk, ctx, opt, doc).await;
 			}
 		}
 		match self.close {
-			Some(ref v) => v.compute_unbordered(stk, ctx, opt, doc).await,
+			Some(ref v) => v.compute(stk, ctx, opt, doc).await,
 			None => Ok(Value::None),
 		}
 	}

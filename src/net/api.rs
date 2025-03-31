@@ -146,7 +146,7 @@ async fn handler(
 				}
 
 				let (header, val) = match format {
-					Format::Json => ("application/cbor", json::res(body)?),
+					Format::Json => ("application/json", json::res(body)?),
 					Format::Cbor => ("application/cbor", cbor::res(body)?),
 					Format::Msgpack => ("application/pack", msgpack::res(body)?),
 					Format::Revision => ("application/surrealdb", revision::res(body)?),
