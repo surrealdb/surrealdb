@@ -223,7 +223,7 @@ impl Datastore {
 					// Wait for the specified interval
 					thread::sleep(Duration::from_millis(wait));
 					// Flush the WAL to disk periodically
-					if let Err(err) = dbc.flush_wal(true) {
+					if let Err(err) = dbc.flush_wal(*cnf::SYNC_DATA) {
 						error!("Failed to flush WAL: {err}");
 					}
 				});
@@ -323,10 +323,7 @@ impl super::api::Transaction for Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Cancel this transaction
-		match self.inner.as_ref() {
-			Some(inner) => inner.rollback()?,
-			None => return Err(fail!("Unable to cancel an already taken transaction")),
-		};
+		self.inner.as_ref().unwrap().rollback()?;
 		// Continue
 		Ok(())
 	}
@@ -345,10 +342,7 @@ impl super::api::Transaction for Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Commit this transaction
-		match self.inner.take() {
-			Some(inner) => inner.commit()?,
-			None => return Err(fail!("Unable to commit an already taken transaction")),
-		};
+		self.inner.take().unwrap().commit()?;
 		// Continue
 		Ok(())
 	}
@@ -367,9 +361,10 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Check the key
-		let res =
-			self.inner.as_ref().unwrap().get_pinned_opt(key.encode_owned()?, &self.ro)?.is_some();
+		// Get the arguments
+		let key = key.encode_owned()?;
+		// Get the key
+		let res = self.inner.as_ref().unwrap().get_pinned_opt(key, &self.ro)?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -388,8 +383,10 @@ impl super::api::Transaction for Transaction {
 		if self.done {
 			return Err(Error::TxFinished);
 		}
+		// Get the arguments
+		let key = key.encode_owned()?;
 		// Get the key
-		let res = self.inner.as_ref().unwrap().get_opt(key.encode_owned()?, &self.ro)?;
+		let res = self.inner.as_ref().unwrap().get_opt(key, &self.ro)?;
 		// Return result
 		Ok(res)
 	}
@@ -404,13 +401,14 @@ impl super::api::Transaction for Transaction {
 		if self.closed() {
 			return Err(Error::TxFinished);
 		}
-		// Get the arguments
-		let mut keys_encoded = Vec::new();
-		for k in keys {
-			keys_encoded.push(k.encode_owned()?);
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
 		}
+		// Get the arguments
+		let keys: Vec<Key> = keys.into_iter().map(K::encode_owned).collect::<Result<_, _>>()?;
 		// Get the keys
-		let res = self.inner.as_ref().unwrap().multi_get_opt(keys_encoded, &self.ro);
+		let res = self.inner.as_ref().unwrap().multi_get_opt(keys, &self.ro);
 		// Convert result
 		let res = res.into_iter().collect::<Result<_, _>>()?;
 		// Return result
@@ -436,8 +434,11 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Get the arguments
+		let key = key.encode_owned()?;
+		let val = val.into();
 		// Set the key
-		self.inner.as_ref().unwrap().put(key.encode_owned()?, val.into())?;
+		self.inner.as_ref().unwrap().put(key, val)?;
 		// Return result
 		Ok(())
 	}
@@ -461,14 +462,12 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let val = val.into();
 		// Set the key if empty
-		match inner.get_pinned_opt(&key, &self.ro)? {
-			None => inner.put(key, val)?,
+		match self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)? {
+			None => self.inner.as_ref().unwrap().put(key, val)?,
 			_ => return Err(Error::TxKeyAlreadyExists),
 		};
 		// Return result
@@ -490,16 +489,14 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let val = val.into();
 		let chk = chk.map(Into::into);
-		// Set the key if valid
-		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
-			(Some(v), Some(w)) if v.eq(&w) => inner.put(key, val)?,
-			(None, None) => inner.put(key, val)?,
+		// Set the key if empty
+		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
+			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().put(key, val)?,
+			(None, None) => self.inner.as_ref().unwrap().put(key, val)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -520,8 +517,10 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
+		// Get the arguments
+		let key = key.encode_owned()?;
 		// Remove the key
-		self.inner.as_ref().unwrap().delete(key.encode_owned()?)?;
+		self.inner.as_ref().unwrap().delete(key)?;
 		// Return result
 		Ok(())
 	}
@@ -541,15 +540,13 @@ impl super::api::Transaction for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let chk = chk.map(Into::into);
 		// Delete the key if valid
-		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
-			(Some(v), Some(w)) if v.eq(&w) => inner.delete(key)?,
-			(None, None) => inner.delete(key)?,
+		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
+			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().delete(key)?,
+			(None, None) => self.inner.as_ref().unwrap().delete(key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -567,21 +564,63 @@ impl super::api::Transaction for Transaction {
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
-		// RocksDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		let rng = self.prepare_scan(rng, version).await?;
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(move || {
+			// Create result set
+			let mut res = vec![];
+			// Set the key range
+			let beg = rng.start.as_slice();
+			let end = rng.end.as_slice();
+			// Set the ReadOptions with the snapshot
+			let mut ro = ReadOptions::default();
+			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
+			ro.set_iterate_lower_bound(beg);
+			ro.set_iterate_upper_bound(end);
+			ro.set_async_io(true);
+			ro.fill_cache(true);
+			// Create the iterator
+			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
+			// Seek to the start key
+			iter.seek(&rng.start);
+			// Check the scan limit
+			while res.len() < limit as usize {
+				// Check the key and value
+				if let Some(k) = iter.key() {
+					// Check the range validity
+					if k >= beg && k < end {
+						res.push(k.to_vec());
+						iter.next();
+						continue;
+					}
+				}
+				// Exit
+				break;
+			}
+			// Drop the iterator
+			drop(iter);
+			// Return result
+			res
+		})
+		.await;
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of keys from the databases
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keysr<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>, Error>
+	where
+		K: KeyEncode + Sprintable + Debug,
+	{
+		let rng = self.prepare_scan(rng, version).await?;
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
-		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.encode_owned()?,
-			end: rng.end.encode_owned()?,
-		};
 		// Create result set
 		let mut res = vec![];
 		// Set the key range
@@ -597,7 +636,7 @@ impl super::api::Transaction for Transaction {
 		// Create the iterator
 		let mut iter = inner.raw_iterator_opt(ro);
 		// Seek to the start key
-		iter.seek(&rng.start);
+		iter.seek_for_prev(&rng.end);
 		// Check the scan limit
 		while res.len() < limit as usize {
 			// Check the key and value
@@ -605,7 +644,7 @@ impl super::api::Transaction for Transaction {
 				// Check the range validity
 				if k >= beg && k < end {
 					res.push(k.to_vec());
-					iter.next();
+					iter.prev();
 					continue;
 				}
 			}
@@ -627,21 +666,62 @@ impl super::api::Transaction for Transaction {
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
-		// RocksDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		let rng = self.prepare_scan(rng, version).await?;
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(move || {
+			// Create result set
+			let mut res = vec![];
+			// Set the key range
+			let beg = rng.start.as_slice();
+			let end = rng.end.as_slice();
+			// Set the ReadOptions with the snapshot
+			let mut ro = ReadOptions::default();
+			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
+			ro.set_iterate_lower_bound(beg);
+			ro.set_iterate_upper_bound(end);
+			ro.set_async_io(true);
+			ro.fill_cache(true);
+			// Create the iterator
+			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
+			// Seek to the start key
+			iter.seek(&rng.start);
+			// Check the scan limit
+			while res.len() < limit as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.item() {
+					// Check the range validity
+					if k >= beg && k < end {
+						res.push((k.to_vec(), v.to_vec()));
+						iter.next();
+						continue;
+					}
+				}
+				// Exit
+				break;
+			}
+			// Drop the iterator
+			drop(iter);
+			// Return result
+			res
+		})
+		.await;
+		// Return result
+		Ok(res)
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scanr<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: KeyEncode + Sprintable + Debug,
+	{
+		let rng = self.prepare_scan(rng, version).await?;
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
-		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.encode_owned()?,
-			end: rng.end.encode_owned()?,
-		};
 		// Create result set
 		let mut res = vec![];
 		// Set the key range
@@ -657,7 +737,7 @@ impl super::api::Transaction for Transaction {
 		// Create the iterator
 		let mut iter = inner.raw_iterator_opt(ro);
 		// Seek to the start key
-		iter.seek(&rng.start);
+		iter.seek_for_prev(&rng.end);
 		// Check the scan limit
 		while res.len() < limit as usize {
 			// Check the key and value
@@ -665,7 +745,7 @@ impl super::api::Transaction for Transaction {
 				// Check the range validity
 				if k >= beg && k < end {
 					res.push((k.to_vec(), v.to_vec()));
-					iter.next();
+					iter.prev();
 					continue;
 				}
 			}
@@ -678,6 +758,31 @@ impl super::api::Transaction for Transaction {
 }
 
 impl Transaction {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn prepare_scan<K>(
+		&mut self,
+		rng: Range<K>,
+		version: Option<u64>,
+	) -> Result<Range<Key>, Error>
+	where
+		K: KeyEncode + Sprintable + Debug,
+	{
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Convert the range to bytes
+		let rng: Range<Key> = Range {
+			start: rng.start.encode_owned()?,
+			end: rng.end.encode_owned()?,
+		};
+		Ok(rng)
+	}
+
 	pub(crate) fn new_save_point(&mut self) {
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();

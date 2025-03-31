@@ -28,6 +28,8 @@ pub(crate) enum Key {
 	Das(String, String),
 	/// A cache key for database access grants
 	Dgs(String, String, String),
+	/// A cache key for apis (on a database)
+	Aps(String, String),
 	/// A cache key for analyzers (on a database)
 	Azs(String, String),
 	/// A cache key for functions (on a database)
@@ -74,6 +76,8 @@ pub(crate) enum Key {
 	Da(String, String, String),
 	/// A cache key for a database access grant
 	Dg(String, String, String, String),
+	/// A cache key for an api (on a database)
+	Ap(String, String, String),
 	/// A cache key for an analyzer (on a database)
 	Az(String, String, String),
 	/// A cache key for a function (on a database)
@@ -113,6 +117,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Dus(a, b) => Key::Dus(a.to_string(), b.to_string()),
 			Lookup::Das(a, b) => Key::Das(a.to_string(), b.to_string()),
 			Lookup::Dgs(a, b, c) => Key::Dgs(a.to_string(), b.to_string(), c.to_string()),
+			Lookup::Aps(a, b) => Key::Aps(a.to_string(), b.to_string()),
 			Lookup::Azs(a, b) => Key::Azs(a.to_string(), b.to_string()),
 			Lookup::Fcs(a, b) => Key::Fcs(a.to_string(), b.to_string()),
 			Lookup::Mls(a, b) => Key::Mls(a.to_string(), b.to_string()),
@@ -137,6 +142,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Du(a, b, c) => Key::Du(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Da(a, b, c) => Key::Da(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Dg(a, b, c, d) => Key::Dg(a.to_string(), b.to_string(), c.to_string(), d.to_string()),
+			Lookup::Ap(a, b, c) => Key::Ap(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Az(a, b, c) => Key::Az(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Fc(a, b, c) => Key::Fc(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Ml(a, b, c, d) => Key::Ml(a.to_string(), b.to_string(), c.to_string(), d.to_string()),

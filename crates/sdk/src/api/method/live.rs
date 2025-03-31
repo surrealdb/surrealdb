@@ -14,7 +14,7 @@ use crate::opt::Resource;
 use crate::value::Notification;
 use crate::Surreal;
 use crate::Value;
-use channel::Receiver;
+use async_channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use std::future::IntoFuture;
@@ -46,7 +46,7 @@ where
 		..
 	} = this;
 	Box::pin(async move {
-		let router = client.router.extract()?;
+		let router = client.inner.router.extract()?;
 		if !router.features.contains(&ExtraFeatures::LiveQueries) {
 			return Err(Error::LiveQueriesNotSupported.into());
 		}
@@ -88,7 +88,7 @@ where
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}
 		let query =
-			Query::new(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
+			Query::normal(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
 		let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
 			return Err(Error::InternalError(
 				"successufull live query didn't return a uuid".to_string(),
@@ -96,11 +96,7 @@ where
 			.into());
 		};
 		let rx = register(router, *id).await?;
-		Ok(Stream::new(
-			Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
-			*id,
-			Some(rx),
-		))
+		Ok(Stream::new(client.inner.clone().into(), *id, Some(rx)))
 	})
 }
 
@@ -108,7 +104,7 @@ pub(crate) async fn register(
 	router: &Router,
 	id: Uuid,
 ) -> Result<Receiver<Notification<CoreValue>>> {
-	let (tx, rx) = channel::unbounded();
+	let (tx, rx) = async_channel::unbounded();
 	router
 		.execute_unit(Command::SubscribeLive {
 			uuid: id,
@@ -257,7 +253,7 @@ where
 {
 	let client = client.clone();
 	spawn(async move {
-		if let Ok(router) = client.router.extract() {
+		if let Ok(router) = client.inner.router.extract() {
 			router
 				.execute_unit(Command::Kill {
 					uuid,

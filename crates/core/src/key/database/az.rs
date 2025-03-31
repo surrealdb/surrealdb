@@ -20,8 +20,8 @@ pub struct Az<'a> {
 }
 impl_key!(Az<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Az<'a> {
-	Az::new(ns, db, tb)
+pub fn new<'a>(ns: &'a str, db: &'a str, az: &'a str) -> Az<'a> {
+	Az::new(ns, db, az)
 }
 
 pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {

@@ -6,10 +6,10 @@ use opentelemetry::Context as TelemetryContext;
 use revision::revisioned;
 use serde::Serialize;
 use std::sync::Arc;
-use surrealdb::channel::Sender;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::Data;
 use surrealdb::sql::Value;
+use tokio::sync::mpsc::Sender;
 use tracing::Span;
 
 #[revisioned(revision = 1)]
@@ -23,8 +23,9 @@ impl Response {
 	#[inline]
 	pub fn into_value(self) -> Value {
 		let mut value = match self.result {
-			Ok(val) => map! {
-				"result" => Value::from(val),
+			Ok(val) => match Value::try_from(val) {
+				Ok(v) => map! {"result" => v},
+				Err(e) => map!("error" => Value::from(e.to_string())),
 			},
 			Err(err) => map! {
 				"error" => Value::from(err),
@@ -38,30 +39,26 @@ impl Response {
 
 	/// Send the response to the WebSocket channel
 	pub async fn send(self, cx: Arc<TelemetryContext>, fmt: Format, chn: Sender<Message>) {
+		// Get the request id
+		let id = self.id.clone();
 		// Create a new tracing span
 		let span = Span::current();
 		// Log the rpc response call
 		debug!("Process RPC response");
-
+		// Store whether this was an error
 		let is_error = self.result.is_err();
+		// Record tracing details for errors
 		if let Err(err) = &self.result {
-			span.record("otel.status_code", "Error");
-			span.record(
-				"otel.status_message",
-				format!("code: {}, message: {}", err.code, err.message),
-			);
+			span.record("otel.status_code", "ERROR");
 			span.record("rpc.error_code", err.code);
 			span.record("rpc.error_message", err.message.as_ref());
 		}
-		// Cheaper to clone the id in case of a failure
-		// than to clone the entire response, which can be arbitrary size
-		let id = self.id.clone();
 		// Process the response for the format
 		let (len, msg) = match fmt.res_ws(self) {
 			Ok((l, m)) => (l, m),
-			Err(err) => {
-				fmt.res_ws(failure(id, err)).expect("Serialising known thrown error should succeed")
-			}
+			Err(err) => fmt
+				.res_ws(failure(id, err))
+				.expect("Serialising internal error should always succeed"),
 		};
 		// Send the message to the write channel
 		if chn.send(msg).await.is_ok() {

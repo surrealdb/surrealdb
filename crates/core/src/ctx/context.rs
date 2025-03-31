@@ -189,7 +189,7 @@ impl MutableContext {
 	/// Creates a new context from a configured datastore.
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
-		capabilities: Capabilities,
+		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
 		cache: Arc<DatastoreCache>,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
@@ -204,7 +204,7 @@ impl MutableContext {
 			query_planner: None,
 			query_executor: None,
 			iteration_stage: None,
-			capabilities: Arc::new(capabilities),
+			capabilities,
 			index_stores,
 			cache: Some(cache),
 			#[cfg(not(target_family = "wasm"))]
@@ -238,6 +238,17 @@ impl MutableContext {
 		K: Into<Cow<'static, str>>,
 	{
 		self.values.insert(key.into(), value);
+	}
+
+	/// Add a value to the context. It overwrites any previously set values
+	/// with the same key.
+	pub(crate) fn add_values<T, K, V>(&mut self, iter: T)
+	where
+		T: IntoIterator<Item = (K, V)>,
+		K: Into<Cow<'static, str>>,
+		V: Into<Arc<Value>>,
+	{
+		self.values.extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
 	}
 
 	/// Add cancellation to the context. The value that is returned will cancel
@@ -365,7 +376,10 @@ impl MutableContext {
 		self.done(check_deadline).is_none()
 	}
 
-	/// Check if the context is not ok to continue.
+	/// Check if there is some reason to stop processing the current query.
+	///
+	/// Returns true when the query is canceled or if check_deadline is true when the query
+	/// deadline is met.
 	pub(crate) fn is_done(&self, check_deadline: bool) -> bool {
 		self.done(check_deadline).is_some()
 	}
@@ -410,8 +424,8 @@ impl MutableContext {
 	//
 
 	/// Set the capabilities for this context
-	pub(crate) fn add_capabilities(&mut self, caps: Capabilities) {
-		self.capabilities = Arc::new(caps);
+	pub(crate) fn add_capabilities(&mut self, caps: Arc<Capabilities>) {
+		self.capabilities = caps;
 	}
 
 	/// Get the capabilities for this context

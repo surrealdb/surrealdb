@@ -16,7 +16,7 @@ use crate::sql::part::{Part, Skip};
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
-use crate::sql::Function;
+use crate::sql::{ControlFlow, FlowResult, FlowResultExt as _, Function};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
@@ -33,10 +33,10 @@ impl Value {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		path: &[Part],
-	) -> Result<Self, Error> {
+	) -> FlowResult<Self> {
 		// Limit recursion depth.
 		if path.len() > (*MAX_COMPUTATION_DEPTH).try_into().unwrap_or(usize::MAX) {
-			return Err(Error::ComputationDepthExceeded);
+			return Err(ControlFlow::from(Error::ComputationDepthExceeded));
 		}
 		match path.first() {
 			// The knowledge of the current value is not relevant to Part::Recurse
@@ -61,7 +61,11 @@ impl Value {
 						// we will not process any recursion plans.
 						if instruction.is_some() {
 							match path.find_recursion_plan() {
-								Some(_) => return Err(Error::RecursionInstructionPlanConflict),
+								Some(_) => {
+									return Err(ControlFlow::from(
+										Error::RecursionInstructionPlanConflict,
+									))
+								}
 								_ => (path, None, after),
 							}
 						} else {
@@ -102,7 +106,7 @@ impl Value {
 			// ensure we can process them efficiently. When encountering a
 			// recursion part, it will find the repeat recurse part and handle
 			// it. If we find one in any unsupported scenario, we throw an error.
-			Some(Part::RepeatRecurse) => Err(Error::UnsupportedRepeatRecurse),
+			Some(Part::RepeatRecurse) => Err(ControlFlow::from(Error::UnsupportedRepeatRecurse)),
 			Some(Part::Doc) => {
 				// Try to obtain a Record ID from the document, otherwise we'll operate on NONE
 				let v = match doc {
@@ -224,7 +228,11 @@ impl Value {
 							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
 						}
 					},
-					Part::Value(x) => match stk.run(|stk| x.compute(stk, ctx, opt, doc)).await? {
+					Part::Value(x) => match stk
+						.run(|stk| x.compute(stk, ctx, opt, doc))
+						.await
+						.catch_return()?
+					{
 						Value::Strand(f) => match v.get(f.as_str()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
@@ -274,7 +282,11 @@ impl Value {
 							}) => match v.get(name) {
 								Some(v) => {
 									let fnc = Function::Anonymous(v.clone(), a, true);
-									match stk.run(|stk| fnc.compute(stk, ctx, opt, doc)).await {
+									match stk
+										.run(|stk| fnc.compute(stk, ctx, opt, doc))
+										.await
+										.catch_return()
+									{
 										Ok(v) => Ok(v),
 										Err(Error::InvalidFunction {
 											..
@@ -331,7 +343,8 @@ impl Value {
 							let cur = v.clone().into();
 							if stk
 								.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
-								.await?
+								.await
+								.catch_return()?
 								.is_truthy()
 							{
 								a.push(v.clone());
@@ -340,25 +353,22 @@ impl Value {
 						let v = Value::from(a);
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
-					Part::Value(x) => match stk.run(|stk| x.compute(stk, ctx, opt, doc)).await? {
+					Part::Value(x) => match stk
+						.run(|stk| x.compute(stk, ctx, opt, doc))
+						.await
+						.catch_return()?
+					{
 						Value::Number(i) => match v.get(i.to_usize()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
 						Value::Range(r) => {
-							if let Some(range) = r.slice(v.as_slice()) {
-								let path = path.next();
-								stk.scope(|scope| {
-									let futs = range
-										.iter()
-										.map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
-									try_join_all_buffered(futs)
-								})
-								.await
-								.map(Into::into)
-							} else {
-								Ok(Value::None)
-							}
+							let v = r
+								.slice(v.as_slice())
+								.map(|v| Value::from(v.to_vec()))
+								.unwrap_or_default();
+
+							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
 						_ => stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await,
 					},
@@ -423,7 +433,11 @@ impl Value {
 								..SelectStatement::default()
 							};
 							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
-							stk.run(|stk| v.get(stk, ctx, opt, None, path)).await?.flatten().ok()
+							stk.run(|stk| v.get(stk, ctx, opt, None, path))
+								.await?
+								.flatten()
+								.ok()
+								.map_err(ControlFlow::from)
 						}
 					}
 				}
@@ -467,6 +481,7 @@ impl Value {
 										.await?
 										.all()
 										.ok()
+										.map_err(ControlFlow::from)
 								} else {
 									let v = stk
 										.run(|stk| stm.compute(stk, ctx, opt, None))
@@ -617,8 +632,12 @@ mod tests {
 		let idi = Idiom::parse(&format!("{}something", "test.".repeat(depth)));
 		let val = Value::parse("{}"); // A deep enough object cannot be parsed.
 		let mut stack = reblessive::tree::TreeStack::new();
-		let err =
-			stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap_err();
+		let err = stack
+			.enter(|stk| val.get(stk, &ctx, &opt, None, &idi))
+			.finish()
+			.await
+			.catch_return()
+			.unwrap_err();
 		assert!(
 			matches!(err, Error::ComputationDepthExceeded),
 			"expected computation depth exceeded, got {:?}",

@@ -30,7 +30,7 @@ use crate::{
 	opt::{IntoEndpoint, Table},
 	value::Notification,
 };
-use channel::Sender;
+use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
@@ -423,11 +423,9 @@ impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
-			router: self.router.clone(),
-			engine: PhantomData,
+			surreal: self.inner.clone().into(),
 			address: address.into_endpoint(),
 			capacity: 0,
-			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}
@@ -481,7 +479,7 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<CoreValue> {
 async fn export_file(
 	kvs: &Datastore,
 	sess: &Session,
-	chn: channel::Sender<Vec<u8>>,
+	chn: async_channel::Sender<Vec<u8>>,
 	config: Option<DbExportConfig>,
 ) -> Result<()> {
 	let res = match config {
@@ -504,7 +502,7 @@ async fn export_file(
 async fn export_ml(
 	kvs: &Datastore,
 	sess: &Session,
-	chn: channel::Sender<Vec<u8>>,
+	chn: async_channel::Sender<Vec<u8>>,
 	MlExportConfig {
 		name,
 		version,
@@ -706,40 +704,52 @@ async fn router(
 		Command::Patch {
 			what,
 			data,
+			upsert,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_single_recordid();
-			let statement = {
+			let statement = if upsert {
+				let mut stmt = UpsertStatement::default();
+				stmt.what = resource_to_values(what);
+				stmt.data = data.map(Data::PatchExpression);
+				stmt.output = Some(Output::After);
+				Statement::Upsert(stmt)
+			} else {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
-				stmt
+				Statement::Update(stmt)
 			};
-			query.0 .0 = vec![Statement::Update(statement)];
+			query.0 .0 = vec![statement];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
-			let value = take(one, response).await?;
-			Ok(DbResponse::Other(value))
+			let response = process(response);
+			Ok(DbResponse::Query(response))
 		}
 		Command::Merge {
 			what,
 			data,
+			upsert,
 		} => {
 			let mut query = Query::default();
-			let one = what.is_single_recordid();
-			let statement = {
+			let statement = if upsert {
+				let mut stmt = UpsertStatement::default();
+				stmt.what = resource_to_values(what);
+				stmt.data = data.map(Data::MergeExpression);
+				stmt.output = Some(Output::After);
+				Statement::Upsert(stmt)
+			} else {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
-				stmt
+				Statement::Update(stmt)
 			};
-			query.0 .0 = vec![Statement::Update(statement)];
+			query.0 .0 = vec![statement];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
-			let value = take(one, response).await?;
-			Ok(DbResponse::Other(value))
+			let response = process(response);
+			Ok(DbResponse::Query(response))
 		}
 		Command::Select {
 			what,
@@ -782,6 +792,16 @@ async fn router(
 			let mut vars = vars.read().await.clone();
 			vars.append(&mut variables.0);
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
+			let response = process(response);
+			Ok(DbResponse::Query(response))
+		}
+		Command::RawQuery {
+			query,
+			mut variables,
+		} => {
+			let mut vars = vars.read().await.clone();
+			vars.append(&mut variables.0);
+			let response = kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}

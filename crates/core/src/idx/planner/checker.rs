@@ -7,7 +7,7 @@ use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
-use crate::sql::{Cond, Thing, Value};
+use crate::sql::{Cond, FlowResultExt as _, Thing, Value};
 use ahash::HashMap;
 use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
@@ -143,7 +143,7 @@ impl MTreeChecker<'_> {
 		let txn = self.ctx.tx();
 		for (doc_id, dist) in res {
 			if let Some(key) = doc_ids.get_doc_key(&txn, doc_id).await? {
-				let rid: Thing = key.into();
+				let rid: Thing = revision::from_slice(&key)?;
 				result.push_back((rid.into(), dist, None));
 			}
 		}
@@ -192,7 +192,11 @@ impl CheckerCacheEntry {
 						ir: None,
 						doc: val.into(),
 					};
-					let truthy = cond.compute(stk, ctx, opt, Some(&cursor_doc)).await?.is_truthy();
+					let truthy = cond
+						.compute(stk, ctx, opt, Some(&cursor_doc))
+						.await
+						.catch_return()?
+						.is_truthy();
 					(cursor_doc.doc.as_arc(), truthy)
 				};
 				return Ok(CheckerCacheEntry {
@@ -226,7 +230,11 @@ impl MTreeCondChecker<'_> {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {
 				let txn = self.ctx.tx();
-				let rid = doc_ids.get_doc_key(&txn, doc_id).await?.map(|k| k.into());
+				let rid = doc_ids
+					.get_doc_key(&txn, doc_id)
+					.await?
+					.map(|k| revision::from_slice(&k))
+					.transpose()?;
 				let ent =
 					CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
 						.await?;

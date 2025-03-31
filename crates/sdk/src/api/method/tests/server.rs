@@ -2,7 +2,7 @@ use super::types::User;
 use crate::api::conn::{Command, DbResponse, Route};
 use crate::api::Response as QueryResponse;
 use crate::opt::Resource;
-use channel::Receiver;
+use async_channel::Receiver;
 use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
@@ -43,6 +43,15 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				} => Ok(DbResponse::Other(CoreValue::None)),
 				Command::Query {
 					..
+				}
+				| Command::RawQuery {
+					..
+				}
+				| Command::Patch {
+					..
+				}
+				| Command::Merge {
+					..
 				} => Ok(DbResponse::Query(QueryResponse::new())),
 				Command::Create {
 					data,
@@ -72,14 +81,6 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					..
 				}
 				| Command::Update {
-					what,
-					..
-				}
-				| Command::Merge {
-					what,
-					..
-				}
-				| Command::Patch {
 					what,
 					..
 				} => match what {

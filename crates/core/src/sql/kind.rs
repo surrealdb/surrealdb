@@ -1,4 +1,4 @@
-use super::escape::escape_key;
+use super::escape::EscapeKey;
 use super::{Duration, Idiom, Number, Part, Strand};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -29,6 +29,8 @@ pub enum Kind {
 	Point,
 	String,
 	Uuid,
+	#[revision(start = 2)]
+	Regex,
 	Record(Vec<Table>),
 	Geometry(Vec<String>),
 	Option(Box<Kind>),
@@ -167,6 +169,7 @@ impl Kind {
 				| Kind::Point
 				| Kind::String
 				| Kind::Uuid
+				| Kind::Regex
 				| Kind::Record(_)
 				| Kind::Geometry(_)
 				| Kind::Function(_, _)
@@ -261,6 +264,7 @@ impl Display for Kind {
 			Kind::Point => f.write_str("point"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
+			Kind::Regex => f.write_str("regex"),
 			Kind::Function(_, _) => f.write_str("function"),
 			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => match k {
@@ -310,6 +314,7 @@ pub enum Literal {
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),
 	DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
+	Bool(bool),
 }
 
 impl Literal {
@@ -329,6 +334,7 @@ impl Literal {
 			}
 			Self::Object(_) => Kind::Object,
 			Self::DiscriminatedObject(_, _) => Kind::Object,
+			Self::Bool(_) => Kind::Bool,
 		}
 	}
 
@@ -344,6 +350,10 @@ impl Literal {
 			},
 			Self::Duration(v) => match value {
 				Value::Duration(n) => n == v,
+				_ => false,
+			},
+			Self::Bool(v) => match value {
+				Value::Bool(b) => b == v,
 				_ => false,
 			},
 			Self::Array(a) => match value {
@@ -478,7 +488,8 @@ impl Display for Literal {
 		match self {
 			Literal::String(s) => write!(f, "{}", s),
 			Literal::Number(n) => write!(f, "{}", n),
-			Literal::Duration(n) => write!(f, "{}", n),
+			Literal::Duration(d) => write!(f, "{}", d),
+			Literal::Bool(b) => write!(f, "{}", b),
 			Literal::Array(a) => {
 				let mut f = Pretty::from(f);
 				f.write_char('[')?;
@@ -503,7 +514,7 @@ impl Display for Literal {
 						"{}",
 						Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
 							args,
-							|(k, v), f| write!(f, "{}: {}", escape_key(k), v)
+							|(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
 						)),)
 					)?;
 					drop(indent);
@@ -534,7 +545,7 @@ impl Display for Literal {
 							"{}",
 							Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
 								args,
-								|(k, v), f| write!(f, "{}: {}", escape_key(k), v)
+								|(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
 							)),)
 						)?;
 						drop(indent);

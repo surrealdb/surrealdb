@@ -17,6 +17,8 @@ use crate::sql::statement::Statement;
 use crate::sql::statements::{OptionStatement, UseStatement};
 use crate::sql::value::Value;
 use crate::sql::Base;
+use crate::sql::ControlFlow;
+use crate::sql::FlowResult;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
 use std::pin::{pin, Pin};
@@ -104,7 +106,7 @@ impl Executor {
 		&mut self,
 		txn: Arc<Transaction>,
 		stmt: Statement,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		let res = match stmt {
 			Statement::Set(stm) => {
 				// Avoid moving in and out of the context via Arc::get_mut
@@ -118,8 +120,6 @@ impl Executor {
 					.finish()
 					.await
 				{
-					// TODO: Maybe catch Error::Return?
-					// Currently unsure of if that should be handled here.
 					Ok(val) => {
 						// Set the parameter
 						Arc::get_mut(&mut self.ctx)
@@ -148,10 +148,10 @@ impl Executor {
 		match self.ctx.done(true) {
 			None => {}
 			Some(Reason::Timedout) => {
-				return Err(Error::QueryTimedout);
+				return Err(ControlFlow::from(Error::QueryTimedout));
 			}
 			Some(Reason::Canceled) => {
-				return Err(Error::QueryCancelled);
+				return Err(ControlFlow::from(Error::QueryCancelled));
 			}
 		}
 
@@ -188,10 +188,7 @@ impl Executor {
 				});
 
 				match self.execute_transaction_statement(txn.clone(), stmt).await {
-					Ok(value)
-					| Err(Error::Return {
-						value,
-					}) => {
+					Ok(value) | Err(ControlFlow::Return(value)) => {
 						let mut lock = txn.lock().await;
 
 						// non-writable transactions might return an error on commit.
@@ -232,9 +229,12 @@ impl Executor {
 
 						Ok(value)
 					}
-					Err(e) => {
+					Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
+						Err(Error::InvalidControlFlow)
+					}
+					Err(ControlFlow::Err(e)) => {
 						let _ = txn.cancel().await;
-						Err(e)
+						Err(*e)
 					}
 				}
 			}
@@ -445,13 +445,14 @@ impl Executor {
 
 					let r = match self.execute_transaction_statement(txn.clone(), stmt).await {
 						Ok(x) => Ok(x),
-						Err(Error::Return {
-							value,
-						}) => {
+						Err(ControlFlow::Return(value)) => {
 							skip_remaining = true;
 							Ok(value)
 						}
-						Err(e) => {
+						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+							Err(Error::InvalidControlFlow)
+						}
+						Err(ControlFlow::Err(e)) => {
 							for res in &mut self.results[start_results..] {
 								res.query_type = QueryType::Other;
 								res.result = Err(Error::QueryNotExecuted);
@@ -460,7 +461,7 @@ impl Executor {
 							// statement return an error. Consume all the other statement until we hit a cancel or commit.
 							self.results.push(Response {
 								time: before.elapsed(),
-								result: Err(e),
+								result: Err(*e),
 								query_type,
 							});
 

@@ -15,6 +15,7 @@ use radix_trie::Trie;
 use rust_decimal::Decimal;
 use std::borrow::Cow;
 use std::collections::VecDeque;
+use std::ops::Range;
 use std::sync::Arc;
 
 pub(crate) type IteratorRef = usize;
@@ -108,10 +109,14 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
+	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+	IndexRangeReverse(IndexRangeReverseThingIterator),
 	IndexUnion(IndexUnionThingIterator),
 	IndexJoin(Box<IndexJoinThingIterator>),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
+	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+	UniqueRangeReverse(UniqueRangeReverseThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
 	Matches(MatchesThingIterator),
@@ -130,7 +135,11 @@ impl ThingIterator {
 			Self::IndexEqual(i) => i.next_batch(txn, size).await,
 			Self::UniqueEqual(i) => i.next_batch(txn).await,
 			Self::IndexRange(i) => i.next_batch(txn, size).await,
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			Self::IndexRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::UniqueRange(i) => i.next_batch(txn, size).await,
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			Self::UniqueRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::IndexUnion(i) => i.next_batch(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_batch(ctx, txn, size).await,
 			Self::Matches(i) => i.next_batch(ctx, txn, size).await,
@@ -151,7 +160,11 @@ impl ThingIterator {
 			Self::IndexEqual(i) => i.next_count(txn, size).await,
 			Self::UniqueEqual(i) => i.next_count(txn).await,
 			Self::IndexRange(i) => i.next_count(txn, size).await,
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			Self::IndexRangeReverse(i) => i.next_count(txn, size).await,
 			Self::UniqueRange(i) => i.next_count(txn, size).await,
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			Self::UniqueRangeReverse(i) => i.next_count(txn, size).await,
 			Self::IndexUnion(i) => i.next_count(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_count(ctx, txn, size).await,
 			Self::Matches(i) => i.next_count(ctx, txn, size).await,
@@ -264,8 +277,10 @@ impl IndexEqualThingIterator {
 	) -> Result<B, Error> {
 		let res = Self::next_scan(tx, beg, end, limit).await?;
 		let mut records = B::with_capacity(res.len());
-		res.into_iter()
-			.for_each(|(_, val)| records.add(IndexItemRecord::new_key(val.into(), irf.into())));
+		res.into_iter().try_for_each(|(_, val)| -> Result<(), Error> {
+			records.add(IndexItemRecord::new_key(revision::from_slice(&val)?, irf.into()));
+			Ok(())
+		})?;
 		Ok(records)
 	}
 
@@ -283,44 +298,78 @@ impl IndexEqualThingIterator {
 }
 
 struct RangeScan {
-	beg: Vec<u8>,
-	end: Vec<u8>,
-	beg_excl: Option<Vec<u8>>,
-	end_excl: Option<Vec<u8>>,
+	beg: Key,
+	end: Key,
+	/// True if the beginning key has already been seen and match checked
+	beg_excl_match_checked: bool,
+	/// True if the ending key has already been seen and match checked
+	end_excl_match_checked: bool,
 }
 
 impl RangeScan {
-	fn new(beg: Vec<u8>, beg_incl: bool, end: Vec<u8>, end_incl: bool) -> Self {
-		let beg_excl = if !beg_incl {
-			Some(beg.clone())
-		} else {
-			None
-		};
-		let end_excl = if !end_incl {
-			Some(end.clone())
-		} else {
-			None
-		};
+	fn new(beg_key: Key, beg_incl: bool, end_key: Key, end_incl: bool) -> Self {
 		Self {
-			beg,
-			end,
-			beg_excl,
-			end_excl,
+			beg: beg_key,
+			end: end_key,
+			beg_excl_match_checked: beg_incl,
+			end_excl_match_checked: end_incl,
 		}
 	}
 
+	fn range(&self) -> Range<Key> {
+		self.beg.clone()..self.end.clone()
+	}
+
 	fn matches(&mut self, k: &Key) -> bool {
-		if let Some(b) = &self.beg_excl {
-			if b.eq(k) {
-				self.beg_excl = None;
-				return false;
-			}
+		// We check if we should match the key matching the beginning of the range
+		if !self.beg_excl_match_checked && self.beg.eq(k) {
+			self.beg_excl_match_checked = true;
+			return false;
 		}
-		if let Some(e) = &self.end_excl {
-			if e.eq(k) {
-				self.end_excl = None;
-				return false;
-			}
+		// We check if we should match the key matching the end of the range
+		if !self.end_excl_match_checked && self.end.eq(k) {
+			self.end_excl_match_checked = true;
+			return false;
+		}
+		true
+	}
+
+	fn matches_end(&mut self) -> bool {
+		// We check if we should match the key matching the end of the range
+		if !self.end_excl_match_checked && self.end.eq(&self.end) {
+			self.end_excl_match_checked = true;
+			return false;
+		}
+		true
+	}
+}
+
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+struct ReverseRangeScan {
+	r: RangeScan,
+	/// True if the beginning key should be included
+	beg_incl: bool,
+	/// True if the ending key should be included
+	end_incl: bool,
+}
+
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+impl ReverseRangeScan {
+	fn new(r: RangeScan) -> Self {
+		Self {
+			beg_incl: r.beg_excl_match_checked,
+			end_incl: r.end_excl_match_checked,
+			r,
+		}
+	}
+	fn matches_check(&self, k: &Key) -> bool {
+		// We check if we should match the key matching the beginning of the range
+		if !self.r.beg_excl_match_checked && self.r.beg.eq(k) {
+			return false;
+		}
+		// We check if we should match the key matching the end of the range
+		if !self.r.end_excl_match_checked && self.r.end.eq(k) {
+			return false;
 		}
 		true
 	}
@@ -441,11 +490,9 @@ impl IndexRangeThingIterator {
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
 	) -> Result<Self, Error> {
-		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from, range.value_type)?;
-		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to, range.value_type)?;
 		Ok(Self {
 			irf,
-			r: RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive),
+			r: Self::range_scan(ns, db, ix, range)?,
 		})
 	}
 
@@ -455,16 +502,19 @@ impl IndexRangeThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 	) -> Result<Self, Error> {
-		let full_range = RangeValue {
-			value: Value::None,
-			inclusive: true,
-		};
-		let range = IteratorRange {
-			value_type: ValueType::None,
-			from: Cow::Borrowed(&full_range),
-			to: Cow::Borrowed(&full_range),
-		};
+		let range = full_iterator_range();
 		Self::new(irf, ns, db, ix, &range)
+	}
+
+	fn range_scan(
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		range: &IteratorRange<'_>,
+	) -> Result<RangeScan, Error> {
+		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from, range.value_type)?;
+		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to, range.value_type)?;
+		Ok(RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive))
 	}
 
 	fn compute_beg(
@@ -506,10 +556,17 @@ impl IndexRangeThingIterator {
 	}
 
 	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
-		let min = self.r.beg.clone();
-		let max = self.r.end.clone();
-		let res = tx.scan(min..max, limit, None).await?;
+		let res = tx.scan(self.r.range(), limit, None).await?;
 		if let Some((key, _)) = res.last() {
+			self.r.beg.clone_from(key);
+			self.r.beg.push(0x00);
+		}
+		Ok(res)
+	}
+
+	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>, Error> {
+		let res = tx.keys(self.r.range(), limit, None).await?;
+		if let Some(key) = res.last() {
 			self.r.beg.clone_from(key);
 			self.r.beg.push(0x00);
 		}
@@ -523,15 +580,155 @@ impl IndexRangeThingIterator {
 	) -> Result<B, Error> {
 		let res = self.next_scan(tx, limit).await?;
 		let mut records = B::with_capacity(res.len());
-		res.into_iter()
-			.filter(|(k, _)| self.r.matches(k))
-			.for_each(|(_, v)| records.add(IndexItemRecord::new_key(v.into(), self.irf.into())));
+		res.into_iter().filter(|(k, _)| self.r.matches(k)).try_for_each(
+			|(_, v)| -> Result<(), Error> {
+				records.add(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into()));
+				Ok(())
+			},
+		)?;
 		Ok(records)
 	}
 
 	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize, Error> {
-		let res = self.next_scan(tx, limit).await?;
-		let count = res.into_iter().filter(|(k, _)| self.r.matches(k)).count();
+		let res = self.next_keys(tx, limit).await?;
+		let count = res.into_iter().filter(|k| self.r.matches(k)).count();
+		Ok(count)
+	}
+}
+
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+pub(crate) struct IndexRangeReverseThingIterator {
+	irf: IteratorRef,
+	r: ReverseRangeScan,
+}
+
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+impl IndexRangeReverseThingIterator {
+	pub(super) fn new(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		range: &IteratorRange<'_>,
+	) -> Result<Self, Error> {
+		Ok(Self {
+			irf,
+			r: ReverseRangeScan::new(IndexRangeThingIterator::range_scan(ns, db, ix, range)?),
+		})
+	}
+
+	pub(super) fn full_range(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+	) -> Result<Self, Error> {
+		let range = full_iterator_range();
+		Self::new(irf, ns, db, ix, &range)
+	}
+	async fn check_batch_ending(
+		&mut self,
+		tx: &Transaction,
+		limit: &mut u32,
+	) -> Result<Option<IndexItemRecord>, Error> {
+		if !self.r.end_incl || !self.r.matches_check(&self.r.r.end) {
+			return Ok(None);
+		}
+		self.r.r.end_excl_match_checked = true;
+		if let Some(v) = tx.get(&self.r.r.end, None).await? {
+			*limit -= 1;
+			Ok(Some(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into())))
+		} else {
+			Ok(None)
+		}
+	}
+
+	async fn check_keys_ending(
+		&mut self,
+		tx: &Transaction,
+		limit: &mut u32,
+	) -> Result<bool, Error> {
+		if !self.r.end_incl || !self.r.matches_check(&self.r.r.end) {
+			return Ok(false);
+		}
+		self.r.r.end_excl_match_checked = true;
+		if tx.exists(&self.r.r.end, None).await? {
+			*limit -= 1;
+			Ok(true)
+		} else {
+			Ok(false)
+		}
+	}
+
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		tx: &Transaction,
+		mut limit: u32,
+	) -> Result<B, Error> {
+		// Check if we need to retrieve the key at end of the range (not returned by the scanr)
+		let ending = self.check_batch_ending(tx, &mut limit).await?;
+
+		// Do we have enough limit left to collect additional records?
+		let res = if limit > 0 {
+			tx.scanr(self.r.r.range(), limit, None).await?
+		} else {
+			vec![]
+		};
+
+		// Proper allocation for the result
+		let mut records = B::with_capacity(res.len() + (ending.is_some() as usize));
+
+		// Add the ending record if any
+		if let Some(r) = ending {
+			records.add(r);
+		}
+
+		// Collect the last key
+		let last_key = res.last().map(|(k, _)| k.clone());
+
+		// Feed the result
+		res.into_iter().filter(|(k, _)| self.r.r.matches(k)).try_for_each(
+			|(_, v)| -> Result<(), Error> {
+				records.add(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into()));
+				Ok(())
+			},
+		)?;
+
+		// Update the ending for the next batch
+		if let Some(key) = last_key {
+			self.r.r.end = key;
+		}
+
+		// The next batch should not include the end anymore
+		if self.r.end_incl {
+			self.r.end_incl = false;
+		}
+		Ok(records)
+	}
+
+	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize, Error> {
+		// Check if we need to retrieve the key at end of the range (not returned by the keysr)
+		let mut count = self.check_keys_ending(tx, &mut limit).await? as usize;
+
+		// Do we have enough limit left to collect additional records?
+		let res = if limit > 0 {
+			tx.keysr(self.r.r.range(), limit, None).await?
+		} else {
+			vec![]
+		};
+
+		// Feed the result
+		count += res.iter().filter(|k| self.r.r.matches(k)).count();
+
+		// Update the ending for the next batch
+		if let Some(key) = res.last() {
+			self.r.r.end = key.clone();
+		}
+
+		// The next batch should not include the end anymore
+		if self.r.end_incl {
+			self.r.end_incl = false;
+		}
 		Ok(count)
 	}
 }
@@ -623,9 +820,10 @@ impl JoinThingIterator {
 		ix: IndexReference,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Result<Self, Error> {
+		let (ns, db) = opt.ns_db()?;
 		Ok(Self {
-			ns: opt.ns()?.to_string(),
-			db: opt.db()?.to_string(),
+			ns: ns.to_owned(),
+			db: db.to_owned(),
 			ix,
 			current_remote: None,
 			current_remote_batch: VecDeque::with_capacity(1),
@@ -675,7 +873,7 @@ impl JoinThingIterator {
 					break;
 				}
 				let thing = r.thing();
-				let k: Key = thing.into();
+				let k: Key = revision::to_vec(thing)?;
 				let value = Value::from(thing.clone());
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local = Some(new_iter(&self.ns, &self.db, &self.ix, value)?);
@@ -803,7 +1001,7 @@ impl UniqueEqualThingIterator {
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B, Error> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = tx.get(key, None).await? {
-				let rid: Thing = val.into();
+				let rid: Thing = revision::from_slice(&val)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());
 				return Ok(B::from_one(record));
 			}
@@ -821,6 +1019,18 @@ impl UniqueEqualThingIterator {
 	}
 }
 
+fn full_iterator_range<'a>() -> IteratorRange<'a> {
+	let value = RangeValue {
+		value: Value::None,
+		inclusive: true,
+	};
+	IteratorRange {
+		value_type: ValueType::None,
+		from: Cow::Owned(value.clone()),
+		to: Cow::Owned(value),
+	}
+}
+
 pub(crate) struct UniqueRangeThingIterator {
 	irf: IteratorRef,
 	r: RangeScan,
@@ -828,19 +1038,28 @@ pub(crate) struct UniqueRangeThingIterator {
 }
 
 impl UniqueRangeThingIterator {
+	fn range_scan(
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		range: &IteratorRange<'_>,
+	) -> Result<RangeScan, Error> {
+		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from, range.value_type)?;
+		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to, range.value_type)?;
+		Ok(RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive))
+	}
+
 	pub(super) fn new(
 		irf: IteratorRef,
 		ns: &str,
 		db: &str,
-		ix_what: &Ident,
-		ix_name: &Ident,
-		range: &IteratorRange<'_>,
+		ix: &DefineIndexStatement,
+		r: &IteratorRange<'_>,
 	) -> Result<Self, Error> {
-		let beg = Self::compute_beg(ns, db, ix_what, ix_name, &range.from, range.value_type)?;
-		let end = Self::compute_end(ns, db, ix_what, ix_name, &range.to, range.value_type)?;
+		let r = Self::range_scan(ns, db, ix, r)?;
 		Ok(Self {
 			irf,
-			r: RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive),
+			r,
 			done: false,
 		})
 	}
@@ -851,16 +1070,8 @@ impl UniqueRangeThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 	) -> Result<Self, Error> {
-		let value = RangeValue {
-			value: Value::None,
-			inclusive: true,
-		};
-		let range = IteratorRange {
-			value_type: ValueType::None,
-			from: Cow::Borrowed(&value),
-			to: Cow::Borrowed(&value),
-		};
-		Self::new(irf, ns, db, &ix.what, &ix.name, &range)
+		let rng = full_iterator_range();
+		Self::new(irf, ns, db, ix, &rng)
 	}
 
 	fn compute_beg(
@@ -899,10 +1110,8 @@ impl UniqueRangeThingIterator {
 		if self.done {
 			return Ok(B::empty());
 		}
-		let min = self.r.beg.clone();
-		let max = self.r.end.clone();
 		limit += 1;
-		let res = tx.scan(min..max, limit, None).await?;
+		let res = tx.scan(self.r.range(), limit, None).await?;
 		let mut records = B::with_capacity(res.len());
 		for (k, v) in res {
 			limit -= 1;
@@ -911,14 +1120,14 @@ impl UniqueRangeThingIterator {
 				return Ok(records);
 			}
 			if self.r.matches(&k) {
-				let rid: Thing = v.into();
+				let rid: Thing = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
-		let end = self.r.end.clone();
-		if self.r.matches(&end) {
-			if let Some(v) = tx.get(end, None).await? {
-				let rid: Thing = v.into();
+
+		if self.r.matches_end() {
+			if let Some(v) = tx.get(&self.r.end, None).await? {
+				let rid: Thing = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
@@ -930,12 +1139,10 @@ impl UniqueRangeThingIterator {
 		if self.done {
 			return Ok(0);
 		}
-		let min = self.r.beg.clone();
-		let max = self.r.end.clone();
 		limit += 1;
-		let res = tx.scan(min..max, limit, None).await?;
+		let res = tx.keys(self.r.range(), limit, None).await?;
 		let mut count = 0;
-		for (k, _) in res {
+		for k in res {
 			limit -= 1;
 			if limit == 0 {
 				self.r.beg = k;
@@ -945,11 +1152,122 @@ impl UniqueRangeThingIterator {
 				count += 1;
 			}
 		}
-		let end = self.r.end.clone();
-		if self.r.matches(&end) && tx.exists(end, None).await? {
+		if self.r.matches_end() && tx.exists(&self.r.end, None).await? {
 			count += 1;
 		}
 		self.done = true;
+		Ok(count)
+	}
+}
+
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+pub(crate) struct UniqueRangeReverseThingIterator {
+	irf: IteratorRef,
+	r: ReverseRangeScan,
+	done: bool,
+}
+
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+impl UniqueRangeReverseThingIterator {
+	pub(super) fn full_range(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+	) -> Result<Self, Error> {
+		let r = full_iterator_range();
+		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, &r)?);
+		Ok(Self {
+			irf,
+			r,
+			done: false,
+		})
+	}
+
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		tx: &Transaction,
+		mut limit: u32,
+	) -> Result<B, Error> {
+		if self.done {
+			return Ok(B::empty());
+		}
+		// Check if we include the last record
+		let ending_record = if self.r.end_incl {
+			// we don't include the ending key for the next batches
+			self.r.end_incl = false;
+			// tx.scanr is end exclusive, so we have to manually collect the value using a get
+			if let Some(v) = tx.get(&self.r.r.end, None).await? {
+				let rid: Thing = revision::from_slice(&v)?;
+				let record = IndexItemRecord::new_key(rid, self.irf.into());
+				limit -= 1;
+				if limit == 0 {
+					return Ok(B::from_one(record));
+				}
+				Some(record)
+			} else {
+				None
+			}
+		} else {
+			None
+		};
+		let mut res = tx.scanr(self.r.r.range(), limit, None).await?;
+		if let Some((k, _)) = res.last() {
+			// We set the ending for the next batch
+			self.r.r.end = k.clone();
+			// If the last key is the beginning of the range, we're done
+			if self.r.r.beg.eq(k) {
+				self.done = true;
+				// Remove the beginning key if it is not supposed to be included
+				if !self.r.beg_incl {
+					res.remove(res.len() - 1);
+				}
+			}
+		}
+		// We collect the records
+		let mut records = B::with_capacity(res.len() + ending_record.is_some() as usize);
+		if let Some(record) = ending_record {
+			records.add(record);
+		}
+		for (_, v) in res {
+			let rid: Thing = revision::from_slice(&v)?;
+			records.add(IndexItemRecord::new_key(rid, self.irf.into()));
+		}
+		Ok(records)
+	}
+
+	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize, Error> {
+		if self.done {
+			return Ok(0);
+		}
+		let mut count = 0;
+		// Check if we include the last record
+		if self.r.end_incl {
+			// we don't include the ending key for the next batches
+			self.r.end_incl = false;
+			// tx.keysr is end exclusive, so we have to manually check if the value exists
+			if tx.exists(&self.r.r.end, None).await? {
+				count += 1;
+				limit -= 1;
+				if limit == 0 {
+					return Ok(count);
+				}
+			}
+		}
+		let mut res = tx.keysr(self.r.r.range(), limit, None).await?;
+		if let Some(k) = res.last() {
+			// We set the ending for the next batch
+			self.r.r.end = k.clone();
+			// If the last key is the beginning of the range, we're done
+			if self.r.r.beg.eq(k) {
+				self.done = true;
+				// Remove the beginning if it is not supposed to be included
+				if !self.r.beg_incl {
+					res.remove(res.len() - 1);
+				}
+			}
+		}
+		count += res.len();
 		Ok(count)
 	}
 }
@@ -968,8 +1286,9 @@ impl UniqueUnionThingIterator {
 	) -> Result<Self, Error> {
 		// We create a VecDeque to hold the key for each value in the array.
 		let mut keys = VecDeque::with_capacity(vals.len());
+		let (ns, db) = opt.ns_db()?;
 		for a in vals {
-			let key = Index::new(opt.ns()?, opt.db()?, &ix.what, &ix.name, a, None).encode()?;
+			let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode()?;
 			keys.push_back(key);
 		}
 		Ok(Self {
@@ -993,7 +1312,7 @@ impl UniqueUnionThingIterator {
 			}
 			if let Some(val) = tx.get(key, None).await? {
 				count += 1;
-				let rid: Thing = val.into();
+				let rid: Thing = revision::from_slice(&val)?;
 				results.add(IndexItemRecord::new_key(rid, self.irf.into()));
 				if results.len() >= limit {
 					break;

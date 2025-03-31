@@ -2,7 +2,7 @@ use super::{ParseResult, Parser};
 use crate::{
 	sql::{Constant, Function, Value},
 	syn::{
-		error::MessageKind,
+		error::{bail, MessageKind},
 		parser::{mac::expected, unexpected, SyntaxError},
 		token::{t, Span},
 	},
@@ -20,6 +20,8 @@ pub enum PathKind {
 
 /// A map of path strings for parsing paths.
 pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
+		UniCase::ascii("api::invoke") => PathKind::Function,
+		//
 		UniCase::ascii("array::add") => PathKind::Function,
 		UniCase::ascii("array::all") => PathKind::Function,
 		UniCase::ascii("array::any") => PathKind::Function,
@@ -72,6 +74,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::slice") => PathKind::Function,
 		UniCase::ascii("array::some") => PathKind::Function,
 		UniCase::ascii("array::sort") => PathKind::Function,
+		UniCase::ascii("array::sort_natural") => PathKind::Function,
+		UniCase::ascii("array::sort_lexical") => PathKind::Function,
+		UniCase::ascii("array::sort_natural_lexical") => PathKind::Function,
 		UniCase::ascii("array::swap") => PathKind::Function,
 		UniCase::ascii("array::transpose") => PathKind::Function,
 		UniCase::ascii("array::union") => PathKind::Function,
@@ -521,10 +526,15 @@ impl Parser<'_> {
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),
-			Some((k, PathKind::Function)) => stk
-				.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
-				.await
-				.map(|x| Value::Function(Box::new(x))),
+			Some((k, PathKind::Function)) => {
+				if k == &UniCase::ascii("api::invoke") && !self.settings.define_api_enabled {
+					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @span);
+				}
+
+				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
+					.await
+					.map(|x| Value::Function(Box::new(x)))
+			}
 			None => {
 				if let Some(suggest) = find_suggestion(str) {
 					Err(SyntaxError::new(format_args!(

@@ -1,9 +1,10 @@
 use super::MlExportConfig;
 use crate::{opt::Resource, value::Notification, Result};
+use async_channel::Sender;
 use bincode::Options;
-use channel::Sender;
 use revision::Revisioned;
 use serde::{ser::SerializeMap as _, Serialize};
+use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
@@ -54,10 +55,12 @@ pub(crate) enum Command {
 	Patch {
 		what: Resource,
 		data: Option<CoreValue>,
+		upsert: bool,
 	},
 	Merge {
 		what: Resource,
 		data: Option<CoreValue>,
+		upsert: bool,
 	},
 	Select {
 		what: Resource,
@@ -67,6 +70,10 @@ pub(crate) enum Command {
 	},
 	Query {
 		query: Query,
+		variables: CoreObject,
+	},
+	RawQuery {
+		query: Cow<'static, str>,
 		variables: CoreObject,
 	},
 	ExportFile {
@@ -117,6 +124,12 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
+		use crate::api::engine::resource_to_values;
+		use surrealdb_core::sql::{
+			statements::{UpdateStatement, UpsertStatement},
+			Data, Output,
+		};
+
 		let res = match self {
 			Command::Use {
 				namespace,
@@ -244,33 +257,58 @@ impl Command {
 			Command::Patch {
 				what,
 				data,
+				upsert,
 				..
 			} => {
-				let mut params = vec![what.into_core_value()];
+				let query = if upsert {
+					let mut stmt = UpsertStatement::default();
+					stmt.what = resource_to_values(what);
+					stmt.data = data.map(Data::PatchExpression);
+					stmt.output = Some(Output::After);
+					Query::from(stmt)
+				} else {
+					let mut stmt = UpdateStatement::default();
+					stmt.what = resource_to_values(what);
+					stmt.data = data.map(Data::PatchExpression);
+					stmt.output = Some(Output::After);
+					Query::from(stmt)
+				};
 
-				if let Some(data) = data {
-					params.push(data);
-				}
+				let variables = CoreObject::default();
+				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
 
 				RouterRequest {
 					id,
-					method: "patch",
+					method: "query",
 					params: Some(params.into()),
 				}
 			}
 			Command::Merge {
 				what,
 				data,
+				upsert,
 				..
 			} => {
-				let mut params = vec![what.into_core_value()];
-				if let Some(data) = data {
-					params.push(data)
-				}
+				let query = if upsert {
+					let mut stmt = UpsertStatement::default();
+					stmt.what = resource_to_values(what);
+					stmt.data = data.map(Data::MergeExpression);
+					stmt.output = Some(Output::After);
+					Query::from(stmt)
+				} else {
+					let mut stmt = UpdateStatement::default();
+					stmt.what = resource_to_values(what);
+					stmt.data = data.map(Data::MergeExpression);
+					stmt.output = Some(Output::After);
+					Query::from(stmt)
+				};
+
+				let variables = CoreObject::default();
+				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
 
 				RouterRequest {
 					id,
-					method: "merge",
+					method: "query",
 					params: Some(params.into()),
 				}
 			}
@@ -295,6 +333,17 @@ impl Command {
 				variables,
 			} => {
 				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
+				RouterRequest {
+					id,
+					method: "query",
+					params: Some(params.into()),
+				}
+			}
+			Command::RawQuery {
+				query,
+				variables,
+			} => {
+				let params: Vec<CoreValue> = vec![query.into_owned().into(), variables.into()];
 				RouterRequest {
 					id,
 					method: "query",
@@ -585,6 +634,7 @@ impl Revisioned for RouterRequest {
 			serializer
 				.serialize_into(&mut *w, "params")
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
+
 			x.serialize_revisioned(w)?;
 		}
 

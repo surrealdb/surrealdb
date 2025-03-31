@@ -19,6 +19,7 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
+use crate::sql::FlowResultExt as _;
 use reblessive::tree::Stk;
 use std::fmt::{Debug, Formatter};
 use std::mem;
@@ -162,12 +163,6 @@ impl Debug for Document {
 	}
 }
 
-impl From<&Document> for Vec<u8> {
-	fn from(val: &Document) -> Vec<u8> {
-		val.current.doc.as_ref().into()
-	}
-}
-
 pub(crate) enum Permitted {
 	Initial,
 	Current,
@@ -261,6 +256,18 @@ impl Document {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}
 
+	/// Update the document for a retry to update after an insert failed.
+	pub fn modify_for_update_retry(&mut self, id: Thing, value: Arc<Value>) {
+		let retry = Arc::new(id);
+		self.id = Some(retry.clone());
+		self.gen = None;
+		self.retry = true;
+		self.record_strategy = RecordStrategy::KeysAndValues;
+
+		self.current = CursorDoc::new(Some(retry), None, value);
+		self.initial = self.current.clone();
+	}
+
 	/// Checks if permissions are required to be run
 	/// over a document. If permissions don't need to
 	/// be processed, then we don't process the initial
@@ -319,7 +326,8 @@ impl Document {
 			// Get the full document
 			let full = target.0;
 			// Process the full document
-			let mut out = full.doc.as_ref().compute(stk, ctx, opt, Some(full)).await?;
+			let mut out =
+				full.doc.as_ref().compute(stk, ctx, opt, Some(full)).await.catch_return()?;
 			// Loop over each field in document
 			for fd in fds.iter() {
 				// Loop over each field in document
@@ -338,7 +346,12 @@ impl Document {
 							ctx.add_value("value", val);
 							let ctx = ctx.freeze();
 							// Process the PERMISSION clause
-							if !e.compute(stk, &ctx, opt, Some(full)).await?.is_truthy() {
+							if !e
+								.compute(stk, &ctx, opt, Some(full))
+								.await
+								.catch_return()?
+								.is_truthy()
+							{
 								out.cut(k);
 							}
 						}
@@ -375,8 +388,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get transaction
 		let txn = ctx.tx();
 		// Get the table definition
@@ -409,8 +421,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the record id
 		let id = self.id()?;
 		// Get transaction
@@ -428,7 +439,7 @@ impl Document {
 						let val = match txn.get_tb(ns, db, &id.tb).await {
 							// The table doesn't exist
 							Err(Error::TbNotFound {
-								value: _,
+								name: _,
 							}) => {
 								// Allowed to run?
 								opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
@@ -453,7 +464,7 @@ impl Document {
 				match txn.get_tb(ns, db, &id.tb).await {
 					// The table doesn't exist
 					Err(Error::TbNotFound {
-						value: _,
+						name: _,
 					}) => {
 						// Allowed to run?
 						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
@@ -476,8 +487,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -510,8 +520,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -544,8 +553,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -578,8 +586,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -608,8 +615,7 @@ impl Document {
 	// Get the lives for this document
 	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>, Error> {
 		// Get the NS + DB
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context

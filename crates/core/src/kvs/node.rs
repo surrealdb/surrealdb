@@ -29,10 +29,10 @@ impl Datastore {
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::Nd::new(id);
 		let now = self.clock_now().await;
-		let val = Node::new(id, now, false);
+		let val = revision::to_vec(&Node::new(id, now, false))?;
 		match run!(txn, txn.put(key, val, None).await) {
 			Err(Error::TxKeyAlreadyExists) => Err(Error::ClAlreadyExists {
-				value: id.to_string(),
+				id: id.to_string(),
 			}),
 			other => other,
 		}
@@ -56,7 +56,7 @@ impl Datastore {
 		let key = crate::key::root::nd::new(id);
 		let now = self.clock_now().await;
 		let val = Node::new(id, now, false);
-		run!(txn, txn.replace(key, val).await)
+		run!(txn, txn.replace(key, revision::to_vec(&val)?).await)
 	}
 
 	/// Deletes a node from the cluster.
@@ -75,7 +75,7 @@ impl Datastore {
 		let key = crate::key::root::nd::new(id);
 		let val = catch!(txn, txn.get_node(id).await);
 		let val = val.as_ref().archive();
-		run!(txn, txn.replace(key, val).await)
+		run!(txn, txn.replace(key, revision::to_vec(&val)?).await)
 	}
 
 	/// Expires nodes which have timedout from the cluster.
@@ -119,7 +119,7 @@ impl Datastore {
 				// Get the key for the node entry
 				let key = crate::key::root::nd::new(nd.id);
 				// Update the node entry
-				catch!(txn, txn.replace(key, val).await);
+				catch!(txn, txn.replace(key, revision::to_vec(&val)?).await);
 			}
 			// Commit the changes
 			catch!(txn, txn.commit().await);
@@ -159,15 +159,13 @@ impl Datastore {
 				trace!(target: TARGET, id = %id, "Deleting live queries for node");
 				// Scan the live queries for this node
 				while let Some(rng) = next {
-					// Pause and yield execution
-					yield_now!();
 					// Fetch the next batch of keys and values
 					let max = *NORMAL_FETCH_SIZE;
 					let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
 					next = res.next;
 					for (k, v) in res.result.iter() {
 						// Decode the data for this live query
-						let val: Live = v.into();
+						let val: Live = revision::from_slice(v)?;
 						// Get the key for this node live query
 						let nlq = catch!(txn, crate::key::node::lq::Lq::decode(k));
 						// Check that the node for this query is archived
@@ -180,6 +178,8 @@ impl Datastore {
 							catch!(txn, txn.clr(nlq).await);
 						}
 					}
+					// Pause and yield execution
+					yield_now!();
 				}
 			}
 			{
@@ -251,15 +251,13 @@ impl Datastore {
 					let mut next = Some(beg..end);
 					let txn = self.transaction(Write, Optimistic).await?;
 					while let Some(rng) = next {
-						// Pause and yield execution
-						yield_now!();
 						// Fetch the next batch of keys and values
 						let max = *NORMAL_FETCH_SIZE;
 						let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
 						next = res.next;
 						for (k, v) in res.result.iter() {
 							// Decode the LIVE query statement
-							let stm: LiveStatement = v.into();
+							let stm: LiveStatement = revision::from_slice(v)?;
 							// Get the node id and the live query id
 							let (nid, lid) = (stm.node.0, stm.id.0);
 							// Check that the node for this query is archived
@@ -274,6 +272,8 @@ impl Datastore {
 								catch!(txn, txn.clr(tlq).await);
 							}
 						}
+						// Pause and yield execution
+						yield_now!();
 					}
 					// Commit the changes
 					txn.commit().await?;
@@ -305,7 +305,7 @@ impl Datastore {
 			// Fetch the LIVE meta data node entry
 			if let Some(val) = catch!(txn, txn.get(nlq, None).await) {
 				// Decode the data for this live query
-				let lq: Live = val.into();
+				let lq: Live = revision::from_slice(&val)?;
 				// Get the key for this node live query
 				let nlq = crate::key::node::lq::new(self.id(), id);
 				// Get the key for this table live query

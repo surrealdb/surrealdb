@@ -4,11 +4,12 @@ mod report;
 mod util;
 
 use core::str;
-use std::{io, mem, thread, time::Duration};
+use std::{any::Any, io, mem, panic::AssertUnwindSafe, thread, time::Duration};
 
 use anyhow::{bail, Context, Result};
 use camino::Utf8Path;
 use clap::ArgMatches;
+use futures::FutureExt;
 use progress::Progress;
 use report::{TestGrade, TestReport};
 use surrealdb_core::{
@@ -35,8 +36,10 @@ use crate::{
 pub enum TestTaskResult {
 	ParserError(RenderedError),
 	RunningError(CoreError),
+	Import(String, String),
 	Timeout,
 	Results(Vec<Response>),
+	Paniced(Box<dyn Any + Send + 'static>),
 }
 
 pub struct TestTaskContext {
@@ -46,15 +49,21 @@ pub struct TestTaskContext {
 	pub result: Sender<(TestId, TestTaskResult)>,
 }
 
+async fn create_base_datastore() -> Result<Datastore> {
+	let db = Datastore::new("memory")
+		.await?
+		.with_capabilities(Capabilities::all())
+		.with_notifications()
+		.with_auth_enabled(true);
+
+	db.bootstrap().await?;
+
+	Ok(db)
+}
+
 async fn fill_datastores(sender: &Sender<Datastore>, num_jobs: usize) -> Result<()> {
 	for _ in 0..num_jobs {
-		let db = Datastore::new("memory")
-			.await?
-			.with_capabilities(Capabilities::all())
-			.with_notifications();
-
-		db.bootstrap().await?;
-
+		let db = create_base_datastore().await?;
 		sender.send(db).await.unwrap();
 	}
 	Ok(())
@@ -79,9 +88,23 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let testset = TestSet::collect_directory(Utf8Path::new(&path)).await?;
 
 	let subset = if let Some(x) = matches.get_one::<String>("filter") {
-		testset.filter(x)
+		testset.filter_map(|name, _| name.contains(x))
 	} else {
 		testset
+	};
+
+	let subset = if matches.get_flag("no-wip") {
+		subset.filter_map(|_, set| !set.config.is_wip())
+	} else {
+		subset
+	};
+
+	let subset = if matches.get_flag("no-results") {
+		subset.filter_map(|_, set| {
+			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
+		})
+	} else {
+		subset
 	};
 
 	// check for unused keys in tests
@@ -176,6 +199,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		reports.push(x);
 	}
 
+	schedular.join_all().await;
+
 	while let Some(x) = ds_recv.recv().await {
 		x.shutdown().await.context("Datastore failed to shutdown properly")?;
 	}
@@ -240,8 +265,11 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		ds.with_capabilities(capabilities)
 	} else {
 		return_channel = None;
-		let ds =
-			Datastore::new("memory").await?.with_capabilities(capabilities).with_notifications();
+		let ds = Datastore::new("memory")
+			.await?
+			.with_capabilities(capabilities)
+			.with_notifications()
+			.with_auth_enabled(true);
 
 		ds.bootstrap().await?;
 
@@ -256,7 +284,31 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 
 	let mut ds = ds.with_query_timeout(Some(timeout_duration));
 
-	let res = run_test_with_dbs(context.id, &context.testset, &mut ds).await;
+	let res = AssertUnwindSafe(run_test_with_dbs(context.id, &context.testset, &mut ds))
+		.catch_unwind()
+		.await;
+
+	let res = match res {
+		Ok(x) => x,
+		Err(e) => {
+			// Test caused a panic!
+			// return this result and if required create a new non poisened ds to run other tests
+			// in.
+			context
+				.result
+				.send((context.id, TestTaskResult::Paniced(e)))
+				.await
+				.expect("result channel quit early");
+
+			if let Some(return_channel) = return_channel {
+				let ds = create_base_datastore().await?;
+
+				return_channel.send(ds).await.expect("datastore return channel quit early");
+			}
+
+			return Ok(());
+		}
+	};
 
 	if let Some(return_channel) = return_channel {
 		return_channel.send(ds).await.expect("datastore return channel quit early");
@@ -276,32 +328,44 @@ async fn run_test_with_dbs(
 	set: &TestSet,
 	dbs: &mut Datastore,
 ) -> Result<TestTaskResult> {
-	let mut session = Session::owner();
-
 	let config = &set[id].config;
+
+	let session = util::session_from_test_config(config);
+
 	let timeout_duration = config
 		.env
 		.as_ref()
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
 
-	if let Some(ns) = config.namespace() {
-		session = session.with_ns(ns)
-	}
-	if let Some(db) = config.database() {
-		session = session.with_db(db)
-	}
+	let mut import_session = Session::owner();
+	if let Some(ns) = session.ns.as_ref() {
+		import_session = import_session.with_ns(ns)
+	};
+	if let Some(db) = session.db.as_ref() {
+		import_session = import_session.with_db(db)
+	};
 
 	for import in set[id].config.imports() {
 		let Some(test) = set.find_all(import) else {
-			bail!("Could not find import import `{import}`");
+			return Ok(TestTaskResult::Import(
+				import.to_string(),
+				format!("Could not find import."),
+			));
 		};
 
-		let source = str::from_utf8(&set[test].source)
-			.with_context(|| format!("Import `{import}` was not valid utf8"))?;
+		let Ok(source) = str::from_utf8(&set[test].source) else {
+			return Ok(TestTaskResult::Import(
+				import.to_string(),
+				format!("Import file was not valid utf-8."),
+			));
+		};
 
-		if let Err(e) = dbs.execute(source, &session, None).await {
-			bail!("Failed to run import `{import}`: {e}");
+		if let Err(e) = dbs.execute(source, &import_session, None).await {
+			return Ok(TestTaskResult::Import(
+				import.to_string(),
+				format!("Failed to run import: `{e}`"),
+			));
 		}
 	}
 
@@ -313,13 +377,22 @@ async fn run_test_with_dbs(
 		bearer_access_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::BearerAccess),
+		define_api_enabled: dbs
+			.get_capabilities()
+			.allows_experimental(&ExperimentalTarget::DefineApi),
 		..Default::default()
 	};
+
 	let mut parser = syn::parser::Parser::new_with_settings(source, settings);
 	let mut stack = reblessive::Stack::new();
 
 	let query = match stack.enter(|stk| parser.parse_query(stk)).finish() {
-		Ok(x) => x,
+		Ok(x) => {
+			if let Err(e) = parser.assert_finished() {
+				return Ok(TestTaskResult::ParserError(e.render_on_bytes(source)));
+			}
+			x
+		}
 		Err(e) => return Ok(TestTaskResult::ParserError(e.render_on_bytes(source))),
 	};
 
@@ -368,9 +441,7 @@ async fn run_test_with_dbs(
 				.await
 				.context("failed to remove test database")?;
 		}
-	}
 
-	if let Some(ref ns) = session.ns {
 		let session = Session::owner();
 		dbs.execute(&format!("REMOVE NAMESPACE IF EXISTS `{ns}`;"), &session, None)
 			.await

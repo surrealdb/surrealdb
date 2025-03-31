@@ -89,7 +89,7 @@ impl HnswIndex {
 	pub async fn index_document(
 		&mut self,
 		tx: &Transaction,
-		id: Id,
+		id: &Id,
 		content: &[Value],
 	) -> Result<(), Error> {
 		// Ensure the layers are up-to-date

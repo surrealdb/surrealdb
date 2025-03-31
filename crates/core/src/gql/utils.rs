@@ -1,8 +1,26 @@
 use std::sync::Arc;
 
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::dbs::Session;
+use crate::err::Error;
+use crate::iam::Error as IamError;
+use crate::kvs::Datastore;
+use crate::kvs::LockType;
+use crate::kvs::TransactionType;
+use crate::sql;
+use crate::sql::part::Part;
+use crate::sql::FlowResultExt;
+use crate::sql::Function;
+use crate::sql::Statement;
+use crate::sql::{Thing, Value as SqlValue};
+
 use async_graphql::dynamic::FieldValue;
 use async_graphql::{dynamic::indexmap::IndexMap, Name, Value as GqlValue};
 use reblessive::TreeStack;
+
+use super::error::GqlError;
+
 pub(crate) trait GqlValueUtils {
 	fn as_i64(&self) -> Option<i64>;
 	fn as_string(&self) -> Option<String>;
@@ -41,22 +59,6 @@ impl GqlValueUtils for GqlValue {
 		}
 	}
 }
-
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Session;
-use crate::err::Error;
-use crate::iam::Error as IamError;
-use crate::kvs::Datastore;
-use crate::kvs::LockType;
-use crate::kvs::TransactionType;
-use crate::sql;
-use crate::sql::part::Part;
-use crate::sql::Function;
-use crate::sql::Statement;
-use crate::sql::{Thing, Value as SqlValue};
-
-use super::error::GqlError;
 
 #[derive(Clone)]
 pub struct GQLTx {
@@ -99,13 +101,18 @@ impl GQLTx {
 			.enter(|stk| value.get(stk, &self.ctx, &self.opt, None, &part))
 			.finish()
 			.await
+			.catch_return()
 			.map_err(Into::into)
 	}
 
 	pub async fn process_stmt(&self, stmt: Statement) -> Result<SqlValue, GqlError> {
 		let mut stack = TreeStack::new();
 
-		let res = stack.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None)).finish().await?;
+		let res = stack
+			.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None))
+			.finish()
+			.await
+			.catch_return()?;
 
 		Ok(res)
 	}
@@ -118,7 +125,8 @@ impl GQLTx {
 			// .enter(|stk| fnc::run(stk, &self.ctx, &self.opt, None, name, args))
 			.enter(|stk| fun.compute(stk, &self.ctx, &self.opt, None))
 			.finish()
-			.await?;
+			.await
+			.catch_return()?;
 
 		Ok(res)
 	}

@@ -37,7 +37,7 @@ on:
       rust_version:
         required: false
         type: string
-        default: "stable"
+        default: "1.85.0"
         description: "The Rust version to use for building binaries"
       onnx_version:
         required: false
@@ -81,12 +81,6 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
-      - name: Install a TOML parser
-        run: |
-          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
-          chmod +x taplo
-          sudo mv taplo /usr/bin/taplo
-
       - name: Configure git
         run: |
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -98,7 +92,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
 
           if [[ $currentVersion == *"-beta"* ]]; then
             git push origin --delete releases/stable || true
@@ -114,7 +108,7 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"${major}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" crates/sdk/Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" Cargo.toml
 
             # Update Cargo.lock without updating dependency versions
             cargo check --no-default-features --features storage-mem
@@ -133,7 +127,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
 
           if [[ $currentVersion == *"-beta"* ]]; then
             if [[ "${{ inputs.bump-version }}" == "true" ]]; then
@@ -148,7 +142,7 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${betaVersion}\"#" crates/sdk/Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" Cargo.toml
           else
             git checkout -b releases/beta
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
@@ -157,7 +151,7 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"${major}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
-            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${betaVersion}\"#" crates/sdk/Cargo.toml
+            sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" Cargo.toml
           fi
 
           # Bump the crate version
@@ -179,7 +173,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
 
           # Create the tag
           alphaVersion=${currentVersion}-${{ inputs.environment }}.${{ inputs.patch }}
@@ -198,7 +192,7 @@ jobs:
         run: |
           set -x
 
-          version=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
 
           if [[ "${{ inputs.environment }}" == "alpha" ]]; then
             version=${version}-${{ inputs.environment }}.${{ inputs.patch }}
@@ -569,7 +563,7 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
           sed -i "s#surrealdb = { version = \"2\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -598,7 +592,6 @@ jobs:
   publish:
     name: Publish crate and artifacts binaries
     needs: [prepare-vars, test, lint, build]
-    if: ${{ inputs.publish }}
     environment: ${{ inputs.environment }}
     runs-on: [runner-amd64-2xlarge]
     steps:
@@ -612,30 +605,8 @@ jobs:
         with:
           toolchain: ${{ inputs.rust_version }}
 
-      - name: Install release-plz
-        run: |
-          curl -L https://github.com/release-plz/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
-          sudo chmod +x /usr/bin/release-plz
-
-      - name: Install a TOML parser
-        if: ${{ inputs.environment != 'stable' }}
-        run: |
-          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
-          chmod +x taplo
-          sudo mv taplo /usr/bin/taplo
-
       - name: Create a temporary branch
         run: git checkout -b crate
-
-      - name: Configure release-plz
-        run: |
-          cat << EOF > /tmp/release-plz.toml
-          [workspace]
-          changelog_update = false
-          git_release_enable = false
-          semver_check = false
-          git_tag_enable = false
-          EOF
 
       - name: Patch beta crate version
         if: ${{ inputs.environment == 'beta' }}
@@ -643,7 +614,7 @@ jobs:
           set -x
 
           # Derive crate version
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
           betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
@@ -652,7 +623,7 @@ jobs:
           # Update crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"2.1.0-${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#surrealdb-core2 = { version = \"=2.1.0-${currentVersion}\"#surrealdb-core2 = { version = \"=2.1.0-${version}\"#" Cargo.toml
 
       - name: Patch alpha crate version
         if: ${{ inputs.environment == 'alpha' }}
@@ -664,7 +635,7 @@ jobs:
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"2\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
       - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
@@ -672,19 +643,20 @@ jobs:
           set -x
 
           # Get the date of the last commit
-          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
 
           # Derive crate version
-          currentVersion=$(taplo get -f Cargo.toml "package.version")
+          currentVersion=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-          # This sets the nightly version to something like `1.3.20231117`
+          # This sets the nightly version to something like `1.3.20250224221932`
           version=${major}.${minor}.${date}
 
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment != 'stable' }}
@@ -695,15 +667,9 @@ jobs:
           sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" crates/sdk/Cargo.toml
           sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" crates/core/Cargo.toml
 
-          # Patch binary dependency
-          sed -i "s/surrealdb =/surrealdb-${{ inputs.environment }} =/" Cargo.toml
-          sed -i "s/surrealdb-core =/surrealdb-core-${{ inputs.environment }} =/" Cargo.toml
-
-          # Patch features
-          sed -i "s#\"surrealdb/#\"surrealdb-${{ inputs.environment }}/#" Cargo.toml
-
-          # Patch sdk dependency
-          sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" crates/sdk/Cargo.toml
+          # Patch dependency package
+          sed -i "s/package = \"surrealdb\"/package = \"surrealdb-${{ inputs.environment }}\"/" Cargo.toml
+          sed -i "s/package = \"surrealdb-core\"/package = \"surrealdb-core-${{ inputs.environment }}\"/" Cargo.toml
 
           # Patch the description
           sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
@@ -715,19 +681,36 @@ jobs:
           git config user.name "github-actions[bot]"
           git commit -am "Name and version patches"
 
+      - run: cat Cargo.toml
+      - run: cat crates/sdk/Cargo.toml
+      - run: cat crates/core/Cargo.toml
+
       - name: Publish the crate
+        if: ${{ inputs.publish }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: release-plz release --config /tmp/release-plz.toml
+        run: |
+          set -x
+
+          for crate in crates/{core,sdk}; do
+            cd $crate
+            if ! cargo publish; then
+              if [[ "${{ inputs.environment }}" != "nightly" ]]; then
+                exit 101
+              fi
+            fi
+            cd -
+          done
 
       - name: Download artifacts
+        if: ${{ inputs.publish }}
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
-        if: ${{ inputs.create-release }}
+        if: ${{ inputs.publish && inputs.create-release }}
         with:
           name: "Release ${{ needs.prepare-vars.outputs.git-ref }}"
           tag_name: ${{ needs.prepare-vars.outputs.git-ref }}
@@ -740,13 +723,14 @@ jobs:
 
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ inputs.publish }}
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
 
       - name: Set latest release version
-        if: ${{ inputs.create-release && inputs.latest }}
+        if: ${{ inputs.publish && inputs.create-release && inputs.latest }}
         run: |
           echo ${{ needs.prepare-vars.outputs.git-ref }} > latest.txt
           aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
@@ -758,6 +742,7 @@ jobs:
           aws s3 cp --cache-control 'no-store' ${{ inputs.environment }}.txt s3://download.surrealdb.com/${{ inputs.environment }}.txt
 
       - name: Publish binaries
+        if: ${{ inputs.publish }}
         run: |
           for file in artifacts/**/*.{tgz,txt,exe}; do
             aws s3 cp --cache-control 'no-store' $file s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
@@ -766,6 +751,7 @@ jobs:
   docker:
     name: Docker images
     needs: [prepare-vars, publish]
+    if: ${{ inputs.publish }}
     uses: ./.github/workflows/docker.yml
     with:
       environment: ${{ inputs.environment }}

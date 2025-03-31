@@ -1,5 +1,6 @@
 use crate::{api::Response, Value};
 use serde::Serialize;
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::{convert::Infallible, io};
 use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
@@ -244,6 +245,10 @@ pub enum Error {
 	/// The engine used does not support data versioning
 	#[error("The '{0}' engine does not support data versioning")]
 	VersionsNotSupported(String),
+
+	#[doc(hidden)] // A raw query being forwarded
+	#[error("{0}")]
+	RawQuery(Cow<'static, str>),
 }
 
 impl serde::ser::Error for Error {
@@ -297,14 +302,14 @@ impl From<tokio_tungstenite::tungstenite::Error> for crate::Error {
 	}
 }
 
-impl<T> From<channel::SendError<T>> for crate::Error {
-	fn from(error: channel::SendError<T>) -> Self {
+impl<T> From<async_channel::SendError<T>> for crate::Error {
+	fn from(error: async_channel::SendError<T>) -> Self {
 		Self::Api(Error::InternalError(error.to_string()))
 	}
 }
 
-impl From<channel::RecvError> for crate::Error {
-	fn from(error: channel::RecvError) -> Self {
+impl From<async_channel::RecvError> for crate::Error {
+	fn from(error: async_channel::RecvError) -> Self {
 		Self::Api(Error::InternalError(error.to_string()))
 	}
 }

@@ -1,10 +1,6 @@
-use std::io::{self, BufWriter, Stderr, Write};
-
-use atty::Stream;
-
-use crate::{cli::ColorMode, format::ansi};
-
 use super::report::TestGrade;
+use crate::{cli::ColorMode, format::ansi};
+use std::io::{self, BufWriter, IsTerminal as _, Stderr, Write};
 
 pub struct Progress<W> {
 	items: Vec<String>,
@@ -32,7 +28,7 @@ impl Progress<BufWriter<Stderr>> {
 	pub fn from_stderr(expected: usize, color_mode: ColorMode) -> Self {
 		Self::from_writer(
 			BufWriter::new(io::stderr()),
-			atty::is(Stream::Stderr),
+			io::stderr().is_terminal(),
 			color_mode,
 			expected,
 		)

@@ -10,7 +10,6 @@ use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
@@ -20,8 +19,9 @@ use crate::sql::{
 	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
 	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
+use crate::sql::{Closure, ControlFlow, FlowResult};
 use chrono::{DateTime, Utc};
-use derive::Store;
+
 use geo::Point;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -85,7 +85,7 @@ impl From<&Tables> for Values {
 }
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -1355,6 +1355,7 @@ impl Value {
 			Kind::Point => self.coerce_to_point().map(Value::from),
 			Kind::Bytes => self.coerce_to_bytes().map(Value::from),
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
+			Kind::Regex => self.coerce_to_regex().map(Value::from),
 			Kind::Range => self.coerce_to_range().map(Value::from),
 			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
@@ -1954,6 +1955,7 @@ impl Value {
 			Kind::Point => self.convert_to_point().map(Value::from),
 			Kind::Bytes => self.convert_to_bytes().map(Value::from),
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
+			Kind::Regex => self.convert_to_regex().map(Value::from),
 			Kind::Range => self.convert_to_range().map(Value::from),
 			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
@@ -2263,6 +2265,29 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "uuid".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `Uuid`
+	pub(crate) fn convert_to_regex(self) -> Result<Regex, Error> {
+		match self {
+			// Uuids are allowed
+			Value::Regex(v) => Ok(v),
+			// Attempt to parse a string
+			Value::Strand(ref v) => match Regex::from_str(v) {
+				// The string can be parsed as a uuid
+				Ok(v) => Ok(v),
+				// This string is not a uuid
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "regex".into(),
+				}),
+			},
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "regex".into(),
 			}),
 		}
 	}
@@ -2793,11 +2818,27 @@ impl Value {
 	/// Check if all Values in an Array contain another Value
 	pub fn contains_all(&self, other: &Value) -> bool {
 		match other {
+			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+				// confirmed as strand so all return false is unreachable
+				let Value::Strand(this) = self else {
+					return false;
+				};
+				v.iter().all(|s| {
+					let Value::Strand(other_string) = s else {
+						return false;
+					};
+					this.0.contains(&other_string.0)
+				})
+			}
 			Value::Array(v) => v.iter().all(|v| match self {
 				Value::Array(w) => w.iter().any(|w| v.equal(w)),
 				Value::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
+			Value::Strand(other_strand) => match self {
+				Value::Strand(s) => s.0.contains(&other_strand.0),
+				_ => false,
+			},
 			_ => false,
 		}
 	}
@@ -2805,11 +2846,27 @@ impl Value {
 	/// Check if any Values in an Array contain another Value
 	pub fn contains_any(&self, other: &Value) -> bool {
 		match other {
+			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+				// confirmed as strand so all return false is unreachable
+				let Value::Strand(this) = self else {
+					return false;
+				};
+				v.iter().any(|s| {
+					let Value::Strand(other_string) = s else {
+						return false;
+					};
+					this.0.contains(&other_string.0)
+				})
+			}
 			Value::Array(v) => v.iter().any(|v| match self {
 				Value::Array(w) => w.iter().any(|w| v.equal(w)),
 				Value::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
+			Value::Strand(other_strand) => match self {
+				Value::Strand(s) => s.0.contains(&other_strand.0),
+				_ => false,
+			},
 			_ => false,
 		}
 	}
@@ -2944,59 +3001,44 @@ impl Value {
 			Value::Idiom(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
-			Value::Function(v) => {
-				v.is_custom() || v.is_script() || v.args().iter().any(Value::writeable)
-			}
+			Value::Function(v) => v.writeable(),
 			Value::Model(m) => m.args.iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.writeable(),
 			_ => false,
 		}
 	}
-	/// Process this type returning a computed simple Value
+	/// Process this type returning a computed simple Value.
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self.compute_unbordered(stk, ctx, opt, doc).await {
-			Err(Error::Return {
-				value,
-			}) => Ok(value),
-			res => res,
-		}
-	}
-	/// Process this type returning a computed simple Value, without catching errors
-	pub(crate) async fn compute_unbordered(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		// Prevent infinite recursion due to casting, expressions, etc.
 		let opt = &opt.dive(1)?;
 
-		match self {
-			Value::Cast(v) => v.compute(stk, ctx, opt, doc).await,
+		let res = match self {
+			Value::Cast(v) => return v.compute(stk, ctx, opt, doc).await,
 			Value::Thing(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Block(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Range(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Block(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Range(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Idiom(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Array(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Object(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Idiom(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Array(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Object(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Constant(v) => v.compute(),
-			Value::Function(v) => v.compute(stk, ctx, opt, doc).await,
-			Value::Model(v) => v.compute(stk, ctx, opt, doc).await,
-			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Function(v) => return v.compute(stk, ctx, opt, doc).await,
+			Value::Model(v) => return v.compute(stk, ctx, opt, doc).await,
+			Value::Subquery(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Expression(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Refs(v) => v.compute(ctx, opt, doc).await,
 			_ => Ok(self.to_owned()),
-		}
+		};
+
+		res.map_err(ControlFlow::from)
 	}
 }
 
@@ -3242,19 +3284,19 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		let enc: Vec<u8> = Value::None.into();
+		let enc: Vec<u8> = revision::to_vec(&Value::None).unwrap();
 		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = Value::Null.into();
+		let enc: Vec<u8> = revision::to_vec(&Value::Null).unwrap();
 		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = Value::Bool(true).into();
+		let enc: Vec<u8> = revision::to_vec(&Value::Bool(true)).unwrap();
 		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = Value::Bool(false).into();
+		let enc: Vec<u8> = revision::to_vec(&Value::Bool(false)).unwrap();
 		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = Value::from("test").into();
+		let enc: Vec<u8> = revision::to_vec(&Value::from("test")).unwrap();
 		assert_eq!(8, enc.len());
-		let enc: Vec<u8> = Value::parse("{ hello: 'world' }").into();
+		let enc: Vec<u8> = revision::to_vec(&Value::parse("{ hello: 'world' }")).unwrap();
 		assert_eq!(19, enc.len());
-		let enc: Vec<u8> = Value::parse("{ compact: true, schema: 0 }").into();
+		let enc: Vec<u8> = revision::to_vec(&Value::parse("{ compact: true, schema: 0 }")).unwrap();
 		assert_eq!(27, enc.len());
 	}
 
@@ -3266,8 +3308,8 @@ mod tests {
 		let res = Value::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
-		let enc: Vec<u8> = val.into();
-		let dec: Value = enc.into();
+		let enc: Vec<u8> = revision::to_vec(&val).unwrap();
+		let dec: Value = revision::from_slice(&enc).unwrap();
 		assert_eq!(res, dec);
 	}
 

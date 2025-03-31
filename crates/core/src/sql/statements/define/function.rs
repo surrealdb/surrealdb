@@ -6,13 +6,13 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, Value};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 #[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineFunctionStatement {
@@ -42,27 +42,28 @@ impl DefineFunctionStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_db_function(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+		let (ns, db) = opt.ns_db()?;
+		if txn.get_db_function(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::FcAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::fc::new(opt.ns()?, opt.db()?, &self.name);
-		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		let key = crate::key::database::fc::new(ns, db, &self.name);
+		txn.get_or_add_ns(ns, opt.strict).await?;
+		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
 			key,
-			DefineFunctionStatement {
+			revision::to_vec(&DefineFunctionStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
-			},
+			})?,
 			None,
 		)
 		.await?;

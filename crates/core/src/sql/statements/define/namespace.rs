@@ -5,13 +5,13 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Strand, Value};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineNamespaceStatement {
@@ -42,7 +42,7 @@ impl DefineNamespaceStatement {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::NsAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}
@@ -50,7 +50,7 @@ impl DefineNamespaceStatement {
 		let key = crate::key::root::ns::new(&self.name);
 		txn.set(
 			key,
-			DefineNamespaceStatement {
+			revision::to_vec(&DefineNamespaceStatement {
 				id: if self.id.is_none() {
 					Some(txn.lock().await.get_next_ns_id().await?)
 				} else {
@@ -60,7 +60,7 @@ impl DefineNamespaceStatement {
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
-			},
+			})?,
 			None,
 		)
 		.await?;

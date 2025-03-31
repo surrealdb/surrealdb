@@ -1,17 +1,17 @@
-use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::kvs::Live;
 use crate::sql::Value;
-use derive::Store;
+use crate::{ctx::Context, sql::FlowResultExt as _};
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct KillStatement {
@@ -34,7 +34,8 @@ impl KillStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Resolve live query id
-		let lid = match self.id.compute(stk, ctx, opt, None).await?.convert_to_uuid() {
+		let lid = match self.id.compute(stk, ctx, opt, None).await.catch_return()?.convert_to_uuid()
+		{
 			Err(_) => {
 				return Err(Error::KillStatement {
 					value: self.id.to_string(),
@@ -54,7 +55,7 @@ impl KillStatement {
 		match txn.get(key, None).await? {
 			Some(val) => {
 				// Decode the data for this live query
-				let val: Live = val.into();
+				let val: Live = revision::from_slice(&val)?;
 				// Delete the node live query
 				let key = crate::key::node::lq::new(nid, lid);
 				txn.clr(key).await?;

@@ -4,7 +4,7 @@ use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
-use crate::idx::planner::{IterationStage, RecordStrategy};
+use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
 use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
 use crate::sql::dir::Dir;
@@ -52,7 +52,7 @@ impl Iterable {
 
 	fn iteration_stage_check(&self, ctx: &Context) -> bool {
 		match self {
-			Iterable::Table(tb, _) | Iterable::Index(tb, _, _) => {
+			Iterable::Table(tb, _, _) | Iterable::Index(tb, _, _) => {
 				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage() {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(tb) {
@@ -129,7 +129,8 @@ impl Collected {
 		let val = if rid_only {
 			Arc::new(Value::Null)
 		} else {
-			txn.get_record(opt.ns()?, opt.db()?, gra.ft, &gra.fk, None).await?
+			let (ns, db) = opt.ns_db()?;
+			txn.get_record(ns, db, gra.ft, &gra.fk, None).await?
 		};
 		let rid = Thing::from((gra.ft, gra.fk));
 		// Parse the data from the store
@@ -189,9 +190,10 @@ impl Collected {
 			Operable::Value(Arc::new(Value::Null))
 		} else {
 			// Check that the table exists
-			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+			let (ns, db) = opt.ns_db()?;
+			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
 			// Fetch the data from the store
-			let val = txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, None).await?;
+			let val = txn.get_record(ns, db, &v.tb, &v.id, None).await?;
 			// Create a new operable value
 			Operable::Relate(f, val, w, o.map(|v| v.into()))
 		};
@@ -217,9 +219,10 @@ impl Collected {
 			Arc::new(Value::Null)
 		} else {
 			// Check that the table exists
-			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+			let (ns, db) = opt.ns_db()?;
+			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
 			// Fetch the data from the store
-			txn.get_record(opt.ns()?, opt.db()?, &v.tb, &v.id, opt.version).await?
+			txn.get_record(ns, db, &v.tb, &v.id, opt.version).await?
 		};
 		// Parse the data from the store
 		let val = Operable::Value(val);
@@ -244,7 +247,8 @@ impl Collected {
 		// if it is skippable we only need the record id
 		if !rid_only {
 			// Check that the table exists
-			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v, opt.strict).await?;
+			let (ns, db) = opt.ns_db()?;
+			txn.check_ns_db_tb(ns, db, &v, opt.strict).await?;
 		}
 		// Pass the value through
 		let pro = Processed {
@@ -277,7 +281,8 @@ impl Collected {
 		// if it is skippable we only need the record id
 		if !rid_only {
 			// Check that the table exists
-			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+			let (ns, db) = opt.ns_db()?;
+			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
 		}
 		// Process the document record
 		let pro = Processed {
@@ -300,7 +305,8 @@ impl Collected {
 		// if it is skippable we only need the record id
 		if !rid_only {
 			// Check that the table exists
-			txn.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
+			let (ns, db) = opt.ns_db()?;
+			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
 		}
 		// Process the document record
 		let pro = Processed {
@@ -316,7 +322,7 @@ impl Collected {
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
-		let val: Value = (&val).into();
+		let val: Value = revision::from_slice(&val)?;
 		let rid = Thing::from((key.tb, key.id));
 		// Create a new operable value
 		let val = Operable::Value(val.into());
@@ -467,17 +473,25 @@ pub(super) trait Collector {
 				Iterable::Thing(v) => self.collect(Collected::Thing(v)).await?,
 				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
 				Iterable::Edges(e) => self.collect_edges(ctx, opt, e).await?,
-				Iterable::Range(tb, v, rs) => match rs {
+				Iterable::Range(tb, v, rs, sc) => match rs {
 					RecordStrategy::Count => self.collect_range_count(ctx, opt, &tb, v).await?,
-					RecordStrategy::KeysOnly => self.collect_range_keys(ctx, opt, &tb, v).await?,
-					RecordStrategy::KeysAndValues => self.collect_range(ctx, opt, &tb, v).await?,
+					RecordStrategy::KeysOnly => {
+						self.collect_range_keys(ctx, opt, &tb, v, sc).await?
+					}
+					RecordStrategy::KeysAndValues => {
+						self.collect_range(ctx, opt, &tb, v, sc).await?
+					}
 				},
-				Iterable::Table(v, rs) => {
+				Iterable::Table(v, rs, sc) => {
 					let ctx = Self::check_query_planner_context(ctx, &v);
 					match rs {
 						RecordStrategy::Count => self.collect_table_count(&ctx, opt, &v).await?,
-						RecordStrategy::KeysOnly => self.collect_table_keys(&ctx, opt, &v).await?,
-						RecordStrategy::KeysAndValues => self.collect_table(&ctx, opt, &v).await?,
+						RecordStrategy::KeysOnly => {
+							self.collect_table_keys(&ctx, opt, &v, sc).await?
+						}
+						RecordStrategy::KeysAndValues => {
+							self.collect_table(&ctx, opt, &v, sc).await?
+						}
 					}
 				}
 				Iterable::Index(v, irf, rs) => {
@@ -513,6 +527,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		txn: &Transaction,
 		mut rng: Range<Key>,
+		sc: ScanDirection,
 	) -> Result<Option<Range<Key>>, Error> {
 		let ite = self.iterator();
 		let skippable = ite.skippable();
@@ -521,7 +536,7 @@ pub(super) trait Collector {
 			return Ok(Some(rng));
 		}
 		// We only need to iterate over keys.
-		let mut stream = txn.stream_keys(rng.clone(), Some(skippable));
+		let mut stream = txn.stream_keys(rng.clone(), Some(skippable), sc);
 		let mut skipped = 0;
 		let mut last_key = vec![];
 		while let Some(res) = stream.next().await {
@@ -531,15 +546,23 @@ pub(super) trait Collector {
 			last_key = res?;
 			skipped += 1;
 		}
-		// Update the iterator about the number of skipped keys
-		ite.skipped(skipped);
-		// If we don't have a last key we're done
+		// If we don't have a last key, we're done
 		if last_key.is_empty() {
 			return Ok(None);
 		}
+		// Update the iterator about the number of skipped keys
+		ite.skipped(skipped);
 		// We set the range for the next iteration
-		last_key.push(0xFF);
-		rng.start = last_key;
+		match sc {
+			ScanDirection::Forward => {
+				last_key.push(0xFF);
+				rng.start = last_key;
+			}
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			ScanDirection::Backward => {
+				rng.end = last_key;
+			}
+		}
 		Ok(Some(rng))
 	}
 
@@ -548,22 +571,24 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		v: &Table,
+		sc: ScanDirection,
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
+		let (ns, db) = opt.ns_db()?;
+		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
-		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
+		let beg = thing::prefix(ns, db, v)?;
+		let end = thing::suffix(ns, db, v)?;
 		// Optionally skip keys
-		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end).await? {
+		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			r
 		} else {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream(rng, opt.version, None);
+		let mut stream = txn.stream(rng, opt.version, None, sc);
 
 		// Loop until no more entries
 		let mut count = 0;
@@ -586,16 +611,18 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		v: &Table,
+		sc: ScanDirection,
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
+		let (ns, db) = opt.ns_db()?;
+		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
-		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
+		let beg = thing::prefix(ns, db, v)?;
+		let end = thing::suffix(ns, db, v)?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -603,7 +630,7 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(rng, None);
+		let mut stream = txn.stream_keys(rng, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
@@ -630,10 +657,11 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, v, opt.strict).await?;
+		let (ns, db) = opt.ns_db()?;
+		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns()?, opt.db()?, v)?;
-		let end = thing::suffix(opt.ns()?, opt.db()?, v)?;
+		let beg = thing::prefix(ns, db, v)?;
+		let end = thing::suffix(ns, db, v)?;
 		// Create a new iterable range
 		let count = txn.count(beg..end).await?;
 		// Collect the count
@@ -649,23 +677,24 @@ pub(super) trait Collector {
 		r: IdRange,
 	) -> Result<(Vec<u8>, Vec<u8>), Error> {
 		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, tb, opt.strict).await?;
+		let (ns, db) = opt.ns_db()?;
+		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
 		// Prepare the range start key
 		let beg = match &r.beg {
-			Bound::Unbounded => thing::prefix(opt.ns()?, opt.db()?, tb)?,
-			Bound::Included(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode()?,
+			Bound::Unbounded => thing::prefix(ns, db, tb)?,
+			Bound::Included(v) => thing::new(ns, db, tb, v).encode()?,
 			Bound::Excluded(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode()?;
+				let mut key = thing::new(ns, db, tb, v).encode()?;
 				key.push(0x00);
 				key
 			}
 		};
 		// Prepare the range end key
 		let end = match &r.end {
-			Bound::Unbounded => thing::suffix(opt.ns()?, opt.db()?, tb)?,
-			Bound::Excluded(v) => thing::new(opt.ns()?, opt.db()?, tb, v).encode()?,
+			Bound::Unbounded => thing::suffix(ns, db, tb)?,
+			Bound::Excluded(v) => thing::new(ns, db, tb, v).encode()?,
 			Bound::Included(v) => {
-				let mut key = thing::new(opt.ns()?, opt.db()?, tb, v).encode()?;
+				let mut key = thing::new(ns, db, tb, v).encode()?;
 				key.push(0x00);
 				key
 			}
@@ -679,13 +708,14 @@ pub(super) trait Collector {
 		opt: &Options,
 		tb: &str,
 		r: IdRange,
+		sc: ScanDirection,
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
 		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -693,7 +723,7 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream(rng, None, None);
+		let mut stream = txn.stream(rng, None, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
@@ -717,13 +747,14 @@ pub(super) trait Collector {
 		opt: &Options,
 		tb: &str,
 		r: IdRange,
+		sc: ScanDirection,
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
 		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -731,7 +762,7 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(rng, None);
+		let mut stream = txn.stream_keys(rng, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
@@ -769,8 +800,7 @@ pub(super) trait Collector {
 
 	async fn collect_edges(&mut self, ctx: &Context, opt: &Options, e: Edges) -> Result<(), Error> {
 		// Pull out options
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 		let tb = &e.from.tb;
 		let id = &e.from.id;
 		// Fetch start and end key pairs
@@ -839,11 +869,11 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_ns_db_tb(opt.ns()?, opt.db()?, tb, opt.strict).await?;
+		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
-			let mut stream = txn.stream(beg?..end?, None, None);
+			let mut stream = txn.stream(beg?..end?, None, None, ScanDirection::Forward);
 			// Loop until no more entries
 			let mut count = 0;
 			while let Some(res) = stream.next().await {
@@ -871,7 +901,8 @@ pub(super) trait Collector {
 		rs: RecordStrategy,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		ctx.tx().check_ns_db_tb(opt.ns()?, opt.db()?, &table.0, opt.strict).await?;
+		let (ns, db) = opt.ns_db()?;
+		ctx.tx().check_ns_db_tb(ns, db, &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(iterator) = exe.new_iterator(opt, irf).await? {
 				let txn = ctx.tx();
@@ -969,7 +1000,8 @@ impl Iterable {
 		thg: &Thing,
 	) -> Result<Arc<Value>, Error> {
 		// Fetch and parse the data from the store
-		let val = txn.get_record(opt.ns()?, opt.db()?, &thg.tb, &thg.id, None).await?;
+		let (ns, db) = opt.ns_db()?;
+		let val = txn.get_record(ns, db, &thg.tb, &thg.id, None).await?;
 		// Return the result
 		Ok(val)
 	}

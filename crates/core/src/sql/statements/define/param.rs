@@ -5,15 +5,15 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Permission, Strand, Value};
-use derive::Store;
+use crate::sql::{Base, FlowResultExt as _, Ident, Permission, Strand, Value};
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 #[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineParamStatement {
@@ -38,32 +38,36 @@ impl DefineParamStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
+
+		let value = self.value.compute(stk, ctx, opt, doc).await.catch_return()?;
+
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_db_param(opt.ns()?, opt.db()?, &self.name).await.is_ok() {
+		let (ns, db) = opt.ns_db()?;
+		if txn.get_db_param(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::PaAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::pa::new(opt.ns()?, opt.db()?, &self.name);
-		txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-		txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
+		let key = crate::key::database::pa::new(ns, db, &self.name);
+		txn.get_or_add_ns(ns, opt.strict).await?;
+		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
 			key,
-			DefineParamStatement {
+			revision::to_vec(&DefineParamStatement {
 				// Compute the param
-				value: self.value.compute(stk, ctx, opt, doc).await?,
+				value,
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
-			},
+			})?,
 			None,
 		)
 		.await?;

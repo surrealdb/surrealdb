@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
-use super::Kind;
+use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
@@ -92,6 +92,15 @@ impl Function {
 			Self::Script(_, _) => "function".to_string().into(),
 			Self::Normal(f, _) => f.to_owned().into(),
 			Self::Custom(f, _) => format!("fn::{f}").into(),
+		}
+	}
+	/// Checks if this function invocation is writable
+	pub fn writeable(&self) -> bool {
+		match self {
+			Self::Custom(_, _) => true,
+			Self::Script(_, _) => true,
+			Self::Normal(f, _) if f == "api::invoke" => true,
+			_ => self.args().iter().any(Value::writeable),
 		}
 	}
 	/// Convert this function to an aggregate
@@ -212,7 +221,7 @@ impl Function {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
 		// Process the function type
@@ -229,7 +238,7 @@ impl Function {
 					})
 					.await?;
 				// Run the normal function
-				fnc::run(stk, ctx, opt, doc, s, a).await
+				Ok(fnc::run(stk, ctx, opt, doc, s, a).await?)
 			}
 			Self::Anonymous(v, x, args_computed) => {
 				let val = match v {
@@ -257,12 +266,12 @@ impl Function {
 								}
 							};
 
-						stk.run(|stk| closure.compute(stk, ctx, opt, doc, a)).await
+						Ok(stk.run(|stk| closure.compute(stk, ctx, opt, doc, a)).await?)
 					}
-					v => Err(Error::InvalidFunction {
+					v => Err(ControlFlow::from(Error::InvalidFunction {
 						name: "ANONYMOUS".to_string(),
 						message: format!("'{}' is not a function", v.kindof()),
-					}),
+					})),
 				}
 			}
 			Self::Custom(s, x) => {
@@ -271,24 +280,25 @@ impl Function {
 				// Check this function is allowed
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
-				let val = ctx.tx().get_db_function(opt.ns()?, opt.db()?, s).await?;
+				let (ns, db) = opt.ns_db()?;
+				let val = ctx.tx().get_db_function(ns, db, s).await?;
 				// Check permissions
 				if opt.check_perms(Action::View)? {
 					match &val.permissions {
 						Permission::Full => (),
 						Permission::None => {
-							return Err(Error::FunctionPermissions {
+							return Err(ControlFlow::from(Error::FunctionPermissions {
 								name: s.to_owned(),
-							})
+							}))
 						}
 						Permission::Specific(e) => {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);
 							// Process the PERMISSION clause
 							if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
-								return Err(Error::FunctionPermissions {
+								return Err(ControlFlow::from(Error::FunctionPermissions {
 									name: s.to_owned(),
-								});
+								}));
 							}
 						}
 					}
@@ -305,14 +315,14 @@ impl Function {
 				});
 				// Check the necessary arguments are passed
 				if x.len() < min_args_len || max_args_len < x.len() {
-					return Err(Error::InvalidArguments {
+					return Err(ControlFlow::from(Error::InvalidArguments {
 						name: format!("fn::{}", val.name),
 						message: match (min_args_len, max_args_len) {
 							(1, 1) => String::from("The function expects 1 argument."),
 							(r, t) if r == t => format!("The function expects {r} arguments."),
 							(r, t) => format!("The function expects {r} to {t} arguments."),
 						},
-					});
+					}));
 				}
 				// Compute the function arguments
 				let a = stk
@@ -330,17 +340,14 @@ impl Function {
 				}
 				let ctx = ctx.freeze();
 				// Run the custom function
-				let result = match stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await {
-					Err(Error::Return {
-						value,
-					}) => Ok(value),
-					res => res,
-				}?;
+				let result =
+					stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await.catch_return()?;
 
 				if let Some(ref returns) = val.returns {
 					result
 						.coerce_to(returns)
 						.map_err(|e| e.function_check_from_coerce(val.name.to_string()))
+						.map_err(ControlFlow::from)
 				} else {
 					Ok(result)
 				}
@@ -360,13 +367,13 @@ impl Function {
 						})
 						.await?;
 					// Run the script function
-					fnc::script::run(ctx, opt, doc, s, a).await
+					Ok(fnc::script::run(ctx, opt, doc, s, a).await?)
 				}
 				#[cfg(not(feature = "scripting"))]
 				{
-					Err(Error::InvalidScript {
+					Err(ControlFlow::Err(Box::new(Error::InvalidScript {
 						message: String::from("Embedded functions are not enabled."),
-					})
+					})))
 				}
 			}
 		}

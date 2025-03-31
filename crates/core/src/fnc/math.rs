@@ -16,7 +16,10 @@ use crate::sql::number::{Number, Sort};
 use crate::sql::value::{TryPow, Value};
 
 pub fn abs((arg,): (Number,)) -> Result<Value, Error> {
-	Ok(arg.abs().into())
+	let Some(x) = arg.checked_abs() else {
+		return Err(Error::ArithmeticOverflow(format!("math::abs({arg})")));
+	};
+	Ok(x.into())
 }
 
 pub fn acos((arg,): (Number,)) -> Result<Value, Error> {
@@ -51,6 +54,12 @@ pub fn ceil((arg,): (Number,)) -> Result<Value, Error> {
 }
 
 pub fn clamp((arg, min, max): (Number, Number, Number)) -> Result<Value, Error> {
+	if min > max {
+		return Err(Error::InvalidArguments {
+			name: "math::clamp".to_string(),
+			message: "Lowerbound for clamp must be smaller the the upperbound".to_string(),
+		});
+	}
 	Ok(arg.clamp(min, max).into())
 }
 

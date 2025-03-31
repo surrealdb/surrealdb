@@ -11,14 +11,13 @@ use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
-use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::{Action, Notification};
-use channel::{Receiver, Sender};
+use async_channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
 use futures::SinkExt;
@@ -33,8 +32,6 @@ use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
-use std::sync::OnceLock;
 use std::time::Duration;
 use surrealdb_core::sql::Value as CoreValue;
 use tokio::sync::watch;
@@ -61,11 +58,12 @@ impl Connection for Client {
 			address.url = address.url.join(PATH)?;
 
 			let (route_tx, route_rx) = match capacity {
-				0 => channel::unbounded(),
-				capacity => channel::bounded(capacity),
+				0 => async_channel::unbounded(),
+				capacity => async_channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = channel::bounded(1);
+			let (conn_tx, conn_rx) = async_channel::bounded(1);
+			let config = address.config.clone();
 
 			spawn_local(run_router(address, capacity, conn_tx, route_rx));
 
@@ -74,14 +72,15 @@ impl Connection for Client {
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
 
-			Ok(Surreal::new_from_router_waiter(
-				Arc::new(OnceLock::with_value(Router {
-					features,
-					sender: route_tx,
-					last_id: AtomicI64::new(0),
-				})),
-				Arc::new(watch::channel(Some(WaitFor::Connection))),
-			))
+			let waiter = watch::channel(Some(WaitFor::Connection));
+			let router = Router {
+				features,
+				config,
+				sender: route_tx,
+				last_id: AtomicI64::new(0),
+			};
+
+			Ok((router, waiter).into())
 		})
 	}
 }
@@ -92,7 +91,7 @@ async fn router_handle_request(
 		response,
 	}: Route,
 	state: &mut RouterState,
-	_endpoint: &Endpoint,
+	endpoint: &Endpoint,
 ) -> HandleResult {
 	let RequestData {
 		id,
@@ -183,7 +182,11 @@ async fn router_handle_request(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", req);
-		let payload = serialize(&req.stringify_queries(), true).unwrap();
+		let payload = if endpoint.config.ast_payload {
+			serialize(&req, true).unwrap()
+		} else {
+			serialize(&req.stringify_queries(), true).unwrap()
+		};
 		Message::Binary(payload)
 	};
 

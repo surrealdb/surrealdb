@@ -5,6 +5,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::iam::Action;
+use crate::kvs::KeyEncode as _;
 use crate::sql::data::Data;
 use crate::sql::idiom::Idiom;
 use crate::sql::kind::Kind;
@@ -12,8 +13,9 @@ use crate::sql::permission::Permission;
 use crate::sql::reference::Refs;
 use crate::sql::statements::DefineFieldStatement;
 use crate::sql::thing::Thing;
+use crate::sql::value::every::ArrayBehaviour;
 use crate::sql::value::Value;
-use crate::sql::Part;
+use crate::sql::{FlowResultExt as _, Part};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -57,10 +59,7 @@ impl Document {
 				if !keys.contains(fd) {
 					match fd {
 						// Built-in fields
-						fd if fd.is_id() => continue,
-						fd if fd.is_in() => continue,
-						fd if fd.is_out() => continue,
-						fd if fd.is_meta() => continue,
+						fd if fd.is_special() => continue,
 						// Custom fields
 						fd => match opt.strict {
 							// If strict, then throw an error on an undefined field
@@ -75,18 +74,14 @@ impl Document {
 						},
 					}
 				}
-				// NONE values should never be stored
-				if self.current.doc.pick(fd).is_none() {
-					self.current.doc.to_mut().cut(fd);
-				}
 			}
-		} else {
-			// Loop over every field in the document
-			for fd in self.current.doc.every(None, true, true).iter() {
-				// NONE values should never be stored
-				if self.current.doc.pick(fd).is_none() {
-					self.current.doc.to_mut().cut(fd);
-				}
+		}
+
+		// Loop over every field in the document
+		for fd in self.current.doc.every(None, true, ArrayBehaviour::Nested).iter() {
+			// NONE values should never be stored
+			if self.current.doc.pick(fd).is_none() {
+				self.current.doc.to_mut().cut(fd);
 			}
 		}
 		// Carry on
@@ -132,6 +127,7 @@ impl Document {
 				}
 				None => false,
 			};
+
 			// Loop over each field in document
 			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
 				// Get the initial value
@@ -240,10 +236,7 @@ impl Document {
 						skip = Some(&fd.name);
 					}
 					// Set the new value of the field, or delete it if empty
-					match val.is_none() {
-						false => self.current.doc.to_mut().put(&k, val),
-						true => self.current.doc.to_mut().cut(&k),
-					};
+					self.current.doc.to_mut().put(&k, val);
 				}
 			}
 		}
@@ -438,7 +431,7 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val = expr.compute(self.stk, &ctx, self.opt, doc).await?;
+			let val = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Return the modified value
@@ -474,7 +467,7 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val = expr.compute(self.stk, &ctx, self.opt, doc).await?;
+			let val = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Return the modified value
@@ -516,7 +509,7 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the ASSERT clause
-			let res = expr.compute(self.stk, &ctx, self.opt, doc).await?;
+			let res = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Check the ASSERT clause result
@@ -586,7 +579,7 @@ impl FieldEditContext<'_> {
 					// Freeze the new context
 					let ctx = ctx.freeze();
 					// Process the PERMISSION clause
-					let res = expr.compute(self.stk, &ctx, opt, doc).await?;
+					let res = expr.compute(self.stk, &ctx, opt, doc).await.catch_return()?;
 					// Unfreeze the new context
 					self.context = Some(MutableContext::unfreeze(ctx)?);
 					// If the specific permissions
@@ -631,7 +624,8 @@ impl FieldEditContext<'_> {
 					.current
 					.doc
 					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
-					.await?;
+					.await
+					.catch_return()?;
 				// If the reference is contained in an array, we only delete it from the array
 				// if there is no other reference to the same record id in the array
 				if let Value::Array(arr) = others {
@@ -691,16 +685,17 @@ impl FieldEditContext<'_> {
 				RefAction::Ignore => Ok(()),
 				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
+					let (ns, db) = self.opt.ns_db()?;
 					let key = crate::key::r#ref::new(
-						self.opt.ns()?,
-						self.opt.db()?,
+						ns,
+						db,
 						&thing.tb,
 						&thing.id,
 						&self.rid.tb,
 						&self.def.name.to_string(),
 						&self.rid.id,
 					)
-					.encode()
+					.encode_owned()
 					.unwrap();
 
 					self.ctx.tx().set(key, vec![], None).await?;
@@ -709,17 +704,18 @@ impl FieldEditContext<'_> {
 				}
 				// Delete the reference, if it exists
 				RefAction::Delete(things, ff) => {
+					let (ns, db) = self.opt.ns_db()?;
 					for thing in things {
 						let key = crate::key::r#ref::new(
-							self.opt.ns()?,
-							self.opt.db()?,
+							ns,
+							db,
 							&thing.tb,
 							&thing.id,
 							&self.rid.tb,
 							&ff,
 							&self.rid.id,
 						)
-						.encode()
+						.encode_owned()
 						.unwrap();
 
 						self.ctx.tx().del(key).await?;

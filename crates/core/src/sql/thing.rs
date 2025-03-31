@@ -4,10 +4,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
-use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
+use crate::kvs::KeyDecode as _;
+use crate::sql::{escape::EscapeRid, id::Id, Strand, Value};
 use crate::syn;
-use derive::Store;
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -20,7 +21,7 @@ const ID: &str = "id";
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Thing")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -140,8 +141,7 @@ impl Thing {
 		ft: Option<&Table>,
 		ff: Option<&Idiom>,
 	) -> Result<Vec<Thing>, Error> {
-		let ns = opt.ns()?;
-		let db = opt.db()?;
+		let (ns, db) = opt.ns_db()?;
 
 		let (prefix, suffix) = match (ft, ff) {
 			(Some(ft), Some(ff)) => {
@@ -169,25 +169,17 @@ impl Thing {
 
 		let range = prefix?..suffix?;
 		let txn = ctx.tx();
-		let mut stream = txn.stream_keys(range, None);
+		let mut stream = txn.stream_keys(range, None, ScanDirection::Forward);
 
-		// Collect the keys from the stream into a vec
-		let mut keys: Vec<Vec<u8>> = vec![];
+		let mut ids = Vec::new();
 		while let Some(res) = stream.next().await {
-			keys.push(res?);
-		}
-
-		let ids = keys
-			.iter()
-			.map(|x| {
-				let key = Ref::from(x);
-
-				Thing {
-					tb: key.ft.to_string(),
-					id: key.fk,
-				}
+			let x = res?;
+			let key = Ref::decode(&x)?;
+			ids.push(Thing {
+				tb: key.ft.to_string(),
+				id: key.fk,
 			})
-			.collect();
+		}
 
 		Ok(ids)
 	}
@@ -289,7 +281,7 @@ impl Thing {
 
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", escape_rid(&self.tb), self.id)
+		write!(f, "{}:{}", EscapeRid(&self.tb), self.id)
 	}
 }
 

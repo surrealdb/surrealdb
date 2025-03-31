@@ -5,13 +5,13 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{filter::Filter, tokenizer::Tokenizer, Array, Base, Ident, Strand, Value};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineAnalyzerStatement {
@@ -38,14 +38,14 @@ impl DefineAnalyzerStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let (ns, db) = (opt.ns()?, opt.db()?);
+		let (ns, db) = opt.ns_db()?;
 		// Check if the definition exists
 		if txn.get_db_analyzer(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
 				return Err(Error::AzAlreadyExists {
-					value: self.name.to_string(),
+					name: self.name.to_string(),
 				});
 			}
 		}
@@ -60,7 +60,7 @@ impl DefineAnalyzerStatement {
 			..self.clone()
 		};
 		ctx.get_index_stores().mappers().load(&az).await?;
-		txn.set(key, az, None).await?;
+		txn.set(key, revision::to_vec(&az)?, None).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

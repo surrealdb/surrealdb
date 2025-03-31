@@ -11,7 +11,7 @@ use crate::sql::paths::META;
 use crate::sql::paths::RD;
 use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
-use crate::sql::Value;
+use crate::sql::{FlowResultExt as _, Value};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -135,8 +135,12 @@ impl Document {
 					// Ensure futures are run
 					let lqopt: &Options = &lqopt.new_with_futures(true);
 					// Output the full document before any changes were applied
-					let mut result =
-						doc.doc.as_ref().compute(stk, &lqctx, lqopt, Some(doc)).await?;
+					let mut result = doc
+						.doc
+						.as_ref()
+						.compute(stk, &lqctx, lqopt, Some(doc))
+						.await
+						.catch_return()?;
 					// Remove metadata fields on output
 					result.del(stk, &lqctx, lqopt, &*META).await?;
 					(Action::Delete, result)
@@ -168,10 +172,10 @@ impl Document {
 			if let Some(fetchs) = &lv.fetch {
 				let mut idioms = Vec::with_capacity(fetchs.0.len());
 				for fetch in fetchs.iter() {
-					fetch.compute(stk, ctx, opt, &mut idioms).await?;
+					fetch.compute(stk, &lqctx, &lqopt, &mut idioms).await?;
 				}
 				for i in &idioms {
-					stk.run(|stk| result.fetch(stk, ctx, opt, i)).await?;
+					stk.run(|stk| result.fetch(stk, &lqctx, &lqopt, i)).await?;
 				}
 			}
 
@@ -206,7 +210,7 @@ impl Document {
 		// Check where condition
 		if let Some(cond) = stm.cond() {
 			// Check if the expression is truthy
-			if !cond.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
+			if !cond.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
 				// Ignore this document
 				return Err(Error::Ignore);
 			}
@@ -235,7 +239,7 @@ impl Document {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
+					if !e.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
 						return Err(Error::Ignore);
 					}
 				}

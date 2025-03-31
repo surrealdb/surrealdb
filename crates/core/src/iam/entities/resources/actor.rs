@@ -61,6 +61,11 @@ impl Actor {
 		self.roles.contains(&role)
 	}
 
+	/// Checks if the actor has the Owner role.
+	pub fn has_owner_role(&self) -> bool {
+		self.roles.iter().any(|r| r.eq(&Role::Owner))
+	}
+
 	/// Checks if the actor has the Editor role.
 	pub fn has_editor_role(&self) -> bool {
 		self.roles.iter().any(|r| r.eq(&Role::Owner) || r.eq(&Role::Editor))

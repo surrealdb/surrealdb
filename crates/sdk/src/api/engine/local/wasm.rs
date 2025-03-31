@@ -5,7 +5,6 @@ use crate::api::engine::local::Db;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
-use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
@@ -16,7 +15,7 @@ use crate::opt::auth::Root;
 use crate::opt::WaitFor;
 use crate::options::EngineOptions;
 use crate::{Action, Notification};
-use channel::{Receiver, Sender};
+use async_channel::{Receiver, Sender};
 use futures::stream::poll_fn;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -25,7 +24,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
-use std::sync::OnceLock;
 use std::task::Poll;
 use tokio::sync::watch;
 use tokio::sync::RwLock;
@@ -38,11 +36,12 @@ impl Connection for Db {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
-				0 => channel::unbounded(),
-				capacity => channel::bounded(capacity),
+				0 => async_channel::unbounded(),
+				capacity => async_channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = channel::bounded(1);
+			let (conn_tx, conn_rx) = async_channel::bounded(1);
+			let config = address.config.clone();
 
 			spawn_local(run_router(address, conn_tx, route_rx));
 
@@ -51,14 +50,15 @@ impl Connection for Db {
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
 
-			Ok(Surreal::new_from_router_waiter(
-				Arc::new(OnceLock::with_value(Router {
-					features,
-					sender: route_tx,
-					last_id: AtomicI64::new(0),
-				})),
-				Arc::new(watch::channel(Some(WaitFor::Connection))),
-			))
+			let waiter = watch::channel(Some(WaitFor::Connection));
+			let router = Router {
+				features,
+				config,
+				sender: route_tx,
+				last_id: AtomicI64::new(0),
+			};
+
+			Ok((router, waiter).into())
 		})
 	}
 }

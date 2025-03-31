@@ -103,6 +103,7 @@ async fn select_start_limit_fetch() -> Result<(), Error> {
 		"[
 				{
 					detail: {
+                        direction: 'forward',
 						table: 'person'
 					},
 					operation: 'Iterate Table'
@@ -121,7 +122,7 @@ async fn select_start_limit_fetch() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						CancelOnLimit: 2,
+						CancelOnLimit: 1,
 						SkipStart: 1
 					},
 					operation: 'StartLimitStrategy'

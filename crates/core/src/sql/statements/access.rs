@@ -5,9 +5,9 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::access_type::BearerAccessSubject;
 use crate::sql::{
-	AccessType, Array, Base, Cond, Datetime, Duration, Ident, Object, Strand, Thing, Uuid, Value,
+	AccessType, Array, Base, Cond, Datetime, Duration, FlowResultExt as _, Ident, Object, Strand,
+	Thing, Uuid, Value,
 };
-use derive::Store;
 use md5::Digest;
 use rand::Rng;
 use reblessive::tree::Stk;
@@ -29,7 +29,7 @@ pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum AccessStatement {
@@ -40,7 +40,7 @@ pub enum AccessStatement {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementGrant {
@@ -50,7 +50,7 @@ pub struct AccessStatementGrant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementShow {
@@ -61,7 +61,7 @@ pub struct AccessStatementShow {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementRevoke {
@@ -72,7 +72,7 @@ pub struct AccessStatementRevoke {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementPurge {
@@ -84,7 +84,7 @@ pub struct AccessStatementPurge {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessGrant {
@@ -185,7 +185,7 @@ impl From<AccessGrant> for Object {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Subject {
@@ -204,7 +204,7 @@ impl Subject {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Grant {
@@ -225,7 +225,7 @@ impl Grant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantJwt {
@@ -234,7 +234,7 @@ pub struct GrantJwt {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantRecord {
@@ -244,7 +244,7 @@ pub struct GrantRecord {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantBearer {
@@ -318,7 +318,10 @@ pub async fn create_grant(
 	let ac = match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
 		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac).await?,
-		Base::Db => txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?,
+		Base::Db => {
+			let (ns, db) = opt.ns_db()?;
+			txn.get_db_access(ns, db, &stmt.ac).await?
+		}
 		_ => {
 			return Err(Error::Unimplemented(
 				"Managing access methods outside of root, namespace and database levels"
@@ -374,11 +377,11 @@ pub async fn create_grant(
 					// Create a hashed version of the grant for storage.
 					let mut gr_store = gr.clone();
 					gr_store.grant = Grant::Bearer(grant.hashed());
-					let key =
-						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &gr.ac, &gr.id);
-					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.put(key, &gr_store, None).await
+					let (ns, db) = opt.ns_db()?;
+					let key = crate::key::database::access::gr::new(ns, db, &gr.ac, &gr.id);
+					txn.get_or_add_ns(ns, opt.strict).await?;
+					txn.get_or_add_db(ns, db, opt.strict).await?;
+					txn.put(key, revision::to_vec(&gr_store)?, None).await
 				}
 				_ => return Err(Error::AccessLevelMismatch),
 			};
@@ -414,7 +417,10 @@ pub async fn create_grant(
 					match base {
 						Base::Root => txn.get_root_user(user).await?,
 						Base::Ns => txn.get_ns_user(opt.ns()?, user).await?,
-						Base::Db => txn.get_db_user(opt.ns()?, opt.db()?, user).await?,
+						Base::Db => {
+							let (ns, db) = opt.ns_db()?;
+							txn.get_db_user(ns, db, user).await?
+						},
 						_ => return Err(Error::Unimplemented(
 							"Managing access methods outside of root, namespace and database levels".to_string(),
 						)),
@@ -456,30 +462,29 @@ pub async fn create_grant(
 			// Create a hashed version of the grant for storage.
 			let mut gr_store = gr.clone();
 			gr_store.grant = Grant::Bearer(grant.hashed());
-			let res = match base {
-				Base::Root => {
-					let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
-					txn.put(key, &gr_store, None).await
-				}
-				Base::Ns => {
-					let key = crate::key::namespace::access::gr::new(opt.ns()?, &gr.ac, &gr.id);
-					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.put(key, &gr_store, None).await
-				}
-				Base::Db => {
-					let key =
-						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &gr.ac, &gr.id);
-					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.put(key, &gr_store, None).await
-				}
-				_ => {
-					return Err(Error::Unimplemented(
+			let res =
+				match base {
+					Base::Root => {
+						let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
+						txn.put(key, revision::to_vec(&gr_store)?, None).await
+					}
+					Base::Ns => {
+						let key = crate::key::namespace::access::gr::new(opt.ns()?, &gr.ac, &gr.id);
+						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+						txn.put(key, revision::to_vec(&gr_store)?, None).await
+					}
+					Base::Db => {
+						let (ns, db) = opt.ns_db()?;
+						let key = crate::key::database::access::gr::new(ns, db, &gr.ac, &gr.id);
+						txn.get_or_add_ns(ns, opt.strict).await?;
+						txn.get_or_add_db(ns, db, opt.strict).await?;
+						txn.put(key, revision::to_vec(&gr_store)?, None).await
+					}
+					_ => return Err(Error::Unimplemented(
 						"Managing access methods outside of root, namespace and database levels"
 							.to_string(),
-					))
-				}
-			};
+					)),
+				};
 
 			// Check if a collision was found in order to log a specific error on the server.
 			// For an access method with a billion grants, this chance is of only one in 295 billion.
@@ -535,7 +540,10 @@ async fn compute_show(
 	match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
 		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac).await?,
-		Base::Db => txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?,
+		Base::Db => {
+			let (ns, db) = opt.ns_db()?;
+			txn.get_db_access(ns, db, &stmt.ac).await?
+		}
 		_ => {
 			return Err(Error::Unimplemented(
 				"Managing access methods outside of root, namespace and database levels"
@@ -547,19 +555,19 @@ async fn compute_show(
 	// Get the grants to show.
 	match &stmt.gr {
 		Some(gr) => {
-			let grant = match base {
-				Base::Root => (*txn.get_root_access_grant(&stmt.ac, gr).await?).clone(),
-				Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, gr).await?).clone(),
-				Base::Db => {
-					(*txn.get_db_access_grant(opt.ns()?, opt.db()?, &stmt.ac, gr).await?).clone()
-				}
-				_ => {
-					return Err(Error::Unimplemented(
+			let grant =
+				match base {
+					Base::Root => (*txn.get_root_access_grant(&stmt.ac, gr).await?).clone(),
+					Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, gr).await?).clone(),
+					Base::Db => {
+						let (ns, db) = opt.ns_db()?;
+						(*txn.get_db_access_grant(ns, db, &stmt.ac, gr).await?).clone()
+					}
+					_ => return Err(Error::Unimplemented(
 						"Managing access methods outside of root, namespace and database levels"
 							.to_string(),
-					))
-				}
-			};
+					)),
+				};
 
 			Ok(Value::Object(grant.redacted().into()))
 		}
@@ -569,7 +577,10 @@ async fn compute_show(
 				match base {
 					Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
 					Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
-					Base::Db => txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?,
+					Base::Db => {
+						let (ns, db) = opt.ns_db()?;
+						txn.all_db_access_grants(ns, db, &stmt.ac).await?
+					}
 					_ => return Err(Error::Unimplemented(
 						"Managing access methods outside of root, namespace and database levels"
 							.to_string(),
@@ -593,7 +604,8 @@ async fn compute_show(
 								doc: redacted_gr.into(),
 							}),
 						)
-						.await?
+						.await
+						.catch_return()?
 						.is_truthy()
 					{
 						// Skip grant if it does not match the provided conditions.
@@ -630,7 +642,10 @@ pub async fn revoke_grant(
 	match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
 		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac).await?,
-		Base::Db => txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?,
+		Base::Db => {
+			let (ns, db) = opt.ns_db()?;
+			txn.get_db_access(ns, db, &stmt.ac).await?
+		}
 		_ => {
 			return Err(Error::Unimplemented(
 				"Managing access methods outside of root, namespace and database levels"
@@ -643,19 +658,19 @@ pub async fn revoke_grant(
 	let mut revoked = Vec::new();
 	match &stmt.gr {
 		Some(gr) => {
-			let mut revoke = match base {
-				Base::Root => (*txn.get_root_access_grant(&stmt.ac, gr).await?).clone(),
-				Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, gr).await?).clone(),
-				Base::Db => {
-					(*txn.get_db_access_grant(opt.ns()?, opt.db()?, &stmt.ac, gr).await?).clone()
-				}
-				_ => {
-					return Err(Error::Unimplemented(
+			let mut revoke =
+				match base {
+					Base::Root => (*txn.get_root_access_grant(&stmt.ac, gr).await?).clone(),
+					Base::Ns => (*txn.get_ns_access_grant(opt.ns()?, &stmt.ac, gr).await?).clone(),
+					Base::Db => {
+						let (ns, db) = opt.ns_db()?;
+						(*txn.get_db_access_grant(ns, db, &stmt.ac, gr).await?).clone()
+					}
+					_ => return Err(Error::Unimplemented(
 						"Managing access methods outside of root, namespace and database levels"
 							.to_string(),
-					))
-				}
-			};
+					)),
+				};
 			if revoke.revocation.is_some() {
 				return Err(Error::AccessGrantRevoked);
 			}
@@ -665,19 +680,19 @@ pub async fn revoke_grant(
 			match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&stmt.ac, gr);
-					txn.set(key, &revoke, None).await?;
+					txn.set(key, revision::to_vec(&revoke)?, None).await?;
 				}
 				Base::Ns => {
 					let key = crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, gr);
 					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.set(key, &revoke, None).await?;
+					txn.set(key, revision::to_vec(&revoke)?, None).await?;
 				}
 				Base::Db => {
-					let key =
-						crate::key::database::access::gr::new(opt.ns()?, opt.db()?, &stmt.ac, gr);
-					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-					txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-					txn.set(key, &revoke, None).await?;
+					let (ns, db) = opt.ns_db()?;
+					let key = crate::key::database::access::gr::new(ns, db, &stmt.ac, gr);
+					txn.get_or_add_ns(ns, opt.strict).await?;
+					txn.get_or_add_db(ns, db, opt.strict).await?;
+					txn.set(key, revision::to_vec(&revoke)?, None).await?;
 				}
 				_ => {
 					return Err(Error::Unimplemented(
@@ -704,7 +719,10 @@ pub async fn revoke_grant(
 				match base {
 					Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
 					Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
-					Base::Db => txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?,
+					Base::Db => {
+						let (ns, db) = opt.ns_db()?;
+						txn.all_db_access_grants(ns, db, &stmt.ac).await?
+					}
 					_ => return Err(Error::Unimplemented(
 						"Managing access methods outside of root, namespace and database levels"
 							.to_string(),
@@ -732,7 +750,8 @@ pub async fn revoke_grant(
 								doc: redacted_gr.into(),
 							}),
 						)
-						.await?
+						.await
+						.catch_return()?
 						.is_truthy()
 					{
 						// Skip grant if it does not match the provided conditions.
@@ -747,24 +766,20 @@ pub async fn revoke_grant(
 				match base {
 					Base::Root => {
 						let key = crate::key::root::access::gr::new(&stmt.ac, &gr.id);
-						txn.set(key, &gr, None).await?;
+						txn.set(key, revision::to_vec(&gr)?, None).await?;
 					}
 					Base::Ns => {
 						let key =
 							crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, &gr.id);
 						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-						txn.set(key, &gr, None).await?;
+						txn.set(key, revision::to_vec(&gr)?, None).await?;
 					}
 					Base::Db => {
-						let key = crate::key::database::access::gr::new(
-							opt.ns()?,
-							opt.db()?,
-							&stmt.ac,
-							&gr.id,
-						);
-						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-						txn.get_or_add_db(opt.ns()?, opt.db()?, opt.strict).await?;
-						txn.set(key, &gr, None).await?;
+						let (ns, db) = opt.ns_db()?;
+						let key = crate::key::database::access::gr::new(ns, db, &stmt.ac, &gr.id);
+						txn.get_or_add_ns(ns, opt.strict).await?;
+						txn.get_or_add_db(ns, db, opt.strict).await?;
+						txn.set(key, revision::to_vec(&gr)?, None).await?;
 					}
 					_ => return Err(Error::Unimplemented(
 						"Managing access methods outside of root, namespace and database levels"
@@ -822,7 +837,10 @@ async fn compute_purge(
 	match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
 		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac).await?,
-		Base::Db => txn.get_db_access(opt.ns()?, opt.db()?, &stmt.ac).await?,
+		Base::Db => {
+			let (ns, db) = opt.ns_db()?;
+			txn.get_db_access(ns, db, &stmt.ac).await?
+		}
 		_ => {
 			return Err(Error::Unimplemented(
 				"Managing access methods outside of root, namespace and database levels"
@@ -835,7 +853,10 @@ async fn compute_purge(
 	let grs = match base {
 		Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
 		Base::Ns => txn.all_ns_access_grants(opt.ns()?, &stmt.ac).await?,
-		Base::Db => txn.all_db_access_grants(opt.ns()?, opt.db()?, &stmt.ac).await?,
+		Base::Db => {
+			let (ns, db) = opt.ns_db()?;
+			txn.all_db_access_grants(ns, db, &stmt.ac).await?
+		}
 		_ => {
 			return Err(Error::Unimplemented(
 				"Managing access methods outside of root, namespace and database levels"
@@ -869,13 +890,8 @@ async fn compute_purge(
 						.await?
 				}
 				Base::Db => {
-					txn.del(crate::key::database::access::gr::new(
-						opt.ns()?,
-						opt.db()?,
-						&stmt.ac,
-						&gr.id,
-					))
-					.await?
+					let (ns, db) = opt.ns_db()?;
+					txn.del(crate::key::database::access::gr::new(ns, db, &stmt.ac, &gr.id)).await?
 				}
 				_ => {
 					return Err(Error::Unimplemented(

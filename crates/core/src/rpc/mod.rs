@@ -1,11 +1,19 @@
-pub mod args;
-pub mod format;
-pub mod method;
-pub mod request;
+mod args;
+mod context;
+mod error;
+mod method;
+mod protocol;
 mod response;
-pub mod rpc_context;
-mod rpc_error;
 
+pub mod format;
+pub mod request;
+
+pub use context::RpcContext;
+pub use error::RpcError;
+pub use format::Format;
+pub use method::Method;
+pub use request::Request;
 pub use response::Data;
-pub use rpc_context::RpcContext;
-pub use rpc_error::RpcError;
+
+pub use protocol::v1::RpcProtocolV1;
+pub use protocol::v2::RpcProtocolV2;

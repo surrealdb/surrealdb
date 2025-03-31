@@ -11,6 +11,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::{fmt, ops::Deref, str};
 
+use super::FlowResultExt as _;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 
 #[revisioned(revision = 1)]
@@ -59,20 +61,21 @@ impl Param {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.doc.as_ref().compute(stk, ctx, opt, doc).await,
+				Some(v) => v.doc.as_ref().compute(stk, ctx, opt, doc).await.catch_return(),
 				// The base document does not exist
 				None => Ok(Value::None),
 			},
 			// This is a normal param
 			v => match ctx.value(v) {
 				// The param has been set locally
-				Some(v) => v.compute(stk, ctx, opt, doc).await,
+				Some(v) => v.compute(stk, ctx, opt, doc).await.catch_return(),
 				// The param has not been set locally
 				None => {
 					// Ensure a database is set
 					opt.valid_for_db()?;
 					// Fetch a defined param if set
-					let val = ctx.tx().get_db_param(opt.ns()?, opt.db()?, v).await;
+					let (ns, db) = opt.ns_db()?;
+					let val = ctx.tx().get_db_param(ns, db, v).await;
 					// Check if the param has been set globally
 					match val {
 						// The param has been set globally
@@ -90,7 +93,12 @@ impl Param {
 										// Disable permissions
 										let opt = &opt.new_with_perms(false);
 										// Process the PERMISSION clause
-										if !e.compute(stk, ctx, opt, doc).await?.is_truthy() {
+										if !e
+											.compute(stk, ctx, opt, doc)
+											.await
+											.catch_return()?
+											.is_truthy()
+										{
 											return Err(Error::ParamPermissions {
 												name: v.to_owned(),
 											});
@@ -99,7 +107,7 @@ impl Param {
 								}
 							}
 							// Return the computed value
-							val.value.compute(stk, ctx, opt, doc).await
+							val.value.compute(stk, ctx, opt, doc).await.catch_return()
 						}
 						// The param has not been set globally
 						Err(Error::PaNotFound {

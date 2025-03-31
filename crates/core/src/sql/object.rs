@@ -3,10 +3,11 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
-	escape::escape_key,
+	escape::EscapeKey,
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
 	Operation, Thing, Value,
 };
+use http::{HeaderMap, HeaderName, HeaderValue};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,8 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
+
+use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 
@@ -35,6 +38,35 @@ impl From<BTreeMap<&str, Value>> for Object {
 impl From<BTreeMap<String, Value>> for Object {
 	fn from(v: BTreeMap<String, Value>) -> Self {
 		Self(v)
+	}
+}
+
+impl FromIterator<(String, Value)> for Object {
+	fn from_iter<T: IntoIterator<Item = (String, Value)>>(iter: T) -> Self {
+		Self(BTreeMap::from_iter(iter))
+	}
+}
+
+impl From<BTreeMap<String, String>> for Object {
+	fn from(v: BTreeMap<String, String>) -> Self {
+		Self(v.into_iter().map(|(k, v)| (k, Value::from(v))).collect())
+	}
+}
+
+impl TryFrom<HeaderMap> for Object {
+	type Error = Error;
+	fn try_from(v: HeaderMap) -> Result<Self, Error> {
+		Ok(Self(
+			v.into_iter()
+				.map(|(k, v)| {
+					if let Some(k) = k {
+						Ok((k.to_string(), Value::from(v.to_str()?)))
+					} else {
+						Err(Error::Unreachable("Encountered a header without a name".into()))
+					}
+				})
+				.collect::<Result<BTreeMap<String, Value>, Error>>()?,
+		))
 	}
 }
 
@@ -138,6 +170,27 @@ impl IntoIterator for Object {
 	}
 }
 
+impl TryInto<BTreeMap<String, String>> for Object {
+	type Error = Error;
+	fn try_into(self) -> Result<BTreeMap<String, String>, Self::Error> {
+		self.into_iter().map(|(k, v)| Ok((k, v.coerce_to_string()?))).collect()
+	}
+}
+
+impl TryInto<HeaderMap> for Object {
+	type Error = Error;
+	fn try_into(self) -> Result<HeaderMap, Self::Error> {
+		let mut headermap = HeaderMap::new();
+		for (k, v) in self.into_iter() {
+			let k: HeaderName = k.parse()?;
+			let v: HeaderValue = v.coerce_to_string()?.parse()?;
+			headermap.insert(k, v);
+		}
+
+		Ok(headermap)
+	}
+}
+
 impl Object {
 	/// Fetch the record id if there is one
 	pub fn rid(&self) -> Option<Thing> {
@@ -221,13 +274,11 @@ impl Object {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		let mut x = BTreeMap::new();
 		for (k, v) in self.iter() {
-			match v.compute(stk, ctx, opt, doc).await {
-				Ok(v) => x.insert(k.clone(), v),
-				Err(e) => return Err(e),
-			};
+			let v = v.compute(stk, ctx, opt, doc).await?;
+			x.insert(k.clone(), v);
 		}
 		Ok(Value::Object(Object(x)))
 	}
@@ -260,7 +311,7 @@ impl Display for Object {
 					self.0.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
 						f,
 						"{}: {}",
-						escape_key(k),
+						EscapeKey(k),
 						v
 					))),
 				)

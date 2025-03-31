@@ -3,15 +3,15 @@ use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
-use crate::sql::{Data, Output, Timeout, Value};
-use derive::Store;
+use crate::sql::{Data, FlowResultExt as _, Output, Timeout, Value};
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RelateStatement {
@@ -58,7 +58,7 @@ impl RelateStatement {
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();
-			match self.from.compute(stk, &ctx, opt, doc).await? {
+			match self.from.compute(stk, &ctx, opt, doc).await.catch_return()? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -100,7 +100,7 @@ impl RelateStatement {
 		// Loop over the with targets
 		let with = {
 			let mut out = Vec::new();
-			match self.with.compute(stk, &ctx, opt, doc).await? {
+			match self.with.compute(stk, &ctx, opt, doc).await.catch_return()? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -143,7 +143,7 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				match &self.kind.compute(stk, &ctx, opt, doc).await? {
+				match &self.kind.compute(stk, &ctx, opt, doc).await.catch_return()? {
 					// The relation has a specific record id
 					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w, None)),
 					// The relation does not have a specific record id

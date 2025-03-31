@@ -7,7 +7,9 @@ use crate::doc::CursorDoc;
 use crate::doc::CursorValue;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
+use crate::kvs::KeyDecode;
 use crate::sql::dir::Dir;
 use crate::sql::edges::Edges;
 use crate::sql::paths::EDGE;
@@ -19,6 +21,7 @@ use crate::sql::statements::UpdateStatement;
 use crate::sql::table::Tables;
 use crate::sql::value::{Value, Values};
 use crate::sql::Data;
+use crate::sql::FlowResultExt as _;
 use crate::sql::Operator;
 use crate::sql::Part;
 use crate::sql::Thing;
@@ -41,10 +44,8 @@ impl Document {
 		let txn = ctx.tx();
 		// Get the record id
 		if let Some(rid) = &self.id {
-			// Get the namespace
-			let ns = opt.ns()?;
-			// Get the database
-			let db = opt.db()?;
+			// Get the namespace / database
+			let (ns, db) = opt.ns_db()?;
 			// Purge the record data
 			txn.del_record(ns, db, &rid.tb, &rid.id).await?;
 			// Purge the record edges
@@ -96,12 +97,12 @@ impl Document {
 				// Obtain a transaction
 				let txn = ctx.tx();
 				// Obtain a stream of keys
-				let mut stream = txn.stream_keys(range.clone(), None);
+				let mut stream = txn.stream_keys(range.clone(), None, ScanDirection::Forward);
 				// Loop until no more entries
 				while let Some(res) = stream.next().await {
 					// Decode the key
 					let key = res?;
-					let r#ref = Ref::from(&key);
+					let r#ref = Ref::decode(&key)?;
 					// Obtain the remote field definition
 					let fd = txn.get_tb_field(ns, db, r#ref.ft, r#ref.ff).await?;
 					// Check if there is a reference defined on the field
@@ -199,7 +200,8 @@ impl Document {
 										None,
 										&[Part::All],
 									)
-									.await?
+									.await
+									.catch_return()?
 									.into();
 								// Construct the document for the compute method
 								let doc = CursorDoc::new(None, None, doc);
@@ -207,6 +209,7 @@ impl Document {
 								// Compute the custom instruction.
 								v.compute(stk, &ctx, &opt.clone().with_perms(false), Some(&doc))
 									.await
+									.catch_return()
 									// Wrap any error in an error explaining what went wrong
 									.map_err(|e| {
 										Error::RefsUpdateFailure(rid.to_string(), e.to_string())

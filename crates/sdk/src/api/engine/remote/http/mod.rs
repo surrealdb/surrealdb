@@ -86,11 +86,9 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			router: self.router.clone(),
-			engine: PhantomData,
+			surreal: self.inner.clone().into(),
 			address: address.into_endpoint(),
 			capacity: 0,
-			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}
@@ -163,7 +161,7 @@ struct AuthResponse {
 	token: Option<String>,
 }
 
-type BackupSender = channel::Sender<Result<Vec<u8>>>;
+type BackupSender = async_channel::Sender<Result<Vec<u8>>>;
 
 #[cfg(not(target_family = "wasm"))]
 async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {

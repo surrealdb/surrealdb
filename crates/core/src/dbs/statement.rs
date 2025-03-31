@@ -1,3 +1,6 @@
+use crate::ctx::{Context, MutableContext};
+use crate::err::Error;
+use crate::idx::planner::QueryPlanner;
 use crate::sql::cond::Cond;
 use crate::sql::data::Data;
 use crate::sql::fetch::Fetchs;
@@ -20,7 +23,8 @@ use crate::sql::statements::show::ShowStatement;
 use crate::sql::statements::update::UpdateStatement;
 use crate::sql::statements::upsert::UpsertStatement;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{Explain, Permission, With};
+use crate::sql::{Explain, Permission, Timeout, With};
+use std::borrow::Cow;
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -128,12 +132,6 @@ impl Statement<'_> {
 	/// Check if this is a DELETE statement
 	pub(crate) fn is_delete(&self) -> bool {
 		matches!(self, Statement::Delete(_))
-	}
-
-	/// Returns whether the IGNORE clause has
-	/// been specified on an INSERT statement
-	pub(crate) fn is_ignore(&self) -> bool {
-		matches!(self, Statement::Insert(i) if i.ignore)
 	}
 
 	/// Returns whether the document retrieval for
@@ -244,20 +242,6 @@ impl Statement<'_> {
 		matches!(self, Statement::Upsert(v) if v.cond.is_some())
 	}
 
-	/// Returns whether the document processing for
-	/// this statement can be retried, and therefore
-	/// whether we need to use savepoints in this
-	/// transaction. This is specifically used in
-	/// UPSERT statements, and INSERT statements which
-	/// have an ON DUPLICATE KEY UPDATE clause.
-	pub(crate) fn is_retryable(&self) -> bool {
-		match self {
-			Statement::Insert(_) if self.data().is_some() => true,
-			Statement::Upsert(_) => true,
-			_ => false,
-		}
-	}
-
 	/// Returns any query fields if specified
 	pub(crate) fn expr(&self) -> Option<&Fields> {
 		match self {
@@ -326,7 +310,10 @@ impl Statement<'_> {
 	/// Returns any WITH clause if specified
 	pub(crate) fn with(&self) -> Option<&With> {
 		match self {
-			Statement::Select(v) => v.with.as_ref(),
+			Statement::Select(s) => s.with.as_ref(),
+			Statement::Update(s) => s.with.as_ref(),
+			Statement::Upsert(s) => s.with.as_ref(),
+			Statement::Delete(s) => s.with.as_ref(),
 			_ => None,
 		}
 	}
@@ -355,6 +342,18 @@ impl Statement<'_> {
 		}
 	}
 
+	pub(crate) fn is_only(&self) -> bool {
+		match self {
+			Statement::Create(v) => v.only,
+			Statement::Delete(v) => v.only,
+			Statement::Relate(v) => v.only,
+			Statement::Select(v) => v.only,
+			Statement::Upsert(v) => v.only,
+			Statement::Update(v) => v.only,
+			_ => false,
+		}
+	}
+
 	/// Returns any RETURN clause if specified
 	pub(crate) fn output(&self) -> Option<&Output> {
 		match self {
@@ -380,7 +379,10 @@ impl Statement<'_> {
 	/// Returns any EXPLAIN clause if specified
 	pub(crate) fn explain(&self) -> Option<&Explain> {
 		match self {
-			Statement::Select(v) => v.explain.as_ref(),
+			Statement::Select(s) => s.explain.as_ref(),
+			Statement::Update(s) => s.explain.as_ref(),
+			Statement::Upsert(s) => s.explain.as_ref(),
+			Statement::Delete(s) => s.explain.as_ref(),
 			_ => None,
 		}
 	}
@@ -400,6 +402,43 @@ impl Statement<'_> {
 			&table.permissions.create
 		} else {
 			&table.permissions.update
+		}
+	}
+
+	pub(crate) fn timeout(&self) -> Option<&Timeout> {
+		match self {
+			Statement::Create(s) => s.timeout.as_ref(),
+			Statement::Delete(s) => s.timeout.as_ref(),
+			Statement::Insert(s) => s.timeout.as_ref(),
+			Statement::Select(s) => s.timeout.as_ref(),
+			Statement::Update(s) => s.timeout.as_ref(),
+			Statement::Upsert(s) => s.timeout.as_ref(),
+			_ => None,
+		}
+	}
+	pub(crate) fn setup_timeout<'a>(&self, ctx: &'a Context) -> Result<Cow<'a, Context>, Error> {
+		if let Some(t) = self.timeout() {
+			let mut ctx = MutableContext::new(ctx);
+			ctx.add_timeout(*t.0)?;
+			Ok(Cow::Owned(ctx.freeze()))
+		} else {
+			Ok(Cow::Borrowed(ctx))
+		}
+	}
+
+	pub(crate) fn setup_query_planner<'a>(
+		&self,
+		planner: QueryPlanner,
+		ctx: Cow<'a, Context>,
+	) -> Cow<'a, Context> {
+		// Add query executors if any
+		if planner.has_executors() {
+			// Create a new context
+			let mut ctx = MutableContext::new(&ctx);
+			ctx.set_query_planner(planner);
+			Cow::Owned(ctx.freeze())
+		} else {
+			ctx
 		}
 	}
 }

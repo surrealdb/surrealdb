@@ -1,5 +1,6 @@
 mod access;
 mod analyzer;
+mod api;
 pub mod config;
 mod database;
 mod deprecated;
@@ -15,6 +16,7 @@ mod user;
 
 pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
+pub use api::DefineApiStatement;
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
 pub use event::DefineEventStatement;
@@ -30,19 +32,23 @@ pub use user::DefineUserStatement;
 pub use deprecated::scope::DefineScopeStatement;
 pub use deprecated::token::DefineTokenStatement;
 
+pub use api::ApiAction;
+pub use api::ApiDefinition;
+pub use api::FindApi;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
-use derive::Store;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 3)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum DefineStatement {
@@ -72,6 +78,8 @@ pub enum DefineStatement {
 	#[revision(start = 2)]
 	Access(DefineAccessStatement),
 	Config(DefineConfigStatement),
+	#[revision(start = 3)]
+	Api(DefineApiStatement),
 }
 
 // Revision implementations
@@ -118,6 +126,7 @@ impl DefineStatement {
 			Self::Model(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Access(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Config(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Api(ref v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }
@@ -138,6 +147,7 @@ impl Display for DefineStatement {
 			Self::Model(v) => Display::fmt(v, f),
 			Self::Access(v) => Display::fmt(v, f),
 			Self::Config(v) => Display::fmt(v, f),
+			Self::Api(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -154,7 +164,7 @@ mod tests {
 			name: Ident::from("test"),
 			..Default::default()
 		});
-		let enc: Vec<u8> = stm.into();
+		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
 		assert_eq!(13, enc.len());
 	}
 }

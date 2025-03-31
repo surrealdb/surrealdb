@@ -51,7 +51,7 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let router = client.router.extract()?;
+				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Update {
 						what: resource?,
@@ -155,6 +155,7 @@ where
 			client: self.client,
 			resource: self.resource,
 			content: data,
+			upsert: false,
 			response_type: PhantomData,
 		}
 	}
@@ -171,6 +172,7 @@ where
 			patches,
 			client: self.client,
 			resource: self.resource,
+			upsert: false,
 			response_type: PhantomData,
 		}
 	}

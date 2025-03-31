@@ -3,13 +3,13 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
-use derive::Store;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RemoveAccessStatement {
@@ -63,13 +63,13 @@ impl RemoveAccessStatement {
 					// Get the transaction
 					let txn = ctx.tx();
 					// Get the definition
-					let ac = txn.get_db_access(opt.ns()?, opt.db()?, &self.name).await?;
+					let (ns, db) = opt.ns_db()?;
+					let ac = txn.get_db_access(ns, db, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::ac::new(opt.ns()?, opt.db()?, &ac.name);
+					let key = crate::key::database::ac::new(ns, db, &ac.name);
 					txn.del(key).await?;
 					// Delete any associated data including access grants.
-					let key =
-						crate::key::database::access::all::new(opt.ns()?, opt.db()?, &ac.name);
+					let key = crate::key::database::access::all::new(ns, db, &ac.name);
 					txn.delp(key).await?;
 					// Clear the cache
 					txn.clear();

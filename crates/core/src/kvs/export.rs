@@ -11,6 +11,7 @@ use crate::sql::Value;
 use async_channel::Sender;
 use chrono::prelude::Utc;
 use chrono::TimeZone;
+use std::fmt;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -48,6 +49,7 @@ impl From<Config> for Value {
 			"functions" => config.functions.into(),
 			"analyzers" => config.analyzers.into(),
 			"versions" => config.versions.into(),
+			"records" => config.records.into(),
 			"tables" => match config.tables {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
@@ -172,6 +174,37 @@ impl TableConfig {
 	}
 }
 
+struct InlineCommentWriter<'a, F>(&'a mut F);
+impl<F: fmt::Write> fmt::Write for InlineCommentWriter<'_, F> {
+	fn write_str(&mut self, s: &str) -> fmt::Result {
+		for c in s.chars() {
+			self.write_char(c)?
+		}
+		Ok(())
+	}
+
+	fn write_char(&mut self, c: char) -> fmt::Result {
+		match c {
+			'\n' => self.0.write_str("\\n"),
+			'\r' => self.0.write_str("\\r"),
+			// NEL/Next Line
+			'\u{0085}' => self.0.write_str("\\u{0085}"),
+			// line seperator
+			'\u{2028}' => self.0.write_str("\\u{2028}"),
+			// Paragraph seperator
+			'\u{2029}' => self.0.write_str("\\u{2029}"),
+			_ => self.0.write_char(c),
+		}
+	}
+}
+
+struct InlineCommentDisplay<F>(F);
+impl<F: fmt::Display> fmt::Display for InlineCommentDisplay<F> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		fmt::Write::write_fmt(&mut InlineCommentWriter(f), format_args!("{}", self.0))
+	}
+}
+
 impl Transaction {
 	/// Writes the full database contents as binary SQL.
 	pub async fn export(
@@ -242,7 +275,7 @@ impl Transaction {
 		}
 
 		chn.send(bytes!("-- ------------------------------")).await?;
-		chn.send(bytes!(format!("-- {}", title))).await?;
+		chn.send(bytes!(format!("-- {}", InlineCommentDisplay(title)))).await?;
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
 
@@ -292,7 +325,7 @@ impl Transaction {
 		chn: &Sender<Vec<u8>>,
 	) -> Result<(), Error> {
 		chn.send(bytes!("-- ------------------------------")).await?;
-		chn.send(bytes!(format!("-- TABLE: {}", table.name))).await?;
+		chn.send(bytes!(format!("-- TABLE: {}", InlineCommentDisplay(&table.name)))).await?;
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
 		chn.send(bytes!(format!("{};", table))).await?;
@@ -328,7 +361,7 @@ impl Transaction {
 		chn: &Sender<Vec<u8>>,
 	) -> Result<(), Error> {
 		chn.send(bytes!("-- ------------------------------")).await?;
-		chn.send(bytes!(format!("-- TABLE DATA: {}", table.name))).await?;
+		chn.send(bytes!(format!("-- TABLE DATA: {}", InlineCommentDisplay(&table.name)))).await?;
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
 
@@ -459,7 +492,7 @@ impl Transaction {
 			let v: Value = if v.is_empty() {
 				Value::None
 			} else {
-				(&v).into()
+				revision::from_slice(&v)?
 			};
 			// Process the value and generate the appropriate SQL command.
 			let sql = Self::process_value(
@@ -537,7 +570,7 @@ impl Transaction {
 		// Process each regular value.
 		for (k, v) in regular_values {
 			let k = thing::Thing::decode(&k)?;
-			let v: Value = (&v).into();
+			let v: Value = revision::from_slice(&v)?;
 			// Process the value and categorize it into records_relate or records_normal.
 			Self::process_value(k, v, &mut records_relate, &mut records_normal, None, None);
 		}

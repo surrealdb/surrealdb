@@ -30,6 +30,8 @@ pub enum TestGrade {
 pub enum TestError {
 	Timeout,
 	Running(String),
+	Paniced(String),
+	Import(String, String),
 }
 
 pub enum TestOutputs {
@@ -282,9 +284,11 @@ impl TestReport {
 			TestTaskResult::ParserError(ref e) => Some(TestOutputs::ParsingError(e.to_string())),
 			TestTaskResult::RunningError(_) => None,
 			TestTaskResult::Timeout => None,
+			TestTaskResult::Import(_, _) => None,
 			TestTaskResult::Results(ref e) => Some(TestOutputs::Values(
 				e.iter().map(|x| x.result.as_ref().map_err(|e| e.to_string()).cloned()).collect(),
 			)),
+			TestTaskResult::Paniced(_) => None,
 		};
 
 		let kind = Self::grade_result(&set[id].config, job_result, matching_datastore).await;
@@ -307,6 +311,16 @@ impl TestReport {
 				TestReportKind::Error(TestError::Running(e.to_string()))
 			}
 			TestTaskResult::Timeout => TestReportKind::Error(TestError::Timeout),
+			TestTaskResult::Import(a, b) => TestReportKind::Error(TestError::Import(a, b)),
+			TestTaskResult::Paniced(e) => {
+				let error = e
+					.downcast::<String>()
+					.map(|x| *x)
+					.or_else(|e| e.downcast::<&'static str>().map(|x| (*x).to_owned()))
+					.unwrap_or_else(|_| "Could not retrieve panic payload".to_owned());
+
+				TestReportKind::Error(TestError::Paniced(error))
+			}
 			TestTaskResult::ParserError(results) => {
 				let expectation = TestExpectation::from_test_config(config);
 
@@ -400,7 +414,10 @@ impl TestReport {
 							index,
 							kind,
 						},
-						None => continue,
+						None => {
+							index += 1;
+							continue;
+						}
 					}
 				}
 			};

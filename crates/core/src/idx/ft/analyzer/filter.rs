@@ -36,6 +36,7 @@ impl Filter {
 					Language::Danish => Stemmer::create(Algorithm::Danish),
 					Language::Dutch => Stemmer::create(Algorithm::Dutch),
 					Language::English => Stemmer::create(Algorithm::English),
+					Language::Finnish => Stemmer::create(Algorithm::Finnish),
 					Language::French => Stemmer::create(Algorithm::French),
 					Language::German => Stemmer::create(Algorithm::German),
 					Language::Greek => Stemmer::create(Algorithm::Greek),
@@ -314,6 +315,26 @@ mod tests {
 		.await;
 		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(en);", input, &output)
 			.await;
+	}
+
+	#[tokio::test]
+	async fn test_finnish_stemmer() {
+		let input = "työ tekijäänsä kiittää";
+		let output = ["työ", "tekij", "kiit"];
+		test_analyzer(
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(finnish);",
+			input,
+			&output,
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(fi);", input, &output)
+			.await;
+		test_analyzer(
+			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(fin);",
+			input,
+			&output,
+		)
+		.await;
 	}
 
 	#[tokio::test]

@@ -9,6 +9,7 @@ use crate::idx::planner::StatementContext;
 use crate::kvs::Transaction;
 use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
+use crate::sql::FlowResultExt as _;
 use crate::sql::{
 	order::{OrderList, Ordering},
 	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Part, Subquery, Table, Value,
@@ -144,18 +145,16 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn eval_order(&mut self) -> Result<(), Error> {
 		if let Some(o) = self.first_order {
-			if o.direction {
-				if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
-					for (ixr, id_col) in &irf {
-						if *id_col == 0 {
-							self.index_map.order_limit = Some(IndexOption::new(
-								ixr.clone(),
-								Some(id),
-								IdiomPosition::None,
-								IndexOperator::Order,
-							));
-							break;
-						}
+			if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
+				for (ixr, id_col) in &irf {
+					if *id_col == 0 {
+						self.index_map.order_limit = Some(IndexOption::new(
+							ixr.clone(),
+							Some(id),
+							IdiomPosition::None,
+							IndexOperator::Order(!o.direction),
+						));
+						break;
 					}
 				}
 			}
@@ -219,7 +218,11 @@ impl<'a> TreeBuilder<'a> {
 		self.leaf_nodes_count += 1;
 		let mut values = Vec::with_capacity(a.len());
 		for v in &a.0 {
-			values.push(stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await?);
+			values.push(
+				stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None))
+					.await
+					.catch_return()?,
+			);
 		}
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
@@ -234,7 +237,10 @@ impl<'a> TreeBuilder<'a> {
 		// Compute the idiom value if it is a param
 		if let Some(Part::Start(x)) = i.0.first() {
 			if x.is_param() {
-				let v = stk.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await?;
+				let v = stk
+					.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None))
+					.await
+					.catch_return()?;
 				return stk.run(|stk| self.eval_value(stk, gr, &v)).await;
 			}
 		}
@@ -664,7 +670,9 @@ impl IndexesMap {
 	pub(crate) fn check_compound(&mut self, ixr: &IndexReference, col: usize, val: &Arc<Value>) {
 		let cols = ixr.cols.len();
 		let values = self.compound_indexes.entry(ixr.clone()).or_insert(vec![vec![]; cols]);
-		values[col].push(val.clone());
+		if let Some(a) = values.get_mut(col) {
+			a.push(val.clone());
+		}
 	}
 
 	pub(crate) fn check_compound_array(&mut self, ixr: &IndexReference, col: usize, a: &Array) {
@@ -719,8 +727,9 @@ struct SchemaCache {
 
 impl SchemaCache {
 	async fn new(opt: &Options, table: &Table, tx: &Transaction) -> Result<Self, Error> {
-		let indexes = tx.all_tb_indexes(opt.ns()?, opt.db()?, table).await?;
-		let fields = tx.all_tb_fields(opt.ns()?, opt.db()?, table, None).await?;
+		let (ns, db) = opt.ns_db()?;
+		let indexes = tx.all_tb_indexes(ns, db, table).await?;
+		let fields = tx.all_tb_fields(ns, db, table, None).await?;
 		Ok(Self {
 			indexes,
 			fields,

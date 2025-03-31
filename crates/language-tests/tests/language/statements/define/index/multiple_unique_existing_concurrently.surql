@@ -26,7 +26,7 @@ error = "The index 'test' already exists"
 value = "NONE"
 
 [[test.results]]
-value = "{ events: {  }, fields: {  }, indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE CONCURRENTLY' }, lives: {  }, tables: {  } }"
+value = "{ events: {  }, fields: {  }, indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
 value = '''{ building: { error: "Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`", status: 'error' } }'''

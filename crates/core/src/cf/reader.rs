@@ -60,7 +60,7 @@ pub async fn read(
 			continue;
 		}
 		// Decode the byte array into a vector of operations
-		let tb_muts: TableMutations = v.into();
+		let tb_muts: TableMutations = revision::from_slice(&v)?;
 		// Get the timestamp of the changefeed entry
 		match vs {
 			Some(x) => {

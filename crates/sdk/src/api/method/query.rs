@@ -6,7 +6,6 @@ use crate::api::opt;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
-use crate::engine::any::Any;
 use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
@@ -32,30 +31,36 @@ use surrealdb_core::sql::{
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Query<'r, C: Connection> {
-	pub(crate) inner: Result<ValidQuery<'r, C>>,
+	pub(crate) client: Cow<'r, Surreal<C>>,
+	pub(crate) inner: Result<ValidQuery>,
 }
 
 #[derive(Debug)]
-pub(crate) struct ValidQuery<'r, C: Connection> {
-	pub client: Cow<'r, Surreal<C>>,
-	pub query: Vec<Statement>,
-	pub bindings: CoreObject,
-	pub register_live_queries: bool,
+pub(crate) enum ValidQuery {
+	Raw {
+		query: Cow<'static, str>,
+		bindings: CoreObject,
+	},
+	Normal {
+		query: Vec<Statement>,
+		register_live_queries: bool,
+		bindings: CoreObject,
+	},
 }
 
 impl<'r, C> Query<'r, C>
 where
 	C: Connection,
 {
-	pub(crate) fn new(
+	pub(crate) fn normal(
 		client: Cow<'r, Surreal<C>>,
 		query: Vec<Statement>,
 		bindings: CoreObject,
 		register_live_queries: bool,
 	) -> Self {
 		Query {
-			inner: Ok(ValidQuery {
-				client,
+			client,
+			inner: Ok(ValidQuery::Normal {
 				query,
 				bindings,
 				register_live_queries,
@@ -65,13 +70,15 @@ where
 
 	pub(crate) fn map_valid<F>(self, f: F) -> Self
 	where
-		F: FnOnce(ValidQuery<'r, C>) -> Result<ValidQuery<'r, C>>,
+		F: FnOnce(ValidQuery) -> Result<ValidQuery>,
 	{
 		match self.inner {
 			Ok(x) => Query {
+				client: self.client,
 				inner: f(x),
 			},
 			x => Query {
+				client: self.client,
 				inner: x,
 			},
 		}
@@ -79,23 +86,9 @@ where
 
 	/// Converts to an owned type which can easily be moved to a different thread
 	pub fn into_owned(self) -> Query<'static, C> {
-		let inner = match self.inner {
-			Ok(ValidQuery {
-				client,
-				query,
-				bindings,
-				register_live_queries,
-			}) => Ok(ValidQuery::<'static, C> {
-				client: Cow::Owned(client.into_owned()),
-				query,
-				bindings,
-				register_live_queries,
-			}),
-			Err(e) => Err(e),
-		};
-
 		Query {
-			inner,
+			client: Cow::Owned(self.client.into_owned()),
+			inner: self.inner,
 		}
 	}
 }
@@ -108,91 +101,93 @@ where
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
-		let ValidQuery {
-			client,
-			query,
-			bindings,
-			register_live_queries,
-		} = match self.inner {
-			Ok(x) => x,
-			Err(error) => return Box::pin(async move { Err(error) }),
-		};
-
-		let query_statements = query;
-
 		Box::pin(async move {
 			// Extract the router from the client
-			let router = client.router.extract()?;
+			let router = self.client.inner.router.extract()?;
 
-			// Collect the indexes of the live queries which should be registerd.
-			let query_indicies = if register_live_queries {
-				query_statements
-					.iter()
-					// BEGIN, COMMIT, and CANCEL don't return a result.
-					.filter(|x| {
-						!matches!(
-							x,
-							Statement::Begin(_) | Statement::Commit(_) | Statement::Cancel(_)
-						)
-					})
-					.enumerate()
-					.filter(|(_, x)| matches!(x, Statement::Live(_)))
-					.map(|(i, _)| i)
-					.collect()
-			} else {
-				Vec::new()
-			};
-
-			// If there are live queries and it is not supported, return an error.
-			if !query_indicies.is_empty() && !router.features.contains(&ExtraFeatures::LiveQueries)
-			{
-				return Err(Error::LiveQueriesNotSupported.into());
-			}
-
-			let mut query = sql::Query::default();
-			query.0 .0 = query_statements;
-
-			let mut response = router
-				.execute_query(Command::Query {
+			match self.inner? {
+				ValidQuery::Raw {
 					query,
-					variables: bindings,
-				})
-				.await?;
-
-			for idx in query_indicies {
-				let Some((_, result)) = response.results.get(&idx) else {
-					continue;
-				};
-
-				// This is a live query. We are using this as a workaround to avoid
-				// creating another public error variant for this internal error.
-				let res = match result {
-					Ok(id) => {
-						let CoreValue::Uuid(uuid) = id else {
-							return Err(Error::InternalError(
-								"successfull live query did not return a uuid".to_string(),
-							)
-							.into());
-						};
-						live::register(router, uuid.0).await.map(|rx| {
-							Stream::new(
-								Surreal::new_from_router_waiter(
-									client.router.clone(),
-									client.waiter.clone(),
-								),
-								uuid.0,
-								Some(rx),
-							)
+					bindings,
+				} => {
+					router
+						.execute_query(Command::RawQuery {
+							query,
+							variables: bindings,
 						})
-					}
-					Err(_) => Err(crate::Error::from(Error::NotLiveQuery(idx))),
-				};
-				response.live_queries.insert(idx, res);
-			}
+						.await
+				}
+				ValidQuery::Normal {
+					query,
+					register_live_queries,
+					bindings,
+				} => {
+					let query_statements = query;
 
-			response.client =
-				Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone());
-			Ok(response)
+					// Collect the indexes of the live queries which should be registerd.
+					let query_indicies = if register_live_queries {
+						query_statements
+							.iter()
+							// BEGIN, COMMIT, and CANCEL don't return a result.
+							.filter(|x| {
+								!matches!(
+									x,
+									Statement::Begin(_)
+										| Statement::Commit(_) | Statement::Cancel(_)
+								)
+							})
+							.enumerate()
+							.filter(|(_, x)| matches!(x, Statement::Live(_)))
+							.map(|(i, _)| i)
+							.collect()
+					} else {
+						Vec::new()
+					};
+
+					// If there are live queries and it is not supported, return an error.
+					if !query_indicies.is_empty()
+						&& !router.features.contains(&ExtraFeatures::LiveQueries)
+					{
+						return Err(Error::LiveQueriesNotSupported.into());
+					}
+
+					let mut query = sql::Query::default();
+					query.0 .0 = query_statements;
+
+					let mut response = router
+						.execute_query(Command::Query {
+							query,
+							variables: bindings,
+						})
+						.await?;
+
+					for idx in query_indicies {
+						let Some((_, result)) = response.results.get(&idx) else {
+							continue;
+						};
+
+						// This is a live query. We are using this as a workaround to avoid
+						// creating another public error variant for this internal error.
+						let res = match result {
+							Ok(id) => {
+								let CoreValue::Uuid(uuid) = id else {
+									return Err(Error::InternalError(
+										"successfull live query did not return a uuid".to_string(),
+									)
+									.into());
+								};
+								live::register(router, uuid.0).await.map(|rx| {
+									Stream::new(self.client.inner.clone().into(), uuid.0, Some(rx))
+								})
+							}
+							Err(_) => Err(crate::Error::from(Error::NotLiveQuery(idx))),
+						};
+						response.live_queries.insert(idx, res);
+					}
+
+					Ok(response)
+				}
+			}
 		})
 	}
 }
@@ -217,11 +212,37 @@ where
 	C: Connection,
 {
 	/// Chains a query onto an existing query
-	pub fn query(self, query: impl opt::IntoQuery) -> Self {
-		self.map_valid(move |mut valid| {
-			let new_query = query.into_query()?;
-			valid.query.extend(new_query);
-			Ok(valid)
+	pub fn query(self, surql: impl opt::IntoQuery) -> Self {
+		let client = self.client.clone();
+		self.map_valid(move |valid| match valid {
+			ValidQuery::Raw {
+				..
+			} => {
+				Err(Error::InvalidParams("Appending to raw queries is not supported".to_owned())
+					.into())
+			}
+			ValidQuery::Normal {
+				mut query,
+				register_live_queries,
+				bindings,
+			} => match client.query(surql).inner {
+				Ok(ValidQuery::Normal {
+					query: stmts,
+					..
+				}) => {
+					query.extend(stmts);
+					Ok(ValidQuery::Normal {
+						query,
+						register_live_queries,
+						bindings,
+					})
+				}
+				Ok(ValidQuery::Raw {
+					..
+				}) => Err(Error::InvalidParams("Appending raw queries is not supported".to_owned())
+					.into()),
+				Err(error) => Err(error),
+			},
 		})
 	}
 
@@ -270,9 +291,19 @@ where
 	/// ```
 	pub fn bind(self, bindings: impl Serialize + 'static) -> Self {
 		self.map_valid(move |mut valid| {
+			let current_bindings = match &mut valid {
+				ValidQuery::Raw {
+					bindings,
+					..
+				} => bindings,
+				ValidQuery::Normal {
+					bindings,
+					..
+				} => bindings,
+			};
 			let bindings = to_core_value(bindings)?;
 			match bindings {
-				CoreValue::Object(mut map) => valid.bindings.append(&mut map.0),
+				CoreValue::Object(mut map) => current_bindings.append(&mut map.0),
 				CoreValue::Array(array) => {
 					if array.len() != 2 || !matches!(array[0], CoreValue::Strand(_)) {
 						let bindings = CoreValue::Array(array);
@@ -288,7 +319,7 @@ where
 						unreachable!()
 					};
 
-					valid.bindings.0.insert(key.0, value);
+					current_bindings.insert(key.0, value);
 				}
 				_ => {
 					let bindings = Value::from_inner(bindings);
@@ -306,7 +337,6 @@ pub(crate) type QueryResult = Result<CoreValue>;
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct Response {
-	pub(crate) client: Surreal<Any>,
 	pub(crate) results: IndexMap<usize, (Stats, QueryResult)>,
 	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
@@ -338,7 +368,6 @@ where
 impl Response {
 	pub(crate) fn new() -> Self {
 		Self {
-			client: Surreal::init(),
 			results: Default::default(),
 			live_queries: Default::default(),
 		}

@@ -1,3 +1,4 @@
+mod api;
 mod auth;
 pub mod client_ip;
 mod export;
@@ -180,7 +181,8 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.merge(signin::router())
 		.merge(signup::router())
 		.merge(key::router())
-		.merge(ml::router());
+		.merge(ml::router())
+		.merge(api::router());
 
 	let axum_app = if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 		#[cfg(surrealdb_unstable)]

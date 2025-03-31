@@ -26,7 +26,7 @@ async fn strict_mode_no_namespace() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::NsNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -34,7 +34,7 @@ async fn strict_mode_no_namespace() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::NsNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -42,7 +42,7 @@ async fn strict_mode_no_namespace() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::NsNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -50,7 +50,7 @@ async fn strict_mode_no_namespace() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::NsNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -58,7 +58,7 @@ async fn strict_mode_no_namespace() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::NsNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -87,7 +87,7 @@ async fn strict_mode_no_database() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::DbNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -95,7 +95,7 @@ async fn strict_mode_no_database() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::DbNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -103,7 +103,7 @@ async fn strict_mode_no_database() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::DbNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -111,7 +111,7 @@ async fn strict_mode_no_database() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::DbNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -143,7 +143,7 @@ async fn strict_mode_no_table() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::TbNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -151,7 +151,7 @@ async fn strict_mode_no_table() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::TbNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -159,7 +159,7 @@ async fn strict_mode_no_table() -> Result<(), Error> {
 	assert!(matches!(
 		tmp.err(),
 		Some(Error::TbNotFound {
-			value: _
+			name: _
 		})
 	));
 	//
@@ -258,6 +258,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 		"{
 			accesses: {},
 			analyzers: {},
+			apis: {},
 			configs: {},
 			functions: {},
 			models: {},

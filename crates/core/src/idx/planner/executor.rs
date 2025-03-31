@@ -17,6 +17,10 @@ use crate::idx::planner::iterators::{
 	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
 	UniqueUnionThingIterator, ValueType,
 };
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+use crate::idx::planner::iterators::{
+	IndexRangeReverseThingIterator, UniqueRangeReverseThingIterator,
+};
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
@@ -25,10 +29,12 @@ use crate::idx::planner::IterationStage;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::idx::IndexKeyBase;
-use crate::kvs::{Key, TransactionType};
+use crate::kvs::TransactionType;
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Cond, Expression, Idiom, Number, Object, Table, Thing, Value};
+use crate::sql::{
+	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
+};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -132,7 +138,8 @@ impl InnerQueryExecutor {
 					let ft_entry = match ft_map.entry(ixr.clone()) {
 						Entry::Occupied(e) => FtEntry::new(stk, ctx, opt, e.get(), io).await?,
 						Entry::Vacant(e) => {
-							let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, e.key())?;
+							let (ns, db) = opt.ns_db()?;
+							let ikb = IndexKeyBase::new(ns, db, e.key())?;
 							let ft = FtIndex::new(
 								ctx,
 								opt,
@@ -166,7 +173,8 @@ impl InnerQueryExecutor {
 									.await?
 							}
 							Entry::Vacant(e) => {
-								let ikb = IndexKeyBase::new(opt.ns()?, opt.db()?, e.key())?;
+								let (ns, db) = opt.ns_db()?;
+								let ikb = IndexKeyBase::new(ns, db, e.key())?;
 								let tx = ctx.tx();
 								let mt =
 									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
@@ -266,7 +274,7 @@ impl QueryExecutor {
 			Ok(Value::Bool(false))
 		} else {
 			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
-				let v = id.compute(stk, ctx, opt, doc).await?;
+				let v = id.compute(stk, ctx, opt, doc).await.catch_return()?;
 				if let Ok(v) = v.try_into() {
 					if let Ok(dist) = dist.compute(&v, val.as_ref()) {
 						p.add(dist, thg).await;
@@ -367,23 +375,17 @@ impl QueryExecutor {
 				if variants.len() == 1 {
 					Some(Self::new_index_equal_iterator(ir, opt, ix, &variants[0])?)
 				} else {
+					let (ns, db) = opt.ns_db()?;
 					Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(
-						ir,
-						opt.ns()?,
-						opt.db()?,
-						ix,
-						&variants,
+						ir, ns, db, ix, &variants,
 					)?))
 				}
 			}
 			IndexOperator::Union(values) => {
 				let variants = Self::get_equal_variants_from_values(values);
+				let (ns, db) = opt.ns_db()?;
 				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(
-					ir,
-					opt.ns()?,
-					opt.db()?,
-					ix,
-					&variants,
+					ir, ns, db, ix, &variants,
 				)?))
 			}
 			IndexOperator::Join(ios) => {
@@ -392,9 +394,30 @@ impl QueryExecutor {
 					Box::new(IndexJoinThingIterator::new(ir, opt, ix.clone(), iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
-			IndexOperator::Order => Some(ThingIterator::IndexRange(
-				IndexRangeThingIterator::full_range(ir, opt.ns()?, opt.db()?, ix)?,
-			)),
+			IndexOperator::Order(reverse) => {
+				if *reverse {
+					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+					{
+						Some(ThingIterator::IndexRangeReverse(
+							IndexRangeReverseThingIterator::full_range(
+								ir,
+								opt.ns()?,
+								opt.db()?,
+								ix,
+							)?,
+						))
+					}
+					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
+					None
+				} else {
+					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
+						ir,
+						opt.ns()?,
+						opt.db()?,
+						ix,
+					)?))
+				}
+			}
 			_ => None,
 		})
 	}
@@ -464,13 +487,8 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		array: &Array,
 	) -> Result<ThingIterator, Error> {
-		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
-			irf,
-			opt.ns()?,
-			opt.db()?,
-			ix,
-			array,
-		)?))
+		let (ns, db) = opt.ns_db()?;
+		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
 	}
 
 	/// This function takes a reference to a `Number` enum and a conversion function `float_to_int`.
@@ -765,13 +783,8 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		range: &IteratorRange,
 	) -> Result<ThingIterator, Error> {
-		Ok(ThingIterator::IndexRange(IndexRangeThingIterator::new(
-			ir,
-			opt.ns()?,
-			opt.db()?,
-			ix,
-			range,
-		)?))
+		let (ns, db) = opt.ns_db()?;
+		Ok(ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, range)?))
 	}
 
 	fn new_unique_range_iterator(
@@ -780,14 +793,8 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
 	) -> Result<ThingIterator, Error> {
-		Ok(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
-			ir,
-			opt.ns()?,
-			opt.db()?,
-			&ix.what,
-			&ix.name,
-			range,
-		)?))
+		let (ns, db) = opt.ns_db()?;
+		Ok(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, range)?))
 	}
 
 	fn new_multiple_index_range_iterator(
@@ -846,9 +853,30 @@ impl QueryExecutor {
 					Box::new(UniqueJoinThingIterator::new(irf, opt, ixr.clone(), iterators)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
-			IndexOperator::Order => Some(ThingIterator::UniqueRange(
-				UniqueRangeThingIterator::full_range(irf, opt.ns()?, opt.db()?, ixr)?,
-			)),
+			IndexOperator::Order(reverse) => {
+				if *reverse {
+					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+					{
+						Some(ThingIterator::UniqueRangeReverse(
+							UniqueRangeReverseThingIterator::full_range(
+								irf,
+								opt.ns()?,
+								opt.db()?,
+								ixr,
+							)?,
+						))
+					}
+					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
+					None
+				} else {
+					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
+						irf,
+						opt.ns()?,
+						opt.db()?,
+						ixr,
+					)?))
+				}
+			}
 			_ => None,
 		})
 	}
@@ -859,25 +887,14 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		array: &Array,
 	) -> Result<ThingIterator, Error> {
+		let (ns, db) = opt.ns_db()?;
 		if ix.cols.len() > 1 {
 			// If the index is unique and the index is a composite index,
 			// then we have the opportunity to iterate on the first column of the index
 			// and consider it as a standard index (rather than a unique one)
-			Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
-				irf,
-				opt.ns()?,
-				opt.db()?,
-				ix,
-				array,
-			)?))
+			Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
 		} else {
-			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
-				irf,
-				opt.ns()?,
-				opt.db()?,
-				ix,
-				array,
-			)?))
+			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(irf, ns, db, ix, array)?))
 		}
 	}
 
@@ -956,7 +973,7 @@ impl QueryExecutor {
 
 		// If no previous case were successful, we end up with a user error
 		Err(Error::NoIndexFoundForMatch {
-			value: exp.to_string(),
+			exp: exp.to_string(),
 		})
 	}
 
@@ -966,7 +983,8 @@ impl QueryExecutor {
 		thg: &Thing,
 		ft: &FtEntry,
 	) -> Result<bool, Error> {
-		let doc_key: Key = thg.into();
+		// TODO ask emmanual
+		let doc_key = revision::to_vec(thg)?;
 		let tx = ctx.tx();
 		let di = ft.0.doc_ids.read().await;
 		let doc_id = di.get_doc_id(&tx, doc_key).await?;
@@ -1084,7 +1102,7 @@ impl QueryExecutor {
 					None
 				};
 				if doc_id.is_none() {
-					let key: Key = rid.into();
+					let key = revision::to_vec(rid)?;
 					let di = e.0.doc_ids.read().await;
 					doc_id = di.get_doc_id(&tx, key).await?;
 					drop(di);

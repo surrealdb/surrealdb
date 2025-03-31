@@ -3,13 +3,12 @@
 # This stage is used to build the SurrealDB linux binary
 ###
 
-FROM docker.io/rockylinux:8 as builder
-
+FROM docker.io/rockylinux:8 AS builder
 
 RUN yum install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11
 
 # Install rust
-ARG RUST_VERSION=1.81.0
+ARG RUST_VERSION=1.82.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /tmp/rustup.sh
 RUN bash /tmp/rustup.sh -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -22,6 +21,7 @@ ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=/opt/rh/gcc-toolset-13/root/us
 WORKDIR /surrealdb
 
 COPY docker/builder-entrypoint.sh /builder-entrypoint.sh
+
 RUN chmod +x /builder-entrypoint.sh
 
 ENTRYPOINT ["/builder-entrypoint.sh"]
@@ -33,7 +33,7 @@ ENTRYPOINT ["/builder-entrypoint.sh"]
 #
 # Development image (built on the CI environment)
 #
-FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest-dev as dev-ci
+FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev-ci
 
 ARG TARGETPLATFORM
 ARG TARGETOS
@@ -47,8 +47,15 @@ COPY ${ARTIFACT_PREFIX}.${TARGETOS}-${TARGETARCH}/surreal /surreal
 
 RUN chmod +x /surreal
 
-# Allow connectivity from the host with bridge networking
-# This still requires publishing the port when running the container
+RUN mkdir /data /logs \
+	&& chown -R nonroot:nonroot /data \
+	&& chmod -R 777 /data \
+	&& chown -R nonroot:nonroot /logs \
+	&& chmod -R 777 /logs \
+	&& echo "OK"
+
+VOLUME /data /logs
+
 ENV SURREAL_BIND="0.0.0.0:8000"
 
 ENTRYPOINT ["/surreal"]
@@ -56,14 +63,18 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built on the CI environment)
 #
-FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest as prod-ci
+FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest AS prod-ci
 
 ARG TARGETPLATFORM
 
 COPY --from=dev-ci /surreal /surreal
 
-# Allow connectivity from the host with bridge networking
-# This still requires publishing the port when running the container
+COPY --from=dev-ci /data /data
+
+COPY --from=dev-ci /logs /logs
+
+VOLUME /data /logs
+
 ENV SURREAL_BIND="0.0.0.0:8000"
 
 ENTRYPOINT ["/surreal"]
@@ -71,18 +82,25 @@ ENTRYPOINT ["/surreal"]
 #
 # Development image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev as dev
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev
 
 ARG SURREALDB_BINARY=target/release/surreal
 
 COPY ${SURREALDB_BINARY} /surreal
 
-RUN chmod +x /surreal
-
 USER root
 
-# Allow connectivity from the host with bridge networking
-# This still requires publishing the port when running the container
+RUN chmod +x /surreal
+
+RUN mkdir /data /logs \
+	&& chown -R nonroot:nonroot /data \
+	&& chmod -R 777 /data \
+	&& chown -R nonroot:nonroot /logs \
+	&& chmod -R 777 /logs \
+	&& echo "OK"
+
+VOLUME /data /logs
+
 ENV SURREAL_BIND="0.0.0.0:8000"
 
 ENTRYPOINT ["/surreal"]
@@ -90,12 +108,16 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest as prod
+FROM cgr.dev/chainguard/glibc-dynamic:latest AS prod
 
 COPY --from=dev /surreal /surreal
 
-# Allow connectivity from the host with bridge networking
-# This still requires publishing the port when running the container
+COPY --from=dev /data /data
+
+COPY --from=dev /logs /logs
+
+VOLUME /data /logs
+
 ENV SURREAL_BIND="0.0.0.0:8000"
 
 ENTRYPOINT ["/surreal"]

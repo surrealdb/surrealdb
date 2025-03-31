@@ -1,28 +1,32 @@
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::RecordStrategy;
-use crate::sql::{Cond, Data, Output, Timeout, Value, Values};
-use derive::Store;
+use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
+use crate::sql::{Cond, Data, Explain, FlowResultExt as _, Output, Timeout, Value, Values, With};
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 3)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct UpdateStatement {
 	#[revision(start = 2)]
 	pub only: bool,
 	pub what: Values,
+	#[revision(start = 2)]
+	pub with: Option<With>,
 	pub data: Option<Data>,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
+	#[revision(start = 3)]
+	pub explain: Option<Explain>,
 }
 
 impl UpdateStatement {
@@ -47,18 +51,14 @@ impl UpdateStatement {
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false);
 		// Check if there is a timeout
-		let ctx = match self.timeout.as_ref() {
-			Some(timeout) => {
-				let mut ctx = MutableContext::new(ctx);
-				ctx.add_timeout(*timeout.0)?;
-				ctx.freeze()
-			}
-			None => ctx.clone(),
-		};
+		let ctx = stm.setup_timeout(ctx)?;
+		// Get a query planner
+		let mut planner = QueryPlanner::new();
+		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the update targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, &ctx, opt, doc).await?;
-			i.prepare(&stm, v).map_err(|e| match e {
+			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
+			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
 				} => Error::UpdateStatement {
@@ -67,6 +67,8 @@ impl UpdateStatement {
 				e => e,
 			})?;
 		}
+		// Attach the query planner to the context
+		let ctx = stm.setup_query_planner(planner, ctx);
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
@@ -95,6 +97,9 @@ impl fmt::Display for UpdateStatement {
 			f.write_str(" ONLY")?
 		}
 		write!(f, " {}", self.what)?;
+		if let Some(ref v) = self.with {
+			write!(f, " {v}")?
+		}
 		if let Some(ref v) = self.data {
 			write!(f, " {v}")?
 		}
@@ -109,6 +114,9 @@ impl fmt::Display for UpdateStatement {
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?
+		}
+		if let Some(ref v) = self.explain {
+			write!(f, " {v}")?
 		}
 		Ok(())
 	}

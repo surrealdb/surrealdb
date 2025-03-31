@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{
 	err::Error,
-	kvs::{KeyEncode as _, Transaction},
+	kvs::{KeyDecode as _, KeyEncode as _, Transaction},
 };
 
 pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<(), Error> {

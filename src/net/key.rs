@@ -78,6 +78,10 @@ async fn select_all(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
 		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -96,9 +100,9 @@ async fn select_all(
 	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match accept.as_deref() {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			// TODO: remove format in 2.0.0
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
@@ -125,6 +129,10 @@ async fn create_all(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
 		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -144,9 +152,9 @@ async fn create_all(
 			match db.execute(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
-					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -175,6 +183,10 @@ async fn update_all(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
 		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -194,9 +206,9 @@ async fn update_all(
 			match db.execute(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
-					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -223,6 +235,10 @@ async fn modify_all(
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
+	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
 		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
@@ -274,6 +290,10 @@ async fn delete_all(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
 		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -287,9 +307,9 @@ async fn delete_all(
 	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match accept.as_deref() {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
@@ -318,6 +338,10 @@ async fn select_one(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
 		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -340,9 +364,9 @@ async fn select_one(
 	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match accept.as_deref() {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
@@ -366,6 +390,10 @@ async fn create_one(
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Key) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
+	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
 		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
 	// Ensure a NS and DB are set
@@ -393,9 +421,9 @@ async fn create_one(
 			match db.execute(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
-					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -424,6 +452,10 @@ async fn update_one(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
 		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -449,9 +481,9 @@ async fn update_one(
 			match db.execute(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
-					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -480,6 +512,10 @@ async fn modify_one(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
 		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
@@ -505,9 +541,9 @@ async fn modify_one(
 			match db.execute(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
-					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -534,6 +570,10 @@ async fn delete_one(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Key);
 		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
 	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Key.to_string()));
+	}
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session)?;
 	// Specify the request statement
@@ -552,9 +592,9 @@ async fn delete_one(
 	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match accept.as_deref() {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested

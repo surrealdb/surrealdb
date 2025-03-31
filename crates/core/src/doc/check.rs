@@ -11,6 +11,7 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
+use crate::sql::FlowResultExt as _;
 use reblessive::tree::Stk;
 
 impl Document {
@@ -228,7 +229,12 @@ impl Document {
 			// This is a INSERT RELATION statement
 			else if let Some(data) = v {
 				// Check that the 'id' field matches
-				match data.pick(&*ID).compute(stk, ctx, opt, Some(&self.current)).await? {
+				match data
+					.pick(&*ID)
+					.compute(stk, ctx, opt, Some(&self.current))
+					.await
+					.catch_return()?
+				{
 					// You cannot store a range id as the id field on a document
 					Value::Thing(v) if v.is_range() => {
 						return Err(Error::IdInvalid {
@@ -249,7 +255,12 @@ impl Document {
 					}
 				}
 				// Check that the 'in' field matches
-				match data.pick(&*IN).compute(stk, ctx, opt, Some(&self.current)).await? {
+				match data
+					.pick(&*IN)
+					.compute(stk, ctx, opt, Some(&self.current))
+					.await
+					.catch_return()?
+				{
 					// You cannot store a range id as the in field on a document
 					Value::Thing(v) if v.is_range() => {
 						return Err(Error::InInvalid {
@@ -268,7 +279,12 @@ impl Document {
 					}
 				}
 				// Check that the 'out' field matches
-				match data.pick(&*OUT).compute(stk, ctx, opt, Some(&self.current)).await? {
+				match data
+					.pick(&*OUT)
+					.compute(stk, ctx, opt, Some(&self.current))
+					.await
+					.catch_return()?
+				{
 					// You cannot store a range id as the out field on a document
 					Value::Thing(v) if v.is_range() => {
 						return Err(Error::OutInvalid {
@@ -313,7 +329,7 @@ impl Document {
 					false => &self.current,
 				};
 				// Check if the expression is truthy
-				if !cond.compute(stk, ctx, opt, Some(current)).await?.is_truthy() {
+				if !cond.compute(stk, ctx, opt, Some(current)).await.catch_return()?.is_truthy() {
 					// Ignore this document
 					return Err(Error::Ignore);
 				}
@@ -356,7 +372,7 @@ impl Document {
 						// Disable permissions
 						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
-						if !e.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
+						if !e.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
 							return Err(Error::Ignore);
 						}
 					}
@@ -448,7 +464,8 @@ impl Document {
 									false => &self.current,
 								}),
 							)
-							.await?
+							.await
+							.catch_return()?
 							.is_truthy()
 						{
 							return Err(Error::Ignore);

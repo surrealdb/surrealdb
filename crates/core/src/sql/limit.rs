@@ -9,6 +9,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use super::FlowResultExt as _;
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -23,7 +25,7 @@ impl Limit {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<u32, Error> {
-		match self.0.compute(stk, ctx, opt, doc).await {
+		match self.0.compute(stk, ctx, opt, doc).await.catch_return() {
 			// This is a valid limiting number
 			Ok(Value::Number(Number::Int(v))) if v >= 0 => {
 				if v > u32::MAX as i64 {

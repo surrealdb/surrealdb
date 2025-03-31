@@ -6,7 +6,9 @@ use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget, RouteTarget};
+use crate::dbs::capabilities::{
+	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
+};
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
@@ -23,6 +25,7 @@ use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::sql::FlowResultExt as _;
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
@@ -71,7 +74,7 @@ pub struct Datastore {
 	/// The maximum duration timeout for running multiple statements in a transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
-	capabilities: Capabilities,
+	capabilities: Arc<Capabilities>,
 	// Whether this datastore enables live query notifications to subscribers.
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// The index store cache
@@ -118,47 +121,48 @@ impl TransactionFactory {
 		};
 		// Create a new transaction on the datastore
 		#[allow(unused_variables)]
-		let (inner, local) = match self.flavor.as_ref() {
+		let (inner, local, reverse_scan) = match self.flavor.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::Mem(tx), true)
+				(super::tr::Inner::Mem(tx), true, false)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::RocksDB(tx), true)
+				(super::tr::Inner::RocksDB(tx), true, true)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			DatastoreFlavor::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::IndxDB(tx), true)
+				(super::tr::Inner::IndxDB(tx), true, false)
 			}
 			#[cfg(feature = "kv-tikv")]
 			DatastoreFlavor::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::TiKV(tx), false)
+				(super::tr::Inner::TiKV(tx), false, true)
 			}
 			#[cfg(feature = "kv-fdb")]
 			DatastoreFlavor::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::FoundationDB(tx), false)
+				(super::tr::Inner::FoundationDB(tx), false, false)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::SurrealKV(tx), true)
+				(super::tr::Inner::SurrealKV(tx), true, false)
 			}
 			#[cfg(feature = "kv-surrealcs")]
 			DatastoreFlavor::SurrealCS(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::SurrealCS(tx), false)
+				(super::tr::Inner::SurrealCS(tx), false, false)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
 		Ok(Transaction::new(
 			local,
+			reverse_scan,
 			Transactor {
 				inner,
 				stash: super::stash::Stash::default(),
@@ -264,6 +268,7 @@ impl Datastore {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
@@ -277,6 +282,9 @@ impl Datastore {
 			s if s.starts_with("file:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
 					let s = s.trim_start_matches("file://");
@@ -293,6 +301,9 @@ impl Datastore {
 			s if s.starts_with("rocksdb:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
@@ -308,6 +319,9 @@ impl Datastore {
 			s if s.starts_with("surrealkv") => {
 				#[cfg(feature = "kv-surrealkv")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", s);
 					let (path, enable_versions) =
 						super::surrealkv::Datastore::parse_start_string(s)?;
@@ -402,7 +416,7 @@ impl Datastore {
 				query_timeout: None,
 				transaction_timeout: None,
 				notification_channel: None,
-				capabilities: Capabilities::default(),
+				capabilities: Arc::new(Capabilities::default()),
 				index_stores: IndexStores::default(),
 				#[cfg(not(target_family = "wasm"))]
 				index_builder: IndexBuilder::new(tf),
@@ -477,7 +491,7 @@ impl Datastore {
 
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
-		self.capabilities = caps;
+		self.capabilities = Arc::new(caps);
 		self
 	}
 
@@ -510,6 +524,12 @@ impl Datastore {
 	/// This function needs to be public to allow access from the CLI crate.
 	pub fn allows_http_route(&self, route_target: &RouteTarget) -> bool {
 		self.capabilities.allows_http_route(route_target)
+	}
+
+	/// Does the datastore allow requesting an HTTP route?
+	/// This function needs to be public to allow access from the CLI crate.
+	pub fn allows_query_by_subject(&self, subject: impl Into<ArbitraryQueryTarget>) -> bool {
+		self.capabilities.allows_query(&subject.into())
 	}
 
 	/// Does the datastore allow connections to a network target?
@@ -837,6 +857,9 @@ impl Datastore {
 			bearer_access_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			define_api_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::DefineApi),
 			..Default::default()
 		};
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
@@ -1008,7 +1031,8 @@ impl Datastore {
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
+		let res =
+			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1080,7 +1104,8 @@ impl Datastore {
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
+		let res =
+			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1238,6 +1263,8 @@ impl Datastore {
 
 #[cfg(test)]
 mod test {
+	use crate::sql::FlowResultExt as _;
+
 	use super::*;
 
 	#[tokio::test]
@@ -1286,7 +1313,12 @@ mod test {
 		let ctx = ctx.freeze();
 		// Compute the value
 		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.unwrap();
+		let res = stack
+			.enter(|stk| val.compute(stk, &ctx, &opt, None))
+			.finish()
+			.await
+			.catch_return()
+			.unwrap();
 		assert_eq!(res, Value::Number(Number::Int(2)));
 		Ok(())
 	}

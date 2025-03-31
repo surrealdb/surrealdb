@@ -337,6 +337,7 @@ mod graphql_integration {
 				.post(sql_url)
 				.body(
 					r#"
+					DEFINE FIELD id ON TABLE foo TYPE string;
                     DEFINE CONFIG GRAPHQL AUTO;
 					DEFINE TABLE foo;
 					DEFINE FIELD val ON foo TYPE string;

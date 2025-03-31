@@ -45,15 +45,19 @@ async fn post_handler(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Sql);
 		return Err(Error::ForbiddenRoute(RouteTarget::Sql.to_string()));
 	}
+	// Check if the user is allowed to query
+	if !db.allows_query_by_subject(session.au.as_ref()) {
+		return Err(Error::ForbiddenRoute(RouteTarget::Sql.to_string()));
+	}
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query
 	match db.execute(sql, &session, params.0.parse().into()).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
+			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
