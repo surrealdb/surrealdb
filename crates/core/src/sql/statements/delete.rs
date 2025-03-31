@@ -3,7 +3,7 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::{Cond, Explain, Output, Timeout, Value, Values, With};
+use crate::sql::{Cond, Explain, FlowResultExt as _, Output, Timeout, Value, Values, With};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -56,7 +56,7 @@ impl DeleteStatement {
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the delete targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, &ctx, opt, doc).await?;
+			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
 			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,

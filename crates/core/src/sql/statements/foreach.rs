@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{block::Entry, Block, Param, Value};
+use crate::sql::{ControlFlow, FlowResult};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -50,7 +51,7 @@ impl ForeachStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		// Check the loop data
 		let data = self.range.compute(stk, ctx, opt, doc).await?;
 		let iter = match data {
@@ -61,16 +62,16 @@ impl ForeachStatement {
 			}
 
 			v => {
-				return Err(Error::InvalidStatementTarget {
+				return Err(ControlFlow::from(Error::InvalidStatementTarget {
 					value: v.to_string(),
-				})
+				}))
 			}
 		};
 
 		// Loop over the values
 		for v in iter {
 			if ctx.is_timedout()? {
-				return Err(Error::QueryTimedout);
+				return Err(ControlFlow::from(Error::QueryTimedout));
 			}
 			// Duplicate context
 			let ctx = MutableContext::new(ctx).freeze();
@@ -96,28 +97,26 @@ impl ForeachStatement {
 					Entry::Continue(v) => v.compute(&ctx, opt, doc).await,
 					Entry::Foreach(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 					Entry::Ifelse(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Select(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Create(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Upsert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Update(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Delete(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Relate(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Insert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Define(v) => v.compute(stk, &ctx, opt, doc).await,
-					Entry::Alter(v) => v.compute(stk, &ctx, opt, doc).await,
-					Entry::Rebuild(v) => v.compute(stk, &ctx, opt, doc).await,
-					Entry::Remove(v) => v.compute(&ctx, opt, doc).await,
+					Entry::Select(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
+					Entry::Create(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
+					Entry::Upsert(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
+					Entry::Update(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
+					Entry::Delete(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
+					Entry::Relate(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
+					Entry::Insert(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
+					Entry::Define(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
+					Entry::Alter(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
+					Entry::Rebuild(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
+					Entry::Remove(v) => Ok(v.compute(&ctx, opt, doc).await?),
 					Entry::Output(v) => {
 						return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
 					}
-					Entry::Throw(v) => {
-						return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
-					}
+					Entry::Throw(v) => return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 				};
 				// Catch any special errors
 				match res {
-					Err(Error::Continue) => break,
-					Err(Error::Break) => return Ok(Value::None),
+					Err(ControlFlow::Continue) => break,
+					Err(ControlFlow::Break) => return Ok(Value::None),
 					Err(err) => return Err(err),
 					_ => (),
 				};

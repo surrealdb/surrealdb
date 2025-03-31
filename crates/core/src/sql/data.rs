@@ -12,6 +12,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
+use super::FlowResultExt as _;
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -56,23 +58,29 @@ impl Data {
 		match self {
 			Self::MergeExpression(v) => match v {
 				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => Ok(v.pick(path).compute(stk, ctx, opt, None).await?.some()),
+				Value::Object(_) => {
+					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
+				}
 				_ => Ok(None),
 			},
 			Self::ReplaceExpression(v) => match v {
 				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => Ok(v.pick(path).compute(stk, ctx, opt, None).await?.some()),
+				Value::Object(_) => {
+					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
+				}
 				_ => Ok(None),
 			},
 			Self::ContentExpression(v) => match v {
 				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => Ok(v.pick(path).compute(stk, ctx, opt, None).await?.some()),
+				Value::Object(_) => {
+					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
+				}
 				_ => Ok(None),
 			},
 			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_field(path)) {
 				Some((_, _, v)) => {
 					// This SET expression has this field
-					Ok(v.compute(stk, ctx, opt, None).await?.some())
+					Ok(v.compute(stk, ctx, opt, None).await.catch_return()?.some())
 				}
 				// This SET expression does not have this field
 				_ => Ok(None),
