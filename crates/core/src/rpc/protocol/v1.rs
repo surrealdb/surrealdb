@@ -18,7 +18,7 @@ use crate::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
-		Array, Fields, Function, Model, Output, Query, Strand, Value,
+		Array, Fields, Function, Idiom, Model, Operator, Output, Query, Strand, Value,
 	},
 };
 
@@ -419,9 +419,21 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_two() else {
+		let Ok((what, data, update)) = params.needs_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
+
+		//format for UpdateExpression
+		let update = match update {
+			Value::Object(v) => Some(
+				v.iter()
+					.map(|(key, value)| (Idiom::from(key.clone()), Operator::Equal, value.clone()))
+					.collect::<Vec<_>>(),
+			),
+			Value::None | Value::Null => None,
+			_ => return Err(RpcError::InvalidParams),
+		};
+
 		// Specify the SQL query string
 		let sql = InsertStatement {
 			into: match what.is_none_or_null() {
@@ -429,6 +441,7 @@ pub trait RpcProtocolV1: RpcContext {
 				true => None,
 			},
 			data: crate::sql::Data::SingleExpression(data),
+			update: update.map(crate::sql::Data::UpdateExpression),
 			output: Some(Output::After),
 			..Default::default()
 		}
