@@ -42,7 +42,7 @@ mod database_upgrade {
 		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
 
 		// Collect INFO FOR NS & INFO FOR DB
-		let info_ns_db = get_info_ns_db(&client).await;
+		let info_ns_db = get_info_ns_db(&client, version).await;
 
 		// Stop the docker instance
 		docker.stop();
@@ -61,11 +61,11 @@ mod database_upgrade {
 		check_migrated_data(&db, "KNN_BRUTEFORCE", &CHECK_KNN_BRUTEFORCE).await;
 
 		// Collect INFO FOR NS/DB on the migrated database
-		let migrated_info_ns_db = get_info_ns_db(&db).await;
+		let migrated_info_ns_db = get_info_ns_db(&db, "Current").await;
 		// Check that INFO FOR NS is matching
-		check_info_ns(info_ns_db.0, migrated_info_ns_db.0);
+		check_info_ns(info_ns_db.0, migrated_info_ns_db.0, version);
 		// Check that INFO FOR DB is matching
-		check_info_db(info_ns_db.1, migrated_info_ns_db.1);
+		check_info_db(info_ns_db.1, migrated_info_ns_db.1, version);
 	}
 
 	macro_rules! run {
@@ -249,8 +249,8 @@ mod database_upgrade {
 		}
 	}
 
-	async fn get_info_ns_db(client: &Surreal<Any>) -> (Value, Value) {
-		info!("Get INFO NS/DB for the database");
+	async fn get_info_ns_db(client: &Surreal<Any>, info: &str) -> (Value, Value) {
+		info!("Collect INFO NS/DB for the database {info}");
 		let mut results = client.query("INFO FOR NS; INFO FOR DB").await.unwrap();
 		let info_ns: Value = results.take(0).unwrap();
 		let info_db: Value = results.take(1).unwrap();
@@ -265,11 +265,13 @@ mod database_upgrade {
 		}
 	}
 
-	fn check_info_ns(prev: Value, next: Value) {
+	fn check_info_ns(prev: Value, next: Value, version: &str) {
+		info!("Check INFO NS - migrated from {version}");
 		assert_eq!(format!("{prev:#}"), format!("{next:#}"));
 	}
 
-	fn check_info_db(prev: Value, next: Value) {
+	fn check_info_db(prev: Value, next: Value, version: &str) {
+		info!("Check INFO DB (analyzers, tables, users) - migrated from {version}");
 		check_info(prev, next, &["analyzers", "tables", "users"]);
 	}
 
