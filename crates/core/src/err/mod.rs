@@ -1331,17 +1331,20 @@ pub enum Error {
 	#[error("Bucket is unavailable")]
 	GlobalBucketEnforced,
 
-	#[error("Bucket url could not be processed")]
-	InvalidBucketUrl,
+	#[error("Bucket url could not be processed: {0}")]
+	InvalidBucketUrl(String),
 
-	#[error("Bucket backend `{0}` is not supported")]
-	UnsupportedBackend(String),
+	#[error("Bucket backend is not supported")]
+	UnsupportedBackend,
 
 	#[error("Write operation is not supported, as bucket `{0}` is in read-only mode")]
 	ReadonlyBucket(String),
 
 	#[error("Operation for bucket `{0}` failed: {1}")]
 	ObjectStoreFailure(String, String),
+
+	#[error("Failed to connect to bucket: {0}")]
+	BucketConnectionFailed(String),
 }
 
 impl From<Error> for String {

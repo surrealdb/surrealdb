@@ -3,9 +3,9 @@ use crate::{
 	err::Error,
 };
 use dashmap::DashMap;
-use object_store::{parse_url, path::Path, prefix::PrefixStore, ObjectStore};
 use std::sync::Arc;
-use url::Url;
+
+use super::store::{prefixed::PrefixedStore, ObjectStore, Path};
 
 // Helper type to represent how bucket connections are persisted
 pub type BucketConnections = DashMap<(String, String, String), Arc<dyn ObjectStore>>;
@@ -23,9 +23,8 @@ pub fn connect_global(ns: &str, db: &str, bu: &str) -> Result<Arc<dyn ObjectStor
 	let global = connect(url, true, false)?;
 
 	// Create a prefixstore for the specified bucket
-	let key = format!("{ns}/{db}/{bu}");
-	let key = Path::parse(key.clone()).map_err(|_| Error::InvalidBucketKey(key))?;
-	Ok(Arc::new(PrefixStore::new(global, key)))
+	let key = Path::from(format!("/{ns}/{db}/{bu}"));
+	Ok(Arc::new(PrefixedStore::new(global, key)))
 }
 
 /// Connects to a bucket by it's connection URL
@@ -40,16 +39,6 @@ pub fn connect(url: &str, global: bool, readonly: bool) -> Result<Arc<dyn Object
 		return Err(Error::GlobalBucketEnforced);
 	}
 
-	// Attempt to parse the string into a `Url`
-	let url = Url::parse(url).map_err(|_| Error::InvalidBucketUrl)?;
-
-	// Check if the backend is supported
-	let scheme = url.scheme();
-	if !super::backend::supported(scheme, global, readonly) {
-		Err(Error::UnsupportedBackend(scheme.into()))
-	} else {
-		// All good, connect to the store
-		let (store, _) = parse_url(&url).map_err(|_| Error::InvalidBucketUrl)?;
-		Ok(Arc::new(store) as Arc<dyn ObjectStore>)
-	}
+	// Connect to the backend
+	super::backend::connect(url, global, readonly)
 }

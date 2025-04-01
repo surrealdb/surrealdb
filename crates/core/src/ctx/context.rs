@@ -1,3 +1,4 @@
+use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
@@ -16,7 +17,6 @@ use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::sql::value::Value;
 use async_channel::Sender;
-use object_store::ObjectStore;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};

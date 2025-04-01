@@ -8,9 +8,10 @@ use crate::{
 		Value,
 	},
 };
-use object_store::{path::Path, ObjectMeta, ObjectStore, PutPayload};
 use reblessive::tree::Stk;
 use std::sync::Arc;
+
+use super::store::{ObjectMeta, ObjectStore, Path};
 
 /// Allows you to control a specific in the context of the current user
 pub struct FileController<'a> {
@@ -37,7 +38,7 @@ impl<'a> FileController<'a> {
 		let (ns, db) = opt.ns_db()?;
 		let bucket = ctx.tx().get_db_bucket(ns, db, &file.bucket).await?;
 		let store = ctx.get_bucket_store(ns, db, &file.bucket).await?;
-		let key = file.get_path()?;
+		let key = Path::from(file.key.clone());
 
 		Ok(Self {
 			stk,
@@ -70,8 +71,8 @@ impl<'a> FileController<'a> {
 	/// Create or update permissions will be used, based on if the remote file already exists
 	pub(crate) async fn put(&mut self, value: Value) -> Result<(), Error> {
 		let payload = match value {
-			Value::Bytes(v) => PutPayload::from_bytes(v.0.into()),
-			Value::Strand(v) => PutPayload::from_bytes(v.0.into_bytes().into()),
+			Value::Bytes(v) => v.0.into(),
+			Value::Strand(v) => v.0.into_bytes().into(),
 			from => {
 				return Err(Error::ConvertTo {
 					from,
@@ -101,32 +102,24 @@ impl<'a> FileController<'a> {
 	pub(crate) async fn head(&mut self) -> Result<Option<ObjectMeta>, Error> {
 		self.check_permission(PermissionKind::Select).await?;
 
-		match self.store.head(&self.key).await {
-			Ok(v) => Ok(Some(v)),
-			Err(object_store::Error::NotFound {
-				..
-			}) => Ok(None),
-			Err(e) => Err(Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string())),
-		}
+		self.store
+			.head(&self.key)
+			.await
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))
 	}
 
 	pub(crate) async fn get(&mut self) -> Result<Option<Bytes>, Error> {
 		self.check_permission(PermissionKind::Select).await?;
 
-		let payload = match self.store.get(&self.key).await {
-			Ok(v) => v,
-			Err(object_store::Error::NotFound {
-				..
-			}) => return Ok(None),
-			Err(e) => {
-				return Err(Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))
-			}
-		};
-
-		let bytes = payload
-			.bytes()
+		let bytes = match self
+			.store
+			.get(&self.key)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?
+		{
+			Some(v) => v,
+			None => return Ok(None),
+		};
 
 		Ok(Some(bytes.to_vec().into()))
 	}
@@ -211,13 +204,11 @@ impl<'a> FileController<'a> {
 	}
 
 	pub(crate) async fn exists_inner(&self, key: Option<&Path>) -> Result<bool, Error> {
-		match self.store.head(key.unwrap_or(&self.key)).await {
-			Ok(_) => Ok(true),
-			Err(object_store::Error::NotFound {
-				..
-			}) => Ok(false),
-			Err(e) => Err(Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string())),
-		}
+		self.store
+			.head(key.unwrap_or(&self.key))
+			.await
+			.map(|v| v.is_some())
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))
 	}
 
 	pub(crate) async fn check_permission(&mut self, kind: PermissionKind) -> Result<(), Error> {

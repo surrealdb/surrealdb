@@ -1,8 +1,7 @@
-use object_store::path::Path;
 use reblessive::tree::Stk;
 
 use crate::{
-	buc::FileController,
+	buc::{store::Path, FileController},
 	ctx::Context,
 	dbs::Options,
 	err::Error,
@@ -36,7 +35,7 @@ pub async fn head(
 ) -> Result<Value, Error> {
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	let res = controller.head().await?;
-	Ok(res.map(Value::from).unwrap_or_default())
+	Ok(res.map(Into::into).unwrap_or_default())
 }
 
 pub async fn delete(
@@ -53,7 +52,7 @@ pub async fn copy(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::parse(target.clone()).map_err(|_| Error::InvalidBucketKey(target))?;
+	let target = Path::from(target);
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.copy(target).await?;
 
@@ -64,7 +63,7 @@ pub async fn copy_if_not_exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::parse(target.clone()).map_err(|_| Error::InvalidBucketKey(target))?;
+	let target = Path::from(target);
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.copy_if_not_exists(target).await?;
 
@@ -75,7 +74,7 @@ pub async fn rename(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::parse(target.clone()).map_err(|_| Error::InvalidBucketKey(target))?;
+	let target = Path::from(target);
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.rename(target).await?;
 
@@ -86,7 +85,7 @@ pub async fn rename_if_not_exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::parse(target.clone()).map_err(|_| Error::InvalidBucketKey(target))?;
+	let target = Path::from(target);
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.rename_if_not_exists(target).await?;
 

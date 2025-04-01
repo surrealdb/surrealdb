@@ -1,9 +1,6 @@
-use object_store::path::Path;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
-
-use crate::err::Error;
 
 use super::Ident;
 
@@ -31,10 +28,6 @@ impl File {
 			bucket,
 			key,
 		}
-	}
-
-	pub(crate) fn get_path(&self) -> Result<Path, Error> {
-		Path::parse(&self.key).map_err(|_| Error::InvalidBucketKey(self.key.clone()))
 	}
 
 	/// Check if this File belongs to a certain bucket type

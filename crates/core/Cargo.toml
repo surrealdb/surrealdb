@@ -120,6 +120,7 @@ rocksdb = { workspace = true, optional = true }
 tikv = { workspace = true, optional = true }
 
 # Other crates
+rust-s3.workspace = true
 addr.workspace = true
 ahash.workspace = true
 ammonia.workspace = true
@@ -130,6 +131,7 @@ async-executor.workspace = true
 async-graphql = { workspace = true, default-features = false, features = [
     "dynamic-schema",
 ] }
+async-trait.workspace = true
 base64.workspace = true
 bcrypt.workspace = true
 bincode.workspace = true

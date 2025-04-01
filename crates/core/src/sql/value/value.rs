@@ -23,7 +23,6 @@ use crate::sql::{Closure, Ident};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
-use object_store::ObjectMeta;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
@@ -658,18 +657,6 @@ impl From<Id> for Value {
 impl From<Query> for Value {
 	fn from(q: Query) -> Self {
 		Value::Query(q)
-	}
-}
-
-impl From<ObjectMeta> for Value {
-	fn from(value: ObjectMeta) -> Self {
-		Value::from(map! {
-			"key" => Value::from(value.location.to_string()),
-			"last_modified" => Value::from(value.last_modified),
-			"size" => Value::from(value.size),
-			"e_tag" => Value::from(value.e_tag),
-			"version" => Value::from(value.version),
-		})
 	}
 }
 

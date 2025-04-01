@@ -6,3 +6,5 @@ mod connection;
 pub use connection::{connect, connect_global, BucketConnections};
 mod controller;
 pub use controller::FileController;
+
+pub mod store;
