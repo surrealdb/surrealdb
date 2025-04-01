@@ -80,9 +80,9 @@ impl From<&str> for Path {
 	}
 }
 
-impl Into<Value> for Path {
-	fn into(self) -> Value {
-		Value::from(self.0)
+impl From<Path> for Value {
+	fn from(val: Path) -> Self {
+		Value::from(val.0)
 	}
 }
 
@@ -128,7 +128,7 @@ impl Hash for Path {
 
 impl PartialOrd for Path {
 	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-		self.0.partial_cmp(&other.0)
+		Some(self.cmp(other))
 	}
 }
 

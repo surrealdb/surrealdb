@@ -14,12 +14,12 @@ pub struct ObjectMeta {
 	pub path: Path,
 }
 
-impl Into<Value> for ObjectMeta {
-	fn into(self) -> Value {
+impl From<ObjectMeta> for Value {
+	fn from(val: ObjectMeta) -> Self {
 		Value::from(map! {
-			"updated" => Value::from(self.updated),
-			"path" => self.path.into(),
-			"size" => Value::from(self.size),
+			"updated" => Value::from(val.updated),
+			"path" => val.path.into(),
+			"size" => Value::from(val.size),
 		})
 	}
 }

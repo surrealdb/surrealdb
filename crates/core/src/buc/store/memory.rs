@@ -46,7 +46,7 @@ impl MemoryStore {
 			return false;
 		};
 
-		return url.scheme() == "memory";
+		url.scheme() == "memory"
 	}
 }
 
@@ -82,9 +82,7 @@ impl ObjectStore for MemoryStore {
 			let mut store =
 				self.store.write().map_err(|_| "Failed to lock object store".to_string())?;
 
-			if !store.contains_key(&path) {
-				store.insert(path, data.into());
-			}
+			store.entry(path).or_insert_with(|| data.into());
 
 			Ok(())
 		})

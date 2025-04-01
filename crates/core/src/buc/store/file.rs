@@ -111,7 +111,7 @@ impl FileStore {
 }
 
 /// Check if a path is allowed according to the allowlist
-fn is_path_allowed(path: &PathBuf) -> bool {
+fn is_path_allowed(path: &std::path::Path) -> bool {
 	// If the allowlist is empty, nothing is allowed
 	if FILE_ALLOWLIST.is_empty() {
 		return false;
