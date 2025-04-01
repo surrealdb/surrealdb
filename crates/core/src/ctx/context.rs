@@ -12,6 +12,7 @@ use crate::kvs::cache::ds::DatastoreCache;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
+use crate::mem::ALLOC;
 use crate::sql::value::Value;
 use async_channel::Sender;
 use std::borrow::Cow;
@@ -352,38 +353,43 @@ impl MutableContext {
 
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
-	/// Note regarding `check_deadline`:
+	/// Note regarding `deep_check`:
 	/// Checking Instant::now() takes tens to hundreds of nanoseconds
 	/// Checking an AtomicBool takes a single-digit nanoseconds.
 	/// We may not want to check for the deadline on every call.
-	/// An iteration loop may want to check it every 10 or 100 calls. Eg.:
-	/// ctx.done(count % 100 == 0)
-	pub(crate) fn done(&self, check_deadline: bool) -> Option<Reason> {
+	/// An iteration loop may want to check it every 10 or 100 calls.
+	/// Eg.: ctx.done(count % 100 == 0)
+	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>, Error> {
 		match self.deadline {
-			Some(deadline) if check_deadline && deadline <= Instant::now() => {
-				Some(Reason::Timedout)
+			Some(deadline) if deep_check && deadline <= Instant::now() => {
+				Ok(Some(Reason::Timedout))
 			}
-			_ if self.cancelled.load(Ordering::Relaxed) => Some(Reason::Canceled),
-			_ => match &self.parent {
-				Some(ctx) => ctx.done(check_deadline),
-				_ => None,
-			},
+			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(Reason::Canceled)),
+			_ => {
+				if deep_check && ALLOC.is_beyond_threshold() {
+					return Err(Error::QueryBeyondMemoryThreshold);
+				}
+				match &self.parent {
+					Some(ctx) => ctx.done(deep_check),
+					_ => Ok(None),
+				}
+			}
 		}
 	}
 
 	/// Check if the context is ok to continue.
-	pub(crate) fn is_ok(&self, check_deadline: bool) -> bool {
-		self.done(check_deadline).is_none()
+	pub(crate) fn is_ok(&self, deep_check: bool) -> Result<bool, Error> {
+		Ok(self.done(deep_check)?.is_none())
 	}
 
 	/// Check if the context is not ok to continue.
-	pub(crate) fn is_done(&self, check_deadline: bool) -> bool {
-		self.done(check_deadline).is_some()
+	pub(crate) fn is_done(&self, deep_check: bool) -> Result<bool, Error> {
+		Ok(self.done(deep_check)?.is_some())
 	}
 
 	/// Check if the context is not ok to continue, because it timed out.
-	pub(crate) fn is_timedout(&self) -> bool {
-		matches!(self.done(true), Some(Reason::Timedout))
+	pub(crate) fn is_timedout(&self) -> Result<bool, Error> {
+		Ok(matches!(self.done(true)?, Some(Reason::Timedout)))
 	}
 
 	#[cfg(storage)]
