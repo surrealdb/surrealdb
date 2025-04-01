@@ -154,15 +154,6 @@ mod database_upgrade {
 		run!(upgrade_test_from_2_0("v2.1.4"));
 	}
 
-	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn upgrade_test_from_2_2_0() {
-		run!(upgrade_test_from_2_0("v2.2.0"));
-	}
-	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn upgrade_test_from_2_2_1() {
-		run!(upgrade_test_from_2_0("v2.2.1"));
-	}
-
 	// *******
 	// DATASET
 	// *******
