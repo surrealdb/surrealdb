@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
-use crate::sql::Object;
+use crate::sql::{FlowResultExt as _, Object};
 use reblessive::tree::Stk;
 
 impl Value {
@@ -114,7 +114,7 @@ impl Value {
 					_ => return Ok(()),
 				},
 				Part::Value(x) => {
-					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await?;
+					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 
 					match place {
 						Value::Object(obj) => {
@@ -216,7 +216,11 @@ impl Value {
 						// Store the elements and positions to update
 						for (i, o) in arr.iter_mut().enumerate() {
 							let cur = o.clone().into();
-							if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
+							if w.compute(stk, ctx, opt, Some(&cur))
+								.await
+								.catch_return()?
+								.is_truthy()
+							{
 								a.push(o.clone());
 								p.push(i);
 							}
@@ -233,7 +237,11 @@ impl Value {
 					} else {
 						for v in arr.iter_mut() {
 							let cur = v.clone().into();
-							if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
+							if w.compute(stk, ctx, opt, Some(&cur))
+								.await
+								.catch_return()?
+								.is_truthy()
+							{
 								stk.run(|stk| v.set(stk, ctx, opt, iter.as_slice(), val.clone()))
 									.await?;
 							}
@@ -264,7 +272,7 @@ impl Value {
 				Part::Field(f) => f.0.clone(),
 				Part::Index(i) => i.to_string(),
 				Part::Value(x) => {
-					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await?;
+					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
 						Value::Strand(x) => x.0,
 						Value::Thing(x) => x.to_raw(),

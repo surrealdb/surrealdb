@@ -3,6 +3,7 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
+use crate::sql::FlowResultExt as _;
 use crate::sql::{
 	order::{OldOrders, Order, OrderList, Ordering},
 	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
@@ -127,7 +128,7 @@ impl SelectStatement {
 		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, &ctx, &opt, doc).await?;
+			let v = w.compute(stk, &ctx, &opt, doc).await.catch_return()?;
 			i.prepare(stk, &mut planner, &stm_ctx, v).await?;
 		}
 		// Attach the query planner to the context
@@ -135,7 +136,7 @@ impl SelectStatement {
 		// Process the statement
 		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
-		if ctx.is_timedout() {
+		if ctx.is_timedout()? {
 			return Err(Error::QueryTimedout);
 		}
 		// Output the results

@@ -4,7 +4,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{pretty_indent, Fmt};
-use crate::sql::{Base, Object, Strand, Value};
+use crate::sql::{Base, FlowResultExt as _, Object, Strand, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -53,8 +53,14 @@ impl DefineApiStatement {
 			}
 		}
 		// Process the statement
-		let path: Path =
-			self.path.compute(stk, ctx, opt, doc).await?.coerce_to_string()?.parse()?;
+		let path: Path = self
+			.path
+			.compute(stk, ctx, opt, doc)
+			.await
+			// Might be correct to not catch here.
+			.catch_return()?
+			.coerce_to_string()?
+			.parse()?;
 		let name = path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);
 		txn.get_or_add_ns(ns, opt.strict).await?;

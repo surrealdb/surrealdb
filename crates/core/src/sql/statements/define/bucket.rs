@@ -3,7 +3,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Ident, Permissions, Strand, Value};
+use crate::sql::{Base, FlowResultExt, Ident, Permissions, Strand, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -55,7 +55,7 @@ impl DefineBucketStatement {
 		}
 		// Process the backend input
 		let backend = if let Some(ref url) = self.backend {
-			Some(url.compute(stk, ctx, opt, doc).await?.coerce_to_string()?)
+			Some(url.compute(stk, ctx, opt, doc).await.catch_return()?.coerce_to_string()?)
 		} else {
 			None
 		};

@@ -1,9 +1,9 @@
-use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::fetch::Fetchs;
 use crate::sql::value::Value;
+use crate::sql::ControlFlow;
+use crate::{ctx::Context, sql::FlowResult};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -31,7 +31,7 @@ impl OutputStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		// Ensure futures are processed
 		let opt = &opt.new_with_futures(true);
 		// Process the output value
@@ -47,9 +47,7 @@ impl OutputStatement {
 			}
 		}
 		//
-		Err(Error::Return {
-			value,
-		})
+		Err(ControlFlow::Return(value))
 	}
 }
 

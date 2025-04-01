@@ -4,8 +4,8 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	sql::{
-		permission::PermissionKind, statements::define::BucketDefinition, Bytes, File, Permission,
-		Value,
+		permission::PermissionKind, statements::define::BucketDefinition, Bytes, File,
+		FlowResultExt, Permission, Value,
 	},
 };
 use reblessive::tree::Stk;
@@ -230,7 +230,7 @@ impl<'a> FileController<'a> {
 					let ctx = ctx.freeze();
 
 					// Process the PERMISSION clause
-					if !e.compute(self.stk, &ctx, opt, self.doc).await?.is_truthy() {
+					if !e.compute(self.stk, &ctx, opt, self.doc).await.catch_return()?.is_truthy() {
 						return Err(Error::BucketPermissions {
 							name: self.bucket.name.to_raw(),
 							kind,

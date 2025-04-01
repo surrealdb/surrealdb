@@ -1,4 +1,4 @@
-use super::Range;
+use super::{FlowResultExt as _, Range};
 use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -252,11 +252,11 @@ impl Id {
 			Id::Number(v) => Ok(Id::Number(*v)),
 			Id::String(v) => Ok(Id::String(v.clone())),
 			Id::Uuid(v) => Ok(Id::Uuid(*v)),
-			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await? {
+			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
 				Value::Array(v) => Ok(Id::Array(v)),
 				v => Err(fail!("Expected a Value::Array but found {v:?}")),
 			},
-			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await? {
+			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
 				Value::Object(v) => Ok(Id::Object(v)),
 				v => Err(fail!("Expected a Value::Object but found {v:?}")),
 			},
