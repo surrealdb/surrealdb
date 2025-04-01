@@ -480,7 +480,7 @@ impl IndexUnionThingIterator {
 		limit: u32,
 	) -> Result<B, Error> {
 		while let Some(r) = &mut self.current {
-			if ctx.is_done() {
+			if ctx.is_done(true)? {
 				break;
 			}
 			let records: B =
@@ -531,7 +531,7 @@ impl JoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<bool, Error> {
-		while !ctx.is_done() {
+		while !ctx.is_done(true)? {
 			if let Some(it) = &mut self.current_remote {
 				self.current_remote_batch = it.next_batch(ctx, tx, limit).await?;
 				if !self.current_remote_batch.is_empty() {
@@ -556,14 +556,19 @@ impl JoinThingIterator {
 	where
 		F: Fn(&str, &str, &DefineIndexStatement, Value) -> ThingIterator,
 	{
-		while !ctx.is_done() {
+		while !ctx.is_done(true)? {
+			let mut count = 0;
 			while let Some((thing, _, _)) = self.current_remote_batch.pop_front() {
+				if ctx.is_done(count % 100 == 0)? {
+					break;
+				}
 				let k: Key = thing.as_ref().into();
 				let value = Value::from(thing.as_ref().clone());
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local = Some(new_iter(&self.ns, &self.db, &self.ix, value));
 					return Ok(true);
 				}
+				count += 1;
 			}
 			if !self.next_current_remote_batch(ctx, tx, limit).await? {
 				break;
@@ -582,7 +587,7 @@ impl JoinThingIterator {
 	where
 		F: Fn(&str, &str, &DefineIndexStatement, Value) -> ThingIterator + Copy,
 	{
-		while !ctx.is_done() {
+		while !ctx.is_done(true)? {
 			if let Some(current_local) = &mut self.current_local {
 				let records: B = current_local.next_batch(ctx, tx, limit).await?;
 				if !records.is_empty() {
@@ -804,11 +809,13 @@ impl UniqueUnionThingIterator {
 	) -> Result<B, Error> {
 		let limit = limit as usize;
 		let mut results = B::with_capacity(limit.min(self.keys.len()));
+		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
-			if ctx.is_done() {
+			if ctx.is_done(count % 100 == 0)? {
 				break;
 			}
 			if let Some(val) = tx.get(key, None).await? {
+				count += 1;
 				let rid: Thing = val.into();
 				results.add((rid.into(), self.irf.into(), None));
 				if results.len() >= limit {
@@ -880,7 +887,7 @@ impl MatchesThingIterator {
 		if let Some(hits) = &mut self.hits {
 			let limit = limit as usize;
 			let mut records = B::with_capacity(limit.min(self.hits_left));
-			while limit > records.len() && !ctx.is_done() {
+			while limit > records.len() && !ctx.is_done(self.hits_left % 100 == 0)? {
 				if let Some((thg, doc_id)) = hits.next(tx).await? {
 					let ir = IteratorRecord {
 						irf: self.irf,
@@ -921,7 +928,7 @@ impl KnnIterator {
 	) -> Result<B, Error> {
 		let limit = limit as usize;
 		let mut records = B::with_capacity(limit.min(self.res.len()));
-		while limit > records.len() && !ctx.is_done() {
+		while limit > records.len() && !ctx.is_done(records.len() % 100 == 0)? {
 			if let Some((thing, dist, val)) = self.res.pop_front() {
 				let ir = IteratorRecord {
 					irf: self.irf,
