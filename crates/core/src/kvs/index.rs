@@ -10,6 +10,7 @@ use crate::key::thing;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::mem::ALLOC;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Object, Thing, Value};
 use dashmap::mapref::entry::Entry;
@@ -293,7 +294,7 @@ impl Building {
 	async fn compute(&self) -> Result<(), Error> {
 		// Set the initial status
 		self.set_status(BuildingStatus::InitialIndexing(0)).await;
-		// First iteration, we index every keys
+		// First iteration, we index every key
 		let ns = self.opt.ns()?;
 		let db = self.opt.db()?;
 		let beg = thing::prefix(ns, db, &self.tb);
@@ -301,6 +302,7 @@ impl Building {
 		let mut next = Some(beg..end);
 		let mut count = 0;
 		while let Some(rng) = next {
+			self.is_beyond_threshold(None)?;
 			// Get the next batch of records
 			let tx = self.new_read_tx().await?;
 			let batch = catch!(tx, tx.batch(rng, *INDEXING_BATCH_SIZE, true, None).await);
@@ -313,7 +315,7 @@ impl Building {
 				// If not, we are with the initial indexing
 				break;
 			}
-			// Create a new context with a write transaction
+			// Create a new context with a "write" transaction
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
 			// Index the batch
@@ -323,6 +325,7 @@ impl Building {
 		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
 		self.set_status(BuildingStatus::UpdatesIndexing(0)).await;
 		loop {
+			self.is_beyond_threshold(None)?;
 			let mut queue = self.queue.lock().await;
 			if queue.is_empty() {
 				// If the batch is empty, we are done.
@@ -358,6 +361,7 @@ impl Building {
 		let mut stack = TreeStack::new();
 		// Index the records
 		for (k, v) in values.into_iter() {
+			self.is_beyond_threshold(Some(*count))?;
 			let key: thing::Thing = (&k).into();
 			// Parse the value
 			let val: Value = (&v).into();
@@ -407,6 +411,7 @@ impl Building {
 	) -> Result<(), Error> {
 		let mut stack = TreeStack::new();
 		for i in range {
+			self.is_beyond_threshold(Some(*count))?;
 			let ia = self.new_ia_key(i)?;
 			if let Some(v) = tx.get(ia.clone(), None).await? {
 				tx.del(ia).await?;
@@ -425,5 +430,18 @@ impl Building {
 			}
 		}
 		Ok(())
+	}
+
+	fn is_beyond_threshold(&self, count: Option<usize>) -> Result<(), Error> {
+		if let Some(count) = count {
+			if count % 100 != 0 {
+				return Ok(());
+			}
+		}
+		if ALLOC.is_beyond_threshold() {
+			Err(Error::QueryBeyondMemoryThreshold)
+		} else {
+			Ok(())
+		}
 	}
 }

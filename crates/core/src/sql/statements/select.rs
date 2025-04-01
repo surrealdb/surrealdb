@@ -203,7 +203,7 @@ impl SelectStatement {
 		// Process the statement
 		let res = i.output(stk, &ctx, &opt, &stm).await?;
 		// Catch statement timeout
-		if ctx.is_timedout() {
+		if ctx.is_timedout()? {
 			return Err(Error::QueryTimedout);
 		}
 		// Output the results

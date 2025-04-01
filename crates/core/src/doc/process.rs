@@ -23,7 +23,7 @@ impl Document {
 		// Loop over maximum two times
 		for _ in 0..2 {
 			// Check current context
-			if ctx.is_done() {
+			if ctx.is_done(true)? {
 				// Don't process the document
 				return Err(Error::Ignore);
 			}
