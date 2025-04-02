@@ -162,6 +162,7 @@ keyword! {
 	Rebuild => "REBUILD",
 	Reference => "REFERENCE",
 	Refresh => "REFRESH",
+	Regex => "REGEX",
 	Relate => "RELATE",
 	Relation => "RELATION",
 	Remove => "REMOVE",

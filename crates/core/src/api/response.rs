@@ -48,7 +48,7 @@ impl TryFrom<Value> for ApiResponse {
 
 			let body = opts.remove("body");
 
-			if opts.len() > 0 {
+			if !opts.is_empty() {
 				Err(ApiError::InvalidApiResponse("Contains invalid properties".into()).into())
 			} else {
 				Ok(Self {

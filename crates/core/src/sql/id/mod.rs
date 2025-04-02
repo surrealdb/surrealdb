@@ -1,10 +1,10 @@
-use super::Range;
+use super::{FlowResultExt as _, Range};
 use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{escape::escape_rid, Array, Number, Object, Strand, Thing, Uuid, Value};
+use crate::sql::{escape::EscapeRid, Array, Number, Object, Strand, Thing, Uuid, Value};
 use nanoid::nanoid;
 use range::IdRange;
 use reblessive::tree::Stk;
@@ -225,7 +225,7 @@ impl Display for Id {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
-			Self::String(v) => Display::fmt(&escape_rid(v), f),
+			Self::String(v) => EscapeRid(v).fmt(f),
 			Self::Uuid(v) => Display::fmt(v, f),
 			Self::Array(v) => Display::fmt(v, f),
 			Self::Object(v) => Display::fmt(v, f),
@@ -252,11 +252,11 @@ impl Id {
 			Id::Number(v) => Ok(Id::Number(*v)),
 			Id::String(v) => Ok(Id::String(v.clone())),
 			Id::Uuid(v) => Ok(Id::Uuid(*v)),
-			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await? {
+			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
 				Value::Array(v) => Ok(Id::Array(v)),
 				v => Err(fail!("Expected a Value::Array but found {v:?}")),
 			},
-			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await? {
+			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
 				Value::Object(v) => Ok(Id::Object(v)),
 				v => Err(fail!("Expected a Value::Object but found {v:?}")),
 			},

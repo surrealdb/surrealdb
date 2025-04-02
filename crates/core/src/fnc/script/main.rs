@@ -1,3 +1,7 @@
+use std::cell::RefCell;
+use std::time::Duration;
+use std::time::Instant;
+
 use super::classes;
 use super::fetch;
 use super::globals;
@@ -34,6 +38,7 @@ pub unsafe fn create_query_data<'a>(
 		context,
 		opt,
 		doc,
+		pending: RefCell::new(None),
 	})
 	.expect("userdata shouldn't be in use");
 
@@ -48,9 +53,18 @@ pub async fn run(
 	arg: Vec<Value>,
 ) -> Result<Value, Error> {
 	// Check the context
-	if context.is_done(true) {
+	if context.is_done(true)? {
 		return Ok(Value::None);
 	}
+
+	// Scripting functions are pretty heavy so make the increase pretty heavy.
+	let opt = opt.dive(4)?;
+
+	//TODO: Maybe check memory usage?
+
+	let instant_start = Instant::now();
+	let time_limit = Duration::from_millis(*crate::cnf::SCRIPTING_MAX_TIME_LIMIT as u64);
+
 	// Create a JavaScript context
 	let run = js::AsyncRuntime::new().unwrap();
 	// Explicitly set max stack size to 256 KiB
@@ -59,7 +73,7 @@ pub async fn run(
 	run.set_memory_limit(*SCRIPTING_MAX_MEMORY_LIMIT).await;
 	// Ensure scripts are cancelled with context
 	let cancellation = context.cancellation();
-	let handler = Box::new(move || cancellation.is_done());
+	let handler = Box::new(move || cancellation.is_done() || instant_start.elapsed() > time_limit);
 	run.set_interrupt_handler(Some(handler)).await;
 	// Create an execution context
 	let ctx = js::AsyncContext::full(&run).await.unwrap();
@@ -76,7 +90,7 @@ pub async fn run(
 			let global = ctx.globals();
 			// SAFETY: This is safe because the runtime only lives for the duration of this
 			// function. For the entire duration of which context, opt, txn and doc are valid.
-			unsafe{ create_query_data(context, opt, doc, &ctx) }?;
+			unsafe{ create_query_data(context, &opt, doc, &ctx) }?;
 			// Register the fetch module as a global function
 			fetch::register(&ctx)?;
 			// Register the surrealdb module as a global object

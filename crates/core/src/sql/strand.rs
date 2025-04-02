@@ -1,5 +1,4 @@
 use crate::err::Error;
-use crate::sql::escape::quote_plain_str;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -7,6 +6,7 @@ use std::ops::Deref;
 use std::ops::{self};
 use std::str;
 
+use super::escape::QuoteStr;
 use super::value::TryAdd;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
@@ -19,17 +19,38 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 #[non_exhaustive]
 pub struct Strand(#[serde(with = "no_nul_bytes")] pub String);
 
-impl From<String> for Strand {
-	fn from(s: String) -> Self {
+impl Strand {
+	/// Create a new strand, returns None if the string contains a null byte.
+	pub fn new(s: String) -> Option<Strand> {
+		if s.contains('\0') {
+			None
+		} else {
+			Some(Strand(s))
+		}
+	}
+
+	/// Create a new strand, without checking the string.
+	///
+	/// # Safety
+	/// Caller must ensure that string handed as an argument does not contain any null bytes.
+	pub unsafe fn new_unchecked(s: String) -> Strand {
+		// Check in debug mode if the variants
 		debug_assert!(!s.contains('\0'));
 		Strand(s)
 	}
 }
 
+impl From<String> for Strand {
+	fn from(s: String) -> Self {
+		// TODO: For now, fix this in the future.
+		unsafe { Self::new_unchecked(s) }
+	}
+}
+
 impl From<&str> for Strand {
 	fn from(s: &str) -> Self {
-		debug_assert!(!s.contains('\0'));
-		Self::from(String::from(s))
+		// TODO: For now, fix this in the future.
+		unsafe { Self::new_unchecked(s.to_string()) }
 	}
 }
 
@@ -63,7 +84,7 @@ impl Strand {
 
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&quote_plain_str(&self.0), f)
+		QuoteStr(&self.0).fmt(f)
 	}
 }
 
@@ -102,7 +123,11 @@ pub(crate) mod no_nul_bytes {
 	where
 		S: Serializer,
 	{
-		debug_assert!(!s.contains('\0'));
+		if s.contains('\0') {
+			return Err(<S::Error as serde::ser::Error>::custom(
+				"to be serialized string contained a null byte",
+			));
+		}
 		serializer.serialize_str(s)
 	}
 

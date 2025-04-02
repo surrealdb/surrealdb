@@ -4,6 +4,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
+use crate::sql::FlowResultExt as _;
 use reblessive::tree::Stk;
 
 impl Document {
@@ -55,11 +56,11 @@ impl Document {
 			// Freeze the context
 			let ctx = ctx.freeze();
 			// Process conditional clause
-			let val = ev.when.compute(stk, &ctx, opt, Some(doc)).await?;
+			let val = ev.when.compute(stk, &ctx, opt, Some(doc)).await.catch_return()?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					v.compute(stk, &ctx, opt, Some(doc)).await?;
+					v.compute(stk, &ctx, opt, Some(doc)).await.catch_return()?;
 				}
 			}
 		}

@@ -46,10 +46,8 @@ impl Document {
 					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 						thing: rid.as_ref().to_owned(),
 					}),
-					// Return any other received error
-					Err(e) => Err(e),
-					// Record creation worked fine
-					Ok(v) => Ok(v),
+					// Return other values
+					x => x,
 				}
 			}
 			// This is a UPSERT statement so try to insert the key.
@@ -68,10 +66,8 @@ impl Document {
 					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 						thing: rid.as_ref().to_owned(),
 					}),
-					// Return any other received error
-					Err(e) => Err(e),
-					// Record creation worked fine
-					Ok(v) => Ok(v),
+					// Return other values
+					x => x,
 				}
 			}
 			// This is a CREATE statement so try to insert the key.
@@ -90,10 +86,7 @@ impl Document {
 					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
 						thing: rid.as_ref().to_owned(),
 					}),
-					// Return any other received error
-					Err(e) => Err(e),
-					// Record creation worked fine
-					Ok(v) => Ok(v),
+					x => x,
 				}
 			}
 			// Let's update the stored value for the specified key

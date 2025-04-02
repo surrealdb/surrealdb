@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
-	escape::escape_key,
+	escape::EscapeKey,
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
 	Operation, Thing, Value,
 };
@@ -16,6 +16,8 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
+
+use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 
@@ -272,13 +274,11 @@ impl Object {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		let mut x = BTreeMap::new();
 		for (k, v) in self.iter() {
-			match v.compute(stk, ctx, opt, doc).await {
-				Ok(v) => x.insert(k.clone(), v),
-				Err(e) => return Err(e),
-			};
+			let v = v.compute(stk, ctx, opt, doc).await?;
+			x.insert(k.clone(), v);
 		}
 		Ok(Value::Object(Object(x)))
 	}
@@ -311,7 +311,7 @@ impl Display for Object {
 					self.0.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
 						f,
 						"{}: {}",
-						escape_key(k),
+						EscapeKey(k),
 						v
 					))),
 				)

@@ -2,7 +2,7 @@ use super::Value;
 use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineAccessStatement;
-use crate::sql::{escape::quote_str, Algorithm};
+use crate::sql::{escape::QuoteStr, Algorithm};
 use revision::revisioned;
 use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};
@@ -168,14 +168,14 @@ impl Display for JwtAccess {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self.verify {
 			JwtAccessVerify::Key(ref v) => {
-				write!(f, "ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?;
+				write!(f, "ALGORITHM {} KEY {}", v.alg, QuoteStr(&v.key))?;
 			}
 			JwtAccessVerify::Jwks(ref v) => {
-				write!(f, "URL {}", quote_str(&v.url),)?;
+				write!(f, "URL {}", QuoteStr(&v.url),)?;
 			}
 		}
 		if let Some(iss) = &self.issue {
-			write!(f, " WITH ISSUER KEY {}", quote_str(&iss.key))?;
+			write!(f, " WITH ISSUER KEY {}", QuoteStr(&iss.key))?;
 		}
 		Ok(())
 	}
