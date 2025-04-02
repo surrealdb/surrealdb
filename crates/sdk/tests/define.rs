@@ -1248,7 +1248,7 @@ async fn permissions_checks_define_index() {
 
 #[tokio::test]
 async fn define_statement_sequence() -> Result<(), Error> {
-    let sql = r#"
+	let sql = r#"
 		DEFINE SEQUENCE seq1;
 		DEFINE SEQUENCE seq2 BATCH 100;
 		INFO FOR DB;
@@ -1256,12 +1256,12 @@ async fn define_statement_sequence() -> Result<(), Error> {
 		DEFINE SEQUENCE seq2 BATCH 150;
 		INFO FOR DB;
 	"#;
-    let mut t = Test::new(sql).await?;
-    t.expect_size(6)?;
-    t.skip_ok(4)?;
-    t.expect_error("The sequence 'seq2' already exists")?;
-    t.expect_val(
-        r#"{
+	let mut t = Test::new(sql).await?;
+	t.expect_size(6)?;
+	t.skip_ok(4)?;
+	t.expect_error("The sequence 'seq2' already exists")?;
+	t.expect_val(
+		r#"{
 			accesses: {},
 			analyzers: {},
 			apis: {},
@@ -1276,8 +1276,8 @@ async fn define_statement_sequence() -> Result<(), Error> {
 				seq2: 'DEFINE SEQUENCE seq2 BATCH 250'
 			}
 		}"#,
-    )?;
-    Ok(())
+	)?;
+	Ok(())
 }
 
 #[tokio::test]
