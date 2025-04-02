@@ -265,6 +265,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      
+      - name: Install ONNX Runtime (1.20.0)
+        run: |
+          wget https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-linux-x64-1.20.0.tgz
+          tar -xzf onnxruntime-linux-x64-1.20.0.tgz
+          sudo cp onnxruntime-linux-x64-1.20.0/lib/libonnxruntime.so.1.20.0 /usr/lib/
+          sudo ln -sf /usr/lib/libonnxruntime.so.1.20.0 /usr/lib/libonnxruntime.so
+          sudo ldconfig
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
