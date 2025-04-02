@@ -369,7 +369,7 @@ jobs:
               mkdir /tmp/onnxruntime
               curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-osx-x86_64-static_lib-${{ inputs.onnx_version }}.tgz | \
                 tar -xz -C /tmp/onnxruntime/
-              export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
+              # export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
               cargo build --features $features --release --locked --target x86_64-apple-darwin
 
@@ -396,7 +396,7 @@ jobs:
               mkdir /tmp/onnxruntime
               curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-osx-arm64-static_lib-${{ inputs.onnx_version }}.tgz | \
                 tar -xz -C /tmp/onnxruntime/
-              export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
+              # export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
               cargo build --features $features --release --locked --target aarch64-apple-darwin
 
@@ -418,7 +418,7 @@ jobs:
               tmpdir=$(mktemp -d)
               curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-linux-x64-static_lib-${{ inputs.onnx_version }}.tgz | \
                 tar -xz -C $tmpdir
-              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
+              # export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
               docker run \
                 --rm -t \
@@ -426,7 +426,7 @@ jobs:
                 -v $(pwd):/surrealdb \
                 -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
                 -e RUSTFLAGS="${RUSTFLAGS}" \
-                -e ORT_STRATEGY=$ORT_STRATEGY \
+                # -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
                 ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
@@ -456,7 +456,7 @@ jobs:
               tmpdir=$(mktemp -d)
               curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-linux-aarch64-static_lib-${{ inputs.onnx_version }}.tgz | \
                 tar -xz -C $tmpdir
-              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
+              # export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
               docker run \
                 --rm -t \
@@ -464,7 +464,7 @@ jobs:
                 -v $(pwd):/surrealdb \
                 -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
                 -e RUSTFLAGS="${RUSTFLAGS}" \
-                -e ORT_STRATEGY=$ORT_STRATEGY \
+                # -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
                 ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
@@ -497,7 +497,7 @@ jobs:
               tmp_dir=$(mktemp -d)
               curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-win-x64-static_lib-${{ inputs.onnx_version }}.zip -o $tmp_dir/onnxruntime.zip
               unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
-              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
+              # export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
 
               cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
 
