@@ -9,9 +9,9 @@ use crate::sql::Value;
 
 /// Path represents a normalized file path in the object store.
 #[derive(Clone, Debug)]
-pub struct Path(String);
+pub struct Key(String);
 
-impl Path {
+impl Key {
 	/// Create a new path, ensuring it starts with "/"
 	pub fn new(path: impl Into<String>) -> Self {
 		let path_str = path.into();
@@ -24,7 +24,7 @@ impl Path {
 	}
 
 	/// Join this path with another, returning a new Path
-	pub fn join(&self, right: &Path) -> Self {
+	pub fn join(&self, right: &Key) -> Self {
 		let mut path = self.0.clone();
 		if path.ends_with('/') {
 			path.pop();
@@ -68,25 +68,25 @@ impl Path {
 	}
 }
 
-impl From<String> for Path {
+impl From<String> for Key {
 	fn from(value: String) -> Self {
-		Path::new(value)
+		Key::new(value)
 	}
 }
 
-impl From<&str> for Path {
+impl From<&str> for Key {
 	fn from(value: &str) -> Self {
-		Path::new(value)
+		Key::new(value)
 	}
 }
 
-impl From<Path> for Value {
-	fn from(val: Path) -> Self {
+impl From<Key> for Value {
+	fn from(val: Key) -> Self {
 		Value::from(val.0)
 	}
 }
 
-impl Deref for Path {
+impl Deref for Key {
 	type Target = str;
 
 	fn deref(&self) -> &Self::Target {
@@ -94,45 +94,45 @@ impl Deref for Path {
 	}
 }
 
-impl fmt::Display for Path {
+impl fmt::Display for Key {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "{}", self.0)
 	}
 }
 
-impl AsRef<str> for Path {
+impl AsRef<str> for Key {
 	fn as_ref(&self) -> &str {
 		self.as_str()
 	}
 }
 
-impl Borrow<str> for Path {
+impl Borrow<str> for Key {
 	fn borrow(&self) -> &str {
 		self.as_str()
 	}
 }
 
-impl PartialEq for Path {
+impl PartialEq for Key {
 	fn eq(&self, other: &Self) -> bool {
 		self.0 == other.0
 	}
 }
 
-impl Eq for Path {}
+impl Eq for Key {}
 
-impl Hash for Path {
+impl Hash for Key {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		self.0.hash(state)
 	}
 }
 
-impl PartialOrd for Path {
+impl PartialOrd for Key {
 	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
 		Some(self.cmp(other))
 	}
 }
 
-impl Ord for Path {
+impl Ord for Key {
 	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
 		self.0.cmp(&other.0)
 	}

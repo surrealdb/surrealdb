@@ -11,12 +11,12 @@ use url::Url;
 
 use crate::{cnf::FILE_ALLOWLIST, err::Error, sql::Datetime};
 
-use super::{ObjectMeta, ObjectStore, Path};
+use super::{Key, ObjectMeta, ObjectStore};
 
 /// Options for configuring the FileStore
 #[derive(Clone, Debug)]
 pub struct FileStoreOptions {
-	root: Path,
+	root: Key,
 }
 
 /// A store implementation that uses the local filesystem
@@ -55,7 +55,7 @@ impl FileStore {
 		}
 
 		Ok(Some(FileStoreOptions {
-			root: Path::from(path.to_string()),
+			root: Key::from(path.to_string()),
 		}))
 	}
 
@@ -67,7 +67,7 @@ impl FileStore {
 	}
 
 	/// Convert a Path to an OsPath, checking against the allowlist
-	fn to_os_path(&self, path: &Path) -> Result<PathBuf, String> {
+	fn to_os_path(&self, path: &Key) -> Result<PathBuf, String> {
 		let root = PathBuf::from(self.options.root.as_str());
 		let relative_path = path.as_str().trim_start_matches('/');
 		let full_path = root.join(relative_path);
@@ -138,17 +138,17 @@ fn is_path_allowed(path: &std::path::Path) -> bool {
 }
 
 impl ObjectStore for FileStore {
-	fn prefix(&self) -> Option<Path> {
+	fn prefix(&self) -> Option<Key> {
 		Some(self.options.root.clone())
 	}
 
 	fn put<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 		data: Bytes,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			let os_path = self.to_os_path(path)?;
+			let os_path = self.to_os_path(key)?;
 			Self::ensure_parent_dirs(&os_path).await?;
 
 			let mut file = File::create(&os_path)
@@ -165,11 +165,11 @@ impl ObjectStore for FileStore {
 
 	fn put_if_not_exists<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 		data: Bytes,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			let os_path = self.to_os_path(path)?;
+			let os_path = self.to_os_path(key)?;
 
 			// Check if the file already exists
 			if Self::path_exists(&os_path).await? {
@@ -192,10 +192,10 @@ impl ObjectStore for FileStore {
 
 	fn get<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>, String>> + Send + 'a>> {
 		Box::pin(async move {
-			let os_path = self.to_os_path(path)?;
+			let os_path = self.to_os_path(key)?;
 
 			// Check if the file exists
 			if !Self::path_exists(&os_path).await? {
@@ -212,10 +212,10 @@ impl ObjectStore for FileStore {
 
 	fn head<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectMeta>, String>> + Send + 'a>> {
 		Box::pin(async move {
-			let os_path = self.to_os_path(path)?;
+			let os_path = self.to_os_path(key)?;
 
 			// Check if the file exists
 			if !Self::path_exists(&os_path).await? {
@@ -234,17 +234,17 @@ impl ObjectStore for FileStore {
 			Ok(Some(ObjectMeta {
 				size,
 				updated,
-				path: path.to_owned(),
+				key: key.to_owned(),
 			}))
 		})
 	}
 
 	fn delete<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			let os_path = self.to_os_path(path)?;
+			let os_path = self.to_os_path(key)?;
 
 			// Check if the file exists
 			if !Self::path_exists(&os_path).await? {
@@ -261,32 +261,32 @@ impl ObjectStore for FileStore {
 
 	fn exists<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>> {
 		Box::pin(async move {
-			let os_path = self.to_os_path(path)?;
+			let os_path = self.to_os_path(key)?;
 			Self::path_exists(&os_path).await
 		})
 	}
 
 	fn copy<'a>(
 		&'a self,
-		path: &'a Path,
-		target: &'a Path,
+		key: &'a Key,
+		target: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			let source_path = self.to_os_path(path)?;
-			let target_path = self.to_os_path(target)?;
+			let source_key = self.to_os_path(key)?;
+			let target_key = self.to_os_path(target)?;
 
 			// Check if the source file exists
-			if !Self::path_exists(&source_path).await? {
+			if !Self::path_exists(&source_key).await? {
 				// Silently ignore operations on non-existent source files
 				return Ok(());
 			}
 
-			Self::ensure_parent_dirs(&target_path).await?;
+			Self::ensure_parent_dirs(&target_key).await?;
 
-			tokio::fs::copy(&source_path, &target_path)
+			tokio::fs::copy(&source_key, &target_key)
 				.await
 				.map_err(|e| format!("Failed to copy file: {}", e))?;
 
@@ -296,27 +296,27 @@ impl ObjectStore for FileStore {
 
 	fn copy_if_not_exists<'a>(
 		&'a self,
-		path: &'a Path,
-		target: &'a Path,
+		key: &'a Key,
+		target: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			let source_path = self.to_os_path(path)?;
-			let target_path = self.to_os_path(target)?;
+			let source_key = self.to_os_path(key)?;
+			let target_key = self.to_os_path(target)?;
 
 			// Check if target already exists
-			if Self::path_exists(&target_path).await? {
+			if Self::path_exists(&target_key).await? {
 				return Ok(());
 			}
 
 			// Check if the source file exists
-			if !Self::path_exists(&source_path).await? {
+			if !Self::path_exists(&source_key).await? {
 				// Silently ignore operations on non-existent source files
 				return Ok(());
 			}
 
-			Self::ensure_parent_dirs(&target_path).await?;
+			Self::ensure_parent_dirs(&target_key).await?;
 
-			tokio::fs::copy(&source_path, &target_path)
+			tokio::fs::copy(&source_key, &target_key)
 				.await
 				.map_err(|e| format!("Failed to copy file: {}", e))?;
 
@@ -326,21 +326,21 @@ impl ObjectStore for FileStore {
 
 	fn rename<'a>(
 		&'a self,
-		path: &'a Path,
-		target: &'a Path,
+		key: &'a Key,
+		target: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			let source_path = self.to_os_path(path)?;
-			let target_path = self.to_os_path(target)?;
+			let source_key = self.to_os_path(key)?;
+			let target_key = self.to_os_path(target)?;
 
 			// Check if the source file exists
-			if !Self::path_exists(&source_path).await? {
-				return Err(format!("Source file does not exist: {}", source_path.display()));
+			if !Self::path_exists(&source_key).await? {
+				return Err(format!("Source file does not exist: {}", source_key.display()));
 			}
 
-			Self::ensure_parent_dirs(&target_path).await?;
+			Self::ensure_parent_dirs(&target_key).await?;
 
-			tokio::fs::rename(&source_path, &target_path)
+			tokio::fs::rename(&source_key, &target_key)
 				.await
 				.map_err(|e| format!("Failed to rename file: {}", e))?;
 
@@ -350,26 +350,26 @@ impl ObjectStore for FileStore {
 
 	fn rename_if_not_exists<'a>(
 		&'a self,
-		path: &'a Path,
-		target: &'a Path,
+		key: &'a Key,
+		target: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			let source_path = self.to_os_path(path)?;
-			let target_path = self.to_os_path(target)?;
+			let source_key = self.to_os_path(key)?;
+			let target_key = self.to_os_path(target)?;
 
 			// Check if target already exists
-			if Self::path_exists(&target_path).await? {
+			if Self::path_exists(&target_key).await? {
 				return Ok(());
 			}
 
 			// Check if the source file exists
-			if !Self::path_exists(&source_path).await? {
-				return Err(format!("Source file does not exist: {}", source_path.display()));
+			if !Self::path_exists(&source_key).await? {
+				return Err(format!("Source file does not exist: {}", source_key.display()));
 			}
 
-			Self::ensure_parent_dirs(&target_path).await?;
+			Self::ensure_parent_dirs(&target_key).await?;
 
-			tokio::fs::rename(&source_path, &target_path)
+			tokio::fs::rename(&source_key, &target_key)
 				.await
 				.map_err(|e| format!("Failed to rename file: {}", e))?;
 

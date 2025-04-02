@@ -5,7 +5,7 @@ use crate::{
 use dashmap::DashMap;
 use std::sync::Arc;
 
-use super::store::{prefixed::PrefixedStore, ObjectStore, Path};
+use super::store::{prefixed::PrefixedStore, Key, ObjectStore};
 
 // Helper type to represent how bucket connections are persisted
 pub type BucketConnections = DashMap<(String, String, String), Arc<dyn ObjectStore>>;
@@ -23,7 +23,7 @@ pub fn connect_global(ns: &str, db: &str, bu: &str) -> Result<Arc<dyn ObjectStor
 	let global = connect(url, true, false)?;
 
 	// Create a prefixstore for the specified bucket
-	let key = Path::from(format!("/{ns}/{db}/{bu}"));
+	let key = Key::from(format!("/{ns}/{db}/{bu}"));
 	Ok(Arc::new(PrefixedStore::new(global, key)))
 }
 

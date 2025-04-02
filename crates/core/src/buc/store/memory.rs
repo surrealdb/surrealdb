@@ -10,7 +10,7 @@ use url::Url;
 
 use crate::sql::Datetime;
 
-use super::{ObjectMeta, ObjectStore, Path};
+use super::{Key, ObjectMeta, ObjectStore};
 
 #[derive(Clone, Debug, Default)]
 pub struct Entry {
@@ -29,7 +29,7 @@ impl From<Bytes> for Entry {
 
 #[derive(Clone, Debug, Default)]
 pub struct MemoryStore {
-	store: Arc<RwLock<BTreeMap<Path, Entry>>>,
+	store: Arc<RwLock<BTreeMap<Key, Entry>>>,
 }
 
 impl MemoryStore {
@@ -51,38 +51,34 @@ impl MemoryStore {
 }
 
 impl ObjectStore for MemoryStore {
-	fn prefix(&self) -> Option<Path> {
+	fn prefix(&self) -> Option<Key> {
 		None
 	}
 
 	fn put<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 		data: Bytes,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
-		let path = path.clone();
-
 		Box::pin(async move {
 			let mut store =
 				self.store.write().map_err(|_| "Failed to lock object store".to_string())?;
 
-			store.insert(path, data.into());
+			store.insert(key.clone(), data.into());
 			Ok(())
 		})
 	}
 
 	fn put_if_not_exists<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 		data: Bytes,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
-		let path = path.clone();
-
 		Box::pin(async move {
 			let mut store =
 				self.store.write().map_err(|_| "Failed to lock object store".to_string())?;
 
-			store.entry(path).or_insert_with(|| data.into());
+			store.entry(key.clone()).or_insert_with(|| data.into());
 
 			Ok(())
 		})
@@ -90,30 +86,26 @@ impl ObjectStore for MemoryStore {
 
 	fn get<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>, String>> + Send + 'a>> {
-		let path = path.clone();
-
 		Box::pin(async move {
 			let store = self.store.read().map_err(|_| "Failed to lock object store".to_string())?;
-			let data = store.get(&path).map(|v| v.bytes.clone());
+			let data = store.get(key).map(|v| v.bytes.clone());
 			Ok(data)
 		})
 	}
 
 	fn head<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectMeta>, String>> + Send + 'a>> {
-		let path = path.clone();
-
 		Box::pin(async move {
 			let store = self.store.read().map_err(|_| "Failed to lock object store".to_string())?;
 
-			let data = store.get(&path).map(|v| ObjectMeta {
+			let data = store.get(key).map(|v| ObjectMeta {
 				size: v.bytes.len() as u64,
 				updated: v.updated.clone(),
-				path: path.to_owned(),
+				key: key.to_owned(),
 			});
 
 			Ok(data)
@@ -122,47 +114,40 @@ impl ObjectStore for MemoryStore {
 
 	fn delete<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
-		let path = path.clone();
-
 		Box::pin(async move {
 			let mut store =
 				self.store.write().map_err(|_| "Failed to lock object store".to_string())?;
 
-			store.remove(&path);
+			store.remove(key);
 			Ok(())
 		})
 	}
 
 	fn exists<'a>(
 		&'a self,
-		path: &'a Path,
+		key: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>> {
-		let path = path.clone();
-
 		Box::pin(async move {
 			let store = self.store.read().map_err(|_| "Failed to lock object store".to_string())?;
-			let exists = store.contains_key(&path);
+			let exists = store.contains_key(key);
 			Ok(exists)
 		})
 	}
 
 	fn copy<'a>(
 		&'a self,
-		path: &'a Path,
-		target: &'a Path,
+		key: &'a Key,
+		target: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
-		let path = path.clone();
-		let target = target.clone();
-
 		Box::pin(async move {
 			let mut store =
 				self.store.write().map_err(|_| "Failed to lock object store".to_string())?;
 
-			if let Some(x) = store.get(&path) {
+			if let Some(x) = store.get(key) {
 				let data = x.clone();
-				store.insert(target, data);
+				store.insert(target.clone(), data);
 			}
 
 			Ok(())
@@ -171,20 +156,17 @@ impl ObjectStore for MemoryStore {
 
 	fn copy_if_not_exists<'a>(
 		&'a self,
-		path: &'a Path,
-		target: &'a Path,
+		key: &'a Key,
+		target: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
-		let path = path.clone();
-		let target = target.clone();
-
 		Box::pin(async move {
 			let mut store =
 				self.store.write().map_err(|_| "Failed to lock object store".to_string())?;
 
-			if !store.contains_key(&target) {
-				if let Some(x) = store.get(&path) {
+			if !store.contains_key(target) {
+				if let Some(x) = store.get(key) {
 					let data = x.clone();
-					store.insert(target, data);
+					store.insert(target.clone(), data);
 				}
 			}
 
@@ -194,18 +176,15 @@ impl ObjectStore for MemoryStore {
 
 	fn rename<'a>(
 		&'a self,
-		path: &'a Path,
-		target: &'a Path,
+		key: &'a Key,
+		target: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
-		let path = path.clone();
-		let target = target.clone();
-
 		Box::pin(async move {
 			let mut store =
 				self.store.write().map_err(|_| "Failed to lock object store".to_string())?;
 
-			if let Some(data) = store.remove(&path) {
-				store.insert(target, data);
+			if let Some(data) = store.remove(key) {
+				store.insert(target.clone(), data);
 			}
 
 			Ok(())
@@ -214,19 +193,16 @@ impl ObjectStore for MemoryStore {
 
 	fn rename_if_not_exists<'a>(
 		&'a self,
-		path: &'a Path,
-		target: &'a Path,
+		key: &'a Key,
+		target: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
-		let path = path.clone();
-		let target = target.clone();
-
 		Box::pin(async move {
 			let mut store =
 				self.store.write().map_err(|_| "Failed to lock object store".to_string())?;
 
-			if !store.contains_key(&target) {
-				if let Some(data) = store.remove(&path) {
-					store.insert(target, data);
+			if !store.contains_key(target) {
+				if let Some(data) = store.remove(key) {
+					store.insert(target.clone(), data);
 				}
 			}
 

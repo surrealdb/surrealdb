@@ -1,7 +1,7 @@
 use reblessive::tree::Stk;
 
 use crate::{
-	buc::{store::Path, FileController},
+	buc::{store::Key, FileController},
 	ctx::Context,
 	dbs::Options,
 	err::Error,
@@ -52,7 +52,7 @@ pub async fn copy(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::from(target);
+	let target = Key::from(target);
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.copy(target).await?;
 
@@ -63,7 +63,7 @@ pub async fn copy_if_not_exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::from(target);
+	let target = Key::from(target);
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.copy_if_not_exists(target).await?;
 
@@ -74,7 +74,7 @@ pub async fn rename(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::from(target);
+	let target = Key::from(target);
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.rename(target).await?;
 
@@ -85,7 +85,7 @@ pub async fn rename_if_not_exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value, Error> {
-	let target = Path::from(target);
+	let target = Key::from(target);
 	let mut controller = FileController::from_file(stk, ctx, opt, doc, &file).await?;
 	controller.rename_if_not_exists(target).await?;
 

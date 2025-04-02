@@ -11,7 +11,7 @@ use crate::{
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
-use super::store::{ObjectMeta, ObjectStore, Path};
+use super::store::{ObjectMeta, ObjectStore, Key};
 
 /// Allows you to control a specific in the context of the current user
 pub struct FileController<'a> {
@@ -22,7 +22,7 @@ pub struct FileController<'a> {
 
 	bucket: Arc<BucketDefinition>,
 	store: Arc<dyn ObjectStore>,
-	key: Path,
+	key: Key,
 }
 
 impl<'a> FileController<'a> {
@@ -38,7 +38,7 @@ impl<'a> FileController<'a> {
 		let (ns, db) = opt.ns_db()?;
 		let bucket = ctx.tx().get_db_bucket(ns, db, &file.bucket).await?;
 		let store = ctx.get_bucket_store(ns, db, &file.bucket).await?;
-		let key = Path::from(file.key.clone());
+		let key = Key::from(file.key.clone());
 
 		Ok(Self {
 			stk,
@@ -136,7 +136,7 @@ impl<'a> FileController<'a> {
 		Ok(())
 	}
 
-	pub(crate) async fn copy(&mut self, target: Path) -> Result<(), Error> {
+	pub(crate) async fn copy(&mut self, target: Key) -> Result<(), Error> {
 		self.require_writeable()?;
 		self.check_permission(PermissionKind::Select).await?;
 
@@ -154,7 +154,7 @@ impl<'a> FileController<'a> {
 		Ok(())
 	}
 
-	pub(crate) async fn copy_if_not_exists(&mut self, target: Path) -> Result<(), Error> {
+	pub(crate) async fn copy_if_not_exists(&mut self, target: Key) -> Result<(), Error> {
 		self.require_writeable()?;
 		self.check_permission(PermissionKind::Select).await?;
 		self.check_permission(PermissionKind::Create).await?;
@@ -167,7 +167,7 @@ impl<'a> FileController<'a> {
 		Ok(())
 	}
 
-	pub(crate) async fn rename(&mut self, target: Path) -> Result<(), Error> {
+	pub(crate) async fn rename(&mut self, target: Key) -> Result<(), Error> {
 		self.require_writeable()?;
 		self.check_permission(PermissionKind::Select).await?;
 
@@ -185,7 +185,7 @@ impl<'a> FileController<'a> {
 		Ok(())
 	}
 
-	pub(crate) async fn rename_if_not_exists(&mut self, target: Path) -> Result<(), Error> {
+	pub(crate) async fn rename_if_not_exists(&mut self, target: Key) -> Result<(), Error> {
 		self.require_writeable()?;
 		self.check_permission(PermissionKind::Select).await?;
 		self.check_permission(PermissionKind::Create).await?;
@@ -203,7 +203,7 @@ impl<'a> FileController<'a> {
 		self.exists_inner(None).await
 	}
 
-	pub(crate) async fn exists_inner(&self, key: Option<&Path>) -> Result<bool, Error> {
+	pub(crate) async fn exists_inner(&self, key: Option<&Key>) -> Result<bool, Error> {
 		self.store
 			.head(key.unwrap_or(&self.key))
 			.await
