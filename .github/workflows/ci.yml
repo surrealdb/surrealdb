@@ -303,7 +303,7 @@ jobs:
 
   ml-integration:
     name: ML integration tests
-    runs-on: ubuntu-latest
+    runs-on: [runner-amd64-large]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
