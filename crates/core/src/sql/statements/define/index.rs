@@ -70,12 +70,12 @@ impl DefineIndexStatement {
 			#[cfg(target_family = "wasm")]
 			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
 		}
-		// Does the table exists?
+		// Does the table exist?
 		match txn.get_tb(ns, db, &self.what).await {
 			Ok(tb) => {
 				// Are we SchemaFull?
 				if tb.full {
-					// Check that the fields exists
+					// Check that the fields exist
 					for idiom in self.cols.iter() {
 						let Some(Part::Field(first)) = idiom.0.first() else {
 							continue;
@@ -143,15 +143,27 @@ impl DefineIndexStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<(), Error> {
-		// Force queries to run
-		let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
-		// Update the index data
-		let stm = UpdateStatement {
-			what: Values(vec![Value::Table(self.what.clone().into())]),
-			output: Some(Output::None),
-			..UpdateStatement::default()
-		};
-		stm.compute(stk, ctx, opt, doc).await?;
+		{
+			// Create the remove statement
+			let stm = RemoveIndexStatement {
+				name: self.name.clone(),
+				what: self.what.clone(),
+				if_exists: false,
+			};
+			// Execute the delete statement
+			stm.compute(ctx, opt).await?;
+		}
+		{
+			// Force queries to run
+			let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
+			// Update the index data
+			let stm = UpdateStatement {
+				what: Values(vec![Value::Table(self.what.clone().into())]),
+				output: Some(Output::None),
+				..UpdateStatement::default()
+			};
+			stm.compute(stk, ctx, opt, doc).await?;
+		}
 		Ok(())
 	}
 

@@ -30,6 +30,7 @@ use tokio::task::JoinHandle;
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
 	Started,
+	RemoveData,
 	Indexing {
 		initial: Option<usize>,
 		updated: Option<usize>,
@@ -75,6 +76,7 @@ impl From<BuildingStatus> for Value {
 		let mut o = Object::default();
 		let s = match st {
 			BuildingStatus::Started => "started",
+			BuildingStatus::RemoveData => "remove_data",
 			BuildingStatus::Indexing {
 				initial,
 				pending,
@@ -402,8 +404,17 @@ impl Building {
 	}
 
 	async fn run(&self) -> Result<(), Error> {
-		// First iteration, we index every key
 		let (ns, db) = self.opt.ns_db()?;
+		// Remove the index data
+		{
+			self.set_status(BuildingStatus::RemoveData).await;
+			let ctx = self.new_write_tx_ctx().await?;
+			let key = crate::key::index::all::new(ns, db, &self.tb, &self.ix.name);
+			let tx = ctx.tx();
+			tx.delp(key).await?;
+			tx.commit().await?;
+		}
+		// First iteration, we index every key
 		let beg = thing::prefix(ns, db, &self.tb)?;
 		let end = thing::suffix(ns, db, &self.tb)?;
 		let mut next = Some(beg..end);
