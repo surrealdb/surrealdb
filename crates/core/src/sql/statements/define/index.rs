@@ -1,18 +1,19 @@
 use crate::ctx::Context;
-use crate::dbs::{Force, Options};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
+#[cfg(target_family = "wasm")]
 use crate::sql::statements::UpdateStatement;
-use crate::sql::{Base, Ident, Idioms, Index, Output, Part, Strand, Value, Values};
-
+use crate::sql::{Base, Ident, Idioms, Index, Part, Strand, Value};
+#[cfg(target_family = "wasm")]
+use crate::sql::{Output, Values};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
-use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 4)]
@@ -123,17 +124,14 @@ impl DefineIndexStatement {
 		txn.clear();
 		// Process the index
 		#[cfg(not(target_family = "wasm"))]
-		if self.concurrently {
-			self.async_index(ctx, opt)?;
-		} else {
-			self.sync_index(stk, ctx, opt, doc).await?;
-		}
+		self.async_index(stk, ctx, opt, doc, !self.concurrently).await?;
 		#[cfg(target_family = "wasm")]
 		self.sync_index(stk, ctx, opt, doc).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
 
+	#[cfg(target_family = "wasm")]
 	async fn sync_index(
 		&self,
 		stk: &mut Stk,
@@ -154,12 +152,25 @@ impl DefineIndexStatement {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	fn async_index(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
-		ctx.get_index_builder().ok_or_else(|| fail!("No Index Builder"))?.build(
+	async fn async_index(
+		&self,
+		_stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		_doc: Option<&CursorDoc>,
+		blocking: bool,
+	) -> Result<(), Error> {
+		let rcv = ctx.get_index_builder().ok_or_else(|| fail!("No Index Builder"))?.build(
 			ctx,
 			opt.clone(),
 			self.clone().into(),
-		)
+			blocking,
+		)?;
+		if let Some(rcv) = rcv {
+			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
+		} else {
+			Ok(())
+		}
 	}
 }
 
