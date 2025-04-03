@@ -11,6 +11,7 @@ use reblessive::tree::Stk;
 pub mod api;
 pub mod args;
 pub mod array;
+pub mod bucket;
 pub mod bytes;
 pub mod count;
 pub mod crypto;
@@ -194,6 +195,9 @@ pub fn synchronous(
 		"duration::from::nanos" => duration::from::nanos,
 		"duration::from::secs" => duration::from::secs,
 		"duration::from::weeks" => duration::from::weeks,
+		//
+		"file::bucket" => file::bucket,
+		"file::key" => file::key,
 		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
@@ -506,6 +510,18 @@ pub async fn asynchronous(
 		"array::reduce" => array::reduce((stk, ctx, Some(opt), doc)).await,
 		"array::some" => array::any((stk, ctx, Some(opt), doc)).await,
 		//
+		"bucket::put" => bucket::put((stk, ctx, opt, doc)).await,
+		"bucket::put_if_not_exists" => bucket::put_if_not_exists((stk, ctx, opt, doc)).await,
+		"bucket::get" => bucket::get((stk, ctx, opt, doc)).await,
+		"bucket::head" => bucket::head((stk, ctx, opt, doc)).await,
+		"bucket::delete" => bucket::delete((stk, ctx, opt, doc)).await,
+		"bucket::copy" => bucket::copy((stk, ctx, opt, doc)).await,
+		"bucket::copy_if_not_exists" => bucket::copy_if_not_exists((stk, ctx, opt, doc)).await,
+		"bucket::rename" => bucket::rename((stk, ctx, opt, doc)).await,
+		"bucket::rename_if_not_exists" => bucket::rename_if_not_exists((stk, ctx, opt, doc)).await,
+		"bucket::exists" => bucket::exists((stk, ctx, opt, doc)).await,
+		"bucket::list" => bucket::list((stk, ctx, opt, doc)).await,
+		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
 		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
 		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
@@ -514,16 +530,6 @@ pub async fn asynchronous(
 		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
 		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
-		//
-		"file::put" => file::put((stk, ctx, opt, doc)).await,
-		"file::get" => file::get((stk, ctx, opt, doc)).await,
-		"file::head" => file::head((stk, ctx, opt, doc)).await,
-		"file::delete" => file::delete((stk, ctx, opt, doc)).await,
-		"file::copy" => file::copy((stk, ctx, opt, doc)).await,
-		"file::copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
-		"file::rename" => file::rename((stk, ctx, opt, doc)).await,
-		"file::rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
-		"file::exists" => file::exists((stk, ctx, opt, doc)).await,
 		//
 		"http::head" => http::head(ctx).await,
 		"http::get" => http::get(ctx).await,
@@ -844,15 +850,19 @@ pub async fn idiom(
 				args.clone(),
 				"no such method found for the file type",
 				//
-				"put" => file::put((stk, ctx, opt, doc)).await,
-				"get" => file::get((stk, ctx, opt, doc)).await,
-				"head" => file::head((stk, ctx, opt, doc)).await,
-				"delete" => file::delete((stk, ctx, opt, doc)).await,
-				"copy" => file::copy((stk, ctx, opt, doc)).await,
-				"copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
-				"rename" => file::rename((stk, ctx, opt, doc)).await,
-				"rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
-				"exists" => file::exists((stk, ctx, opt, doc)).await,
+				"bucket" => file::bucket,
+				"key" => file::key,
+				//
+				"put" => bucket::put((stk, ctx, opt, doc)).await,
+				"put_if_not_exists" => bucket::put_if_not_exists((stk, ctx, opt, doc)).await,
+				"get" => bucket::get((stk, ctx, opt, doc)).await,
+				"head" => bucket::head((stk, ctx, opt, doc)).await,
+				"delete" => bucket::delete((stk, ctx, opt, doc)).await,
+				"copy" => bucket::copy((stk, ctx, opt, doc)).await,
+				"copy_if_not_exists" => bucket::copy_if_not_exists((stk, ctx, opt, doc)).await,
+				"rename" => bucket::rename((stk, ctx, opt, doc)).await,
+				"rename_if_not_exists" => bucket::rename_if_not_exists((stk, ctx, opt, doc)).await,
+				"exists" => bucket::exists((stk, ctx, opt, doc)).await,
 			)
 		}
 		_ => Err(Error::InvalidFunction {

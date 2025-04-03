@@ -11,7 +11,7 @@ use url::Url;
 
 use crate::{cnf::FILE_ALLOWLIST, err::Error, sql::Datetime};
 
-use super::{Key, ObjectMeta, ObjectStore};
+use super::{Key, ListOptions, ObjectMeta, ObjectStore};
 
 /// Options for configuring the FileStore
 #[derive(Clone, Debug)]
@@ -374,6 +374,119 @@ impl ObjectStore for FileStore {
 				.map_err(|e| format!("Failed to rename file: {}", e))?;
 
 			Ok(())
+		})
+	}
+
+	fn list<'a>(
+		&'a self,
+		opts: &'a ListOptions,
+	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
+		Box::pin(async move {
+			// If a prefix is provided, combine it with the store prefix
+			// If not, just use the store's prefix
+			let base_key = opts.prefix.as_ref().cloned().unwrap_or_else(|| Key::from(""));
+			let os_path = self.to_os_path(&base_key)?;
+
+			// Check if the directory exists
+			if !Self::path_exists(&os_path).await? {
+				return Ok(Vec::new());
+			}
+
+			// Check if it's a file or directory
+			let metadata = tokio::fs::metadata(&os_path)
+				.await
+				.map_err(|e| format!("Failed to get metadata: {}", e))?;
+
+			// If it's a file, return it as a single item
+			if metadata.is_file() {
+				// If a start key is provided and our base_key is less than it, return empty
+				if let Some(ref start_key) = opts.start {
+					if base_key.to_string() < start_key.to_string() {
+						return Ok(Vec::new());
+					}
+				}
+
+				let size = metadata.len();
+				let updated =
+					metadata.modified().map(|time| Datetime(time.into())).unwrap_or_default();
+				return Ok(vec![ObjectMeta {
+					key: base_key,
+					size,
+					updated,
+				}]);
+			}
+
+			// If it's a directory, read its contents
+			let mut read_dir = tokio::fs::read_dir(&os_path)
+				.await
+				.map_err(|e| format!("Failed to read directory: {}", e))?;
+
+			// Collect all entries first so we can sort and paginate them
+			let mut all_entries = Vec::new();
+
+			// Process each entry in the directory
+			while let Ok(Some(entry)) = read_dir.next_entry().await {
+				let path = entry.path();
+				let metadata = match tokio::fs::metadata(&path).await {
+					Ok(md) => md,
+					Err(e) => {
+						// Skip entries we can't get metadata for
+						eprintln!("Failed to get metadata for {}: {}", path.display(), e);
+						continue;
+					}
+				};
+
+				// Skip directories if we're only listing files
+				if metadata.is_dir() {
+					continue;
+				}
+
+				// Convert the path to a relative Key
+				let rel_path = path
+					.strip_prefix(&os_path)
+					.map_err(|e| format!("Failed to get relative path: {}", e))?;
+				let rel_str = rel_path.to_string_lossy();
+				let entry_key = base_key.join(&Key::from(rel_str.to_string()));
+
+				all_entries.push((entry_key, metadata));
+			}
+
+			// Sort entries by key to ensure consistent ordering
+			all_entries.sort_by(|(key_a, _), (key_b, _)| key_a.to_string().cmp(&key_b.to_string()));
+
+			// Filter by start key if provided
+			let filtered_entries = if let Some(ref start_key) = opts.start {
+				all_entries
+					.into_iter()
+					.filter(|(key, _)| key.to_string() > start_key.to_string())
+					.collect()
+			} else {
+				all_entries
+			};
+
+			// Apply limit if specified
+			let limited_entries = if let Some(limit_val) = opts.limit {
+				filtered_entries.into_iter().take(limit_val).collect::<Vec<_>>()
+			} else {
+				filtered_entries
+			};
+
+			// Convert to ObjectMeta
+			let objects = limited_entries
+				.into_iter()
+				.map(|(entry_key, metadata)| {
+					let size = metadata.len();
+					let updated =
+						metadata.modified().map(|time| Datetime(time.into())).unwrap_or_default();
+					ObjectMeta {
+						key: entry_key,
+						size,
+						updated,
+					}
+				})
+				.collect();
+
+			Ok(objects)
 		})
 	}
 }

@@ -10,7 +10,7 @@ use url::Url;
 
 use crate::sql::Datetime;
 
-use super::{Key, ObjectMeta, ObjectStore};
+use super::{Key, ListOptions, ObjectMeta, ObjectStore};
 
 #[derive(Clone, Debug, Default)]
 pub struct Entry {
@@ -207,6 +207,62 @@ impl ObjectStore for MemoryStore {
 			}
 
 			Ok(())
+		})
+	}
+
+	fn list<'a>(
+		&'a self,
+		opts: &'a ListOptions,
+	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
+		Box::pin(async move {
+			let store = self.store.read().map_err(|_| "Failed to lock object store".to_string())?;
+			let mut objects = Vec::new();
+
+			// If prefix is provided, filter keys that start with the prefix
+			// Otherwise, include all keys
+			let prefix_str = opts.prefix.as_ref().map(|p| p.as_str()).unwrap_or("");
+
+			// Get the start key as string if provided
+			let start_str = opts.start.as_ref().map(|s| s.as_str());
+
+			// Collect and sort keys first to ensure consistent ordering
+			let mut all_keys: Vec<_> = store
+				.iter()
+				.filter(|(key, _)| {
+					// Filter by prefix
+					let key_matches_prefix = key.as_str().starts_with(prefix_str);
+
+					// Filter by start key if provided
+					let key_after_start = if let Some(start_s) = start_str {
+						key.as_str() > start_s
+					} else {
+						true
+					};
+
+					key_matches_prefix && key_after_start
+				})
+				.collect();
+
+			// Sort keys lexicographically for consistent ordering
+			all_keys.sort_by(|(key_a, _), (key_b, _)| key_a.as_str().cmp(&key_b.as_str()));
+
+			// Apply limit if specified
+			let limited_keys = if let Some(limit_val) = opts.limit {
+				all_keys.into_iter().take(limit_val).collect::<Vec<_>>()
+			} else {
+				all_keys
+			};
+
+			// Convert to ObjectMeta
+			for (key, entry) in limited_keys {
+				objects.push(ObjectMeta {
+					key: key.clone(),
+					size: entry.bytes.len() as u64,
+					updated: entry.updated.clone(),
+				});
+			}
+
+			Ok(objects)
 		})
 	}
 }

@@ -5,6 +5,7 @@ pub use crate::ent::buc::backend;
 mod connection;
 pub use connection::{connect, connect_global, BucketConnections};
 mod controller;
-pub use controller::FileController;
+pub use controller::BucketController;
+pub use controller::BucketOperation;
 
 pub mod store;

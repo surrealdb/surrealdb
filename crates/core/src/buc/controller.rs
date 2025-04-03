@@ -3,18 +3,17 @@ use crate::{
 	dbs::Options,
 	doc::CursorDoc,
 	err::Error,
-	sql::{
-		permission::PermissionKind, statements::define::BucketDefinition, Bytes, File,
-		FlowResultExt, Permission, Value,
-	},
+	iam::Action,
+	sql::{statements::define::BucketDefinition, Bytes, File, FlowResultExt, Permission, Value},
 };
+use core::fmt;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
-use super::store::{ObjectMeta, ObjectStore, Key};
+use super::store::{Key, ListOptions, ObjectMeta, ObjectStore};
 
 /// Allows you to control a specific in the context of the current user
-pub struct FileController<'a> {
+pub struct BucketController<'a> {
 	stk: &'a mut Stk,
 	ctx: &'a Context,
 	opt: &'a Options,
@@ -22,23 +21,21 @@ pub struct FileController<'a> {
 
 	bucket: Arc<BucketDefinition>,
 	store: Arc<dyn ObjectStore>,
-	key: Key,
 }
 
-impl<'a> FileController<'a> {
+impl<'a> BucketController<'a> {
 	/// Create a `FileController` for a specified file
 	/// Will obtain a bucket connection and return back a `FileController` or `Error`
-	pub(crate) async fn from_file(
+	pub(crate) async fn new(
 		stk: &'a mut Stk,
 		ctx: &'a Context,
 		opt: &'a Options,
 		doc: Option<&'a CursorDoc>,
-		file: &'a File,
+		buc: &str,
 	) -> Result<Self, Error> {
 		let (ns, db) = opt.ns_db()?;
-		let bucket = ctx.tx().get_db_bucket(ns, db, &file.bucket).await?;
-		let store = ctx.get_bucket_store(ns, db, &file.bucket).await?;
-		let key = Key::from(file.key.clone());
+		let bucket = ctx.tx().get_db_bucket(ns, db, &buc).await?;
+		let store = ctx.get_bucket_store(ns, db, &buc).await?;
 
 		Ok(Self {
 			stk,
@@ -48,13 +45,7 @@ impl<'a> FileController<'a> {
 
 			bucket,
 			store,
-			key,
 		})
-	}
-
-	/// Generate a `File` based on the current `FileController`
-	pub(crate) fn to_file(&self) -> File {
-		File::new(self.bucket.name.to_string(), self.key.to_string())
 	}
 
 	/// Checks if the bucket allows writes, and if not, return an `Error::ReadonlyBucket`
@@ -69,7 +60,7 @@ impl<'a> FileController<'a> {
 	/// Attempt to put a file
 	/// `Bytes` and `Strand` values are supported, and will be converted into `Bytes`
 	/// Create or update permissions will be used, based on if the remote file already exists
-	pub(crate) async fn put(&mut self, value: Value) -> Result<(), Error> {
+	pub(crate) async fn put(&mut self, key: &Key, value: Value) -> Result<(), Error> {
 		let payload = match value {
 			Value::Bytes(v) => v.0.into(),
 			Value::Strand(v) => v.0.into_bytes().into(),
@@ -82,38 +73,57 @@ impl<'a> FileController<'a> {
 		};
 
 		self.require_writeable()?;
-
-		let permission_kind = if self.exists_inner(None).await? {
-			PermissionKind::Update
-		} else {
-			PermissionKind::Create
-		};
-
-		self.check_permission(permission_kind).await?;
+		self.check_permission(BucketOperation::Put, Some(key), None).await?;
 
 		self.store
-			.put(&self.key, payload)
+			.put(&key, payload)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
 
-	pub(crate) async fn head(&mut self) -> Result<Option<ObjectMeta>, Error> {
-		self.check_permission(PermissionKind::Select).await?;
+	/// Attempt to put a file
+	/// `Bytes` and `Strand` values are supported, and will be converted into `Bytes`
+	/// Create or update permissions will be used, based on if the remote file already exists
+	pub(crate) async fn put_if_not_exists(&mut self, key: &Key, value: Value) -> Result<(), Error> {
+		let payload = match value {
+			Value::Bytes(v) => v.0.into(),
+			Value::Strand(v) => v.0.into_bytes().into(),
+			from => {
+				return Err(Error::ConvertTo {
+					from,
+					into: "bytes".into(),
+				})
+			}
+		};
+
+		self.require_writeable()?;
+		self.check_permission(BucketOperation::Put, Some(key), None).await?;
 
 		self.store
-			.head(&self.key)
+			.put_if_not_exists(&key, payload)
+			.await
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
+
+		Ok(())
+	}
+
+	pub(crate) async fn head(&mut self, key: &Key) -> Result<Option<ObjectMeta>, Error> {
+		self.check_permission(BucketOperation::Head, Some(key), None).await?;
+
+		self.store
+			.head(&key)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))
 	}
 
-	pub(crate) async fn get(&mut self) -> Result<Option<Bytes>, Error> {
-		self.check_permission(PermissionKind::Select).await?;
+	pub(crate) async fn get(&mut self, key: &Key) -> Result<Option<Bytes>, Error> {
+		self.check_permission(BucketOperation::Get, Some(key), None).await?;
 
 		let bytes = match self
 			.store
-			.get(&self.key)
+			.get(&key)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?
 		{
@@ -124,116 +134,144 @@ impl<'a> FileController<'a> {
 		Ok(Some(bytes.to_vec().into()))
 	}
 
-	pub(crate) async fn delete(&mut self) -> Result<(), Error> {
+	pub(crate) async fn delete(&mut self, key: &Key) -> Result<(), Error> {
 		self.require_writeable()?;
-		self.check_permission(PermissionKind::Delete).await?;
+		self.check_permission(BucketOperation::Delete, Some(key), None).await?;
 
 		self.store
-			.delete(&self.key)
+			.delete(&key)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
 
-	pub(crate) async fn copy(&mut self, target: Key) -> Result<(), Error> {
+	pub(crate) async fn copy(&mut self, key: &Key, target: Key) -> Result<(), Error> {
 		self.require_writeable()?;
-		self.check_permission(PermissionKind::Select).await?;
-
-		if self.exists_inner(Some(&target)).await? {
-			self.check_permission(PermissionKind::Update).await?;
-		} else {
-			self.check_permission(PermissionKind::Create).await?;
-		};
+		self.check_permission(BucketOperation::Copy, Some(key), Some(&target)).await?;
 
 		self.store
-			.copy(&self.key, &target)
+			.copy(&key, &target)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
 
-	pub(crate) async fn copy_if_not_exists(&mut self, target: Key) -> Result<(), Error> {
+	pub(crate) async fn copy_if_not_exists(&mut self, key: &Key, target: Key) -> Result<(), Error> {
 		self.require_writeable()?;
-		self.check_permission(PermissionKind::Select).await?;
-		self.check_permission(PermissionKind::Create).await?;
+		self.check_permission(BucketOperation::Copy, Some(key), Some(&target)).await?;
 
 		self.store
-			.copy_if_not_exists(&self.key, &target)
+			.copy_if_not_exists(&key, &target)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
 
-	pub(crate) async fn rename(&mut self, target: Key) -> Result<(), Error> {
+	pub(crate) async fn rename(&mut self, key: &Key, target: Key) -> Result<(), Error> {
 		self.require_writeable()?;
-		self.check_permission(PermissionKind::Select).await?;
-
-		if self.exists_inner(Some(&target)).await? {
-			self.check_permission(PermissionKind::Update).await?;
-		} else {
-			self.check_permission(PermissionKind::Create).await?;
-		};
+		self.check_permission(BucketOperation::Rename, Some(key), Some(&target)).await?;
 
 		self.store
-			.rename(&self.key, &target)
+			.rename(&key, &target)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
 
-	pub(crate) async fn rename_if_not_exists(&mut self, target: Key) -> Result<(), Error> {
+	pub(crate) async fn rename_if_not_exists(
+		&mut self,
+		key: &Key,
+		target: Key,
+	) -> Result<(), Error> {
 		self.require_writeable()?;
-		self.check_permission(PermissionKind::Select).await?;
-		self.check_permission(PermissionKind::Create).await?;
+		self.check_permission(BucketOperation::Rename, Some(key), Some(&target)).await?;
 
 		self.store
-			.rename_if_not_exists(&self.key, &target)
+			.rename_if_not_exists(&key, &target)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
 		Ok(())
 	}
 
-	pub(crate) async fn exists(&mut self) -> Result<bool, Error> {
-		self.check_permission(PermissionKind::Select).await?;
-		self.exists_inner(None).await
-	}
-
-	pub(crate) async fn exists_inner(&self, key: Option<&Key>) -> Result<bool, Error> {
+	pub(crate) async fn exists(&mut self, key: &Key) -> Result<bool, Error> {
+		self.check_permission(BucketOperation::Exists, Some(key), None).await?;
 		self.store
-			.head(key.unwrap_or(&self.key))
+			.head(key)
 			.await
 			.map(|v| v.is_some())
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))
 	}
 
-	pub(crate) async fn check_permission(&mut self, kind: PermissionKind) -> Result<(), Error> {
-		if self.opt.check_perms(kind.into())? {
-			match self.bucket.permissions.get_by_kind(kind) {
+	pub(crate) async fn list(&mut self, opts: &ListOptions) -> Result<Vec<ObjectMeta>, Error> {
+		self.check_permission(BucketOperation::Exists, None, None).await?;
+		self.store
+			.list(opts)
+			.await
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))
+	}
+
+	pub(crate) async fn check_permission(
+		&mut self,
+		op: BucketOperation,
+		key: Option<&Key>,
+		target: Option<&Key>,
+	) -> Result<(), Error> {
+		if self.opt.check_perms(op.into())? {
+			// Guest and Record users are not allowed to list files in buckets
+			if op.is_list() {
+				return Err(Error::BucketPermissions {
+					name: self.bucket.name.to_raw(),
+					op,
+				});
+			}
+
+			match &self.bucket.permissions {
 				Permission::None => {
 					return Err(Error::BucketPermissions {
 						name: self.bucket.name.to_raw(),
-						kind,
+						op,
 					})
 				}
 				Permission::Full => (),
-				Permission::Specific(e) => {
+				Permission::Specific(ref e) => {
 					// Disable permissions
 					let opt = &self.opt.new_with_perms(false);
-					// Add $file to context
+
+					// Add $action, $file and $target to context
 					let mut ctx = MutableContext::new(self.ctx);
-					ctx.add_value("file", Value::File(self.to_file()).into());
+					ctx.add_value("action", Value::from(op.to_string()).into());
+					if let Some(key) = key {
+						ctx.add_value(
+							"file",
+							Value::File(File {
+								bucket: self.bucket.name.to_raw(),
+								key: key.to_string(),
+							})
+							.into(),
+						)
+					}
+					if let Some(target) = target {
+						ctx.add_value(
+							"target",
+							Value::File(File {
+								bucket: self.bucket.name.to_raw(),
+								key: target.to_string(),
+							})
+							.into(),
+						)
+					}
 					let ctx = ctx.freeze();
 
 					// Process the PERMISSION clause
 					if !e.compute(self.stk, &ctx, opt, self.doc).await.catch_return()?.is_truthy() {
 						return Err(Error::BucketPermissions {
 							name: self.bucket.name.to_raw(),
-							kind,
+							op,
 						});
 					}
 				}
@@ -241,5 +279,47 @@ impl<'a> FileController<'a> {
 		}
 
 		Ok(())
+	}
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BucketOperation {
+	Put,
+	Get,
+	Head,
+	Delete,
+	Copy,
+	Rename,
+	Exists,
+	List,
+}
+
+impl BucketOperation {
+	pub fn is_list(self) -> bool {
+		matches!(self, Self::List)
+	}
+}
+
+impl Into<Action> for BucketOperation {
+	fn into(self) -> Action {
+		match self {
+			Self::Get | Self::Head | Self::Exists | Self::List => Action::View,
+			Self::Put | Self::Delete | Self::Copy | Self::Rename => Action::Edit,
+		}
+	}
+}
+
+impl fmt::Display for BucketOperation {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Put => write!(f, "put"),
+			Self::Get => write!(f, "get"),
+			Self::Head => write!(f, "head"),
+			Self::Delete => write!(f, "delete"),
+			Self::Copy => write!(f, "copy"),
+			Self::Rename => write!(f, "rename"),
+			Self::Exists => write!(f, "exists"),
+			Self::List => write!(f, "list"),
+		}
 	}
 }

@@ -1435,7 +1435,7 @@ impl Parser<'_> {
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = stk.run(|stk| self.parse_permission(stk, true)).await?;
+					res.permissions = stk.run(|stk| self.parse_permission_value(stk)).await?;
 				}
 				t!("READONLY") => {
 					self.pop_peek();

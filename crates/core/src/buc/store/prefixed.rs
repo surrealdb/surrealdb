@@ -1,4 +1,4 @@
-use super::{Key, ObjectMeta, ObjectStore};
+use super::{Key, ListOptions, ObjectMeta, ObjectStore};
 use bytes::Bytes;
 use std::{future::Future, pin::Pin};
 
@@ -130,5 +130,39 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		let full_target = self.prefix.join(target);
 
 		Box::pin(async move { self.store.rename_if_not_exists(&full_key, &full_target).await })
+	}
+
+	fn list<'a>(
+		&'a self,
+		opts: &'a ListOptions,
+	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
+		Box::pin(async move {
+			// Combine the store's prefix with the request prefix
+			let prefix = match opts.prefix {
+				Some(ref req_prefix) => self.prefix.join(req_prefix),
+				None => self.prefix.clone(),
+			};
+
+			let opts = ListOptions {
+				start: opts.start.clone(),
+				prefix: Some(prefix),
+				limit: opts.limit.clone(),
+			};
+
+			// Delegate to the underlying store with the combined prefix
+			let objects_result = self.store.list(&opts).await?;
+
+			// Map the returned objects to strip the prefix
+			let mapped_objects = objects_result
+				.into_iter()
+				.map(|mut meta| {
+					// Strip the prefix from keys to maintain proper namespacing
+					meta.key = meta.key.strip_prefix(&self.prefix).unwrap_or(meta.key);
+					meta
+				})
+				.collect();
+
+			Ok(mapped_objects)
+		})
 	}
 }

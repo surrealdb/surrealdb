@@ -3,7 +3,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, FlowResultExt, Ident, Permissions, Strand, Value};
+use crate::sql::{Base, FlowResultExt, Ident, Permission, Strand, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -21,7 +21,7 @@ pub struct DefineBucketStatement {
 	pub overwrite: bool,
 	pub name: Ident,
 	pub backend: Option<Value>,
-	pub permissions: Permissions,
+	pub permissions: Permission,
 	pub readonly: bool,
 	pub comment: Option<Strand>,
 }
@@ -143,7 +143,7 @@ pub struct BucketDefinition {
 	pub id: Option<u32>,
 	pub name: Ident,
 	pub backend: Option<String>,
-	pub permissions: Permissions,
+	pub permissions: Permission,
 	pub readonly: bool,
 	pub comment: Option<Strand>,
 }

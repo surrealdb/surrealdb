@@ -1,4 +1,7 @@
-use crate::sql::{Datetime, Value};
+use crate::{
+	err::Error,
+	sql::{Datetime, File, Object, Value},
+};
 use bytes::Bytes;
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -14,13 +17,44 @@ pub struct ObjectMeta {
 	pub key: Key,
 }
 
-impl From<ObjectMeta> for Value {
-	fn from(val: ObjectMeta) -> Self {
+impl ObjectMeta {
+	pub fn to_value(self, bucket: String) -> Value {
 		Value::from(map! {
-			"updated" => Value::from(val.updated),
-			"key" => val.key.into(),
-			"size" => Value::from(val.size),
+			"updated" => Value::from(self.updated),
+			"size" => Value::from(self.size),
+			"file" => Value::File(File {
+				bucket,
+				key: self.key.to_string(),
+			})
 		})
+	}
+}
+
+#[derive(Default)]
+pub struct ListOptions {
+	pub start: Option<Key>,
+	pub prefix: Option<Key>,
+	pub limit: Option<usize>,
+}
+
+impl TryFrom<Object> for ListOptions {
+	type Error = Error;
+	fn try_from(mut obj: Object) -> Result<Self, Self::Error> {
+		let mut opts = ListOptions::default();
+
+		if let Some(start) = obj.remove("start") {
+			opts.start = Some(start.coerce_to_string()?.into());
+		}
+
+		if let Some(prefix) = obj.remove("prefix") {
+			opts.prefix = Some(prefix.coerce_to_string()?.into());
+		}
+
+		if let Some(limit) = obj.remove("limit") {
+			opts.limit = Some(limit.coerce_to_u64()? as usize);
+		}
+
+		Ok(opts)
 	}
 }
 
@@ -82,6 +116,11 @@ pub trait ObjectStore: Send + Sync + 'static {
 		key: &'a Key,
 		target: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+
+	fn list<'a>(
+		&'a self,
+		prefix: &'a ListOptions,
+	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>>;
 }
 
 impl ObjectStore for Arc<dyn ObjectStore> {
@@ -163,5 +202,12 @@ impl ObjectStore for Arc<dyn ObjectStore> {
 		target: &'a Key,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		(**self).rename_if_not_exists(key, target)
+	}
+
+	fn list<'a>(
+		&'a self,
+		opts: &'a ListOptions,
+	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
+		(**self).list(opts)
 	}
 }
