@@ -172,6 +172,7 @@ impl Parser<'_> {
 
 				Ok(Kind::References(table, path))
 			}
+			t!("NONE") => unexpected!(self, next, "a kind name.\nHint: to define a type that can be NONE, use option<type_name> instead."),
 			_ => unexpected!(self, next, "a kind name"),
 		}
 	}
