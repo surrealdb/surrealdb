@@ -11,7 +11,6 @@ mod index;
 mod model;
 mod namespace;
 mod param;
-mod statement;
 mod table;
 mod user;
 
@@ -42,7 +41,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Ident, Kind, Permission, Strand, Value};
+use crate::sql::{Ident, Kind, Strand, Value};
 use crate::dbs::type_def::TypeDefinition;
 
 use reblessive::tree::Stk;
@@ -184,7 +183,6 @@ pub struct DefineTypeStatement {
 	pub name: Ident,
 	pub kind: Kind,
 	pub comment: Option<Strand>,
-	pub permissions: Permission,
 	pub if_not_exists: bool,
 	pub overwrite: bool,
 }
@@ -211,7 +209,6 @@ impl DefineTypeStatement {
 			name: self.name.clone(),
 			kind: self.kind.clone(),
 			comment: self.comment.clone(),
-			permissions: self.permissions.clone(),
 		};
 
 		// Store the type definition
@@ -245,7 +242,6 @@ impl InfoStructure for DefineTypeStatement {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
 			"kind".to_string() => self.kind.structure(),
-			"permissions".to_string() => self.permissions.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

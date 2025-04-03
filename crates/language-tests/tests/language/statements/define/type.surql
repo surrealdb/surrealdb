@@ -45,6 +45,3 @@ DEFINE FIELD unique_phones ON user TYPE set<phone>;
 
 -- Test using user-defined types in either
 DEFINE FIELD contact ON user TYPE email | phone;
-
-
-

@@ -1,4 +1,4 @@
-use crate::sql::{Ident, Kind, Permission, Strand};
+use crate::sql::{Ident, Kind, Strand};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -11,7 +11,6 @@ pub struct TypeDefinition {
     pub name: Ident,
     pub kind: Kind,
     pub comment: Option<Strand>,
-    pub permissions: Permission,
 }
 
 impl Display for TypeDefinition {

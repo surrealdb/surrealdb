@@ -2154,7 +2154,6 @@ fn parse_define_type() {
 			name: Ident("example".to_string()),
 			kind: Kind::Set(Box::new(Kind::String), None),
 			comment: Some(Strand("Height type".to_string())),
-			permissions: Permission::default(),
 			if_not_exists: false,
 			overwrite: false,
 		}))
@@ -2167,20 +2166,18 @@ fn parse_define_type() {
 			name: Ident("example".to_string()),
 			kind: Kind::Set(Box::new(Kind::String), None),
 			comment: None,
-			permissions: Permission::default(),
 			if_not_exists: true,
 			overwrite: false,
 		}))
 	);
 
-	let res = test_parse!(parse_stmt, "DEFINE TYPE OVERWRITE example AS 'tall' | 'short' PERMISSIONS FOR select WHERE true").unwrap();
+	let res = test_parse!(parse_stmt, "DEFINE TYPE OVERWRITE example AS 'tall' | 'short'").unwrap();
 	assert_eq!(
 		res,
 		Statement::Define(DefineStatement::Type(DefineTypeStatement {
 			name: Ident("example".to_string()),
 			kind: Kind::Set(Box::new(Kind::String), None),
 			comment: None,
-			permissions: Permission::Specific(Value::Bool(true)),
 			if_not_exists: false,
 			overwrite: true,
 		}))

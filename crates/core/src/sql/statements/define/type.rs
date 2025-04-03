@@ -9,6 +9,5 @@ pub use type_definition::DefineTypeStatement;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum DefineStatement {
-    // ... existing variants ...
     Type(DefineTypeStatement),
 }

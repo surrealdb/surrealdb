@@ -26,7 +26,7 @@ use crate::{
 		},
 		table_type,
 		tokenizer::Tokenizer,
-		user, AccessType, Ident, Idioms, Index, Kind, Param, Permission, Permissions, Scoring, Strand,
+		user, AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand,
 		TableType, Values,
 	},
 	syn::{
@@ -1742,32 +1742,10 @@ impl Parser<'_> {
 			None
 		};
 
-		// Parse optional PERMISSIONS
-		let permissions = if self.eat(t!("PERMISSIONS")) {
-			if self.eat(t!("FOR")) {
-				// Parse FOR clause
-				let _permission = self.next_token_value::<Ident>()?;
-				if self.eat(t!("WHERE")) {
-					// Parse WHERE condition
-					let cond = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-					Permission::Specific(cond)
-				} else {
-					Permission::Full
-				}
-			} else {
-				// Parse specific permission value
-				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-				Permission::Specific(value)
-			}
-		} else {
-			Permission::default()
-		};
-
 		Ok(DefineTypeStatement {
 			name,
 			kind,
 			comment,
-			permissions,
 			if_not_exists,
 			overwrite,
 		})
