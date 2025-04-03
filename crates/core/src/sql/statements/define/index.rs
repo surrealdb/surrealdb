@@ -1,4 +1,6 @@
 use crate::ctx::Context;
+#[cfg(target_family = "wasm")]
+use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -14,6 +16,8 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+#[cfg(target_family = "wasm")]
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 4)]
