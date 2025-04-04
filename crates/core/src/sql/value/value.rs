@@ -1040,6 +1040,11 @@ impl Value {
 		matches!(self, Value::Strand(_))
 	}
 
+	/// Check if this Value is a single character Strand
+	pub fn is_char(&self) -> bool {
+		matches!(self, Value::Strand(v) if v.chars().count() == 1)
+	}
+
 	/// Check if this Value is a Query
 	pub fn is_query(&self) -> bool {
 		matches!(self, Value::Query(_))
@@ -2403,12 +2408,61 @@ impl Value {
 			// Ranges are allowed
 			Value::Range(r) => Ok(*r),
 			// Arrays with two elements are allowed
-			Value::Array(v) if v.len() == 2 => {
+			Value::Array(v)
+				if v.len() == 2
+					&& (v.iter().all(|item| item.is_integer())
+						|| v.iter().all(|item| item.is_char())) =>
+			{
 				let mut v = v;
 				Ok(Range {
 					beg: Bound::Included(v.remove(0)),
 					end: Bound::Excluded(v.remove(0)),
 				})
+			}
+			Value::Array(ref v) if v.len() > 2 && v.iter().all(|item| item.is_int()) => {
+				match v
+					.windows(2)
+					.map(|pair| {
+						let [Value::Number(Number::Int(num1)), Value::Number(Number::Int(num2))] =
+							pair
+						else {
+							unreachable!("bla")
+						};
+						num2 - num1 == 1
+					})
+					.all(|item| item == true)
+				{
+					true => Ok(Range {
+						beg: Bound::Included(v.clone().remove(0)),
+						end: Bound::Excluded(v.last().unwrap().clone()),
+					}),
+					false => Err(Error::ConvertTo {
+						from: self.clone(),
+						into: "range".into(),
+					}),
+				}
+			}
+			Value::Array(ref v) if v.len() > 2 && v.iter().all(|item| item.is_char()) => {
+				match v
+					.windows(2)
+					.map(|pair| {
+						let [Value::Strand(str1), Value::Strand(str2)] = pair else {
+							unreachable!("bla")
+						};
+						str2.chars().next().unwrap() as u32 - str1.chars().next().unwrap() as u32
+							== 1
+					})
+					.all(|item| item == true)
+				{
+					true => Ok(Range {
+						beg: Bound::Included(v.clone().remove(0)),
+						end: Bound::Excluded(v.last().unwrap().clone()),
+					}),
+					false => Err(Error::ConvertTo {
+						from: self.clone(),
+						into: "range".into(),
+					}),
+				}
 			}
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
