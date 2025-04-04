@@ -4,7 +4,6 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
-use camino::Utf8PathBuf;
 use schema::TestConfig;
 use serde::{de::IntoDeserializer, Deserialize};
 pub use testset::TestSet;
@@ -59,7 +58,7 @@ pub enum ConfigKind {
 }
 
 pub struct TestCase {
-	pub path: Utf8PathBuf,
+	pub path: String,
 	pub toml: DocumentMut,
 	pub config: Arc<TestConfig>,
 	pub source: Vec<u8>,
@@ -68,7 +67,7 @@ pub struct TestCase {
 }
 
 impl TestCase {
-	pub fn from_source_path(path: Utf8PathBuf, source: Vec<u8>) -> Result<Self> {
+	pub fn from_source_path(path: String, source: Vec<u8>) -> Result<Self> {
 		let (range, config_kind, config_source) = Self::extract_config_text(&source)?;
 
 		let config_source =

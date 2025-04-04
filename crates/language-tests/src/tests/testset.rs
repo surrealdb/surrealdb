@@ -1,22 +1,77 @@
-use anyhow::{Context, Result};
-use camino::{Utf8Path, Utf8PathBuf};
+use anyhow::{anyhow, Context, Result};
 use std::{
+	borrow::Cow,
 	collections::{hash_map::Values, HashMap},
+	fmt::Write,
 	hash::Hash,
+	io::{self, IsTerminal as _},
 	mem,
 	ops::Index,
+	path::Path,
 	sync::Arc,
 };
 use tokio::fs;
 
+use crate::{
+	cli::ColorMode,
+	format::{ansi, IndentFormatter},
+};
+
 use super::TestCase;
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct TestId(usize);
+
+#[derive(Debug)]
+pub struct TestLoadError {
+	path: String,
+	error: anyhow::Error,
+}
+
+impl TestLoadError {
+	pub fn display(&self, color: ColorMode) {
+		let use_color = match color {
+			ColorMode::Always => true,
+			ColorMode::Never => false,
+			ColorMode::Auto => io::stdout().is_terminal(),
+		};
+
+		type Fmt<'a> = IndentFormatter<&'a mut String>;
+
+		let mut buffer = String::new();
+		let mut f = Fmt::new(&mut buffer, 2);
+		f.indent(|f| {
+			if use_color {
+				writeln!(
+					f,
+					ansi!(
+						" ==> ",
+						red,
+						"Error",
+						reset_format,
+						" loading ",
+						bold,
+						"{}",
+						reset_format,
+						":"
+					),
+					self.path
+				)?
+			} else {
+				writeln!(f, " ==> Error Loading {}:", self.path)?
+			}
+
+			f.indent(|f| writeln!(f, "{:?}", self.error))
+		})
+		.unwrap();
+
+		println!("{buffer}");
+	}
+}
 
 #[derive(Clone)]
 pub struct TestSet {
-	root: Utf8PathBuf,
+	root: String,
 	map: Arc<HashMap<String, TestId>>,
 	all_map: Arc<HashMap<String, TestId>>,
 	all: Arc<Vec<TestCase>>,
@@ -60,29 +115,36 @@ impl TestSet {
 	where
 		S: AsRef<str>,
 	{
-		let name = name.as_ref();
-		self.all_map.get(name).cloned()
+		let mut name = Cow::Borrowed(name.as_ref());
+		if !name.starts_with(std::path::MAIN_SEPARATOR) {
+			name = Cow::Owned(format!("{}{name}", std::path::MAIN_SEPARATOR));
+		}
+		self.all_map.get(name.as_ref()).cloned()
 	}
 
-	pub async fn collect_directory(path: &Utf8Path) -> Result<Self> {
+	pub async fn collect_directory(path: &str) -> Result<(Self, Vec<TestLoadError>)> {
 		let mut all = Vec::new();
 		let mut map = HashMap::new();
-		let root = path.to_path_buf();
-		Self::collect_recursive(path, &root, &mut map, &mut all).await?;
+		let mut errors = Vec::new();
+		Self::collect_recursive(path, &path, &mut map, &mut all, &mut errors).await?;
 		let map = Arc::new(map);
-		Ok(Self {
-			root,
-			all_map: map.clone(),
-			map,
-			all: Arc::new(all),
-		})
+		Ok((
+			Self {
+				root: path.to_string(),
+				all_map: map.clone(),
+				map,
+				all: Arc::new(all),
+			},
+			errors,
+		))
 	}
 
 	async fn collect_recursive(
-		dir: &Utf8Path,
-		root: &Utf8Path,
+		dir: &str,
+		root: &str,
 		map: &mut HashMap<String, TestId>,
 		all: &mut Vec<TestCase>,
+		errors: &mut Vec<TestLoadError>,
 	) -> Result<()> {
 		let mut dir_entries = fs::read_dir(dir)
 			.await
@@ -92,7 +154,11 @@ impl TestSet {
 			let entry =
 				entry.with_context(|| format!("Failed to read entry in directory '{dir}'"))?;
 
-			let p: Utf8PathBuf = entry.path().try_into()?;
+			let p: String = entry
+				.path()
+				.to_str()
+				.ok_or_else(|| anyhow!("Failed to parse entry to utf-8 string"))?
+				.to_owned();
 
 			let ft = entry
 				.file_type()
@@ -103,12 +169,13 @@ impl TestSet {
 			mem::drop(entry);
 
 			if ft.is_dir() {
-				Box::pin(Self::collect_recursive(&p, root, map, all)).await?;
+				Box::pin(Self::collect_recursive(&p, root, map, all, errors)).await?;
 				continue;
 			};
 
 			if ft.is_file() {
-				let Some("surql") = p.extension() else {
+				let Some("surql") = Path::new(&p).extension().map(|x| x.to_str().unwrap_or(""))
+				else {
 					continue;
 				};
 
@@ -119,8 +186,10 @@ impl TestSet {
 				let case = match TestCase::from_source_path(p.clone(), text) {
 					Ok(x) => x,
 					Err(e) => {
-						println!("{:?}", e.context(format!("Failed to load test at '{p}'")));
-						println!("Skipping test!");
+						errors.push(TestLoadError {
+							path: p,
+							error: e,
+						});
 						continue;
 					}
 				};

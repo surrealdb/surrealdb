@@ -5,22 +5,66 @@ use clap::{
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum FailureMode {
-	Fail,
+pub enum ResultsMode {
+	Default,
 	Accept,
 	Overwrite,
 }
 
-impl ValueEnum for FailureMode {
+impl ValueEnum for ResultsMode {
 	fn value_variants<'a>() -> &'a [Self] {
-		&[FailureMode::Fail, FailureMode::Accept, FailureMode::Overwrite]
+		&[ResultsMode::Default, ResultsMode::Accept, ResultsMode::Overwrite]
 	}
 
 	fn to_possible_value(&self) -> Option<PossibleValue> {
 		match self {
-			FailureMode::Fail => Some(PossibleValue::new("fail")),
-			FailureMode::Accept => Some(PossibleValue::new("accept")),
-			FailureMode::Overwrite => Some(PossibleValue::new("overwrite")),
+			ResultsMode::Default => Some(PossibleValue::new("default").help("Do not change any tests")),
+			ResultsMode::Accept => Some(PossibleValue::new("accept").help("Write the results of tests which do not have results specified as the expected results")),
+			ResultsMode::Overwrite => Some(PossibleValue::new("overwrite").help("Overwrite the results of tests which do not have results and those that failed")),
+		}
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum Backend {
+	Memory,
+	RocksDb,
+	SurrealKv,
+	Foundation,
+}
+
+impl ValueEnum for Backend {
+	fn value_variants<'a>() -> &'a [Self] {
+		&[Backend::Memory, Backend::RocksDb, Backend::SurrealKv, Backend::Foundation]
+	}
+
+	fn to_possible_value(&self) -> Option<PossibleValue> {
+		match self {
+			Backend::Memory => Some(PossibleValue::new("memory").alias("mem")),
+			Backend::RocksDb => Some(PossibleValue::new("rocksdb")),
+			Backend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
+			Backend::Foundation => Some(PossibleValue::new("foundation")),
+		}
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum UpgradeBackend {
+	RocksDb,
+	SurrealKv,
+	Foundation,
+}
+
+impl ValueEnum for UpgradeBackend {
+	fn value_variants<'a>() -> &'a [Self] {
+		&[UpgradeBackend::RocksDb, UpgradeBackend::SurrealKv, UpgradeBackend::Foundation]
+	}
+
+	fn to_possible_value(&self) -> Option<PossibleValue> {
+		match self {
+			UpgradeBackend::RocksDb => Some(PossibleValue::new("rocksdb")),
+			UpgradeBackend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
+			UpgradeBackend::Foundation => Some(PossibleValue::new("foundationdb")),
 		}
 	}
 }
@@ -78,14 +122,18 @@ pub fn parse() -> ArgMatches {
         .subcommand(
             Command::new("run")
                 .about("Run surrealdb tests")
-                .arg(arg!([filter] "Filter the test by their path"))
+                .arg(arg!([filter] "Filter the tests by their path"))
                 .arg(arg!(--path <PATH> "The path to tests directory").default_value("./tests"))
                 .arg(
                     arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")
                         .value_parser(value_parser!(u32).range(1..))
                 ).arg(
-                    arg!(--failure <FAILURE> "How to handle failure of tests").value_parser(EnumValueParser::<FailureMode>::new()).default_value("fail")
+                    arg!(--results <RESULT_MODE> "How to handle results of tests").value_parser(EnumValueParser::<ResultsMode>::new()).default_value("default").alias("failure")
                 )
+				.arg(
+					arg!(--backend <BACKEND> "Specify the storage backend to use for the tests")
+						.value_parser(EnumValueParser::<Backend>::new()).default_value("mem")
+				)
 				.arg(
 					arg!(--"no-wip" "Skips tests marked work-in-progress")
 				)
@@ -93,29 +141,36 @@ pub fn parse() -> ArgMatches {
 					arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
 				),
         )
-        .subcommand(
-            Command::new("list")
-                .about("List surrealdb tests")
-                .arg(arg!([filter] "Filter the test by their path"))
-                .arg(
-                    arg!(--path <PATH> "Set the path to tests directory").default_value("./tests"),
-                ),
-        )
 		.subcommand(
-			// Not yet used
-			Command::new("fuzz")
-				.about("Command for handling fuzzing input")
-				.subcommand(
-					Command::new("fmt")
-						.about("Debug format the query from a reproduction file")
-						.arg(arg!(<INPUT> "The input file")),
-				)
-				.subcommand(
-					Command::new("export")
-						.about("Debug format the query from a reproduction file")
-						.arg(arg!(<INPUT> "The input file")),
-				)
-				.subcommand_required(true),
+			Command::new("upgrade")
+			.about("Run surrealdb upgrade tests")
+			.arg(arg!([filter] "Filter the tests by their path"))
+			.arg(arg!(--path <PATH> "The path to the tests directory").default_value("./upgrades"))
+			.arg(
+				arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")
+				.value_parser(value_parser!(u32).range(1..))
+			)
+			.arg(
+				arg!(--results <RESULT_MODE> "How to handle results of tests").value_parser(EnumValueParser::<ResultsMode>::new()).default_value("default")
+			)
+			.arg(
+				arg!(--backend <BACKEND> "Specify the storage backend to use for the upgrade test")
+					.value_parser(EnumValueParser::<UpgradeBackend>::new()).default_value("surrealkv")
+			)
+			.arg(
+				arg!(--from <VERSIONS> "The version to upgrade from").required(true)
+			)
+			.arg(
+				arg!(--to <VERSIONS> "The version to upgrade to").required(true)
+			),
+		)
+		.subcommand(
+			Command::new("list")
+			.about("List surrealdb tests")
+			.arg(arg!([filter] "Filter the test by their path"))
+			.arg(
+				arg!(--path <PATH> "Set the path to tests directory").default_value("./tests"),
+			),
 		);
 
 	cmd.subcommand_required(true).get_matches()
