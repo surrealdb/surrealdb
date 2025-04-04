@@ -8,7 +8,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
 #[cfg(target_family = "wasm")]
-use crate::sql::statements::UpdateStatement;
+use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::sql::{Base, Ident, Idioms, Index, Part, Strand, Value};
 #[cfg(target_family = "wasm")]
 use crate::sql::{Output, Values};
