@@ -7,11 +7,11 @@ use crate::{
 use anyhow::{bail, Context, Result};
 use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
-use std::{any::Any, io, mem, str, thread, time::Duration};
+use std::{io, mem, str, thread, time::Duration};
 use surrealdb_core::{
-	dbs::{capabilities::ExperimentalTarget, Response, Session},
+	dbs::{capabilities::ExperimentalTarget, Session},
 	kvs::Datastore,
-	syn::{self, error::RenderedError},
+	syn,
 };
 use tokio::{
 	select,

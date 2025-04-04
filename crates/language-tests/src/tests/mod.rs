@@ -8,7 +8,6 @@ use toml_edit::DocumentMut;
 
 pub mod cmp;
 pub mod report;
-pub mod results;
 pub mod schema;
 pub mod set;
 

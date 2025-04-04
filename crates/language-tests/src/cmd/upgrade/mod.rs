@@ -310,7 +310,7 @@ async fn run_imports(
 			)));
 		};
 
-		let Ok(source) = str::from_utf8(&set[test].source) else {
+		let Ok(source) = std::str::from_utf8(&set[test].source) else {
 			return Ok(Some(TestTaskResult::Import(
 				import.to_owned(),
 				format!("Import file was not valid utf-8."),

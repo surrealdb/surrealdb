@@ -8,7 +8,7 @@ use crate::tests::{
 	set::TestId,
 	TestSet,
 };
-use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::sql::Value as SurValue;
 use surrealdb_core::syn::error::RenderedError;
