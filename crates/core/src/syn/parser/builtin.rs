@@ -84,6 +84,18 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::sort::asc") => PathKind::Function,
 		UniCase::ascii("array::sort::desc") => PathKind::Function,
 		//
+		UniCase::ascii("bucket::put") => PathKind::Function,
+		UniCase::ascii("bucket::put_if_not_exists") => PathKind::Function,
+		UniCase::ascii("bucket::get") => PathKind::Function,
+		UniCase::ascii("bucket::head") => PathKind::Function,
+		UniCase::ascii("bucket::delete") => PathKind::Function,
+		UniCase::ascii("bucket::copy") => PathKind::Function,
+		UniCase::ascii("bucket::copy_if_not_exists") => PathKind::Function,
+		UniCase::ascii("bucket::rename") => PathKind::Function,
+		UniCase::ascii("bucket::rename_if_not_exists") => PathKind::Function,
+		UniCase::ascii("bucket::exists") => PathKind::Function,
+		UniCase::ascii("bucket::list") => PathKind::Function,
+		//
 		UniCase::ascii("bytes::len") => PathKind::Function,
 		//
 		UniCase::ascii("count") => PathKind::Function,
@@ -122,6 +134,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("encoding::base64::decode") => PathKind::Function,
 		UniCase::ascii("encoding::base64::encode") => PathKind::Function,
+		//
+		UniCase::ascii("file::bucket") => PathKind::Function,
+		UniCase::ascii("file::key") => PathKind::Function,
 		//
 		UniCase::ascii("geo::area") => PathKind::Function,
 		UniCase::ascii("geo::bearing") => PathKind::Function,
@@ -340,6 +355,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::duration") => PathKind::Function,
 		UniCase::ascii("type::field") => PathKind::Function,
 		UniCase::ascii("type::fields") => PathKind::Function,
+		UniCase::ascii("type::file") => PathKind::Function,
 		UniCase::ascii("type::float") => PathKind::Function,
 		UniCase::ascii("type::geometry") => PathKind::Function,
 		UniCase::ascii("type::int") => PathKind::Function,
@@ -348,6 +364,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::range") => PathKind::Function,
 		UniCase::ascii("type::record") => PathKind::Function,
 		UniCase::ascii("type::string") => PathKind::Function,
+		UniCase::ascii("type::string_lossy") => PathKind::Function,
 		UniCase::ascii("type::table") => PathKind::Function,
 		UniCase::ascii("type::thing") => PathKind::Function,
 		UniCase::ascii("type::uuid") => PathKind::Function,

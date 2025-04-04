@@ -317,26 +317,6 @@ impl Complement<Array> for Array {
 
 // ------------------------------
 
-#[allow(dead_code)]
-pub(crate) trait Concat<T> {
-	fn concat(self, other: T) -> T;
-}
-
-impl Concat<Array> for Array {
-	fn concat(mut self, mut other: Array) -> Array {
-		self.append(&mut other);
-		self
-	}
-}
-
-impl Concat<String> for String {
-	fn concat(self, other: String) -> String {
-		self + &other
-	}
-}
-
-// ------------------------------
-
 pub(crate) trait Difference<T> {
 	fn difference(self, other: T) -> T;
 }

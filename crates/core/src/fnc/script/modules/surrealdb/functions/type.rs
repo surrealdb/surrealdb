@@ -19,6 +19,7 @@ impl_module_def!(
 	"duration" => run,
 	"field" => fut Async,
 	"fields" => fut Async,
+	"file" => run,
 	"float" => run,
 	"int" => run,
 	"is" => (is::Package),

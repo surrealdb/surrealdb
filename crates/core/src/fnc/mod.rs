@@ -11,11 +11,13 @@ use reblessive::tree::Stk;
 pub mod api;
 pub mod args;
 pub mod array;
+pub mod bucket;
 pub mod bytes;
 pub mod count;
 pub mod crypto;
 pub mod duration;
 pub mod encoding;
+pub mod file;
 pub mod geo;
 pub mod http;
 pub mod math;
@@ -66,6 +68,7 @@ pub async fn run(
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
 		|| name.eq("value::patch")
+		|| name.starts_with("file")
 		|| name.starts_with("http")
 		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
@@ -192,6 +195,9 @@ pub fn synchronous(
 		"duration::from::nanos" => duration::from::nanos,
 		"duration::from::secs" => duration::from::secs,
 		"duration::from::weeks" => duration::from::weeks,
+		//
+		"file::bucket" => file::bucket,
+		"file::key" => file::key,
 		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
@@ -395,6 +401,7 @@ pub fn synchronous(
 		"type::datetime" => r#type::datetime,
 		"type::decimal" => r#type::decimal,
 		"type::duration" => r#type::duration,
+		"type::file" => r#type::file,
 		"type::float" => r#type::float,
 		"type::geometry" => r#type::geometry,
 		"type::int" => r#type::int,
@@ -403,6 +410,7 @@ pub fn synchronous(
 		"type::range" => r#type::range,
 		"type::record" => r#type::record,
 		"type::string" => r#type::string,
+		"type::string_lossy" => r#type::string_lossy,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
 		"type::uuid" => r#type::uuid,
@@ -501,6 +509,18 @@ pub async fn asynchronous(
 		"array::map" => array::map((stk, ctx, Some(opt), doc)).await,
 		"array::reduce" => array::reduce((stk, ctx, Some(opt), doc)).await,
 		"array::some" => array::any((stk, ctx, Some(opt), doc)).await,
+		//
+		"bucket::put" => bucket::put((stk, ctx, opt, doc)).await,
+		"bucket::put_if_not_exists" => bucket::put_if_not_exists((stk, ctx, opt, doc)).await,
+		"bucket::get" => bucket::get((stk, ctx, opt, doc)).await,
+		"bucket::head" => bucket::head((stk, ctx, opt, doc)).await,
+		"bucket::delete" => bucket::delete((stk, ctx, opt, doc)).await,
+		"bucket::copy" => bucket::copy((stk, ctx, opt, doc)).await,
+		"bucket::copy_if_not_exists" => bucket::copy_if_not_exists((stk, ctx, opt, doc)).await,
+		"bucket::rename" => bucket::rename((stk, ctx, opt, doc)).await,
+		"bucket::rename_if_not_exists" => bucket::rename_if_not_exists((stk, ctx, opt, doc)).await,
+		"bucket::exists" => bucket::exists((stk, ctx, opt, doc)).await,
+		"bucket::list" => bucket::list((stk, ctx, opt, doc)).await,
 		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
 		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
@@ -824,6 +844,27 @@ pub async fn idiom(
 				"year" => time::year,
 			)
 		}
+		Value::File(_) => {
+			dispatch!(
+				name,
+				args.clone(),
+				"no such method found for the file type",
+				//
+				"bucket" => file::bucket,
+				"key" => file::key,
+				//
+				"put" => bucket::put((stk, ctx, opt, doc)).await,
+				"put_if_not_exists" => bucket::put_if_not_exists((stk, ctx, opt, doc)).await,
+				"get" => bucket::get((stk, ctx, opt, doc)).await,
+				"head" => bucket::head((stk, ctx, opt, doc)).await,
+				"delete" => bucket::delete((stk, ctx, opt, doc)).await,
+				"copy" => bucket::copy((stk, ctx, opt, doc)).await,
+				"copy_if_not_exists" => bucket::copy_if_not_exists((stk, ctx, opt, doc)).await,
+				"rename" => bucket::rename((stk, ctx, opt, doc)).await,
+				"rename_if_not_exists" => bucket::rename_if_not_exists((stk, ctx, opt, doc)).await,
+				"exists" => bucket::exists((stk, ctx, opt, doc)).await,
+			)
+		}
 		_ => Err(Error::InvalidFunction {
 			name: "".into(),
 			message: "".into(),
@@ -879,6 +920,7 @@ pub async fn idiom(
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,

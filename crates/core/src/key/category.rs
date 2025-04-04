@@ -72,6 +72,8 @@ pub enum Category {
 	DatabaseApi,
 	/// crate::key::database::az             /*{ns}*{db}!az{az}
 	DatabaseAnalyzer,
+	/// crate::key::database::bu             /*{ns}*{db}!bu{bu}
+	DatabaseBucket,
 	/// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 	DatabaseFunction,
 	/// crate::key::database::ml             /*{ns}*{db}!ml{ml}{vn}
@@ -193,6 +195,7 @@ impl Display for Category {
 			Self::DatabaseAccessGrant => "DatabaseAccessGrant",
 			Self::DatabaseApi => "DatabaseApi",
 			Self::DatabaseAnalyzer => "DatabaseAnalyzer",
+			Self::DatabaseBucket => "DatabaseBucket",
 			Self::DatabaseFunction => "DatabaseFunction",
 			Self::DatabaseModel => "DatabaseModel",
 			Self::DatabaseParameter => "DatabaseParameter",
