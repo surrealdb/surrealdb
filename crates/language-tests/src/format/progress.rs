@@ -1,9 +1,9 @@
-use super::report::TestGrade;
+use crate::tests::report::TestGrade;
 use crate::{cli::ColorMode, format::ansi};
 use std::io::{self, BufWriter, IsTerminal as _, Stderr, Write};
 
-pub struct Progress<W> {
-	items: Vec<String>,
+pub struct Progress<I, W> {
+	items: Vec<(I, String)>,
 	color_mode: ColorMode,
 	use_ansii: bool,
 	writer: W,
@@ -11,7 +11,7 @@ pub struct Progress<W> {
 	expected: usize,
 }
 
-impl<W> Progress<W> {
+impl<I, W> Progress<I, W> {
 	pub fn from_writer(writer: W, use_ansii: bool, color_mode: ColorMode, expected: usize) -> Self {
 		Progress {
 			items: Vec::new(),
@@ -24,7 +24,7 @@ impl<W> Progress<W> {
 	}
 }
 
-impl Progress<BufWriter<Stderr>> {
+impl<I> Progress<I, BufWriter<Stderr>> {
 	pub fn from_stderr(expected: usize, color_mode: ColorMode) -> Self {
 		Self::from_writer(
 			BufWriter::new(io::stderr()),
@@ -35,7 +35,7 @@ impl Progress<BufWriter<Stderr>> {
 	}
 }
 
-impl<W: Write> Progress<W> {
+impl<I: Eq, W: Write> Progress<I, W> {
 	fn use_color(&self) -> bool {
 		match self.color_mode {
 			ColorMode::Always => true,
@@ -111,8 +111,8 @@ impl<W: Write> Progress<W> {
 		}
 	}
 
-	pub fn start_item(&mut self, name: &str) -> Result<(), io::Error> {
-		if self.items.iter().any(|x| x == name) {
+	pub fn start_item(&mut self, id: I, name: &str) -> Result<(), io::Error> {
+		if self.items.iter().any(|x| x.0 == id) {
 			return Ok(());
 		}
 
@@ -122,20 +122,20 @@ impl<W: Write> Progress<W> {
 		}
 
 		self.write_running(name)?;
-		self.items.push(name.to_string());
+		self.items.push((id, name.to_string()));
 		if self.use_ansii {
 			self.write_bar()?;
 		}
 		self.writer.flush()
 	}
 
-	pub fn finish_item(&mut self, name: &str, result: TestGrade) -> Result<(), io::Error> {
-		let Some(idx) = self.items.iter().position(|x| x == name) else {
+	pub fn finish_item(&mut self, id: I, result: TestGrade) -> Result<(), io::Error> {
+		let Some(idx) = self.items.iter().position(|x| x.0 == id) else {
 			return Ok(());
 		};
 
 		let lines = self.items.len();
-		self.items.remove(idx);
+		let (_, name) = self.items.remove(idx);
 
 		if self.use_ansii {
 			self.writer.write_all(b"\r")?;
@@ -145,10 +145,10 @@ impl<W: Write> Progress<W> {
 			self.writer.write_all(ansi!(clear_after).as_bytes())?;
 		}
 
-		self.write_finished(name, result)?;
+		self.write_finished(&name, result)?;
 
 		if self.use_ansii {
-			for name in self.items.iter() {
+			for (_, name) in self.items.iter() {
 				self.writer.write_fmt(format_args!(
 					ansi!(blue, "  Running", reset_format, " {}\n"),
 					name

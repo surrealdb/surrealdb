@@ -2,10 +2,16 @@ mod cli;
 mod cmd;
 mod format;
 mod runner;
+mod temp_dir;
 mod tests;
 
 use anyhow::Result;
 use cli::ColorMode;
+
+#[cfg(all(feature = "backend-foundation-7_1", feature = "backend-foundation-7_3"))]
+compile_error!(
+	"The two foundation db version backends are mutually exclusive, they cannot both be enabled"
+);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -18,15 +24,15 @@ async fn main() -> Result<()> {
 	//log::init(Level::INFO);
 
 	match sub {
-		"run" => cmd::run::run(color, args).await,
-		//#[cfg(feature = "fuzzing")]
-		//"fuzz" => cmd::fuzz::run(args).await,
-		//#[cfg(not(feature = "fuzzing"))]
-		"fuzz" => {
+		"test" => cmd::run::run(color, args).await,
+		#[cfg(not(feature = "upgrade"))]
+		"upgrade" => {
 			anyhow::bail!(
-				"Fuzzing subcommand is only implemented when the fuzzing feature is enabled"
+				"Upgrade subcommand is only implemented when the fuzzing feature is enabled"
 			)
 		}
+		#[cfg(feature = "upgrade")]
+		"upgrade" => cmd::upgrade::run(color, args).await,
 		"list" => cmd::list::run(args).await,
 		_ => panic!(),
 	}

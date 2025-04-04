@@ -1,9 +1,6 @@
 use std::{cmp::Ordering, fmt::Write, ops::Range};
 
-use crate::{
-	cmd::run::report::TestOutputs,
-	tests::{ConfigKind, TestSet},
-};
+use crate::tests::{report::TestOutputs, ConfigKind, TestSet};
 use anyhow::Result;
 use surrealdb_core::sql::Value as SurValue;
 use tokio::{fs, io::AsyncWriteExt};
