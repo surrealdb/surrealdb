@@ -2,6 +2,7 @@ mod cli;
 mod cmd;
 mod format;
 mod runner;
+mod temp_dir;
 mod tests;
 
 use anyhow::Result;
@@ -23,7 +24,7 @@ async fn main() -> Result<()> {
 	//log::init(Level::INFO);
 
 	match sub {
-		"run" => cmd::run::run(color, args).await,
+		"test" => cmd::run::run(color, args).await,
 		#[cfg(not(feature = "upgrade"))]
 		"upgrade" => {
 			anyhow::bail!(

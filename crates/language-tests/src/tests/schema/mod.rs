@@ -252,7 +252,7 @@ pub struct TestDetails {
 	pub fuzzing_reproduction: Option<String>,
 
 	#[serde(default)]
-	pub is_upgrade: bool,
+	pub upgrade: bool,
 
 	pub version: Option<Version>,
 

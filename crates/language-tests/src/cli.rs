@@ -1,8 +1,11 @@
+use std::str::FromStr;
+
 use clap::{
 	arg,
 	builder::{EnumValueParser, PossibleValue},
 	command, value_parser, ArgMatches, Command, ValueEnum,
 };
+use semver::Version;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ResultsMode {
@@ -69,6 +72,27 @@ impl ValueEnum for UpgradeBackend {
 	}
 }
 
+#[derive(Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub enum DsVersion {
+	Current,
+	Latest,
+	Version(Version),
+}
+
+impl DsVersion {
+	fn from_str(s: &str) -> Result<Self, semver::Error> {
+		if s == "current" {
+			return Ok(DsVersion::Current);
+		}
+
+		if s == "latest" {
+			return Ok(DsVersion::Latest);
+		}
+
+		Version::from_str(s).map(DsVersion::Version)
+	}
+}
+
 /*
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LogLevel {
@@ -120,7 +144,7 @@ pub fn parse() -> ArgMatches {
 	let cmd = command!()
 		.arg(arg!(--color <COLOR> "Set if the output should be colored").value_parser(EnumValueParser::<ColorMode>::new()).default_value("auto"))
         .subcommand(
-            Command::new("run")
+            Command::new("test").alias("run")
                 .about("Run surrealdb tests")
                 .arg(arg!([filter] "Filter the tests by their path"))
                 .arg(arg!(--path <PATH> "The path to tests directory").default_value("./tests"))
@@ -145,7 +169,9 @@ pub fn parse() -> ArgMatches {
 			Command::new("upgrade")
 			.about("Run surrealdb upgrade tests")
 			.arg(arg!([filter] "Filter the tests by their path"))
-			.arg(arg!(--path <PATH> "The path to the tests directory").default_value("./upgrades"))
+			.arg(arg!(--path <PATH> "The path to the tests directory").default_value("./tests"))
+			.arg(arg!(--"docker-cmd" <COMMAND> "The command to run docker images with").default_value("docker"))
+			.arg(arg!(--"surreal-src" <PATH> "The location of a local version of the surrealdb source").default_value("../..").help("The directory of the a version of the surrealdb source. Whenever the a test is run with the 'current' version this directory will be used for building surrealdb."))
 			.arg(
 				arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")
 				.value_parser(value_parser!(u32).range(1..))
@@ -158,10 +184,16 @@ pub fn parse() -> ArgMatches {
 					.value_parser(EnumValueParser::<UpgradeBackend>::new()).default_value("surrealkv")
 			)
 			.arg(
-				arg!(--from <VERSIONS> "The version to upgrade from").required(true)
+				arg!(-f --from <VERSIONS> "The version to upgrade from").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
 			)
 			.arg(
-				arg!(--to <VERSIONS> "The version to upgrade to").required(true)
+				arg!(-t --to <VERSIONS> "The version to upgrade to").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
+			)
+			.arg(
+				arg!(--"no-wip" "Skips tests marked work-in-progress")
+			)
+			.arg(
+				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
 			),
 		)
 		.subcommand(

@@ -1,13 +1,16 @@
-pub mod schema;
-pub mod testset;
-use std::ops::Range;
-use std::sync::Arc;
-
 use anyhow::{bail, Context, Result};
 use schema::TestConfig;
 use serde::{de::IntoDeserializer, Deserialize};
-pub use testset::TestSet;
+pub use set::TestSet;
+use std::ops::Range;
+use std::sync::Arc;
 use toml_edit::DocumentMut;
+
+pub mod cmp;
+pub mod report;
+pub mod results;
+pub mod schema;
+pub mod set;
 
 struct Parser<'a> {
 	chars: &'a [u8],

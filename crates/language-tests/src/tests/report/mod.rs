@@ -1,19 +1,30 @@
+use std::any::Any;
 use std::collections::BTreeMap;
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
-use super::TestTaskResult;
 use crate::tests::schema::{self, TestConfig};
 use crate::tests::{
 	schema::{BoolOr, TestDetailsResults},
-	testset::TestId,
+	set::TestId,
 	TestSet,
 };
-use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::{Response, Session};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::sql::Value as SurValue;
+use surrealdb_core::syn::error::RenderedError;
 
 mod display;
 mod update;
+
+#[derive(Debug)]
+pub enum TestTaskResult {
+	ParserError(RenderedError),
+	RunningError(anyhow::Error),
+	Import(String, String),
+	Timeout,
+	Results(Vec<Result<SurValue, String>>),
+	Paniced(Box<dyn Any + Send + 'static>),
+}
 
 /// Enum with the outcome of a test
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -285,9 +296,7 @@ impl TestReport {
 			TestTaskResult::RunningError(_) => None,
 			TestTaskResult::Timeout => None,
 			TestTaskResult::Import(_, _) => None,
-			TestTaskResult::Results(ref e) => Some(TestOutputs::Values(
-				e.iter().map(|x| x.result.as_ref().map_err(|e| e.to_string()).cloned()).collect(),
-			)),
+			TestTaskResult::Results(ref e) => Some(TestOutputs::Values(e.clone())),
 			TestTaskResult::Paniced(_) => None,
 		};
 
@@ -308,7 +317,7 @@ impl TestReport {
 	) -> TestReportKind {
 		match job_result {
 			TestTaskResult::RunningError(e) => {
-				TestReportKind::Error(TestError::Running(e.to_string()))
+				TestReportKind::Error(TestError::Running(format!("{:?}", e)))
 			}
 			TestTaskResult::Timeout => TestReportKind::Error(TestError::Timeout),
 			TestTaskResult::Import(a, b) => TestReportKind::Error(TestError::Import(a, b)),
@@ -358,8 +367,6 @@ impl TestReport {
 			}
 			TestTaskResult::Results(results) => {
 				let expectation = TestExpectation::from_test_config(config);
-				let results =
-					results.into_iter().map(|x| x.result.map_err(|x| x.to_string())).collect();
 				Self::grade_value_results(expectation, results, matcher_datastore).await
 			}
 		}

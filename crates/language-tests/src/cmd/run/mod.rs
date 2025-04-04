@@ -1,7 +1,7 @@
 use crate::{
 	cli::{Backend, ColorMode, ResultsMode},
 	runner::Schedular,
-	tests::{testset::TestId, TestSet},
+	tests::{report::TestTaskResult, set::TestId, TestSet},
 };
 
 use anyhow::{bail, Context, Result};
@@ -10,7 +10,6 @@ use provisioner::{Permit, PermitError, Provisioner};
 use std::{any::Any, io, mem, str, thread, time::Duration};
 use surrealdb_core::{
 	dbs::{capabilities::ExperimentalTarget, Response, Session},
-	err::Error as CoreError,
 	kvs::Datastore,
 	syn::{self, error::RenderedError},
 };
@@ -20,25 +19,12 @@ use tokio::{
 	time,
 };
 
-mod cmp;
-mod progress;
 mod provisioner;
-mod report;
 mod util;
 
-use progress::Progress;
-use report::{TestGrade, TestReport};
+use crate::format::Progress;
+use crate::tests::report::{TestGrade, TestReport};
 use util::core_capabilities_from_test_config;
-
-#[derive(Debug)]
-pub enum TestTaskResult {
-	ParserError(RenderedError),
-	RunningError(CoreError),
-	Import(String, String),
-	Timeout,
-	Results(Vec<Response>),
-	Paniced(Box<dyn Any + Send + 'static>),
-}
 
 pub struct TestTaskContext {
 	pub id: TestId,
@@ -49,14 +35,12 @@ pub struct TestTaskContext {
 
 fn try_collect_reports<W: io::Write>(
 	reports: &mut Vec<TestReport>,
-	testset: &TestSet,
 	channel: &mut UnboundedReceiver<TestReport>,
-	progress: &mut Progress<W>,
+	progress: &mut Progress<TestId, W>,
 ) {
 	while let Ok(x) = channel.try_recv() {
 		let grade = x.grade();
-		let name = testset[x.test_id()].path.as_str();
-		progress.finish_item(name, grade).unwrap();
+		progress.finish_item(x.test_id(), grade).unwrap();
 		reports.push(x);
 	}
 }
@@ -68,10 +52,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	// Check if the backend is supported by the enabled features.
 	match backend {
-		#[cfg(feature = "backend-mem")]
+		// backend memory is always enabled as we needs it to run match expressions.
 		Backend::Memory => {}
-		#[cfg(not(feature = "backend-mem"))]
-		Backend::Memory => bail!("Memory backed feature is not enabled"),
 		#[cfg(feature = "backend-rocksdb")]
 		Backend::RocksDb => {}
 		#[cfg(not(feature = "backend-rocksdb"))]
@@ -118,7 +100,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.copied()
 		.unwrap_or_else(|| thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(8));
 
-	let failure_mode = matches.get_one::<ResultsMode>("results").unwrap();
+	let results_mode = matches.get_one::<ResultsMode>("results").unwrap();
 
 	println!(" Running with {num_jobs} jobs");
 	let mut schedular = Schedular::new(num_jobs);
@@ -136,16 +118,16 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	tokio::spawn(grade_task(subset.clone(), res_recv, report_send));
 
 	let mut reports = Vec::new();
-	let mut progress = progress::Progress::from_stderr(subset.len(), color);
+	let mut progress = Progress::from_stderr(subset.len(), color);
 
 	// spawn all tests.
 	for (id, test) in subset.iter_ids() {
 		let config = test.config.clone();
 
-		progress.start_item(test.path.as_str()).unwrap();
+		progress.start_item(id, test.path.as_str()).unwrap();
 
 		if !config.should_run() {
-			progress.finish_item(subset[id].path.as_str(), TestGrade::Success).unwrap();
+			progress.finish_item(id, TestGrade::Success).unwrap();
 			continue;
 		}
 
@@ -177,7 +159,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		}
 
 		// Try to collect reports to give quick feedback on test completion.
-		try_collect_reports(&mut reports, &subset, &mut report_recv, &mut progress);
+		try_collect_reports(&mut reports, &mut report_recv, &mut progress);
 	}
 
 	// all test are running.
@@ -188,8 +170,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	// meaning the test tasks have all quit.
 	while let Some(x) = report_recv.recv().await {
 		let grade = x.grade();
-		let name = subset[x.test_id()].path.as_str();
-		progress.finish_item(name, grade).unwrap();
+		progress.finish_item(x.test_id(), grade).unwrap();
 		reports.push(x);
 	}
 
@@ -215,7 +196,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	}
 
 	// possibly update test configs with acquired results.
-	match failure_mode {
+	match results_mode {
 		ResultsMode::Default => {}
 		ResultsMode::Accept => {
 			for report in reports.iter().filter(|x| x.is_unspecified_test() && !x.is_wip()) {
@@ -416,7 +397,10 @@ async fn run_test_with_dbs(
 	}
 
 	match result {
-		Ok(x) => Ok(TestTaskResult::Results(x)),
-		Err(e) => Ok(TestTaskResult::RunningError(e)),
+		Ok(x) => {
+			let x = x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect();
+			Ok(TestTaskResult::Results(x))
+		}
+		Err(e) => Ok(TestTaskResult::RunningError(anyhow::anyhow!(e))),
 	}
 }
