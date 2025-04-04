@@ -347,6 +347,17 @@ impl FieldEditContext<'_> {
 								check: kind.to_string(),
 								value: from.to_string(),
 							},
+							Error::NestedCoerceTo {
+								from,
+								path,
+								into,
+								..
+							} => Error::FieldCheck {
+								thing: self.rid.to_string(),
+								field: self.def.name.clone().extend(path),
+								check: into,
+								value: from.to_string(),
+							},
 							// There was a different error
 							e => e,
 						})?;
@@ -375,6 +386,17 @@ impl FieldEditContext<'_> {
 						thing: self.rid.to_string(),
 						field: self.def.name.clone(),
 						check: kind.to_string(),
+						value: from.to_string(),
+					},
+					Error::NestedCoerceTo {
+						from,
+						path,
+						into,
+						..
+					} => Error::FieldCheck {
+						thing: self.rid.to_string(),
+						field: self.def.name.clone().extend(path),
+						check: into,
 						value: from.to_string(),
 					},
 					// There was a different error
