@@ -10,7 +10,6 @@ value = "'🜕'"
 [[test.results]]
 value = "'🜕'"
 
-
 */
 
 "\u{0000B0}";

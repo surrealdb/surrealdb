@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::fnc;
 use crate::sql::operator::Operator;
 use crate::sql::value::Value;
@@ -10,6 +9,9 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
+
+use super::ControlFlow;
+use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 
@@ -103,7 +105,7 @@ impl Expression {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		// Check the type of expression
 		match self {
 			// This is a unary expression: !test
@@ -111,10 +113,10 @@ impl Expression {
 				o,
 				v,
 			} => match o {
-				Operator::Add => Ok(v.compute(stk, ctx, opt, doc).await?),
-				Operator::Neg => fnc::operate::neg(v.compute(stk, ctx, opt, doc).await?),
-				Operator::Not => fnc::operate::not(v.compute(stk, ctx, opt, doc).await?),
-				o => Err(fail!("Invalid operator '{o:?}' encountered")),
+				Operator::Add => v.compute(stk, ctx, opt, doc).await,
+				Operator::Neg => Ok(fnc::operate::neg(v.compute(stk, ctx, opt, doc).await?)?),
+				Operator::Not => Ok(fnc::operate::not(v.compute(stk, ctx, opt, doc).await?)?),
+				o => Err(ControlFlow::from(fail!("Invalid operator '{o:?}' encountered"))),
 			},
 			// This is a binary expression: test != NONE
 			Self::Binary {
@@ -147,7 +149,7 @@ impl Expression {
 					_ => {} // Continue
 				}
 				let r = r.compute(stk, ctx, opt, doc).await?;
-				match o {
+				let res = match o {
 					Operator::Or => fnc::operate::or(l, r),
 					Operator::And => fnc::operate::and(l, r),
 					Operator::Tco => fnc::operate::tco(l, r),
@@ -190,7 +192,8 @@ impl Expression {
 						fnc::operate::knn(stk, ctx, opt, doc, self).await
 					}
 					o => Err(fail!("Invalid operator '{o:?}' encountered")),
-				}
+				};
+				res.map_err(ControlFlow::from)
 			}
 		}
 	}

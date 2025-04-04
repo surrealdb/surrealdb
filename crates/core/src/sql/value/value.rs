@@ -10,7 +10,6 @@ use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
@@ -20,6 +19,7 @@ use crate::sql::{
 	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
 	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
+use crate::sql::{Closure, ControlFlow, FlowResult};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
@@ -3008,50 +3008,37 @@ impl Value {
 			_ => false,
 		}
 	}
-	/// Process this type returning a computed simple Value
+	/// Process this type returning a computed simple Value.
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self.compute_unbordered(stk, ctx, opt, doc).await {
-			Err(Error::Return {
-				value,
-			}) => Ok(value),
-			res => res,
-		}
-	}
-	/// Process this type returning a computed simple Value, without catching errors
-	pub(crate) async fn compute_unbordered(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		// Prevent infinite recursion due to casting, expressions, etc.
 		let opt = &opt.dive(1)?;
 
-		match self {
-			Value::Cast(v) => v.compute(stk, ctx, opt, doc).await,
+		let res = match self {
+			Value::Cast(v) => return v.compute(stk, ctx, opt, doc).await,
 			Value::Thing(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Block(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Range(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Block(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Range(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Idiom(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Array(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Object(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Idiom(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Array(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Object(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Constant(v) => v.compute(),
-			Value::Function(v) => v.compute(stk, ctx, opt, doc).await,
-			Value::Model(v) => v.compute(stk, ctx, opt, doc).await,
-			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Function(v) => return v.compute(stk, ctx, opt, doc).await,
+			Value::Model(v) => return v.compute(stk, ctx, opt, doc).await,
+			Value::Subquery(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Expression(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Refs(v) => v.compute(ctx, opt, doc).await,
 			_ => Ok(self.to_owned()),
-		}
+		};
+
+		res.map_err(ControlFlow::from)
 	}
 }
 
