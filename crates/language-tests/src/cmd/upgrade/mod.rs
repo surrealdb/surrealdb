@@ -339,8 +339,25 @@ async fn run_task_inner(
 
 	let process = process::SurrealProcess::new(&config, &task.from, dir, port, false).await?;
 
-	if let Some(x) = run_imports(&task, &test_set, &process).await? {
-		return Ok(x);
+	match run_imports(&task, &test_set, &process).await {
+		Ok(Some(TestTaskResult::Import(test, error))) => {
+			let output = process.quit_with_output().await?;
+			let error = format!(
+				"{error}\n> process stdout:\n{}\n\n> process stderr: \n{}",
+				output.stdout, output.stderr
+			);
+			return Ok(TestTaskResult::Import(test, error));
+		}
+		Ok(Some(x)) => return Ok(x),
+		Ok(None) => {}
+		Err(e) => {
+			let output = process.quit_with_output().await?;
+			bail!(
+				"{e:?}\n> process stdout:\n{}\n\n> process stderr: \n{}",
+				output.stdout,
+				output.stderr
+			)
+		}
 	};
 
 	process.retrieve_data(&config, &dir).await?;
@@ -350,9 +367,19 @@ async fn run_task_inner(
 
 	let source = &test_set[task.test].source;
 	let source = std::str::from_utf8(source).context("Text source was not valid utf-8")?;
-	let result = process.send_request(&source).await;
+	let result = match process.send_request(&source).await {
+		Ok(x) => x,
+		Err(e) => {
+			let output = process.quit_with_output().await?;
+			bail!(
+				"{e:?}\n> process stdout:\n{}\n\n> process stderr: \n{}",
+				output.stdout,
+				output.stderr
+			)
+		}
+	};
 
 	let _ = tokio::fs::remove_dir_all(dir).await;
 
-	result
+	Ok(result)
 }

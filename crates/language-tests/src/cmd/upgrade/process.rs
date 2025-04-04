@@ -7,7 +7,10 @@ use surrealdb_core::{
 	dbs::{self, Status},
 	sql::{Object, Value},
 };
-use tokio::process::{Child, Command};
+use tokio::{
+	io::AsyncReadExt,
+	process::{Child, Command},
+};
 use tokio_tungstenite::{
 	connect_async,
 	tungstenite::{
@@ -46,6 +49,11 @@ enum Data {
 struct Response {
 	id: Option<Value>,
 	result: Result<Data, Failure>,
+}
+
+pub struct ProcessOutput {
+	pub stdout: String,
+	pub stderr: String,
 }
 
 pub struct SurrealProcess {
@@ -137,8 +145,8 @@ impl SurrealProcess {
 			&endpoint,
 		])
 		.stdin(Stdio::null())
-		.stdout(Stdio::null())
-		.stderr(Stdio::null())
+		.stdout(Stdio::piped())
+		.stderr(Stdio::piped())
 		.kill_on_drop(true);
 		return cmd;
 	}
@@ -165,8 +173,8 @@ impl SurrealProcess {
 		res.args(common_args)
 			.current_dir(Path::new(&config.surreal_path).join("target").join("debug"))
 			.stdin(Stdio::null())
-			.stdout(Stdio::null())
-			.stderr(Stdio::null())
+			.stdout(Stdio::piped())
+			.stderr(Stdio::piped())
 			.kill_on_drop(true);
 		return res;
 	}
@@ -259,6 +267,28 @@ impl SurrealProcess {
 			self.process.kill().await?;
 		}
 		Ok(())
+	}
+
+	pub async fn quit_with_output(mut self) -> anyhow::Result<ProcessOutput> {
+		self.stop().await?;
+
+		if let Err(_) = tokio::time::timeout(Duration::from_secs(5), self.process.wait()).await {
+			self.process.kill().await?;
+		}
+
+		let mut buffer = Vec::new();
+
+		self.process.stdout.unwrap().read_to_end(&mut buffer).await.unwrap();
+		let stdout = String::from_utf8_lossy(&buffer).into_owned();
+
+		buffer.clear();
+		self.process.stderr.unwrap().read_to_end(&mut buffer).await.unwrap();
+		let stderr = String::from_utf8_lossy(&buffer).into_owned();
+
+		Ok(ProcessOutput {
+			stdout,
+			stderr,
+		})
 	}
 
 	pub async fn retrieve_data(&self, config: &Config, path: &str) -> anyhow::Result<()> {
