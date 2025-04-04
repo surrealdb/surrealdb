@@ -278,6 +278,10 @@ pub enum Error {
 	#[error("The query was not executed due to a cancelled transaction")]
 	QueryCancelled,
 
+	/// The query did not execute, because the memory threshold has been reached
+	#[error("The query was not executed due to the memory threshold being reached")]
+	QueryBeyondMemoryThreshold,
+
 	/// The query did not execute, because the transaction has failed
 	#[error("The query was not executed due to a failed transaction")]
 	QueryNotExecuted,
@@ -1009,6 +1013,10 @@ pub enum Error {
 	IndexAlreadyBuilding {
 		name: String,
 	},
+
+	/// A database index entry for the specified table is already building
+	#[error("Index building has been cancelled")]
+	IndexingBuildingCancelled,
 
 	/// The token has expired
 	#[error("The token has expired")]
