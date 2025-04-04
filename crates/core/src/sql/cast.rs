@@ -1,13 +1,14 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::{Idiom, Kind, Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
+
+use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
 
@@ -48,9 +49,9 @@ impl Cast {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		// Compute the value to be cast and convert it
-		stk.run(|stk| self.1.compute(stk, ctx, opt, doc)).await?.convert_to(&self.0)
+		Ok(stk.run(|stk| self.1.compute(stk, ctx, opt, doc)).await?.convert_to(&self.0)?)
 	}
 }
 

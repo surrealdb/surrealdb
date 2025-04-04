@@ -8,10 +8,10 @@ value = "[1, 3, 5]"
 value = "['a0', 'b1', 'c2']"
 
 [[test.results]]
-error = "Continue statement has been reached"
+error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 [[test.results]]
-error = "Break statement has been reached"
+error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 [[test.results]]
 value = "[]"
