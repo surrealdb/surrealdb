@@ -79,6 +79,32 @@ impl DefineFieldStatement {
 				});
 			}
 		}
+
+		// Validate custom types
+		if let Some(ref kind) = self.kind {
+			if let Kind::UserDefined(name) = kind {
+				// Check if the type exists
+				let key = format!("type:{}", name);
+				if txn.get(key.as_str(), None).await?.is_none() {
+					return Err(Error::TypeNotFound(name.to_string()));
+				}
+			}
+		}
+
+		// Validate default value against type
+		if let Some(ref default) = self.default {
+			if let Some(ref kind) = self.kind {
+				default.validate_custom_type(kind, ctx).await?;
+			}
+		}
+
+		// Validate value against type
+		if let Some(ref value) = self.value {
+			if let Some(ref kind) = self.kind {
+				value.validate_custom_type(kind, ctx).await?;
+			}
+		}
+
 		// Process the statement
 		let key = crate::key::table::fd::new(ns, db, &self.what, &fd);
 		txn.get_or_add_ns(ns, opt.strict).await?;

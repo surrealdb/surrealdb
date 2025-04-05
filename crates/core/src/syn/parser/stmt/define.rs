@@ -22,6 +22,7 @@ use crate::{
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
 			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
 			DefineParamStatement, DefineStatement, DefineTableStatement, DefineUserStatement,
+			DefineTypeStatement,
 		},
 		table_type,
 		tokenizer::Tokenizer,
@@ -65,6 +66,7 @@ impl Parser<'_> {
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
 			t!("CONFIG") => self.parse_define_config(ctx).await.map(DefineStatement::Config),
+			t!("TYPE") => self.parse_define_type(ctx).await.map(DefineStatement::Type),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -1703,5 +1705,49 @@ impl Parser<'_> {
 		}
 
 		Ok(res)
+	}
+
+	pub async fn parse_define_type(&mut self, ctx: &mut Stk) -> ParseResult<DefineTypeStatement> {
+		// Parse optional IF NOT EXISTS or OVERWRITE
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
+
+		let overwrite = if self.eat(t!("OVERWRITE")) {
+			true
+		} else {
+			false
+		};
+
+		// Parse TYPE keyword
+		expected!(self, t!("TYPE"));
+
+		// Parse type name
+		let name = self.next_token_value()?;
+
+		// Parse AS keyword
+		expected!(self, t!("AS"));
+
+		// Parse the type kind
+		let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
+
+		// Parse optional COMMENT
+		let comment = if self.eat(t!("COMMENT")) {
+			Some(self.next_token_value()?)
+		} else {
+			None
+		};
+
+		Ok(DefineTypeStatement {
+			name,
+			kind,
+			comment,
+			if_not_exists,
+			overwrite,
+		})
 	}
 }
