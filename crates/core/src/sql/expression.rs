@@ -9,6 +9,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
+use crate::sql::Number;
 
 use super::ControlFlow;
 use super::FlowResult;
@@ -205,7 +206,10 @@ impl fmt::Display for Expression {
 			Self::Unary {
 				o,
 				v,
-			} => write!(f, "{o}{v}"),
+			} => match v {
+				Value::Number(n) if *n < Number::Int(0) => write!(f, "{o} {n}"),
+				_ => write!(f, "{o}{v}"),
+			}
 			Self::Binary {
 				l,
 				o,
