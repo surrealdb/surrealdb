@@ -7,9 +7,9 @@ use std::borrow::Cow;
 use std::ops::Bound;
 use std::time::Duration;
 use surrealdb::fflags::FFLAGS;
-use surrealdb::opt::auth::Database;
 use surrealdb::opt::auth::Namespace;
 use surrealdb::opt::auth::Record as RecordAccess;
+use surrealdb::opt::auth::{Database, Root};
 use surrealdb::opt::Raw;
 use surrealdb::opt::Resource;
 use surrealdb::opt::{PatchOp, PatchOps};
@@ -22,9 +22,9 @@ use surrealdb::{error::Api as ApiError, error::Db as DbError, Error};
 use surrealdb_core::sql::{Id, Value as CoreValue};
 use ulid::Ulid;
 
-use crate::api_integration::RecordName;
 use crate::api_integration::NS;
 use crate::api_integration::{ApiRecordId, Record, RecordBuf};
+use crate::api_integration::{RecordName, ROOT_PASS, ROOT_USER};
 
 use super::AuthParams;
 use super::CreateDb;
@@ -149,35 +149,73 @@ pub async fn signin_record(new_db: impl CreateDb) {
 		"
         DEFINE ACCESS `{access}` ON DB TYPE RECORD
         SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
-        SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+        SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) AND isActive = true )
 		DURATION FOR SESSION 1d FOR TOKEN 15s
     "
 	);
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
-	db.signup(RecordAccess {
-		namespace: NS,
-		database: &database,
-		access: &access,
-		params: AuthParams {
-			pass,
-			email: &email,
-		},
-	})
-	.await
-	.unwrap();
-	db.signin(RecordAccess {
-		namespace: NS,
-		database: &database,
-		access: &access,
-		params: AuthParams {
-			pass,
-			email: &email,
-		},
-	})
-	.await
-	.unwrap();
+	{
+		db.signup(RecordAccess {
+			namespace: NS,
+			database: &database,
+			access: &access,
+			params: AuthParams {
+				pass,
+				email: &email,
+			},
+		})
+		.await
+		.unwrap();
+		db.query("UPDATE user SET isActive=true").await.unwrap().check().unwrap();
+	}
+
+	{
+		db.signin(RecordAccess {
+			namespace: NS,
+			database: &database,
+			access: &access,
+			params: AuthParams {
+				pass,
+				email: &email,
+			},
+		})
+		.await
+		.unwrap();
+		db.invalidate().await.unwrap();
+	}
+
+	{
+		db.signin(Root {
+			username: ROOT_USER,
+			password: ROOT_PASS,
+		})
+		.await
+		.unwrap();
+		db.query("UPDATE user SET isActive=false").await.unwrap().check().unwrap();
+		db.invalidate().await.unwrap();
+	}
+
+	{
+		match db
+			.signin(RecordAccess {
+				namespace: NS,
+				database: &database,
+				access: &access,
+				params: AuthParams {
+					pass,
+					email: &email,
+				},
+			})
+			.await
+		{
+			Err(Error::Api(surrealdb::error::Api::Query(e))) => {
+				assert_eq!(e, "There was a problem with the database: No record was returned")
+			}
+			v => panic!("Unexpected response or error: {v:?}"),
+		};
+	}
 }
 
 pub async fn record_access_throws_error(new_db: impl CreateDb) {
