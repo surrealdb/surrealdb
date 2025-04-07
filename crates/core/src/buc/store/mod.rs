@@ -5,6 +5,7 @@ use crate::{
 use bytes::Bytes;
 use std::{future::Future, pin::Pin, sync::Arc};
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod file;
 pub mod memory;
 pub mod prefixed;
