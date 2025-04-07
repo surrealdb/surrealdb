@@ -146,7 +146,7 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 			let opts = ListOptions {
 				start: opts.start.clone(),
 				prefix: Some(prefix),
-				limit: opts.limit.clone(),
+				limit: opts.limit,
 			};
 
 			// Delegate to the underlying store with the combined prefix

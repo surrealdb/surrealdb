@@ -244,7 +244,7 @@ impl ObjectStore for MemoryStore {
 				.collect();
 
 			// Sort keys lexicographically for consistent ordering
-			all_keys.sort_by(|(key_a, _), (key_b, _)| key_a.as_str().cmp(&key_b.as_str()));
+			all_keys.sort_by(|(key_a, _), (key_b, _)| key_a.as_str().cmp(key_b.as_str()));
 
 			// Apply limit if specified
 			let limited_keys = if let Some(limit_val) = opts.limit {

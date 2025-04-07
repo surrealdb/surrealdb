@@ -34,8 +34,8 @@ impl<'a> BucketController<'a> {
 		buc: &str,
 	) -> Result<Self, Error> {
 		let (ns, db) = opt.ns_db()?;
-		let bucket = ctx.tx().get_db_bucket(ns, db, &buc).await?;
-		let store = ctx.get_bucket_store(ns, db, &buc).await?;
+		let bucket = ctx.tx().get_db_bucket(ns, db, buc).await?;
+		let store = ctx.get_bucket_store(ns, db, buc).await?;
 
 		Ok(Self {
 			stk,
@@ -76,7 +76,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Put, Some(key), None).await?;
 
 		self.store
-			.put(&key, payload)
+			.put(key, payload)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
@@ -102,7 +102,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Put, Some(key), None).await?;
 
 		self.store
-			.put_if_not_exists(&key, payload)
+			.put_if_not_exists(key, payload)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
@@ -113,7 +113,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Head, Some(key), None).await?;
 
 		self.store
-			.head(&key)
+			.head(key)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))
 	}
@@ -123,7 +123,7 @@ impl<'a> BucketController<'a> {
 
 		let bytes = match self
 			.store
-			.get(&key)
+			.get(key)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?
 		{
@@ -139,7 +139,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Delete, Some(key), None).await?;
 
 		self.store
-			.delete(&key)
+			.delete(key)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
@@ -151,7 +151,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Copy, Some(key), Some(&target)).await?;
 
 		self.store
-			.copy(&key, &target)
+			.copy(key, &target)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
@@ -163,7 +163,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Copy, Some(key), Some(&target)).await?;
 
 		self.store
-			.copy_if_not_exists(&key, &target)
+			.copy_if_not_exists(key, &target)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
@@ -175,7 +175,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Rename, Some(key), Some(&target)).await?;
 
 		self.store
-			.rename(&key, &target)
+			.rename(key, &target)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
@@ -191,7 +191,7 @@ impl<'a> BucketController<'a> {
 		self.check_permission(BucketOperation::Rename, Some(key), Some(&target)).await?;
 
 		self.store
-			.rename_if_not_exists(&key, &target)
+			.rename_if_not_exists(key, &target)
 			.await
 			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_raw(), e.to_string()))?;
 
@@ -300,11 +300,20 @@ impl BucketOperation {
 	}
 }
 
-impl Into<Action> for BucketOperation {
-	fn into(self) -> Action {
-		match self {
-			Self::Get | Self::Head | Self::Exists | Self::List => Action::View,
-			Self::Put | Self::Delete | Self::Copy | Self::Rename => Action::Edit,
+impl From<BucketOperation> for Action {
+	fn from(val: BucketOperation) -> Self {
+		match val {
+			// Action::View
+			BucketOperation::Get
+			| BucketOperation::Head
+			| BucketOperation::Exists
+			| BucketOperation::List => Action::View,
+
+			// Action::Edit
+			BucketOperation::Put
+			| BucketOperation::Delete
+			| BucketOperation::Copy
+			| BucketOperation::Rename => Action::Edit,
 		}
 	}
 }
