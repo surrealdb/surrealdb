@@ -28,7 +28,7 @@ rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 anyhow = "1.0.81"
 
 # Async utility crates
-tokio = { version = "1.41.1", features = ["full"] }
+tokio = { version = "1.44.2", features = ["full"] }
 futures = "0.3.30"
 
 # Config and cli parsing
