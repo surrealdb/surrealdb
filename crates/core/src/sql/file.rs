@@ -34,11 +34,15 @@ impl File {
 	pub fn is_bucket_type(&self, types: &[Ident]) -> bool {
 		types.is_empty() || types.iter().any(|buc| buc.0 == self.bucket)
 	}
+
+	pub fn display_inner(&self) -> String {
+		format!("{}:{}", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
+	}
 }
 
 impl fmt::Display for File {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "f\"{}:{}\"", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
+		write!(f, "f\"{}\"", self.display_inner())
 	}
 }
 
