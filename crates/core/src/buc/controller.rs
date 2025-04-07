@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use super::store::{Key, ListOptions, ObjectMeta, ObjectStore};
 
-/// Allows you to control a specific in the context of the current user
+/// Allows you to control a specific bucket in the context of the current user
 pub struct BucketController<'a> {
 	stk: &'a mut Stk,
 	ctx: &'a Context,

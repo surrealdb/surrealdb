@@ -40,6 +40,10 @@ impl Parser<'_> {
 				Ok(Value::Uuid(self.next_token_value()?))
 			}
 			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
+				if !self.settings.files_enabled {
+					bail!("Cannot create a file pointer, as the experimental files capability is not enabled", @self.last_span);
+				}
+
 				Ok(Value::File(self.next_token_value()?))
 			}
 			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
@@ -246,6 +250,10 @@ impl Parser<'_> {
 				Value::Bytes(self.next_token_value()?)
 			}
 			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
+				if !self.settings.files_enabled {
+					bail!("Cannot create a file pointer, as the experimental files capability is not enabled", @self.last_span);
+				}
+
 				Value::File(self.next_token_value()?)
 			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
