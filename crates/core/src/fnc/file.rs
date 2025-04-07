@@ -206,10 +206,24 @@ pub async fn list(
 	Ok(res)
 }
 
-pub fn bucket((file,): (File,)) -> Result<Value, Error> {
+pub fn bucket(ctx: &Context, (file,): (File,)) -> Result<Value, Error> {
+	if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files) {
+		return Err(Error::InvalidFunction {
+			name: "type::file".to_string(),
+			message: "Experimental feature is disabled".to_string(),
+		});
+	}
+
 	Ok(file.bucket.into())
 }
 
-pub fn key((file,): (File,)) -> Result<Value, Error> {
+pub fn key(ctx: &Context, (file,): (File,)) -> Result<Value, Error> {
+	if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files) {
+		return Err(Error::InvalidFunction {
+			name: "type::file".to_string(),
+			message: "Experimental feature is disabled".to_string(),
+		});
+	}
+
 	Ok(file.key.into())
 }

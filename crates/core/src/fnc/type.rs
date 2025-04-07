@@ -20,7 +20,7 @@ pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
 }
 
-pub fn file((bucket, key): (String, String)) -> Result<Value, Error> {
+pub fn file(ctx: &Context, (bucket, key): (String, String)) -> Result<Value, Error> {
 	if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files) {
 		return Err(Error::InvalidFunction {
 			name: "type::file".to_string(),

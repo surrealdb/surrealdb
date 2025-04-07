@@ -205,8 +205,8 @@ pub fn synchronous(
 		"duration::from::secs" => duration::from::secs,
 		"duration::from::weeks" => duration::from::weeks,
 		//
-		"file::bucket" => file::bucket,
-		"file::key" => file::key,
+		"file::bucket" => file::bucket(ctx),
+		"file::key" => file::key(ctx),
 		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
@@ -410,7 +410,7 @@ pub fn synchronous(
 		"type::datetime" => r#type::datetime,
 		"type::decimal" => r#type::decimal,
 		"type::duration" => r#type::duration,
-		"type::file" => r#type::file,
+		"type::file" => r#type::file(ctx),
 		"type::float" => r#type::float,
 		"type::geometry" => r#type::geometry,
 		"type::int" => r#type::int,
@@ -859,8 +859,8 @@ pub async fn idiom(
 				args.clone(),
 				"no such method found for the file type",
 				//
-				"bucket" => file::bucket,
-				"key" => file::key,
+				"bucket" => file::bucket(ctx),
+				"key" => file::key(ctx),
 				//
 				"put" => file::put((stk, ctx, opt, doc)).await,
 				"put_if_not_exists" => file::put_if_not_exists((stk, ctx, opt, doc)).await,
