@@ -226,6 +226,10 @@ async fn define_statement_index_concurrently_building_status(
 							info!("Started");
 							continue;
 						}
+						"cleaning" => {
+							info!("Cleaning");
+							continue;
+						}
 						"indexing" => {
 							{
 								if new_initial != initial_count {
