@@ -39,7 +39,7 @@ impl DefineBucketStatement {
 		}
 
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Bucket, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = (opt.ns()?, opt.db()?);
