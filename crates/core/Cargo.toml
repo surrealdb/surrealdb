@@ -23,7 +23,7 @@ resolver = "2"
 
 [features]
 # Public features
-default = ["kv-mem"]
+default = ["kv-mem", "enterprise"]
 kv-mem = [
     "dep:surrealkv",
     "tokio/time",
@@ -121,7 +121,6 @@ tikv = { workspace = true, optional = true }
 
 # Other crates
 path-clean.workspace = true
-rust-s3.workspace = true
 addr.workspace = true
 ahash.workspace = true
 ammonia.workspace = true
@@ -241,6 +240,7 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 tokio-tungstenite = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+rust-s3.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
 mimalloc = { workspace = true, optional = true, default-features = false }
