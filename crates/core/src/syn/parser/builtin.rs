@@ -84,18 +84,6 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::sort::asc") => PathKind::Function,
 		UniCase::ascii("array::sort::desc") => PathKind::Function,
 		//
-		UniCase::ascii("bucket::put") => PathKind::Function,
-		UniCase::ascii("bucket::put_if_not_exists") => PathKind::Function,
-		UniCase::ascii("bucket::get") => PathKind::Function,
-		UniCase::ascii("bucket::head") => PathKind::Function,
-		UniCase::ascii("bucket::delete") => PathKind::Function,
-		UniCase::ascii("bucket::copy") => PathKind::Function,
-		UniCase::ascii("bucket::copy_if_not_exists") => PathKind::Function,
-		UniCase::ascii("bucket::rename") => PathKind::Function,
-		UniCase::ascii("bucket::rename_if_not_exists") => PathKind::Function,
-		UniCase::ascii("bucket::exists") => PathKind::Function,
-		UniCase::ascii("bucket::list") => PathKind::Function,
-		//
 		UniCase::ascii("bytes::len") => PathKind::Function,
 		//
 		UniCase::ascii("count") => PathKind::Function,
@@ -137,6 +125,17 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("file::bucket") => PathKind::Function,
 		UniCase::ascii("file::key") => PathKind::Function,
+		UniCase::ascii("file::put") => PathKind::Function,
+		UniCase::ascii("file::put_if_not_exists") => PathKind::Function,
+		UniCase::ascii("file::get") => PathKind::Function,
+		UniCase::ascii("file::head") => PathKind::Function,
+		UniCase::ascii("file::delete") => PathKind::Function,
+		UniCase::ascii("file::copy") => PathKind::Function,
+		UniCase::ascii("file::copy_if_not_exists") => PathKind::Function,
+		UniCase::ascii("file::rename") => PathKind::Function,
+		UniCase::ascii("file::rename_if_not_exists") => PathKind::Function,
+		UniCase::ascii("file::exists") => PathKind::Function,
+		UniCase::ascii("file::list") => PathKind::Function,
 		//
 		UniCase::ascii("geo::area") => PathKind::Function,
 		UniCase::ascii("geo::bearing") => PathKind::Function,

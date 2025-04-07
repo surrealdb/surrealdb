@@ -9,7 +9,6 @@ use super::query::QueryContext;
 
 mod api;
 mod array;
-mod bucket;
 mod bytes;
 mod crypto;
 mod duration;
@@ -39,7 +38,6 @@ impl_module_def!(
 	"", // root path
 	"api" => (api::Package),
 	"array" => (array::Package),
-	"bucket" => (bucket::Package),
 	"bytes" => (bytes::Package),
 	"count" => run,
 	"crypto" => (crypto::Package),
