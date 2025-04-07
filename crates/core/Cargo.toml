@@ -23,7 +23,7 @@ resolver = "2"
 
 [features]
 # Public features
-default = ["kv-mem", "enterprise"]
+default = ["kv-mem"]
 kv-mem = [
     "dep:surrealkv",
     "tokio/time",
@@ -66,12 +66,7 @@ allocation-tracking = []
 # Special features
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 kv-fdb-7_3 = ["foundationdb/fdb-7_3", "kv-fdb"]
-enterprise = [
-    "object_store/gcp",
-    "object_store/aws",
-    "object_store/azure",
-    "object_store/http",
-]
+enterprise = ["rust-s3"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -240,13 +235,15 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 tokio-tungstenite = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
-rust-s3.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
 mimalloc = { workspace = true, optional = true, default-features = false }
 
 [target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 jemallocator = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rust-s3 = { workspace = true, optional = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
