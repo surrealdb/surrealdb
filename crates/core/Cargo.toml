@@ -120,6 +120,7 @@ rocksdb = { workspace = true, optional = true }
 tikv = { workspace = true, optional = true }
 
 # Other crates
+path-clean.workspace = true
 rust-s3.workspace = true
 addr.workspace = true
 ahash.workspace = true

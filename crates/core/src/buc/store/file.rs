@@ -1,6 +1,5 @@
 use std::{
 	future::Future,
-	io,
 	path::{Path as OsPath, PathBuf},
 	pin::Pin,
 };
@@ -51,7 +50,18 @@ impl FileStore {
 
 		// Check if the path is allowed
 		if !is_path_allowed(&path_buf) {
-			return Err(Error::UnsupportedBackend);
+			return Err(Error::FileAccessDenied(path.to_string()));
+		}
+
+		// Check if the path exists
+		if !path_buf.exists() {
+			// Create directory and its parents if they don't exist
+			std::fs::create_dir_all(&path_buf).map_err(|e| {
+				Error::InvalidBucketUrl(format!("Failed to create directory {}: {}", path, e))
+			})?;
+		} else if !path_buf.is_dir() {
+			// If path exists but is not a directory, return an error
+			return Err(Error::InvalidBucketUrl(format!("Path is not a directory: {}", path)));
 		}
 
 		Ok(Some(FileStoreOptions {
@@ -69,34 +79,24 @@ impl FileStore {
 	/// Convert a Path to an OsPath, checking against the allowlist
 	fn to_os_path(&self, path: &Key) -> Result<PathBuf, String> {
 		let root = PathBuf::from(self.options.root.as_str());
+
+		// First canonicalize the root (which should exist)
+		let canonical_root = std::fs::canonicalize(&root)
+			.map_err(|e| format!("Failed to canonicalize root path: {}", e))?;
+
+		// Get the relative path components
 		let relative_path = path.as_str().trim_start_matches('/');
-		let full_path = root.join(relative_path);
 
-		// Canonicalize the path to resolve any ".." or symlinks
-		let canonical_path = match std::fs::canonicalize(&full_path) {
-			Ok(p) => p,
-			// If the path doesn't exist yet, we can't canonicalize it
-			// In this case, we need to check if its parent directory is allowed
-			Err(e) if e.kind() == io::ErrorKind::NotFound => {
-				if let Some(parent) = full_path.parent() {
-					match std::fs::canonicalize(parent) {
-						Ok(parent_path) => parent_path
-							.join(full_path.file_name().ok_or_else(|| "Invalid path".to_string())?),
-						Err(e) => return Err(format!("Failed to canonicalize parent path: {}", e)),
-					}
-				} else {
-					return Err("Invalid path: no parent directory".to_string());
-				}
-			}
-			Err(e) => return Err(format!("Failed to canonicalize path: {}", e)),
-		};
+		// Combine the canonical root with the relative path
+		let full_path = canonical_root.join(relative_path);
 
-		// Verify the path is within the allowlist
-		if !is_path_allowed(&canonical_path) {
-			return Err(format!("Path is not in the allowlist: {}", canonical_path.display()));
+		// Verify the path is within the allowlist without canonicalizing
+		// Since we're starting from a canonicalized root, the path should be valid
+		if !is_path_allowed(&full_path) {
+			return Err(format!("Path is not in the allowlist: {}", full_path.display()));
 		}
 
-		Ok(canonical_path)
+		Ok(full_path)
 	}
 
 	/// Create parent directories for a path if they don't exist

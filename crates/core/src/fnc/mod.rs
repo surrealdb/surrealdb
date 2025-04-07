@@ -68,7 +68,7 @@ pub async fn run(
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
 		|| name.eq("value::patch")
-		|| name.starts_with("file")
+		|| name.starts_with("bucket")
 		|| name.starts_with("http")
 		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
