@@ -27,6 +27,7 @@ impl_module_def!(
 	"point" => run,
 	"regex" => run,
 	"string" => run,
+	"string_lossy" => run,
 	"table" => run,
 	"thing" => run,
 	"range" => run,

@@ -14,6 +14,7 @@ impl_module_def!(
 	"key" => run,
 	//
 	"put" => fut Async,
+	"put_if_not_exists" => fut Async,
 	"get" => fut Async,
 	"head" => fut Async,
 	"delete" => fut Async,
