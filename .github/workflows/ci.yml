@@ -138,6 +138,7 @@ jobs:
 
   check-msrv:
     name: Check workspace MSRV
+    run-name: Check workspace MSRV
     runs-on: ubuntu-latest
 
     strategy:
