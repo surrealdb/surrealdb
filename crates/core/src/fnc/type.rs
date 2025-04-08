@@ -1,7 +1,6 @@
 use std::ops::Deref;
 
 use crate::ctx::Context;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -20,14 +19,7 @@ pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
 }
 
-pub fn file(ctx: &Context, (bucket, key): (String, String)) -> Result<Value, Error> {
-	if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files) {
-		return Err(Error::InvalidFunction {
-			name: "type::file".to_string(),
-			message: "Experimental feature is disabled".to_string(),
-		});
-	}
-
+pub fn file((bucket, key): (String, String)) -> Result<Value, Error> {
 	Ok(Value::File(File::new(bucket, key)))
 }
 
