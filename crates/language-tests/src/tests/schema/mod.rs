@@ -4,8 +4,7 @@ mod bytes_hack;
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
-use camino::Utf8PathBuf;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 use surrealdb_core::{
 	dbs::capabilities::{
 		Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
@@ -42,7 +41,7 @@ impl TestConfig {
 	}
 
 	/// Returns the imports for this file, empty if no imports are defined.
-	pub fn imports(&self) -> &[Utf8PathBuf] {
+	pub fn imports(&self) -> &[String] {
 		self.env.as_ref().and_then(|x| x.imports.as_ref()).map(|x| x.as_slice()).unwrap_or(&[])
 	}
 
@@ -88,7 +87,7 @@ pub struct TestEnv {
 
 	pub login: Option<TestLogin>,
 
-	pub imports: Option<Vec<Utf8PathBuf>>,
+	pub imports: Option<Vec<String>>,
 	pub timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
 
@@ -221,6 +220,30 @@ impl<T> BoolOr<T> {
 	}
 }
 
+#[derive(Default, Clone, Debug)]
+pub struct Version(semver::VersionReq);
+
+impl<'de> Deserialize<'de> for Version {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		let str = String::deserialize(deserializer)?;
+		let version = semver::VersionReq::parse(&str).map_err(<D::Error as de::Error>::custom)?;
+		Ok(Version(version))
+	}
+}
+
+impl Serialize for Version {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		let str = self.0.to_string();
+		str.serialize(serializer)
+	}
+}
+
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TestDetails {
@@ -230,6 +253,11 @@ pub struct TestDetails {
 	issue: Option<u64>,
 	wip: Option<bool>,
 	pub fuzzing_reproduction: Option<String>,
+
+	#[serde(default)]
+	pub is_upgrade: bool,
+
+	pub version: Option<Version>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
