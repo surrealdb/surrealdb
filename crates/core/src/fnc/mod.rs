@@ -1009,10 +1009,17 @@ mod tests {
 		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}").unwrap();
 		let fnc_no_idiom = re.replace(fnc_mod, "");
 
+		let exp_regex = Regex::new(r"exp\(.*\) ").unwrap();
+
 		for line in fnc_no_idiom.lines() {
-			if !(line.contains("=>")
-				&& (line.trim().starts_with('"') || line.trim().ends_with(',')))
-			{
+			let line = line.trim();
+			let line = if line.starts_with("exp") {
+				&exp_regex.replace(line, "")
+			} else {
+				line
+			};
+
+			if !(line.contains("=>") && (line.starts_with('"') || line.ends_with(','))) {
 				// This line does not define a function name.
 				continue;
 			}
