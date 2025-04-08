@@ -114,7 +114,6 @@ rustls-pki-types = "1.7.0"
 rust_decimal = "1.36.0"
 # TODO: Look at dependency, 5 years old seems unmaintained.
 rust-stemmers = "1.2.0"
-rust-s3 = "0.35.1"
 scrypt = "0.11.0"
 semver = "1.0.20"
 serde = "1.0.209"
@@ -184,7 +183,6 @@ storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 # Deprecated features
 # Doesn't do anything. Use a version specific `storage-fdb-*` feature instead.
 storage-fdb = ["surrealdb/kv-fdb"]
-enterprise = ["surrealdb/enterprise"]
 
 [profile.release]
 lto = true

@@ -32,7 +32,9 @@ include = [
 exclude = ["hashbrown::map"]
 
 [api.process]
-include = ["tokio::process"]
+include = [
+    "tokio::process",
+]
 
 #
 # Crates Linking to Libraries
@@ -578,9 +580,6 @@ allow_unsafe = true
 [pkg.utf-8]
 allow_unsafe = true
 
-[pkg.url]
-allow_apis = ["fs"]
-
 [pkg.urlencoding]
 allow_unsafe = true
 
@@ -639,7 +638,6 @@ allow_unsafe = true
 
 [pkg.dashmap]
 allow_unsafe = true
-allow_apis = ["net"]
 
 [pkg.tokio-stream]
 allow_unsafe = true
@@ -999,7 +997,7 @@ from.test.allow_apis = ["fs"]
 allow_apis = ["fs"]
 
 [pkg.object_store]
-allow_apis = ["fs", "net"]
+allow_apis = ["fs"]
 
 [pkg.hyper-rustls]
 allow_apis = ["net"]
@@ -1224,10 +1222,14 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.surrealcs-kernel]
-allow_apis = ["net"]
+allow_apis = [
+    "net",
+]
 
 [pkg.surrealcs]
-allow_apis = ["net"]
+allow_apis = [
+    "net",
+]
 
 [pkg.revision]
 allow_apis = ["fs"]

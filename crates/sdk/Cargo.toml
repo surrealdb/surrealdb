@@ -53,8 +53,7 @@ allocation-tracking = ["surrealdb-core/allocation-tracking"]
 kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
 kv-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]
 # Deprecated features
-kv-fdb = []                                # Use a version specific `kv-fdb-*` feature instead
-enterprise = ["surrealdb-core/enterprise"]
+kv-fdb = [] # Use a version specific `kv-fdb-*` feature instead
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
