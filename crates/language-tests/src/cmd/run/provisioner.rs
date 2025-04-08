@@ -1,35 +1,67 @@
-use std::{any::Any, mem, panic::AssertUnwindSafe, sync::Arc};
+use std::{
+	any::Any,
+	mem,
+	panic::AssertUnwindSafe,
+	path::Path,
+	sync::{
+		atomic::{AtomicUsize, Ordering},
+		Arc,
+	},
+	time::SystemTime,
+};
 
 use anyhow::{Context, Result};
 use futures::FutureExt as _;
 use surrealdb_core::{dbs::Capabilities, kvs::Datastore};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-use crate::{cli::Backend, temp_dir::TempDir};
+use crate::cli::Backend;
 
 struct CreateInfo {
+	id_gen: AtomicUsize,
 	backend: Backend,
-	dir: Option<TempDir>,
+	dir: Option<String>,
+}
+
+fn xorshift(state: &mut u32) -> u32 {
+	let mut x = *state;
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	*state = x;
+	return x;
 }
 
 impl CreateInfo {
 	pub async fn new(backend: Backend) -> Result<Self> {
 		if let Backend::Memory = backend {
 			return Ok(CreateInfo {
+				id_gen: AtomicUsize::new(0),
 				backend,
 				dir: None,
 			});
 		}
+		let temp_dir = std::env::temp_dir();
+		let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+		let time = time.as_secs() ^ time.subsec_nanos() as u64;
+		let mut state = (time >> 32) as u32 ^ time as u32;
 
-		let dir = TempDir::new("surreal_test")
-			.await
-			.context("Failed to create a temporary directory for test databases")?;
+		let rand = xorshift(&mut state);
+		let mut dir = temp_dir.join(format!("surreal_lang_tests_{rand}"));
 
-		println!(" Using '{}' as temporary directory for datastores", dir.path().display());
+		while tokio::fs::metadata(&dir).await.is_ok() {
+			let rand = xorshift(&mut state);
+			dir = temp_dir.join(format!("surreal_lang_tests_{rand}"));
+		}
+
+		tokio::fs::create_dir(&dir).await?;
+
+		println!(" Using '{}' as temporary directory for datastores", dir.display());
 
 		Ok(CreateInfo {
+			id_gen: AtomicUsize::new(0),
 			backend,
-			dir: Some(dir),
+			dir: Some(dir.to_str().unwrap().to_string()),
 		})
 	}
 
@@ -66,13 +98,12 @@ impl CreateInfo {
 	}
 
 	fn produce_path(&self) -> String {
-		self.dir
-			.as_ref()
-			.unwrap()
-			.sub_dir_path()
-			.to_str()
-			.expect("temporary sub directory path should be valid utf-8")
-			.to_owned()
+		let path = self.dir.as_ref().unwrap();
+
+		let id = self.id_gen.fetch_add(1, Ordering::AcqRel);
+
+		let path = Path::new(path).join(format!("store_{id}"));
+		path.to_str().unwrap().to_owned()
 	}
 }
 
@@ -212,7 +243,7 @@ impl Provisioner {
 		}
 
 		if let Some(dir) = self.create_info.dir.as_ref() {
-			dir.cleanup().await.context("Failed to clean up temporary directory for datastores")?;
+			tokio::fs::remove_dir_all(dir).await.context("Failed to clean up temporary dir")?;
 		}
 
 		Ok(())

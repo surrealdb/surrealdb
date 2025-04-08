@@ -1,7 +1,12 @@
 use crate::{
 	cli::{Backend, ColorMode, ResultsMode},
+	format::Progress,
 	runner::Schedular,
-	tests::{report::TestTaskResult, set::TestId, TestSet},
+	tests::{
+		report::{TestGrade, TestReport, TestTaskResult},
+		set::TestId,
+		TestSet,
+	},
 };
 
 use anyhow::{bail, Context, Result};
@@ -22,8 +27,6 @@ use tokio::{
 mod provisioner;
 mod util;
 
-use crate::format::Progress;
-use crate::tests::report::{TestGrade, TestReport};
 use util::core_capabilities_from_test_config;
 
 pub struct TestTaskContext {
@@ -100,7 +103,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.copied()
 		.unwrap_or_else(|| thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(8));
 
-	let results_mode = matches.get_one::<ResultsMode>("results").unwrap();
+	let failure_mode = matches.get_one::<ResultsMode>("results").unwrap();
 
 	println!(" Running with {num_jobs} jobs");
 	let mut schedular = Schedular::new(num_jobs);
@@ -196,7 +199,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	}
 
 	// possibly update test configs with acquired results.
-	match results_mode {
+	match failure_mode {
 		ResultsMode::Default => {}
 		ResultsMode::Accept => {
 			for report in reports.iter().filter(|x| x.is_unspecified_test() && !x.is_wip()) {
