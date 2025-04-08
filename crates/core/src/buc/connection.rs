@@ -8,19 +8,24 @@ use std::sync::Arc;
 use super::store::{prefixed::PrefixedStore, ObjectKey, ObjectStore};
 
 // Helper type to represent how bucket connections are persisted
+// Key format: NS, DB, BU
 pub(crate) type BucketConnections = DashMap<(String, String, String), Arc<dyn ObjectStore>>;
 
 /// Connect to a global bucket, if one is configured
 /// If no global bucket is configured, the NoGlobalBucket error will be returned
 /// The key in the global bucket will be: `{ns}/{db}/{bu}`
-pub(crate) fn connect_global(ns: &str, db: &str, bu: &str) -> Result<Arc<dyn ObjectStore>, Error> {
+pub(crate) async fn connect_global(
+	ns: &str,
+	db: &str,
+	bu: &str,
+) -> Result<Arc<dyn ObjectStore>, Error> {
 	// Obtain the URL for the global bucket
 	let Some(ref url) = *GLOBAL_BUCKET else {
 		return Err(Error::NoGlobalBucket);
 	};
 
 	// Connect to the global bucket
-	let global = connect(url, true, false)?;
+	let global = connect(url, true, false).await?;
 
 	// Create a prefixstore for the specified bucket
 	let key = ObjectKey::from(format!("/{ns}/{db}/{bu}"));
@@ -33,7 +38,7 @@ pub(crate) fn connect_global(ns: &str, db: &str, bu: &str) -> Result<Arc<dyn Obj
 /// - Validates the URL
 /// - Checks if the backend is supported
 /// - Attempts to connect to the bucket
-pub(crate) fn connect(
+pub(crate) async fn connect(
 	url: &str,
 	global: bool,
 	readonly: bool,
@@ -44,5 +49,5 @@ pub(crate) fn connect(
 	}
 
 	// Connect to the backend
-	super::backend::connect(url, global, readonly)
+	super::backend::connect(url, global, readonly).await
 }

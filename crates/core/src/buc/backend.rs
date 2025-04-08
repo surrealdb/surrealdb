@@ -5,7 +5,7 @@ use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use super::store::file::FileStore;
 
-pub(crate) fn connect(
+pub(crate) async fn connect(
 	url: &str,
 	_global: bool,
 	_readonly: bool,
@@ -15,7 +15,7 @@ pub(crate) fn connect(
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
-	if let Some(opts) = FileStore::parse_url(url)? {
+	if let Some(opts) = FileStore::parse_url(url).await? {
 		return Ok(Arc::new(FileStore::new(opts)));
 	}
 
