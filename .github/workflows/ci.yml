@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - '2.0'
   pull_request:
   merge_group:
 
@@ -14,7 +14,7 @@ concurrency:
   # Use github.run_id on main branch
   # Use github.event.pull_request.number on pull requests, so it's unique per pull request
   # Use github.ref on other branches, so it's unique per branch
-  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -160,7 +160,7 @@ jobs:
     runs-on: [runner-arm64-large]
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.85.0
         with:
           components: clippy
 
@@ -292,7 +292,7 @@ jobs:
     runs-on: [runner-arm64-2xlarge]
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.85.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
