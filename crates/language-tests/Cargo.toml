@@ -18,7 +18,7 @@ upgrade = ["backend-surrealkv"] # Upgrade test suite.
 [dependencies]
 # Crates for running surrealdb.
 surrealdb-core = { path = "../core/", default-features=false, features = ["scripting"] }
-reblessive = { version = "0.4.2" }
+reblessive = { version = "0.4.3" }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 
 # Used for capturing logs from core
