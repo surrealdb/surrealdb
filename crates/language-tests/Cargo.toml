@@ -21,7 +21,7 @@ members = []
 [dependencies]
 # Crates for running surrealdb.
 surrealdb-core = { path = "../core/", features = ["scripting"] }
-reblessive = { version = "0.4.2" }
+reblessive = { version = "0.4.3" }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 
 # Used for capturing logs from core
