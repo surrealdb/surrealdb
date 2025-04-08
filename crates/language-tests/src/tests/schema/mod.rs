@@ -7,7 +7,10 @@ use std::{collections::BTreeMap, fmt, str::FromStr};
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use surrealdb_core::{
-	dbs::capabilities::{ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget},
+	dbs::capabilities::{
+		Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
+		RouteTarget, Targets,
+	},
 	sql::{Thing, Value as CoreValue},
 	syn,
 };
@@ -300,7 +303,13 @@ impl<'de> Deserialize<'de> for SurrealValue {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let mut v = syn::value(&source).map_err(<D::Error as serde::de::Error>::custom)?;
+		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
+		let res = syn::value_with_capabilities(&source, &capabilities);
+		if let Err(ref e) = res {
+			println!("Failed to parse value: {source}");
+			println!("Error: {e}");
+		};
+		let mut v = res.map_err(<D::Error as serde::de::Error>::custom)?;
 		bytes_hack::compute_bytes_inplace(&mut v);
 		Ok(SurrealValue(v))
 	}
@@ -325,7 +334,13 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let v = syn::value(&source).map_err(<D::Error as serde::de::Error>::custom)?;
+		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
+		let res = syn::value_with_capabilities(&source, &capabilities);
+		if let Err(ref e) = res {
+			println!("Failed to parse rid: {source}");
+			println!("Error: {e}");
+		};
+		let v = res.map_err(<D::Error as serde::de::Error>::custom)?;
 		if let CoreValue::Thing(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {

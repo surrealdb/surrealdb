@@ -113,6 +113,7 @@ pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 				.allows_experimental(&ExperimentalTarget::RecordReferences),
 			bearer_access_enabled: capabilities
 				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
 			..Default::default()
 		},
 	);
