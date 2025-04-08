@@ -9,6 +9,7 @@ use crate::idx::planner::StatementContext;
 use crate::kvs::Transaction;
 use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
+use crate::sql::FlowResultExt as _;
 use crate::sql::{
 	order::{OrderList, Ordering},
 	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Part, Subquery, Table, Value,
@@ -217,7 +218,11 @@ impl<'a> TreeBuilder<'a> {
 		self.leaf_nodes_count += 1;
 		let mut values = Vec::with_capacity(a.len());
 		for v in &a.0 {
-			values.push(stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await?);
+			values.push(
+				stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None))
+					.await
+					.catch_return()?,
+			);
 		}
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
@@ -232,7 +237,10 @@ impl<'a> TreeBuilder<'a> {
 		// Compute the idiom value if it is a param
 		if let Some(Part::Start(x)) = i.0.first() {
 			if x.is_param() {
-				let v = stk.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await?;
+				let v = stk
+					.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None))
+					.await
+					.catch_return()?;
 				return stk.run(|stk| self.eval_value(stk, gr, &v)).await;
 			}
 		}

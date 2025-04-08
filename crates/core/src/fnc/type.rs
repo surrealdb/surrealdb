@@ -7,7 +7,10 @@ use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{Array, Bytes, Datetime, Duration, Geometry, Kind, Number, Range, Strand, Uuid};
+use crate::sql::{
+	Array, Bytes, Datetime, Duration, FlowResultExt as _, Geometry, Kind, Number, Range, Strand,
+	Uuid,
+};
 use crate::syn;
 use geo::Point;
 use reblessive::tree::Stk;
@@ -48,7 +51,7 @@ pub async fn field(
 			// Parse the string as an Idiom
 			let idi = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
-			Ok(idi.compute(stk, ctx, opt, doc).await?)
+			idi.compute(stk, ctx, opt, doc).await.catch_return()
 		}
 		_ => Ok(Value::None),
 	}
@@ -65,7 +68,7 @@ pub async fn fields(
 				// Parse the string as an Idiom
 				let idi = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
-				args.push(idi.compute(stk, ctx, opt, doc).await?);
+				args.push(idi.compute(stk, ctx, opt, doc).await.catch_return()?);
 			}
 			Ok(args.into())
 		}

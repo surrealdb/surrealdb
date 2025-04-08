@@ -18,7 +18,7 @@ use crate::sql::statements::{DefineTableStatement, SelectStatement};
 use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
-use crate::sql::{Cond, Function, Groups, View};
+use crate::sql::{Cond, FlowResultExt as _, Function, Groups, View};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -109,7 +109,8 @@ impl Document {
 							if !targeted_force
 								&& act != Action::Create && cond
 								.compute(stk, ctx, opt, Some(&self.initial))
-								.await?
+								.await
+								.catch_return()?
 								.is_truthy()
 							{
 								// Delete the old value in the table
@@ -134,7 +135,8 @@ impl Document {
 							if act != Action::Delete
 								&& cond
 									.compute(stk, ctx, opt, Some(&self.current))
-									.await?
+									.await
+									.catch_return()?
 									.is_truthy()
 							{
 								// Update the new value in the table
@@ -210,7 +212,11 @@ impl Document {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(stk, ctx, opt, Some(&self.current)).await? {
+							match cond
+								.compute(stk, ctx, opt, Some(&self.current))
+								.await
+								.catch_return()?
+							{
 								v if v.is_truthy() => {
 									// Define the statement
 									match act {
@@ -290,9 +296,11 @@ impl Document {
 	) -> Result<Vec<Value>, Error> {
 		Ok(stk
 			.scope(|scope| {
-				try_join_all(
-					group.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, Some(doc)))),
-				)
+				try_join_all(group.iter().map(|v| {
+					scope.run(|stk| async {
+						v.compute(stk, ctx, opt, Some(doc)).await.catch_return()
+					})
+				}))
 			})
 			.await?
 			.into_iter()
@@ -393,11 +401,15 @@ impl Document {
 				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						Some("count") => {
-							let val = f.compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val =
+								f.compute(stk, ctx, opt, Some(fdc.doc)).await.catch_return()?;
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
 						Some(name) if name == "time::min" => {
-							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = f.args()[0]
+								.compute(stk, ctx, opt, Some(fdc.doc))
+								.await
+								.catch_return()?;
 							let val = match val {
 								val @ Value::Datetime(_) => val,
 								val => {
@@ -413,7 +425,10 @@ impl Document {
 							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Some(name) if name == "time::max" => {
-							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = f.args()[0]
+								.compute(stk, ctx, opt, Some(fdc.doc))
+								.await
+								.catch_return()?;
 							let val = match val {
 								val @ Value::Datetime(_) => val,
 								val => {
@@ -429,7 +444,10 @@ impl Document {
 							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Some(name) if name == "math::sum" => {
-							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = f.args()[0]
+								.compute(stk, ctx, opt, Some(fdc.doc))
+								.await
+								.catch_return()?;
 							let val = match val {
 								val @ Value::Number(_) => val,
 								val => {
@@ -445,7 +463,10 @@ impl Document {
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
 						Some(name) if name == "math::min" => {
-							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = f.args()[0]
+								.compute(stk, ctx, opt, Some(fdc.doc))
+								.await
+								.catch_return()?;
 							let val = match val {
 								val @ Value::Number(_) => val,
 								val => {
@@ -461,7 +482,10 @@ impl Document {
 							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Some(name) if name == "math::max" => {
-							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = f.args()[0]
+								.compute(stk, ctx, opt, Some(fdc.doc))
+								.await
+								.catch_return()?;
 							let val = match val {
 								val @ Value::Number(_) => val,
 								val => {
@@ -477,7 +501,10 @@ impl Document {
 							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Some(name) if name == "math::mean" => {
-							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							let val = f.args()[0]
+								.compute(stk, ctx, opt, Some(fdc.doc))
+								.await
+								.catch_return()?;
 							let val = match val {
 								val @ Value::Number(_) => val.coerce_to::<Decimal>()?.into(),
 								val => {
@@ -495,7 +522,8 @@ impl Document {
 						f => return Err(fail!("Unexpected function {f:?} encountered")),
 					},
 					_ => {
-						let val = expr.compute(stk, ctx, opt, Some(fdc.doc)).await?;
+						let val =
+							expr.compute(stk, ctx, opt, Some(fdc.doc)).await.catch_return()?;
 						self.set(&mut set_ops, idiom, val)?;
 					}
 				}

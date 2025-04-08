@@ -1,6 +1,6 @@
 use super::kind::HasKind;
 use super::value::{Coerce, CoerceError, CoerceErrorExt as _};
-use super::{Array, Id};
+use super::{Array, FlowResult, Id};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -262,7 +262,7 @@ impl Range {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		Ok(Value::Range(Box::new(Range {
 			beg: match &self.beg {
 				Bound::Included(v) => Bound::Included(v.compute(stk, ctx, opt, doc).await?),

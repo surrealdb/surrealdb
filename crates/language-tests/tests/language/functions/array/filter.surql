@@ -11,10 +11,10 @@ value = "['hello_world', 'hello wombat']"
 value = "[]"
 
 [[test.results]]
-error = "Continue statement has been reached"
+error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 [[test.results]]
-error = "Break statement has been reached"
+error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 [[test.results]]
 error = "An error occurred: ERROR"

@@ -15,6 +15,8 @@ use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use super::FlowResult;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
 #[revisioned(revision = 1)]
@@ -99,13 +101,11 @@ impl Array {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
-			match v.compute(stk, ctx, opt, doc).await {
-				Ok(v) => x.push(v),
-				Err(e) => return Err(e),
-			};
+			let v = v.compute(stk, ctx, opt, doc).await?;
+			x.push(v);
 		}
 		Ok(Value::Array(x))
 	}

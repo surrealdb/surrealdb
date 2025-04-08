@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::Value;
+use crate::sql::{ControlFlow, FlowResult, Value};
 use crate::{cnf::PROTECTED_PARAM_NAMES, sql::Kind};
 
 use reblessive::tree::Stk;
@@ -33,24 +33,27 @@ impl SetStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		// Check if the variable is a protected variable
 		match PROTECTED_PARAM_NAMES.contains(&self.name.as_str()) {
 			// The variable isn't protected and can be stored
 			false => {
 				let result = self.what.compute(stk, ctx, opt, doc).await?;
 				match self.kind {
-					Some(ref kind) => result.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
-						name: self.name.to_string(),
-						error: Box::new(e),
-					}),
+					Some(ref kind) => result
+						.coerce_to_kind(kind)
+						.map_err(|e| Error::SetCoerce {
+							name: self.name.to_string(),
+							error: Box::new(e),
+						})
+						.map_err(ControlFlow::from),
 					None => Ok(result),
 				}
 			}
 			// The user tried to set a protected variable
-			true => Err(Error::InvalidParam {
+			true => Err(ControlFlow::from(Error::InvalidParam {
 				name: self.name.to_owned(),
-			}),
+			})),
 		}
 	}
 }

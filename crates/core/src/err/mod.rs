@@ -33,21 +33,6 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
-	/// This error is used for breaking a loop in a foreach statement
-	#[doc(hidden)]
-	#[error("Break statement has been reached")]
-	Break,
-
-	/// This error is used for skipping a loop in a foreach statement
-	#[doc(hidden)]
-	#[error("Continue statement has been reached")]
-	Continue,
-
-	/// This error is used for retrying document processing with a new id
-	#[doc(hidden)]
-	#[error("This document should be retried with a new ID")]
-	RetryWithId(Thing),
-
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),
@@ -281,6 +266,10 @@ pub enum Error {
 	#[error("Invalid timeout: {0:?} seconds")]
 	InvalidTimeout(u64),
 
+	/// Invalid timeout
+	#[error("Invalid control flow statement, break or continue statement found outside of loop.")]
+	InvalidControlFlow,
+
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
 	QueryTimedout,
@@ -288,6 +277,10 @@ pub enum Error {
 	/// The query did not execute, because the transaction was cancelled
 	#[error("The query was not executed due to a cancelled transaction")]
 	QueryCancelled,
+
+	/// The query did not execute, because the memory threshold has been reached
+	#[error("The query was not executed due to the memory threshold being reached")]
+	QueryBeyondMemoryThreshold,
 
 	/// The query did not execute, because the transaction has failed
 	#[error("The query was not executed due to a failed transaction")]
@@ -1028,6 +1021,10 @@ pub enum Error {
 		name: String,
 	},
 
+	/// A database index entry for the specified table is already building
+	#[error("Index building has been cancelled")]
+	IndexingBuildingCancelled,
+
 	/// The token has expired
 	#[error("The token has expired")]
 	ExpiredToken,
@@ -1154,13 +1151,6 @@ pub enum Error {
 	#[error("Found {value} for the Record ID but this is not a valid table name")]
 	TbInvalid {
 		value: String,
-	},
-
-	/// This error is used for breaking execution when a value is returned
-	#[doc(hidden)]
-	#[error("Return statement has been reached")]
-	Return {
-		value: Value,
 	},
 
 	/// A destructuring variant was used in a context where it is not supported

@@ -17,6 +17,7 @@ use crate::sql::array::Uniq;
 use crate::sql::array::Windows;
 use crate::sql::value::Value;
 use crate::sql::Closure;
+use crate::sql::FlowResultExt as _;
 use crate::sql::Function;
 use rand::prelude::SliceRandom;
 use reblessive::tree::Stk;
@@ -64,10 +65,10 @@ pub async fn all(
 	Ok(match check {
 		Some(closure) if closure.is_closure() => {
 			if let Some(opt) = opt {
-				for val in array.iter() {
-					let arg = val.compute(stk, ctx, opt, doc).await?;
+				for arg in array.into_iter() {
+					// TODO: Don't clone the closure every time the function is called.
 					let fnc = Function::Anonymous(closure.clone(), vec![arg], true);
-					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
 						continue;
 					} else {
 						return Ok(Value::Bool(false));
@@ -90,10 +91,10 @@ pub async fn any(
 	Ok(match check {
 		Some(closure) if closure.is_closure() => {
 			if let Some(opt) = opt {
-				for val in array.iter() {
-					let arg = val.compute(stk, ctx, opt, doc).await?;
+				for arg in array.into_iter() {
+					// TODO: Don't clone the closure every time the function is called.
 					let fnc = Function::Anonymous(closure.clone(), vec![arg], true);
-					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
 						return Ok(Value::Bool(true));
 					} else {
 						continue;
@@ -239,10 +240,10 @@ pub async fn filter(
 		closure if closure.is_closure() => {
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
-				for val in array.iter() {
-					let arg = val.compute(stk, ctx, opt, doc).await?;
+				for arg in array.into_iter() {
+					// TODO: Don't clone the closure every time the function is called.
 					let fnc = Function::Anonymous(closure.clone(), vec![arg.clone()], true);
-					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
 						res.push(arg)
 					}
 				}
@@ -263,10 +264,10 @@ pub async fn filter_index(
 		closure if closure.is_closure() => {
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
-				for (i, val) in array.iter().enumerate() {
-					let arg = val.compute(stk, ctx, opt, doc).await?;
+				for (i, arg) in array.into_iter().enumerate() {
+					// TODO: Don't clone the closure every time the function is called.
 					let fnc = Function::Anonymous(closure.clone(), vec![arg, i.into()], true);
-					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
 						res.push(i);
 					}
 				}
@@ -297,10 +298,10 @@ pub async fn find(
 	Ok(match value {
 		closure if closure.is_closure() => {
 			if let Some(opt) = opt {
-				for val in array.iter() {
-					let arg = val.compute(stk, ctx, opt, doc).await?;
+				for arg in array.into_iter() {
+					// TODO: Don't clone the closure every time the function is called.
 					let fnc = Function::Anonymous(closure.clone(), vec![arg.clone()], true);
-					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
 						return Ok(arg);
 					}
 				}
@@ -320,10 +321,10 @@ pub async fn find_index(
 	Ok(match value {
 		closure if closure.is_closure() => {
 			if let Some(opt) = opt {
-				for (i, val) in array.iter().enumerate() {
-					let arg = val.compute(stk, ctx, opt, doc).await?;
+				for (i, arg) in array.into_iter().enumerate() {
+					// TODO: Don't clone the closure every time the function is called.
 					let fnc = Function::Anonymous(closure.clone(), vec![arg, i.into()], true);
-					if fnc.compute(stk, ctx, opt, doc).await?.is_truthy() {
+					if fnc.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy() {
 						return Ok(i.into());
 					}
 				}
@@ -365,8 +366,9 @@ pub async fn fold(
 	if let Some(opt) = opt {
 		let mut accum = init;
 		for (i, val) in array.into_iter().enumerate() {
+			// TODO: Don't clone the closure every time the function is called.
 			let fnc = Function::Anonymous(mapper.clone().into(), vec![accum, val, i.into()], true);
-			accum = fnc.compute(stk, ctx, opt, doc).await?;
+			accum = fnc.compute(stk, ctx, opt, doc).await.catch_return()?;
 		}
 		Ok(accum)
 	} else {
@@ -505,10 +507,10 @@ pub async fn map(
 ) -> Result<Value, Error> {
 	if let Some(opt) = opt {
 		let mut res = Vec::with_capacity(array.len());
-		for (i, val) in array.into_iter().enumerate() {
-			let arg = val.compute(stk, ctx, opt, doc).await?;
+		for (i, arg) in array.into_iter().enumerate() {
+			// TODO: Don't clone the closure every time the function is called.
 			let fnc = Function::Anonymous(mapper.clone().into(), vec![arg, i.into()], true);
-			res.push(fnc.compute(stk, ctx, opt, doc).await?);
+			res.push(fnc.compute(stk, ctx, opt, doc).await.catch_return()?);
 		}
 		Ok(res.into())
 	} else {
@@ -589,7 +591,7 @@ pub async fn reduce(
 						vec![accum, val, idx.into()],
 						true,
 					);
-					accum = fnc.compute(stk, ctx, opt, doc).await?;
+					accum = fnc.compute(stk, ctx, opt, doc).await.catch_return()?;
 				}
 				Ok(accum)
 			}

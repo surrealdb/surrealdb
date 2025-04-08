@@ -17,6 +17,8 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use super::FlowResult;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 
 /// Invariant: Keys never contain NUL bytes.
@@ -272,13 +274,11 @@ impl Object {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		let mut x = BTreeMap::new();
 		for (k, v) in self.iter() {
-			match v.compute(stk, ctx, opt, doc).await {
-				Ok(v) => x.insert(k.clone(), v),
-				Err(e) => return Err(e),
-			};
+			let v = v.compute(stk, ctx, opt, doc).await?;
+			x.insert(k.clone(), v);
 		}
 		Ok(Value::Object(Object(x)))
 	}
