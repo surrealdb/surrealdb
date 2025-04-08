@@ -128,23 +128,7 @@ fn is_path_allowed(path: &std::path::Path) -> bool {
 	}
 
 	// Check if the path is within any of the allowed paths
-	FILE_ALLOWLIST.iter().any(|allowed| {
-		if path.starts_with(allowed) {
-			return true;
-		}
-
-		// Handle case sensitivity on Windows
-		#[cfg(windows)]
-		if path
-			.to_string_lossy()
-			.to_lowercase()
-			.starts_with(&allowed.to_string_lossy().to_lowercase())
-		{
-			return true;
-		}
-
-		false
-	})
+	FILE_ALLOWLIST.iter().any(|allowed| path.starts_with(allowed))
 }
 
 impl ObjectStore for FileStore {
