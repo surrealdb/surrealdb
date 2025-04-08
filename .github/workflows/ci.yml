@@ -160,7 +160,7 @@ jobs:
     runs-on: [runner-arm64-large]
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.85.0
         with:
           components: clippy
 
@@ -292,7 +292,7 @@ jobs:
     runs-on: [runner-arm64-2xlarge]
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.85.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
