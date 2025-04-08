@@ -1,7 +1,7 @@
 use reblessive::tree::Stk;
 
 use crate::{
-	buc::{store::Key, BucketController},
+	buc::{store::ObjectKey, BucketController},
 	ctx::Context,
 	dbs::{capabilities::ExperimentalTarget, Options},
 	err::Error,
@@ -104,7 +104,7 @@ pub async fn copy(
 		});
 	}
 
-	let target = Key::from(target);
+	let target = ObjectKey::from(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
 	controller.copy(&file.key.into(), target).await?;
 
@@ -122,7 +122,7 @@ pub async fn copy_if_not_exists(
 		});
 	}
 
-	let target = Key::from(target);
+	let target = ObjectKey::from(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
 	controller.copy_if_not_exists(&file.key.into(), target).await?;
 
@@ -140,7 +140,7 @@ pub async fn rename(
 		});
 	}
 
-	let target = Key::from(target);
+	let target = ObjectKey::from(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
 	controller.rename(&file.key.into(), target).await?;
 
@@ -158,7 +158,7 @@ pub async fn rename_if_not_exists(
 		});
 	}
 
-	let target = Key::from(target);
+	let target = ObjectKey::from(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
 	controller.rename_if_not_exists(&file.key.into(), target).await?;
 

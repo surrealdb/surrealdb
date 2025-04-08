@@ -1,2 +1,2 @@
 mod path;
-pub use path::Key;
+pub use path::ObjectKey;

@@ -5,15 +5,15 @@ use crate::{
 use dashmap::DashMap;
 use std::sync::Arc;
 
-use super::store::{prefixed::PrefixedStore, Key, ObjectStore};
+use super::store::{prefixed::PrefixedStore, ObjectKey, ObjectStore};
 
 // Helper type to represent how bucket connections are persisted
-pub type BucketConnections = DashMap<(String, String, String), Arc<dyn ObjectStore>>;
+pub(crate) type BucketConnections = DashMap<(String, String, String), Arc<dyn ObjectStore>>;
 
 /// Connect to a global bucket, if one is configured
 /// If no global bucket is configured, the NoGlobalBucket error will be returned
 /// The key in the global bucket will be: `{ns}/{db}/{bu}`
-pub fn connect_global(ns: &str, db: &str, bu: &str) -> Result<Arc<dyn ObjectStore>, Error> {
+pub(crate) fn connect_global(ns: &str, db: &str, bu: &str) -> Result<Arc<dyn ObjectStore>, Error> {
 	// Obtain the URL for the global bucket
 	let Some(ref url) = *GLOBAL_BUCKET else {
 		return Err(Error::NoGlobalBucket);
@@ -23,17 +23,21 @@ pub fn connect_global(ns: &str, db: &str, bu: &str) -> Result<Arc<dyn ObjectStor
 	let global = connect(url, true, false)?;
 
 	// Create a prefixstore for the specified bucket
-	let key = Key::from(format!("/{ns}/{db}/{bu}"));
+	let key = ObjectKey::from(format!("/{ns}/{db}/{bu}"));
 	Ok(Arc::new(PrefixedStore::new(global, key)))
 }
 
 /// Connects to a bucket by it's connection URL
 /// The function:
-/// - Checks if the global bucket is enfored
+/// - Checks if the global bucket is enforced
 /// - Validates the URL
 /// - Checks if the backend is supported
 /// - Attempts to connect to the bucket
-pub fn connect(url: &str, global: bool, readonly: bool) -> Result<Arc<dyn ObjectStore>, Error> {
+pub(crate) fn connect(
+	url: &str,
+	global: bool,
+	readonly: bool,
+) -> Result<Arc<dyn ObjectStore>, Error> {
 	// Check if the global bucket is enforced
 	if !global && *GLOBAL_BUCKET_ENFORCED {
 		return Err(Error::GlobalBucketEnforced);

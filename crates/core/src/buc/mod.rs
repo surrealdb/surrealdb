@@ -1,8 +1,8 @@
-pub mod backend;
+pub(crate) mod backend;
 mod connection;
-pub use connection::{connect, connect_global, BucketConnections};
+pub(crate) use connection::{connect, connect_global, BucketConnections};
 mod controller;
-pub use controller::BucketController;
+pub(crate) use controller::BucketController;
 pub use controller::BucketOperation;
 
-pub mod store;
+pub(crate) mod store;

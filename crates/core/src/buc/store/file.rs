@@ -10,12 +10,12 @@ use url::Url;
 
 use crate::{cnf::FILE_ALLOWLIST, err::Error, sql::Datetime};
 
-use super::{Key, ListOptions, ObjectMeta, ObjectStore};
+use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 
 /// Options for configuring the FileStore
 #[derive(Clone, Debug)]
 pub struct FileStoreOptions {
-	root: Key,
+	root: ObjectKey,
 }
 
 /// A store implementation that uses the local filesystem
@@ -65,7 +65,7 @@ impl FileStore {
 		}
 
 		Ok(Some(FileStoreOptions {
-			root: Key::from(path.to_string()),
+			root: ObjectKey::from(path.to_string()),
 		}))
 	}
 
@@ -77,7 +77,7 @@ impl FileStore {
 	}
 
 	/// Convert a Path to an OsPath, checking against the allowlist
-	fn to_os_path(&self, path: &Key) -> Result<PathBuf, String> {
+	fn to_os_path(&self, path: &ObjectKey) -> Result<PathBuf, String> {
 		let root = PathBuf::from(self.options.root.as_str());
 
 		// First canonicalize the root (which should exist)
@@ -138,13 +138,9 @@ fn is_path_allowed(path: &std::path::Path) -> bool {
 }
 
 impl ObjectStore for FileStore {
-	fn prefix(&self) -> Option<Key> {
-		Some(self.options.root.clone())
-	}
-
 	fn put<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 		data: Bytes,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
@@ -165,7 +161,7 @@ impl ObjectStore for FileStore {
 
 	fn put_if_not_exists<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 		data: Bytes,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
@@ -192,7 +188,7 @@ impl ObjectStore for FileStore {
 
 	fn get<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>, String>> + Send + 'a>> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key)?;
@@ -212,7 +208,7 @@ impl ObjectStore for FileStore {
 
 	fn head<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectMeta>, String>> + Send + 'a>> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key)?;
@@ -241,7 +237,7 @@ impl ObjectStore for FileStore {
 
 	fn delete<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key)?;
@@ -261,7 +257,7 @@ impl ObjectStore for FileStore {
 
 	fn exists<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key)?;
@@ -271,8 +267,8 @@ impl ObjectStore for FileStore {
 
 	fn copy<'a>(
 		&'a self,
-		key: &'a Key,
-		target: &'a Key,
+		key: &'a ObjectKey,
+		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
 			let source_key = self.to_os_path(key)?;
@@ -296,8 +292,8 @@ impl ObjectStore for FileStore {
 
 	fn copy_if_not_exists<'a>(
 		&'a self,
-		key: &'a Key,
-		target: &'a Key,
+		key: &'a ObjectKey,
+		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
 			let source_key = self.to_os_path(key)?;
@@ -326,8 +322,8 @@ impl ObjectStore for FileStore {
 
 	fn rename<'a>(
 		&'a self,
-		key: &'a Key,
-		target: &'a Key,
+		key: &'a ObjectKey,
+		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
 			let source_key = self.to_os_path(key)?;
@@ -350,8 +346,8 @@ impl ObjectStore for FileStore {
 
 	fn rename_if_not_exists<'a>(
 		&'a self,
-		key: &'a Key,
-		target: &'a Key,
+		key: &'a ObjectKey,
+		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
 			let source_key = self.to_os_path(key)?;
@@ -384,7 +380,7 @@ impl ObjectStore for FileStore {
 		Box::pin(async move {
 			// If a prefix is provided, combine it with the store prefix
 			// If not, just use the store's prefix
-			let base_key = opts.prefix.as_ref().cloned().unwrap_or_else(|| Key::from(""));
+			let base_key = opts.prefix.as_ref().cloned().unwrap_or_else(|| ObjectKey::from(""));
 			let os_path = self.to_os_path(&base_key)?;
 
 			// Check if the directory exists
@@ -431,7 +427,7 @@ impl ObjectStore for FileStore {
 					Ok(md) => md,
 					Err(e) => {
 						// Skip entries we can't get metadata for
-						eprintln!("Failed to get metadata for {}: {}", path.display(), e);
+						error!("Failed to get metadata for {}: {}", path.display(), e);
 						continue;
 					}
 				};
@@ -446,7 +442,7 @@ impl ObjectStore for FileStore {
 					.strip_prefix(&os_path)
 					.map_err(|e| format!("Failed to get relative path: {}", e))?;
 				let rel_str = rel_path.to_string_lossy();
-				let entry_key = base_key.join(&Key::from(rel_str.to_string()));
+				let entry_key = base_key.join(&ObjectKey::from(rel_str.to_string()));
 
 				all_entries.push((entry_key, metadata));
 			}

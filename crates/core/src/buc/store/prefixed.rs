@@ -1,15 +1,15 @@
-use super::{Key, ListOptions, ObjectMeta, ObjectStore};
+use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use bytes::Bytes;
 use std::{future::Future, pin::Pin};
 
 #[derive(Clone, Debug)]
 pub struct PrefixedStore<T: ObjectStore> {
-	prefix: Key,
+	prefix: ObjectKey,
 	store: T,
 }
 
 impl<T: ObjectStore> PrefixedStore<T> {
-	pub fn new(store: T, prefix: Key) -> Self {
+	pub fn new(store: T, prefix: ObjectKey) -> Self {
 		Self {
 			store,
 			prefix,
@@ -18,18 +18,9 @@ impl<T: ObjectStore> PrefixedStore<T> {
 }
 
 impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
-	fn prefix(&self) -> Option<Key> {
-		let prefix = if let Some(x) = self.store.prefix() {
-			self.prefix.join(&x)
-		} else {
-			self.prefix.clone()
-		};
-		Some(prefix)
-	}
-
 	fn put<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 		data: Bytes,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		let full_key = self.prefix.join(key);
@@ -39,7 +30,7 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 
 	fn put_if_not_exists<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 		data: Bytes,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		let full_key = self.prefix.join(key);
@@ -49,7 +40,7 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 
 	fn get<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>, String>> + Send + 'a>> {
 		let full_key = self.prefix.join(key);
 
@@ -58,7 +49,7 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 
 	fn head<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectMeta>, String>> + Send + 'a>> {
 		let full_key = self.prefix.join(key);
 
@@ -72,7 +63,7 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 
 	fn delete<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		let full_key = self.prefix.join(key);
 
@@ -81,7 +72,7 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 
 	fn exists<'a>(
 		&'a self,
-		key: &'a Key,
+		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>> {
 		let full_key = self.prefix.join(key);
 
@@ -90,8 +81,8 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 
 	fn copy<'a>(
 		&'a self,
-		key: &'a Key,
-		target: &'a Key,
+		key: &'a ObjectKey,
+		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		let full_key = self.prefix.join(key);
 		let full_target = self.prefix.join(target);
@@ -101,8 +92,8 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 
 	fn copy_if_not_exists<'a>(
 		&'a self,
-		key: &'a Key,
-		target: &'a Key,
+		key: &'a ObjectKey,
+		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		let full_key = self.prefix.join(key);
 		let full_target = self.prefix.join(target);
@@ -112,8 +103,8 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 
 	fn rename<'a>(
 		&'a self,
-		key: &'a Key,
-		target: &'a Key,
+		key: &'a ObjectKey,
+		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		let full_key = self.prefix.join(key);
 		let full_target = self.prefix.join(target);
@@ -123,8 +114,8 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 
 	fn rename_if_not_exists<'a>(
 		&'a self,
-		key: &'a Key,
-		target: &'a Key,
+		key: &'a ObjectKey,
+		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		let full_key = self.prefix.join(key);
 		let full_target = self.prefix.join(target);
