@@ -169,12 +169,14 @@ impl TryInto<std::ops::Range<char>> for Range {
 		let beg = match self.beg {
 			Bound::Unbounded => char::MIN,
 			Bound::Included(beg) => to_char(beg)?,
-			Bound::Excluded(beg) => char::try_from(to_char(beg)? as u32 + 1).unwrap(),
+			Bound::Excluded(beg) => char::try_from(to_char(beg)? as u32 + 1)
+				.map_err(|e| Error::Unreachable(e.to_string()))?,
 		};
 
 		let end = match self.end {
 			Bound::Unbounded => char::MAX,
-			Bound::Included(end) => char::try_from(to_char(end)? as u32 + 1).unwrap(),
+			Bound::Included(end) => char::try_from(to_char(end)? as u32 + 1)
+				.map_err(|e| Error::Unreachable(e.to_string()))?,
 			Bound::Excluded(end) => to_char(end)?,
 		};
 
@@ -330,7 +332,10 @@ fn to_i64(v: Value) -> Result<i64, Error> {
 
 fn to_char(v: Value) -> Result<char, Error> {
 	match v {
-		Value::Strand(s) if v.is_char() => Ok(s.0.chars().next().unwrap()),
+		Value::Strand(s) if v.is_char() => match s.0.chars().next() {
+			Some(c) => Ok(c),
+			None => Err(Error::Unreachable("Couldn't find char".into())),
+		},
 		v => Err(Error::InvalidRangeValue {
 			expected: "char".to_string(),
 			found: v.kindof().to_string(),
