@@ -85,11 +85,17 @@ impl SurrealProcess {
 			}
 		};
 
-		cmd.spawn()
+		let success = cmd
+			.spawn()
 			.context("Failed to spawn prepare command")?
 			.wait()
 			.await
-			.context("Failed to wait on prepare command")?;
+			.context("Failed to wait on prepare command")?
+			.success();
+
+		if !success {
+			bail!("A prepare command for running a surrealdb datastore was not successfull.")
+		}
 
 		Ok(())
 	}
@@ -109,7 +115,6 @@ impl SurrealProcess {
 			"--pull",
 			"never",
 			"--quiet",
-			"--read-only",
 			"--cpus",
 			"1",
 			"--publish",
@@ -269,6 +274,22 @@ impl SurrealProcess {
 		Ok(())
 	}
 
+	async fn retrieve_output(proc: Child) -> ProcessOutput {
+		let mut buffer = Vec::new();
+
+		proc.stdout.unwrap().read_to_end(&mut buffer).await.unwrap();
+		let stdout = String::from_utf8_lossy(&buffer).into_owned();
+
+		buffer.clear();
+		proc.stderr.unwrap().read_to_end(&mut buffer).await.unwrap();
+		let stderr = String::from_utf8_lossy(&buffer).into_owned();
+
+		ProcessOutput {
+			stdout,
+			stderr,
+		}
+	}
+
 	pub async fn quit_with_output(mut self) -> anyhow::Result<ProcessOutput> {
 		self.stop().await?;
 
@@ -276,19 +297,9 @@ impl SurrealProcess {
 			self.process.kill().await?;
 		}
 
-		let mut buffer = Vec::new();
+		let output = Self::retrieve_output(self.process).await;
 
-		self.process.stdout.unwrap().read_to_end(&mut buffer).await.unwrap();
-		let stdout = String::from_utf8_lossy(&buffer).into_owned();
-
-		buffer.clear();
-		self.process.stderr.unwrap().read_to_end(&mut buffer).await.unwrap();
-		let stderr = String::from_utf8_lossy(&buffer).into_owned();
-
-		Ok(ProcessOutput {
-			stdout,
-			stderr,
-		})
+		Ok(output)
 	}
 
 	pub async fn retrieve_data(&self, config: &Config, path: &str) -> anyhow::Result<()> {
@@ -296,15 +307,20 @@ impl SurrealProcess {
 			return Ok(());
 		};
 
-		Command::new(&config.docker_command)
+		let mut proc = Command::new(&config.docker_command)
 			.args(["container", "cp", &format!("{name}:/tmp/ds"), path])
-			.stdout(Stdio::null())
-			.stderr(Stdio::null())
+			.stdout(Stdio::piped())
+			.stderr(Stdio::piped())
 			.spawn()
-			.context("Failed to spawn command to copy data from container")?
-			.wait()
-			.await
-			.context("Failed to finish command to copy data from container")?;
+			.context("Failed to spawn command to copy data from container")?;
+
+		let exit_status =
+			proc.wait().await.context("Failed to finish command to copy data from container")?;
+
+		if !exit_status.success() {
+			let output = Self::retrieve_output(proc).await;
+			bail!("Command to copy datastore data finished with an error.\n> Stdout:\n {}\n> Stderr:\n {}",output.stdout,output.stderr);
+		}
 
 		Ok(())
 	}
