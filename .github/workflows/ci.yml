@@ -138,18 +138,15 @@ jobs:
 
   check-msrv:
     name: Check workspace MSRV
-    run-name: Check workspace MSRV
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        msrv: ["1.84"] # This should be updated if the MSRV is updated.
+    env:
+      msrv: ["1.84"] # This should be updated if the MSRV is updated.
 
     steps:
       - name: Install MSRV toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.msrv }}
+          toolchain: ${{ env.msrv }}
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -160,13 +157,13 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
-        run: cargo +${{ matrix.msrv }} install --debug --locked cargo-make
+        run: cargo +${{ env.msrv }} install --debug --locked cargo-make
 
       - name: Check workspace on MSRV
-        run: cargo +${{ matrix.msrv }} make ci-check
+        run: cargo +${{ env.msrv }} make ci-check
 
       - name: Check workspace release on MSRV
-        run: cargo +${{ matrix.msrv }} make ci-check-release
+        run: cargo +${{ env.msrv }} make ci-check-release
 
   check-fuzzing:
     name: Check fuzzing
