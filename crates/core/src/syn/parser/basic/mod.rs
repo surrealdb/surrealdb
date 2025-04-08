@@ -4,7 +4,6 @@ use crate::{
 		Uuid,
 	},
 	syn::{
-		error::bail,
 		lexer::compound,
 		parser::{mac::unexpected, ParseResult, Parser},
 		token::{self, t, TokenKind},
@@ -140,11 +139,11 @@ impl TokenValue for Uuid {
 
 impl TokenValue for File {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.peek();
 		if !parser.settings.files_enabled {
-			bail!("Cannot use files, as the experimental files capability is not enabled", @parser.last_span);
+			unexpected!(parser, token, "the experimental files feature to be enabled");
 		}
 
-		let token = parser.peek();
 		match token.kind {
 			TokenKind::Glued(token::Glued::File) => Ok(pop_glued!(parser, File)),
 			t!("f\"") | t!("f'") => {

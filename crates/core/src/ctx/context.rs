@@ -1,5 +1,5 @@
 use crate::buc::store::ObjectStore;
-use crate::buc::{self, BucketConnections};
+use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -510,7 +510,7 @@ impl MutableContext {
 		// Do we have a buckets context?
 		if let Some(buckets) = &self.buckets {
 			// Attempt to obtain an existing bucket connection
-			let key = (ns.to_string(), db.to_string(), bu.to_string());
+			let key = BucketConnectionKey::new(ns, db, bu);
 			if let Some(bucket_ref) = buckets.get(&key) {
 				Ok((*bucket_ref).clone())
 			} else {

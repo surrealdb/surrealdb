@@ -2467,19 +2467,17 @@ impl Value {
 
 				// Check each element
 				for value in v.0.iter() {
-					match value {
-						Value::Number(Number::Int(i)) if *i >= 0 && *i <= 255 => {
-							// Safe to convert to u8
-							bytes.push(*i as u8);
-						}
-						_ => {
-							// Not an int or outside u8 range
-							return Err(Error::ConvertTo {
-								from: self.clone(),
-								into: "bytes".into(),
-							});
+					if let Value::Number(v) = value {
+						if let Ok(v) = v.to_owned().try_into() {
+							bytes.push(v);
+							continue;
 						}
 					}
+
+					return Err(Error::ConvertTo {
+						from: self.clone(),
+						into: "bytes".into(),
+					});
 				}
 
 				Ok(Bytes(bytes))

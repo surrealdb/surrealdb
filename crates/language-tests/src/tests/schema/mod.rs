@@ -304,12 +304,8 @@ impl<'de> Deserialize<'de> for SurrealValue {
 	{
 		let source = String::deserialize(deserializer)?;
 		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
-		let res = syn::value_with_capabilities(&source, &capabilities);
-		if let Err(ref e) = res {
-			println!("Failed to parse value: {source}");
-			println!("Error: {e}");
-		};
-		let mut v = res.map_err(<D::Error as serde::de::Error>::custom)?;
+		let mut v = syn::value_with_capabilities(&source, &capabilities)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
 		bytes_hack::compute_bytes_inplace(&mut v);
 		Ok(SurrealValue(v))
 	}
@@ -335,12 +331,8 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 	{
 		let source = String::deserialize(deserializer)?;
 		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
-		let res = syn::value_with_capabilities(&source, &capabilities);
-		if let Err(ref e) = res {
-			println!("Failed to parse rid: {source}");
-			println!("Error: {e}");
-		};
-		let v = res.map_err(<D::Error as serde::de::Error>::custom)?;
+		let v = syn::value_with_capabilities(&source, &capabilities)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
 		if let CoreValue::Thing(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {

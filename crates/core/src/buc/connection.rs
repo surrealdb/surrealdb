@@ -8,8 +8,24 @@ use std::sync::Arc;
 use super::store::{prefixed::PrefixedStore, ObjectKey, ObjectStore};
 
 // Helper type to represent how bucket connections are persisted
-// Key format: NS, DB, BU
-pub(crate) type BucketConnections = DashMap<(String, String, String), Arc<dyn ObjectStore>>;
+pub(crate) type BucketConnections = DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>;
+
+#[derive(Hash, PartialEq, Eq)]
+pub(crate) struct BucketConnectionKey {
+	ns: String,
+	db: String,
+	bu: String,
+}
+
+impl BucketConnectionKey {
+	pub fn new(ns: impl Into<String>, db: impl Into<String>, bu: impl Into<String>) -> Self {
+		Self {
+			ns: ns.into(),
+			db: db.into(),
+			bu: bu.into(),
+		}
+	}
+}
 
 /// Connect to a global bucket, if one is configured
 /// If no global bucket is configured, the NoGlobalBucket error will be returned

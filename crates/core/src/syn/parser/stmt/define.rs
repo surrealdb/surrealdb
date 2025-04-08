@@ -11,6 +11,7 @@ use crate::sql::statements::define::{ApiAction, DefineBucketStatement, DefineCon
 use crate::sql::statements::DefineApiStatement;
 use crate::sql::Value;
 use crate::syn::error::bail;
+use crate::syn::token::Token;
 use crate::{
 	sql::{
 		access_type,
@@ -65,7 +66,7 @@ impl Parser<'_> {
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
 			t!("CONFIG") => self.parse_define_config(ctx).await.map(DefineStatement::Config),
-			t!("BUCKET") => self.parse_define_bucket(ctx).await.map(DefineStatement::Bucket),
+			t!("BUCKET") => self.parse_define_bucket(ctx, next).await.map(DefineStatement::Bucket),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -1403,9 +1404,10 @@ impl Parser<'_> {
 	pub async fn parse_define_bucket(
 		&mut self,
 		stk: &mut Stk,
+		token: Token,
 	) -> ParseResult<DefineBucketStatement> {
 		if !self.settings.files_enabled {
-			bail!("Cannot define a bucket, as the experimental files capability is not enabled", @self.last_span);
+			unexpected!(self, token, "the experimental files feature to be enabled");
 		}
 
 		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {

@@ -41,7 +41,7 @@ impl Parser<'_> {
 			}
 			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
 				if !self.settings.files_enabled {
-					bail!("Cannot create a file pointer, as the experimental files capability is not enabled", @self.last_span);
+					unexpected!(self, token, "the experimental files feature to be enabled");
 				}
 
 				Ok(Value::File(self.next_token_value()?))
@@ -251,7 +251,7 @@ impl Parser<'_> {
 			}
 			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
 				if !self.settings.files_enabled {
-					bail!("Cannot create a file pointer, as the experimental files capability is not enabled", @self.last_span);
+					unexpected!(self, token, "the experimental files feature to be enabled");
 				}
 
 				Value::File(self.next_token_value()?)

@@ -269,14 +269,20 @@ impl Display for Kind {
 			Kind::Regex => f.write_str("regex"),
 			Kind::Function(_, _) => f.write_str("function"),
 			Kind::Option(k) => write!(f, "option<{}>", k),
-			Kind::Record(k) => match k {
-				k if k.is_empty() => write!(f, "record"),
-				k => write!(f, "record<{}>", Fmt::verbar_separated(k)),
-			},
-			Kind::Geometry(k) => match k {
-				k if k.is_empty() => write!(f, "geometry"),
-				k => write!(f, "geometry<{}>", Fmt::verbar_separated(k)),
-			},
+			Kind::Record(k) => {
+				if k.is_empty() {
+					write!(f, "record")
+				} else {
+					write!(f, "record<{}>", Fmt::verbar_separated(k))
+				}
+			}
+			Kind::Geometry(k) => {
+				if k.is_empty() {
+					write!(f, "geometry")
+				} else {
+					write!(f, "geometry<{}>", Fmt::verbar_separated(k))
+				}
+			}
 			Kind::Set(k, l) => match (k, l) {
 				(k, None) if k.is_any() => write!(f, "set"),
 				(k, None) => write!(f, "set<{k}>"),
@@ -295,10 +301,13 @@ impl Display for Kind {
 				(Some(t), Some(i)) => write!(f, "references<{}, {}>", t, i),
 				(None, _) => f.write_str("references"),
 			},
-			Kind::File(k) => match k {
-				k if k.is_empty() => write!(f, "file"),
-				k => write!(f, "file<{}>", Fmt::verbar_separated(k)),
-			},
+			Kind::File(k) => {
+				if k.is_empty() {
+					write!(f, "file")
+				} else {
+					write!(f, "file<{}>", Fmt::verbar_separated(k))
+				}
+			}
 		}
 	}
 }

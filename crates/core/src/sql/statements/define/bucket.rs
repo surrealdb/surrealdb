@@ -1,5 +1,4 @@
-use crate::buc;
-use crate::dbs::capabilities::ExperimentalTarget;
+use crate::buc::{self, BucketConnectionKey};
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -34,10 +33,6 @@ impl DefineBucketStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files) {
-			return Err(Error::Unreachable("Experimental files capability is not enabled".into()));
-		}
-
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Bucket, &Base::Db)?;
 		// Fetch the transaction
@@ -70,7 +65,8 @@ impl DefineBucketStatement {
 
 		// Persist the store to cache
 		if let Some(buckets) = ctx.get_buckets() {
-			buckets.insert((ns.to_string(), db.to_string(), name.clone()), store);
+			let key = BucketConnectionKey::new(ns, db, &name);
+			buckets.insert(key, store);
 		}
 
 		// Process the statement
