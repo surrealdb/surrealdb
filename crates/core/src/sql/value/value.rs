@@ -2391,8 +2391,10 @@ impl Value {
 			Value::Array(v) => Ok(v),
 			// Ranges convert to an array
 			Value::Range(r) => {
+				// let range: std::ops::Range<char> = r.deref().to_owned().try_into()?;
 				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
 				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
+				//Ok(range.into_iter().map(|c| Value::from(c.to_string())).collect::<Vec<Value>>().into())
 			}
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {

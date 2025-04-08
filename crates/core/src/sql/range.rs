@@ -163,6 +163,31 @@ impl TryInto<std::ops::Range<i64>> for Range {
 	}
 }
 
+impl TryInto<std::ops::Range<char>> for Range {
+	type Error = Error;
+	fn try_into(self) -> Result<std::ops::Range<char>, Self::Error> {
+		let beg = match self.beg {
+			Bound::Unbounded => char::MIN,
+			Bound::Included(beg) => to_char(beg)?,
+			Bound::Excluded(beg) => char::try_from(to_char(beg)? as u32 + 1).unwrap(),
+		};
+
+		let end = match self.end {
+			Bound::Unbounded => char::MAX,
+			Bound::Included(end) => char::try_from(to_char(end)? as u32 + 1).unwrap(),
+			Bound::Excluded(end) => to_char(end)?,
+		};
+
+		if (beg as i64 + *GENERATION_ALLOCATION_LIMIT as i64) < end as i64 {
+			Err(Error::RangeTooBig {
+				max: *GENERATION_ALLOCATION_LIMIT,
+			})
+		} else {
+			Ok(beg..end)
+		}
+	}
+}
+
 impl Range {
 	/// Construct a new range
 	pub fn new(beg: Bound<Value>, end: Bound<Value>) -> Self {
@@ -298,6 +323,16 @@ fn to_i64(v: Value) -> Result<i64, Error> {
 		Value::Number(Number::Int(v)) => Ok(v),
 		v => Err(Error::InvalidRangeValue {
 			expected: "int".to_string(),
+			found: v.kindof().to_string(),
+		}),
+	}
+}
+
+fn to_char(v: Value) -> Result<char, Error> {
+	match v {
+		Value::Strand(s) if v.is_char() => Ok(s.0.chars().next().unwrap()),
+		v => Err(Error::InvalidRangeValue {
+			expected: "char".to_string(),
 			found: v.kindof().to_string(),
 		}),
 	}
