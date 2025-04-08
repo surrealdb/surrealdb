@@ -125,7 +125,6 @@ async-executor.workspace = true
 async-graphql = { workspace = true, default-features = false, features = [
     "dynamic-schema",
 ] }
-async-trait.workspace = true
 base64.workspace = true
 bcrypt.workspace = true
 bincode.workspace = true
