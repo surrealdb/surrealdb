@@ -73,7 +73,7 @@ pub async fn head(
 
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
 	let res = controller.head(&file.key.into()).await?;
-	Ok(res.map(|v| v.to_value(file.bucket)).unwrap_or_default())
+	Ok(res.map(|v| v.into_value(file.bucket)).unwrap_or_default())
 }
 
 pub async fn delete(
@@ -199,7 +199,7 @@ pub async fn list(
 		.list(&opts)
 		.await?
 		.into_iter()
-		.map(|v| v.to_value(bucket.clone()))
+		.map(|v| v.into_value(bucket.clone()))
 		.collect::<Vec<Value>>()
 		.into();
 

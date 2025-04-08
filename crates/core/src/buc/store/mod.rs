@@ -19,7 +19,7 @@ pub(crate) struct ObjectMeta {
 }
 
 impl ObjectMeta {
-	pub fn to_value(self, bucket: String) -> Value {
+	pub fn into_value(self, bucket: String) -> Value {
 		Value::from(map! {
 			"updated" => Value::from(self.updated),
 			"size" => Value::from(self.size),
