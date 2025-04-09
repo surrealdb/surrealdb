@@ -275,7 +275,7 @@ impl QueryExecutor {
 		} else {
 			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
 				let v = id.compute(stk, ctx, opt, doc).await.catch_return()?;
-				if let Ok(v) = v.try_into() {
+				if let Ok(v) = v.coerce_to() {
 					if let Ok(dist) = dist.compute(&v, val.as_ref()) {
 						p.add(dist, thg).await;
 						return Ok(Value::Bool(true));

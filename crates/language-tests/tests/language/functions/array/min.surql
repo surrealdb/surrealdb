@@ -8,7 +8,7 @@ imports = ["datasets/type_order.surql"]
 value = "NONE"
 
 [[test.results]]
-error = "Incorrect arguments for function array::min(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+error = "Incorrect arguments for function array::min(). Argument 1 was the wrong type. Expected `array` but found `'some text'`"
 
 [[test.results]]
 value = "1"

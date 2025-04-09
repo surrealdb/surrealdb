@@ -5,10 +5,10 @@
 value = "0"
 
 [[test.results]]
-error = "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected a bytes but found true"
+error = "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected `bytes` but found `true`"
 
 [[test.results]]
-error = "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected a bytes but found []"
+error = "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected `bytes` but found `[]`"
 
 [[test.results]]
 value = "2"

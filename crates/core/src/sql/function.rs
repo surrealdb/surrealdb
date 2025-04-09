@@ -336,7 +336,10 @@ impl Function {
 				let mut ctx = MutableContext::new_isolated(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
-					ctx.add_value(name.to_raw(), val.coerce_to(kind)?.into());
+					ctx.add_value(
+						name.to_raw(),
+						val.coerce_to_kind(kind).map_err(Error::from)?.into(),
+					);
 				}
 				let ctx = ctx.freeze();
 				// Run the custom function
@@ -345,8 +348,11 @@ impl Function {
 
 				if let Some(ref returns) = val.returns {
 					result
-						.coerce_to(returns)
-						.map_err(|e| e.function_check_from_coerce(val.name.to_string()))
+						.coerce_to_kind(returns)
+						.map_err(|e| Error::ReturnCoerce {
+							name: val.name.to_string(),
+							error: Box::new(e),
+						})
 						.map_err(ControlFlow::from)
 				} else {
 					Ok(result)

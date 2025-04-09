@@ -14,7 +14,7 @@ use crate::sql::reference::Refs;
 use crate::sql::statements::DefineFieldStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::every::ArrayBehaviour;
-use crate::sql::value::Value;
+use crate::sql::value::{CoerceError, Value};
 use crate::sql::{FlowResultExt as _, Part};
 use reblessive::tree::Stk;
 use std::sync::Arc;
@@ -39,7 +39,7 @@ impl Document {
 			// Loop through all field statements
 			for fd in self.fd(ctx, opt).await?.iter() {
 				// Is this a schemaless field?
-				match fd.flex || fd.kind.as_ref().is_some_and(Kind::is_literal_nested) {
+				match fd.flex || fd.kind.as_ref().is_some_and(Kind::contains_literal) {
 					false => {
 						// Loop over this field in the document
 						for k in self.current.doc.each(&fd.name).into_iter() {
@@ -335,50 +335,35 @@ impl FieldEditContext<'_> {
 					if !kind.is_record() {
 						// Get the value of the ID only
 						let inner = Value::from(id.id.clone());
+
 						// Check the type of the ID part
-						inner.coerce_to(kind).map_err(|e| match e {
-							// There was a conversion error
-							Error::CoerceTo {
-								from,
-								..
-							} => Error::FieldCheck {
-								thing: self.rid.to_string(),
-								field: self.def.name.clone(),
-								check: kind.to_string(),
-								value: from.to_string(),
-							},
-							// There was a different error
-							e => e,
+						inner.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
+							thing: self.rid.to_string(),
+							field_name: self.def.name.to_string(),
+							error: Box::new(e),
 						})?;
 					}
 				}
 				// The outer value should be a record
 				else {
 					// There was a field check error
-					return Err(Error::FieldCheck {
+					return Err(Error::FieldCoerce {
 						thing: self.rid.to_string(),
-						field: self.def.name.clone(),
-						check: kind.to_string(),
-						value: val.to_string(),
+						field_name: "id".to_string(),
+						error: Box::new(CoerceError::InvalidKind {
+							from: val,
+							into: "record".to_string(),
+						}),
 					});
 				}
 			}
 			// This is not the `id` field
 			else {
 				// Check the type of the field value
-				let val = val.coerce_to(kind).map_err(|e| match e {
-					// There was a conversion error
-					Error::CoerceTo {
-						from,
-						..
-					} => Error::FieldCheck {
-						thing: self.rid.to_string(),
-						field: self.def.name.clone(),
-						check: kind.to_string(),
-						value: from.to_string(),
-					},
-					// There was a different error
-					e => e,
+				let val = val.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
+					thing: self.rid.to_string(),
+					field_name: self.def.name.to_string(),
+					error: Box::new(e),
 				})?;
 				// Return the modified value
 				return Ok(val);

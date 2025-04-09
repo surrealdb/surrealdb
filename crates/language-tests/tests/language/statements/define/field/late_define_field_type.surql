@@ -17,7 +17,7 @@ value = "NONE"
 value = "[{ a: 1, b: '2', id: table:1 }]"
 
 [[test.results]]
-error = "Found '1' for field `a`, with record `table:2`, but expected a number"
+error = "Couldn't coerce value for field `a` of `table:2`: Expected `number` but found `'1'`"
 
 */
 

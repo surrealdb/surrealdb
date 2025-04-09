@@ -2,6 +2,7 @@ use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::error::Api;
 use crate::method::OnceLockExt;
 use crate::sql::to_value;
 use crate::Surreal;
@@ -52,7 +53,9 @@ where
 			let content = credentials.map_err(crate::error::Db::from)?;
 			router
 				.execute(Command::Signin {
-					credentials: to_value(content)?.try_into()?,
+					credentials: to_value(content)?
+						.into_object()
+						.ok_or(Api::CrendentialsNotObject)?,
 				})
 				.await
 		})

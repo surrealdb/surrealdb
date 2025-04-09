@@ -14,13 +14,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Found NONE for field `age`, with record `person:test`, but expected a number"
+error = "Couldn't coerce value for field `age` of `person:test`: Expected `number` but found `NONE`"
 
 [[test.results]]
-error = "Found NONE for field `age`, with record `person:test`, but expected a number"
+error = "Couldn't coerce value for field `age` of `person:test`: Expected `number` but found `NONE`"
 
 [[test.results]]
-error = "Found NULL for field `age`, with record `person:test`, but expected a number"
+error = "Couldn't coerce value for field `age` of `person:test`: Expected `number` but found `NULL`"
 
 [[test.results]]
 error = "Found 0 for field `age`, with record `person:test`, but field must conform to: $value > 0"
