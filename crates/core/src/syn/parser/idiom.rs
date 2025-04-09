@@ -35,7 +35,7 @@ impl Parser<'_> {
 			let alias = if self.eat(t!("AS")) {
 				Some(self.parse_plain_idiom(ctx).await?)
 			} else {
-				None
+				Some(expr.to_idiom())
 			};
 			Ok(Fields(
 				vec![Field::Single {
@@ -54,7 +54,7 @@ impl Parser<'_> {
 					let alias = if self.eat(t!("AS")) {
 						Some(self.parse_plain_idiom(ctx).await?)
 					} else {
-						None
+						Some(expr.to_idiom())
 					};
 					Field::Single {
 						expr,
