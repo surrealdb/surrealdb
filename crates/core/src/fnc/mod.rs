@@ -195,6 +195,8 @@ pub fn synchronous(
 		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
+		"encoding::cbor::decode" => encoding::cbor::decode,
+		"encoding::cbor::encode" => encoding::cbor::encode,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,

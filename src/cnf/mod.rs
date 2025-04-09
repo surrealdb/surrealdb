@@ -75,9 +75,9 @@ pub static WEBSOCKET_MAX_FRAME_SIZE: LazyLock<usize> =
 pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", usize, 128 << 20);
 
-/// How many responses can be buffered when delivering to the client (defaults to 25).
+/// How many responses can be buffered when delivering to the client (defaults to 0).
 pub static WEBSOCKET_RESPONSE_BUFFER_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_BUFFER_SIZE", usize, 25);
+	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_BUFFER_SIZE", usize, 0);
 
 /// How often are any buffered responses flushed to the WebSocket client (defaults to 3 ms).
 pub static WEBSOCKET_RESPONSE_FLUSH_PERIOD: LazyLock<u64> =
