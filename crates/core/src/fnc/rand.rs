@@ -139,15 +139,7 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 		Some((Value::Number(Number::Int(min)), Value::Number(Number::Int(max)))) => {
 			Some((min, max))
 		}
-		Some((Value::Datetime(min), Value::Datetime(max))) => match (min.to_i64(), max.to_i64()) {
-			(Some(min), Some(max)) => Some((min, max)),
-			_ => {
-				return Err(Error::InvalidArguments {
-					name: String::from("rand::time"),
-					message: String::from("Failed to convert datetime arguments to i64 timestamps"),
-				})
-			}
-		},
+		Some((Value::Datetime(min), Value::Datetime(max))) => Some((min.to_secs(), max.to_secs())),
 		_ => {
 			return Err(Error::InvalidArguments {
 				name: String::from("rand::time"),
@@ -162,17 +154,17 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 	// Check the function input arguments
 	let (min, max) = if let Some((min, max)) = range {
 		match min {
-			min if (1..=LIMIT).contains(&min) => match max {
+			min if (0..=LIMIT).contains(&min) => match max {
 				max if min <= max && max <= LIMIT => (min, max),
 				max if max >= 1 && max <= min => (max, min),
 				_ => return Err(Error::InvalidArguments {
 					name: String::from("rand::time"),
-					message: format!("To generate a time between X and Y seconds, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
+					message: format!("To generate a time between X and Y seconds, the 2 arguments must be non-negative numbers and no higher than {LIMIT}."),
 				}),
 			},
 			_ => return Err(Error::InvalidArguments {
 				name: String::from("rand::time"),
-				message: format!("To generate a time between X and Y seconds, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
+				message: format!("To generate a time between X and Y seconds, the 2 arguments must be non-negative numbers and no higher than {LIMIT}."),
 			}),
 		}
 	} else {
