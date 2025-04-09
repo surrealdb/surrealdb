@@ -56,9 +56,9 @@ impl FileStore {
 			})
 			.transpose()
 			.map_err(|_| {
-				Error::InvalidBucketUrl(format!(
-					"Expected to find a bool for query option `lowercase_paths`"
-				))
+				Error::InvalidBucketUrl(
+					"Expected to find a bool for query option `lowercase_paths`".to_string(),
+				)
 			})?
 			.unwrap_or(true);
 
