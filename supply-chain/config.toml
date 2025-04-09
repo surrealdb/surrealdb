@@ -1372,7 +1372,7 @@ version = "0.13.2"
 criteria = "safe-to-run"
 
 [[exemptions.reblessive]]
-version = "0.4.2"
+version = "0.4.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
