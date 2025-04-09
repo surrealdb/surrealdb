@@ -17,6 +17,7 @@ use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 #[derive(Clone, Debug)]
 pub struct FileStoreOptions {
 	root: ObjectKey,
+	lowercase_paths: bool,
 }
 
 /// A store implementation that uses the local filesystem
@@ -43,8 +44,30 @@ impl FileStore {
 			return Ok(None);
 		}
 
+		let lowercase_paths: bool = url
+			.query_pairs()
+			.find(|(key, _)| key == "lowercase_paths")
+			.map(|(_, value)| {
+				if value.is_empty() {
+					Ok(true)
+				} else {
+					value.parse()
+				}
+			})
+			.transpose()
+			.map_err(|_| {
+				Error::InvalidBucketUrl(format!(
+					"Expected to find a bool for query option `lowercase_paths`"
+				))
+			})?
+			.unwrap_or(true);
+
 		// Get the path from the URL
-		let path = url.path();
+		let path = if lowercase_paths {
+			&url.path().to_lowercase()
+		} else {
+			url.path()
+		};
 
 		// Create a PathBuf from the path, and clean it
 		let path_buf = PathBuf::from(path).clean();
@@ -55,7 +78,7 @@ impl FileStore {
 		}
 
 		// Check if the path is allowed
-		if !is_path_allowed(&path_buf) {
+		if !is_path_allowed(&path_buf, lowercase_paths) {
 			return Err(Error::FileAccessDenied(path.to_string()));
 		}
 
@@ -71,10 +94,11 @@ impl FileStore {
 			tokio::fs::create_dir_all(&path_buf).await.map_err(|e| {
 				Error::InvalidBucketUrl(format!("Failed to create directory {}: {}", path, e))
 			})?;
-		}
+		};
 
 		Ok(Some(FileStoreOptions {
 			root: ObjectKey::from(path.to_string()),
+			lowercase_paths,
 		}))
 	}
 
@@ -97,12 +121,19 @@ impl FileStore {
 		// Get the relative path components
 		let relative_path = path.as_str().trim_start_matches('/');
 
+		// Handle case sensitivity
+		let relative_path = if self.options.lowercase_paths {
+			&relative_path.to_lowercase()
+		} else {
+			relative_path
+		};
+
 		// Combine the canonical root with the relative path
 		let full_path = canonical_root.join(relative_path).clean();
 
 		// Verify the path is within the allowlist without canonicalizing
 		// Since we're starting from a canonicalized root, the path should be valid
-		if !is_path_allowed(&full_path) {
+		if !is_path_allowed(&full_path, self.options.lowercase_paths) {
 			return Err(format!("Path is not in inside the bucket: {}", path));
 		}
 
@@ -121,14 +152,24 @@ impl FileStore {
 }
 
 /// Check if a path is allowed according to the allowlist
-fn is_path_allowed(path: &std::path::Path) -> bool {
+fn is_path_allowed(path: &std::path::Path, lowercase_paths: bool) -> bool {
 	// If the allowlist is empty, nothing is allowed
 	if FILE_ALLOWLIST.is_empty() {
 		return false;
 	}
 
 	// Check if the path is within any of the allowed paths
-	FILE_ALLOWLIST.iter().any(|allowed| path.starts_with(allowed))
+	FILE_ALLOWLIST.iter().any(|allowed| {
+		if lowercase_paths {
+			// Convert both paths to lowercase strings for case-insensitive comparison
+			let path_str = path.to_string_lossy().to_lowercase();
+			let allowed_str = allowed.to_string_lossy().to_lowercase();
+			path_str.starts_with(&allowed_str)
+		} else {
+			// Case-sensitive comparison (original behavior)
+			path.starts_with(allowed)
+		}
+	})
 }
 
 impl ObjectStore for FileStore {
