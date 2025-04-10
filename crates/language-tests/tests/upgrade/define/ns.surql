@@ -1,6 +1,6 @@
 /**
 [env]
-imports = ["upgrade/schema/define_ns_import.surql"]
+imports = ["upgrade/define/ns_import.surql"]
 
 [test]
 upgrade = true

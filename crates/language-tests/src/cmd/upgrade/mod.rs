@@ -37,30 +37,7 @@ pub struct Task {
 
 impl Task {
 	pub fn name(&self, set: &TestSet) -> String {
-		let mut res = String::new();
-
-		res.push_str(&set[self.test].path);
-		res.push_str(" ");
-
-		match self.from {
-			DsVersion::Path(ref x) => {
-				res.push_str(x);
-			}
-			DsVersion::Version(ref v) => {
-				res.push_str(&v.to_string());
-			}
-		}
-		res.push_str(" => ");
-		match self.to {
-			DsVersion::Path(ref x) => {
-				res.push_str(x);
-			}
-			DsVersion::Version(ref v) => {
-				res.push_str(&v.to_string());
-			}
-		}
-
-		res
+		format!("{} {} => {}", &set[self.test].path, self.from, self.to)
 	}
 }
 
@@ -198,7 +175,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	// Port distribution variables.
 	let mut start_port = 9000u16;
 	let mut reuse_port = Vec::<u16>::new();
-	let mut used_ports = HashMap::new();
+	let mut task_context = HashMap::new();
 
 	let mut join_set = JoinSet::<(TestId, TestTaskResult)>::new();
 	loop {
@@ -218,10 +195,12 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 					break;
 				};
 
+				let extra_name = format!("{} => {}", task.from, task.to);
+
 				let name = task.name(&testset);
 				let id = join_set.spawn(run_task(task, testset.clone(), port, config.clone())).id();
 
-				used_ports.insert(id, port);
+				task_context.insert(id, (port, extra_name));
 
 				progress.start_item(id, &name).unwrap();
 			} else {
@@ -235,11 +214,12 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 		let (id, (test_id, result)) = res.unwrap();
 
-		let used_port =
-			used_ports.remove(&id).expect("previously used ports should be in the ports map");
+		let (used_port, extra_name) =
+			task_context.remove(&id).expect("previously used ports should be in the ports map");
 		reuse_port.push(used_port);
 
-		let report = TestReport::from_test_result(test_id, &testset, result, &ds).await;
+		let report =
+			TestReport::from_test_result(test_id, &testset, result, &ds, Some(extra_name)).await;
 		let grade = report.grade();
 		reports.push(report);
 		progress.finish_item(id, grade).unwrap();

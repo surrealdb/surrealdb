@@ -249,6 +249,7 @@ pub struct TestReport {
 	is_wip: bool,
 	kind: TestReportKind,
 	outputs: Option<TestOutputs>,
+	extra_name: Option<String>,
 }
 
 impl TestReport {
@@ -290,6 +291,7 @@ impl TestReport {
 		set: &TestSet,
 		job_result: TestTaskResult,
 		matching_datastore: &Datastore,
+		extra_name: Option<String>,
 	) -> Self {
 		let outputs = match job_result {
 			TestTaskResult::ParserError(ref e) => Some(TestOutputs::ParsingError(e.to_string())),
@@ -307,6 +309,7 @@ impl TestReport {
 			is_wip: set[id].config.is_wip(),
 			kind,
 			outputs,
+			extra_name,
 		}
 	}
 

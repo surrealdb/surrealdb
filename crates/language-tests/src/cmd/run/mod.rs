@@ -240,7 +240,7 @@ pub async fn grade_task(
 			break;
 		};
 
-		let report = TestReport::from_test_result(id, &set, res, &ds).await;
+		let report = TestReport::from_test_result(id, &set, res, &ds, None).await;
 		sender.send(report).expect("report channel quit early");
 	}
 }

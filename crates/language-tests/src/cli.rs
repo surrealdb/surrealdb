@@ -1,3 +1,5 @@
+use std::fmt;
+
 use clap::{
 	arg,
 	builder::{EnumValueParser, PossibleValue},
@@ -74,6 +76,15 @@ impl ValueEnum for UpgradeBackend {
 pub enum DsVersion {
 	Version(Version),
 	Path(String),
+}
+
+impl fmt::Display for DsVersion {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			DsVersion::Version(version) => version.fmt(f),
+			DsVersion::Path(p) => p.fmt(f),
+		}
+	}
 }
 
 impl DsVersion {

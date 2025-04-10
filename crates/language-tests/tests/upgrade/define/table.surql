@@ -1,6 +1,6 @@
 /**
 [env]
-imports = ["upgrade/schema/define_table_import.surql"]
+imports = ["upgrade/define/table_import.surql"]
 
 [test]
 upgrade = true
