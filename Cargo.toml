@@ -197,6 +197,11 @@ strip = false
 [profile.make]
 inherits = "dev"
 
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = true
+
 [dependencies]
 # workspace internal dependencies
 surrealdb = { workspace = true, features = ["protocol-http", "protocol-ws", "rustls"] }
