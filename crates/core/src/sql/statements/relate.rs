@@ -3,7 +3,7 @@ use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
-use crate::sql::{Data, FlowResultExt as _, Output, Timeout, Value};
+use crate::sql::{Data, FlowResultExt as _, Kind, Output, Timeout, Value, Literal};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -17,7 +17,7 @@ use std::fmt;
 pub struct RelateStatement {
 	#[revision(start = 2)]
 	pub only: bool,
-	pub kind: Value,
+	pub kind: Kind,
 	pub from: Value,
 	pub with: Value,
 	pub uniq: bool,
@@ -55,6 +55,32 @@ impl RelateStatement {
 			}
 			None => ctx.clone(),
 		};
+
+		// Validate custom types in relationship data
+		if let Some(ref data) = self.data {
+			if let Kind::Literal(Literal::Object(fields)) = &self.kind {
+				match data {
+					Data::SetExpression(v) => {
+						for (key, _, val) in v {
+							if let Some(field_kind) = fields.get(&key.to_string()) {
+								val.validate_custom_type(field_kind, &ctx).await?;
+							}
+						}
+					}
+					Data::MergeExpression(v) | Data::ReplaceExpression(v) | Data::ContentExpression(v) => {
+						if let Value::Object(obj) = v {
+							for (key, val) in obj.iter() {
+								if let Some(field_kind) = fields.get(key) {
+									val.validate_custom_type(field_kind, &ctx).await?;
+								}
+							}
+						}
+					}
+					_ => {}
+				}
+			}
+		}
+
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();
@@ -143,26 +169,23 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				match &self.kind.compute(stk, &ctx, opt, doc).await.catch_return()? {
-					// The relation has a specific record id
-					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w, None)),
-					// The relation does not have a specific record id
-					Value::Table(tb) => match &self.data {
-						// There is a data clause so check for a record id
-						Some(data) => {
-							let id = match data.rid(stk, &ctx, opt).await? {
-								Some(id) => id.generate(tb, false)?,
-								None => tb.generate(),
-							};
-							i.ingest(Iterable::Relatable(f, id, w, None))
+				match &self.kind {
+					Kind::Record(tables) if tables.len() == 1 => {
+						let tb = &tables[0];
+						match &self.data {
+							Some(data) => {
+								let id = match data.rid(stk, &ctx, opt).await? {
+									Some(id) => id.generate(tb, false)?,
+									None => tb.generate(),
+								};
+								i.ingest(Iterable::Relatable(f, id, w, None))
+							}
+							None => i.ingest(Iterable::Relatable(f, tb.generate(), w, None)),
 						}
-						// There is no data clause so create a record id
-						None => i.ingest(Iterable::Relatable(f, tb.generate(), w, None)),
-					},
-					// The relation can not be any other type
-					v => {
+					}
+					_ => {
 						return Err(Error::RelateStatementOut {
-							value: v.to_string(),
+							value: self.kind.to_string(),
 						})
 					}
 				};

@@ -141,6 +141,7 @@ fn statements() -> Vec<Statement> {
 		Statement::Continue(ContinueStatement),
 		Statement::Create(CreateStatement {
 			only: true,
+			kind: Some(Kind::Any),
 			what: Values(vec![Value::Table(Table("foo".to_owned()))]),
 			data: Some(Data::SetExpression(vec![
 				(
@@ -628,16 +629,14 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Relate(RelateStatement {
 			only: true,
-			kind: Value::Thing(Thing {
-				tb: "a".to_owned(),
-				id: Id::from("b"),
-			}),
+			kind: Kind::Record(vec![Table("a".to_owned())]),
 			from: Value::Array(Array(vec![
 				Value::Number(Number::Int(1)),
 				Value::Number(Number::Int(2)),
 			])),
 			with: Value::Subquery(Box::new(Subquery::Create(CreateStatement {
 				only: false,
+				kind: Some(Kind::Any),
 				what: Values(vec![Value::Table(Table("foo".to_owned()))]),
 				data: None,
 				output: None,

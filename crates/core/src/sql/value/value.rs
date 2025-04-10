@@ -1,7 +1,7 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, type_def::TypeDefinition};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
@@ -24,7 +24,7 @@ use chrono::{DateTime, Utc};
 
 use geo::Point;
 use reblessive::tree::Stk;
-use revision::revisioned;
+use revision::{revisioned, Revisioned};
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -1357,6 +1357,7 @@ impl Value {
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
 			Kind::Regex => self.coerce_to_regex().map(Value::from),
 			Kind::Range => self.coerce_to_range().map(Value::from),
+			Kind::UserDefined(_) => Ok(self),
 			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.coerce_to_set_type_len(t, l).map(Value::from),
@@ -1957,7 +1958,8 @@ impl Value {
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
 			Kind::Regex => self.convert_to_regex().map(Value::from),
 			Kind::Range => self.convert_to_range().map(Value::from),
-			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
+			Kind::UserDefined(_) => Ok(self),
+			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.convert_to_set_type_len(t, l).map(Value::from),
 				None => self.convert_to_set_type(t).map(Value::from),
@@ -2929,6 +2931,76 @@ impl Value {
 				| Value::Table(_)
 				| Value::Uuid(_)
 		)
+	}
+
+	pub(crate) async fn validate_custom_type(&self, kind: &Kind, ctx: &Context) -> Result<(), Error> {
+		match kind {
+			Kind::UserDefined(name) => {
+				// Get the type definition
+				let key = format!("type:{}", name);
+				let txn = ctx.tx();
+				if let Some(def) = txn.get(key.as_str(), None).await? {
+					let def: TypeDefinition = TypeDefinition::deserialize_revisioned(&mut def.as_slice()).map_err(|e| Error::Revision(e))?;
+					// Validate against the type definition
+					Box::pin(async move { self.validate_custom_type(&def.kind, ctx).await }).await?;
+				} else {
+					return Err(Error::TypeNotFound(name.to_string()));
+				}
+			}
+			Kind::Array(kind, _len) => {
+				if let Value::Array(arr) = self {
+					for val in arr.0.iter() {
+						Box::pin(async move { val.validate_custom_type(kind, ctx).await }).await?;
+					}
+				} else {
+					return Err(Error::InvalidType {
+						expected: "array".to_string(),
+						found: self.kindof().to_string(),
+					});
+				}
+			}
+			Kind::Object => {
+				if !matches!(self, Value::Object(_)) {
+					return Err(Error::InvalidType {
+						expected: "object".to_string(),
+						found: self.kindof().to_string(),
+					});
+				}
+			}
+			Kind::Set(kind, _len) => {
+				if let Value::Array(arr) = self {
+					for val in arr.0.iter() {
+						Box::pin(async move { val.validate_custom_type(kind, ctx).await }).await?;
+					}
+				} else {
+					return Err(Error::InvalidType {
+						expected: "set".to_string(),
+						found: self.kindof().to_string(),
+					});
+				}
+			}
+			Kind::Record(tables) => {
+				if let Value::Thing(thing) = self {
+					let table = Table::from(thing.tb.clone());
+					if !tables.contains(&table) {
+						return Err(Error::InvalidType {
+							expected: format!("record of type {:?}", tables),
+							found: format!("record of type {}", thing.tb),
+						});
+					}
+				} else {
+					return Err(Error::InvalidType {
+						expected: "record".to_string(),
+						found: self.kindof().to_string(),
+					});
+				}
+			}
+			_ => {
+				// For primitive types, use existing coercion
+				self.clone().coerce_to(kind)?;
+			}
+		}
+		Ok(())
 	}
 }
 
