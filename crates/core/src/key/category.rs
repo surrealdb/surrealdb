@@ -88,6 +88,8 @@ pub enum Category {
 	DatabaseVersionstamp,
 	/// crate::key::database::cg             /*{ns}*{db}!cg{ty}
 	DatabaseConfig,
+	/// crate::key::database::sq             /*{ns}*{db}!sq{sq}
+	DatabaseSequence,
 	///
 	/// ------------------------------
 	///
@@ -164,6 +166,13 @@ pub enum Category {
 	///
 	/// crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{ff}{fk}
 	Ref,
+	///
+	/// ------------------------------
+	///
+	/// crate::seq::state                      /*{ns}*{db}!sq{sq}!st{nid}
+	SequenceState,
+	/// crate::seq::batch                      /*{ns}*{db}!sq{sq}!ba{start}
+	SequenceBatch,
 }
 
 impl Display for Category {
@@ -201,6 +210,7 @@ impl Display for Category {
 			Self::DatabaseTimestamp => "DatabaseTimestamp",
 			Self::DatabaseUser => "DatabaseUser",
 			Self::DatabaseVersionstamp => "DatabaseVersionstamp",
+			Self::DatabaseSequence => "DatabaseSequence",
 			Self::DatabaseConfig => "DatabaseConfig",
 			Self::TableRoot => "TableRoot",
 			Self::TableEvent => "TableEvent",
@@ -231,6 +241,8 @@ impl Display for Category {
 			Self::Thing => "Thing",
 			Self::Graph => "Graph",
 			Self::Ref => "Ref",
+			Self::SequenceState => "SequenceState",
+			Self::SequenceBatch => "SequenceBatch",
 		};
 		write!(f, "{}", name)
 	}
