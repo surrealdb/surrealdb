@@ -2,13 +2,15 @@ use std::{path::Path, process::Stdio, time::Duration};
 
 use anyhow::{bail, Context};
 use futures::{SinkExt, StreamExt};
-use revision::{revisioned, Revisioned as _};
+use revision::revisioned;
+use semver::Version;
 use surrealdb_core::{
 	dbs::{self, Status},
 	sql::{Object, Value},
 };
 use tokio::{
 	io::AsyncReadExt,
+	net::TcpStream,
 	process::{Child, Command},
 };
 use tokio_tungstenite::{
@@ -20,6 +22,7 @@ use tokio_tungstenite::{
 		},
 		Message,
 	},
+	MaybeTlsStream, WebSocketStream,
 };
 
 use crate::{
@@ -31,14 +34,14 @@ use super::Config;
 
 #[revisioned(revision = 1)]
 #[derive(Debug)]
-struct Failure {
+pub struct Failure {
 	code: i64,
-	message: String,
+	pub message: String,
 }
 
 #[revisioned(revision = 1)]
 #[derive(Debug)]
-enum Data {
+pub enum Data {
 	Other(Value),
 	Query(Vec<dbs::QueryMethodResponse>),
 	Live(dbs::Notification),
@@ -46,9 +49,9 @@ enum Data {
 
 #[revisioned(revision = 1)]
 #[derive(Debug)]
-struct Response {
+pub struct Response {
 	id: Option<Value>,
-	result: Result<Data, Failure>,
+	pub result: Result<Data, Failure>,
 }
 
 pub struct ProcessOutput {
@@ -106,6 +109,7 @@ impl SurrealProcess {
 		port: u16,
 		name: &str,
 		path: Option<&str>,
+		version: &Version,
 	) -> Command {
 		let mut cmd = Command::new(&config.docker_command);
 		cmd.args([
@@ -127,32 +131,37 @@ impl SurrealProcess {
 			cmd.args(["--volume", &format!("{path}:/import_data")]);
 
 			match config.backend {
-				UpgradeBackend::RocksDb => "rocksdb:///import_data/ds".to_string(),
+				UpgradeBackend::RocksDb => {
+					// rocksdb was called file before 2.0
+					if *version < Version::new(2, 0, 0) {
+						"file:///import_data/ds".to_string()
+					} else {
+						"rocksdb:///import_data/ds".to_string()
+					}
+				}
 				UpgradeBackend::SurrealKv => "surrealkv:///import_data/ds".to_string(),
 				UpgradeBackend::Foundation => "fdb:///import_data/ds".to_string(),
 			}
 		} else {
 			match config.backend {
-				UpgradeBackend::RocksDb => "rocksdb:///tmp/ds".to_string(),
+				UpgradeBackend::RocksDb => {
+					// rocksdb was called file before 2.0
+					if *version < Version::new(2, 0, 0) {
+						"file:///tmp/ds".to_string()
+					} else {
+						"rocksdb:///tmp/ds".to_string()
+					}
+				}
 				UpgradeBackend::SurrealKv => "surrealkv:///tmp/ds".to_string(),
 				UpgradeBackend::Foundation => "fdb:///tmp/ds".to_string(),
 			}
 		};
 
-		cmd.args([
-			&image_name,
-			"start",
-			"--username",
-			"root",
-			"--password",
-			"root",
-			"--unauthenticated",
-			&endpoint,
-		])
-		.stdin(Stdio::null())
-		.stdout(Stdio::piped())
-		.stderr(Stdio::piped())
-		.kill_on_drop(true);
+		cmd.args([&image_name, "start", "--username", "root", "--password", "root", &endpoint])
+			.stdin(Stdio::null())
+			.stdout(Stdio::piped())
+			.stderr(Stdio::piped())
+			.kill_on_drop(true);
 		return cmd;
 	}
 
@@ -163,17 +172,8 @@ impl SurrealProcess {
 			UpgradeBackend::Foundation => format!("fdb://{tmp_dir}/ds"),
 		};
 		let bind = format!("127.0.0.1:{port}");
-		let common_args = [
-			"start",
-			"--bind",
-			&bind,
-			"--username",
-			"root",
-			"--password",
-			"root",
-			"--unauthenticated",
-			&endpoint,
-		];
+		let common_args =
+			["start", "--bind", &bind, "--username", "root", "--password", "root", &endpoint];
 		let mut res = Command::new("./surreal");
 		res.args(common_args)
 			.current_dir(Path::new(&config.surreal_path).join("target").join("debug"))
@@ -202,6 +202,7 @@ impl SurrealProcess {
 					port,
 					&name,
 					mount.then_some(tmp_dir),
+					version,
 				);
 				(Some(name), cmd)
 			}
@@ -214,6 +215,7 @@ impl SurrealProcess {
 					port,
 					&name,
 					mount.then_some(tmp_dir),
+					&Version::new(u64::MAX, 0, 0),
 				);
 				(Some(name), cmd)
 			}
@@ -232,10 +234,10 @@ impl SurrealProcess {
 	pub async fn stop(&self) -> anyhow::Result<()> {
 		use anyhow::bail;
 
-		let pid = self
-			.process
-			.id()
-			.ok_or_else(|| anyhow::anyhow!("Failed to get process ID for child rprocesses"))?;
+		let pid = match self.process.id() {
+			None => return Ok(()),
+			Some(x) => x,
+		};
 		let res = Command::new("kill").arg("-15").arg(pid.to_string()).output().await?;
 		if !res.status.success() {
 			bail!(
@@ -251,9 +253,10 @@ impl SurrealProcess {
 	pub async fn stop(&self) -> anyhow::Result<()> {
 		use anyhow::bail;
 
-		let pid = process
-			.id()
-			.ok_or_else(|| anyhow::anyhow!("Failed to get process ID for child rprocesses"))?;
+		let pid = match self.process.id() {
+			None => return Ok(()),
+			Some(x) => x,
+		};
 		let res = Command::new("taskkill").arg("/pid").arg(pid.to_string()).output().await?;
 		if !res.status.success() {
 			bail!(
@@ -274,14 +277,14 @@ impl SurrealProcess {
 		Ok(())
 	}
 
-	async fn retrieve_output(proc: Child) -> ProcessOutput {
+	async fn retrieve_output(proc: &mut Child) -> ProcessOutput {
 		let mut buffer = Vec::new();
 
-		proc.stdout.unwrap().read_to_end(&mut buffer).await.unwrap();
+		proc.stdout.take().unwrap().read_to_end(&mut buffer).await.unwrap();
 		let stdout = String::from_utf8_lossy(&buffer).into_owned();
 
 		buffer.clear();
-		proc.stderr.unwrap().read_to_end(&mut buffer).await.unwrap();
+		proc.stderr.take().unwrap().read_to_end(&mut buffer).await.unwrap();
 		let stderr = String::from_utf8_lossy(&buffer).into_owned();
 
 		ProcessOutput {
@@ -297,7 +300,7 @@ impl SurrealProcess {
 			self.process.kill().await?;
 		}
 
-		let output = Self::retrieve_output(self.process).await;
+		let output = Self::retrieve_output(&mut self.process).await;
 
 		Ok(output)
 	}
@@ -318,15 +321,14 @@ impl SurrealProcess {
 			proc.wait().await.context("Failed to finish command to copy data from container")?;
 
 		if !exit_status.success() {
-			let output = Self::retrieve_output(proc).await;
+			let output = Self::retrieve_output(&mut proc).await;
 			bail!("Command to copy datastore data finished with an error.\n> Stdout:\n {}\n> Stderr:\n {}",output.stdout,output.stderr);
 		}
 
 		Ok(())
 	}
 
-	pub async fn send_request(&self, query: &str) -> anyhow::Result<TestTaskResult> {
-		// setup the connection
+	pub async fn open_connection(&mut self) -> anyhow::Result<SurrealConnection> {
 		let request = tokio_tungstenite::tungstenite::handshake::client::Request::builder()
 			.uri(format!("ws://127.0.0.1:{}/rpc", self.port))
 			.header(SEC_WEBSOCKET_PROTOCOL, "revision")
@@ -341,12 +343,22 @@ impl SurrealProcess {
 		let mut wait_duration = Duration::from_millis(100);
 		let mut retries = 0;
 
-		let mut socket = loop {
+		let socket = loop {
 			match connect_async(request.clone()).await.context("Failed to connect to socket.") {
 				Ok((x, _)) => break x,
 				Err(e) => {
 					if retries < 8 {
-						tokio::time::sleep(wait_duration).await;
+						if let Ok(x) =
+							tokio::time::timeout(wait_duration, self.process.wait()).await
+						{
+							x.context("Waiting on the surrealdb process returned an error")?;
+							let output = Self::retrieve_output(&mut self.process).await;
+							bail!(
+								"Surrealdb process quit early.\n> Stdout:\n {}\n> Stderr:\n {}",
+								output.stdout,
+								output.stderr
+							)
+						}
 						wait_duration *= 2;
 						retries += 1;
 					} else {
@@ -356,47 +368,39 @@ impl SurrealProcess {
 			}
 		};
 
-		// send the query request
-		let mut request_obj = Object::default();
-		request_obj.insert("id".to_owned(), Value::from(0xCAFECAFEi64));
-		request_obj.insert("method".to_owned(), Value::from("use"));
-		request_obj.insert(
-			"params".to_owned(),
-			Value::from(vec![Value::from("test"), Value::from("test")]),
-		);
+		Ok(SurrealConnection {
+			id: 0,
+			socket,
+		})
+	}
+}
 
-		let mut message_data = Vec::new();
-		Value::from(request_obj)
-			.serialize_revisioned(&mut message_data)
-			.context("Failed to serialize message")?;
+pub struct SurrealConnection {
+	id: i64,
+	socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+}
 
-		socket.send(Message::Binary(message_data)).await.context("Failed to send query message")?;
+impl SurrealConnection {
+	pub async fn request(&mut self, mut object: Object) -> anyhow::Result<Response> {
+		let id = self.id;
+		self.id += 1;
 
-		// send the query request
-		let mut request_obj = Object::default();
-		request_obj.insert("id".to_owned(), Value::from(0xCAFEBEEFi64));
-		request_obj.insert("method".to_owned(), Value::from("query"));
-		request_obj.insert("params".to_owned(), Value::from(vec![Value::from(query)]));
+		object.insert("id".to_owned(), Value::from(id));
 
-		let mut message_data = Vec::new();
-		Value::from(request_obj)
-			.serialize_revisioned(&mut message_data)
-			.context("Failed to serialize message")?;
+		let message =
+			revision::to_vec(&Value::from(object)).context("Failed to serialize message")?;
+		self.socket.send(Message::Binary(message)).await.context("Failed to send query message")?;
 
-		socket.send(Message::Binary(message_data)).await.context("Failed to send query message")?;
-
-		// wait for a response.
 		loop {
-			let Some(message) = socket.next().await else {
-				return Ok(TestTaskResult::RunningError(anyhow::Error::msg(
-					"Websocket connection to database closed early",
-				)));
+			let Some(message) = self.socket.next().await else {
+				bail!("Websocket connection closed early")
 			};
-			let message = message.context("Failed to parse message")?;
+			let message = message.context("Surrealdb connection error")?;
+
 			let data =
 				match message {
 					Message::Ping(x) => {
-						socket.send(Message::Pong(x)).await?;
+						self.socket.send(Message::Pong(x)).await?;
 						continue;
 					}
 					Message::Text(_) => {
@@ -407,9 +411,7 @@ impl SurrealProcess {
 					// Documentation says we don't get this message.
 					Message::Frame(_) => unreachable!(),
 					Message::Close(_) => {
-						return Ok(TestTaskResult::RunningError(anyhow::Error::msg(
-							"Websocket connection to database closed early",
-						)));
+						bail!("Websocket connection to database closed early")
 					}
 				};
 
@@ -420,37 +422,47 @@ impl SurrealProcess {
 				let Err(e) = response.result else {
 					unreachable!()
 				};
-				return Ok(TestTaskResult::RunningError(anyhow::Error::msg(format!(
-					"Response returned a failure: {}",
-					e.message
-				))));
+				bail!("Response returned a failure: {}", e.message);
 			}
 
-			if response.id != Some(Value::from(0xCAFEBEEFi64)) {
+			if response.id != Some(Value::from(id)) {
 				continue;
 			}
 
-			return match response.result {
-				Ok(Data::Query(e)) => {
-					let results = e
-						.into_iter()
-						.map(|x| {
-							if let Status::Ok = x.status {
-								Ok(Ok(x.result))
-							} else {
-								let Value::Strand(x) = x.result else {
-									bail!("Value of result with error status was not a string");
-								};
-								Ok(Err(x.to_string()))
-							}
-						})
-						.collect::<Result<Vec<Result<Value, String>>, anyhow::Error>>()?;
+			return Ok(response);
+		}
+	}
 
-					Ok(TestTaskResult::Results(results))
-				}
-				Ok(_) => bail!("Got invalid response type"),
-				Err(e) => Ok(TestTaskResult::RunningError(anyhow::Error::msg(e.message))),
-			};
+	pub async fn query(&mut self, query: &str) -> anyhow::Result<TestTaskResult> {
+		let mut request_obj = Object::default();
+		request_obj.insert("method".to_owned(), Value::from("query"));
+		request_obj.insert("params".to_owned(), Value::from(vec![Value::from(query)]));
+
+		let response = match self.request(request_obj).await {
+			Ok(x) => x,
+			Err(e) => return Ok(TestTaskResult::RunningError(e)),
+		};
+
+		match response.result {
+			Ok(Data::Query(e)) => {
+				let results = e
+					.into_iter()
+					.map(|x| {
+						if let Status::Ok = x.status {
+							Ok(Ok(x.result))
+						} else {
+							let Value::Strand(x) = x.result else {
+								bail!("Value of result with error status was not a string");
+							};
+							Ok(Err(x.to_string()))
+						}
+					})
+					.collect::<Result<Vec<Result<Value, String>>, anyhow::Error>>()?;
+
+				Ok(TestTaskResult::Results(results))
+			}
+			Ok(_) => bail!("Got invalid response type"),
+			Err(e) => Ok(TestTaskResult::RunningError(anyhow::Error::msg(e.message))),
 		}
 	}
 }

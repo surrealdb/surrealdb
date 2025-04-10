@@ -51,7 +51,7 @@ impl ValueEnum for Backend {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum UpgradeBackend {
 	RocksDb,
 	SurrealKv,
@@ -72,11 +72,11 @@ impl ValueEnum for UpgradeBackend {
 	}
 }
 
-#[derive(Clone, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Eq, PartialEq, PartialOrd, Ord, Debug)]
 pub enum DsVersion {
-	Current,
-	Latest,
 	Version(Version),
+	Latest,
+	Current,
 }
 
 impl DsVersion {
@@ -194,6 +194,9 @@ pub fn parse() -> ArgMatches {
 			)
 			.arg(
 				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
+			)
+			.arg(
+				arg!(--"skip-prepare" "Don't run the perpare step, skipping building surrealdb and pulling docker images.")
 			),
 		)
 		.subcommand(

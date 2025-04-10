@@ -3,6 +3,8 @@ mod process;
 use std::{
 	collections::HashMap,
 	net::{Ipv4Addr, SocketAddr},
+	os::unix::fs::PermissionsExt,
+	path::Path,
 	sync::Arc,
 	thread,
 };
@@ -10,7 +12,11 @@ use std::{
 use anyhow::{bail, Context, Result};
 use clap::ArgMatches;
 use process::SurrealProcess;
-use surrealdb_core::kvs::Datastore;
+use semver::Version;
+use surrealdb_core::{
+	kvs::Datastore,
+	sql::{Object, Value},
+};
 use tokio::task::JoinSet;
 
 use crate::{
@@ -72,6 +78,7 @@ pub struct Config {
 	docker_command: String,
 	jobs: u32,
 	backend: UpgradeBackend,
+	skip_prepare: bool,
 }
 
 impl Config {
@@ -84,6 +91,7 @@ impl Config {
 			jobs: matches.get_one::<u32>("jobs").copied().unwrap_or_else(|| {
 				thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(1)
 			}),
+			skip_prepare: matches.get_one("skip-prepare").copied().unwrap_or(false),
 		}
 	}
 }
@@ -93,6 +101,15 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let config = Arc::new(config);
 
 	let (testset, load_errors) = TestSet::collect_directory(&config.test_path).await?;
+
+	let results_mode = matches.get_one::<ResultsMode>("results").unwrap();
+
+	let from_versions = matches.get_many::<DsVersion>("from").unwrap().cloned().collect::<Vec<_>>();
+	let to_versions = matches.get_many::<DsVersion>("to").unwrap().cloned().collect::<Vec<_>>();
+	let mut all_versions: Vec<_> =
+		from_versions.iter().cloned().chain(to_versions.iter().cloned()).collect();
+	all_versions.sort_unstable();
+	all_versions.dedup();
 
 	// Check if the backend is supported by the enabled features.
 	match config.backend {
@@ -108,6 +125,14 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		UpgradeBackend::Foundation => {}
 		#[cfg(not(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1")))]
 		UpgradeBackend::Foundation => bail!("FoundationDB backend features is not enabled"),
+	}
+
+	if UpgradeBackend::SurrealKv == config.backend {
+		if let Some(DsVersion::Version(v)) =
+			all_versions.iter().find(|x| **x < DsVersion::Version(Version::new(2, 0, 0)))
+		{
+			bail!("Cannot run with backend surrealkv and version {v}, surrealkv was not yet available on this version")
+		}
 	}
 
 	let subset =
@@ -133,19 +158,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		subset
 	};
 
-	let results_mode = matches.get_one::<ResultsMode>("results").unwrap();
-
-	let from_versions = matches.get_many::<DsVersion>("from").unwrap().cloned().collect::<Vec<_>>();
-	let to_versions = matches.get_many::<DsVersion>("to").unwrap().cloned().collect::<Vec<_>>();
-
-	let mut all_versions: Vec<_> =
-		from_versions.iter().cloned().chain(to_versions.iter().cloned()).collect();
-	all_versions.sort_unstable();
-	all_versions.dedup();
-
-	println!("Preparing used versions of surrealdb");
-	for v in all_versions {
-		SurrealProcess::prepare(&config, &v).await?;
+	if !config.skip_prepare {
+		println!("Preparing used versions of surrealdb");
+		for v in all_versions {
+			SurrealProcess::prepare(&config, &v).await?;
+		}
 	}
 
 	let temp_dir = TempDir::new("surreal_upgrade_tests")
@@ -234,7 +251,10 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	if let Err(e) = temp_dir.cleanup().await {
 		println!();
 		println!();
-		println!("Failed to clean up temporary directory:{e}")
+		println!("Failed to clean up temporary directory:{e}");
+		println!("This can happen when the upgrading datastore is ran in a container.");
+		println!("Docker will create files owned by the docker container which can't be removed without super user access.");
+		println!("You can manually remove them or just wait until a reboot as the files are stored in a temporary directory.");
 	}
 
 	println!();
@@ -296,11 +316,54 @@ async fn run_task(
 async fn run_imports(
 	task: &Task,
 	set: &TestSet,
-	process: &SurrealProcess,
+	process: &mut SurrealProcess,
+	namespace: Option<&str>,
+	database: Option<&str>,
 ) -> anyhow::Result<Option<TestTaskResult>> {
 	let Some(imports) = set[task.test].config.env.as_ref().and_then(|x| x.imports.as_ref()) else {
 		bail!("Upgrade test did not specify any imports, can't run upgrade tests without first importing data")
 	};
+
+	let mut connection = process
+		.open_connection()
+		.await
+		.context("Failed to open connection to upgrade from database")?;
+
+	let mut params = Vec::new();
+	if let Some(ns) = namespace {
+		params.push(Value::from(ns))
+	}
+	if let Some(db) = database {
+		params.push(Value::from(db))
+	}
+
+	if !params.is_empty() {
+		let mut req = Object::default();
+		req.insert("method".to_owned(), Value::from("use"));
+		req.insert("params".to_owned(), Value::from(params));
+
+		let resp = connection
+			.request(req)
+			.await
+			.context("Failed to set namespace/database on importing database")?;
+		if let Err(e) = resp.result {
+			bail!("Failed to set namespace/database on importing database: {}", e.message)
+		}
+	}
+
+	let mut credentials = Object::default();
+	credentials.insert("user".to_owned(), Value::from("root"));
+	credentials.insert("pass".to_owned(), Value::from("root"));
+
+	let mut req = Object::default();
+	req.insert("method".to_owned(), Value::from("signin"));
+	req.insert("params".to_owned(), Value::from(vec![Value::from(credentials)]));
+
+	let resp =
+		connection.request(req).await.context("Failed to authenticate on importing database")?;
+	if let Err(e) = resp.result {
+		bail!("Failed to authenticate on importing database: {}", e.message)
+	}
 
 	for import in imports {
 		let Some(test) = set.find_all(import) else {
@@ -317,15 +380,47 @@ async fn run_imports(
 			)));
 		};
 
-		if let Err(e) = process.send_request(source).await {
-			return Ok(Some(TestTaskResult::Import(
-				import.to_owned(),
-				format!("Failed to run import: {e}."),
-			)));
+		match connection.query(source).await {
+			Ok(TestTaskResult::RunningError(e)) => {
+				return Ok(Some(TestTaskResult::Import(
+					import.to_owned(),
+					format!("Failed to run import: {e:?}"),
+				)))
+			}
+			Err(e) => {
+				return Ok(Some(TestTaskResult::Import(
+					import.to_owned(),
+					format!("Failed to run import: {e:?}."),
+				)));
+			}
+			_ => {}
 		}
 	}
 
 	Ok(None)
+}
+
+async fn make_read_write(dir: &Path) -> anyhow::Result<()> {
+	let mut iter = tokio::fs::read_dir(dir).await.context("Failed to read output directory")?;
+	while let Ok(Some(x)) = iter.next_entry().await {
+		let metadata =
+			x.metadata().await.context("Failed to retrieve metadata for output directory")?;
+
+		let mut perm = metadata.permissions();
+		perm.set_readonly(false);
+		#[cfg(not(windows))]
+		{
+			perm.set_mode(0o0777);
+		}
+		tokio::fs::set_permissions(x.path(), perm)
+			.await
+			.context("Failed to set permissions for output directory")?;
+
+		if metadata.is_dir() {
+			Box::pin(make_read_write(&x.path())).await?
+		}
+	}
+	Ok(())
 }
 
 async fn run_task_inner(
@@ -337,37 +432,78 @@ async fn run_task_inner(
 	let dir = &task.path;
 	tokio::fs::create_dir(dir).await.context("Failed to create tempory directory for datastore")?;
 
-	let process = process::SurrealProcess::new(&config, &task.from, dir, port, false).await?;
+	if test_set[task.test].config.env.as_ref().and_then(|x| x.capabilities.as_ref()).is_some() {
+		bail!("Setting capabilities are not supported for upgrade tests")
+	}
 
-	match run_imports(&task, &test_set, &process).await {
-		Ok(Some(TestTaskResult::Import(test, error))) => {
-			let output = process.quit_with_output().await?;
-			let error = format!(
-				"{error}\n> process stdout:\n{}\n\n> process stderr: \n{}",
-				output.stdout, output.stderr
-			);
-			return Ok(TestTaskResult::Import(test, error));
-		}
-		Ok(Some(x)) => return Ok(x),
-		Ok(None) => {}
-		Err(e) => {
-			let output = process.quit_with_output().await?;
-			bail!(
-				"{e:?}\n> process stdout:\n{}\n\n> process stderr: \n{}",
-				output.stdout,
-				output.stderr
-			)
-		}
+	let mut process = process::SurrealProcess::new(&config, &task.from, dir, port, false).await?;
+
+	let namespace =
+		test_set[task.test].config.env.as_ref().map(|x| x.namespace()).unwrap_or(Some("test"));
+	let database =
+		test_set[task.test].config.env.as_ref().map(|x| x.database()).unwrap_or(Some("test"));
+
+	if database.is_some() && namespace.is_none() {
+		bail!("Cannot have a database set but not a namespace.")
+	}
+
+	match run_imports(&task, &test_set, &mut process, namespace, database).await? {
+		Some(x) => return Ok(x),
+		None => {}
 	};
 
 	process.retrieve_data(&config, &dir).await?;
+	make_read_write(Path::new(dir))
+		.await
+		.context("Failed to make output dataset world read/writable")?;
 	process.quit().await?;
 
-	let process = process::SurrealProcess::new(&config, &task.to, dir, port, true).await?;
+	let mut process = process::SurrealProcess::new(&config, &task.to, dir, port, true).await?;
+
+	let mut connection = process
+		.open_connection()
+		.await
+		.context("Failed to open connection to upgrading datastore")?;
+
+	let mut params = Vec::new();
+	if let Some(ns) = namespace {
+		params.push(Value::from(ns))
+	}
+	if let Some(db) = database {
+		params.push(Value::from(db))
+	}
+
+	if !params.is_empty() {
+		let mut req = Object::default();
+		req.insert("method".to_owned(), Value::from("use"));
+		req.insert("params".to_owned(), Value::from(params));
+
+		let resp = connection
+			.request(req)
+			.await
+			.context("Failed to set namespace/database on upgrading database")?;
+		if let Err(e) = resp.result {
+			bail!("Failed to set namespace/database on upgrading database: {}", e.message)
+		}
+	}
+
+	let mut credentials = Object::default();
+	credentials.insert("user".to_owned(), Value::from("root"));
+	credentials.insert("pass".to_owned(), Value::from("root"));
+
+	let mut req = Object::default();
+	req.insert("method".to_owned(), Value::from("signin"));
+	req.insert("params".to_owned(), Value::from(vec![Value::from(credentials)]));
+
+	let resp =
+		connection.request(req).await.context("Failed to authenticate on upgrading database")?;
+	if let Err(e) = resp.result {
+		bail!("Failed to authenticate on upgrading database: {}", e.message)
+	}
 
 	let source = &test_set[task.test].source;
 	let source = std::str::from_utf8(source).context("Text source was not valid utf-8")?;
-	let result = match process.send_request(&source).await {
+	let result = match connection.query(&source).await {
 		Ok(x) => x,
 		Err(e) => {
 			let output = process.quit_with_output().await?;
