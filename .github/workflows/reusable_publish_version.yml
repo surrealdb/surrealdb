@@ -37,7 +37,7 @@ on:
       rust_version:
         required: false
         type: string
-        default: "1.84.0"
+        default: "1.82.0"
         description: "The Rust version to use for building binaries"
       onnx_version:
         required: false
@@ -578,7 +578,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ inputs.rust_version }}
+          toolchain: '1.84.0'
 
       - name: Install release-plz
         run: |
