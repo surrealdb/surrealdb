@@ -787,6 +787,7 @@ jobs:
           workspaces: |
             crates/language-tests
             ./
+          cache-directories: crates/language-tests/.binary-cache
 
       - name: Build SurrealQL test tool
         run: |
@@ -796,7 +797,7 @@ jobs:
       - name: Run SurrealQL test suite
         run: |
           cd crates/language-tests
-          ./target/debug/surrealql-test --color always upgrade --from 2.2.0,2.1.0,2.0.0 --to current
+          ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------
   # Other SDK tests
