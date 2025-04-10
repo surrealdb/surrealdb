@@ -1,10 +1,10 @@
+mod binaries;
 mod process;
+mod protocol;
 
 use std::{
 	collections::HashMap,
 	net::{Ipv4Addr, SocketAddr},
-	os::unix::fs::PermissionsExt,
-	path::Path,
 	sync::Arc,
 	thread,
 };
@@ -12,11 +12,9 @@ use std::{
 use anyhow::{bail, Context, Result};
 use clap::ArgMatches;
 use process::SurrealProcess;
+use protocol::{ProxyObject, ProxyValue};
 use semver::Version;
-use surrealdb_core::{
-	kvs::Datastore,
-	sql::{Object, Value},
-};
+use surrealdb_core::kvs::Datastore;
 use tokio::task::JoinSet;
 
 use crate::{
@@ -45,11 +43,8 @@ impl Task {
 		res.push_str(" ");
 
 		match self.from {
-			DsVersion::Current => {
-				res.push_str("current");
-			}
-			DsVersion::Latest => {
-				res.push_str("latest");
+			DsVersion::Path(ref x) => {
+				res.push_str(x);
 			}
 			DsVersion::Version(ref v) => {
 				res.push_str(&v.to_string());
@@ -57,11 +52,8 @@ impl Task {
 		}
 		res.push_str(" => ");
 		match self.to {
-			DsVersion::Current => {
-				res.push_str("current");
-			}
-			DsVersion::Latest => {
-				res.push_str("latest");
+			DsVersion::Path(ref x) => {
+				res.push_str(x);
 			}
 			DsVersion::Version(ref v) => {
 				res.push_str(&v.to_string());
@@ -74,11 +66,9 @@ impl Task {
 
 pub struct Config {
 	test_path: String,
-	surreal_path: String,
-	docker_command: String,
 	jobs: u32,
+	download_permission: bool,
 	backend: UpgradeBackend,
-	skip_prepare: bool,
 }
 
 impl Config {
@@ -86,12 +76,10 @@ impl Config {
 		Config {
 			backend: *matches.get_one::<UpgradeBackend>("backend").unwrap(),
 			test_path: matches.get_one::<String>("path").unwrap().clone(),
-			surreal_path: matches.get_one::<String>("surreal-src").unwrap().clone(),
-			docker_command: matches.get_one::<String>("docker-cmd").unwrap().clone(),
+			download_permission: matches.get_one("allow-download").copied().unwrap_or(false),
 			jobs: matches.get_one::<u32>("jobs").copied().unwrap_or_else(|| {
 				thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(1)
 			}),
-			skip_prepare: matches.get_one("skip-prepare").copied().unwrap_or(false),
 		}
 	}
 }
@@ -158,11 +146,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		subset
 	};
 
-	if !config.skip_prepare {
-		println!("Preparing used versions of surrealdb");
-		for v in all_versions {
-			SurrealProcess::prepare(&config, &v).await?;
-		}
+	println!("Preparing used versions of surrealdb");
+	for v in all_versions {
+		binaries::prepare(v, config.download_permission).await?;
 	}
 
 	let temp_dir = TempDir::new("surreal_upgrade_tests")
@@ -172,6 +158,17 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let mut tasks = Vec::new();
 	for from in from_versions.iter() {
 		for to in to_versions.iter() {
+			if let DsVersion::Version(ref from) = from {
+				match to {
+					DsVersion::Path(_) => {}
+					DsVersion::Version(to) => {
+						if from >= to {
+							continue;
+						}
+					}
+				}
+			}
+
 			for (t, _) in subset.iter_ids() {
 				tasks.push(Task {
 					from: from.clone(),
@@ -250,11 +247,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	if let Err(e) = temp_dir.cleanup().await {
 		println!();
-		println!();
 		println!("Failed to clean up temporary directory:{e}");
-		println!("This can happen when the upgrading datastore is ran in a container.");
-		println!("Docker will create files owned by the docker container which can't be removed without super user access.");
-		println!("You can manually remove them or just wait until a reboot as the files are stored in a temporary directory.");
 	}
 
 	println!();
@@ -331,16 +324,16 @@ async fn run_imports(
 
 	let mut params = Vec::new();
 	if let Some(ns) = namespace {
-		params.push(Value::from(ns))
+		params.push(ProxyValue::from(ns))
 	}
 	if let Some(db) = database {
-		params.push(Value::from(db))
+		params.push(ProxyValue::from(db))
 	}
 
 	if !params.is_empty() {
-		let mut req = Object::default();
-		req.insert("method".to_owned(), Value::from("use"));
-		req.insert("params".to_owned(), Value::from(params));
+		let mut req = ProxyObject::default();
+		req.insert("method".to_owned(), ProxyValue::from("use"));
+		req.insert("params".to_owned(), ProxyValue::from(params));
 
 		let resp = connection
 			.request(req)
@@ -351,13 +344,13 @@ async fn run_imports(
 		}
 	}
 
-	let mut credentials = Object::default();
-	credentials.insert("user".to_owned(), Value::from("root"));
-	credentials.insert("pass".to_owned(), Value::from("root"));
+	let mut credentials = ProxyObject::default();
+	credentials.insert("user".to_owned(), ProxyValue::from("root"));
+	credentials.insert("pass".to_owned(), ProxyValue::from("root"));
 
-	let mut req = Object::default();
-	req.insert("method".to_owned(), Value::from("signin"));
-	req.insert("params".to_owned(), Value::from(vec![Value::from(credentials)]));
+	let mut req = ProxyObject::default();
+	req.insert("method".to_owned(), ProxyValue::from("signin"));
+	req.insert("params".to_owned(), ProxyValue::from(vec![ProxyValue::from(credentials)]));
 
 	let resp =
 		connection.request(req).await.context("Failed to authenticate on importing database")?;
@@ -400,29 +393,6 @@ async fn run_imports(
 	Ok(None)
 }
 
-async fn make_read_write(dir: &Path) -> anyhow::Result<()> {
-	let mut iter = tokio::fs::read_dir(dir).await.context("Failed to read output directory")?;
-	while let Ok(Some(x)) = iter.next_entry().await {
-		let metadata =
-			x.metadata().await.context("Failed to retrieve metadata for output directory")?;
-
-		let mut perm = metadata.permissions();
-		perm.set_readonly(false);
-		#[cfg(not(windows))]
-		{
-			perm.set_mode(0o0777);
-		}
-		tokio::fs::set_permissions(x.path(), perm)
-			.await
-			.context("Failed to set permissions for output directory")?;
-
-		if metadata.is_dir() {
-			Box::pin(make_read_write(&x.path())).await?
-		}
-	}
-	Ok(())
-}
-
 async fn run_task_inner(
 	task: Task,
 	test_set: TestSet,
@@ -436,7 +406,7 @@ async fn run_task_inner(
 		bail!("Setting capabilities are not supported for upgrade tests")
 	}
 
-	let mut process = process::SurrealProcess::new(&config, &task.from, dir, port, false).await?;
+	let mut process = process::SurrealProcess::new(&config, &task.from, dir, port).await?;
 
 	let namespace =
 		test_set[task.test].config.env.as_ref().map(|x| x.namespace()).unwrap_or(Some("test"));
@@ -452,13 +422,9 @@ async fn run_task_inner(
 		None => {}
 	};
 
-	process.retrieve_data(&config, &dir).await?;
-	make_read_write(Path::new(dir))
-		.await
-		.context("Failed to make output dataset world read/writable")?;
 	process.quit().await?;
 
-	let mut process = process::SurrealProcess::new(&config, &task.to, dir, port, true).await?;
+	let mut process = process::SurrealProcess::new(&config, &task.to, dir, port).await?;
 
 	let mut connection = process
 		.open_connection()
@@ -467,16 +433,16 @@ async fn run_task_inner(
 
 	let mut params = Vec::new();
 	if let Some(ns) = namespace {
-		params.push(Value::from(ns))
+		params.push(ProxyValue::from(ns))
 	}
 	if let Some(db) = database {
-		params.push(Value::from(db))
+		params.push(ProxyValue::from(db))
 	}
 
 	if !params.is_empty() {
-		let mut req = Object::default();
-		req.insert("method".to_owned(), Value::from("use"));
-		req.insert("params".to_owned(), Value::from(params));
+		let mut req = ProxyObject::default();
+		req.insert("method".to_owned(), ProxyValue::from("use"));
+		req.insert("params".to_owned(), ProxyValue::from(params));
 
 		let resp = connection
 			.request(req)
@@ -487,13 +453,13 @@ async fn run_task_inner(
 		}
 	}
 
-	let mut credentials = Object::default();
-	credentials.insert("user".to_owned(), Value::from("root"));
-	credentials.insert("pass".to_owned(), Value::from("root"));
+	let mut credentials = ProxyObject::default();
+	credentials.insert("user".to_owned(), ProxyValue::from("root"));
+	credentials.insert("pass".to_owned(), ProxyValue::from("root"));
 
-	let mut req = Object::default();
-	req.insert("method".to_owned(), Value::from("signin"));
-	req.insert("params".to_owned(), Value::from(vec![Value::from(credentials)]));
+	let mut req = ProxyObject::default();
+	req.insert("method".to_owned(), ProxyValue::from("signin"));
+	req.insert("params".to_owned(), ProxyValue::from(vec![ProxyValue::from(credentials)]));
 
 	let resp =
 		connection.request(req).await.context("Failed to authenticate on upgrading database")?;

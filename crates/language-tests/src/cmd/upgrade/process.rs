@@ -3,10 +3,9 @@ use std::{path::Path, process::Stdio, time::Duration};
 use anyhow::{bail, Context};
 use futures::{SinkExt, StreamExt};
 use revision::revisioned;
-use semver::Version;
 use surrealdb_core::{
 	dbs::{self, Status},
-	sql::{Object, Value},
+	sql::Value,
 };
 use tokio::{
 	io::AsyncReadExt,
@@ -30,7 +29,10 @@ use crate::{
 	tests::report::TestTaskResult,
 };
 
-use super::Config;
+use super::{
+	protocol::{ProxyObject, ProxyValue},
+	Config,
+};
 
 #[revisioned(revision = 1)]
 #[derive(Debug)]
@@ -60,172 +62,49 @@ pub struct ProcessOutput {
 }
 
 pub struct SurrealProcess {
-	docker_name: Option<String>,
 	process: Child,
 	port: u16,
 }
 
 impl SurrealProcess {
-	/// Prepare the command to run for a version
-	pub async fn prepare(config: &Config, version: &DsVersion) -> Result<(), anyhow::Error> {
-		let mut cmd = match version {
-			DsVersion::Current => {
-				let mut cmd = Command::new("cargo");
-				cmd.arg("build").current_dir(&config.surreal_path);
-				cmd
-			}
-			DsVersion::Version(version) => {
-				let version = format!("surrealdb/surrealdb:v{version}");
-				let mut cmd = Command::new(&config.docker_command);
-				cmd.args(["pull", &version]);
-				cmd
-			}
-			DsVersion::Latest => {
-				let version = "surrealdb/surrealdb:latest".to_string();
-				let mut cmd = Command::new(&config.docker_command);
-				cmd.args(["pull", &version]);
-				cmd
-			}
-		};
-
-		let success = cmd
-			.spawn()
-			.context("Failed to spawn prepare command")?
-			.wait()
-			.await
-			.context("Failed to wait on prepare command")?
-			.success();
-
-		if !success {
-			bail!("A prepare command for running a surrealdb datastore was not successfull.")
-		}
-
-		Ok(())
-	}
-
-	fn docker_command(
-		config: &Config,
-		image_name: &str,
-		port: u16,
-		name: &str,
-		path: Option<&str>,
-		version: &Version,
-	) -> Command {
-		let mut cmd = Command::new(&config.docker_command);
-		cmd.args([
-			"container",
-			"run",
-			"--rm",
-			"--pull",
-			"never",
-			"--quiet",
-			"--cpus",
-			"1",
-			"--publish",
-			&format!("127.0.0.1:{port}:8000"),
-			"--name",
-			name,
-		]);
-
-		let endpoint = if let Some(path) = path {
-			cmd.args(["--volume", &format!("{path}:/import_data")]);
-
-			match config.backend {
-				UpgradeBackend::RocksDb => {
-					// rocksdb was called file before 2.0
-					if *version < Version::new(2, 0, 0) {
-						"file:///import_data/ds".to_string()
-					} else {
-						"rocksdb:///import_data/ds".to_string()
-					}
-				}
-				UpgradeBackend::SurrealKv => "surrealkv:///import_data/ds".to_string(),
-				UpgradeBackend::Foundation => "fdb:///import_data/ds".to_string(),
-			}
-		} else {
-			match config.backend {
-				UpgradeBackend::RocksDb => {
-					// rocksdb was called file before 2.0
-					if *version < Version::new(2, 0, 0) {
-						"file:///tmp/ds".to_string()
-					} else {
-						"rocksdb:///tmp/ds".to_string()
-					}
-				}
-				UpgradeBackend::SurrealKv => "surrealkv:///tmp/ds".to_string(),
-				UpgradeBackend::Foundation => "fdb:///tmp/ds".to_string(),
-			}
-		};
-
-		cmd.args([&image_name, "start", "--username", "root", "--password", "root", &endpoint])
-			.stdin(Stdio::null())
-			.stdout(Stdio::piped())
-			.stderr(Stdio::piped())
-			.kill_on_drop(true);
-		return cmd;
-	}
-
-	fn current_command(config: &Config, tmp_dir: &str, port: u16) -> Command {
-		let endpoint = match config.backend {
-			UpgradeBackend::RocksDb => format!("rocksdb://{tmp_dir}/ds"),
-			UpgradeBackend::SurrealKv => format!("surrealkv://{tmp_dir}/ds"),
-			UpgradeBackend::Foundation => format!("fdb://{tmp_dir}/ds"),
-		};
-		let bind = format!("127.0.0.1:{port}");
-		let common_args =
-			["start", "--bind", &bind, "--username", "root", "--password", "root", &endpoint];
-		let mut res = Command::new("./surreal");
-		res.args(common_args)
-			.current_dir(Path::new(&config.surreal_path).join("target").join("debug"))
-			.stdin(Stdio::null())
-			.stdout(Stdio::piped())
-			.stderr(Stdio::piped())
-			.kill_on_drop(true);
-		return res;
-	}
-
 	pub async fn new(
 		config: &Config,
 		version: &DsVersion,
 		tmp_dir: &str,
 		port: u16,
-		mount: bool,
 	) -> Result<SurrealProcess, anyhow::Error> {
-		let (docker_name, mut cmd) = match version {
-			DsVersion::Current => (None, Self::current_command(config, tmp_dir, port)),
-			DsVersion::Version(version) => {
-				//Just use the port to get a unique name
-				let name = format!("surrealdb_{port}");
-				let cmd = Self::docker_command(
-					config,
-					&format!("surrealdb/surrealdb:v{version}"),
-					port,
-					&name,
-					mount.then_some(tmp_dir),
-					version,
-				);
-				(Some(name), cmd)
+		let mut command = match version {
+			DsVersion::Path(x) => {
+				let path = Path::new(x).join("target").join("debug").join("surreal");
+				Command::new(path)
 			}
-			DsVersion::Latest => {
-				//Just use the port to get a unique name
-				let name = format!("surrealdb_{port}");
-				let cmd = Self::docker_command(
-					config,
-					&"surrealdb/surrealdb:latest",
-					port,
-					&name,
-					mount.then_some(tmp_dir),
-					&Version::new(u64::MAX, 0, 0),
-				);
-				(Some(name), cmd)
+			DsVersion::Version(x) => {
+				let path = Path::new(".binary_cache").join(format!("surreal-v{x}"));
+				Command::new(path)
 			}
 		};
 
-		let process = cmd.spawn().context("Failed to spawn process")?;
+		let endpoint = match config.backend {
+			UpgradeBackend::RocksDb => format!("rocksdb://{tmp_dir}/ds"),
+			UpgradeBackend::SurrealKv => format!("surrealkv://{tmp_dir}/ds"),
+			UpgradeBackend::Foundation => format!("fdb://{tmp_dir}/ds"),
+		};
+
+		let bind = format!("127.0.0.1:{port}");
+		let common_args =
+			["start", "--bind", &bind, "--username", "root", "--password", "root", &endpoint];
+
+		command
+			.args(common_args)
+			.stdin(Stdio::null())
+			.stdout(Stdio::piped())
+			.stderr(Stdio::piped())
+			.kill_on_drop(true);
+
+		let process = command.spawn().context("Failed to spawn process")?;
 
 		Ok(SurrealProcess {
 			process,
-			docker_name,
 			port,
 		})
 	}
@@ -305,29 +184,6 @@ impl SurrealProcess {
 		Ok(output)
 	}
 
-	pub async fn retrieve_data(&self, config: &Config, path: &str) -> anyhow::Result<()> {
-		let Some(name) = self.docker_name.as_ref() else {
-			return Ok(());
-		};
-
-		let mut proc = Command::new(&config.docker_command)
-			.args(["container", "cp", &format!("{name}:/tmp/ds"), path])
-			.stdout(Stdio::piped())
-			.stderr(Stdio::piped())
-			.spawn()
-			.context("Failed to spawn command to copy data from container")?;
-
-		let exit_status =
-			proc.wait().await.context("Failed to finish command to copy data from container")?;
-
-		if !exit_status.success() {
-			let output = Self::retrieve_output(&mut proc).await;
-			bail!("Command to copy datastore data finished with an error.\n> Stdout:\n {}\n> Stderr:\n {}",output.stdout,output.stderr);
-		}
-
-		Ok(())
-	}
-
 	pub async fn open_connection(&mut self) -> anyhow::Result<SurrealConnection> {
 		let request = tokio_tungstenite::tungstenite::handshake::client::Request::builder()
 			.uri(format!("ws://127.0.0.1:{}/rpc", self.port))
@@ -381,14 +237,14 @@ pub struct SurrealConnection {
 }
 
 impl SurrealConnection {
-	pub async fn request(&mut self, mut object: Object) -> anyhow::Result<Response> {
+	pub async fn request(&mut self, mut object: ProxyObject) -> anyhow::Result<Response> {
 		let id = self.id;
 		self.id += 1;
 
-		object.insert("id".to_owned(), Value::from(id));
+		object.insert("id".to_owned(), ProxyValue::from(id));
 
 		let message =
-			revision::to_vec(&Value::from(object)).context("Failed to serialize message")?;
+			revision::to_vec(&ProxyValue::from(object)).context("Failed to serialize message")?;
 		self.socket.send(Message::Binary(message)).await.context("Failed to send query message")?;
 
 		loop {
@@ -434,9 +290,9 @@ impl SurrealConnection {
 	}
 
 	pub async fn query(&mut self, query: &str) -> anyhow::Result<TestTaskResult> {
-		let mut request_obj = Object::default();
-		request_obj.insert("method".to_owned(), Value::from("query"));
-		request_obj.insert("params".to_owned(), Value::from(vec![Value::from(query)]));
+		let mut request_obj = ProxyObject::default();
+		request_obj.insert("method".to_owned(), ProxyValue::from("query"));
+		request_obj.insert("params".to_owned(), ProxyValue::from(vec![ProxyValue::from(query)]));
 
 		let response = match self.request(request_obj).await {
 			Ok(x) => x,

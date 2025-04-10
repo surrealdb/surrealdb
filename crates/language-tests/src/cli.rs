@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use clap::{
 	arg,
 	builder::{EnumValueParser, PossibleValue},
@@ -72,24 +70,18 @@ impl ValueEnum for UpgradeBackend {
 	}
 }
 
-#[derive(Clone, Eq, PartialEq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, PartialOrd, Ord)]
 pub enum DsVersion {
 	Version(Version),
-	Latest,
-	Current,
+	Path(String),
 }
 
 impl DsVersion {
 	fn from_str(s: &str) -> Result<Self, semver::Error> {
-		if s == "current" {
-			return Ok(DsVersion::Current);
+		if let Ok(x) = Version::parse(s) {
+			return Ok(DsVersion::Version(x));
 		}
-
-		if s == "latest" {
-			return Ok(DsVersion::Latest);
-		}
-
-		Version::from_str(s).map(DsVersion::Version)
+		Ok(DsVersion::Path(s.to_string()))
 	}
 }
 
@@ -170,8 +162,6 @@ pub fn parse() -> ArgMatches {
 			.about("Run surrealdb upgrade tests")
 			.arg(arg!([filter] "Filter the tests by their path"))
 			.arg(arg!(--path <PATH> "The path to the tests directory").default_value("./tests"))
-			.arg(arg!(--"docker-cmd" <COMMAND> "The command to run docker images with").default_value("docker"))
-			.arg(arg!(--"surreal-src" <PATH> "The location of a local version of the surrealdb source").default_value("../..").help("The directory of the a version of the surrealdb source. Whenever the a test is run with the 'current' version this directory will be used for building surrealdb."))
 			.arg(
 				arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")
 				.value_parser(value_parser!(u32).range(1..))
@@ -184,10 +174,13 @@ pub fn parse() -> ArgMatches {
 					.value_parser(EnumValueParser::<UpgradeBackend>::new()).default_value("surrealkv")
 			)
 			.arg(
-				arg!(-f --from <VERSIONS> "The version to upgrade from").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
+				arg!(-f --from <VERSIONS> "The version to upgrade from. This can be either a version number or a path to the surrealdb codebase.").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
 			)
 			.arg(
-				arg!(-t --to <VERSIONS> "The version to upgrade to").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
+				arg!(-t --to <VERSIONS> "The version to upgrade to. This can be either a version number or a path to the surrealdb codebase.").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
+			)
+			.arg(
+				arg!(--"allow-download" "Skip the confirmation for downloading binaries from github")
 			)
 			.arg(
 				arg!(--"no-wip" "Skips tests marked work-in-progress")
@@ -195,9 +188,6 @@ pub fn parse() -> ArgMatches {
 			.arg(
 				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
 			)
-			.arg(
-				arg!(--"skip-prepare" "Don't run the perpare step, skipping building surrealdb and pulling docker images.")
-			),
 		)
 		.subcommand(
 			Command::new("list")
