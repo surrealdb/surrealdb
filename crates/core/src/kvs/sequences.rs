@@ -6,6 +6,8 @@ use crate::kvs::Transaction;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::sleep;
 
 #[derive(Clone)]
 pub(crate) struct Sequences {
@@ -106,6 +108,14 @@ impl Sequence {
 		_tf: &TransactionFactory,
 		_ctx: &Context,
 	) -> Result<(i64, i64), Error> {
+		// Use for exponential backoff
+		let mut tempo = 5;
+		// Loop until we have a successful allocation
+		loop {
+			// exponential backoff
+			sleep(Duration::from_millis(tempo)).await;
+			tempo *= 2;
+		}
 		todo!()
 	}
 }

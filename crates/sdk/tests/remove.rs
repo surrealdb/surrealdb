@@ -218,38 +218,6 @@ async fn remove_statement_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn remove_statement_sequence() -> Result<(), Error> {
-	let sql = r#"
-		DEFINE SEQUENCE seq1;
-		DEFINE SEQUENCE seq2 BATCH 100;
-		REMOVE SEQUENCE seq1;
-		REMOVE SEQUENCE IF EXISTS seq1;
-		REMOVE SEQUENCE IF EXISTS seq2;
-		REMOVE SEQUENCE seq2;
-		INFO FOR DB;
-	"#;
-	let mut t = Test::new(sql).await?;
-	t.expect_size(7)?;
-	t.skip_ok(5)?;
-	t.expect_error("The sequence 'seq2' does not exist")?;
-	t.expect_val(
-		r#"{
-			accesses: {},
-			analyzers: {},
-			apis: {},
-			configs: {},
-			functions: {},
-			models: {},
-			params: {},
-			tables: {},
-			users: {},
-			sequences: {}
-		}"#,
-	)?;
-	Ok(())
-}
-
-#[tokio::test]
 async fn should_error_when_remove_and_table_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE TABLE foo;

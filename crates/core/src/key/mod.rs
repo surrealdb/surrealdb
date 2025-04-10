@@ -70,8 +70,8 @@
 /// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
 /// crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{ff}{fk}
 ///
-/// crate::key::sequence::sh             /*{ns}*{db}*{tb}!sh{sh}
-/// crate::key::sequence::sa             /*{ns}*{db}*{tb}!sa{id}{sa}
+/// crate::key::sequence::st             /*{ns}*{db}*{tb}*{sq}!st{id}
+/// crate::key::sequence::ba             /*{ns}*{db}*{tb}*{sq}!ba{start}
 ///
 pub(crate) mod category;
 pub(crate) mod change;
@@ -83,6 +83,7 @@ pub(crate) mod namespace;
 pub(crate) mod node;
 pub(crate) mod r#ref;
 pub(crate) mod root;
+pub(crate) mod sequence;
 pub(crate) mod table;
 pub(crate) mod thing;
 pub(crate) mod version;

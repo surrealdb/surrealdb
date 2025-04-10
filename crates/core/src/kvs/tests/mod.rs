@@ -73,7 +73,7 @@ mod mem {
 		// Use a memory datastore instance
 		let path = "memory";
 		// Setup the in-memory datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_public_id(id);
+		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Mem)
 	}

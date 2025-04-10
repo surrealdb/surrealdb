@@ -166,6 +166,13 @@ pub enum Category {
 	///
 	/// crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{ff}{fk}
 	Ref,
+	///
+	/// ------------------------------
+	///
+	/// crate::seq::state                      /*{ns}*{db}!sq{sq}!st{nid}
+	SequenceState,
+	/// crate::seq::batch                      /*{ns}*{db}!sq{sq}!ba{start}
+	SequenceBatch,
 }
 
 impl Display for Category {
@@ -234,6 +241,8 @@ impl Display for Category {
 			Self::Thing => "Thing",
 			Self::Graph => "Graph",
 			Self::Ref => "Ref",
+			Self::SequenceState => "SequenceState",
+			Self::SequenceBatch => "SequenceBatch",
 		};
 		write!(f, "{}", name)
 	}
