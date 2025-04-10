@@ -1,0 +1,16 @@
+/**
+[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+*/
+DEFINE TABLE table COMMENT "foo" DROP TYPE NORMAL SCHEMAFULL PERMISSIONS NONE;
+DEFINE TABLE table_full COMMENT "foo" DROP TYPE NORMAL SCHEMAFULL PERMISSIONS FULL;
+DEFINE TABLE table_specific COMMENT "foo" DROP TYPE NORMAL SCHEMAFULL PERMISSIONS FOR SELECT FULL, FOR CREATE WHERE a = 1;

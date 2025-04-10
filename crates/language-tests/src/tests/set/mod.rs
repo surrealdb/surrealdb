@@ -7,7 +7,7 @@ use std::{
 	io::{self, IsTerminal as _},
 	mem,
 	ops::Index,
-	path::Path,
+	path::{self, Path},
 	sync::Arc,
 };
 use tokio::fs;
@@ -22,6 +22,7 @@ use super::TestCase;
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct TestId(usize);
 
+/// An error that happened during loading of a test case.
 #[derive(Debug)]
 pub struct TestLoadError {
 	path: String,
@@ -116,8 +117,8 @@ impl TestSet {
 		S: AsRef<str>,
 	{
 		let mut name = Cow::Borrowed(name.as_ref());
-		if !name.starts_with(std::path::MAIN_SEPARATOR) {
-			name = Cow::Owned(format!("{}{name}", std::path::MAIN_SEPARATOR));
+		if !name.starts_with(path::MAIN_SEPARATOR) {
+			name = Cow::Owned(format!("{}{name}", path::MAIN_SEPARATOR));
 		}
 		self.all_map.get(name.as_ref()).cloned()
 	}

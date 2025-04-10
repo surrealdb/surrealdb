@@ -68,7 +68,11 @@ impl TestReport {
 	}
 
 	fn display_grade_header(&self, tests: &TestSet, use_color: bool, f: &mut Fmt) -> fmt::Result {
-		let name = &tests[self.id].path;
+		let name = if let Some(x) = self.extra_name.as_ref() {
+			format!("{} {}", tests[self.id].path, x)
+		} else {
+			tests[self.id].path.clone()
+		};
 
 		match self.grade() {
 			TestGrade::Success => {

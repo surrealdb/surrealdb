@@ -769,6 +769,36 @@ jobs:
           cd crates/language-tests
           ./target/debug/surrealql-test --color always run
 
+
+  upgrade-tests:
+    name: Run SurrealQL upgrade tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: |
+            crates/language-tests
+            ./
+          cache-directories: crates/language-tests/.binary-cache
+
+      - name: Build SurrealQL test tool
+        run: |
+          cd crates/language-tests
+          cargo build --features upgrade
+
+      - name: Run SurrealQL test suite
+        run: |
+          cd crates/language-tests
+          ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
+
   # ----------------------------------------
   # Other SDK tests
   # ----------------------------------------
