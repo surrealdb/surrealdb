@@ -1040,6 +1040,11 @@ impl Value {
 		matches!(self, Value::Strand(_))
 	}
 
+	/// Check if this Value is a single character Strand
+	pub fn is_char(&self) -> bool {
+		matches!(self, Value::Strand(v) if v.chars().count() == 1)
+	}
+
 	/// Check if this Value is a Query
 	pub fn is_query(&self) -> bool {
 		matches!(self, Value::Query(_))
@@ -2385,10 +2390,21 @@ impl Value {
 			// Arrays are allowed
 			Value::Array(v) => Ok(v),
 			// Ranges convert to an array
-			Value::Range(r) => {
-				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
-				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
-			}
+			Value::Range(ref r) => {
+
+				let try_i64: Result<std::ops::Range<i64>, _> = r.deref().to_owned().try_into();
+				let try_char: Result<std::ops::Range<char>, _> = r.deref().to_owned().try_into();
+
+				if let Ok(range) = try_i64 {
+					return Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
+				} else if let Ok(range) = try_char {
+					return Ok(range.into_iter().map(|c| Value::from(c.to_string())).collect::<Vec<Value>>().into())
+				};
+					Err(Error::ConvertTo {
+						from: self.clone(),
+						into: "array".into()
+				})
+			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -2403,12 +2419,61 @@ impl Value {
 			// Ranges are allowed
 			Value::Range(r) => Ok(*r),
 			// Arrays with two elements are allowed
-			Value::Array(v) if v.len() == 2 => {
+			Value::Array(v)
+				if v.len() == 2
+					&& (v.iter().all(|item| item.is_integer())
+						|| v.iter().all(|item| item.is_char())) =>
+			{
 				let mut v = v;
 				Ok(Range {
 					beg: Bound::Included(v.remove(0)),
 					end: Bound::Excluded(v.remove(0)),
 				})
+			}
+			Value::Array(ref v) if v.len() > 2 && v.iter().all(|item| item.is_int()) => {
+				match v
+					.windows(2)
+					.map(|pair| {
+						let [Value::Number(Number::Int(num1)), Value::Number(Number::Int(num2))] =
+							pair
+						else {
+							unreachable!("bla")
+						};
+						num2 - num1 == 1
+					})
+					.all(|item| item == true)
+				{
+					true => Ok(Range {
+						beg: Bound::Included(v.clone().remove(0)),
+						end: Bound::Excluded(v.last().unwrap().clone()),
+					}),
+					false => Err(Error::ConvertTo {
+						from: self.clone(),
+						into: "range".into(),
+					}),
+				}
+			}
+			Value::Array(ref v) if v.len() > 2 && v.iter().all(|item| item.is_char()) => {
+				match v
+					.windows(2)
+					.map(|pair| {
+						let [Value::Strand(str1), Value::Strand(str2)] = pair else {
+							unreachable!("bla")
+						};
+						str2.chars().next().unwrap() as u32 - str1.chars().next().unwrap() as u32
+							== 1
+					})
+					.all(|item| item == true)
+				{
+					true => Ok(Range {
+						beg: Bound::Included(v.clone().remove(0)),
+						end: Bound::Excluded(v.last().unwrap().clone()),
+					}),
+					false => Err(Error::ConvertTo {
+						from: self.clone(),
+						into: "range".into(),
+					}),
+				}
 			}
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
