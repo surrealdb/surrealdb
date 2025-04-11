@@ -19,7 +19,7 @@ impl Document {
 		pro: Processed,
 	) -> Result<Value, Error> {
 		// Check current context
-		if ctx.is_done(true)? {
+		if ctx.is_done(true).await? {
 			// Don't process the document
 			return Err(Error::Ignore);
 		}
