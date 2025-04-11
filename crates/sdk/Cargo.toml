@@ -84,7 +84,7 @@ revision = { workspace = true, features = [
     "uuid",
 ] }
 reblessive = { workspace = true, features = ["tree"] }
-trice = {workspace = true, optional = true }
+trice = { workspace = true, optional = true }
 
 
 # Other crates
@@ -131,9 +131,7 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
-wasmtimer = { workspace = true, default-features = false, features = [
-    "tokio",
-] }
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 ws_stream_wasm.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

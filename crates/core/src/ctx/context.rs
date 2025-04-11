@@ -1,3 +1,5 @@
+use crate::buc::store::ObjectStore;
+use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -63,6 +65,8 @@ pub struct MutableContext {
 	transaction: Option<Arc<Transaction>>,
 	// Does not read from parent `values`.
 	isolated: bool,
+	// A map of bucket connections
+	buckets: Option<Arc<BucketConnections>>,
 }
 
 impl Default for MutableContext {
@@ -111,6 +115,7 @@ impl MutableContext {
 			temporary_directory: None,
 			transaction: None,
 			isolated: false,
+			buckets: None,
 		}
 	}
 
@@ -134,6 +139,7 @@ impl MutableContext {
 			transaction: parent.transaction.clone(),
 			isolated: false,
 			parent: Some(parent.clone()),
+			buckets: parent.buckets.clone(),
 		}
 	}
 
@@ -159,6 +165,7 @@ impl MutableContext {
 			transaction: parent.transaction.clone(),
 			isolated: true,
 			parent: Some(parent.clone()),
+			buckets: parent.buckets.clone(),
 		}
 	}
 
@@ -184,6 +191,7 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			parent: None,
+			buckets: from.buckets.clone(),
 		}
 	}
 
@@ -195,6 +203,7 @@ impl MutableContext {
 		cache: Arc<DatastoreCache>,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
+		buckets: Arc<BucketConnections>,
 	) -> Result<MutableContext, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -214,6 +223,7 @@ impl MutableContext {
 			temporary_directory,
 			transaction: None,
 			isolated: false,
+			buckets: Some(buckets),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -477,6 +487,44 @@ impl MutableContext {
 				Ok(())
 			}
 			_ => Err(Error::InvalidUrl(url.to_string())),
+		}
+	}
+
+	pub(crate) fn get_buckets(&self) -> Option<Arc<BucketConnections>> {
+		self.buckets.clone()
+	}
+
+	/// Obtain the connection for a bucket
+	pub(crate) async fn get_bucket_store(
+		&self,
+		ns: &str,
+		db: &str,
+		bu: &str,
+	) -> Result<Arc<dyn ObjectStore>, Error> {
+		// Do we have a buckets context?
+		if let Some(buckets) = &self.buckets {
+			// Attempt to obtain an existing bucket connection
+			let key = BucketConnectionKey::new(ns, db, bu);
+			if let Some(bucket_ref) = buckets.get(&key) {
+				Ok((*bucket_ref).clone())
+			} else {
+				// Obtain the bucket definition
+				let tx = self.tx();
+				let bd = tx.get_db_bucket(ns, db, bu).await?;
+
+				// Connect to the bucket
+				let store = if let Some(ref backend) = bd.backend {
+					buc::connect(backend, false, bd.readonly).await?
+				} else {
+					buc::connect_global(ns, db, bu).await?
+				};
+
+				// Persist the bucket connection
+				buckets.insert(key, store.clone());
+				Ok(store)
+			}
+		} else {
+			Err(Error::BucketUnavailable(bu.into()))
 		}
 	}
 }

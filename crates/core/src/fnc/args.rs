@@ -1,8 +1,8 @@
 use crate::err::Error;
 use crate::sql::value::Value;
 use crate::sql::{
-	Array, Bytes, Bytesize, Closure, Datetime, Duration, Geometry, Kind, Number, Object, Regex,
-	Strand, Thing, Uuid,
+	Array, Bytes, Bytesize, Closure, Datetime, Duration, File, Geometry, Kind, Number, Object,
+	Regex, Strand, Thing, Uuid,
 };
 use std::vec::IntoIter;
 
@@ -26,6 +26,12 @@ impl FromArg for bool {
 impl FromArg for Closure {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		arg.coerce_to_function()
+	}
+}
+
+impl FromArg for File {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		arg.coerce_to_file()
 	}
 }
 

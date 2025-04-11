@@ -27,6 +27,7 @@ mod exe;
 mod fnc;
 
 pub mod api;
+pub mod buc;
 pub mod cnf;
 pub mod ctx;
 pub mod dbs;

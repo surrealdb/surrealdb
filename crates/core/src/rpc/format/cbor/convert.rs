@@ -11,6 +11,7 @@ use crate::sql::id::range::IdRange;
 use crate::sql::Array;
 use crate::sql::Datetime;
 use crate::sql::Duration;
+use crate::sql::File;
 use crate::sql::Future;
 use crate::sql::Geometry;
 use crate::sql::Id;
@@ -26,7 +27,7 @@ use std::str::FromStr;
 const TAG_SPEC_DATETIME: u64 = 0;
 const TAG_SPEC_UUID: u64 = 37;
 
-// Custom tags
+// Custom tags (6->15 is unassigned)
 const TAG_NONE: u64 = 6;
 const TAG_TABLE: u64 = 7;
 const TAG_RECORDID: u64 = 8;
@@ -38,12 +39,15 @@ const TAG_STRING_DURATION: u64 = 13;
 const TAG_CUSTOM_DURATION: u64 = 14;
 const TAG_FUTURE: u64 = 15;
 
-// Ranges
+// Ranges (49->51 is unassigned)
 const TAG_RANGE: u64 = 49;
 const TAG_BOUND_INCLUDED: u64 = 50;
 const TAG_BOUND_EXCLUDED: u64 = 51;
 
-// Custom Geometries
+// Custom tags (55->60 is unassigned)
+const TAG_FILE: u64 = 55;
+
+// Custom Geometries (88->95 is unassigned)
 const TAG_GEOMETRY_POINT: u64 = 88;
 const TAG_GEOMETRY_LINE: u64 = 89;
 const TAG_GEOMETRY_POLYGON: u64 = 90;
@@ -308,6 +312,23 @@ impl TryFrom<Cbor> for Value {
 						}
 						_ => Err("Expected a CBOR array with Geometry values"),
 					},
+					TAG_FILE => match *v {
+						Data::Array(mut v) if v.len() == 2 => {
+							let Data::Text(bucket) = v.remove(0) else {
+								return Err("Expected the bucket name to be a string value");
+							};
+
+							let Data::Text(key) = v.remove(0) else {
+								return Err("Expected the file key to be a string value");
+							};
+
+							Ok(Value::File(File {
+								bucket,
+								key,
+							}))
+						}
+						_ => Err("Expected a CBOR array with two String bucket and key values"),
+					},
 					// An unknown tag
 					_ => Err("Encountered an unknown CBOR tag"),
 				}
@@ -404,6 +425,13 @@ impl TryFrom<Value> for Cbor {
 				let bin = Data::Text(format!("{}", (*v).0));
 				Ok(Cbor(Data::Tag(TAG_FUTURE, Box::new(bin))))
 			}
+			Value::File(File {
+				bucket,
+				key,
+			}) => Ok(Cbor(Data::Tag(
+				TAG_FILE,
+				Box::new(Data::Array(vec![Data::Text(bucket), Data::Text(key)])),
+			))),
 			// We shouldn't reach here
 			_ => Err("Found unsupported SurrealQL value being encoded into a CBOR value"),
 		}
