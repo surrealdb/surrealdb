@@ -22,7 +22,7 @@ surrealcs = { version = "0.4.4" }
 surrealkv = { version = "0.9.1" }
 surrealml = { version = "0.1.1", package = "surrealml-core" }
 affinitypool = { version = "0.3.1" }
-dmp = "0.2.0"
+dmp = "0.2.3"
 indxdb = "0.6.0"
 ipnet = "2.9.0"
 ## Somewhat a surreal crate as it is maintained by @Delskayn.
@@ -196,6 +196,11 @@ strip = false
 
 [profile.make]
 inherits = "dev"
+
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = true
 
 [dependencies]
 # workspace internal dependencies
