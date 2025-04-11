@@ -413,18 +413,6 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-03-16"
 end = "2025-01-24"
 
-[[trusted.surrealcs]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2024-09-03"
-end = "2025-09-03"
-
-[[trusted.surrealcs-kernel]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2024-09-03"
-end = "2025-09-03"
-
 [[trusted.surrealdb]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)

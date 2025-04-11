@@ -369,42 +369,6 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct SurrealKv;
 
-/// SurrealCS database
-///
-/// # Examples
-///
-/// Instantiating a SurrealCS-backed instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealCs;
-///
-/// let db = Surreal::new::<SurrealCs>("path/to/database-folder").await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Instantiating a SurrealCS-backed strict instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealCs;
-///
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<SurrealCs>(("path/to/database-folder", config)).await?;
-/// # Ok(())
-/// # }
-/// ```
-#[cfg(feature = "kv-surrealcs")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealcs")))]
-#[derive(Debug)]
-pub struct SurrealCs;
-
 /// An embedded database
 #[derive(Debug, Clone)]
 pub struct Db(());
