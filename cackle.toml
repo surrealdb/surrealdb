@@ -1218,16 +1218,6 @@ allow_unsafe = true
 [pkg.nanoservices-utils]
 allow_unsafe = true
 
-[pkg.surrealcs-kernel]
-allow_apis = [
-    "net",
-]
-
-[pkg.surrealcs]
-allow_apis = [
-    "net",
-]
-
 [pkg.revision]
 allow_apis = ["fs"]
 

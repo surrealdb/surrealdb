@@ -20,7 +20,6 @@ pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 		v if v.starts_with("rocksdb:") => Ok(v.to_string()),
 		v if v.starts_with("surrealkv:") => Ok(v.to_string()),
 		v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
-		v if v.starts_with("surrealcs:") => Ok(v.to_string()),
 		v if v.starts_with("tikv:") => Ok(v.to_string()),
 		v if v.starts_with("fdb:") => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database path parameter")),
@@ -74,7 +73,6 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 		| "surrealkv"
 		| "surrealkv+versioned"
 		| "file"
-		| "surrealcs"
 		| "tikv" => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database connection string")),
 	}
