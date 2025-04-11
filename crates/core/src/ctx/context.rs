@@ -18,10 +18,8 @@ use async_channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-use std::future::Future;
 #[cfg(storage)]
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -361,33 +359,28 @@ impl MutableContext {
 	/// We may not want to check for the deadline on every call.
 	/// An iteration loop may want to check it every 10 or 100 calls.
 	/// Eg.: ctx.done(count % 100 == 0)
-	pub(crate) fn done<'a>(
-		&'a self,
-		deep_check: bool,
-	) -> Pin<Box<dyn Future<Output = Result<Option<Reason>, Error>> + Send + 'a>> {
-		Box::pin(async move {
-			yield_now!();
-			match self.deadline {
-				Some(deadline) if deep_check && deadline <= Instant::now() => {
-					Ok(Some(Reason::Timedout))
+	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>, Error> {
+		match self.deadline {
+			Some(deadline) if deep_check && deadline <= Instant::now() => {
+				Ok(Some(Reason::Timedout))
+			}
+			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(Reason::Canceled)),
+			_ => {
+				if deep_check && ALLOC.is_beyond_threshold() {
+					return Err(Error::QueryBeyondMemoryThreshold);
 				}
-				_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(Reason::Canceled)),
-				_ => {
-					if deep_check && ALLOC.is_beyond_threshold() {
-						return Err(Error::QueryBeyondMemoryThreshold);
-					}
-					match &self.parent {
-						Some(ctx) => ctx.done(deep_check).await,
-						_ => Ok(None),
-					}
+				match &self.parent {
+					Some(ctx) => ctx.done(deep_check),
+					_ => Ok(None),
 				}
 			}
-		})
+		}
 	}
 
 	/// Check if the context is ok to continue.
 	pub(crate) async fn is_ok(&self, deep_check: bool) -> Result<bool, Error> {
-		Ok(self.done(deep_check).await?.is_none())
+		yield_now!();
+		Ok(self.done(deep_check)?.is_none())
 	}
 
 	/// Check if there is some reason to stop processing the current query.
@@ -395,12 +388,14 @@ impl MutableContext {
 	/// Returns true when the query is canceled or if check_deadline is true when the query
 	/// deadline is met.
 	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool, Error> {
-		Ok(self.done(deep_check).await?.is_some())
+		yield_now!();
+		Ok(self.done(deep_check)?.is_some())
 	}
 
 	/// Check if the context is not ok to continue, because it timed out.
 	pub(crate) async fn is_timedout(&self) -> Result<bool, Error> {
-		Ok(matches!(self.done(true).await?, Some(Reason::Timedout)))
+		yield_now!();
+		Ok(matches!(self.done(true)?, Some(Reason::Timedout)))
 	}
 
 	#[cfg(storage)]
