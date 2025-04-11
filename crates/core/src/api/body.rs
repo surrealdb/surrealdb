@@ -56,6 +56,7 @@ impl ApiBody {
 				let mut bytes: Vec<u8> = Vec::new();
 
 				while let Some(chunk) = stream.next().await {
+					yield_now!();
 					let chunk = chunk.map_err(|_| Error::ApiError(ApiError::InvalidRequestBody))?;
 					size += chunk.len() as u64;
 					if size > max.0 {

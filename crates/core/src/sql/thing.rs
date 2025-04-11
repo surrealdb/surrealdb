@@ -173,6 +173,7 @@ impl Thing {
 
 		let mut ids = Vec::new();
 		while let Some(res) = stream.next().await {
+			yield_now!();
 			let x = res?;
 			let key = Ref::decode(&x)?;
 			ids.push(Thing {

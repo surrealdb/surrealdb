@@ -100,6 +100,7 @@ impl Document {
 				let mut stream = txn.stream_keys(range.clone(), None, ScanDirection::Forward);
 				// Loop until no more entries
 				while let Some(res) = stream.next().await {
+					yield_now!();
 					// Decode the key
 					let key = res?;
 					let r#ref = Ref::decode(&key)?;

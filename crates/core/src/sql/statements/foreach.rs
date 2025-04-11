@@ -70,7 +70,7 @@ impl ForeachStatement {
 
 		// Loop over the values
 		for v in iter {
-			if ctx.is_timedout()? {
+			if ctx.is_timedout().await? {
 				return Err(ControlFlow::from(Error::QueryTimedout));
 			}
 			// Duplicate context
@@ -121,7 +121,7 @@ impl ForeachStatement {
 					_ => (),
 				};
 			}
-			// Cooperitively yield if the task has been running for too long.
+			// Cooperatively yield if the task has been running for too long.
 			yield_now!();
 		}
 		// Ok all good

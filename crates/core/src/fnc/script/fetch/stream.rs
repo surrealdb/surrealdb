@@ -45,6 +45,7 @@ impl<R: Clone + 'static + Send + Sync> ReadableStream<R> {
 		let mut old_stream = std::mem::replace(&mut self.0, new_stream);
 		let drive = async move {
 			while let Some(item) = old_stream.next().await {
+				yield_now!();
 				if send_a.send(item.clone()).await.is_err() {
 					break;
 				}

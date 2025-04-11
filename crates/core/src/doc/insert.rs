@@ -114,7 +114,7 @@ impl Document {
 		// Insertion failed so instead do an update.
 		ctx.tx().lock().await.rollback_to_save_point().await?;
 
-		if ctx.is_done(true)? {
+		if ctx.is_done(true).await? {
 			// Don't process the document
 			return Err(Error::Ignore);
 		}
