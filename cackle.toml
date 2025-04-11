@@ -880,9 +880,6 @@ allow_unsafe = true
 [pkg.half]
 allow_unsafe = true
 
-[pkg.any_ascii]
-allow_unsafe = true
-
 [pkg.zeroize]
 allow_unsafe = true
 
