@@ -6,7 +6,6 @@ use serde_json::json;
 use std::borrow::Cow;
 use std::ops::Bound;
 use std::time::Duration;
-use surrealdb::fflags::FFLAGS;
 use surrealdb::opt::auth::Database;
 use surrealdb::opt::auth::Namespace;
 use surrealdb::opt::auth::Record as RecordAccess;
@@ -1474,26 +1473,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
-	match FFLAGS.change_feed_live_queries.enabled() {
-		true => {
-			assert_eq!(
-				Value::from_inner(changes),
-				r#"[
-                 {
-                      create: {
-                          id: testuser:amos,
-                          name: 'Amos'
-                      }
-                 }
-            ]"#
-				.parse()
-				.unwrap()
-			);
-		}
-		false => {
-			assert_eq!(
-				Value::from_inner(changes),
-				r#"[
+	assert_eq!(
+		Value::from_inner(changes),
+		r#"[
                  {
                       update: {
                           id: testuser:amos,
@@ -1501,11 +1483,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
                       }
                  }
             ]"#
-				.parse()
-				.unwrap()
-			);
-		}
-	}
+		.parse()
+		.unwrap()
+	);
 	// UPDATE testuser:jane
 	let a = array.get(2).unwrap();
 	let CoreValue::Object(a) = a.clone() else {
@@ -1516,26 +1496,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	};
 	assert!(*versionstamp1 < versionstamp2);
 	let changes = a.get("changes").unwrap().to_owned();
-	match FFLAGS.change_feed_live_queries.enabled() {
-		true => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
-                    {
-                         create: {
-                             id: testuser:jane,
-                             name: 'Jane'
-                         }
-                    }
-                ]"
-				.parse()
-				.unwrap()
-			);
-		}
-		false => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
+	assert_eq!(
+		Value::from_inner(changes),
+		"[
                     {
                          update: {
                              id: testuser:jane,
@@ -1543,11 +1506,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
                          }
                     }
                 ]"
-				.parse()
-				.unwrap()
-			);
-		}
-	}
+		.parse()
+		.unwrap()
+	);
 	// UPDATE testuser:amos
 	let a = array.get(3).unwrap();
 	let CoreValue::Object(a) = a.clone() else {
@@ -1558,26 +1519,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	};
 	assert!(versionstamp2 < *versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
-	match FFLAGS.change_feed_live_queries.enabled() {
-		true => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
-                    {
-                        create: {
-                            id: testuser:amos,
-                            name: 'AMOS'
-                        }
-                    }
-                ]"
-				.parse()
-				.unwrap()
-			);
-		}
-		false => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
+	assert_eq!(
+		Value::from_inner(changes),
+		"[
                     {
                         update: {
                             id: testuser:amos,
@@ -1585,11 +1529,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
                         }
                     }
                 ]"
-				.parse()
-				.unwrap()
-			);
-		}
-	};
+		.parse()
+		.unwrap()
+	);
 	// UPDATE table
 	let a = array.get(4).unwrap();
 	let CoreValue::Object(a) = a.clone() else {

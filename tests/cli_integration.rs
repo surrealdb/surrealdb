@@ -19,7 +19,6 @@ mod cli_integration {
 	#[cfg(unix)]
 	use std::time;
 	use std::time::Duration;
-	use surrealdb::fflags::FFLAGS;
 	use test_log::test;
 	use tokio::time::sleep;
 	use tracing::info;
@@ -1054,14 +1053,12 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			if FFLAGS.change_feed_live_queries.enabled() {
-				let output = common::run(&args)
-					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-					.output()
-					.unwrap();
-				let output = remove_debug_info(output).replace('\n', "");
-				// TODO: when enabling the feature flag, turn these to `create` not `update`
-				let allowed = [
+			let output = common::run(&args)
+				.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+				.output()
+				.unwrap();
+			let output = remove_debug_info(output).replace('\n', "");
+			let allowed = [
 					// Delete these
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
@@ -1073,42 +1070,15 @@ mod cli_integration {
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
 				];
-				allowed
-					.into_iter()
-					.find(|case| {
-						println!("Comparing 2:\n{case}\n{output}");
-						*case == output
-					})
-					.ok_or(format!("Output didnt match an example output: {output}"))
-					.unwrap();
-			} else {
-				let output = common::run(&args)
-					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-					.output()
-					.unwrap();
-				let output = remove_debug_info(output).replace('\n', "");
-				let allowed = [
-					// Delete these
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
-					// Keep these
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
-				];
-				allowed
-					.into_iter()
-					.find(|case| {
-						let a = *case == output;
-						println!("Comparing\n{case}\n{output}\n{a}");
-						a
-					})
-					.ok_or(format!("Output didnt match an example output: {output}"))
-					.unwrap();
-			}
+			allowed
+				.into_iter()
+				.find(|case| {
+					let a = *case == output;
+					println!("Comparing\n{case}\n{output}\n{a}");
+					a
+				})
+				.ok_or(format!("Output didnt match an example output: {output}"))
+				.unwrap();
 		};
 
 		sleep(Duration::from_secs(20)).await;
