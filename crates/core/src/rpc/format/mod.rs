@@ -35,8 +35,8 @@ impl From<&str> for Format {
 		match v {
 			s if s == PROTOCOLS[0] => Format::Json,
 			s if s == PROTOCOLS[1] => Format::Cbor,
-			s if s == PROTOCOLS[3] => Format::Bincode,
-			s if s == PROTOCOLS[4] => Format::Revision,
+			s if s == PROTOCOLS[2] => Format::Bincode,
+			s if s == PROTOCOLS[3] => Format::Revision,
 			_ => Format::Unsupported,
 		}
 	}
