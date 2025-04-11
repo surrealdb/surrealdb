@@ -117,7 +117,6 @@ radix_trie = { workspace = true, features = ["serde"]}
 rand.workspace = true
 rayon.workspace = true
 regex.workspace = true
-rmpv.workspace = true
 roaring = { workspace = true, features = ["serde"] }
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 rust-stemmers.workspace = true

@@ -1,10 +1,10 @@
 [package]
+authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+edition = "2021"
+license-file = "LICENSE"
 name = "surreal"
 publish = false
-edition = "2021"
 version = "2.3.0"
-license-file = "LICENSE"
-authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [workspace]
 members = [
@@ -14,17 +14,17 @@ members = [
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb-core = { version = "=2.3.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
 surrealdb = { version = "=2.3.0", package = "surrealdb", path = "./crates/sdk" }
+surrealdb-core = { version = "=2.3.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
 
 # External surreal crates
-surrealcs = { version = "0.4.4" }
-surrealkv = { version = "0.9.1" }
-surrealml = { version = "0.1.1", package = "surrealml-core" }
 affinitypool = { version = "0.3.1" }
 dmp = "0.2.3"
 indxdb = "0.6.0"
 ipnet = "2.9.0"
+surrealcs = { version = "0.4.4" }
+surrealkv = { version = "0.9.1" }
+surrealml = { version = "0.1.1", package = "surrealml-core" }
 ## Somewhat a surreal crate as it is maintained by @Delskayn.
 js = { version = "0.9.0", package = "rquickjs" }
 lexicmp = "0.2.0"
@@ -85,11 +85,11 @@ nanoid = "0.4.0"
 native-tls = "0.2.11"
 ndarray = "=0.15.6"
 ndarray-stats = "=0.5.1"
-num_cpus = "1.16.0"
 num-traits = "0.2.18"
+num_cpus = "1.16.0"
 object_store = "0.12.0"
-path-clean = "1.0.1"
 parking_lot = "0.12.3"
+path-clean = "1.0.1"
 pbkdf2 = "0.12.2"
 ## TODO: Look at dependency, 3 year old, unmaintained, no license specified.
 pharos = "0.5.3"
@@ -104,13 +104,12 @@ regex = "1.10.6"
 regex-syntax = "0.8.4"
 reqwest = { version = "0.12.7", default-features = false }
 ring = "0.17.13"
-rmpv = "1.0.1"
 roaring = "0.10.6"
 rustls = { version = "0.23.12", default-features = false }
 # Sub dependency of the rustls dependency, should be updated whenever rustls is.
 # Defined so we can enable features on this dependency.
-rustls-pki-types = "1.7.0"
 rust_decimal = "1.36.0"
+rustls-pki-types = "1.7.0"
 # TODO: Look at dependency, 5 years old seems unmaintained.
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
@@ -127,8 +126,8 @@ tempfile = "3.10.1"
 thiserror = "1.0.63"
 tokio = { version = "1.44.2", default-features = false }
 tokio-stream = "0.1"
-tokio-util = "0.7.11"
 tokio-tungstenite = "0.23.1"
+tokio-util = "0.7.11"
 tracing = "0.1.40"
 ulid = "1.1.0"
 unicase = "2.7.0"
@@ -153,6 +152,8 @@ wiremock = "0.6.0"
 
 [features]
 # Public features
+allocation-tracking = ["surrealdb/allocation-tracking"]
+allocator = ["surrealdb/allocator"]
 default = [
     "allocator",
     "allocation-tracking",
@@ -163,19 +164,17 @@ default = [
     "scripting",
     "http",
 ]
-allocator = ["surrealdb/allocator"]
-storage-mem = ["surrealdb/kv-mem"]
-storage-rocksdb = ["surrealdb/kv-rocksdb"]
-storage-tikv = ["surrealdb/kv-tikv"]
-storage-surrealkv = ["surrealdb/kv-surrealkv"]
-storage-surrealcs = ["surrealdb/kv-surrealcs"]
-scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 http-compression = []
-ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
-allocation-tracking = ["surrealdb/allocation-tracking"]
+ml = ["surrealdb/ml"]
 performance-profiler = ["dep:pprof"]
+scripting = ["surrealdb/scripting"]
+storage-mem = ["surrealdb/kv-mem"]
+storage-rocksdb = ["surrealdb/kv-rocksdb"]
+storage-surrealcs = ["surrealdb/kv-surrealcs"]
+storage-surrealkv = ["surrealdb/kv-surrealkv"]
+storage-tikv = ["surrealdb/kv-tikv"]
 # FoundationDB features
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
 storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
@@ -184,11 +183,11 @@ storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 storage-fdb = ["surrealdb/kv-fdb"]
 
 [profile.release]
+codegen-units = 1
 lto = true
-strip = true
 opt-level = 3
 panic = 'abort'
-codegen-units = 1
+strip = true
 
 [profile.bench]
 strip = false
@@ -197,9 +196,9 @@ strip = false
 inherits = "dev"
 
 [profile.profiling]
+debug = true
 inherits = "release"
 strip = false
-debug = true
 
 [dependencies]
 # workspace internal dependencies
@@ -220,10 +219,9 @@ http-body = "1.0.0"
 http-body-util = "0.1.1"
 hyper = "1.4.1"
 opentelemetry = { version = "0.24" }
-opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 rustyline = { version = "12.0.0", features = ["derive"] }
-serde_pack = { version = "1.1.2", package = "rmp-serde" }
 tower = { version = "0.4.13", features = ["limit", "load-shed"] }
 tower-http = { version = "0.5.2", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension", "compression-full"] }
 tower-service = "0.3.3"
@@ -249,7 +247,6 @@ num_cpus.workspace = true
 pin-project-lite.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, default-features = false, features = ["blocking", "gzip", "http2"] }
-rmpv.workspace = true
 rust_decimal.workspace = true
 semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -295,13 +292,6 @@ wiremock.workspace = true
 semver.workspace = true
 
 [package.metadata.deb]
-maintainer-scripts = "pkg/deb/"
-maintainer = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
-copyright = "SurrealDB Ltd. 2022"
-systemd-units = { enable = true }
-depends = "$auto"
-section = "utility"
-priority = "optional"
 assets = [
     [
         "target/release/surreal",
@@ -314,8 +304,15 @@ assets = [
         "644",
     ],
 ]
+copyright = "SurrealDB Ltd. 2022"
+depends = "$auto"
 extended-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web."
 license-file = ["LICENSE", "4"]
+maintainer = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
+maintainer-scripts = "pkg/deb/"
+priority = "optional"
+section = "utility"
+systemd-units = { enable = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
