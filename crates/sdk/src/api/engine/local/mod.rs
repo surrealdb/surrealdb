@@ -369,11 +369,6 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct SurrealKv;
 
-/// SurrealKV database
-#[deprecated(note = "Incorrect case, use SurrealKv instead")]
-#[cfg(feature = "kv-surrealkv")]
-pub type SurrealKV = SurrealKv;
-
 /// SurrealCS database
 ///
 /// # Examples
@@ -409,11 +404,6 @@ pub type SurrealKV = SurrealKv;
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealcs")))]
 #[derive(Debug)]
 pub struct SurrealCs;
-
-/// SurrealCS database
-#[deprecated(note = "Incorrect case, use SurrealCs instead")]
-#[cfg(feature = "kv-surrealcs")]
-pub type SurrealCS = SurrealCs;
 
 /// An embedded database
 #[derive(Debug, Clone)]
