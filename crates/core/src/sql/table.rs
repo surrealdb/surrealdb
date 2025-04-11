@@ -5,6 +5,8 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
+use super::{Value, Values};
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Table";
 
 #[revisioned(revision = 1)]
@@ -23,6 +25,12 @@ impl Deref for Tables {
 	type Target = Vec<Table>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
+	}
+}
+
+impl From<Tables> for Values {
+	fn from(tables: Tables) -> Self {
+		Self(tables.0.into_iter().map(Value::from).collect())
 	}
 }
 

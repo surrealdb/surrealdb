@@ -46,6 +46,8 @@ pub struct Options {
 	pub(crate) version: Option<u64>,
 	/// The channel over which we send notifications
 	pub(crate) sender: Option<Sender<Notification>>,
+	/// Do we mimmick rolling aggregation only?
+	pub(crate) rolling_aggregation: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -88,6 +90,7 @@ impl Options {
 			sender: None,
 			auth: Arc::new(Auth::default()),
 			version: None,
+			rolling_aggregation: false,
 		}
 	}
 
@@ -217,6 +220,12 @@ impl Options {
 		self
 	}
 
+	/// Specify wether we mimmick rolling aggregation only
+	pub fn with_rolling_aggregation(mut self, rolling_aggregation: bool) -> Self {
+		self.rolling_aggregation = rolling_aggregation;
+		self
+	}
+
 	// --------------------------------------------------
 
 	/// Create a new Options object for a subquery
@@ -310,6 +319,19 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			sender: Some(sender),
+			..*self
+		}
+	}
+
+	/// Create a new Options object for a subquery
+	pub fn new_with_rolling_aggregation(&self, rolling_aggregation: bool) -> Self {
+		Self {
+			sender: self.sender.clone(),
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
+			force: self.force.clone(),
+			rolling_aggregation,
 			..*self
 		}
 	}

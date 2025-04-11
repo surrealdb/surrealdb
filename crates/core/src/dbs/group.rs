@@ -149,7 +149,13 @@ impl GroupsCollector {
 						{
 							if let Some(agr) = aggregator.get_mut(idioms_pos) {
 								match expr {
-									Value::Function(f) if f.is_aggregate() => {
+									Value::Function(f)
+										if if opt.rolling_aggregation {
+											f.is_rolling()
+										} else {
+											f.is_aggregate()
+										} =>
+									{
 										let a = f.get_optimised_aggregate();
 										let x = if matches!(a, OptimisedAggregate::None) {
 											// The aggregation is not optimised, let's compute it with the values
