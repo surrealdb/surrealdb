@@ -4742,16 +4742,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rmpv"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58450723cd9ee93273ce44a20b6ec4efe17f8ed2e3631474387bfdecf18bb2a9"
-dependencies = [
- "num-traits",
- "rmp",
-]
-
-[[package]]
 name = "roaring"
 version = "0.10.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5571,8 +5561,6 @@ dependencies = [
  "rcgen",
  "reqwest",
  "revision 0.11.0",
- "rmp-serde",
- "rmpv",
  "rust_decimal",
  "rustyline",
  "semver",
@@ -5764,7 +5752,6 @@ dependencies = [
  "reqwest",
  "revision 0.11.0",
  "ring",
- "rmpv",
  "roaring",
  "rocksdb",
  "rquickjs",
