@@ -1,6 +1,6 @@
 use super::DefineFieldStatement;
 use crate::ctx::Context;
-use crate::dbs::{Force, Options};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -8,18 +8,15 @@ use crate::kvs::Transaction;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::paths::{IN, OUT};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{
-	changefeed::ChangeFeed, statements::UpdateStatement, Base, Ident, Output, Permissions, Strand,
-	Value, Values, View,
-};
-use crate::sql::{Idiom, Kind, TableType};
+use crate::sql::statements::{InsertStatement, SelectStatement};
+use crate::sql::{changefeed::ChangeFeed, Base, Ident, Permissions, Strand, Value, View};
+use crate::sql::{Data, Idiom, Kind, Subquery, TableType};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
-use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 6)]
@@ -115,10 +112,19 @@ impl DefineTableStatement {
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Force queries to run
-			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
+			let opt = &opt.new_with_rolling_aggregation(true);
 			// Remove the table data
 			let key = crate::key::table::all::new(ns, db, &self.name);
 			txn.delp(key).await?;
+			// Collect and insert the data
+			let stm = InsertStatement {
+				into: Some(Value::Table(self.name.clone().into())),
+				data: Data::SingleExpression(Value::Subquery(Box::new(Subquery::Select(
+					SelectStatement::from(view.clone()),
+				)))),
+				..Default::default()
+			};
+			stm.compute(stk, ctx, &opt, doc).await?;
 			// Process each foreign table
 			for ft in view.what.0.iter() {
 				// Save the view config
@@ -142,13 +148,6 @@ impl DefineTableStatement {
 				}
 				// Clear the cache
 				txn.clear();
-				// Process the view data
-				let stm = UpdateStatement {
-					what: Values(vec![Value::Table(ft.clone())]),
-					output: Some(Output::None),
-					..UpdateStatement::default()
-				};
-				stm.compute(stk, ctx, opt, doc).await?;
 			}
 		}
 		// Clear the cache
