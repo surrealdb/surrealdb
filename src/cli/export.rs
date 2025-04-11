@@ -8,6 +8,8 @@ use surrealdb::kvs::export::TableConfig;
 use surrealdb::method::{Export, ExportConfig};
 use surrealdb::Connection;
 use tokio::io::{self, AsyncWriteExt};
+use tokio::signal::ctrl_c;
+use tokio::sync::watch;
 
 #[derive(Args, Debug)]
 pub struct DatabaseConnectionArguments {
@@ -84,6 +86,19 @@ pub async fn init(
 		config,
 	}: ExportCommandArguments,
 ) -> Result<(), Error> {
+	// Create a cancellation channel
+	let (cancel_tx, cancel_rx) = watch::channel(false);
+	
+	// Clone the sender for the Ctrl+C handler
+	let ctrl_c_tx = cancel_tx.clone();
+
+	// Setup cancellation handler
+	tokio::spawn(async move {
+		if ctrl_c().await.is_ok() {
+			let _ = &ctrl_c_tx.send(true);
+		}
+	});
+
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
 	let client = if username.is_some()
@@ -129,11 +144,23 @@ pub async fn init(
 		let mut stdout = io::stdout();
 		// Write the backup to standard output
 		while let Some(bytes) = backup.next().await {
-			stdout.write_all(&bytes?).await?;
+			if stdout.write_all(&bytes?).await.is_err() {
+				// If write fails (e.g., pipe closed), trigger cancellation
+				let _ = cancel_tx.send(true);
+				break;
+			}
 		}
+		stdout.flush().await?;
 	} else {
 		apply_config(config, client.export(file)).await?;
 	}
+
+	// Check if operation was cancelled
+	if *cancel_rx.borrow() {
+		eprintln!("Export operation cancelled");
+		return Ok(());
+	}
+
 	info!("The SurrealQL file was exported successfully");
 	// Everything OK
 	Ok(())
