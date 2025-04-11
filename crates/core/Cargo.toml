@@ -76,7 +76,6 @@ addr.workspace = true
 ahash.workspace = true
 ammonia.workspace = true
 argon2.workspace = true
-ascii.workspace = true
 async-channel.workspace = true
 async-executor.workspace = true
 async-graphql = { workspace = true, default-features = false, features = ["dynamic-schema"] }
