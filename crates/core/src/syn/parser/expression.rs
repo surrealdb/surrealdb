@@ -5,8 +5,8 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::mac::{expected_whitespace, unexpected};
-use crate::sql::Range;
 use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
+use crate::sql::{Function, Range};
 use crate::syn::error::bail;
 use crate::syn::token::{self, Token};
 use crate::syn::{
@@ -32,6 +32,7 @@ pub enum BindingPower {
 	Range,
 	Nullish,
 	Unary,
+	Postfix,
 }
 
 impl Parser<'_> {
@@ -515,6 +516,26 @@ impl Parser<'_> {
 		Ok(Value::Range(Box::new(range)))
 	}
 
+	async fn parse_call(&mut self, ctx: &mut Stk, lhs: Value) -> ParseResult<Value> {
+		let start = self.last_span();
+		let mut args = Vec::new();
+		loop {
+			if self.eat(t!(")")) {
+				break;
+			}
+
+			let arg = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
+			args.push(arg);
+
+			if !self.eat(t!(",")) {
+				self.expect_closing_delimiter(t!(")"), start)?;
+				break;
+			}
+		}
+
+		Ok(Value::Function(Box::new(Function::Anonymous(lhs, args, false))))
+	}
+
 	/// The pratt parsing loop.
 	/// Parses expression according to binding power.
 	async fn pratt_parse_expr(
@@ -531,6 +552,16 @@ impl Parser<'_> {
 
 		loop {
 			let token = self.peek();
+
+			if let t!("(") = token.kind {
+				if BindingPower::Postfix <= min_bp {
+					break;
+				}
+
+				lhs = self.parse_call(ctx, lhs).await?;
+				continue;
+			}
+
 			let Some(bp) = self.infix_binding_power(token.kind) else {
 				// explain that assignment operators can't be used in normal expressions.
 				if let t!("+=") | t!("*=") | t!("-=") | t!("+?=") = token.kind {
