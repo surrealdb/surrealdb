@@ -32,7 +32,6 @@ kv-indxdb = ["surrealdb-core/kv-indxdb"]
 kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
 kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
-kv-surrealcs = ["surrealdb-core/kv-surrealcs", "tokio/time"]
 scripting = ["surrealdb-core/scripting"]
 http = ["surrealdb-core/http"]
 native-tls = [
@@ -85,7 +84,6 @@ revision = { workspace = true, features = [
 ] }
 reblessive = { workspace = true, features = ["tree"] }
 trice = { workspace = true, optional = true }
-
 
 # Other crates
 arrayvec.workspace = true

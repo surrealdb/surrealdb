@@ -79,13 +79,13 @@ end = "2025-08-06"
 
 [[trusted.bitcode]]
 criteria = "safe-to-deploy"
-user-id = 132446 # Finn Bear (finnbear)
+user-id = 132446
 start = "2023-04-16"
 end = "2025-09-03"
 
 [[trusted.bitcode_derive]]
 criteria = "safe-to-deploy"
-user-id = 132446 # Finn Bear (finnbear)
+user-id = 132446
 start = "2023-04-27"
 end = "2025-09-03"
 
@@ -265,7 +265,7 @@ end = "2025-09-03"
 
 [[trusted.nanoservices-utils]]
 criteria = "safe-to-deploy"
-user-id = 262632 # Maxwell Flitton (maxwellflitton)
+user-id = 262632
 start = "2024-03-30"
 end = "2025-09-03"
 
@@ -412,18 +412,6 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-03-16"
 end = "2025-01-24"
-
-[[trusted.surrealcs]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2024-09-03"
-end = "2025-09-03"
-
-[[trusted.surrealcs-kernel]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2024-09-03"
-end = "2025-09-03"
 
 [[trusted.surrealdb]]
 criteria = "safe-to-deploy"
