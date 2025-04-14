@@ -21,7 +21,6 @@ use opentelemetry::Context as TelemetryContext;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::Session;
-#[cfg(surrealdb_unstable)]
 use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
@@ -67,7 +66,6 @@ pub struct Websocket {
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: Sender<Message>,
 	/// The GraphQL schema cache stored in advance
-	#[cfg(surrealdb_unstable)]
 	pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
@@ -95,7 +93,6 @@ impl Websocket {
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
 			channel: sender.clone(),
-			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
 		});
@@ -512,10 +509,8 @@ impl RpcContext for Websocket {
 	// ------------------------------
 
 	/// GraphQL queries are enabled on WebSockets
-	#[cfg(surrealdb_unstable)]
 	const GQL_SUPPORT: bool = true;
 
-	#[cfg(surrealdb_unstable)]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema
 	}
