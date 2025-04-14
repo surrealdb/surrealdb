@@ -74,7 +74,6 @@ pub mod cbor {
 	}
 }
 
-
 #[cfg(test)]
 mod tests {
 	use super::*;
