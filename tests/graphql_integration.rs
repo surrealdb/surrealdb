@@ -1,6 +1,5 @@
 mod common;
 
-#[cfg(surrealdb_unstable)]
 mod graphql_integration {
 	use std::{str::FromStr, time::Duration};
 
