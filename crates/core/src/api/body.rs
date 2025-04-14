@@ -10,7 +10,7 @@ use futures::StreamExt;
 use http::header::CONTENT_TYPE;
 
 use crate::err::Error;
-use crate::rpc::format::{cbor, json, msgpack, revision};
+use crate::rpc::format::{cbor, json, revision};
 use crate::sql::Bytesize;
 use crate::sql::Kind;
 use crate::sql::Value;
@@ -104,7 +104,6 @@ impl ApiBody {
 				let parsed = match content_type {
 					Some("application/json") => json::parse_value(&bytes),
 					Some("application/cbor") => cbor::parse_value(bytes),
-					Some("application/pack") => msgpack::parse_value(bytes),
 					Some("application/surrealdb") => revision::parse_value(bytes),
 					_ => return Ok(Value::Bytes(crate::sql::Bytes(bytes))),
 				};

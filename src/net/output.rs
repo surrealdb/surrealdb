@@ -13,7 +13,6 @@ pub enum Output {
 	Text(String),
 	Json(Vec<u8>), // JSON
 	Cbor(Vec<u8>), // CBOR
-	Pack(Vec<u8>), // MessagePack
 	Full(Vec<u8>), // Full type serialization
 }
 
@@ -46,16 +45,6 @@ where
 	}
 }
 
-pub fn pack<T>(val: &T) -> Output
-where
-	T: Serialize,
-{
-	match serde_pack::to_vec(val) {
-		Ok(v) => Output::Pack(v),
-		Err(_) => Output::Fail,
-	}
-}
-
 pub fn full<T>(val: &T) -> Output
 where
 	T: Serialize,
@@ -82,9 +71,6 @@ impl IntoResponse for Output {
 			}
 			Output::Cbor(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor))], v).into_response()
-			}
-			Output::Pack(v) => {
-				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationPack))], v).into_response()
 			}
 			Output::Full(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::Surrealdb))], v).into_response()

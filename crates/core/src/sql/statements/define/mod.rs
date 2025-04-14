@@ -1,6 +1,7 @@
 mod access;
 mod analyzer;
 mod api;
+mod bucket;
 pub mod config;
 mod database;
 mod deprecated;
@@ -17,6 +18,7 @@ mod user;
 pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
 pub use api::DefineApiStatement;
+pub use bucket::DefineBucketStatement;
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
 pub use event::DefineEventStatement;
@@ -36,20 +38,22 @@ pub use api::ApiAction;
 pub use api::ApiDefinition;
 pub use api::FindApi;
 
+pub use bucket::BucketDefinition;
+
 use crate::ctx::Context;
+use crate::dbs::type_def::TypeDefinition;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Ident, Kind, Strand, Value};
-use crate::dbs::type_def::TypeDefinition;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -82,7 +86,9 @@ pub enum DefineStatement {
 	Config(DefineConfigStatement),
 	#[revision(start = 3)]
 	Api(DefineApiStatement),
-	#[revision(start = 3)]
+	#[revision(start = 4)]
+	Bucket(DefineBucketStatement),
+	#[revision(start = 5)]
 	Type(DefineTypeStatement),
 }
 
@@ -131,6 +137,7 @@ impl DefineStatement {
 			Self::Access(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Config(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Api(ref v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Bucket(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Type(ref v) => v.compute(ctx, opt, doc).await,
 		}
 	}
@@ -153,6 +160,7 @@ impl Display for DefineStatement {
 			Self::Access(v) => Display::fmt(v, f),
 			Self::Config(v) => Display::fmt(v, f),
 			Self::Api(v) => Display::fmt(v, f),
+			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Type(v) => Display::fmt(v, f),
 		}
 	}
