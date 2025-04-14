@@ -28,7 +28,6 @@ mod exe;
 mod fnc;
 mod idg;
 mod key;
-mod obs;
 mod sys;
 
 pub mod api;
@@ -42,6 +41,7 @@ pub mod iam;
 pub mod idx;
 pub mod kvs;
 pub mod mem;
+pub mod obs;
 pub mod options;
 pub mod rpc;
 pub mod sql;
