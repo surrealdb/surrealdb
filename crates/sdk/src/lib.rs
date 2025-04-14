@@ -11,6 +11,43 @@
 //! server-side or client-side code. All connections to SurrealDB are made over WebSockets by default,
 //! and automatically reconnect when the connection is terminated.
 //!
+//! # Running SurrealDB embedded in Rust
+//!
+//! When running SurrealDB as an embedded database within Rust, using the correct release profile and memory allocator can greatly improve the performance of the database core engine. In addition using an optimised asynchronous runtime configuration can help speed up concurrent queries and increase database throughput.
+//!
+//! In your project’s Cargo.toml file, ensure that the release profile uses the following configuration:
+//!
+//! ```no_run
+//! [profile.release]
+//! lto = true
+//! strip = true
+//! opt-level = 3
+//! panic = 'abort'
+//! codegen-units = 1
+//! ```
+//!
+//! In your project’s Cargo.toml file, ensure that the allocator feature is among those enabled on the surrealdb dependency:
+//!
+//! ```no_run
+//! surrealdb = { version = "2", features = ["allocator", "storage-mem", "storage-surrealkv", "storage-rocksdb", "protocol-http", "protocol-ws", "rustls"] }
+//! ```
+//!
+//! When running SurrealDB within your Rust code, ensure that the asynchronous runtime is configured correctly, making use of multiple threads, an increased stack size, and an optimised number of threads:
+//!
+//! ```no_run
+//! tokio = { version = "1.41.1", features = ["sync", "rt-multi-thread"] }
+//! fn main() {
+//!     tokio::runtime::Builder::new_multi_thread()
+//!     .enable_all()
+//!     .thread_stack_size(10 * 1024 * 1024) // 10MiB
+//!     .build()
+//!     .unwrap()
+//!     .block_on(async {
+//!       // Your application code
+//!     })
+//! }
+//! ``````
+//!
 //! # Examples
 //!
 //! ```no_run
