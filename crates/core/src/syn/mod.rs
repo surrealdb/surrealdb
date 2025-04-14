@@ -4,7 +4,10 @@ use crate::{
 	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
 	dbs::{capabilities::ExperimentalTarget, Capabilities},
 	err::Error,
-	sql::{Block, Datetime, Duration, Idiom, Kind, Query, Range, Subquery, Thing, Value},
+	sql::{
+		Block, Cond, Datetime, Duration, Fields, Idiom, Kind, Output, Query, Range, Subquery,
+		Thing, Value,
+	},
 };
 
 pub mod error;
@@ -20,6 +23,7 @@ pub trait Parse<T> {
 #[cfg(test)]
 mod test;
 
+use error::RenderedError;
 use lexer::{compound, Lexer};
 use parser::{Parser, ParserSettings};
 use reblessive::Stack;
@@ -344,6 +348,128 @@ pub fn block(input: &str) -> Result<Block, Error> {
 				.with_span(token.span, error::MessageKind::Error)
 				.render_on(input),
 		)),
+	}
+}
+
+/// Parses fields for a SELECT statement
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub(crate) fn fields_with_capabilities(
+	input: &str,
+	capabilities: &Capabilities,
+) -> Result<Fields, Error> {
+	trace!(target: TARGET, "Parsing select fields");
+
+	if input.len() > u32::MAX as usize {
+		return Err(Error::QueryTooLarge);
+	}
+
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			references_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			bearer_access_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
+			..Default::default()
+		},
+	);
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_fields(stk))
+		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
+}
+
+/// Parses an output for a RETURN clause
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub(crate) fn output_with_capabilities(
+	input: &str,
+	capabilities: &Capabilities,
+) -> Result<Output, Error> {
+	trace!(target: TARGET, "Parsing RETURN condition");
+
+	let input = format!("RETURN {input}");
+
+	if input.len() > u32::MAX as usize {
+		return Err(Error::QueryTooLarge);
+	}
+
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			references_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			bearer_access_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
+			..Default::default()
+		},
+	);
+	let mut stack = Stack::new();
+	let output = stack
+		.enter(|stk| parser.try_parse_output(stk))
+		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input.as_str()))
+		.map_err(Error::InvalidQuery)?;
+
+	match output {
+		Some(output) => Ok(output),
+		_ => Err(Error::InvalidQuery(RenderedError {
+			errors: vec!["Missing Output".into()],
+			snippets: vec![],
+		})),
+	}
+}
+
+/// Parses a condition for a WHERE clause
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub(crate) fn condition_with_capabilities(
+	input: &str,
+	capabilities: &Capabilities,
+) -> Result<Cond, Error> {
+	trace!(target: TARGET, "Parsing WHERE condition");
+
+	let input = format!("WHERE {input}");
+
+	if input.len() > u32::MAX as usize {
+		return Err(Error::QueryTooLarge);
+	}
+
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			references_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			bearer_access_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
+			..Default::default()
+		},
+	);
+	let mut stack = Stack::new();
+	let cond = stack
+		.enter(|stk| parser.try_parse_condition(stk))
+		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input.as_str()))
+		.map_err(Error::InvalidQuery)?;
+
+	match cond {
+		Some(cond) => Ok(cond),
+		_ => Err(Error::InvalidQuery(RenderedError {
+			errors: vec!["Missing Condition".into()],
+			snippets: vec![],
+		})),
 	}
 }
 
