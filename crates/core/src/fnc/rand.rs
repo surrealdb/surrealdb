@@ -152,7 +152,7 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 		}
 	};
 	// Set the maximum valid seconds
-	const LIMIT: i64 = 8210298412799;
+	const LIMIT: i64 = 8210266876799;
 	// Check the function input arguments
 	let (min, max) = if let Some((min, max)) = range {
 		match min {
