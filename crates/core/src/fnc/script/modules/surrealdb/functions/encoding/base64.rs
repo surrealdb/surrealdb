@@ -8,5 +8,6 @@ impl_module_def!(
 	Package,
 	"encoding::base64",
 	"decode" => run,
-	"encode" => run
+	"encode" => run,
+	"encode_padded" => run
 );
