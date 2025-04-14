@@ -20,9 +20,9 @@ pub(crate) enum RpcData {
 	Single(Value),
 }
 
-impl Into<Data> for RpcData {
-	fn into(self) -> Data {
-		match self {
+impl From<RpcData> for Data {
+	fn from(data: RpcData) -> Self {
+		match data {
 			RpcData::Patch(v) => Data::PatchExpression(v),
 			RpcData::Merge(v) => Data::MergeExpression(v),
 			RpcData::Replace(v) => Data::ReplaceExpression(v),

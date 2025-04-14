@@ -392,7 +392,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Specify the SQL query string
 		let sql = SelectStatement {
 			only: opts.only,
-			expr: opts.fields.unwrap_or_else(|| Fields::all()),
+			expr: opts.fields.unwrap_or_else(Fields::all),
 			what: vec![what.could_be_table()].into(),
 			start: opts.start,
 			limit: opts.limit,
