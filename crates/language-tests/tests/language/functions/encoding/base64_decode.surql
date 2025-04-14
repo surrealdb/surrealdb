@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-value = 'encoding::base64::decode("")'
+value = 'b""'
 
 [[test.results]]
 value = "true"

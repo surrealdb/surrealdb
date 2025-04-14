@@ -25,3 +25,8 @@ topic:wasm:
 topic:stability:
   - "/(crash)/i"
   - "/(panic)/i"
+
+# Add the `nix` label if the issue content contains 'nix' or 'flake'
+nix:
+  - "/(nix)/i"
+  - "/(flake)/i"

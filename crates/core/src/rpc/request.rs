@@ -1,5 +1,4 @@
 use crate::rpc::format::cbor::Cbor;
-use crate::rpc::format::msgpack::Pack;
 use crate::rpc::Method;
 use crate::rpc::RpcError;
 use crate::sql::Array;
@@ -25,13 +24,6 @@ impl TryFrom<Cbor> for Request {
 	type Error = RpcError;
 	fn try_from(val: Cbor) -> Result<Self, RpcError> {
 		<Cbor as TryInto<Value>>::try_into(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
-	}
-}
-
-impl TryFrom<Pack> for Request {
-	type Error = RpcError;
-	fn try_from(val: Pack) -> Result<Self, RpcError> {
-		<Pack as TryInto<Value>>::try_into(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
 	}
 }
 

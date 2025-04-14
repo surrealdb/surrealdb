@@ -1,5 +1,6 @@
 use crate::cnf::FILE_ALLOWLIST;
 use crate::err::Error;
+use path_clean::PathClean;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -40,10 +41,9 @@ pub(crate) fn extract_allowed_paths(input: &str) -> Vec<PathBuf> {
 			if trimmed.is_empty() {
 				None
 			} else {
-				// Convert to a PathBuf and canonicalize it.
-				fs::canonicalize(trimmed).ok().inspect(|p| {
-					debug!("Allowed file path: {}", p.to_string_lossy());
-				})
+				let path = PathBuf::from(trimmed).clean();
+				debug!("Allowed file path: {}", path.to_string_lossy());
+				Some(path)
 			}
 		})
 		.collect()
