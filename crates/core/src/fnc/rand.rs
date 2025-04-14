@@ -140,6 +140,8 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 			Some((min, max))
 		}
 		Some((Value::Datetime(min), Value::Datetime(max))) => Some((min.to_secs(), max.to_secs())),
+		Some((Value::Number(Number::Int(min)), Value::Datetime(max))) => Some((min, max.to_secs())),
+		Some((Value::Datetime(min), Value::Number(Number::Int(max)))) => Some((min.to_secs(), max)),
 		_ => {
 			return Err(Error::InvalidArguments {
 				name: String::from("rand::time"),
@@ -159,7 +161,7 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 				max if max >= 1 && max <= min => (max, min),
 				_ => return Err(Error::InvalidArguments {
 					name: String::from("rand::time"),
-					message: format!("To generate a time between X and Y seconds, the 2 arguments must be non-negative numbers and no higher than {LIMIT}."),
+					message: format!("To generate a time between X and Y seconds, the 2 arguments must be non-negative numbers, the second argument must be equal to or greater than the first, and no higher than {LIMIT}."),
 				}),
 			},
 			_ => return Err(Error::InvalidArguments {
