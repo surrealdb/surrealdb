@@ -38,6 +38,8 @@ pub enum Constant {
 	MathSqrt2,
 	MathTau,
 	TimeEpoch,
+	TimeMin,
+	TimeMax,
 	// Add new variants here
 }
 
@@ -73,6 +75,8 @@ impl Constant {
 			Self::MathSqrt2 => ConstantValue::Float(f64c::SQRT_2),
 			Self::MathTau => ConstantValue::Float(f64c::TAU),
 			Self::TimeEpoch => ConstantValue::Datetime(Datetime(Utc.timestamp_nanos(0))),
+			Self::TimeMin => ConstantValue::Datetime(Datetime::MIN_UTC),
+			Self::TimeMax => ConstantValue::Datetime(Datetime::MAX_UTC),
 		}
 	}
 	/// Process this type returning a computed simple Value
@@ -109,6 +113,8 @@ impl fmt::Display for Constant {
 			Self::MathSqrt2 => "math::SQRT_2",
 			Self::MathTau => "math::TAU",
 			Self::TimeEpoch => "time::EPOCH",
+			Self::TimeMin => "time::MINIMUM",
+			Self::TimeMax => "time::MAXIMUM",
 		})
 	}
 }
