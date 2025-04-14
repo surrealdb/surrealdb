@@ -1,4 +1,4 @@
-#![cfg(not(target_family = "wasm"))]
+#[cfg(not(target_family = "wasm"))]
 use crate::gql::SchemaCache;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
