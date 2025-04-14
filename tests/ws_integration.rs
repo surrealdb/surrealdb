@@ -20,12 +20,6 @@ mod ws_integration {
 		use crate::common::Format;
 		crate::include_tests!(Some(Format::Cbor), Format::Cbor);
 	}
-
-	/// Tests for the MessagePack protocol format
-	mod pack {
-		use crate::common::Format;
-		crate::include_tests!(Some(Format::Pack), Format::Pack);
-	}
 }
 
 use assert_fs::TempDir;

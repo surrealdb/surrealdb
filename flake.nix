@@ -108,7 +108,7 @@
             spec = (import ./pkg/nix/spec/${target}.nix) {
               inherit pkgs target util;
             };
-            extraComponents = with fenix.packages.${system}; [ targets.${target}.stable.rust-src rust-analyzer targets.${target}.stable.rustfmt ];
+            extraComponents = with fenix.packages.${system}; [ targets.${target}.stable.rust-src stable.rust-analyzer targets.${target}.stable.rustfmt ];
             rustToolchain = mkRustToolchain { inherit target extraComponents; };
             buildSpec = spec.buildSpec;
           in pkgs.mkShell (buildSpec // {

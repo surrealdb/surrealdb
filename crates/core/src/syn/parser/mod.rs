@@ -8,15 +8,15 @@
 //!
 //! There are a bunch of common patterns for which this module has some confinence functions.
 //! - Whenever only one token can be next you should use the `expected!` macro. This macro
-//!     ensures that the given token type is next and if not returns a parser error.
+//!   ensures that the given token type is next and if not returns a parser error.
 //! - Whenever a limited set of tokens can be next it is common to match the token kind and then
-//!     have a catch all arm which calles the macro `unexpected!`. This macro will raise an parse
-//!     error with information about the type of token it recieves and what it expected.
+//!   have a catch all arm which calles the macro `unexpected!`. This macro will raise an parse
+//!   error with information about the type of token it recieves and what it expected.
 //! - If a single token can be optionally next use [`Parser::eat`] this function returns a bool
-//!     depending on if the given tokenkind was eaten.
+//!   depending on if the given tokenkind was eaten.
 //! - If a closing delimiting token is expected use `Parser::expect_closing_delimiter`. This
-//!     function will raise an error if the expected delimiter isn't the next token. This error will
-//!     also point to which delimiter the parser expected to be closed.
+//!   function will raise an error if the expected delimiter isn't the next token. This error will
+//!   also point to which delimiter the parser expected to be closed.
 //!
 //! ## Far Token Peek
 //!
@@ -55,7 +55,7 @@
 
 use self::token_buffer::TokenBuffer;
 use crate::{
-	sql::{self, Datetime, Duration, Strand, Uuid},
+	sql::{self, Bytes, Datetime, Duration, File, Strand, Uuid},
 	syn::{
 		error::{bail, SyntaxError},
 		lexer::{compound::NumberKind, Lexer},
@@ -119,6 +119,8 @@ pub enum GluedValue {
 	Strand(Strand),
 	#[default]
 	None,
+	Bytes(Bytes),
+	File(File),
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +145,8 @@ pub struct ParserSettings {
 	pub bearer_access_enabled: bool,
 	/// Whether bearer access is enabled
 	pub define_api_enabled: bool,
+	/// Whether the files feature is enabled
+	pub files_enabled: bool,
 }
 
 impl Default for ParserSettings {
@@ -155,6 +159,7 @@ impl Default for ParserSettings {
 			references_enabled: false,
 			bearer_access_enabled: false,
 			define_api_enabled: false,
+			files_enabled: false,
 		}
 	}
 }

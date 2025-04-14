@@ -1,4 +1,3 @@
-use crate::fflags::FFLAGS;
 use crate::sql::array::Array;
 use crate::sql::object::Object;
 use crate::sql::statements::DefineTableStatement;
@@ -85,11 +84,7 @@ impl TableMutation {
 		let mut h = BTreeMap::<String, Value>::new();
 		let h = match self {
 			TableMutation::Set(_thing, v) => {
-				if FFLAGS.change_feed_live_queries.enabled() {
-					h.insert("create".to_string(), v);
-				} else {
-					h.insert("update".to_string(), v);
-				}
+				h.insert("update".to_string(), v);
 				h
 			}
 			TableMutation::SetWithDiff(_thing, current, operations) => {

@@ -76,9 +76,6 @@ async fn handler(
 					Some(Accept::ApplicationCbor) => {
 						Ok(output::cbor(&Success::new(v.token, v.refresh)))
 					}
-					Some(Accept::ApplicationPack) => {
-						Ok(output::pack(&Success::new(v.token, v.refresh)))
-					}
 					// Text serialization
 					// NOTE: Only the token is returned in a plain text response.
 					Some(Accept::TextPlain) => Ok(output::text(v.token.unwrap_or_default())),

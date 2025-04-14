@@ -4,7 +4,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ident::Ident;
-use crate::sql::statements::RemoveIndexStatement;
 use crate::sql::value::Value;
 use crate::sql::Base;
 
@@ -73,15 +72,10 @@ impl RebuildIndexStatement {
 			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 			// Get the index definition
 			let (ns, db) = opt.ns_db()?;
-			let ix = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await?;
-			// Create the remove statement
-			let stm = RemoveIndexStatement {
-				name: self.name.clone(),
-				what: self.what.clone(),
-				if_exists: false,
-			};
-			// Execute the delete statement
-			stm.compute(ctx, opt).await?;
+			let mut ix =
+				ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await?.as_ref().clone();
+			ix.overwrite = true;
+			ix.if_not_exists = false;
 			// Rebuild the index
 			ix.compute(stk, ctx, opt, doc).await?;
 			// Ok all good

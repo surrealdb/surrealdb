@@ -1,3 +1,5 @@
+use crate::buc::store::ObjectStore;
+use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -12,6 +14,7 @@ use crate::kvs::cache::ds::DatastoreCache;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
+use crate::mem::ALLOC;
 use crate::sql::value::Value;
 use async_channel::Sender;
 use std::borrow::Cow;
@@ -62,6 +65,8 @@ pub struct MutableContext {
 	transaction: Option<Arc<Transaction>>,
 	// Does not read from parent `values`.
 	isolated: bool,
+	// A map of bucket connections
+	buckets: Option<Arc<BucketConnections>>,
 }
 
 impl Default for MutableContext {
@@ -110,6 +115,7 @@ impl MutableContext {
 			temporary_directory: None,
 			transaction: None,
 			isolated: false,
+			buckets: None,
 		}
 	}
 
@@ -133,6 +139,7 @@ impl MutableContext {
 			transaction: parent.transaction.clone(),
 			isolated: false,
 			parent: Some(parent.clone()),
+			buckets: parent.buckets.clone(),
 		}
 	}
 
@@ -158,6 +165,7 @@ impl MutableContext {
 			transaction: parent.transaction.clone(),
 			isolated: true,
 			parent: Some(parent.clone()),
+			buckets: parent.buckets.clone(),
 		}
 	}
 
@@ -183,6 +191,7 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			parent: None,
+			buckets: from.buckets.clone(),
 		}
 	}
 
@@ -194,6 +203,7 @@ impl MutableContext {
 		cache: Arc<DatastoreCache>,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
+		buckets: Arc<BucketConnections>,
 	) -> Result<MutableContext, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -213,6 +223,7 @@ impl MutableContext {
 			temporary_directory,
 			transaction: None,
 			isolated: false,
+			buckets: Some(buckets),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -352,41 +363,46 @@ impl MutableContext {
 
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
-	/// Note regarding `check_deadline`:
+	/// Note regarding `deep_check`:
 	/// Checking Instant::now() takes tens to hundreds of nanoseconds
 	/// Checking an AtomicBool takes a single-digit nanoseconds.
 	/// We may not want to check for the deadline on every call.
-	/// An iteration loop may want to check it every 10 or 100 calls. Eg.:
-	/// ctx.done(count % 100 == 0)
-	pub(crate) fn done(&self, check_deadline: bool) -> Option<Reason> {
+	/// An iteration loop may want to check it every 10 or 100 calls.
+	/// Eg.: ctx.done(count % 100 == 0)
+	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>, Error> {
 		match self.deadline {
-			Some(deadline) if check_deadline && deadline <= Instant::now() => {
-				Some(Reason::Timedout)
+			Some(deadline) if deep_check && deadline <= Instant::now() => {
+				Ok(Some(Reason::Timedout))
 			}
-			_ if self.cancelled.load(Ordering::Relaxed) => Some(Reason::Canceled),
-			_ => match &self.parent {
-				Some(ctx) => ctx.done(check_deadline),
-				_ => None,
-			},
+			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(Reason::Canceled)),
+			_ => {
+				if deep_check && ALLOC.is_beyond_threshold() {
+					return Err(Error::QueryBeyondMemoryThreshold);
+				}
+				match &self.parent {
+					Some(ctx) => ctx.done(deep_check),
+					_ => Ok(None),
+				}
+			}
 		}
 	}
 
 	/// Check if the context is ok to continue.
-	pub(crate) fn is_ok(&self, check_deadline: bool) -> bool {
-		self.done(check_deadline).is_none()
+	pub(crate) fn is_ok(&self, deep_check: bool) -> Result<bool, Error> {
+		Ok(self.done(deep_check)?.is_none())
 	}
 
 	/// Check if there is some reason to stop processing the current query.
 	///
 	/// Returns true when the query is canceled or if check_deadline is true when the query
 	/// deadline is met.
-	pub(crate) fn is_done(&self, check_deadline: bool) -> bool {
-		self.done(check_deadline).is_some()
+	pub(crate) fn is_done(&self, deep_check: bool) -> Result<bool, Error> {
+		Ok(self.done(deep_check)?.is_some())
 	}
 
 	/// Check if the context is not ok to continue, because it timed out.
-	pub(crate) fn is_timedout(&self) -> bool {
-		matches!(self.done(true), Some(Reason::Timedout))
+	pub(crate) fn is_timedout(&self) -> Result<bool, Error> {
+		Ok(matches!(self.done(true)?, Some(Reason::Timedout)))
 	}
 
 	#[cfg(storage)]
@@ -471,6 +487,44 @@ impl MutableContext {
 				Ok(())
 			}
 			_ => Err(Error::InvalidUrl(url.to_string())),
+		}
+	}
+
+	pub(crate) fn get_buckets(&self) -> Option<Arc<BucketConnections>> {
+		self.buckets.clone()
+	}
+
+	/// Obtain the connection for a bucket
+	pub(crate) async fn get_bucket_store(
+		&self,
+		ns: &str,
+		db: &str,
+		bu: &str,
+	) -> Result<Arc<dyn ObjectStore>, Error> {
+		// Do we have a buckets context?
+		if let Some(buckets) = &self.buckets {
+			// Attempt to obtain an existing bucket connection
+			let key = BucketConnectionKey::new(ns, db, bu);
+			if let Some(bucket_ref) = buckets.get(&key) {
+				Ok((*bucket_ref).clone())
+			} else {
+				// Obtain the bucket definition
+				let tx = self.tx();
+				let bd = tx.get_db_bucket(ns, db, bu).await?;
+
+				// Connect to the bucket
+				let store = if let Some(ref backend) = bd.backend {
+					buc::connect(backend, false, bd.readonly).await?
+				} else {
+					buc::connect_global(ns, db, bu).await?
+				};
+
+				// Persist the bucket connection
+				buckets.insert(key, store.clone());
+				Ok(store)
+			}
+		} else {
+			Err(Error::BucketUnavailable(bu.into()))
 		}
 	}
 }

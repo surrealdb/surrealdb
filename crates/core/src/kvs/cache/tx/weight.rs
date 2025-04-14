@@ -6,7 +6,7 @@ use quick_cache::Weighter;
 pub(crate) struct Weight;
 
 impl Weighter<Key, Entry> for Weight {
-	fn weight(&self, _key: &Key, val: &Entry) -> u32 {
+	fn weight(&self, _key: &Key, val: &Entry) -> u64 {
 		match val {
 			// Value entries all have the same weight,
 			// and can be evicted whenever necessary.

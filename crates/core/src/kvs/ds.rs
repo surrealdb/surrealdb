@@ -2,6 +2,7 @@ use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
+use crate::buc::BucketConnections;
 use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
@@ -31,6 +32,7 @@ use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
+use dashmap::DashMap;
 use futures::{Future, Stream};
 use reblessive::TreeStack;
 use std::fmt;
@@ -90,6 +92,8 @@ pub struct Datastore {
 	#[cfg(storage)]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
+	// Map of bucket connections
+	buckets: Arc<BucketConnections>,
 }
 
 #[derive(Clone)]
@@ -152,11 +156,6 @@ impl TransactionFactory {
 				let tx = v.transaction(write, lock).await?;
 				(super::tr::Inner::SurrealKV(tx), true, false)
 			}
-			#[cfg(feature = "kv-surrealcs")]
-			DatastoreFlavor::SurrealCS(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::SurrealCS(tx), false, false)
-			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
@@ -187,8 +186,6 @@ pub(super) enum DatastoreFlavor {
 	FoundationDB(super::fdb::Datastore),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Datastore),
-	#[cfg(feature = "kv-surrealcs")]
-	SurrealCS(super::surrealcs::Datastore),
 }
 
 impl fmt::Display for Datastore {
@@ -207,8 +204,6 @@ impl fmt::Display for Datastore {
 			DatastoreFlavor::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(_) => write!(f, "surrealkv"),
-			#[cfg(feature = "kv-surrealcs")]
-			DatastoreFlavor::SurrealCS(_) => write!(f, "surrealcs"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -335,22 +330,6 @@ impl Datastore {
 				#[cfg(not(feature = "kv-surrealkv"))]
                 return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate a SurrealCS datastore
-			s if s.starts_with("surrealcs:") => {
-				#[cfg(feature = "kv-surrealcs")]
-				{
-					info!(target: TARGET, "Starting kvs store at {}", path);
-					let s = s.trim_start_matches("surrealcs://");
-					let s = s.trim_start_matches("surrealcs:");
-					let v =
-						super::surrealcs::Datastore::new(s).await.map(DatastoreFlavor::SurrealCS);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {}", path);
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-surrealcs"))]
-				return Err(Error::Ds("Cannot connect to the `surrealcs` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
 				#[cfg(feature = "kv-indxdb")]
@@ -425,6 +404,7 @@ impl Datastore {
 				#[cfg(storage)]
 				temporary_directory: None,
 				cache: Arc::new(DatastoreCache::new()),
+				buckets: Arc::new(DashMap::new()),
 			}
 		})
 	}
@@ -450,6 +430,7 @@ impl Datastore {
 			temporary_directory: self.temporary_directory,
 			transaction_factory: self.transaction_factory,
 			cache: Arc::new(DatastoreCache::new()),
+			buckets: Arc::new(DashMap::new()),
 		}
 	}
 
@@ -757,8 +738,6 @@ impl Datastore {
 			DatastoreFlavor::FoundationDB(v) => v.shutdown().await,
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => v.shutdown().await,
-			#[cfg(feature = "kv-surrealcs")]
-			DatastoreFlavor::SurrealCS(v) => v.shutdown().await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -860,6 +839,7 @@ impl Datastore {
 			define_api_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),
+			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
 			..Default::default()
 		};
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
@@ -1239,6 +1219,7 @@ impl Datastore {
 			self.index_builder.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
+			self.buckets.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

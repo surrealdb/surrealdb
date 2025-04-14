@@ -70,7 +70,7 @@ impl ForeachStatement {
 
 		// Loop over the values
 		for v in iter {
-			if ctx.is_timedout() {
+			if ctx.is_timedout()? {
 				return Err(ControlFlow::from(Error::QueryTimedout));
 			}
 			// Duplicate context
