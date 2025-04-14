@@ -160,15 +160,15 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 		match min {
 			min if (MINIMUM..=LIMIT).contains(&min) => match max {
 				max if min <= max && max <= LIMIT => (min, max),
-				max if max >= 1 && max <= min => (max, min),
+				max if max >= MINIMUM && max <= min => (max, min),
 				_ => return Err(Error::InvalidArguments {
 					name: String::from("rand::time"),
-					message: format!("To generate a time between X and Y seconds, the 2 arguments must be non-negative numbers, the second argument must be equal to or greater than the first, and both must be between {MINIMUM} and {LIMIT}."),
+					message: format!("To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."),
 				}),
 			},
 			_ => return Err(Error::InvalidArguments {
 				name: String::from("rand::time"),
-				message: format!("To generate a time between X and Y seconds, the 2 arguments must be non-negative numbers and between {MINIMUM} and {LIMIT}."),
+				message: format!("To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."),
 			}),
 		}
 	} else {
