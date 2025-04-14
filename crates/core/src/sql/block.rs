@@ -1,7 +1,6 @@
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::rebuild::RebuildStatement;
@@ -18,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
+
+use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 
@@ -53,7 +54,7 @@ impl Block {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		// Duplicate context
 		let mut ctx = MutableContext::new(ctx).freeze();
 		// Loop over the statements
@@ -122,10 +123,10 @@ impl Block {
 				Entry::Value(v) => {
 					if i == self.len() - 1 {
 						// If the last entry then return the value
-						return v.compute_unbordered(stk, &ctx, opt, doc).await;
+						return v.compute(stk, &ctx, opt, doc).await;
 					} else {
 						// Otherwise just process the value
-						v.compute_unbordered(stk, &ctx, opt, doc).await?;
+						v.compute(stk, &ctx, opt, doc).await?;
 					}
 				}
 			}

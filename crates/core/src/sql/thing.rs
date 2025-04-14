@@ -7,7 +7,7 @@ use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode as _;
-use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
+use crate::sql::{escape::EscapeRid, id::Id, Strand, Value};
 use crate::syn;
 use futures::StreamExt;
 use reblessive::tree::Stk;
@@ -171,15 +171,11 @@ impl Thing {
 		let txn = ctx.tx();
 		let mut stream = txn.stream_keys(range, None, ScanDirection::Forward);
 
-		// Collect the keys from the stream into a vec
-		let mut keys: Vec<Vec<u8>> = vec![];
-		while let Some(res) = stream.next().await {
-			keys.push(res?);
-		}
-
 		let mut ids = Vec::new();
-		for x in keys.iter() {
-			let key = Ref::decode(x)?;
+		while let Some(res) = stream.next().await {
+			yield_now!();
+			let x = res?;
+			let key = Ref::decode(&x)?;
 			ids.push(Thing {
 				tb: key.ft.to_string(),
 				id: key.fk,
@@ -286,7 +282,7 @@ impl Thing {
 
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", escape_rid(&self.tb), self.id)
+		write!(f, "{}:{}", EscapeRid(&self.tb), self.id)
 	}
 }
 

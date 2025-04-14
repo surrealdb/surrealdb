@@ -7,6 +7,7 @@ use crate::sql::part::DestructurePart;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
+use crate::sql::FlowResultExt as _;
 use reblessive::tree::Stk;
 use std::collections::HashSet;
 
@@ -63,7 +64,7 @@ impl Value {
 							_ => Ok(()),
 						},
 					},
-					Part::Value(x) => match x.compute(stk, ctx, opt, None).await? {
+					Part::Value(x) => match x.compute(stk, ctx, opt, None).await.catch_return()? {
 						Value::Strand(f) => match path.len() {
 							1 => {
 								v.remove(f.as_str());
@@ -171,7 +172,11 @@ impl Value {
 							for (i, v) in v.iter().enumerate() {
 								// TODO: Can we avoid the cloning?
 								let cur = v.clone().into();
-								if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
+								if w.compute(stk, ctx, opt, Some(&cur))
+									.await
+									.catch_return()?
+									.is_truthy()
+								{
 									m.insert(i);
 								};
 							}
@@ -185,7 +190,11 @@ impl Value {
 								// Store the elements and positions to update
 								for (i, o) in v.iter_mut().enumerate() {
 									let cur = o.clone().into();
-									if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
+									if w.compute(stk, ctx, opt, Some(&cur))
+										.await
+										.catch_return()?
+										.is_truthy()
+									{
 										a.push(o.clone());
 										p.push(i);
 									}
@@ -209,7 +218,11 @@ impl Value {
 								let path = path.next();
 								for v in v.iter_mut() {
 									let cur = v.clone().into();
-									if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
+									if w.compute(stk, ctx, opt, Some(&cur))
+										.await
+										.catch_return()?
+										.is_truthy()
+									{
 										stk.run(|stk| v.del(stk, ctx, opt, path)).await?;
 									}
 								}
@@ -217,7 +230,7 @@ impl Value {
 							}
 						},
 					},
-					Part::Value(x) => match x.compute(stk, ctx, opt, None).await? {
+					Part::Value(x) => match x.compute(stk, ctx, opt, None).await.catch_return()? {
 						Value::Number(i) => match path.len() {
 							1 => {
 								if v.len() > i.to_usize() {

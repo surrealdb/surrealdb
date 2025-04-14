@@ -3,10 +3,10 @@ use reblessive::Stk;
 use crate::{
 	sql::{
 		statements::{
-			remove::RemoveAnalyzerStatement, RemoveAccessStatement, RemoveDatabaseStatement,
-			RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
-			RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
-			RemoveUserStatement,
+			remove::{RemoveAnalyzerStatement, RemoveBucketStatement},
+			RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
+			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
+			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveUserStatement,
 		},
 		Param,
 	},
@@ -223,6 +223,20 @@ impl Parser<'_> {
 				RemoveStatement::User(RemoveUserStatement {
 					name,
 					base,
+					if_exists,
+				})
+			}
+			t!("BUCKET") => {
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+				let name = self.next_token_value()?;
+
+				RemoveStatement::Bucket(RemoveBucketStatement {
+					name,
 					if_exists,
 				})
 			}

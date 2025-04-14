@@ -1,4 +1,5 @@
 use crate::api::err::ApiError;
+use crate::buc::BucketOperation;
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
@@ -32,21 +33,6 @@ pub enum Error {
 	#[doc(hidden)]
 	#[error("Conditional clause is not truthy")]
 	Ignore,
-
-	/// This error is used for breaking a loop in a foreach statement
-	#[doc(hidden)]
-	#[error("Break statement has been reached")]
-	Break,
-
-	/// This error is used for skipping a loop in a foreach statement
-	#[doc(hidden)]
-	#[error("Continue statement has been reached")]
-	Continue,
-
-	/// This error is used for retrying document processing with a new id
-	#[doc(hidden)]
-	#[error("This document should be retried with a new ID")]
-	RetryWithId(Thing),
 
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
@@ -281,6 +267,10 @@ pub enum Error {
 	#[error("Invalid timeout: {0:?} seconds")]
 	InvalidTimeout(u64),
 
+	/// Invalid timeout
+	#[error("Invalid control flow statement, break or continue statement found outside of loop.")]
+	InvalidControlFlow,
+
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
 	QueryTimedout,
@@ -288,6 +278,10 @@ pub enum Error {
 	/// The query did not execute, because the transaction was cancelled
 	#[error("The query was not executed due to a cancelled transaction")]
 	QueryCancelled,
+
+	/// The query did not execute, because the memory threshold has been reached
+	#[error("The query was not executed due to the memory threshold being reached")]
+	QueryBeyondMemoryThreshold,
 
 	/// The query did not execute, because the transaction has failed
 	#[error("The query was not executed due to a failed transaction")]
@@ -405,6 +399,12 @@ pub enum Error {
 	#[error("The analyzer '{name}' does not exist")]
 	AzNotFound {
 		name: String,
+	},
+
+	/// The requested api does not exist
+	#[error("The bucket '{value}' does not exist")]
+	BuNotFound {
+		value: String,
 	},
 
 	/// The requested analyzer does not exist
@@ -561,6 +561,13 @@ pub enum Error {
 	#[error("You don't have permission to run the fn::{name} function")]
 	FunctionPermissions {
 		name: String,
+	},
+
+	/// The permissions do not allow this query to be run on this table
+	#[error("You don't have permission to {op} this file in the `{name}` bucket")]
+	BucketPermissions {
+		name: String,
+		op: BucketOperation,
 	},
 
 	/// The specified table can not be written as it is setup as a foreign table view
@@ -922,6 +929,12 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The requested api already exists
+	#[error("The bucket '{value}' already exists")]
+	BuAlreadyExists {
+		value: String,
+	},
+
 	/// The requested database already exists
 	#[error("The database '{name}' already exists")]
 	DbAlreadyExists {
@@ -1020,6 +1033,10 @@ pub enum Error {
 	IndexAlreadyBuilding {
 		name: String,
 	},
+
+	/// A database index entry for the specified table is already building
+	#[error("Index building has been cancelled")]
+	IndexingBuildingCancelled,
 
 	/// The token has expired
 	#[error("The token has expired")]
@@ -1147,13 +1164,6 @@ pub enum Error {
 	#[error("Found {value} for the Record ID but this is not a valid table name")]
 	TbInvalid {
 		value: String,
-	},
-
-	/// This error is used for breaking execution when a value is returned
-	#[doc(hidden)]
-	#[error("Return statement has been reached")]
-	Return {
-		value: Value,
 	},
 
 	/// A destructuring variant was used in a context where it is not supported
@@ -1298,6 +1308,33 @@ pub enum Error {
 
 	#[error("File access denied: {0}")]
 	FileAccessDenied(String),
+
+	#[error("No global bucket has been configured")]
+	NoGlobalBucket,
+
+	#[error("Bucket `{0}` is unavailable")]
+	BucketUnavailable(String),
+
+	#[error("File key `{0}` cannot be parsed into a path")]
+	InvalidBucketKey(String),
+
+	#[error("Bucket is unavailable")]
+	GlobalBucketEnforced,
+
+	#[error("Bucket url could not be processed: {0}")]
+	InvalidBucketUrl(String),
+
+	#[error("Bucket backend is not supported")]
+	UnsupportedBackend,
+
+	#[error("Write operation is not supported, as bucket `{0}` is in read-only mode")]
+	ReadonlyBucket(String),
+
+	#[error("Operation for bucket `{0}` failed: {1}")]
+	ObjectStoreFailure(String, String),
+
+	#[error("Failed to connect to bucket: {0}")]
+	BucketConnectionFailed(String),
 }
 
 impl From<Error> for String {

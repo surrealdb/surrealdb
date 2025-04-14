@@ -55,7 +55,10 @@ db-path = "~/.cargo/advisory-db"
 # The lint level for crates that have been yanked.
 yanked = "warn"
 # A list of security advisory identifiers to ignore.
-ignore = []
+# TODOs:
+# - remove RUSTSEC-2025-0014 once https://github.com/apache/arrow-rs/pull/7261 is released
+# - for RUSTSEC-2024-0436, track https://github.com/3Hren/msgpack-rust/issues/365
+ignore = ["RUSTSEC-2025-0014", "RUSTSEC-2024-0436"]
 
 # --------------------------------------------------
 # LICENSES
@@ -96,20 +99,12 @@ name = "surrealdb"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "surrealcs"
-allow = ["BUSL-1.1"]
-
-[[licenses.exceptions]]
 name = "surrealdb-core"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
 name = "surrealml-core"
 allow = ["Apache-2.0"]
-
-[[licenses.exceptions]]
-name = "surrealcs-kernel"
-allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
 name = "unicode-ident"

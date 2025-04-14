@@ -2,10 +2,10 @@
 [test]
 
 [[test.results]]
-value = "NONE"
+error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 [[test.results]]
-value = "[{ id: test:1 }, { id: test:2 }, { id: test:3 }, { id: test:4 }, { id: test:6 }, { id: test:7 }, { id: test:8 }, { id: test:9 }]"
+value = "[]"
 
 */
 

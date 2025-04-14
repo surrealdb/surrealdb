@@ -22,7 +22,6 @@ use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
 use surrealdb::rpc::format::cbor;
 use surrealdb::rpc::format::json;
-use surrealdb::rpc::format::msgpack;
 use surrealdb::rpc::format::revision;
 use surrealdb::rpc::format::Format;
 use surrealdb::sql::statements::FindApi;
@@ -146,9 +145,8 @@ async fn handler(
 				}
 
 				let (header, val) = match format {
-					Format::Json => ("application/cbor", json::res(body)?),
+					Format::Json => ("application/json", json::res(body)?),
 					Format::Cbor => ("application/cbor", cbor::res(body)?),
-					Format::Msgpack => ("application/pack", msgpack::res(body)?),
 					Format::Revision => ("application/surrealdb", revision::res(body)?),
 					_ => {
 						return Err(Error::Api(ApiError::Unreachable(

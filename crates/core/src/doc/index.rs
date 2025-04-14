@@ -13,7 +13,7 @@ use crate::kvs::TransactionType;
 use crate::sql::array::Array;
 use crate::sql::index::{HnswParams, Index, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Part, Thing, Value};
+use crate::sql::{FlowResultExt as _, Part, Thing, Value};
 use reblessive::tree::Stk;
 
 impl Document {
@@ -114,7 +114,7 @@ impl Document {
 		}
 		let mut o = Vec::with_capacity(ix.cols.len());
 		for i in ix.cols.iter() {
-			let v = i.compute(stk, ctx, opt, Some(doc)).await?;
+			let v = i.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
 			o.push(v);
 		}
 		Ok(Some(o))

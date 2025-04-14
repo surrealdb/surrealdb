@@ -39,6 +39,16 @@ impl Parser<'_> {
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
 				Ok(Value::Uuid(self.next_token_value()?))
 			}
+			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
+				if !self.settings.files_enabled {
+					unexpected!(self, token, "the experimental files feature to be enabled");
+				}
+
+				Ok(Value::File(self.next_token_value()?))
+			}
+			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
+				Ok(Value::Bytes(self.next_token_value()?))
+			}
 			t!("$param") => {
 				let value = Value::Param(self.next_token_value()?);
 				let value = self.try_parse_inline(ctx, &value).await?.unwrap_or(value);
@@ -236,6 +246,16 @@ impl Parser<'_> {
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
 				Value::Uuid(self.next_token_value()?)
 			}
+			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
+				Value::Bytes(self.next_token_value()?)
+			}
+			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
+				if !self.settings.files_enabled {
+					unexpected!(self, token, "the experimental files feature to be enabled");
+				}
+
+				Value::File(self.next_token_value()?)
+			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;
 				if self.settings.legacy_strands {
@@ -327,7 +347,7 @@ impl Parser<'_> {
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
-						self.parse_thing_or_range(ctx, str).await?.into()
+						self.parse_thing_or_range(ctx, str).await.map(Value::Thing)?
 					}
 					_ => {
 						if self.table_as_field {

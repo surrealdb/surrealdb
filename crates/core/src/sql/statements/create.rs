@@ -3,7 +3,7 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::{Data, Output, Timeout, Value, Values, Version};
+use crate::sql::{Data, FlowResultExt as _, Output, Timeout, Value, Values, Version};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -66,7 +66,7 @@ impl CreateStatement {
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the create targets
 		for w in self.what.0.iter() {
-			let v = w.compute(stk, &ctx, opt, doc).await?;
+			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
 			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
@@ -81,7 +81,7 @@ impl CreateStatement {
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
-		if ctx.is_timedout() {
+		if ctx.is_timedout().await? {
 			return Err(Error::QueryTimedout);
 		}
 		// Output the results

@@ -311,6 +311,11 @@ pub async fn process_tbs(
 			let Some(ref kind) = fd.kind else {
 				continue;
 			};
+			if fd.name.is_id() {
+				// We have already defined "id"
+				// so we don't take any new definition for it.
+				continue;
+			};
 			let fd_name = Name::new(fd.name.to_string());
 			let fd_type = kind_to_type(kind.clone(), types)?;
 			table_orderable = table_orderable.item(fd_name.to_string());
@@ -479,6 +484,7 @@ fn filter_from_type(
 		Kind::Point => {}
 		Kind::String => {}
 		Kind::Uuid => {}
+		Kind::Regex => {}
 		Kind::Record(_) => {}
 		Kind::Geometry(_) => {}
 		Kind::Option(_) => {}
@@ -489,6 +495,7 @@ fn filter_from_type(
 		Kind::Range => {}
 		Kind::Literal(_) => {}
 		Kind::References(_, _) => {}
+		Kind::File(_) => {}
 	};
 	Ok(filter)
 }

@@ -10,7 +10,7 @@ use futures::StreamExt;
 use http::header::CONTENT_TYPE;
 
 use crate::err::Error;
-use crate::rpc::format::{cbor, json, msgpack, revision};
+use crate::rpc::format::{cbor, json, revision};
 use crate::sql::Bytesize;
 use crate::sql::Kind;
 use crate::sql::Value;
@@ -56,6 +56,7 @@ impl ApiBody {
 				let mut bytes: Vec<u8> = Vec::new();
 
 				while let Some(chunk) = stream.next().await {
+					yield_now!();
 					let chunk = chunk.map_err(|_| Error::ApiError(ApiError::InvalidRequestBody))?;
 					size += chunk.len() as u64;
 					if size > max.0 {
@@ -104,7 +105,6 @@ impl ApiBody {
 				let parsed = match content_type {
 					Some("application/json") => json::parse_value(&bytes),
 					Some("application/cbor") => cbor::parse_value(bytes),
-					Some("application/pack") => msgpack::parse_value(bytes),
 					Some("application/surrealdb") => revision::parse_value(bytes),
 					_ => return Ok(Value::Bytes(crate::sql::Bytes(bytes))),
 				};
