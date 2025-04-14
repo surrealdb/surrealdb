@@ -1,4 +1,4 @@
-#![cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+#![cfg(not(target_family = "wasm"))]
 
 pub mod cache;
 pub mod error;

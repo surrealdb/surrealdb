@@ -94,8 +94,6 @@ jobs:
 
       - name: Create version bump branch
         if: ${{ steps.bump.outputs.beta-num == '1' }}
-        env:
-          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: |
           set -x
 

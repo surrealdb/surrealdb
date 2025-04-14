@@ -10,14 +10,12 @@ use surrealdb_core::rpc::RpcProtocolV2;
 use surrealdb_core::sql::Array;
 use tokio::sync::Semaphore;
 
-#[cfg(surrealdb_unstable)]
 use surrealdb_core::gql::{Pessimistic, SchemaCache};
 
 pub struct Http {
 	pub kvs: Arc<Datastore>,
 	pub lock: Arc<Semaphore>,
 	pub session: Arc<Session>,
-	#[cfg(surrealdb_unstable)]
 	pub gql_schema: SchemaCache<Pessimistic>,
 }
 
@@ -27,7 +25,6 @@ impl Http {
 			kvs: kvs.clone(),
 			lock: Arc::new(Semaphore::new(1)),
 			session: Arc::new(session),
-			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(kvs.clone()),
 		}
 	}
@@ -67,10 +64,8 @@ impl RpcContext for Http {
 	// ------------------------------
 
 	/// GraphQL queries are enabled on HTTP
-	#[cfg(surrealdb_unstable)]
 	const GQL_SUPPORT: bool = true;
 
-	#[cfg(surrealdb_unstable)]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema
 	}
