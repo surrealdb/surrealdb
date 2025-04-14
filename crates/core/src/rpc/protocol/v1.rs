@@ -791,7 +791,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Specify the query variables
 		let vars = match vars {
-			Value::Object(mut v) => Some(mrg! {v.0, self.session().parameters.clone()}),
+			Value::Object(mut v) => Some(mrg! {v.0, self.session().parameters}),
 			Value::None | Value::Null => Some(self.session().parameters.clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};
