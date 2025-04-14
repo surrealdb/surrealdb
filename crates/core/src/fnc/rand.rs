@@ -146,31 +146,36 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 			return Err(Error::InvalidArguments {
 				name: String::from("rand::time"),
 				message: String::from(
-					"Expected an optional pair of datetimes or pair of i64 numbers to be passed",
+					"Expected two arguments of type datetime or int",
 				),
 			})
 		}
 	};
+
+	// Set the minimum valid seconds
+	const MINIMUM: i64 = -8334601228800;
 	// Set the maximum valid seconds
 	const LIMIT: i64 = 8210266876799;
+
 	// Check the function input arguments
 	let (min, max) = if let Some((min, max)) = range {
 		match min {
-			min if (0..=LIMIT).contains(&min) => match max {
+			min if (MINIMUM..=LIMIT).contains(&min) => match max {
 				max if min <= max && max <= LIMIT => (min, max),
 				max if max >= 1 && max <= min => (max, min),
 				_ => return Err(Error::InvalidArguments {
 					name: String::from("rand::time"),
-					message: format!("To generate a time between X and Y seconds, the 2 arguments must be non-negative numbers, the second argument must be equal to or greater than the first, and no higher than {LIMIT}."),
+					message: format!("To generate a time between X and Y seconds, the 2 arguments must be non-negative numbers, the second argument must be equal to or greater than the first, and both must be between {MINIMUM} and {LIMIT}."),
 				}),
 			},
 			_ => return Err(Error::InvalidArguments {
 				name: String::from("rand::time"),
-				message: format!("To generate a time between X and Y seconds, the 2 arguments must be non-negative numbers and no higher than {LIMIT}."),
+				message: format!("To generate a time between X and Y seconds, the 2 arguments must be non-negative numbers and between {MINIMUM} and {LIMIT}."),
 			}),
 		}
 	} else {
-		(0, LIMIT)
+		// Datetime between d'0000-01-01T00:00:00Z' and d'9999-12-31T23:59:59Z'
+		(-62167219200, 253402300799)
 	};
 	// Generate the random time, try up to 5 times
 	for _ in 0..5 {
