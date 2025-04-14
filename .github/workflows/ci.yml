@@ -266,13 +266,13 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       
-      - name: Install ONNX Runtime (1.20.0)
-        run: |
-          wget https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-linux-x64-1.20.0.tgz
-          tar -xzf onnxruntime-linux-x64-1.20.0.tgz
-          sudo cp onnxruntime-linux-x64-1.20.0/lib/libonnxruntime.so.1.20.0 /usr/lib/
-          sudo ln -sf /usr/lib/libonnxruntime.so.1.20.0 /usr/lib/libonnxruntime.so
-          sudo ldconfig
+      # - name: Install ONNX Runtime (1.20.0)
+      #   run: |
+      #     wget https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-linux-x64-1.20.0.tgz
+      #     tar -xzf onnxruntime-linux-x64-1.20.0.tgz
+      #     sudo cp onnxruntime-linux-x64-1.20.0/lib/libonnxruntime.so.1.20.0 /usr/lib/
+      #     sudo ln -sf /usr/lib/libonnxruntime.so.1.20.0 /usr/lib/libonnxruntime.so
+      #     sudo ldconfig
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -303,7 +303,7 @@ jobs:
 
   ml-integration:
     name: ML integration tests
-    runs-on: [runner-amd64-large]
+    runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -320,7 +320,7 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Run ML integration tests
-        run: cargo make ci-ml-integration
+        run: export ORT_LIB_LOCATION=./target/debug/libonnxruntime.so & cargo make ci-ml-integration
 
   graphql-integration:
     name: GraphQL integration
