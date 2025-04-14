@@ -145,9 +145,7 @@ pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
 		_ => {
 			return Err(Error::InvalidArguments {
 				name: String::from("rand::time"),
-				message: String::from(
-					"Expected two arguments of type datetime or int",
-				),
+				message: String::from("Expected two arguments of type datetime or int"),
 			})
 		}
 	};
