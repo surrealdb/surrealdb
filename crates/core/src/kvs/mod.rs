@@ -34,7 +34,6 @@ mod fdb;
 mod indxdb;
 mod mem;
 mod rocksdb;
-mod surrealcs;
 mod surrealkv;
 mod tikv;
 
@@ -42,12 +41,7 @@ pub(crate) mod cache;
 
 #[cfg(not(target_family = "wasm"))]
 mod index;
-#[cfg(any(
-	feature = "kv-tikv",
-	feature = "kv-fdb",
-	feature = "kv-indxdb",
-	feature = "kv-surrealcs",
-))]
+#[cfg(any(feature = "kv-tikv", feature = "kv-fdb", feature = "kv-indxdb",))]
 mod savepoint;
 #[cfg(test)]
 mod tests;

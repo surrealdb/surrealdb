@@ -6,6 +6,6 @@ pub struct Package;
 
 impl_module_def!(
 	Package,
-	"array",
+	"bytes",
 	"len" => run
 );
