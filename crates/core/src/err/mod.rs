@@ -1,4 +1,5 @@
 use crate::api::err::ApiError;
+use crate::buc::BucketOperation;
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
@@ -400,6 +401,12 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The requested api does not exist
+	#[error("The bucket '{value}' does not exist")]
+	BuNotFound {
+		value: String,
+	},
+
 	/// The requested analyzer does not exist
 	#[error("The index '{name}' does not exist")]
 	IxNotFound {
@@ -554,6 +561,13 @@ pub enum Error {
 	#[error("You don't have permission to run the fn::{name} function")]
 	FunctionPermissions {
 		name: String,
+	},
+
+	/// The permissions do not allow this query to be run on this table
+	#[error("You don't have permission to {op} this file in the `{name}` bucket")]
+	BucketPermissions {
+		name: String,
+		op: BucketOperation,
 	},
 
 	/// The specified table can not be written as it is setup as a foreign table view
@@ -913,6 +927,12 @@ pub enum Error {
 	#[error("The analyzer '{name}' already exists")]
 	AzAlreadyExists {
 		name: String,
+	},
+
+	/// The requested api already exists
+	#[error("The bucket '{value}' already exists")]
+	BuAlreadyExists {
+		value: String,
 	},
 
 	/// The requested database already exists
@@ -1288,6 +1308,33 @@ pub enum Error {
 
 	#[error("File access denied: {0}")]
 	FileAccessDenied(String),
+
+	#[error("No global bucket has been configured")]
+	NoGlobalBucket,
+
+	#[error("Bucket `{0}` is unavailable")]
+	BucketUnavailable(String),
+
+	#[error("File key `{0}` cannot be parsed into a path")]
+	InvalidBucketKey(String),
+
+	#[error("Bucket is unavailable")]
+	GlobalBucketEnforced,
+
+	#[error("Bucket url could not be processed: {0}")]
+	InvalidBucketUrl(String),
+
+	#[error("Bucket backend is not supported")]
+	UnsupportedBackend,
+
+	#[error("Write operation is not supported, as bucket `{0}` is in read-only mode")]
+	ReadonlyBucket(String),
+
+	#[error("Operation for bucket `{0}` failed: {1}")]
+	ObjectStoreFailure(String, String),
+
+	#[error("Failed to connect to bucket: {0}")]
+	BucketConnectionFailed(String),
 }
 
 impl From<Error> for String {

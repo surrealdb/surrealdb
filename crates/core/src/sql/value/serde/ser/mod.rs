@@ -61,6 +61,7 @@ where
 		sql::Query as v => Ok(v.into()),
 		sql::Model as v => Ok(v.into()),
 		sql::Closure as v => Ok(v.into()),
+		sql::File as v => Ok(v.into()),
 		value => Serializer::new().serialize(value)?.try_into(),
 	})
 }

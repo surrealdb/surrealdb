@@ -8,7 +8,6 @@ pub enum ContentType {
 	TextPlain,
 	ApplicationJson,
 	ApplicationCbor,
-	ApplicationPack,
 	ApplicationOctetStream,
 	Surrealdb,
 }
@@ -19,7 +18,6 @@ impl std::fmt::Display for ContentType {
 			ContentType::TextPlain => write!(f, "text/plain"),
 			ContentType::ApplicationJson => write!(f, "application/json"),
 			ContentType::ApplicationCbor => write!(f, "application/cbor"),
-			ContentType::ApplicationPack => write!(f, "application/pack"),
 			ContentType::ApplicationOctetStream => write!(f, "application/octet-stream"),
 			ContentType::Surrealdb => write!(f, "application/surrealdb"),
 		}
@@ -43,7 +41,6 @@ impl Header for ContentType {
 			"text/plain" => Ok(ContentType::TextPlain),
 			"application/json" => Ok(ContentType::ApplicationJson),
 			"application/cbor" => Ok(ContentType::ApplicationCbor),
-			"application/pack" => Ok(ContentType::ApplicationPack),
 			"application/octet-stream" => Ok(ContentType::ApplicationOctetStream),
 			"application/surrealdb" => Ok(ContentType::Surrealdb),
 			// TODO: Support more (all?) mime-types
