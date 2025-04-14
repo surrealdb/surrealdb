@@ -122,7 +122,6 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("encoding::base64::decode") => PathKind::Function,
 		UniCase::ascii("encoding::base64::encode") => PathKind::Function,
-		UniCase::ascii("encoding::base64::encode_padded") => PathKind::Function,
 		UniCase::ascii("encoding::cbor::decode") => PathKind::Function,
 		UniCase::ascii("encoding::cbor::encode") => PathKind::Function,
 		//

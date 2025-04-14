@@ -16,7 +16,7 @@ value = "'aGVsbG8='"
 */
 
 encoding::base64::encode(<bytes>"");
-encoding::base64::encode(<bytes>"hello");
+encoding::base64::encode(<bytes>"hello", false);
 
-encoding::base64::encode_padded(<bytes>"");
-encoding::base64::encode_padded(<bytes>"hello");
+encoding::base64::encode(<bytes>"", true);
+encoding::base64::encode(<bytes>"hello", true);

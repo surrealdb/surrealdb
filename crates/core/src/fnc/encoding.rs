@@ -16,13 +16,14 @@ pub mod base64 {
 	);
 
 	/// Encodes a `Bytes` value to a base64 string without padding.
-	pub fn encode((arg,): (Bytes,)) -> Result<Value, Error> {
-		Ok(Value::from(STANDARD_NO_PAD.encode(&*arg)))
-	}
-
-	/// Encodes a `Bytes` value to a base64 string with padding.
-	pub fn encode_padded((arg,): (Bytes,)) -> Result<Value, Error> {
-		Ok(Value::from(STANDARD.encode(&*arg)))
+	pub fn encode((arg, padded): (Bytes, Option<bool>)) -> Result<Value, Error> {
+		let padded = padded.unwrap_or_default();
+		let engine = if padded {
+			STANDARD
+		} else {
+			STANDARD_NO_PAD
+		};
+		Ok(Value::from(engine.encode(&*arg)))
 	}
 
 	/// Decodes a base64 string to a `Bytes` value. It accepts both padded and
@@ -83,14 +84,17 @@ mod tests {
 	#[test]
 	fn test_base64_encode() {
 		let input = Bytes(b"hello".to_vec());
-		let result = base64::encode((input,)).unwrap();
+		let result = base64::encode((input.clone(), None)).unwrap();
+		assert_eq!(result, Value::from("aGVsbG8"));
+
+		let result = base64::encode((input, Some(false))).unwrap();
 		assert_eq!(result, Value::from("aGVsbG8"));
 	}
 
 	#[test]
 	fn test_base64_encode_padded() {
 		let input = Bytes(b"hello".to_vec());
-		let result = base64::encode_padded((input,)).unwrap();
+		let result = base64::encode((input, Some(true))).unwrap();
 		assert_eq!(result, Value::from("aGVsbG8="));
 	}
 

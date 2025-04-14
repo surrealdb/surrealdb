@@ -226,7 +226,6 @@ pub fn synchronous(
 		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
-		"encoding::base64::encode_padded" => encoding::base64::encode_padded,
 		"encoding::cbor::decode" => encoding::cbor::decode,
 		"encoding::cbor::encode" => encoding::cbor::encode,
 		//
