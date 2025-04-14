@@ -702,7 +702,7 @@ pub async fn idiom(
 				"no such method found for the object type",
 				//
 				"entries" => object::entries,
-				// "extend" => object::extend,
+				"extend" => object::extend,
 				"is_empty" => object::is_empty,
 				"keys" => object::keys,
 				"len" => object::len,

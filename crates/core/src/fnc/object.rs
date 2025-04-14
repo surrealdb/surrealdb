@@ -57,6 +57,11 @@ pub fn from_entries((array,): (Array,)) -> Result<Value, Error> {
 	Ok(Value::Object(Object(obj)))
 }
 
+pub fn extend((mut object, other): (Object, Object)) -> Result<Value, Error> {
+	object.0.extend(other.0);
+	Ok(Value::Object(object))
+}
+
 pub fn is_empty((object,): (Object,)) -> Result<Value, Error> {
 	Ok(Value::Bool(object.0.is_empty()))
 }
