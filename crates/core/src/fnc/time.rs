@@ -309,7 +309,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::unix"),
-				message: String::from("The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between between d'-262143-01-01T00:00:00Z' and d'+262142-12-31T23:59:59Z'."),
+				message: String::from("The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between d'-262143-01-01T00:00:00Z' and d'+262142-12-31T23:59:59Z'."),
 			}),
 		}
 	}

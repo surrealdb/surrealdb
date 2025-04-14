@@ -15,8 +15,8 @@ value = ""Incorrect arguments for function time::from::unix(). The argument must
 
 */
 
-# Note: this function is identical to time::from::secs
-time::from::unix(-8334601228800);
-time::from::unix(-8334601228801);
-time::from::unix(8210266876799);
-time::from::unix(8210266876800);
+# Note: this function is identical to time::from::unix
+time::from::secs(-8334601228800);
+time::from::secs(-8334601228801);
+time::from::secs(8210266876799);
+time::from::secs(8210266876800);
