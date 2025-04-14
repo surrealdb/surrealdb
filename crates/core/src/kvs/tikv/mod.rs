@@ -1,5 +1,7 @@
 #![cfg(feature = "kv-tikv")]
 
+mod cnf;
+
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
@@ -12,12 +14,13 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
-use tikv::CheckLevel;
+use std::time::Duration;
 use tikv::TimestampExt;
 use tikv::TransactionOptions;
+use tikv::{CheckLevel, Config, TransactionClient};
 
 pub struct Datastore {
-	db: Pin<Arc<tikv::TransactionClient>>,
+	db: Pin<Arc<TransactionClient>>,
 }
 
 pub struct Transaction {
@@ -35,7 +38,7 @@ pub struct Transaction {
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
-	db: Pin<Arc<tikv::TransactionClient>>,
+	db: Pin<Arc<TransactionClient>>,
 }
 
 impl Drop for Transaction {
@@ -59,7 +62,21 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
-		match tikv::TransactionClient::new(vec![path]).await {
+		// Configure the client and keyspace
+		let config = match *cnf::TIKV_API_VERSION {
+			2 => match *cnf::TIKV_KEYSPACE {
+				Some(ref keyspace) => Config::default().with_keyspace(keyspace),
+				None => Config::default().with_default_keyspace(),
+			},
+			1 => Config::default(),
+			_ => return Err(Error::Ds("Invalid TiKV API version".into())),
+		};
+		// Set the default request timeout
+		let config = config.with_timeout(Duration::from_secs(*cnf::TIKV_REQUEST_TIMEOUT));
+		// Create the client with the config
+		let client = TransactionClient::new_with_config(vec![path], config);
+		// Check for errors with the client
+		match client.await {
 			Ok(db) => Ok(Datastore {
 				db: Arc::pin(db),
 			}),
@@ -80,9 +97,15 @@ impl Datastore {
 			TransactionOptions::new_optimistic()
 		};
 		// Use async commit to determine transaction state earlier
-		opt = opt.use_async_commit();
+		opt = match *cnf::TIKV_ASYNC_COMMIT {
+			true => opt.use_async_commit(),
+			_ => opt,
+		};
 		// Try to use one-phase commit if writing to only one region
-		opt = opt.try_one_pc();
+		opt = match *cnf::TIKV_ONE_PHASE_COMMIT {
+			true => opt.try_one_pc(),
+			_ => opt,
+		};
 		// Set the behaviour when dropping an unfinished transaction
 		opt = opt.drop_check(CheckLevel::Warn);
 		// Set this transaction as read only if possible
