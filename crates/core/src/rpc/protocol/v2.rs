@@ -65,7 +65,7 @@ pub trait RpcProtocolV2: RpcContext {
 			Method::Run => self.run(params).await,
 			Method::GraphQL => self.graphql(params).await,
 			Method::InsertRelation => self.insert_relation(params).await,
-			Method::Unknown => Err(RpcError::MethodNotFound),
+			_ => Err(RpcError::MethodNotFound),
 		}
 	}
 
