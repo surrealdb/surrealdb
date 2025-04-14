@@ -119,8 +119,6 @@ pub trait RpcProtocolV2: RpcContext {
 		Ok(Value::None.into())
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
-	// This will allow returning refresh tokens as well as any additional credential resulting from signing up.
 	async fn signup(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
@@ -134,7 +132,7 @@ pub trait RpcProtocolV2: RpcContext {
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
 		let out: Result<Value, Error> =
-			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(|v| v.token.into());
+			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -143,8 +141,6 @@ pub trait RpcProtocolV2: RpcContext {
 		out.map(Into::into).map_err(Into::into)
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
-	// This will allow returning refresh tokens as well as any additional credential resulting from signing in.
 	async fn signin(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
@@ -157,10 +153,8 @@ pub trait RpcProtocolV2: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
-		let out: Result<Value, Error> = crate::iam::signin::signin(self.kvs(), &mut session, v)
-			.await
-			// The default `signin` method just returns the token
-			.map(|v| v.token.into());
+		let out: Result<Value, Error> =
+			crate::iam::signin::signin(self.kvs(), &mut session, v).await.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
