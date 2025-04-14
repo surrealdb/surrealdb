@@ -379,7 +379,9 @@ impl MutableContext {
 
 	/// Check if the context is ok to continue.
 	pub(crate) async fn is_ok(&self, deep_check: bool) -> Result<bool, Error> {
-		yield_now!();
+		if deep_check {
+			yield_now!();
+		}
 		Ok(self.done(deep_check)?.is_none())
 	}
 
@@ -388,7 +390,9 @@ impl MutableContext {
 	/// Returns true when the query is canceled or if check_deadline is true when the query
 	/// deadline is met.
 	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool, Error> {
-		yield_now!();
+		if deep_check {
+			yield_now!();
+		}
 		Ok(self.done(deep_check)?.is_some())
 	}
 
