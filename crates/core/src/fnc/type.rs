@@ -151,6 +151,7 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				Value::Object(v) => v.into(),
 				Value::Number(v) => v.into(),
 				Value::Range(v) => v.deref().to_owned().try_into()?,
+				Value::Uuid(u) => u.into(),
 				v => v.as_string().into(),
 			},
 		})),
