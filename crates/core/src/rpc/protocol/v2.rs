@@ -65,7 +65,7 @@ pub trait RpcProtocolV2: RpcContext {
 			Method::Run => self.run(params).await,
 			Method::GraphQL => self.graphql(params).await,
 			Method::InsertRelation => self.insert_relation(params).await,
-			Method::Unknown => Err(RpcError::MethodNotFound),
+			_ => Err(RpcError::MethodNotFound),
 		}
 	}
 
@@ -791,7 +791,7 @@ pub trait RpcProtocolV2: RpcContext {
 		}
 		// Specify the query variables
 		let vars = match vars {
-			Value::Object(mut v) => Some(mrg! {v.0, self.session().parameters.clone()}),
+			Value::Object(mut v) => Some(mrg! {v.0, self.session().parameters}),
 			Value::None | Value::Null => Some(self.session().parameters.clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};
