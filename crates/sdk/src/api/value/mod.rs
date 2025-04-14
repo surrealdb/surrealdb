@@ -5,7 +5,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
 	cmp::{Ordering, PartialEq, PartialOrd},
 	fmt,
-	ops::Deref,
+	ops::{Deref, Index},
 	str::FromStr,
 };
 use surrealdb_core::{
@@ -366,6 +366,61 @@ impl Value {
 			// is safe.
 			std::mem::transmute::<&mut Vec<Value>, &mut Vec<CoreValue>>(v)
 		}
+	}
+}
+
+impl Index<usize> for Value {
+	type Output = Self;
+
+	fn index(&self, index: usize) -> &Self::Output {
+		match &self.0 {
+			CoreValue::Array(map) => {
+				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
+			}
+			_ => &Value(CoreValue::None),
+		}
+	}
+}
+
+impl Index<&str> for Value {
+	type Output = Self;
+
+	fn index(&self, index: &str) -> &Self::Output {
+		match &self.0 {
+			CoreValue::Object(map) => {
+				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
+			}
+			_ => &Value(CoreValue::None),
+		}
+	}
+}
+
+impl Value {
+	/// Accesses the value found at a certain field
+	/// if an object, and a certain index if an array.
+	/// Will not err if no value is found at this point,
+	/// instead returning a Value::None. If an Option<&Value>
+	/// is desired, the .into_option() method can be used
+	/// to perform the conversion.
+	pub fn get<Idx>(&self, index: Idx) -> &Value
+	where
+		Value: Index<Idx, Output = Value>,
+	{
+		self.index(index)
+	}
+
+	/// Converts a Value into an Option<&Value>, returning
+	/// a Some in all cases except Value::None.
+	pub fn into_option(&self) -> Option<&Value> {
+		match self {
+			Value(CoreValue::None) => None,
+			v => Some(v),
+		}
+	}
+
+	/// Checks to see if a Value is a Value::None.
+	pub fn is_none(&self) -> bool {
+		matches!(&self, Value(CoreValue::None))
 	}
 }
 

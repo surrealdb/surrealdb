@@ -1,9 +1,9 @@
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+#[cfg(not(target_family = "wasm"))]
 use async_graphql::BatchRequest;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+#[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::rpc::Data;
@@ -65,7 +65,7 @@ pub trait RpcProtocolV2: RpcContext {
 			Method::Run => self.run(params).await,
 			Method::GraphQL => self.graphql(params).await,
 			Method::InsertRelation => self.insert_relation(params).await,
-			Method::Unknown => Err(RpcError::MethodNotFound),
+			_ => Err(RpcError::MethodNotFound),
 		}
 	}
 
@@ -791,7 +791,7 @@ pub trait RpcProtocolV2: RpcContext {
 		}
 		// Specify the query variables
 		let vars = match vars {
-			Value::Object(mut v) => Some(mrg! {v.0, self.session().parameters.clone()}),
+			Value::Object(mut v) => Some(mrg! {v.0, self.session().parameters}),
 			Value::None | Value::Null => Some(self.session().parameters.clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};
@@ -852,12 +852,12 @@ pub trait RpcProtocolV2: RpcContext {
 	// Methods for querying with GraphQL
 	// ------------------------------
 
-	#[cfg(any(target_family = "wasm", not(surrealdb_unstable)))]
+	#[cfg(target_family = "wasm")]
 	async fn graphql(&self, _: Array) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
-	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+	#[cfg(not(target_family = "wasm"))]
 	async fn graphql(&self, params: Array) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {

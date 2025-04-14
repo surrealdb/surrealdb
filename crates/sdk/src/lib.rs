@@ -157,8 +157,6 @@ pub use surrealdb_core::*;
 
 pub use uuid::Uuid;
 
-#[macro_use]
-mod mac;
 #[allow(hidden_glob_reexports)]
 mod api;
 

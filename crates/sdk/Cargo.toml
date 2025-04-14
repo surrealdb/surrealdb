@@ -32,7 +32,6 @@ kv-indxdb = ["surrealdb-core/kv-indxdb"]
 kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
 kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
-kv-surrealcs = ["surrealdb-core/kv-surrealcs", "tokio/time"]
 scripting = ["surrealdb-core/scripting"]
 http = ["surrealdb-core/http"]
 native-tls = [
@@ -84,8 +83,7 @@ revision = { workspace = true, features = [
     "uuid",
 ] }
 reblessive = { workspace = true, features = ["tree"] }
-trice = {workspace = true, optional = true }
-
+trice = { workspace = true, optional = true }
 
 # Other crates
 arrayvec.workspace = true
@@ -121,6 +119,7 @@ rustls = { workspace = true, default-features = false, features = [
 ], optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
 pharos.workspace = true
 rustls-pki-types = { version = "1.7.0", features = ["web"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
@@ -130,9 +129,7 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
-wasmtimer = { workspace = true, default-features = false, features = [
-    "tokio",
-] }
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 ws_stream_wasm.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
@@ -173,7 +170,6 @@ wiremock.workspace = true
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(kv_fdb)',
     'cfg(storage)',
-    'cfg(surrealdb_unstable)',
 ] }
 
 [lib]

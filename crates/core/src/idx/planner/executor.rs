@@ -32,7 +32,9 @@ use crate::idx::IndexKeyBase;
 use crate::kvs::TransactionType;
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Cond, Expression, Idiom, Number, Object, Table, Thing, Value};
+use crate::sql::{
+	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
+};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -272,7 +274,7 @@ impl QueryExecutor {
 			Ok(Value::Bool(false))
 		} else {
 			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
-				let v = id.compute(stk, ctx, opt, doc).await?;
+				let v = id.compute(stk, ctx, opt, doc).await.catch_return()?;
 				if let Ok(v) = v.try_into() {
 					if let Ok(dist) = dist.compute(&v, val.as_ref()) {
 						p.add(dist, thg).await;

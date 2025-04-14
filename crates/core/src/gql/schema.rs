@@ -235,6 +235,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Number => TypeRef::named("number"),
 		Kind::Object => TypeRef::named("object"),
 		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
+		Kind::Regex => return Err(schema_error("Kind::Regex is not yet supported")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
 		Kind::Record(mut r) => match r.len() {
@@ -325,6 +326,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 
 			TypeRef::List(Box::new(kind_to_type(inner, types)?))
 		}
+		Kind::File(_) => return Err(schema_error("Kind::File is not yet supported")),
 	};
 
 	let out = match optional {
@@ -651,6 +653,8 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Function(_, _) => Err(resolver_error("Sets are not yet supported")),
 		Kind::Range => Err(resolver_error("Ranges are not yet supported")),
 		Kind::Literal(_) => Err(resolver_error("Literals are not yet supported")),
+		Kind::Regex => Err(resolver_error("Regexes are not yet supported")),
 		Kind::References(_, _) => Err(resolver_error("Cannot convert value into references")),
+		Kind::File(_) => Err(resolver_error("Files are not yet supported")),
 	}
 }

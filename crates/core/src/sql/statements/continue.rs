@@ -1,8 +1,7 @@
-use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::Value;
+use crate::sql::{ControlFlow, Value};
+use crate::{ctx::Context, sql::FlowResult};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -25,8 +24,8 @@ impl ContinueStatement {
 		_ctx: &Context,
 		_opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		Err(Error::Continue)
+	) -> FlowResult<Value> {
+		Err(ControlFlow::Continue)
 	}
 }
 

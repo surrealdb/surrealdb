@@ -10,6 +10,7 @@ use crate::sql::output::Output;
 use crate::sql::paths::META;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
+use crate::sql::FlowResultExt as _;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -48,13 +49,13 @@ impl Document {
 						// This is an already processed reduced document
 						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
 						// Output the full document before any changes were applied
-						false => {
-							self.current
-								.doc
-								.as_ref()
-								.compute(stk, ctx, opt, Some(&self.current))
-								.await
-						}
+						false => self
+							.current
+							.doc
+							.as_ref()
+							.compute(stk, ctx, opt, Some(&self.current))
+							.await
+							.catch_return(),
 					}
 				}
 				Output::Before => {
@@ -63,13 +64,13 @@ impl Document {
 						// This is an already processed reduced document
 						true => Ok(self.initial_reduced.doc.as_ref().to_owned()),
 						// Output the full document before any changes were applied
-						false => {
-							self.initial
-								.doc
-								.as_ref()
-								.compute(stk, ctx, opt, Some(&self.initial))
-								.await
-						}
+						false => self
+							.initial
+							.doc
+							.as_ref()
+							.compute(stk, ctx, opt, Some(&self.initial))
+							.await
+							.catch_return(),
 					}
 				}
 				Output::Fields(v) => {
@@ -123,13 +124,13 @@ impl Document {
 						// This is an already processed reduced document
 						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
 						// This is a full document, so process it
-						false => {
-							self.current
-								.doc
-								.as_ref()
-								.compute(stk, ctx, opt, Some(&self.current))
-								.await
-						}
+						false => self
+							.current
+							.doc
+							.as_ref()
+							.compute(stk, ctx, opt, Some(&self.current))
+							.await
+							.catch_return(),
 					}
 				}
 				Statement::Upsert(_) => {
@@ -138,13 +139,13 @@ impl Document {
 						// This is an already processed reduced document
 						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
 						// This is a full document, so process it
-						false => {
-							self.current
-								.doc
-								.as_ref()
-								.compute(stk, ctx, opt, Some(&self.current))
-								.await
-						}
+						false => self
+							.current
+							.doc
+							.as_ref()
+							.compute(stk, ctx, opt, Some(&self.current))
+							.await
+							.catch_return(),
 					}
 				}
 				Statement::Update(_) => {
@@ -153,13 +154,13 @@ impl Document {
 						// This is an already processed reduced document
 						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
 						// This is a full document, so process it
-						false => {
-							self.current
-								.doc
-								.as_ref()
-								.compute(stk, ctx, opt, Some(&self.current))
-								.await
-						}
+						false => self
+							.current
+							.doc
+							.as_ref()
+							.compute(stk, ctx, opt, Some(&self.current))
+							.await
+							.catch_return(),
 					}
 				}
 				Statement::Relate(_) => {
@@ -168,13 +169,13 @@ impl Document {
 						// This is an already processed reduced document
 						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
 						// This is a full document, so process it
-						false => {
-							self.current
-								.doc
-								.as_ref()
-								.compute(stk, ctx, opt, Some(&self.current))
-								.await
-						}
+						false => self
+							.current
+							.doc
+							.as_ref()
+							.compute(stk, ctx, opt, Some(&self.current))
+							.await
+							.catch_return(),
 					}
 				}
 				Statement::Insert(_) => {
@@ -183,13 +184,13 @@ impl Document {
 						// This is an already processed reduced document
 						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
 						// This is a full document, so process it
-						false => {
-							self.current
-								.doc
-								.as_ref()
-								.compute(stk, ctx, opt, Some(&self.current))
-								.await
-						}
+						false => self
+							.current
+							.doc
+							.as_ref()
+							.compute(stk, ctx, opt, Some(&self.current))
+							.await
+							.catch_return(),
 					}
 				}
 				_ => Err(Error::Ignore),
@@ -219,7 +220,8 @@ impl Document {
 								// Process the PERMISSION clause
 								if !e
 									.compute(stk, &ctx, opt, Some(&self.current))
-									.await?
+									.await
+									.catch_return()?
 									.is_truthy()
 								{
 									out.cut(k);

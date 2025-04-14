@@ -10,16 +10,16 @@ use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
 	model::Model,
-	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
-	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Tables, Thing, Uuid,
+	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, File, Function,
+	Future, Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range,
+	Regex, Strand, Subquery, Table, Tables, Thing, Uuid,
 };
+use crate::sql::{Closure, ControlFlow, FlowResult, Ident};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
@@ -28,6 +28,7 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -139,6 +140,7 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	Refs(Refs),
+	File(File),
 	// Add new variants here
 }
 
@@ -181,6 +183,12 @@ impl From<Uuid> for Value {
 impl From<Closure> for Value {
 	fn from(v: Closure) -> Self {
 		Value::Closure(Box::new(v))
+	}
+}
+
+impl From<File> for Value {
+	fn from(v: File) -> Self {
+		Value::File(v)
 	}
 }
 
@@ -1355,6 +1363,7 @@ impl Value {
 			Kind::Point => self.coerce_to_point().map(Value::from),
 			Kind::Bytes => self.coerce_to_bytes().map(Value::from),
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
+			Kind::Regex => self.coerce_to_regex().map(Value::from),
 			Kind::Range => self.coerce_to_range().map(Value::from),
 			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
@@ -1399,6 +1408,10 @@ impl Value {
 				from: self,
 				into: kind.to_string(),
 			}),
+			Kind::File(t) => match t.is_empty() {
+				true => self.coerce_to_file().map(Value::from),
+				false => self.coerce_to_file_type(t).map(Value::from),
+			},
 		};
 		// Check for any conversion errors
 		match res {
@@ -1701,6 +1714,32 @@ impl Value {
 		}
 	}
 
+	/// Try to coerce this value to a `File`
+	pub(crate) fn coerce_to_file(self) -> Result<File, Error> {
+		match self {
+			// Files are allowed
+			Value::File(v) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "file".into(),
+			}),
+		}
+	}
+
+	/// Try to coerce this value to a `File` belonging to a certain bucket
+	pub(crate) fn coerce_to_file_type(self, val: &[Ident]) -> Result<File, Error> {
+		match self {
+			// Records are allowed if correct type
+			Value::File(v) if v.is_bucket_type(val) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "file".into(),
+			}),
+		}
+	}
+
 	/// Try to coerce this value to a `Datetime`
 	pub(crate) fn coerce_to_datetime(self) -> Result<Datetime, Error> {
 		match self {
@@ -1954,6 +1993,7 @@ impl Value {
 			Kind::Point => self.convert_to_point().map(Value::from),
 			Kind::Bytes => self.convert_to_bytes().map(Value::from),
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
+			Kind::Regex => self.convert_to_regex().map(Value::from),
 			Kind::Range => self.convert_to_range().map(Value::from),
 			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
@@ -1998,6 +2038,10 @@ impl Value {
 				from: self,
 				into: kind.to_string(),
 			}),
+			Kind::File(t) => match t.is_empty() {
+				true => self.convert_to_file().map(Value::from),
+				false => self.convert_to_file_type(t).map(Value::from),
+			},
 		};
 		// Check for any conversion errors
 		match res {
@@ -2218,11 +2262,50 @@ impl Value {
 	/// Try to convert this value to a `Strand`
 	pub(crate) fn convert_to_strand(self) -> Result<Strand, Error> {
 		match self {
-			// Bytes can't convert to strings
-			Value::Bytes(_) => Err(Error::ConvertTo {
+			// Allow any bytes value
+			Value::Bytes(v) => {
+				let bytes = &v.0[..];
+				match std::str::from_utf8(bytes) {
+					Ok(s) => Ok(s.into()),
+					// Invalid UTF-8 bytes cannot be converted
+					Err(_) => Err(Error::ConvertTo {
+						from: Value::Bytes(v),
+						into: "string".into(),
+					}),
+				}
+			}
+			// None can't convert to a string
+			Value::None => Err(Error::ConvertTo {
 				from: self,
 				into: "string".into(),
 			}),
+			// Null can't convert to a string
+			Value::Null => Err(Error::ConvertTo {
+				from: self,
+				into: "string".into(),
+			}),
+			// Allow any string value
+			Value::Strand(v) => Ok(v),
+			// Stringify anything else
+			Value::Uuid(v) => Ok(v.to_raw().into()),
+			// Stringify anything else
+			Value::Datetime(v) => Ok(v.to_raw().into()),
+			// Stringify anything else
+			_ => Ok(self.to_string().into()),
+		}
+	}
+
+	/// Try to convert this value to a `Strand`
+	pub(crate) fn convert_to_strand_lossy(self) -> Result<Strand, Error> {
+		match self {
+			// Allow any bytes value
+			Value::Bytes(v) => {
+				let bytes = &v.0[..];
+				Ok(match String::from_utf8_lossy(bytes) {
+					Cow::Owned(s) => s.into(),
+					Cow::Borrowed(s) => s.into(),
+				})
+			}
 			// None can't convert to a string
 			Value::None => Err(Error::ConvertTo {
 				from: self,
@@ -2267,6 +2350,29 @@ impl Value {
 		}
 	}
 
+	/// Try to convert this value to a `Uuid`
+	pub(crate) fn convert_to_regex(self) -> Result<Regex, Error> {
+		match self {
+			// Uuids are allowed
+			Value::Regex(v) => Ok(v),
+			// Attempt to parse a string
+			Value::Strand(ref v) => match Regex::from_str(v) {
+				// The string can be parsed as a uuid
+				Ok(v) => Ok(v),
+				// This string is not a uuid
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "regex".into(),
+				}),
+			},
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "regex".into(),
+			}),
+		}
+	}
+
 	/// Try to convert this value to a `Closure`
 	pub(crate) fn convert_to_function(self) -> Result<Closure, Error> {
 		match self {
@@ -2276,6 +2382,32 @@ impl Value {
 			_ => Err(Error::ConvertTo {
 				from: self,
 				into: "function".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `File`
+	pub(crate) fn convert_to_file(self) -> Result<File, Error> {
+		match self {
+			// Files are allowed
+			Value::File(v) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "file".into(),
+			}),
+		}
+	}
+
+	/// Try to convert this value to a `File` belonging to a certain bucket
+	pub(crate) fn convert_to_file_type(self, val: &[Ident]) -> Result<File, Error> {
+		match self {
+			// Records are allowed if correct type
+			Value::File(v) if v.is_bucket_type(val) => Ok(v),
+			// Anything else raises an error
+			_ => Err(Error::ConvertTo {
+				from: self,
+				into: "file".into(),
 			}),
 		}
 	}
@@ -2329,6 +2461,27 @@ impl Value {
 	/// Try to convert this value to a `Bytes`
 	pub(crate) fn convert_to_bytes(self) -> Result<Bytes, Error> {
 		match self {
+			// Arrays of ints are allowed
+			Value::Array(ref v) => {
+				let mut bytes = Vec::with_capacity(v.len());
+
+				// Check each element
+				for value in v.0.iter() {
+					if let Value::Number(v) = value {
+						if let Ok(v) = v.to_owned().try_into() {
+							bytes.push(v);
+							continue;
+						}
+					}
+
+					return Err(Error::ConvertTo {
+						from: self.clone(),
+						into: "bytes".into(),
+					});
+				}
+
+				Ok(Bytes(bytes))
+			}
 			// Bytes are allowed
 			Value::Bytes(v) => Ok(v),
 			// Strings can be converted to bytes
@@ -2364,6 +2517,8 @@ impl Value {
 				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
 				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
 			}
+			// Bytes convert to an array
+			Value::Bytes(v) => Ok(v.0.into_iter().map(Value::from).collect::<Vec<Value>>().into()),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -2942,6 +3097,7 @@ impl fmt::Display for Value {
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
 			Value::Refs(v) => write!(f, "{v}"),
+			Value::File(v) => write!(f, "{v}"),
 		}
 	}
 }
@@ -2983,50 +3139,37 @@ impl Value {
 			_ => false,
 		}
 	}
-	/// Process this type returning a computed simple Value
+	/// Process this type returning a computed simple Value.
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self.compute_unbordered(stk, ctx, opt, doc).await {
-			Err(Error::Return {
-				value,
-			}) => Ok(value),
-			res => res,
-		}
-	}
-	/// Process this type returning a computed simple Value, without catching errors
-	pub(crate) async fn compute_unbordered(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> FlowResult<Value> {
 		// Prevent infinite recursion due to casting, expressions, etc.
 		let opt = &opt.dive(1)?;
 
-		match self {
-			Value::Cast(v) => v.compute(stk, ctx, opt, doc).await,
+		let res = match self {
+			Value::Cast(v) => return v.compute(stk, ctx, opt, doc).await,
 			Value::Thing(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Block(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Range(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Block(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Range(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Idiom(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Array(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Object(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Idiom(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Array(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Object(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Constant(v) => v.compute(),
-			Value::Function(v) => v.compute(stk, ctx, opt, doc).await,
-			Value::Model(v) => v.compute(stk, ctx, opt, doc).await,
-			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Function(v) => return v.compute(stk, ctx, opt, doc).await,
+			Value::Model(v) => return v.compute(stk, ctx, opt, doc).await,
+			Value::Subquery(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Expression(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Refs(v) => v.compute(ctx, opt, doc).await,
 			_ => Ok(self.to_owned()),
-		}
+		};
+
+		res.map_err(ControlFlow::from)
 	}
 }
 
