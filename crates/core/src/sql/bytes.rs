@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+use hex;
 use revision::revisioned;
 use serde::de::SeqAccess;
 use serde::{
@@ -42,7 +42,7 @@ impl Deref for Bytes {
 
 impl Display for Bytes {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		write!(f, "encoding::base64::decode(\"{}\")", STANDARD_NO_PAD.encode(&self.0))
+		write!(f, "b\"{}\"", hex::encode_upper(&self.0))
 	}
 }
 
