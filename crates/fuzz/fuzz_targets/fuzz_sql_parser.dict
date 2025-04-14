@@ -263,6 +263,7 @@
 "meta::id("
 "meta::tb("
 "object::entries("
+"object::extend("
 "object::from_entries("
 "object::is_empty("
 "object::keys("
