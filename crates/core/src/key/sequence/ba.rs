@@ -28,7 +28,7 @@ impl Categorise for Ba<'_> {
 }
 
 impl<'a> Ba<'a> {
-	fn new(ns: &'a str, db: &'a str, sq: &'a str, start: i64) -> Self {
+	pub(crate) fn new(ns: &'a str, db: &'a str, sq: &'a str, start: i64) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

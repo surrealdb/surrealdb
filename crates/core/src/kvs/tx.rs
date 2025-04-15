@@ -759,7 +759,7 @@ impl Transaction {
 		}
 	}
 
-	/// Retrieve all analyzer definitions for a specific database.
+	/// Retrieve all sequences definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_sequences(
 		&self,
