@@ -84,7 +84,7 @@ impl<T> CoerceErrorExt for Result<T, CoerceError> {
 /// For the most part this m
 ///
 /// Coercion rules are more strict then casting rules.
-/// Calling this method will succeed if the value can by unified with the kind of the target
+/// Calling this method will succeed if the value can be unified with the kind of the target
 pub trait Coerce: Sized {
 	/// Returns if calling coerce on the value will succeed or not.
 	///

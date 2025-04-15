@@ -240,8 +240,7 @@ impl Cast for f64 {
 impl Cast for Decimal {
 	fn can_cast(v: &Value) -> bool {
 		match v {
-			Value::Number(Number::Int(_) | Number::Float(_)) => true,
-			Value::Number(Number::Decimal(v)) => v.is_integer() || i64::try_from(*v).is_ok(),
+			Value::Number(_) => true,
 			Value::Strand(ref v) => v.parse::<f64>().is_ok(),
 			_ => false,
 		}
@@ -571,6 +570,7 @@ impl Cast for Box<Range> {
 impl Cast for Point<f64> {
 	fn can_cast(v: &Value) -> bool {
 		match v {
+            Value::Geometry(Geometry::Point(_)) => true,
 			Value::Range(_) => true,
 			Value::Array(x) => x.len() == 2,
 			_ => false,
