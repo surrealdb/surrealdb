@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-/// The keyspace identifier for data isolation
+/// Which TiKV cluster API version to use
 pub(super) static TIKV_API_VERSION: LazyLock<u8> =
 	lazy_env_parse!("SURREAL_TIKV_API_VERSION", u8, 1);
 
