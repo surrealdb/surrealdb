@@ -8,6 +8,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use super::Duration;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
 
 #[revisioned(revision = 1)]
@@ -40,13 +42,14 @@ pub enum Constant {
 	TimeEpoch,
 	TimeMin,
 	TimeMax,
-	// Add new variants here
+	DurationMax, // Add new variants here
 }
 
 /// A type of constant that may be converted to a value or JSON.
 pub(crate) enum ConstantValue {
 	Float(f64),
 	Datetime(Datetime),
+	Duration(Duration),
 }
 
 impl Constant {
@@ -77,6 +80,7 @@ impl Constant {
 			Self::TimeEpoch => ConstantValue::Datetime(Datetime(Utc.timestamp_nanos(0))),
 			Self::TimeMin => ConstantValue::Datetime(Datetime::MIN_UTC),
 			Self::TimeMax => ConstantValue::Datetime(Datetime::MAX_UTC),
+			Self::DurationMax => ConstantValue::Duration(Duration::MAX),
 		}
 	}
 	/// Process this type returning a computed simple Value
@@ -84,6 +88,7 @@ impl Constant {
 		Ok(match self.value() {
 			ConstantValue::Datetime(d) => d.into(),
 			ConstantValue::Float(f) => f.into(),
+			ConstantValue::Duration(d) => d.into(),
 		})
 	}
 }
@@ -115,6 +120,7 @@ impl fmt::Display for Constant {
 			Self::TimeEpoch => "time::EPOCH",
 			Self::TimeMin => "time::MINIMUM",
 			Self::TimeMax => "time::MAXIMUM",
+			Self::DurationMax => "duration::MAX",
 		})
 	}
 }

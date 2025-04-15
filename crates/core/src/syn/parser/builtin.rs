@@ -222,6 +222,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("rand") => PathKind::Function,
 		UniCase::ascii("rand::bool") => PathKind::Function,
+		UniCase::ascii("rand::duration") => PathKind::Function,
 		UniCase::ascii("rand::enum") => PathKind::Function,
 		UniCase::ascii("rand::float") => PathKind::Function,
 		UniCase::ascii("rand::guid") => PathKind::Function,
@@ -443,7 +444,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("math::TAU") => PathKind::Constant(Constant::MathTau),
 		UniCase::ascii("time::EPOCH") => PathKind::Constant(Constant::TimeEpoch),
 		UniCase::ascii("time::MINIMUM") => PathKind::Constant(Constant::TimeMin),
-		UniCase::ascii("time::MAXIMUM") => PathKind::Constant(Constant::TimeMax)
+		UniCase::ascii("time::MAXIMUM") => PathKind::Constant(Constant::TimeMax),
+		UniCase::ascii("duration::MAX") => PathKind::Constant(Constant::DurationMax)
 };
 
 const MAX_LEVENSTHEIN_CUT_OFF: u8 = 4;

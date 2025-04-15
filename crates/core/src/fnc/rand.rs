@@ -2,7 +2,7 @@ use crate::cnf::ID_CHARS;
 use crate::err::Error;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
-use crate::sql::{Datetime, Number};
+use crate::sql::{Datetime, Duration, Number};
 use chrono::{TimeZone, Utc};
 use nanoid::nanoid;
 use rand::distributions::{Alphanumeric, DistString};
@@ -130,6 +130,25 @@ pub fn string((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> 
 	};
 	// Generate the random string
 	Ok(Alphanumeric.sample_string(&mut rand::thread_rng(), len).into())
+}
+
+pub fn duration((dur1, dur2): (Duration, Duration)) -> Result<Value, Error> {
+	// Sort from low to high
+	let (from, to) = match dur2 > dur1 {
+		true => (dur1, dur2),
+		false => (dur2, dur1),
+	};
+
+	let rand = rand::thread_rng().gen_range(from.as_nanos()..=to.as_nanos());
+
+	let nanos = (rand % 1_000_000_000) as u32;
+
+	// Max Duration is made of (u64::MAX, NANOS_PER_SEC - 1) so will never overflow
+	let Ok(secs) = u64::try_from(rand / 1_000_000_000) else {
+		return Err(Error::Unreachable("Overflow inside rand::duration()".into()));
+	};
+
+	Ok(Value::Duration(Duration::new(secs, nanos)))
 }
 
 pub fn time((range,): (Option<(Value, Value)>,)) -> Result<Value, Error> {
