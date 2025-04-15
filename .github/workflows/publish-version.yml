@@ -60,6 +60,7 @@ jobs:
       current-version: ${{ steps.outputs.outputs.current-version }}
       name: ${{ steps.outputs.outputs.name }}
       build-metadata: ${{ steps.outputs.outputs.build-metadata }}
+      release-branch: ${{ steps.outputs.outputs.release-branch }}
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -106,6 +107,7 @@ jobs:
           echo "version=${version}" >> $GITHUB_OUTPUT
           echo "environment=${environment}" >> $GITHUB_OUTPUT
           echo "build-metadata=${buildMetadata}" >> $GITHUB_OUTPUT
+          echo "release-branch=releases/${version}" >> $GITHUB_OUTPUT
 
           if [[ "${{ inputs.publish }}" == "true" && "${{ inputs.suffix }}" != "metadata"  ]]; then
             echo "git-ref=v${version}" >> $GITHUB_OUTPUT
@@ -133,8 +135,7 @@ jobs:
           version=${{ steps.outputs.outputs.version }}
           currentVersion=${{ steps.outputs.outputs.current-version }}
 
-          git push origin --delete releases/${version} || true
-          git checkout -b releases/${version}
+          git checkout -b ${{ steps.outputs.outputs.release-branch }}
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
@@ -707,3 +708,15 @@ jobs:
           for region in ${regions[@]}; do
               aws s3 sync --delete --storage-class INTELLIGENT_TIERING --source-region eu-west-2 --region ${region} s3://download.surrealdb.com s3://download.${region}.surrealdb.com
           done
+
+  cleanup:
+    name: Delete release branch
+    if: ${{ inputs.publish }}
+    needs: [publish, prepare-vars]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Delete ${{ needs.prepare-vars.outputs.release-branch }}
+        run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }}
