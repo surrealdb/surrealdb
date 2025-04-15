@@ -604,7 +604,7 @@ impl Cast for Point<f64> {
 			}
 			_ => Err(CastError::InvalidKind {
 				from: v,
-				into: "range".into(),
+				into: "point".into(),
 			}),
 		}
 	}

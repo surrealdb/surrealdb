@@ -32,7 +32,7 @@ error = "Expected `datetime` but found a `1dec`"
 error = "Expected `duration` but found a `1dec`"
 
 [[test.results]]
-error = "Expected `range` but found a `1dec`"
+error = "Expected `point` but found a `1dec`"
 
 [[test.results]]
 error = "Expected `uuid` but found a `1dec`"
