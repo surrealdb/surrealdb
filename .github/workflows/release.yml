@@ -2,7 +2,7 @@
 
 name: Release
 
-run-name: "Stable release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }})"
+run-name: "Release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
 
 on:
   workflow_dispatch:

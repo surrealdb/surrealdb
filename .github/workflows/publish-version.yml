@@ -156,9 +156,6 @@ jobs:
         run: git push
 
       - name: Tag the release
-        run: 
-
-      - name: Push tag
         if: ${{ inputs.publish && inputs.suffix != 'metadata'}}
         run: |
           set -x
