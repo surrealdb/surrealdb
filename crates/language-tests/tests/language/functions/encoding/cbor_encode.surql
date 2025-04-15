@@ -2,8 +2,8 @@
 [test]
 
 [[test.results]]
-value = '"oWNmb29jYmFy"'
+value = 'b"A163666F6F63626172"'
 
 */
 
-encoding::base64::encode(encoding::cbor::encode({ foo: "bar" }))
+encoding::cbor::encode({ foo: "bar" })

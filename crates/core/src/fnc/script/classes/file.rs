@@ -1,0 +1,48 @@
+use js::{class::Trace, JsLifetime};
+
+use crate::sql::file;
+
+#[derive(Clone, Trace, JsLifetime)]
+#[js::class]
+#[non_exhaustive]
+pub struct File {
+	#[qjs(skip_trace)]
+	pub(crate) value: file::File,
+}
+
+#[js::methods]
+impl File {
+	#[qjs(constructor)]
+	pub fn new(bucket: String, key: String) -> Self {
+		Self {
+			value: file::File::new(bucket, key),
+		}
+	}
+
+	#[qjs(get)]
+	pub fn value(&self) -> String {
+		self.value.to_string()
+	}
+	// Compare two File instances
+	pub fn is(a: &File, b: &File) -> bool {
+		a.value == b.value
+	}
+	/// Convert the object to a string
+	#[qjs(rename = "toString")]
+	pub fn js_to_string(&self) -> String {
+		self.value.display_inner()
+	}
+	/// Convert the object to JSON
+	#[qjs(rename = "toJSON")]
+	pub fn to_json(&self) -> String {
+		self.value.display_inner()
+	}
+	// Get the bucket for this file
+	pub fn bucket(&self) -> String {
+		self.value.bucket.to_owned()
+	}
+	// Get the key for this file
+	pub fn key(&self) -> String {
+		self.value.key.to_owned()
+	}
+}

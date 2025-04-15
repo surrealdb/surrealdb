@@ -439,6 +439,7 @@
 "type::number("
 "type::point("
 "type::string("
+"type::string_lossy("
 "type::table("
 "type::thing("
 "type::range("

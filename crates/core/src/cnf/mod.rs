@@ -2,85 +2,101 @@ use crate::iam::file::extract_allowed_paths;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-/// The characters which are supported in server record IDs.
+/// The publicly visible name of the server
+pub const SERVER_NAME: &str = "SurrealDB";
+
+/// The characters which are supported in server record IDs
 pub const ID_CHARS: [char; 36] = [
 	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i',
 	'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-/// The publicly visible name of the server
-pub const SERVER_NAME: &str = "SurrealDB";
-
-/// Specifies the names of parameters which can not be specified in a query.
+/// Specifies the names of parameters which can not be specified in a query
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
-/// Specifies how many concurrent jobs can be buffered in the worker channel.
+/// The memory usage threshold before tasks are forced to exit (default: 0 bytes)
+pub static MEMORY_THRESHOLD: LazyLock<usize> =
+	lazy_env_parse!(bytes, "SURREAL_MEMORY_THRESHOLD", usize, 0);
+
+/// Specifies how many concurrent jobs can be buffered in the worker channel
 #[cfg(not(target_family = "wasm"))]
 pub static MAX_CONCURRENT_TASKS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_MAX_CONCURRENT_TASKS", usize, 64);
 
-/// Specifies how deep computation recursive call will go before en error is returned.
+/// Specifies how deep recursive computation will go before erroring (default: 120)
 pub static MAX_COMPUTATION_DEPTH: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u32, 120);
 
-/// Specifies how deep the parser will parse nested objects and arrays in a query.
+/// Specifies how deep the parser will parse nested objects and arrays (default: 100)
 pub static MAX_OBJECT_PARSING_DEPTH: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_OBJECT_PARSING_DEPTH", u32, 100);
 
-/// Specifies how deep the parser will parse recursive queries (queries within queries).
+/// Specifies how deep the parser will parse recursive queries (default: 20)
 pub static MAX_QUERY_PARSING_DEPTH: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_QUERY_PARSING_DEPTH", u32, 20);
 
-/// Specifies the number of computed regexes which can be cached in the engine.
+/// The maximum recursive idiom path depth allowed (default: 256)
+pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_IDIOM_RECURSION_LIMIT", usize, 256);
+
+/// The maximum size of a compiled regular expression (default: 10 MiB)
+pub static REGEX_SIZE_LIMIT: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_REGEX_SIZE_LIMIT", usize, 10 * 1024 * 1024);
+
+/// Specifies the number of computed regexes which can be cached in the engine (default: 1000)
 pub static REGEX_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_REGEX_CACHE_SIZE", usize, 1_000);
 
-/// Specifies the number of items which can be cached within a single transaction.
+/// Specifies the number of items which can be cached within a single transaction (default: 10,000)
 pub static TRANSACTION_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_TRANSACTION_CACHE_SIZE", usize, 10_000);
 
-/// Specifies the number of definitions which can be cached across transactions.
+/// Specifies the number of definitions which can be cached across transactions (default: 1,000)
 pub static DATASTORE_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_DATASTORE_CACHE_SIZE", usize, 1_000);
 
-/// The maximum number of keys that should be scanned at once in general queries.
+/// The maximum number of keys that should be scanned at once in general queries (default: 500)
 pub static NORMAL_FETCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_NORMAL_FETCH_SIZE", u32, 500);
 
-/// The maximum number of keys that should be scanned at once for export queries.
+/// The maximum number of keys that should be scanned at once for export queries (default: 1000)
 pub static EXPORT_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_EXPORT_BATCH_SIZE", u32, 1000);
 
-/// The maximum number of keys that should be scanned at once for count queries.
+/// The maximum number of keys that should be scanned at once for count queries (default: 10,000)
 pub static COUNT_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_COUNT_BATCH_SIZE", u32, 10_000);
+
+/// The maximum number of keys to scan at once per concurrent indexing batch (default: 250)
+pub static INDEXING_BATCH_SIZE: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", u32, 250);
 
 /// The maximum size of the priority queue triggering usage of the priority queue for the result collector.
 pub static MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE", u32, 1000);
 
-/// The maximum number of keys that should be scanned at once per concurrent indexing batch.
-pub static INDEXING_BATCH_SIZE: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", u32, 250);
-
-/// The maximum stack size of the JavaScript function runtime (defaults to 256 KiB)
+/// The maximum stack size of the JavaScript function runtime (default: 256 KiB)
 pub static SCRIPTING_MAX_STACK_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SCRIPTING_MAX_STACK_SIZE", usize, 256 * 1024);
 
-/// The maximum memory limit of the JavaScript function runtime (defaults to 2 MiB).
+/// The maximum memory limit of the JavaScript function runtime (default: 2 MiB)
 pub static SCRIPTING_MAX_MEMORY_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SCRIPTING_MAX_MEMORY_LIMIT", usize, 2 << 20);
 
-/// Used to limit allocation for builtin functions
+/// The maximum amount of time that a JavaScript function can run (default: 5 seconds)
 pub static SCRIPTING_MAX_TIME_LIMIT: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_SCRIPTING_MAX_TIME_LIMIT", usize, 1000 * 5);
+	lazy_env_parse!("SURREAL_SCRIPTING_MAX_TIME_LIMIT", usize, 5 * 1000);
 
-/// Forward all signup/signin/authenticate query errors to a client performing authentication. Do not use in production.
+/// The maximum number of HTTP redirects allowed within http functions (default: 10)
+pub static MAX_HTTP_REDIRECTS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_HTTP_REDIRECTS", usize, 10);
+
+/// Forward all authentication errors to the client. Do not use in production (default: false)
 pub static INSECURE_FORWARD_ACCESS_ERRORS: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_INSECURE_FORWARD_ACCESS_ERRORS", bool, false);
 
+/// The number of result records which will trigger on-disk sorting (default: 50,000)
 #[cfg(storage)]
-/// Specifies the buffer limit for external sorting.
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
 
@@ -92,58 +108,17 @@ pub static GENERATION_ALLOCATION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 	2usize.pow(n)
 });
 
-/// Used to limit allocation for regular expressions
-pub static REGEX_SIZE_LIMIT: LazyLock<usize> = LazyLock::new(|| {
-	std::env::var("SURREAL_REGEX_SIZE_LIMIT")
-		.map(|s| s.parse::<usize>().unwrap_or(10_485_760))
-		.unwrap_or(10_485_760)
-});
-
-pub static MAX_HTTP_REDIRECTS: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_MAX_HTTP_REDIRECTS", usize, 10);
-
-/// Used to limit allocation for builtin functions
-pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
-	std::env::var("SURREAL_IDIOM_RECURSION_LIMIT")
-		.map(|s| s.parse::<usize>().unwrap_or(256))
-		.unwrap_or(256)
-});
-
-pub static MEMORY_THRESHOLD: LazyLock<usize> = LazyLock::new(|| {
-	std::env::var("SURREAL_MEMORY_THRESHOLD")
-		.map(|input| {
-			// Trim the input of any spaces
-			let input = input.trim();
-			// Check if this contains a suffix
-			let split = input.find(|c: char| !c.is_ascii_digit());
-			// Split the value into number and suffix
-			let parts = match split {
-				Some(index) => input.split_at(index),
-				None => (input, ""),
-			};
-			// Parse the number as a positive number
-			let number = parts.0.parse::<usize>().unwrap_or_default();
-			// Parse the supplied suffix as a multiplier
-			let suffix = match parts.1.trim().to_lowercase().as_str() {
-				"" | "b" => 1,
-				"k" | "kb" | "kib" => 1024,
-				"m" | "mb" | "mib" => 1024 * 1024,
-				"g" | "gb" | "gib" => 1024 * 1024 * 1024,
-				_ => 1,
-			};
-			// Multiply the input by the suffix
-			let bytes = number.checked_mul(suffix).unwrap_or_default();
-			// Log the parsed memory threshold
-			debug!("Memory threshold guide: {input} ({bytes} bytes)");
-			// Return the total byte threshold
-			bytes
-		})
-		.unwrap_or(0)
-});
-
-/// Used to limit file access
+/// Specifies a list of paths in which files can be accessed (default: empty)
 pub static FILE_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
 	std::env::var("SURREAL_FILE_ALLOWLIST")
 		.map(|input| extract_allowed_paths(&input))
 		.unwrap_or_default()
 });
+
+/// Specify the name of a global bucket for file data (default: None)
+pub static GLOBAL_BUCKET: LazyLock<Option<String>> =
+	lazy_env_parse!("SURREAL_GLOBAL_BUCKET", Option<String>);
+
+/// Whether to enforce a global bucket for file data (default: false)
+pub static GLOBAL_BUCKET_ENFORCED: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_GLOBAL_BUCKET_ENFORCED", bool, false);

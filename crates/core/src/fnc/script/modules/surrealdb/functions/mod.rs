@@ -13,6 +13,7 @@ mod bytes;
 mod crypto;
 mod duration;
 mod encoding;
+mod file;
 mod geo;
 mod http;
 mod math;
@@ -43,6 +44,7 @@ impl_module_def!(
 	"crypto" => (crypto::Package),
 	"duration" => (duration::Package),
 	"encoding" => (encoding::Package),
+	"file" => (file::Package),
 	"geo" => (geo::Package),
 	"http" => (http::Package),
 	"math" => (math::Package),

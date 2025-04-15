@@ -1,5 +1,6 @@
 mod access;
 mod analyzer;
+mod bucket;
 mod database;
 mod event;
 mod field;
@@ -14,6 +15,7 @@ mod user;
 
 pub use access::RemoveAccessStatement;
 pub use analyzer::RemoveAnalyzerStatement;
+pub use bucket::RemoveBucketStatement;
 pub use database::RemoveDatabaseStatement;
 pub use event::RemoveEventStatement;
 pub use field::RemoveFieldStatement;
@@ -53,6 +55,7 @@ pub enum RemoveStatement {
 	Index(RemoveIndexStatement),
 	User(RemoveUserStatement),
 	Model(RemoveModelStatement),
+	Bucket(RemoveBucketStatement),
 	Sequence(RemoveSequenceStatement),
 }
 
@@ -81,6 +84,7 @@ impl RemoveStatement {
 			Self::Analyzer(ref v) => v.compute(ctx, opt).await,
 			Self::User(ref v) => v.compute(ctx, opt).await,
 			Self::Model(ref v) => v.compute(ctx, opt).await,
+			Self::Bucket(ref v) => v.compute(ctx, opt).await,
 			Self::Sequence(ref v) => v.compute(ctx, opt).await,
 		}
 	}
@@ -101,6 +105,7 @@ impl Display for RemoveStatement {
 			Self::Analyzer(v) => Display::fmt(v, f),
 			Self::User(v) => Display::fmt(v, f),
 			Self::Model(v) => Display::fmt(v, f),
+			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
 		}
 	}

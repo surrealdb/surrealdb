@@ -1,6 +1,7 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined in this module.
 
 use crate::ctx::Context;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -16,6 +17,7 @@ pub mod count;
 pub mod crypto;
 pub mod duration;
 pub mod encoding;
+pub mod file;
 pub mod geo;
 pub mod http;
 pub mod math;
@@ -61,6 +63,17 @@ pub async fn run(
 		|| name.eq("array::map")
 		|| name.eq("array::reduce")
 		|| name.eq("array::some")
+		|| name.eq("file::put")
+		|| name.eq("file::put_if_not_exists")
+		|| name.eq("file::get")
+		|| name.eq("file::head")
+		|| name.eq("file::delete")
+		|| name.eq("file::exists")
+		|| name.eq("file::copy")
+		|| name.eq("file::copy_if_not_exists")
+		|| name.eq("file::rename")
+		|| name.eq("file::rename_if_not_exists")
+		|| name.eq("file::list")
 		|| name.eq("record::exists")
 		|| name.eq("record::refs")
 		|| name.eq("type::field")
@@ -87,23 +100,37 @@ pub async fn run(
 /// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
 /// `cpu_intensive`.
 macro_rules! dispatch {
-	($name: ident, $args: expr, $message: expr, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
-		{
-			match $name {
-				$($function_name => {
-					let args = args::FromArgs::from_args($name, $args)?;
-					#[allow(clippy::redundant_closure_call)]
-					$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
-				},)+
-				_ => {
-					Err($crate::err::Error::InvalidFunction{
-						name: String::from($name),
-						message: $message.to_string()
-					})
-				}
-			}
-		}
-	};
+    ($ctx: ident, $name: ident, $args: expr, $message: expr,
+        $($(exp($exp_target: ident))? $function_name: literal =>
+            $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+
+    ) => {
+        {
+            match $name {
+                $(
+                    $function_name => {
+                        $(
+                            if !$ctx.get_capabilities().allows_experimental(&ExperimentalTarget::$exp_target) {
+                                return Err($crate::err::Error::InvalidFunction {
+                                    name: String::from($name),
+                                    message: format!("Experimental feature {} is not enabled", ExperimentalTarget::$exp_target),
+                                });
+                            }
+                        )?
+
+                        let args = args::FromArgs::from_args($name, $args)?;
+                        #[allow(clippy::redundant_closure_call)]
+                        $($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
+                    },
+                )+
+                _ => {
+                    Err($crate::err::Error::InvalidFunction{
+                        name: String::from($name),
+                        message: $message.to_string()
+                    })
+                }
+            }
+        }
+    };
 }
 
 /// Attempts to run any synchronous function.
@@ -114,6 +141,7 @@ pub fn synchronous(
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
 	dispatch!(
+		ctx,
 		name,
 		args,
 		"no such builtin function found",
@@ -194,6 +222,9 @@ pub fn synchronous(
 		"duration::from::nanos" => duration::from::nanos,
 		"duration::from::secs" => duration::from::secs,
 		"duration::from::weeks" => duration::from::weeks,
+		//
+		exp(Files) "file::bucket" => file::bucket,
+		exp(Files) "file::key" => file::key,
 		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
@@ -399,6 +430,7 @@ pub fn synchronous(
 		"type::datetime" => r#type::datetime,
 		"type::decimal" => r#type::decimal,
 		"type::duration" => r#type::duration,
+		exp(Files) "type::file" => r#type::file,
 		"type::float" => r#type::float,
 		"type::geometry" => r#type::geometry,
 		"type::int" => r#type::int,
@@ -407,6 +439,7 @@ pub fn synchronous(
 		"type::range" => r#type::range,
 		"type::record" => r#type::record,
 		"type::string" => r#type::string,
+		"type::string_lossy" => r#type::string_lossy,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
 		"type::uuid" => r#type::uuid,
@@ -486,11 +519,12 @@ pub async fn asynchronous(
 	}
 
 	dispatch!(
+		ctx,
 		name,
 		args,
 		"no such builtin function found",
 		//
-		"api::invoke" => api::invoke((stk, ctx, opt)).await,
+		exp(DefineApi) "api::invoke" => api::invoke((stk, ctx, opt)).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,
@@ -514,6 +548,18 @@ pub async fn asynchronous(
 		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
 		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		//
+		exp(Files) "file::put" => file::put((stk, ctx, opt, doc)).await,
+		exp(Files) "file::put_if_not_exists" => file::put_if_not_exists((stk, ctx, opt, doc)).await,
+		exp(Files) "file::get" => file::get((stk, ctx, opt, doc)).await,
+		exp(Files) "file::head" => file::head((stk, ctx, opt, doc)).await,
+		exp(Files) "file::delete" => file::delete((stk, ctx, opt, doc)).await,
+		exp(Files) "file::copy" => file::copy((stk, ctx, opt, doc)).await,
+		exp(Files) "file::copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
+		exp(Files) "file::rename" => file::rename((stk, ctx, opt, doc)).await,
+		exp(Files) "file::rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
+		exp(Files) "file::exists" => file::exists((stk, ctx, opt, doc)).await,
+		exp(Files) "file::list" => file::list((stk, ctx, opt, doc)).await,
 		//
 		"http::head" => http::head(ctx).await,
 		"http::get" => http::get(ctx).await,
@@ -556,6 +602,7 @@ pub async fn idiom(
 	let specific = match value {
 		Value::Array(_) => {
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the array type",
@@ -646,6 +693,7 @@ pub async fn idiom(
 		}
 		Value::Bytes(_) => {
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the bytes type",
@@ -655,6 +703,7 @@ pub async fn idiom(
 		}
 		Value::Duration(_) => {
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the duration type",
@@ -672,6 +721,7 @@ pub async fn idiom(
 		}
 		Value::Geometry(_) => {
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the geometry type",
@@ -687,6 +737,7 @@ pub async fn idiom(
 		}
 		Value::Thing(_) => {
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the record type",
@@ -700,6 +751,7 @@ pub async fn idiom(
 		}
 		Value::Object(_) => {
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the object type",
@@ -713,6 +765,7 @@ pub async fn idiom(
 		}
 		Value::Number(_) => {
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the number type",
@@ -740,6 +793,7 @@ pub async fn idiom(
 		}
 		Value::Strand(_) => {
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the string type",
@@ -805,6 +859,7 @@ pub async fn idiom(
 		}
 		Value::Datetime(_) => {
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the datetime type",
@@ -830,6 +885,28 @@ pub async fn idiom(
 				"year" => time::year,
 			)
 		}
+		Value::File(_) => {
+			dispatch!(
+				ctx,
+				name,
+				args.clone(),
+				"no such method found for the file type",
+				//
+				exp(Files) "bucket" => file::bucket,
+				exp(Files) "key" => file::key,
+				//
+				exp(Files) "put" => file::put((stk, ctx, opt, doc)).await,
+				exp(Files) "put_if_not_exists" => file::put_if_not_exists((stk, ctx, opt, doc)).await,
+				exp(Files) "get" => file::get((stk, ctx, opt, doc)).await,
+				exp(Files) "head" => file::head((stk, ctx, opt, doc)).await,
+				exp(Files) "delete" => file::delete((stk, ctx, opt, doc)).await,
+				exp(Files) "copy" => file::copy((stk, ctx, opt, doc)).await,
+				exp(Files) "copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
+				exp(Files) "rename" => file::rename((stk, ctx, opt, doc)).await,
+				exp(Files) "rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
+				exp(Files) "exists" => file::exists((stk, ctx, opt, doc)).await,
+			)
+		}
 		_ => Err(Error::InvalidFunction {
 			name: "".into(),
 			message: "".into(),
@@ -842,6 +919,7 @@ pub async fn idiom(
 		}) => {
 			let message = format!("no such method found for the {} type", value.kindof());
 			dispatch!(
+				ctx,
 				name,
 				args,
 				message,
@@ -885,6 +963,7 @@ pub async fn idiom(
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
@@ -936,10 +1015,17 @@ mod tests {
 		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}").unwrap();
 		let fnc_no_idiom = re.replace(fnc_mod, "");
 
+		let exp_regex = Regex::new(r"exp\(.*\) ").unwrap();
+
 		for line in fnc_no_idiom.lines() {
-			if !(line.contains("=>")
-				&& (line.trim().starts_with('"') || line.trim().ends_with(',')))
-			{
+			let line = line.trim();
+			let line = if line.starts_with("exp") {
+				&exp_regex.replace(line, "")
+			} else {
+				line
+			};
+
+			if !(line.contains("=>") && (line.starts_with('"') || line.ends_with(','))) {
 				// This line does not define a function name.
 				continue;
 			}

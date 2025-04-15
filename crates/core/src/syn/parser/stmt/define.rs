@@ -7,10 +7,13 @@ use crate::sql::index::HnswParams;
 use crate::sql::statements::define::config::api::ApiConfig;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::ConfigInner;
-use crate::sql::statements::define::{ApiAction, DefineConfigStatement, DefineSequenceStatement};
+use crate::sql::statements::define::{
+	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineSequenceStatement,
+};
 use crate::sql::statements::DefineApiStatement;
 use crate::sql::Value;
 use crate::syn::error::bail;
+use crate::syn::token::Token;
 use crate::{
 	sql::{
 		access_type,
@@ -65,6 +68,7 @@ impl Parser<'_> {
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
 			t!("CONFIG") => self.parse_define_config(ctx).await.map(DefineStatement::Config),
+			t!("BUCKET") => self.parse_define_bucket(ctx, next).await.map(DefineStatement::Bucket),
 			t!("SEQUENCE") => self.parse_define_sequence().map(DefineStatement::Sequence),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
@@ -885,6 +889,10 @@ impl Parser<'_> {
 			}
 		}
 
+		if self.eat(t!("COMMENT")) {
+			res.comment = Some(self.next_token_value()?);
+		}
+
 		Ok(res)
 	}
 
@@ -1393,6 +1401,61 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
+		Ok(res)
+	}
+
+	pub async fn parse_define_bucket(
+		&mut self,
+		stk: &mut Stk,
+		token: Token,
+	) -> ParseResult<DefineBucketStatement> {
+		if !self.settings.files_enabled {
+			unexpected!(self, token, "the experimental files feature to be enabled");
+		}
+
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
+		} else {
+			(false, false)
+		};
+
+		let name = self.next_token_value()?;
+
+		let mut res = DefineBucketStatement {
+			name,
+			if_not_exists,
+			overwrite,
+			..Default::default()
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("BACKEND") => {
+					self.pop_peek();
+					res.backend = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
+				}
+				t!("PERMISSIONS") => {
+					self.pop_peek();
+					res.permissions = stk.run(|stk| self.parse_permission_value(stk)).await?;
+				}
+				t!("READONLY") => {
+					self.pop_peek();
+					res.readonly = true;
+				}
+				t!("COMMENT") => {
+					self.pop_peek();
+					res.comment = Some(self.next_token_value()?);
+				}
+				_ => {
+					break;
+				}
+			}
+		}
+
 		Ok(res)
 	}
 
