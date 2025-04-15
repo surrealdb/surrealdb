@@ -5,13 +5,13 @@
 value = "d'-262143-01-01T00:00:00Z'"
 
 [[test.results]]
-error = "'Incorrect arguments for function time::from::secs(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.'"
+error = "Incorrect arguments for function time::from::secs(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."
 
 [[test.results]]
 value = "d'+262142-12-31T23:59:59Z'"
 
 [[test.results]]
-error = "'Incorrect arguments for function time::from::secs(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.'"
+error = "Incorrect arguments for function time::from::secs(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."
 
 */
 
