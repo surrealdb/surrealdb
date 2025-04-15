@@ -27,7 +27,7 @@ jobs:
     name: Prepare nightly release
     uses: ./.github/workflows/publish-version.yml
     with:
-      environment: nightly
+      suffix: metadata
       extra-features: storage-surrealkv,ml
       git-ref: main
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
