@@ -76,7 +76,7 @@ pub trait FromArgs: Sized {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error>;
 }
 
-/// A wrapper type for optional arguments, as aposed to Option which might also indicate None being a
+/// A wrapper type for optional arguments, as opposed to Option which might also indicate None being a
 /// proper value.
 #[repr(transparent)]
 pub struct Optional<T>(pub Option<T>);

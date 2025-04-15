@@ -81,7 +81,8 @@ impl<T> CoerceErrorExt for Result<T, CoerceError> {
 /// Trait for converting the value using coercion rules.
 ///
 /// Coercion rules are applied whenever a Value needs to be of a specific [`Kind`].
-/// For the most part this m
+/// This happens when a value is applied to a place with a type like table fields and function
+/// parameters.
 ///
 /// Coercion rules are more strict then casting rules.
 /// Calling this method will succeed if the value can be unified with the kind of the target

@@ -14,7 +14,7 @@ value = "[NONE, NONE, NONE]"
 value = "[]"
 
 [[test.results]]
-value = "[]"
+error = "Incorrect arguments for function array::repeat(). Output must not exceed 1048576 bytes."
 
 [[test.results]]
 error = "Incorrect arguments for function array::repeat(). Output must not exceed 1048576 bytes."

@@ -570,8 +570,7 @@ impl Cast for Box<Range> {
 impl Cast for Point<f64> {
 	fn can_cast(v: &Value) -> bool {
 		match v {
-            Value::Geometry(Geometry::Point(_)) => true,
-			Value::Range(_) => true,
+			Value::Geometry(Geometry::Point(_)) => true,
 			Value::Array(x) => x.len() == 2,
 			_ => false,
 		}
@@ -584,14 +583,14 @@ impl Cast for Point<f64> {
 				if x.len() != 2 {
 					return Err(CastError::InvalidKind {
 						from: Value::Array(x),
-						into: "geometry<point>".to_string(),
+						into: "point".to_string(),
 					});
 				}
 
 				if !x[0].can_coerce_to::<f64>() || !x[1].can_coerce_to::<f64>() {
 					return Err(CastError::InvalidKind {
 						from: Value::Array(x),
-						into: "geometry<point>".to_string(),
+						into: "point".to_string(),
 					});
 				}
 

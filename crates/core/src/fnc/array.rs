@@ -617,7 +617,8 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 }
 
 pub fn repeat((value, count): (Value, i64)) -> Result<Value, Error> {
-	let count = count.max(0) as usize;
+	// TODO: Fix signed to unsigned casting here.
+	let count = count as usize;
 	limit("array::repeat", size_of_val(&value).saturating_mul(count))?;
 	Ok(Array(std::iter::repeat_n(value, count).collect()).into())
 }

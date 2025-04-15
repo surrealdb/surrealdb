@@ -477,7 +477,7 @@ impl Value {
 	// Simple output of value type
 	// -----------------------------------
 
-	/// Treat a string as a table name
+	/// Returns the surql representation of the kind of the value as a string.
 	///
 	/// # Warning
 	/// This function is not fully implement for all variants, make sure you don't accidentally use
