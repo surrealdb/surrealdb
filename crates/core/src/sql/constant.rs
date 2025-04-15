@@ -42,7 +42,8 @@ pub enum Constant {
 	TimeEpoch,
 	TimeMin,
 	TimeMax,
-	DurationMax, // Add new variants here
+	DurationMax,
+	// Add new variants here
 }
 
 /// A type of constant that may be converted to a value or JSON.
