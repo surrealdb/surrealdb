@@ -428,13 +428,38 @@ impl Cast for Duration {
 
 impl Cast for Bytes {
 	fn can_cast(v: &Value) -> bool {
-		matches!(v, Value::Bytes(_) | Value::Strand(_))
+		match v {
+			Value::Bytes(_) | Value::Strand(_) => true,
+			Value::Array(x) => x.iter().all(|x| x.can_cast_to::<i64>()),
+			_ => false,
+		}
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bytes(b) => Ok(b),
 			Value::Strand(s) => Ok(Bytes(s.0.into_bytes())),
+			Value::Array(x) => {
+				// Optimization to check first if the conversion can succeed to avoid possibly
+				// cloning large values.
+				if !x.0.iter().all(|x| x.can_cast_to::<i64>()) {
+					return Err(CastError::InvalidKind {
+						from: x.into(),
+						into: "bytes".to_owned(),
+					});
+				}
+
+				let mut res = Vec::new();
+
+				for v in x.0.into_iter() {
+					// Unwrap condition checked above.
+					let x = v.clone().cast_to::<i64>().unwrap();
+					// TODO: Fix truncation.
+					res.push(x as u8);
+				}
+
+				Ok(Bytes(res))
+			}
 			_ => Err(CastError::InvalidKind {
 				from: v,
 				into: "bytes".into(),
@@ -446,7 +471,7 @@ impl Cast for Bytes {
 impl Cast for Array {
 	fn can_cast(v: &Value) -> bool {
 		match v {
-			Value::Array(_) => true,
+			Value::Array(_) | Value::Bytes(_) => true,
 			Value::Range(r) => r.can_coerce_to_typed::<i64>(),
 			_ => false,
 		}
@@ -468,6 +493,7 @@ impl Cast for Array {
 					value: Box::new(Range::from(range)),
 				})
 			}
+			Value::Bytes(x) => Ok(Array(x.0.into_iter().map(|x| Value::from(x as i64)).collect())),
 			_ => Err(CastError::InvalidKind {
 				from: v,
 				into: "array".into(),

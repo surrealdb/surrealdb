@@ -475,7 +475,7 @@ impl Value {
 				if buckets.is_empty() {
 					self.can_coerce_to::<File>()
 				} else {
-					self.can_coerce_to_file_buckets(&buckets)
+					self.can_coerce_to_file_buckets(buckets)
 				}
 			}
 		}
