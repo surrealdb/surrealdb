@@ -170,10 +170,6 @@ impl Duration {
 	pub fn from_weeks(weeks: u64) -> Option<Duration> {
 		weeks.checked_mul(SECONDS_PER_WEEK).map(time::Duration::from_secs).map(|x| x.into())
 	}
-
-	pub fn saturating_add(&self, other: Self) -> Duration {
-		Self(self.0.saturating_add(other.0))
-	}
 }
 
 impl fmt::Display for Duration {
