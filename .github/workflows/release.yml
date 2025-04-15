@@ -1,6 +1,6 @@
 # Use this workflow to trigger stable releases, both minor releases and patches
 
-name: Stable release
+name: Release
 
 run-name: "Stable release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }})"
 
@@ -10,8 +10,13 @@ on:
       branch:
         required: true
         type: string
-        description: "The github branch of this release. Should be 'releases/beta' or 'patches/x.y'"
-        default: releases/beta
+        description: "The github branch of this release"
+        default: main
+      suffix:
+        required: true
+        type: string
+        default: metadata
+        description: "The suffix of the version, e.g. none, metadata, alpha.1 or beta.1"
       latest:
         required: false
         type: boolean
@@ -32,43 +37,13 @@ permissions:
   pull-requests: write
 
 jobs:
-  checks:
-    name: Pre-release checks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Verify that the provided branch is either a release branch or a patch branch
-        run: |
-          set -x
-          if [[ "${{ inputs.branch }}" == "releases/beta" || "${{ inputs.branch }}" == "patches/"* ]]; then
-            exit 0
-          else
-            echo "Branch should either be 'releases/beta' or 'patches/x.y'"
-            exit 1
-          fi
-
   release:
     name: Prepare release
-    needs: [checks]
     uses: ./.github/workflows/publish-version.yml
     with:
-      environment: stable
       git-ref: ${{ inputs.branch }}
-      latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
+      latest: ${{ inputs.latest }}
+      suffix: ${{ inputs.suffix }}
       publish: ${{ inputs.publish }}
       create-release: ${{ inputs.publish }}
     secrets: inherit
-
-  delete-branches:
-    name: Bump main version
-    if: ${{ inputs.publish }}
-    needs: [release]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Delete the release branch
-        run: |
-          set -x
-          git push origin --delete ${{ inputs.branch }} || true
-          git push origin --delete releases/stable || true
