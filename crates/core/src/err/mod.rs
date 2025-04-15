@@ -395,6 +395,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested type does not exist
+	#[error("The type '{name}' does not exist")]
+	TyNotFound {
+		name: String,
+	},
+
 	/// The requested analyzer does not exist
 	#[error("The analyzer '{name}' does not exist")]
 	AzNotFound {
@@ -921,6 +927,12 @@ pub enum Error {
 	#[error("The api '/{value}' already exists")]
 	ApAlreadyExists {
 		value: String,
+	},
+
+	/// The requested type already exists
+	#[error("The type '{name}' already exists")]
+	TyAlreadyExists {
+		name: String,
 	},
 
 	/// The requested analyzer already exists

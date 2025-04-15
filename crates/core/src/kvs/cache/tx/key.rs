@@ -42,6 +42,8 @@ pub(crate) enum Key {
 	Cgs(String, String),
 	/// A cache key for parameters (on a database)
 	Pas(String, String),
+	/// A cache key for types
+	Tys(String, String),
 	/// A cache key for tables
 	Tbs(String, String),
 	/// A cache key for events (on a table)
@@ -92,6 +94,8 @@ pub(crate) enum Key {
 	Cg(String, String, String),
 	/// A cache key for a parameter (on a database)
 	Pa(String, String, String),
+	/// A cache key for a type
+	Ty(String, String, String),
 	/// A cache key for a table
 	Tb(String, String, String),
 	/// A cache key for an event (on a table)
@@ -128,6 +132,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Mls(a, b) => Key::Mls(a.to_string(), b.to_string()),
 			Lookup::Cgs(a, b) => Key::Cgs(a.to_string(), b.to_string()),
 			Lookup::Pas(a, b) => Key::Pas(a.to_string(), b.to_string()),
+			Lookup::Tys(a, b) => Key::Tys(a.to_string(), b.to_string()),
 			Lookup::Tbs(a, b) => Key::Tbs(a.to_string(), b.to_string()),
 			Lookup::Evs(a, b, c) => Key::Evs(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Fds(a, b, c) => Key::Fds(a.to_string(), b.to_string(), c.to_string()),
@@ -154,6 +159,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Ml(a, b, c, d) => Key::Ml(a.to_string(), b.to_string(), c.to_string(), d.to_string()),
 			Lookup::Cg(a, b, c) => Key::Cg(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Pa(a, b, c) => Key::Pa(a.to_string(), b.to_string(), c.to_string()),
+			Lookup::Ty(a, b, c) => Key::Ty(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Tb(a, b, c) => Key::Tb(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Ev(a, b, c, d) => Key::Ev(a.to_string(), b.to_string(), c.to_string(), d.to_string()),
 			Lookup::Fd(a, b, c, d) => Key::Fd(a.to_string(), b.to_string(), c.to_string(), d.to_string()),

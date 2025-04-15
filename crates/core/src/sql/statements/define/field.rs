@@ -11,6 +11,7 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::sql::{Literal, Part};
 use crate::sql::{Relation, TableType};
+use reblessive::tree::Stk;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,7 @@ impl DefineFieldStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
@@ -77,31 +79,6 @@ impl DefineFieldStatement {
 				return Err(Error::FdAlreadyExists {
 					name: fd,
 				});
-			}
-		}
-
-		// Validate custom types
-		if let Some(ref kind) = self.kind {
-			if let Kind::UserDefined(name) = kind {
-				// Check if the type exists
-				let key = format!("type:{}", name);
-				if txn.get(key.as_str(), None).await?.is_none() {
-					return Err(Error::TypeNotFound(name.to_string()));
-				}
-			}
-		}
-
-		// Validate default value against type
-		if let Some(ref default) = self.default {
-			if let Some(ref kind) = self.kind {
-				default.validate_custom_type(kind, ctx).await?;
-			}
-		}
-
-		// Validate value against type
-		if let Some(ref value) = self.value {
-			if let Some(ref kind) = self.kind {
-				value.validate_custom_type(kind, ctx).await?;
 			}
 		}
 
@@ -142,8 +119,13 @@ impl DefineFieldStatement {
 		txn.clear();
 		// Find all existing field definitions
 		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
+		// Obtain the inner kind
+		let cur_kind = match self.kind.as_ref() {
+			Some(x) => x.inner_kind(stk, ctx, opt).await?,
+			_ => None,
+		};
 		// Process possible recursive_definitions
-		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
+		if let Some(mut cur_kind) = cur_kind {
 			let mut name = self.name.clone();
 			loop {
 				// Check if the subtype is an `any` type
@@ -160,7 +142,7 @@ impl DefineFieldStatement {
 					break;
 				}
 				// Get the kind of this sub field
-				let new_kind = cur_kind.inner_kind();
+				let new_kind = cur_kind.inner_kind(stk, ctx, opt).await?;
 				// Add a new subtype
 				name.0.push(Part::All);
 				// Get the field name

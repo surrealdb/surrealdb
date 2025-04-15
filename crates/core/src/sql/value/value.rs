@@ -1,7 +1,7 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 use crate::ctx::Context;
-use crate::dbs::{type_def::TypeDefinition, Options};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
@@ -22,9 +22,10 @@ use crate::sql::{
 use crate::sql::{Closure, ControlFlow, FlowResult, Ident};
 use chrono::{DateTime, Utc};
 
+use futures::future::try_join_all;
 use geo::Point;
 use reblessive::tree::Stk;
-use revision::{revisioned, Revisioned};
+use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -1346,7 +1347,13 @@ impl Value {
 	// -----------------------------------
 
 	/// Try to coerce this value to the specified `Kind`
-	pub(crate) fn coerce_to(self, kind: &Kind) -> Result<Value, Error> {
+	pub(crate) async fn coerce_to(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		kind: &Kind,
+	) -> Result<Value, Error> {
 		// Attempt to convert to the desired type
 		let res = match kind {
 			Kind::Any => Ok(self),
@@ -1365,15 +1372,17 @@ impl Value {
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
 			Kind::Regex => self.coerce_to_regex().map(Value::from),
 			Kind::Range => self.coerce_to_range().map(Value::from),
-			Kind::UserDefined(_) => Ok(self),
+			Kind::Custom(_) => Ok(self),
 			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
-				Some(l) => self.coerce_to_set_type_len(t, l).map(Value::from),
-				None => self.coerce_to_set_type(t).map(Value::from),
+				Some(l) => self.coerce_to_set_type_len(stk, ctx, opt, t, l).await.map(Value::from),
+				None => self.coerce_to_set_type(stk, ctx, opt, t).await.map(Value::from),
 			},
 			Kind::Array(t, l) => match l {
-				Some(l) => self.coerce_to_array_type_len(t, l).map(Value::from),
-				None => self.coerce_to_array_type(t).map(Value::from),
+				Some(l) => {
+					self.coerce_to_array_type_len(stk, ctx, opt, t, l).await.map(Value::from)
+				}
+				None => self.coerce_to_array_type(stk, ctx, opt, t).await.map(Value::from),
 			},
 			Kind::Record(t) => match t.is_empty() {
 				true => self.coerce_to_record().map(Value::from),
@@ -1385,12 +1394,12 @@ impl Value {
 			},
 			Kind::Option(k) => match self {
 				Self::None => Ok(Self::None),
-				v => v.coerce_to(k),
+				v => v.coerce_to(stk, ctx, opt, k).await,
 			},
 			Kind::Either(k) => {
 				let mut val = self;
 				for k in k {
-					match val.coerce_to(k) {
+					match val.coerce_to(stk, ctx, opt, k).await {
 						Err(Error::CoerceTo {
 							from,
 							..
@@ -1885,91 +1894,121 @@ impl Value {
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type
-	pub(crate) fn coerce_to_array_type(self, kind: &Kind) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("array<{kind}>"),
-				},
-				e => e,
-			})
+	pub(crate) async fn coerce_to_array_type(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		kind: &Kind,
+	) -> Result<Array, Error> {
+		let arr = self.coerce_to_array()?;
+		stk.scope(|scope| {
+			try_join_all(arr.into_iter().map(|v| scope.run(|stk| v.coerce_to(stk, ctx, opt, kind))))
+		})
+		.await
+		.map(Array)
+		.map_err(|e| match e {
+			Error::CoerceTo {
+				from,
+				..
+			} => Error::CoerceTo {
+				from,
+				into: format!("array<{kind}>"),
+			},
+			e => e,
+		})
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type, and length
-	pub(crate) fn coerce_to_array_type_len(self, kind: &Kind, len: &u64) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("array<{kind}, {len}>"),
-				},
-				e => e,
-			})
-			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("array<{kind}, {len}>"),
-					size: v,
-				}),
-				_ => Ok(v),
-			})
+	pub(crate) async fn coerce_to_array_type_len(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		kind: &Kind,
+		len: &u64,
+	) -> Result<Array, Error> {
+		let arr = self.coerce_to_array()?;
+		stk.scope(|scope| {
+			try_join_all(arr.into_iter().map(|v| scope.run(|stk| v.coerce_to(stk, ctx, opt, kind))))
+		})
+		.await
+		.map_err(|e| match e {
+			Error::CoerceTo {
+				from,
+				..
+			} => Error::CoerceTo {
+				from,
+				into: format!("array<{kind}, {len}>"),
+			},
+			e => e,
+		})
+		.and_then(|v| match v.len() {
+			v if v > *len as usize => Err(Error::LengthInvalid {
+				kind: format!("array<{kind}, {len}>"),
+				size: v,
+			}),
+			_ => Ok(Array(v)),
+		})
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type, unique values
-	pub(crate) fn coerce_to_set_type(self, kind: &Kind) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.uniq()
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("set<{kind}>"),
-				},
-				e => e,
-			})
+	pub(crate) async fn coerce_to_set_type(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		kind: &Kind,
+	) -> Result<Array, Error> {
+		let arr = self.coerce_to_array()?.uniq();
+		stk.scope(|scope| {
+			try_join_all(arr.into_iter().map(|v| scope.run(|stk| v.coerce_to(stk, ctx, opt, kind))))
+		})
+		.await
+		.map(Array)
+		.map_err(|e| match e {
+			Error::CoerceTo {
+				from,
+				..
+			} => Error::CoerceTo {
+				from,
+				into: format!("set<{kind}>"),
+			},
+			e => e,
+		})
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type, unique values, and length
-	pub(crate) fn coerce_to_set_type_len(self, kind: &Kind, len: &u64) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.uniq()
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("set<{kind}, {len}>"),
-				},
-				e => e,
-			})
-			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("set<{kind}, {len}>"),
-					size: v,
-				}),
-				_ => Ok(v),
-			})
+	pub(crate) async fn coerce_to_set_type_len(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		kind: &Kind,
+		len: &u64,
+	) -> Result<Array, Error> {
+		let arr = self.coerce_to_array()?.uniq();
+		stk.scope(|scope| {
+			try_join_all(arr.into_iter().map(|v| scope.run(|stk| v.coerce_to(stk, ctx, opt, kind))))
+		})
+		.await
+		.map_err(|e| match e {
+			Error::CoerceTo {
+				from,
+				..
+			} => Error::CoerceTo {
+				from,
+				into: format!("set<{kind}, {len}>"),
+			},
+			e => e,
+		})
+		.and_then(|v| match v.len() {
+			v if v > *len as usize => Err(Error::LengthInvalid {
+				kind: format!("set<{kind}, {len}>"),
+				size: v,
+			}),
+			_ => Ok(Array(v)),
+		})
 	}
 
 	// -----------------------------------
@@ -1996,7 +2035,7 @@ impl Value {
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
 			Kind::Regex => self.convert_to_regex().map(Value::from),
 			Kind::Range => self.convert_to_range().map(Value::from),
-			Kind::UserDefined(_) => Ok(self),
+			Kind::Custom(_) => Ok(self),
 			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.convert_to_set_type_len(t, l).map(Value::from),
@@ -3061,83 +3100,6 @@ impl Value {
 				| Value::Table(_)
 				| Value::Uuid(_)
 		)
-	}
-
-	pub(crate) async fn validate_custom_type(
-		&self,
-		kind: &Kind,
-		ctx: &Context,
-	) -> Result<(), Error> {
-		match kind {
-			Kind::UserDefined(name) => {
-				// Get the type definition
-				let key = format!("type:{}", name);
-				let txn = ctx.tx();
-				if let Some(def) = txn.get(key.as_str(), None).await? {
-					let def: TypeDefinition =
-						TypeDefinition::deserialize_revisioned(&mut def.as_slice())
-							.map_err(|e| Error::Revision(e))?;
-					// Validate against the type definition
-					Box::pin(async move { self.validate_custom_type(&def.kind, ctx).await })
-						.await?;
-				} else {
-					return Err(Error::TypeNotFound(name.to_string()));
-				}
-			}
-			Kind::Array(kind, _len) => {
-				if let Value::Array(arr) = self {
-					for val in arr.0.iter() {
-						Box::pin(async move { val.validate_custom_type(kind, ctx).await }).await?;
-					}
-				} else {
-					return Err(Error::InvalidType {
-						expected: "array".to_string(),
-						found: self.kindof().to_string(),
-					});
-				}
-			}
-			Kind::Object => {
-				if !matches!(self, Value::Object(_)) {
-					return Err(Error::InvalidType {
-						expected: "object".to_string(),
-						found: self.kindof().to_string(),
-					});
-				}
-			}
-			Kind::Set(kind, _len) => {
-				if let Value::Array(arr) = self {
-					for val in arr.0.iter() {
-						Box::pin(async move { val.validate_custom_type(kind, ctx).await }).await?;
-					}
-				} else {
-					return Err(Error::InvalidType {
-						expected: "set".to_string(),
-						found: self.kindof().to_string(),
-					});
-				}
-			}
-			Kind::Record(tables) => {
-				if let Value::Thing(thing) = self {
-					let table = Table::from(thing.tb.clone());
-					if !tables.contains(&table) {
-						return Err(Error::InvalidType {
-							expected: format!("record of type {:?}", tables),
-							found: format!("record of type {}", thing.tb),
-						});
-					}
-				} else {
-					return Err(Error::InvalidType {
-						expected: "record".to_string(),
-						found: self.kindof().to_string(),
-					});
-				}
-			}
-			_ => {
-				// For primitive types, use existing coercion
-				self.clone().coerce_to(kind)?;
-			}
-		}
-		Ok(())
 	}
 }
 

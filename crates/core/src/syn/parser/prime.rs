@@ -530,7 +530,7 @@ impl Parser<'_> {
 			}
 			t!("CREATE") => {
 				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx, start)).await?;
+				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
 				Subquery::Create(stmt)
 			}
 			t!("INSERT") => {
@@ -643,9 +643,8 @@ impl Parser<'_> {
 				Subquery::Select(stmt)
 			}
 			t!("CREATE") => {
-				let token = self.pop_peek();
-				let delim = start.unwrap_or_else(|| token.span);
-				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx, delim)).await?;
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
 				Subquery::Create(stmt)
 			}
 			t!("INSERT") => {

@@ -11,5 +11,6 @@ pub mod pa;
 pub mod tb;
 pub mod ti;
 pub mod ts;
+pub mod ty;
 pub mod us;
 pub mod vs;

@@ -39,7 +39,7 @@ impl Closure {
 					})
 				}
 				(kind, Some(val)) => {
-					if let Ok(val) = val.to_owned().coerce_to(kind) {
+					if let Ok(val) = val.to_owned().coerce_to(stk, &ctx.freeze(), opt, kind).await {
 						ctx.add_value(name.to_string(), val.into());
 					} else {
 						return Err(Error::InvalidArguments {
@@ -57,7 +57,10 @@ impl Closure {
 		let ctx = ctx.freeze();
 		let result = self.body.compute(stk, &ctx, opt, doc).await.catch_return()?;
 		if let Some(returns) = &self.returns {
-			result.coerce_to(returns).map_err(|e| e.function_check_from_coerce("ANONYMOUS"))
+			result
+				.coerce_to(stk, &ctx, opt, returns)
+				.await
+				.map_err(|e| e.function_check_from_coerce("ANONYMOUS"))
 		} else {
 			Ok(result)
 		}

@@ -25,12 +25,12 @@ use crate::{
 			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
 			DefineParamStatement, DefineStatement, DefineTableStatement, DefineTypeStatement,
 			DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
-			KillStatement, OptionStatement, OutputStatement, RelateStatement, RemoveAccessStatement,
-			RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
-			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
-			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
-			UpsertStatement, UseStatement,
+			KillStatement, OptionStatement, OutputStatement, RelateStatement,
+			RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement,
+			RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
+			RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
+			RemoveTableStatement, RemoveUserStatement, SelectStatement, SetStatement,
+			ThrowStatement, UpdateStatement, UpsertStatement, UseStatement,
 		},
 		tokenizer::Tokenizer,
 		user::UserDuration,
@@ -108,7 +108,6 @@ fn parse_create() {
 		Statement::Create(CreateStatement {
 			only: true,
 			what: Values(vec![Value::Table(Table("foo".to_owned()))]),
-			kind: Some(Kind::Any),
 			data: Some(Data::SetExpression(vec![
 				(
 					Idiom(vec![Part::Field(Ident("bar".to_owned()))]),
@@ -1932,10 +1931,8 @@ fn parse_define_field() {
 
 	// Custom type
 	{
-		let res = test_parse!(
-			parse_stmt,
-			r#"DEFINE FIELD email ON TABLE user TYPE email_type"#
-		).unwrap();
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE FIELD email ON TABLE user TYPE email_type"#).unwrap();
 
 		assert_eq!(
 			res,
@@ -1943,7 +1940,7 @@ fn parse_define_field() {
 				name: Idiom(vec![Part::Field(Ident("email".to_owned()))]),
 				what: Ident("user".to_owned()),
 				flex: false,
-				kind: Some(Kind::UserDefined(Ident("email_type".to_owned()))),
+				kind: Some(Kind::Custom(Ident("email_type".to_owned()))),
 				readonly: false,
 				value: None,
 				assert: None,
@@ -2147,10 +2144,13 @@ fn parse_define_analyzer() {
 
 #[test]
 fn parse_define_type() {
-	let res = test_parse!(parse_stmt, "DEFINE TYPE example AS 'tall' | 'short' COMMENT 'Height type'").unwrap();
+	let res =
+		test_parse!(parse_stmt, "DEFINE TYPE example AS 'tall' | 'short' COMMENT 'Height type'")
+			.unwrap();
 	assert_eq!(
 		res,
 		Statement::Define(DefineStatement::Type(DefineTypeStatement {
+			id: None,
 			name: Ident("example".to_string()),
 			kind: Kind::Set(Box::new(Kind::String), None),
 			comment: Some(Strand("Height type".to_string())),
@@ -2159,10 +2159,12 @@ fn parse_define_type() {
 		}))
 	);
 
-	let res = test_parse!(parse_stmt, "DEFINE TYPE IF NOT EXISTS example AS 'tall' | 'short'").unwrap();
+	let res =
+		test_parse!(parse_stmt, "DEFINE TYPE IF NOT EXISTS example AS 'tall' | 'short'").unwrap();
 	assert_eq!(
 		res,
 		Statement::Define(DefineStatement::Type(DefineTypeStatement {
+			id: None,
 			name: Ident("example".to_string()),
 			kind: Kind::Set(Box::new(Kind::String), None),
 			comment: None,
@@ -2175,6 +2177,7 @@ fn parse_define_type() {
 	assert_eq!(
 		res,
 		Statement::Define(DefineStatement::Type(DefineTypeStatement {
+			id: None,
 			name: Ident("example".to_string()),
 			kind: Kind::Set(Box::new(Kind::String), None),
 			comment: None,
@@ -2776,7 +2779,10 @@ fn parse_relate() {
 		res,
 		Statement::Relate(RelateStatement {
 			only: true,
-			kind: Kind::Record(vec![Table("a".to_owned())]),
+			kind: Value::Thing(Thing {
+				tb: "a".to_owned(),
+				id: Id::from("b"),
+			}),
 			from: Value::Array(Array(vec![
 				Value::Number(Number::Int(1)),
 				Value::Number(Number::Int(2)),
@@ -2784,7 +2790,6 @@ fn parse_relate() {
 			with: Value::Subquery(Box::new(Subquery::Create(CreateStatement {
 				only: false,
 				what: Values(vec![Value::Table(Table("foo".to_owned()))]),
-				kind: Some(Kind::Any),
 				data: None,
 				output: None,
 				timeout: None,

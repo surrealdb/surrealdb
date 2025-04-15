@@ -14,7 +14,7 @@ use crate::sql::statements::{
 use crate::sql::{Duration, Fields, Ident, Param};
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
-use crate::syn::token::{t, Glued, TokenKind, Span};
+use crate::syn::token::{t, Glued, TokenKind};
 use crate::{
 	sql::{
 		statements::{
@@ -128,7 +128,7 @@ impl Parser<'_> {
 			}
 			t!("CREATE") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_create_stmt(ctx, Span::empty())).await.map(Statement::Create)
+				ctx.run(|ctx| self.parse_create_stmt(ctx)).await.map(Statement::Create)
 			}
 			t!("DEFINE") => {
 				self.pop_peek();
@@ -245,7 +245,7 @@ impl Parser<'_> {
 			}
 			t!("CREATE") => {
 				self.pop_peek();
-				self.parse_create_stmt(ctx, Span::empty()).await.map(Entry::Create)
+				self.parse_create_stmt(ctx).await.map(Entry::Create)
 			}
 			t!("DEFINE") => {
 				self.pop_peek();

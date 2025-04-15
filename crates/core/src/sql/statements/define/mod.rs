@@ -13,6 +13,7 @@ mod model;
 mod namespace;
 mod param;
 mod table;
+mod r#type;
 mod user;
 
 pub use access::DefineAccessStatement;
@@ -28,6 +29,7 @@ pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
 pub use param::DefineParamStatement;
+pub use r#type::DefineTypeStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 
@@ -41,12 +43,10 @@ pub use api::FindApi;
 pub use bucket::BucketDefinition;
 
 use crate::ctx::Context;
-use crate::dbs::type_def::TypeDefinition;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Ident, Kind, Strand, Value};
+use crate::sql::Value;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -129,7 +129,7 @@ impl DefineStatement {
 			Self::Param(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Event(ref v) => v.compute(ctx, opt, doc).await,
-			Self::Field(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Field(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Index(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, doc).await,
 			Self::User(ref v) => v.compute(ctx, opt, doc).await,
@@ -180,77 +180,5 @@ mod tests {
 		});
 		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
 		assert_eq!(13, enc.len());
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct DefineTypeStatement {
-	pub name: Ident,
-	pub kind: Kind,
-	pub comment: Option<Strand>,
-	pub if_not_exists: bool,
-	pub overwrite: bool,
-}
-
-impl DefineTypeStatement {
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		_opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Check if the type already exists
-		if !self.if_not_exists {
-			// Check if type exists in the database
-			let key = format!("type:{}", self.name);
-			let txn = ctx.tx();
-			if let Some(_) = txn.get(key.as_str(), None).await? {
-				return Err(Error::TypeExists(self.name.to_string()));
-			}
-		}
-
-		// Create the type definition
-		let def = TypeDefinition {
-			name: self.name.clone(),
-			kind: self.kind.clone(),
-			comment: self.comment.clone(),
-		};
-
-		// Store the type definition
-		let key = format!("type:{}", self.name);
-		let txn = ctx.tx();
-		txn.set(key.as_str(), revision::to_vec(&def)?, None).await?;
-
-		Ok(Value::None)
-	}
-}
-
-impl Display for DefineTypeStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE TYPE")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
-		}
-		write!(f, " {} AS {}", self.name, self.kind)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
-		}
-		Ok(())
-	}
-}
-
-impl InfoStructure for DefineTypeStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"kind".to_string() => self.kind.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

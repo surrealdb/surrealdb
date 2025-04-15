@@ -185,10 +185,11 @@ impl Parser<'_> {
 					Ok(Kind::File(Vec::new()))
 				}
 			}
-			TokenKind::Identifier => {
-				// Check if this is a user-defined type
+			t!("TYPE") => {
+				expected!(self, t!("<"));
 				let name = self.next_token_value()?;
-				Ok(Kind::UserDefined(name))
+				expected!(self, t!(">"));
+				Ok(Kind::Custom(name))
 			}
 			_ => unexpected!(self, next, "a kind name"),
 		}

@@ -1769,23 +1769,15 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_define_type(&mut self, ctx: &mut Stk) -> ParseResult<DefineTypeStatement> {
-		// Parse optional IF NOT EXISTS or OVERWRITE
-		let if_not_exists = if self.eat(t!("IF")) {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			true
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
 		} else {
-			false
+			(false, false)
 		};
-
-		let overwrite = if self.eat(t!("OVERWRITE")) {
-			true
-		} else {
-			false
-		};
-
-		// Parse TYPE keyword
-		expected!(self, t!("TYPE"));
 
 		// Parse type name
 		let name = self.next_token_value()?;
@@ -1794,6 +1786,10 @@ impl Parser<'_> {
 		expected!(self, t!("AS"));
 
 		// Parse the type kind
+		let peek = self.peek();
+		if matches!(peek.kind, t!("TYPE")) {
+			unexpected!(self, peek, "a non-custom type")
+		}
 		let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
 
 		// Parse optional COMMENT
@@ -1809,6 +1805,7 @@ impl Parser<'_> {
 			comment,
 			if_not_exists,
 			overwrite,
+			..Default::default()
 		})
 	}
 }

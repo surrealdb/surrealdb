@@ -19,7 +19,6 @@ mod variables;
 
 pub mod capabilities;
 pub mod node;
-pub mod type_def;
 
 pub use self::capabilities::Capabilities;
 pub(crate) use self::executor::*;

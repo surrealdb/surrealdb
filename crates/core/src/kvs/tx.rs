@@ -29,6 +29,7 @@ use crate::sql::statements::DefineModelStatement;
 use crate::sql::statements::DefineNamespaceStatement;
 use crate::sql::statements::DefineParamStatement;
 use crate::sql::statements::DefineTableStatement;
+use crate::sql::statements::DefineTypeStatement;
 use crate::sql::statements::DefineUserStatement;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Id;
@@ -715,6 +716,29 @@ impl Transaction {
 		.try_into_aps()
 	}
 
+	/// Retrieve all type definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn all_db_types(
+		&self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineTypeStatement]>, Error> {
+		let qey = cache::tx::Lookup::Tys(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let beg = crate::key::database::ty::prefix(ns, db)?;
+				let end = crate::key::database::ty::suffix(ns, db)?;
+				let val = self.getr(beg..end, None).await?;
+				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+				let val = cache::tx::Entry::Tys(Arc::clone(&val));
+				self.cache.insert(qey, val.clone());
+				val
+			}
+		}
+		.try_into_tys()
+	}
+
 	/// Retrieve all analyzer definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_analyzers(
@@ -1313,6 +1337,31 @@ impl Transaction {
 					value: ap.to_owned(),
 				})?;
 				let val: ApiDefinition = revision::from_slice(&val)?;
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey, val.clone());
+				val
+			}
+		}
+		.try_into_type()
+	}
+
+	/// Retrieve a specific api definition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_db_type(
+		&self,
+		ns: &str,
+		db: &str,
+		ty: &str,
+	) -> Result<Arc<DefineTypeStatement>, Error> {
+		let qey = cache::tx::Lookup::Ty(ns, db, ty);
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::database::ty::new(ns, db, ty).encode()?;
+				let val = self.get(key, None).await?.ok_or_else(|| Error::TyNotFound {
+					name: ty.to_owned(),
+				})?;
+				let val: DefineTypeStatement = revision::from_slice(&val)?;
 				let val = cache::tx::Entry::Any(Arc::new(val));
 				self.cache.insert(qey, val.clone());
 				val

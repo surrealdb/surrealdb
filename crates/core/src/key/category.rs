@@ -84,6 +84,8 @@ pub enum Category {
 	DatabaseTable,
 	/// crate::key::database::ts             /*{ns}*{db}!ts{ts}
 	DatabaseTimestamp,
+	/// crate::key::database::ty             /*{ns}*{db}!ty{ty}
+	DatabaseType,
 	/// crate::key::database::us             /*{ns}*{db}!us{us}
 	DatabaseUser,
 	/// crate::key::database::vs             /*{ns}*{db}!vs
@@ -202,6 +204,7 @@ impl Display for Category {
 			Self::DatabaseTable => "DatabaseTable",
 			Self::DatabaseTableIdentifier => "DatabaseTableIdentifier",
 			Self::DatabaseTimestamp => "DatabaseTimestamp",
+			Self::DatabaseType => "DatabaseType",
 			Self::DatabaseUser => "DatabaseUser",
 			Self::DatabaseVersionstamp => "DatabaseVersionstamp",
 			Self::DatabaseConfig => "DatabaseConfig",
