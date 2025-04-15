@@ -13,9 +13,9 @@ use crate::sql::{
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
 	model::Model,
-	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
-	Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex, Strand,
-	Subquery, Table, Tables, Thing, Uuid,
+	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, File, Function,
+	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
+	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
 use crate::sql::{Closure, ControlFlow, FlowResult};
 use chrono::{DateTime, Utc};
@@ -145,6 +145,7 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	Refs(Refs),
+	File(File),
 	// Add new variants here
 }
 
@@ -160,6 +161,14 @@ impl Value {
 				end: fields.0.end,
 			})),
 		}))
+	}
+}
+
+impl Eq for Value {}
+
+impl Ord for Value {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.partial_cmp(other).unwrap_or(Ordering::Equal)
 	}
 }
 
@@ -930,6 +939,7 @@ impl fmt::Display for Value {
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
 			Value::Refs(v) => write!(f, "{v}"),
+			Value::File(v) => write!(f, "{v}"),
 		}
 	}
 }
@@ -1084,13 +1094,6 @@ impl TryNeg for Value {
 	}
 }
 
-impl Eq for Value {}
-impl Ord for Value {
-	fn cmp(&self, other: &Self) -> Ordering {
-		self.partial_cmp(other).unwrap_or(Ordering::Equal)
-	}
-}
-
 // Conversion methods.
 
 /// Macro implementing conversion methods for the variants of the value enum.
@@ -1220,6 +1223,7 @@ subtypes! {
 	Model(Box<Model>) => (is_model,as_model,into_model),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
 	Refs(Refs) => (is_refs,as_refs,into_refs),
+	File(File) => (is_file,as_file,into_file),
 }
 
 macro_rules! impl_from_number {

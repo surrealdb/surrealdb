@@ -108,7 +108,7 @@ jobs:
         run: |
           cargo install --debug --locked cargo-acl
           sudo apt-get install -y bubblewrap
-      
+
       # See https://etbe.coker.com.au/2024/04/24/ubuntu-24-04-bubblewrap/
       - name: Configure bubblewrap
         run: |
@@ -127,8 +127,6 @@ jobs:
           sudo systemctl reload apparmor
 
       - name: Check dependencies for unauthorized access
-        env:
-          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: cargo acl -n
 
       - name: Dependency check failure

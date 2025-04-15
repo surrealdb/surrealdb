@@ -154,6 +154,7 @@ impl InfoStatement {
 						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
 						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
+						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
 						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
 						"models".to_string() => process(txn.all_db_models(ns, db).await?),
 						"params".to_string() => process(txn.all_db_params(ns, db).await?),
@@ -180,6 +181,13 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_analyzers( ns, db).await?.iter() {
 								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"buckets".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_buckets(ns, db).await?.iter() {
+								out.insert(v.name.to_string(), v.to_string().into());
 							}
 							out.into()
 						},

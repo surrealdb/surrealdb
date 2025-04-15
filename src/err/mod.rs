@@ -59,9 +59,6 @@ pub enum Error {
 	#[error("There was an error with CBOR serialization: {0}")]
 	Cbor(String),
 
-	#[error("There was an error with MessagePack serialization: {0}")]
-	Pack(String),
-
 	#[error("There was an error with the remote request: {0}")]
 	Remote(#[from] ReqwestError),
 
@@ -106,18 +103,6 @@ impl From<Utf8Error> for Error {
 impl From<serde_json::Error> for Error {
 	fn from(e: serde_json::Error) -> Error {
 		Error::Json(e.to_string())
-	}
-}
-
-impl From<serde_pack::encode::Error> for Error {
-	fn from(e: serde_pack::encode::Error) -> Error {
-		Error::Pack(e.to_string())
-	}
-}
-
-impl From<serde_pack::decode::Error> for Error {
-	fn from(e: serde_pack::decode::Error) -> Error {
-		Error::Pack(e.to_string())
 	}
 }
 

@@ -4,8 +4,9 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::sql::{
-	array::Uniq as _, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, Duration,
-	Geometry, Kind, Literal, Number, Object, Range, Regex, Strand, Table, Thing, Uuid, Value,
+	array::Uniq as _, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, Duration, File,
+	Geometry, Ident, Kind, Literal, Number, Object, Range, Regex, Strand, Table, Thing, Uuid,
+	Value,
 };
 
 #[derive(Clone, Debug)]
@@ -307,15 +308,28 @@ impl Cast for Number {
 
 impl Cast for Strand {
 	fn can_cast(v: &Value) -> bool {
-		!matches!(v, Value::Bytes(_) | Value::None | Value::Null)
+		match v {
+			Value::None | Value::Null => false,
+			Value::Bytes(b) => std::str::from_utf8(b).is_ok(),
+			_ => true,
+		}
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
-			Value::Bytes(_) | Value::Null | Value::None => Err(CastError::InvalidKind {
+			Value::Bytes(b) => match String::from_utf8(b.0) {
+				Ok(x) => Ok(Strand(x)),
+				Err(e) => Err(CastError::InvalidKind {
+					from: Value::Bytes(Bytes(e.into_bytes())),
+					into: "string".to_owned(),
+				}),
+			},
+
+			Value::Null | Value::None => Err(CastError::InvalidKind {
 				from: v,
 				into: "string".into(),
 			}),
+
 			Value::Strand(x) => Ok(x),
 			Value::Uuid(x) => Ok(x.to_raw().into()),
 			Value::Datetime(x) => Ok(x.to_raw().into()),
@@ -634,6 +648,7 @@ impl_direct! {
 	Closure => Box<Closure> = Closure,
 	Object => Object,
 	Geometry => Geometry,
+	File => File,
 }
 
 impl Value {
@@ -689,6 +704,13 @@ impl Value {
 			Kind::Either(k) => k.iter().any(|x| self.can_cast_to_kind(x)),
 			Kind::Literal(lit) => self.can_cast_to_literal(lit),
 			Kind::References(_, _) => false,
+			Kind::File(buckets) => {
+				if buckets.is_empty() {
+					self.can_cast_to::<File>()
+				} else {
+					self.can_cast_to_file_buckets(buckets)
+				}
+			}
 		}
 	}
 
@@ -719,6 +741,10 @@ impl Value {
 
 	fn can_cast_to_literal(&self, val: &Literal) -> bool {
 		val.validate_value(self)
+	}
+
+	fn can_cast_to_file_buckets(&self, buckets: &[Ident]) -> bool {
+		matches!(self, Value::File(f) if f.is_bucket_type(buckets))
 	}
 
 	pub fn cast_to<T: Cast>(self) -> Result<T, CastError> {
@@ -783,6 +809,13 @@ impl Value {
 				from: self,
 				into: kind.to_string(),
 			}),
+			Kind::File(buckets) => {
+				if buckets.is_empty() {
+					self.cast_to::<File>().map(Value::from)
+				} else {
+					self.cast_to_file_buckets(buckets).map(Value::from)
+				}
+			}
 		}
 	}
 
@@ -911,5 +944,26 @@ impl Value {
 		}
 
 		Ok(array)
+	}
+
+	pub(crate) fn cast_to_file_buckets(self, buckets: &[Ident]) -> Result<File, CastError> {
+		let v = self.cast_to::<File>()?;
+
+		if v.is_bucket_type(buckets) {
+			return Ok(v);
+		}
+
+		let mut kind = "file<".to_owned();
+		for (idx, t) in buckets.iter().enumerate() {
+			if idx != 0 {
+				kind.push('|');
+			}
+			kind.push_str(t.as_str())
+		}
+		kind.push('>');
+		Err(CastError::InvalidKind {
+			from: v.into(),
+			into: kind,
+		})
 	}
 }

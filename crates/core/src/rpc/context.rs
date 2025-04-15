@@ -1,4 +1,4 @@
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+#[cfg(not(target_family = "wasm"))]
 use crate::gql::SchemaCache;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -51,11 +51,11 @@ pub trait RpcContext {
 	// ------------------------------
 
 	/// GraphQL queries are disabled by default
-	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+	#[cfg(not(target_family = "wasm"))]
 	const GQL_SUPPORT: bool = false;
 
 	/// Returns the GraphQL schema cache used in GraphQL queries
-	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+	#[cfg(not(target_family = "wasm"))]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		unimplemented!("graphql_schema_cache function must be implemented if GQL_SUPPORT = true")
 	}

@@ -8,8 +8,8 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{
-	Array, Bytes, Datetime, Duration, FlowResultExt as _, Geometry, Kind, Number, Range, Strand,
-	Uuid,
+	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Kind, Number, Range,
+	Strand, Uuid,
 };
 use crate::syn;
 use geo::Point;
@@ -24,6 +24,10 @@ pub fn array((val,): (Value,)) -> Result<Value, Error> {
 
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	Ok(val.cast_to::<bool>()?.into())
+}
+
+pub fn file((bucket, key): (String, String)) -> Result<Value, Error> {
+	Ok(Value::File(File::new(bucket, key)))
 }
 
 pub fn bytes((val,): (Value,)) -> Result<Value, Error> {
@@ -122,6 +126,14 @@ pub fn string((val,): (Value,)) -> Result<Value, Error> {
 	Ok(val.cast_to::<Strand>()?.into())
 }
 
+pub fn string_lossy((val,): (Value,)) -> Result<Value, Error> {
+	match val {
+		//TODO: Replace with from_utf8_lossy_owned once stablized.
+		Value::Bytes(x) => Ok(String::from_utf8_lossy(&x).into_owned().into()),
+		x => x.cast_to::<String>().map(Value::from).map_err(Error::from),
+	}
+}
+
 pub fn table((val,): (Value,)) -> Result<Value, Error> {
 	Ok(Value::Table(Table(match val {
 		Value::Thing(t) => t.tb,
@@ -144,6 +156,7 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value, 
 				Value::Object(v) => v.into(),
 				Value::Number(v) => v.into(),
 				Value::Range(v) => v.deref().to_owned().try_into()?,
+				Value::Uuid(u) => u.into(),
 				ref v => {
 					let s = v.clone().as_string();
 					if s.is_empty() {

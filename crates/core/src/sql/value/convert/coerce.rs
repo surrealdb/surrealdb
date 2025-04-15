@@ -1,6 +1,6 @@
 use std::{
 	collections::{BTreeMap, HashMap},
-	fmt,
+	fmt::{self},
 	hash::BuildHasher,
 };
 
@@ -8,8 +8,9 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::sql::{
-	array::Uniq, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, Duration, Geometry,
-	Kind, Literal, Number, Object, Range, Regex, Strand, Table, Thing, Uuid, Value,
+	array::Uniq, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, Duration, File,
+	Geometry, Ident, Kind, Literal, Number, Object, Range, Regex, Strand, Table, Thing, Uuid,
+	Value,
 };
 
 #[derive(Clone, Debug)]
@@ -242,19 +243,18 @@ impl Coerce for String {
 	}
 }
 
-//TODO: Conver to impl_direct once kind::regex merges.
-impl Coerce for Regex {
+impl Coerce for File {
 	fn can_coerce(v: &Value) -> bool {
-		matches!(v, Value::Regex(_))
+		matches!(v, Value::File(_))
 	}
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		if let Value::Regex(x) = v {
+		if let Value::File(x) = v {
 			Ok(x)
 		} else {
 			Err(CoerceError::InvalidKind {
 				from: v,
-				into: "regex".to_string(),
+				into: "file".to_string(),
 			})
 		}
 	}
@@ -414,6 +414,7 @@ impl_direct! {
 	Thing => Thing,
 	Strand => Strand,
 	Geometry => Geometry,
+	Regex => Regex,
 }
 
 // Coerce to runtime value implementations
@@ -470,6 +471,13 @@ impl Value {
 			Kind::Either(k) => k.iter().any(|x| self.can_coerce_to_kind(x)),
 			Kind::Literal(lit) => self.can_coerce_to_literal(lit),
 			Kind::References(_, _) => false,
+			Kind::File(buckets) => {
+				if buckets.is_empty() {
+					self.can_coerce_to::<File>()
+				} else {
+					self.can_coerce_to_file_buckets(&buckets)
+				}
+			}
 		}
 	}
 
@@ -502,6 +510,10 @@ impl Value {
 
 	fn can_coerce_to_literal(&self, val: &Literal) -> bool {
 		val.validate_value(self)
+	}
+
+	fn can_coerce_to_file_buckets(&self, buckets: &[Ident]) -> bool {
+		matches!(self, Value::File(f) if f.is_bucket_type(buckets))
 	}
 
 	/// Convert the value using coercion rules.
@@ -573,6 +585,13 @@ impl Value {
 				from: self,
 				into: kind.to_string(),
 			}),
+			Kind::File(buckets) => {
+				if buckets.is_empty() {
+					self.coerce_to::<File>().map(Value::from)
+				} else {
+					self.coerce_to_file_buckets(buckets).map(Value::from)
+				}
+			}
 		}
 	}
 
@@ -691,5 +710,26 @@ impl Value {
 		}
 
 		Ok(array)
+	}
+
+	pub(crate) fn coerce_to_file_buckets(self, buckets: &[Ident]) -> Result<File, CoerceError> {
+		let v = self.coerce_to::<File>()?;
+
+		if v.is_bucket_type(buckets) {
+			return Ok(v);
+		}
+
+		let mut kind = "file<".to_owned();
+		for (idx, t) in buckets.iter().enumerate() {
+			if idx != 0 {
+				kind.push('|');
+			}
+			kind.push_str(t.as_str())
+		}
+		kind.push('>');
+		Err(CoerceError::InvalidKind {
+			from: v.into(),
+			into: kind,
+		})
 	}
 }
