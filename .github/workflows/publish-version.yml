@@ -85,15 +85,15 @@ jobs:
             exit 404
           fi
 
-          if [[ $suffix != "none" ]]; then
+          if [[ $suffix == "none" ]]; then
             environment=stable
             buildMetadata=""
-          elif [[ $suffix != "metadata" ]]; then
+          elif [[ $suffix == "metadata" ]]; then
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
             rev=$(git rev-parse --short HEAD)
             buildMetadata=${date}.${rev}
             environment=nightly
-          elif [[  $suffix != "rc" ]]; then
+          elif [[  $suffix == "rc" ]]; then
             version=${version}-${{ inputs.suffix }}
             environment=release-candidate
             buildMetadata=""
