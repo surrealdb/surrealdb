@@ -66,6 +66,11 @@ jobs:
         with:
           toolchain: ${{ inputs.rust_version }}
 
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git-ref }}
+
       - name: Set outputs
         id: outputs
         run: |
@@ -113,11 +118,6 @@ jobs:
           else
             echo "name=v${version}" >> $GITHUB_OUTPUT
           fi
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.git-ref }}
 
       - name: Configure git
         run: |
