@@ -29,7 +29,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the next tokens to be of a field set.
-	pub(super) async fn parse_fields(&mut self, ctx: &mut Stk) -> ParseResult<Fields> {
+	pub(crate) async fn parse_fields(&mut self, ctx: &mut Stk) -> ParseResult<Fields> {
 		if self.eat(t!("VALUE")) {
 			let expr = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 			let alias = if self.eat(t!("AS")) {

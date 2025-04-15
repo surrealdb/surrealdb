@@ -6,6 +6,7 @@ use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::rpc::statement_options::StatementOptions;
 use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
@@ -56,15 +57,12 @@ pub trait RpcProtocolV2: RpcContext {
 			Method::Create => self.create(params).await,
 			Method::Upsert => self.upsert(params).await,
 			Method::Update => self.update(params).await,
-			Method::Merge => self.merge(params).await,
-			Method::Patch => self.patch(params).await,
 			Method::Delete => self.delete(params).await,
 			Method::Version => self.version(params).await,
 			Method::Query => self.query(params).await,
 			Method::Relate => self.relate(params).await,
 			Method::Run => self.run(params).await,
 			Method::GraphQL => self.graphql(params).await,
-			Method::InsertRelation => self.insert_relation(params).await,
 			_ => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -118,8 +116,6 @@ pub trait RpcProtocolV2: RpcContext {
 		Ok(Value::None.into())
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
-	// This will allow returning refresh tokens as well as any additional credential resulting from signing up.
 	async fn signup(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
@@ -133,7 +129,7 @@ pub trait RpcProtocolV2: RpcContext {
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
 		let out: Result<Value, Error> =
-			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(|v| v.token.into());
+			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -142,8 +138,6 @@ pub trait RpcProtocolV2: RpcContext {
 		out.map(Into::into).map_err(Into::into)
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
-	// This will allow returning refresh tokens as well as any additional credential resulting from signing in.
 	async fn signin(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
@@ -156,10 +150,8 @@ pub trait RpcProtocolV2: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
-		let out: Result<Value, Error> = crate::iam::signin::signin(self.kvs(), &mut session, v)
-			.await
-			// The default `signin` method just returns the token
-			.map(|v| v.token.into());
+		let out: Result<Value, Error> =
+			crate::iam::signin::signin(self.kvs(), &mut session, v).await.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -383,19 +375,30 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok(what) = params.needs_one() else {
+		let Ok((what, opts_value)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Apply user options
+		if !opts_value.is_none_or_null() {
+			opts.process_options(opts_value, self.kvs().get_capabilities())?;
+		}
+		// Specify the query parameters
+		let var = Some(opts.merge_vars(&self.session().parameters));
 		// Specify the SQL query string
 		let sql = SelectStatement {
-			only: what.is_thing_single(),
-			expr: Fields::all(),
+			only: opts.only,
+			expr: opts.fields.unwrap_or_else(Fields::all),
 			what: vec![what.could_be_table()].into(),
+			start: opts.start,
+			limit: opts.limit,
+			cond: opts.cond,
+			timeout: opts.timeout,
+			version: opts.version,
 			..Default::default()
 		}
 		.into();
-		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -419,58 +422,39 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_two() else {
+		let Ok((what, data, opts_value)) = params.needs_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Insert data
+		opts.with_data_content(data);
+		// Apply user options
+		if !opts_value.is_none_or_null() {
+			opts.process_options(opts_value, self.kvs().get_capabilities())?;
+		}
+		// Extract the data from the Option
+		let Some(data) = opts.data_expr() else {
+			return Err(
+				fail!("Data content was previously set, so it cannot be Option::None").into()
+			);
+		};
+		// Specify the query parameters
+		let var = Some(opts.merge_vars(&self.session().parameters));
 		// Specify the SQL query string
 		let sql = InsertStatement {
 			into: match what.is_none_or_null() {
 				false => Some(what.could_be_table()),
 				true => None,
 			},
-			data: crate::sql::Data::SingleExpression(data),
-			output: Some(Output::After),
+			data,
+			output: opts.output,
+			relation: opts.relation,
+			timeout: opts.timeout,
+			version: opts.version,
 			..Default::default()
 		}
 		.into();
-		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
-		// Execute the query on the database
-		let mut res = self.kvs().process(sql, &self.session(), var).await?;
-		// Extract the first query result
-		Ok(res
-			.remove(0)
-			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
-			})?
-			.into())
-	}
-
-	async fn insert_relation(&self, params: Array) -> Result<Data, RpcError> {
-		// Check if the user is allowed to query
-		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
-		}
-		// Process the method arguments
-		let Ok((what, data)) = params.needs_two() else {
-			return Err(RpcError::InvalidParams);
-		};
-		// Specify the SQL query string
-		let sql = InsertStatement {
-			relation: true,
-			into: match what.is_none_or_null() {
-				false => Some(what.could_be_table()),
-				true => None,
-			},
-			data: crate::sql::Data::SingleExpression(data),
-			output: Some(Output::After),
-			..Default::default()
-		}
-		.into();
-		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -494,24 +478,37 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_one_or_two() else {
+		let Ok((what, data, opts_value)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Set the default output
+		opts.with_output(Output::After);
+		// Insert data
+		if !data.is_none_or_null() {
+			opts.with_data_content(data);
+		}
+		// Apply user options
+		if !opts_value.is_none_or_null() {
+			opts.process_options(opts_value, self.kvs().get_capabilities())?;
+		}
 		let what = what.could_be_table();
+		// Specify the query parameters
+		let var = Some(opts.merge_vars(&self.session().parameters));
 		// Specify the SQL query string
 		let sql = CreateStatement {
-			only: what.is_thing_single() || what.is_table(),
+			only: opts.only,
 			what: vec![what.could_be_table()].into(),
-			data: match data.is_none_or_null() {
-				false => Some(crate::sql::Data::ContentExpression(data)),
-				true => None,
-			},
-			output: Some(Output::After),
+			data: opts.data_expr(),
+			output: opts.output,
+			timeout: opts.timeout,
+			version: opts.version,
 			..Default::default()
 		}
 		.into();
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, &self.session(), None).await?;
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
 		Ok(res
 			.remove(0)
@@ -533,23 +530,34 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_one_or_two() else {
+		let Ok((what, data, opts_value)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Set the default output
+		opts.with_output(Output::After);
+		// Insert data
+		if !data.is_none_or_null() {
+			opts.with_data_content(data);
+		}
+		// Apply user options
+		if !opts_value.is_none_or_null() {
+			opts.process_options(opts_value, self.kvs().get_capabilities())?;
+		}
+		// Specify the query parameters
+		let var = Some(opts.merge_vars(&self.session().parameters));
 		// Specify the SQL query string
 		let sql = UpsertStatement {
-			only: what.is_thing_single(),
+			only: opts.only,
 			what: vec![what.could_be_table()].into(),
-			data: match data.is_none_or_null() {
-				false => Some(crate::sql::Data::ContentExpression(data)),
-				true => None,
-			},
-			output: Some(Output::After),
+			data: opts.data_expr(),
+			output: opts.output,
+			cond: opts.cond,
+			timeout: opts.timeout,
 			..Default::default()
 		}
 		.into();
-		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -573,103 +581,34 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_one_or_two() else {
+		let Ok((what, data, opts_value)) = params.needs_one_two_or_three() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Set the default output
+		opts.with_output(Output::After);
+		// Insert data
+		if !data.is_none_or_null() {
+			opts.with_data_content(data);
+		}
+		// Apply user options
+		if !opts_value.is_none_or_null() {
+			opts.process_options(opts_value, self.kvs().get_capabilities())?;
+		}
+		// Specify the query parameters
+		let var = Some(opts.merge_vars(&self.session().parameters));
 		// Specify the SQL query string
 		let sql = UpdateStatement {
-			only: what.is_thing_single(),
+			only: opts.only,
 			what: vec![what.could_be_table()].into(),
-			data: match data.is_none_or_null() {
-				false => Some(crate::sql::Data::ContentExpression(data)),
-				true => None,
-			},
-			output: Some(Output::After),
+			data: opts.data_expr(),
+			output: opts.output,
+			cond: opts.cond,
+			timeout: opts.timeout,
 			..Default::default()
 		}
 		.into();
-		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
-		// Execute the query on the database
-		let mut res = self.kvs().process(sql, &self.session(), var).await?;
-		// Extract the first query result
-		Ok(res
-			.remove(0)
-			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
-			})?
-			.into())
-	}
-
-	// ------------------------------
-	// Methods for merging
-	// ------------------------------
-
-	async fn merge(&self, params: Array) -> Result<Data, RpcError> {
-		// Check if the user is allowed to query
-		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
-		}
-		// Process the method arguments
-		let Ok((what, data)) = params.needs_one_or_two() else {
-			return Err(RpcError::InvalidParams);
-		};
-		// Specify the SQL query string
-		let sql = UpdateStatement {
-			only: what.is_thing_single(),
-			what: vec![what.could_be_table()].into(),
-			data: match data.is_none_or_null() {
-				false => Some(crate::sql::Data::MergeExpression(data)),
-				true => None,
-			},
-			output: Some(Output::After),
-			..Default::default()
-		}
-		.into();
-		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
-		// Execute the query on the database
-		let mut res = self.kvs().process(sql, &self.session(), var).await?;
-		// Extract the first query result
-		Ok(res
-			.remove(0)
-			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
-			})?
-			.into())
-	}
-
-	// ------------------------------
-	// Methods for patching
-	// ------------------------------
-
-	async fn patch(&self, params: Array) -> Result<Data, RpcError> {
-		// Check if the user is allowed to query
-		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
-		}
-		// Process the method arguments
-		let Ok((what, data, diff)) = params.needs_one_two_or_three() else {
-			return Err(RpcError::InvalidParams);
-		};
-		// Specify the SQL query string
-		let sql = UpdateStatement {
-			only: what.is_thing_single(),
-			what: vec![what.could_be_table()].into(),
-			data: Some(crate::sql::Data::PatchExpression(data)),
-			output: match diff.is_true() {
-				true => Some(Output::Diff),
-				false => Some(Output::After),
-			},
-			..Default::default()
-		}
-		.into();
-		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -693,25 +632,36 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((from, kind, with, data)) = params.needs_three_or_four() else {
+		let Ok((from, kind, with, data, opts_value)) = params.needs_three_four_or_five() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Set the default output
+		opts.with_output(Output::After);
+		// Insert data
+		if !data.is_none_or_null() {
+			opts.with_data_content(data);
+		}
+		// Apply user options
+		if !opts_value.is_none_or_null() {
+			opts.process_options(opts_value, self.kvs().get_capabilities())?;
+		}
+		// Specify the query parameters
+		let var = Some(opts.merge_vars(&self.session().parameters));
 		// Specify the SQL query string
 		let sql = RelateStatement {
-			only: from.is_single() && with.is_single(),
+			only: opts.only,
 			from,
 			kind: kind.could_be_table(),
 			with,
-			data: match data.is_none_or_null() {
-				false => Some(crate::sql::Data::ContentExpression(data)),
-				true => None,
-			},
-			output: Some(Output::After),
+			data: opts.data_expr(),
+			output: opts.output,
+			timeout: opts.timeout,
+			uniq: opts.unique,
 			..Default::default()
 		}
 		.into();
-		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -735,19 +685,29 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok(what) = params.needs_one() else {
+		let Ok((what, opts_value)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Set the default output
+		opts.with_output(Output::Before);
+		// Apply user options
+		if !opts_value.is_none_or_null() {
+			opts.process_options(opts_value, self.kvs().get_capabilities())?;
+		}
+		// Specify the query parameters
+		let var = Some(opts.merge_vars(&self.session().parameters));
 		// Specify the SQL query string
 		let sql = DeleteStatement {
-			only: what.is_thing_single(),
+			only: opts.only,
 			what: vec![what.could_be_table()].into(),
-			output: Some(Output::Before),
+			output: opts.output,
+			timeout: opts.timeout,
+			cond: opts.cond,
 			..Default::default()
 		}
 		.into();
-		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
