@@ -30,7 +30,7 @@ impl Categorise for St<'_> {
 }
 
 impl<'a> St<'a> {
-	fn new(ns: &'a str, db: &'a str, sq: &'a str, nid: Uuid) -> Self {
+	pub(crate) fn new(ns: &'a str, db: &'a str, sq: &'a str, nid: Uuid) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

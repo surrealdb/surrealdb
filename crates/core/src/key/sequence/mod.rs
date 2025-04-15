@@ -7,36 +7,6 @@ use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-struct All<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: &'a str,
-	_b: u8,
-	pub db: &'a str,
-	_c: u8,
-	_d: u8,
-	_e: u8,
-	pub sq: &'a str,
-}
-impl_key!(All<'a>);
-
-impl<'a> All<'a> {
-	pub(crate) fn new(ns: &'a str, db: &'a str, sq: &'a str) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'!',
-			_d: b's',
-			_e: b'q',
-			sq,
-		}
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -87,11 +57,6 @@ impl<'a> Prefix<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	#[test]
-	fn all() {
-		let val = All::new("testns", "testdb", "testsq").encode().unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0!sqtestsq\0");
-	}
 
 	#[test]
 	fn ba_range() {

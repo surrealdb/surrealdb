@@ -2,9 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::key::sequence::ba::Ba;
+use crate::key::sequence::st::St;
 use crate::key::sequence::Prefix;
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{LockType, Transaction, TransactionType};
+use crate::kvs::{KeyEncode, LockType, Transaction, TransactionType};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use revision::revisioned;
@@ -33,6 +34,13 @@ struct SequenceKey {
 struct BatchValue {
 	to: i64,
 	owner: Uuid,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[non_exhaustive]
+struct SequenceState {
+	next: i64,
 }
 
 impl SequenceKey {
@@ -87,7 +95,7 @@ impl Sequences {
 		match self.sequences.entry(key) {
 			Entry::Occupied(mut e) => e.get_mut().next(ctx, opt, sq, seq.batch).await,
 			Entry::Vacant(e) => {
-				let s = Sequence::new(self.tf.clone());
+				let s = Sequence::load(self.tf.clone(), ctx, opt, sq, seq.batch).await?;
 				e.insert(s).next(ctx, opt, sq, seq.batch).await
 			}
 		}
@@ -96,18 +104,39 @@ impl Sequences {
 
 struct Sequence {
 	tf: TransactionFactory,
-	next: i64,
+	st: SequenceState,
 	to: i64,
+	key: Vec<u8>,
 }
 
 impl Sequence {
-	fn new(tf: TransactionFactory) -> Self {
-		Self {
+	async fn load(
+		tf: TransactionFactory,
+		ctx: &Context,
+		opt: &Options,
+		sq: &str,
+		batch: u32,
+	) -> Result<Self, Error> {
+		let (ns, db) = opt.ns_db()?;
+		let nid = opt.id()?;
+		let key = St::new(ns, db, sq, nid).encode()?;
+		let mut st: SequenceState = if let Some(v) = ctx.tx().get(&key, None).await? {
+			revision::from_slice(&v)?
+		} else {
+			SequenceState {
+				next: 0,
+			}
+		};
+		let (from, to) = Self::check_batch_allocation(&tf, ns, db, sq, nid, st.next, batch).await?;
+		st.next = from;
+		Ok(Self {
 			tf,
-			next: 0,
-			to: 0,
-		}
+			key,
+			to,
+			st,
+		})
 	}
+
 	pub(crate) async fn next(
 		&mut self,
 		ctx: &Context,
@@ -115,21 +144,25 @@ impl Sequence {
 		seq: &str,
 		batch: u32,
 	) -> Result<i64, Error> {
-		if self.next >= self.to {
-			(self.next, self.to) =
-				Self::check_batch_allocation(&self.tf, ctx, opt, seq, batch).await?;
+		if self.st.next >= self.to {
+			(self.st.next, self.to) =
+				Self::find_batch_allocation(&self.tf, ctx, opt, seq, self.st.next, batch).await?;
 		}
-		let v = self.next;
-		self.next += 1;
-		// TODO write next on the kv store
+		let v = self.st.next;
+		self.st.next += 1;
+		// write the state on the kv store
+		let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		tx.set(&self.key, revision::to_vec(&self.st)?, None).await?;
+		tx.commit().await?;
 		Ok(v)
 	}
 
-	async fn check_batch_allocation(
+	async fn find_batch_allocation(
 		tf: &TransactionFactory,
 		ctx: &Context,
 		opt: &Options,
 		seq: &str,
+		next: i64,
 		batch: u32,
 	) -> Result<(i64, i64), Error> {
 		let (ns, db) = opt.ns_db()?;
@@ -138,7 +171,7 @@ impl Sequence {
 		let mut tempo = 5;
 		// Loop until we have a successful allocation
 		while !ctx.is_timedout().await? {
-			if let Ok(r) = Self::new_batch_allocation(tf, ns, db, seq, nid, batch).await {
+			if let Ok(r) = Self::check_batch_allocation(tf, ns, db, seq, nid, next, batch).await {
 				return Ok(r);
 			}
 			// exponential backoff
@@ -148,12 +181,13 @@ impl Sequence {
 		Err(Error::QueryTimedout)
 	}
 
-	async fn new_batch_allocation(
+	async fn check_batch_allocation(
 		tf: &TransactionFactory,
 		ns: &str,
 		db: &str,
 		seq: &str,
 		nid: Uuid,
+		next: i64,
 		batch: u32,
 	) -> Result<(i64, i64), Error> {
 		let tx = tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
@@ -164,9 +198,15 @@ impl Sequence {
 		for (key, val) in val.iter() {
 			let ba: BatchValue = revision::from_slice(val)?;
 			next_start = next_start.max(ba.to);
+			// The batch belong to this node
 			if ba.owner == nid {
 				// If a previous batch belongs to this node, we can remove it,
 				// as we are going to create a new one
+				// If the current value is still in the batch range, we return it
+				if next < ba.to {
+					return Ok((next, ba.to));
+				}
+				// Otherwise we can remove this old batch and create a new one
 				tx.del(key).await?;
 			}
 		}
