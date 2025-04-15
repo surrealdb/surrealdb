@@ -2,7 +2,6 @@ mod api;
 mod auth;
 pub mod client_ip;
 mod export;
-#[cfg(surrealdb_unstable)]
 mod gql;
 pub(crate) mod headers;
 mod health;
@@ -182,22 +181,12 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.merge(signup::router())
 		.merge(key::router())
 		.merge(ml::router())
-		.merge(api::router());
+		.merge(api::router())
+		.merge(gql::router(ds.clone()).await);
 
-	let axum_app = if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
-		#[cfg(surrealdb_unstable)]
-		{
-			warn!("❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌");
-			axum_app.merge(gql::router(ds.clone()).await)
-		}
-		#[cfg(not(surrealdb_unstable))]
-		{
-			warn!("GraphQL is a pre-release feature and only available on builds with the surrealdb_unstable flag");
-			axum_app
-		}
-	} else {
-		axum_app
-	};
+	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
+		warn!("❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌");
+	}
 
 	let axum_app = axum_app.layer(service);
 

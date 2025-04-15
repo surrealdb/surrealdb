@@ -388,7 +388,10 @@ impl MutableContext {
 	}
 
 	/// Check if the context is ok to continue.
-	pub(crate) fn is_ok(&self, deep_check: bool) -> Result<bool, Error> {
+	pub(crate) async fn is_ok(&self, deep_check: bool) -> Result<bool, Error> {
+		if deep_check {
+			yield_now!();
+		}
 		Ok(self.done(deep_check)?.is_none())
 	}
 
@@ -396,12 +399,16 @@ impl MutableContext {
 	///
 	/// Returns true when the query is canceled or if check_deadline is true when the query
 	/// deadline is met.
-	pub(crate) fn is_done(&self, deep_check: bool) -> Result<bool, Error> {
+	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool, Error> {
+		if deep_check {
+			yield_now!();
+		}
 		Ok(self.done(deep_check)?.is_some())
 	}
 
 	/// Check if the context is not ok to continue, because it timed out.
-	pub(crate) fn is_timedout(&self) -> Result<bool, Error> {
+	pub(crate) async fn is_timedout(&self) -> Result<bool, Error> {
+		yield_now!();
 		Ok(matches!(self.done(true)?, Some(Reason::Timedout)))
 	}
 

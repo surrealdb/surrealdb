@@ -19,7 +19,7 @@ pub struct FuncTarget(pub String, pub Option<String>);
 impl fmt::Display for FuncTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self.1 {
-			Some(name) => write!(f, "{}:{}", self.0, name),
+			Some(name) => write!(f, "{}:{name}", self.0),
 			None => write!(f, "{}::*", self.0),
 		}
 	}
@@ -168,14 +168,14 @@ impl std::str::FromStr for ExperimentalTarget {
 	type Err = ParseExperimentalTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match_insensitive!(s.trim(), {
+		match s.trim().to_ascii_lowercase().as_str() {
 			"record_references" => Ok(ExperimentalTarget::RecordReferences),
 			"graphql" => Ok(ExperimentalTarget::GraphQL),
 			"bearer_access" => Ok(ExperimentalTarget::BearerAccess),
 			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			"files" => Ok(ExperimentalTarget::Files),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
-		})
+		}
 	}
 }
 
@@ -190,9 +190,9 @@ pub enum NetTarget {
 impl fmt::Display for NetTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::Host(host, Some(port)) => write!(f, "{}:{}", host, port),
-			Self::Host(host, None) => write!(f, "{}", host),
-			Self::IPNet(ipnet) => write!(f, "{}", ipnet),
+			Self::Host(host, Some(port)) => write!(f, "{host}:{port}"),
+			Self::Host(host, None) => write!(f, "{host}"),
+			Self::IPNet(ipnet) => write!(f, "{ipnet}"),
 		}
 	}
 }
@@ -454,12 +454,12 @@ impl std::str::FromStr for ArbitraryQueryTarget {
 	type Err = ParseArbitraryQueryTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match_insensitive!(s.trim(), {
+		match s.trim().to_ascii_lowercase().as_str() {
 			"guest" => Ok(ArbitraryQueryTarget::Guest),
 			"record" => Ok(ArbitraryQueryTarget::Record),
 			"system" => Ok(ArbitraryQueryTarget::System),
 			_ => Err(ParseArbitraryQueryTargetError::InvalidName),
-		})
+		}
 	}
 }
 
@@ -498,11 +498,11 @@ impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<
 		match self {
 			Self::None => write!(f, "none"),
 			Self::All => write!(f, "all"),
-			Self::Some(targets) => {
-				let targets =
-					targets.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ");
-				write!(f, "{}", targets)
-			}
+			Self::Some(targets) => write!(
+				f,
+				"{}",
+				targets.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ")
+			),
 		}
 	}
 }

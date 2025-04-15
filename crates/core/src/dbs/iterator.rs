@@ -105,8 +105,6 @@ pub(crate) struct Processed {
 pub(crate) struct Iterator {
 	/// Iterator status
 	run: Canceller,
-	/// Total documents processed
-	count: u64,
 	/// Iterator limit value
 	limit: Option<u32>,
 	/// Iterator start value
@@ -129,7 +127,6 @@ impl Clone for Iterator {
 	fn clone(&self) -> Self {
 		Self {
 			run: self.run.clone(),
-			count: 0,
 			limit: self.limit,
 			start: self.start,
 			start_skip: self.start_skip.map(|_| self.start.unwrap_or(0) as usize),
@@ -702,12 +699,8 @@ impl Iterator {
 		rs: RecordStrategy,
 		res: Result<Value, Error>,
 	) {
-		// Count the result
-		self.count += 1;
-		// Periodically yield
-		if self.count % 100 == 0 {
-			yield_now!();
-		}
+		// yield
+		yield_now!();
 		// Process the result
 		match res {
 			Err(Error::Ignore) => {
