@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::sql::paths::ID;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{Array, Idiom, Kind, Literal, Part, Table};
+use crate::sql::{Array, FlowResultExt as _, Idiom, Kind, Literal, Part, Table};
 use reblessive::tree::Stk;
 
 pub async fn exists(
@@ -14,7 +14,7 @@ pub async fn exists(
 	(arg,): (Thing,),
 ) -> Result<Value, Error> {
 	if let Some(opt) = opt {
-		Ok(match Value::Thing(arg).get(stk, ctx, opt, doc, ID.as_ref()).await? {
+		Ok(match Value::Thing(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()? {
 			Value::None => Value::Bool(false),
 			_ => Value::Bool(true),
 		})

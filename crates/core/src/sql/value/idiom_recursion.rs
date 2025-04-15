@@ -6,7 +6,7 @@ use crate::{
 	err::Error,
 	sql::{
 		part::{RecurseInstruction, RecursionPlan},
-		Array, Part,
+		Array, FlowResultExt as _, Part,
 	},
 };
 
@@ -135,7 +135,7 @@ pub(crate) async fn compute_idiom_recursion(
 					)
 					.await?
 			}
-			_ => stk.run(|stk| current.get(stk, ctx, opt, doc, rec.path)).await?,
+			_ => stk.run(|stk| current.get(stk, ctx, opt, doc, rec.path)).await.catch_return()?,
 		};
 
 		// Check for any recursion plans

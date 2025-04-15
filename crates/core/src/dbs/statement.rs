@@ -134,12 +134,6 @@ impl Statement<'_> {
 		matches!(self, Statement::Delete(_))
 	}
 
-	/// Returns whether the IGNORE clause has
-	/// been specified on an INSERT statement
-	pub(crate) fn is_ignore(&self) -> bool {
-		matches!(self, Statement::Insert(i) if i.ignore)
-	}
-
 	/// Returns whether the document retrieval for
 	/// this statement can be deferred. This is used
 	/// in the following instances:
@@ -246,20 +240,6 @@ impl Statement<'_> {
 	/// UPSERT some WHERE test = true;
 	pub(crate) fn is_guaranteed(&self) -> bool {
 		matches!(self, Statement::Upsert(v) if v.cond.is_some())
-	}
-
-	/// Returns whether the document processing for
-	/// this statement can be retried, and therefore
-	/// whether we need to use savepoints in this
-	/// transaction. This is specifically used in
-	/// UPSERT statements, and INSERT statements which
-	/// have an ON DUPLICATE KEY UPDATE clause.
-	pub(crate) fn is_retryable(&self) -> bool {
-		match self {
-			Statement::Insert(_) if self.data().is_some() => true,
-			Statement::Upsert(_) => true,
-			_ => false,
-		}
 	}
 
 	/// Returns any query fields if specified

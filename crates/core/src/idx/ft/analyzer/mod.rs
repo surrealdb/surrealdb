@@ -9,7 +9,7 @@ use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::store::IndexStores;
 use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::Value;
+use crate::sql::{FlowResultExt as _, Value};
 use crate::sql::{Function, Strand};
 use filter::Filter;
 use reblessive::tree::Stk;
@@ -270,7 +270,7 @@ impl Analyzer {
 	) -> Result<Tokens, Error> {
 		if let Some(function_name) = self.az.function.as_ref().map(|i| i.0.clone()) {
 			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
-			let val = fns.compute(stk, ctx, opt, None).await?;
+			let val = fns.compute(stk, ctx, opt, None).await.catch_return()?;
 			if let Value::Strand(val) = val {
 				input = val.0;
 			} else {

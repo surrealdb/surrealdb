@@ -1,5 +1,6 @@
 use crate::cnf::FILE_ALLOWLIST;
 use crate::err::Error;
+use path_clean::PathClean;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -40,10 +41,9 @@ pub(crate) fn extract_allowed_paths(input: &str) -> Vec<PathBuf> {
 			if trimmed.is_empty() {
 				None
 			} else {
-				// Convert to a PathBuf and canonicalize it.
-				fs::canonicalize(trimmed).ok().inspect(|p| {
-					debug!("Allowed file path: {}", p.to_string_lossy());
-				})
+				let path = PathBuf::from(trimmed).clean();
+				debug!("Allowed file path: {}", path.to_string_lossy());
+				Some(path)
 			}
 		})
 		.collect()
@@ -62,7 +62,7 @@ mod tests {
 		fs::write(&file_path, "content").expect("failed to write file in file_path");
 
 		// With an empty allowlist, access should be allowed.
-		let result = check_is_path_allowed(&file_path, &vec![]);
+		let result = check_is_path_allowed(&file_path, &[]);
 		assert!(result.is_ok(), "File access should be allowed when no restrictions are set");
 	}
 

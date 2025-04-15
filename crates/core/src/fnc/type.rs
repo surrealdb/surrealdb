@@ -7,7 +7,7 @@ use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{Kind, Strand};
+use crate::sql::{File, FlowResultExt as _, Kind, Strand};
 use crate::syn;
 use reblessive::tree::Stk;
 
@@ -17,6 +17,10 @@ pub fn array((val,): (Value,)) -> Result<Value, Error> {
 
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
+}
+
+pub fn file((bucket, key): (String, String)) -> Result<Value, Error> {
+	Ok(Value::File(File::new(bucket, key)))
 }
 
 pub fn bytes((val,): (Value,)) -> Result<Value, Error> {
@@ -44,7 +48,7 @@ pub async fn field(
 			// Parse the string as an Idiom
 			let idi = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
-			Ok(idi.compute(stk, ctx, opt, doc).await?)
+			idi.compute(stk, ctx, opt, doc).await.catch_return()
 		}
 		_ => Ok(Value::None),
 	}
@@ -61,7 +65,7 @@ pub async fn fields(
 				// Parse the string as an Idiom
 				let idi = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
-				args.push(idi.compute(stk, ctx, opt, doc).await?);
+				args.push(idi.compute(stk, ctx, opt, doc).await.catch_return()?);
 			}
 			Ok(args.into())
 		}
@@ -115,6 +119,10 @@ pub fn string((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_strand().map(Value::from)
 }
 
+pub fn string_lossy((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_strand_lossy().map(Value::from)
+}
+
 pub fn table((val,): (Value,)) -> Result<Value, Error> {
 	Ok(Value::Table(Table(match val {
 		Value::Thing(t) => t.tb,
@@ -143,6 +151,7 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				Value::Object(v) => v.into(),
 				Value::Number(v) => v.into(),
 				Value::Range(v) => v.deref().to_owned().try_into()?,
+				Value::Uuid(u) => u.into(),
 				v => v.as_string().into(),
 			},
 		})),

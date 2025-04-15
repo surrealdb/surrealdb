@@ -11,10 +11,10 @@
 #![forbid(unsafe_code)]
 
 #[macro_use]
-extern crate tracing;
+extern crate surrealdb_core;
 
 #[macro_use]
-mod mac;
+extern crate tracing;
 
 mod cli;
 mod cnf;
@@ -37,13 +37,14 @@ fn main() -> ExitCode {
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.
 fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
 	// Start a Tokio runtime with custom configuration
-	tokio::runtime::Builder::new_multi_thread()
-		.enable_all()
+	let mut b = tokio::runtime::Builder::new_multi_thread();
+	b.enable_all()
 		.max_blocking_threads(*cnf::RUNTIME_MAX_BLOCKING_THREADS)
 		.worker_threads(*cnf::RUNTIME_WORKER_THREADS)
 		.thread_stack_size(*cnf::RUNTIME_STACK_SIZE)
-		.thread_name("surrealdb-worker")
-		.build()
-		.unwrap()
-		.block_on(fut)
+		.thread_name("surrealdb-worker");
+	#[cfg(feature = "allocation-tracking")]
+	b.on_thread_stop(|| surrealdb_core::mem::ALLOC.stop_tracking());
+	// Build the runtime
+	b.build().unwrap().block_on(fut)
 }

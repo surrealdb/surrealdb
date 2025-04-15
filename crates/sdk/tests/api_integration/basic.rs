@@ -6,7 +6,6 @@ use serde_json::json;
 use std::borrow::Cow;
 use std::ops::Bound;
 use std::time::Duration;
-use surrealdb::fflags::FFLAGS;
 use surrealdb::opt::auth::Database;
 use surrealdb::opt::auth::Namespace;
 use surrealdb::opt::auth::Record as RecordAccess;
@@ -1474,26 +1473,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
-	match FFLAGS.change_feed_live_queries.enabled() {
-		true => {
-			assert_eq!(
-				Value::from_inner(changes),
-				r#"[
-                 {
-                      create: {
-                          id: testuser:amos,
-                          name: 'Amos'
-                      }
-                 }
-            ]"#
-				.parse()
-				.unwrap()
-			);
-		}
-		false => {
-			assert_eq!(
-				Value::from_inner(changes),
-				r#"[
+	assert_eq!(
+		Value::from_inner(changes),
+		r#"[
                  {
                       update: {
                           id: testuser:amos,
@@ -1501,11 +1483,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
                       }
                  }
             ]"#
-				.parse()
-				.unwrap()
-			);
-		}
-	}
+		.parse()
+		.unwrap()
+	);
 	// UPDATE testuser:jane
 	let a = array.get(2).unwrap();
 	let CoreValue::Object(a) = a.clone() else {
@@ -1516,26 +1496,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	};
 	assert!(*versionstamp1 < versionstamp2);
 	let changes = a.get("changes").unwrap().to_owned();
-	match FFLAGS.change_feed_live_queries.enabled() {
-		true => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
-                    {
-                         create: {
-                             id: testuser:jane,
-                             name: 'Jane'
-                         }
-                    }
-                ]"
-				.parse()
-				.unwrap()
-			);
-		}
-		false => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
+	assert_eq!(
+		Value::from_inner(changes),
+		"[
                     {
                          update: {
                              id: testuser:jane,
@@ -1543,11 +1506,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
                          }
                     }
                 ]"
-				.parse()
-				.unwrap()
-			);
-		}
-	}
+		.parse()
+		.unwrap()
+	);
 	// UPDATE testuser:amos
 	let a = array.get(3).unwrap();
 	let CoreValue::Object(a) = a.clone() else {
@@ -1558,26 +1519,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	};
 	assert!(versionstamp2 < *versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
-	match FFLAGS.change_feed_live_queries.enabled() {
-		true => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
-                    {
-                        create: {
-                            id: testuser:amos,
-                            name: 'AMOS'
-                        }
-                    }
-                ]"
-				.parse()
-				.unwrap()
-			);
-		}
-		false => {
-			assert_eq!(
-				Value::from_inner(changes),
-				"[
+	assert_eq!(
+		Value::from_inner(changes),
+		"[
                     {
                         update: {
                             id: testuser:amos,
@@ -1585,11 +1529,9 @@ pub async fn changefeed(new_db: impl CreateDb) {
                         }
                     }
                 ]"
-				.parse()
-				.unwrap()
-			);
-		}
-	};
+		.parse()
+		.unwrap()
+	);
 	// UPDATE table
 	let a = array.get(4).unwrap();
 	let CoreValue::Object(a) = a.clone() else {
@@ -1719,6 +1661,31 @@ pub async fn multi_take(new_db: impl CreateDb) {
 	assert_eq!(addresses, vec!["UK".to_owned(), "USA".to_owned()]);
 }
 
+pub async fn field_and_index_methods(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	let mut response =
+		db.query("SELECT b1 FROM CREATE something SET b1.total_peers = 74").await.unwrap();
+	let as_value: Value = response.take::<Value>(0).unwrap();
+	let inside = as_value.get(0).get("b1").get("total_peers");
+
+	assert_eq!(inside, &Value::from_inner(CoreValue::Number(74.into())));
+	assert!(!inside.is_none());
+	assert_eq!(inside.into_option(), Some(&Value::from_inner(CoreValue::Number(74.into()))));
+
+	let mut response =
+		db.query("SELECT b1 FROM CREATE something SET b1.total_peers = 74").await.unwrap();
+	let as_value: Value = response.take::<Value>(0).unwrap();
+	// Second .get() is a non-existent field
+	let inside = as_value.get(0).get("b1111111").get("total_peers");
+
+	assert_eq!(inside, &Value::from_inner(CoreValue::None));
+	assert!(inside.is_none());
+	assert_eq!(inside.into_option(), None);
+}
+
 define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	connect,
@@ -1822,4 +1789,6 @@ define_include_tests!(basic => {
 	run,
 	#[test_log::test(tokio::test)]
 	multi_take,
+	#[test_log::test(tokio::test)]
+	field_and_index_methods,
 });

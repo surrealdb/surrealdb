@@ -5,7 +5,6 @@
 	feature = "kv-tikv",
 	feature = "kv-fdb",
 	feature = "kv-surrealkv",
-	feature = "kv-surrealcs",
 ))]
 
 use super::Datastore;

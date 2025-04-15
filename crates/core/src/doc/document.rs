@@ -19,6 +19,7 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
+use crate::sql::FlowResultExt as _;
 use reblessive::tree::Stk;
 use std::fmt::{Debug, Formatter};
 use std::mem;
@@ -255,6 +256,18 @@ impl Document {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}
 
+	/// Update the document for a retry to update after an insert failed.
+	pub fn modify_for_update_retry(&mut self, id: Thing, value: Arc<Value>) {
+		let retry = Arc::new(id);
+		self.id = Some(retry.clone());
+		self.gen = None;
+		self.retry = true;
+		self.record_strategy = RecordStrategy::KeysAndValues;
+
+		self.current = CursorDoc::new(Some(retry), None, value);
+		self.initial = self.current.clone();
+	}
+
 	/// Checks if permissions are required to be run
 	/// over a document. If permissions don't need to
 	/// be processed, then we don't process the initial
@@ -313,7 +326,8 @@ impl Document {
 			// Get the full document
 			let full = target.0;
 			// Process the full document
-			let mut out = full.doc.as_ref().compute(stk, ctx, opt, Some(full)).await?;
+			let mut out =
+				full.doc.as_ref().compute(stk, ctx, opt, Some(full)).await.catch_return()?;
 			// Loop over each field in document
 			for fd in fds.iter() {
 				// Loop over each field in document
@@ -332,7 +346,12 @@ impl Document {
 							ctx.add_value("value", val);
 							let ctx = ctx.freeze();
 							// Process the PERMISSION clause
-							if !e.compute(stk, &ctx, opt, Some(full)).await?.is_truthy() {
+							if !e
+								.compute(stk, &ctx, opt, Some(full))
+								.await
+								.catch_return()?
+								.is_truthy()
+							{
 								out.cut(k);
 							}
 						}

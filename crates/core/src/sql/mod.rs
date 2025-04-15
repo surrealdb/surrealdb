@@ -26,6 +26,7 @@ pub(crate) mod explain;
 pub(crate) mod expression;
 pub(crate) mod fetch;
 pub(crate) mod field;
+pub(crate) mod file;
 pub(crate) mod filter;
 pub(crate) mod fmt;
 pub(crate) mod function;
@@ -79,6 +80,8 @@ pub mod index;
 pub mod serde;
 pub mod statements;
 
+use crate::err::Error;
+
 pub use self::access::Access;
 pub use self::access::Accesses;
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
@@ -105,6 +108,7 @@ pub use self::fetch::Fetch;
 pub use self::fetch::Fetchs;
 pub use self::field::Field;
 pub use self::field::Fields;
+pub use self::file::File;
 pub use self::filter::Filter;
 pub use self::function::Function;
 pub use self::future::Future;
@@ -166,3 +170,43 @@ mod parser {
 }
 
 pub use self::parser::{idiom, json, parse, subquery, thing, value};
+
+/// Result of functions which can impact the controlflow of query execution.
+pub type FlowResult<T> = Result<T, ControlFlow>;
+
+/// An enum carrying control flow information.
+///
+/// Returned by compute functions which can impact control flow.
+#[derive(Debug)]
+pub enum ControlFlow {
+	Break,
+	Continue,
+	Return(Value),
+	Err(Box<Error>),
+}
+
+impl From<Error> for ControlFlow {
+	fn from(error: Error) -> Self {
+		ControlFlow::Err(Box::new(error))
+	}
+}
+
+/// Helper trait to catch controlflow return unwinding.
+pub trait FlowResultExt {
+	/// Function which catches `ControlFlow::Return(x)` and turns it into `Ok(x)`.
+	///
+	/// If the error value is either `ControlFlow::Break` or `ControlFlow::Continue` it will
+	/// instead create an error that break/continue was used within an invalid location.
+	fn catch_return(self) -> Result<Value, Error>;
+}
+
+impl FlowResultExt for FlowResult<Value> {
+	fn catch_return(self) -> Result<Value, Error> {
+		match self {
+			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => Err(Error::InvalidControlFlow),
+			Err(ControlFlow::Return(x)) => Ok(x),
+			Err(ControlFlow::Err(e)) => Err(*e),
+			Ok(x) => Ok(x),
+		}
+	}
+}

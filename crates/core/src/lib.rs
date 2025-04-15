@@ -21,10 +21,14 @@ extern crate tracing;
 #[macro_use]
 mod mac;
 
+mod buc;
 mod cf;
 mod doc;
 mod exe;
 mod fnc;
+mod idg;
+mod key;
+mod sys;
 
 pub mod api;
 pub mod cnf;
@@ -32,20 +36,17 @@ pub mod ctx;
 pub mod dbs;
 pub mod env;
 pub mod err;
-pub mod fflags;
 pub mod gql;
 pub mod iam;
-pub mod idg;
 pub mod idx;
-pub mod key;
 pub mod kvs;
 pub mod mem;
 pub mod obs;
 pub mod options;
 pub mod rpc;
 pub mod sql;
+pub mod str;
 pub mod syn;
-pub mod sys;
 pub mod vs;
 
 #[cfg(feature = "ml")]

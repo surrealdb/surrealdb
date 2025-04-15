@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::Auth;
 use crate::kvs::Live;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
+use crate::sql::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -104,7 +104,7 @@ impl LiveStatement {
 		// Get the id
 		let id = stm.id.0;
 		// Process the live query table
-		match stm.what.compute(stk, ctx, opt, doc).await? {
+		match stm.what.compute(stk, ctx, opt, doc).await.catch_return()? {
 			Value::Table(tb) => {
 				// Store the current Node ID
 				stm.node = nid.into();

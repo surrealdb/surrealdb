@@ -105,8 +105,6 @@ pub(crate) struct Processed {
 pub(crate) struct Iterator {
 	/// Iterator status
 	run: Canceller,
-	/// Total documents processed
-	count: u64,
 	/// Iterator limit value
 	limit: Option<u32>,
 	/// Iterator start value
@@ -129,7 +127,6 @@ impl Clone for Iterator {
 	fn clone(&self) -> Self {
 		Self {
 			run: self.run.clone(),
-			count: 0,
 			limit: self.limit,
 			start: self.start,
 			start_skip: self.start_skip.map(|_| self.start.unwrap_or(0) as usize),
@@ -380,7 +377,7 @@ impl Iterator {
 			}
 			// Process prepared values
 			let sp = if let Some(qp) = ctx.get_query_planner() {
-				let sp = Some(qp.is_any_specific_permission());
+				let sp = qp.is_any_specific_permission();
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
 					let mut c = MutableContext::unfreeze(cancel_ctx)?;
@@ -392,7 +389,7 @@ impl Iterator {
 				}
 				sp
 			} else {
-				None
+				false
 			};
 			// Process all documents
 			self.iterate(stk, &cancel_ctx, opt, stm, sp, plan.explanation.as_mut()).await?;
@@ -513,14 +510,14 @@ impl Iterator {
 		&mut self,
 		ctx: &Context,
 		stm: &Statement<'_>,
-		is_specific_permission: Option<bool>,
+		is_specific_permission: bool,
 	) {
 		if self.check_set_start_limit(ctx, stm) {
 			if let Some(l) = self.limit {
 				self.cancel_on_limit = Some(l);
 			}
 			// Check if we can skip processing the document below "start".
-			if let Some(false) = is_specific_permission {
+			if !is_specific_permission {
 				let s = self.start.unwrap_or(0) as usize;
 				if s > 0 {
 					self.start_skip = Some(s);
@@ -631,7 +628,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-		is_specific_permission: Option<bool>,
+		is_specific_permission: bool,
 		exp: Option<&mut Explanation>,
 	) -> Result<(), Error> {
 		// Compute iteration limits
@@ -702,12 +699,8 @@ impl Iterator {
 		rs: RecordStrategy,
 		res: Result<Value, Error>,
 	) {
-		// Count the result
-		self.count += 1;
-		// Periodically yield
-		if self.count % 100 == 0 {
-			yield_now!();
-		}
+		// yield
+		yield_now!();
 		// Process the result
 		match res {
 			Err(Error::Ignore) => {
