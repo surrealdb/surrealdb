@@ -12,6 +12,7 @@ impl js::module::ModuleDef for Package {
 	fn declare(decls: &js::module::Declarations) -> js::Result<()> {
 		decls.declare("default")?;
 		decls.declare("bool")?;
+		decls.declare("duration")?;
 		decls.declare("enum")?;
 		decls.declare("float")?;
 		decls.declare("guid")?;
