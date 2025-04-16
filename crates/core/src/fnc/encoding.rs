@@ -80,22 +80,25 @@ pub mod cbor {
 mod tests {
 	use super::*;
 
-	use crate::sql::{Bytes, Value};
+	use crate::{
+		fnc::args::Optional,
+		sql::{Bytes, Value},
+	};
 
 	#[test]
 	fn test_base64_encode() {
 		let input = Bytes(b"hello".to_vec());
-		let result = base64::encode((input.clone(), None)).unwrap();
+		let result = base64::encode((input.clone(), Optional(None))).unwrap();
 		assert_eq!(result, Value::from("aGVsbG8"));
 
-		let result = base64::encode((input, Some(false))).unwrap();
+		let result = base64::encode((input, Optional(Some(false)))).unwrap();
 		assert_eq!(result, Value::from("aGVsbG8"));
 	}
 
 	#[test]
 	fn test_base64_encode_padded() {
 		let input = Bytes(b"hello".to_vec());
-		let result = base64::encode((input, Some(true))).unwrap();
+		let result = base64::encode((input, Optional(Some(true)))).unwrap();
 		assert_eq!(result, Value::from("aGVsbG8="));
 	}
 
