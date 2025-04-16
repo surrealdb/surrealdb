@@ -61,7 +61,7 @@ async fn concurrent_sequence_next_val() -> Result<(), Error> {
 		set11.into_iter().chain(set12.into_iter()).chain(set13.into_iter()).collect();
 	assert_eq!(set1.len(), count * 3);
 	assert_eq!(set1.first().cloned(), Some(-250));
-	assert_eq!(set1.last().cloned(), Some(2999));
+	assert_eq!(set1.last().cloned(), Some(2749));
 
 	let set2: BTreeSet<i64> = set21.into_iter().chain(set22.into_iter()).collect();
 	assert_eq!(set2.len(), count * 2);

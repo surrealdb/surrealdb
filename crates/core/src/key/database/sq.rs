@@ -19,11 +19,6 @@ pub struct Sq<'a> {
 	pub sq: &'a str,
 }
 impl_key!(Sq<'a>);
-
-pub fn new<'a>(ns: &'a str, db: &'a str, sq: &'a str) -> Sq<'a> {
-	Sq::new(ns, db, sq)
-}
-
 pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
 	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!sq\x00");
@@ -43,7 +38,7 @@ impl Categorise for Sq<'_> {
 }
 
 impl<'a> Sq<'a> {
-	pub fn new(ns: &'a str, db: &'a str, sq: &'a str) -> Self {
+	pub(crate) fn new(ns: &'a str, db: &'a str, sq: &'a str) -> Self {
 		Self {
 			__: b'/', // /
 			_a: b'*', // *

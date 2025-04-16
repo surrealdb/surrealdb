@@ -52,6 +52,18 @@ impl<'a> Prefix<'a> {
 		end.extend_from_slice(&[0xFF; 9]);
 		Ok((beg, end))
 	}
+
+	pub(crate) fn new_st_range(
+		ns: &'a str,
+		db: &'a str,
+		sq: &'a str,
+	) -> Result<(Vec<u8>, Vec<u8>), Error> {
+		let mut beg = Self::new(ns, db, sq, b's', b't').encode()?;
+		let mut end = Self::new(ns, db, sq, b's', b't').encode()?;
+		beg.extend_from_slice(&[0x00; 9]);
+		end.extend_from_slice(&[0xFF; 9]);
+		Ok((beg, end))
+	}
 }
 
 #[cfg(test)]

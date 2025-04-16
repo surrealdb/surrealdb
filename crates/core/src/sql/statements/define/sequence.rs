@@ -5,6 +5,8 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Value};
 
+use crate::key::database::sq::Sq;
+use crate::key::sequence::Prefix;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -39,7 +41,7 @@ impl DefineSequenceStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::sq::new(ns, db, &self.name);
+		let key = Sq::new(ns, db, &self.name);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		let sq = DefineSequenceStatement {
@@ -48,7 +50,13 @@ impl DefineSequenceStatement {
 			overwrite: false,
 			..self.clone()
 		};
+		// Set the definition
 		txn.set(key, revision::to_vec(&sq)?, None).await?;
+		// Clear any pre-existing sequence records
+		let (beg, end) = Prefix::new_ba_range(ns, db, &sq.name)?;
+		txn.delr(beg..end).await?;
+		let (beg, end) = Prefix::new_st_range(ns, db, &sq.name)?;
+		txn.delr(beg..end).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

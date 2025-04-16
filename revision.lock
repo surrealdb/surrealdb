@@ -68,7 +68,7 @@ DefineModelStatement:3(crates/core/src/sql/statements/define/model.rs)(140136516
 DefineNamespaceStatement:3(crates/core/src/sql/statements/define/namespace.rs)(297116727)
 DefineParamStatement:3(crates/core/src/sql/statements/define/param.rs)(2700791309)
 DefineScopeStatement:2(crates/core/src/sql/statements/define/deprecated/scope.rs)(197298002)
-DefineSequenceStatement:1(crates/core/src/sql/statements/define/sequence.rs)(717139622)
+DefineSequenceStatement:1(crates/core/src/sql/statements/define/sequence.rs)(3986442077)
 DefineStatement:5(crates/core/src/sql/statements/define/mod.rs)(1199262023)
 DefineTableStatement:6(crates/core/src/sql/statements/define/table.rs)(2979319872)
 DefineTokenStatement:2(crates/core/src/sql/statements/define/deprecated/token.rs)(322714756)

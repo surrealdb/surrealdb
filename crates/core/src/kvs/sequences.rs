@@ -194,12 +194,12 @@ impl Sequence {
 		let tx = tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
 		let (beg, end) = Prefix::new_ba_range(ns, db, seq)?;
 		let val = tx.getr(beg..end, None).await?;
-		let mut next_start = 0;
+		let mut next_start = next;
 		// Scan every existing batches
 		for (key, val) in val.iter() {
 			let ba: BatchValue = revision::from_slice(val)?;
 			next_start = next_start.max(ba.to);
-			// The batch belong to this node
+			// The batch belongs to this node
 			if ba.owner == nid {
 				// If a previous batch belongs to this node, we can remove it,
 				// as we are going to create a new one

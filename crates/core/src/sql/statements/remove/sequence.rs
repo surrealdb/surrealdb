@@ -4,6 +4,8 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
 
+use crate::key::database::sq::Sq;
+use crate::key::sequence::Prefix;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -31,8 +33,13 @@ impl RemoveSequenceStatement {
 			if let Some(seq) = ctx.get_sequences() {
 				seq.sequence_removed(ns, db, &self.name);
 			}
+			// Delete any sequence records
+			let (beg, end) = Prefix::new_ba_range(ns, db, &sq.name)?;
+			txn.delr(beg..end).await?;
+			let (beg, end) = Prefix::new_st_range(ns, db, &sq.name)?;
+			txn.delr(beg..end).await?;
 			// Delete the definition
-			let key = crate::key::database::sq::new(ns, db, &sq.name);
+			let key = Sq::new(ns, db, &sq.name);
 			txn.del(key).await?;
 			// Clear the cache
 			txn.clear();

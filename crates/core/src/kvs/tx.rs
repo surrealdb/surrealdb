@@ -10,6 +10,7 @@ use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
+use crate::key::database::sq::Sq;
 use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
@@ -1404,7 +1405,7 @@ impl Transaction {
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
 			None => {
-				let key = crate::key::database::sq::new(ns, db, sq).encode()?;
+				let key = Sq::new(ns, db, sq).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::SeqNotFound {
 					name: sq.to_owned(),
 				})?;
