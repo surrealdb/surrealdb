@@ -62,6 +62,6 @@ mod tests {
 	fn ba_range() {
 		let (beg, end) = Prefix::new_ba_range("testns", "testdb", "testsq").unwrap();
 		assert_eq!(beg, b"/*testns\0*testdb\0!sqtestsq\0!ba\x00");
-		assert_eq!(beg, b"/*testns\0*testdb\0!sqtestsq\0!ba\xff");
+		assert_eq!(end, b"/*testns\0*testdb\0!sqtestsq\0!ba\xff");
 	}
 }
