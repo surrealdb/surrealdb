@@ -437,7 +437,6 @@ jobs:
 
               # Prepare deps
               vcpkg integrate install
-              vcpkg install shasum
 
               # Build
               features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
@@ -453,7 +452,7 @@ jobs:
               # Package
               ./target/x86_64-pc-windows-msvc/release/surreal.exe version
               cp target/x86_64-pc-windows-msvc/release/surreal.exe surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe
-              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.txt
+              echo $(certutil -hashfile surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe SHA256 | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.txt
 
     runs-on: ${{ matrix.runner }}
     steps:
