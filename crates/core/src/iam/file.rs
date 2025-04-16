@@ -47,7 +47,12 @@ pub(crate) fn extract_allowed_paths(
 			} else {
 				let path = PathBuf::from(trimmed).clean();
 				let path = if canonicalize {
-					fs::canonicalize(path).expect("failed to get canonical path")
+					let Ok(path) = fs::canonicalize(&path) else {
+						warn!("Failed to canonicalize {subject} path: {}", path.to_string_lossy());
+						return None;
+					};
+
+					path
 				} else {
 					path
 				};
