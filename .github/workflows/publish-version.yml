@@ -583,7 +583,7 @@ jobs:
             extraArgs="--dry-run"
           fi
 
-          if ! cargo publish --workspace $extraArgs; then
+          if ! cargo -Z package-workspace publish --workspace $extraArgs; then
             if [[ "${{ needs.prepare-vars.outputs.environment }}" != "nightly" ]]; then
               exit 101
             fi
