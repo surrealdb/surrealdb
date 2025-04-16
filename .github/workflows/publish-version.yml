@@ -574,21 +574,22 @@ jobs:
       - run: cat crates/core/Cargo.toml
 
       - name: Publish the crate
-        if: ${{ inputs.publish }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -x
 
-          for crate in crates/{core,sdk}; do
-            cd $crate
-            if ! cargo publish; then
-              if [[ "${{ needs.prepare-vars.outputs.environment }}" != "nightly" ]]; then
-                exit 101
-              fi
+          if [[ "${{ inputs.publish }}" == "true" ]]; then
+            extraArgs=""
+          else
+            extraArgs="--dry-run"
+          fi
+
+          if ! cargo publish --workspace $extraArgs; then
+            if [[ "${{ needs.prepare-vars.outputs.environment }}" != "nightly" ]]; then
+              exit 101
             fi
-            cd -
-          done
+          fi
 
       - name: Download artifacts
         if: ${{ inputs.publish }}
