@@ -437,6 +437,7 @@ jobs:
 
               # Prepare deps
               vcpkg integrate install
+              vcpkg install shasum
 
               # Build
               features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
