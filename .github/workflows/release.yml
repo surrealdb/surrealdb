@@ -21,7 +21,7 @@ on:
         required: false
         type: boolean
         default: false
-        description: "Consider this release as the latest one"
+        description: "Make this the latest release"
       extra-features:
         required: false
         type: string
