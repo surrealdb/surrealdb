@@ -4,15 +4,15 @@ edition = "2021"
 license-file = "LICENSE"
 name = "surreal"
 publish = false
-version = "2.3.0"
+version = "3.0.0"
 
 [workspace]
 members = ["crates/core", "crates/sdk"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb = { version = "=2.3.0", package = "surrealdb", path = "./crates/sdk" }
-surrealdb-core = { version = "=2.3.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
+surrealdb = { version = "=3.0.0", package = "surrealdb", path = "./crates/sdk" }
+surrealdb-core = { version = "=3.0.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
 
 # External surreal crates
 affinitypool = { version = "0.3.1" }
