@@ -1475,9 +1475,15 @@ impl Parser<'_> {
 		} else {
 			1000
 		};
+		let start = if self.eat(t!("START")) {
+			self.next_token_value()?
+		} else {
+			0
+		};
 		Ok(DefineSequenceStatement {
 			name,
 			batch,
+			start,
 			if_not_exists,
 			overwrite,
 		})

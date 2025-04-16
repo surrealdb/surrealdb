@@ -16,6 +16,7 @@ use std::fmt::{self, Display};
 pub struct DefineSequenceStatement {
 	pub name: Ident,
 	pub batch: u32,
+	pub start: i64,
 	pub if_not_exists: bool,
 	pub overwrite: bool,
 }
@@ -64,7 +65,7 @@ impl Display for DefineSequenceStatement {
 		if self.overwrite {
 			write!(f, " OVERWRITE")?
 		}
-		write!(f, " {} BATCH {}", self.name, self.batch)?;
+		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
 		Ok(())
 	}
 }
@@ -72,8 +73,9 @@ impl Display for DefineSequenceStatement {
 impl InfoStructure for DefineSequenceStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"batch".to_string() => Value::from(self.batch).structure(),
+				"name".to_string() => self.name.structure(),
+				"batch".to_string() => Value::from(self.batch).structure(),
+				"start".to_string() => Value::from(self.start).structure(),
 		})
 	}
 }

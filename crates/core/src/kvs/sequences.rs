@@ -95,7 +95,7 @@ impl Sequences {
 		match self.sequences.entry(key) {
 			Entry::Occupied(mut e) => e.get_mut().next(ctx, opt, sq, seq.batch).await,
 			Entry::Vacant(e) => {
-				let s = Sequence::load(self.tf.clone(), ctx, opt, sq, seq.batch).await?;
+				let s = Sequence::load(self.tf.clone(), ctx, opt, sq, seq.batch, seq.start).await?;
 				e.insert(s).next(ctx, opt, sq, seq.batch).await
 			}
 		}
@@ -116,6 +116,7 @@ impl Sequence {
 		opt: &Options,
 		sq: &str,
 		batch: u32,
+		start: i64,
 	) -> Result<Self, Error> {
 		let (ns, db) = opt.ns_db()?;
 		let nid = opt.id()?;
@@ -124,7 +125,7 @@ impl Sequence {
 			revision::from_slice(&v)?
 		} else {
 			SequenceState {
-				next: 0,
+				next: start,
 			}
 		};
 		let (from, to) = Self::check_batch_allocation(&tf, ns, db, sq, nid, st.next, batch).await?;
