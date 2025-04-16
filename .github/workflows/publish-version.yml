@@ -435,9 +435,6 @@ jobs:
             build-step: |
               set -x
 
-              echo foo > bar.txt
-              echo $(certutil -hashfile bar.txt SHA256 | sed -n '2p')
-
               # Prepare deps
               vcpkg integrate install
 
