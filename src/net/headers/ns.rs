@@ -45,6 +45,7 @@ impl From<SurrealNamespace> for HeaderValue {
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<&SurrealNamespace> for HeaderValue {
 	fn from(value: &SurrealNamespace) -> Self {
 		HeaderValue::from_str(value.0.as_str()).unwrap()

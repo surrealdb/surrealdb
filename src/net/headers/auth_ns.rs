@@ -45,6 +45,7 @@ impl From<SurrealAuthNamespace> for HeaderValue {
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<&SurrealAuthNamespace> for HeaderValue {
 	fn from(value: &SurrealAuthNamespace) -> Self {
 		HeaderValue::from_str(value.0.as_str()).unwrap()
