@@ -189,7 +189,7 @@ pub async fn init(
 		.with_changefeed_gc_interval(changefeed_gc_interval);
 	// Configure the config
 	let config = Config {
-		bind: listen_addresses.first().cloned().unwrap(),
+		bind: listen_addresses.first().copied().unwrap(),
 		client_ip,
 		path,
 		user,
@@ -202,7 +202,7 @@ pub async fn init(
 	// Setup the command-line options
 	let _ = CF.set(config);
 	// Initiate environment
-	env::init().await?;
+	env::init()?;
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
