@@ -1,5 +1,6 @@
 pub mod base64 {
 	use crate::err::Error;
+	use crate::fnc::args::Optional;
 	use crate::sql::{Bytes, Value};
 	use base64::engine::general_purpose::{
 		GeneralPurpose, GeneralPurposeConfig, STANDARD, STANDARD_NO_PAD,
@@ -16,7 +17,7 @@ pub mod base64 {
 	);
 
 	/// Encodes a `Bytes` value to a base64 string without padding.
-	pub fn encode((arg, padded): (Bytes, Option<bool>)) -> Result<Value, Error> {
+	pub fn encode((arg, Optional(padded)): (Bytes, Optional<bool>)) -> Result<Value, Error> {
 		let padded = padded.unwrap_or_default();
 		let engine = if padded {
 			STANDARD
