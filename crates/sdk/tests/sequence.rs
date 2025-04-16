@@ -9,7 +9,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
 use surrealdb_core::kvs::Datastore;
 
-async fn concurrent_task(ds: Arc<Datastore>, seq: &str, count: usize) -> HashSet<i64> {
+async fn concurrent_task(ds: &Datastore, seq: &str, count: usize) -> HashSet<i64> {
 	let mut set = HashSet::new();
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let sql = format!("RETURN sequence::nextval('{seq}');");
@@ -20,6 +20,11 @@ async fn concurrent_task(ds: Arc<Datastore>, seq: &str, count: usize) -> HashSet
 	}
 	set
 }
+
+async fn concurrent_task_asc(ds: Arc<Datastore>, seq: &str, count: usize) -> HashSet<i64> {
+	concurrent_task(&ds, seq, count).await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_sequence_next_val() -> Result<(), Error> {
 	let ds = Arc::new(new_ds().await?);
@@ -35,16 +40,16 @@ async fn concurrent_sequence_next_val() -> Result<(), Error> {
 		.await?;
 	skip_ok(res, 3)?;
 
-	// The number of unique id each task will collect
+	// The number of unique IDs each task will collect
 	let count = 1000;
 
 	// Run 3 tasks collecting the next value of the sequence
-	let task11 = tokio::spawn(concurrent_task(ds.clone(), "sq1", count));
-	let task12 = tokio::spawn(concurrent_task(ds.clone(), "sq1", count));
-	let task13 = tokio::spawn(concurrent_task(ds.clone(), "sq1", count));
-	let task21 = tokio::spawn(concurrent_task(ds.clone(), "sq2", count));
-	let task22 = tokio::spawn(concurrent_task(ds.clone(), "sq2", count));
-	let task31 = tokio::spawn(concurrent_task(ds.clone(), "sq3", count));
+	let task11 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq1", count));
+	let task12 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq1", count));
+	let task13 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq1", count));
+	let task21 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq2", count));
+	let task22 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq2", count));
+	let task31 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq3", count));
 	let (set11, set12, set13, set21, set22, set31) =
 		tokio::try_join!(task11, task12, task13, task21, task22, task31).expect("Tasks failed");
 
@@ -72,6 +77,35 @@ async fn concurrent_sequence_next_val() -> Result<(), Error> {
 	assert_eq!(set3.len(), count);
 	assert_eq!(set3.first().cloned(), Some(1000));
 	assert_eq!(set3.last().cloned(), Some(1999));
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn sequence_next_val_after_restart() -> Result<(), Error> {
+	let ds = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	// Create the sequence
+	let res = &mut ds.execute("DEFINE SEQUENCE sq;", &ses, None).await?;
+	skip_ok(res, 1)?;
+
+	// Run 1000 sequence::nextval()
+	let set1 = concurrent_task(&ds, "sq", 1000).await;
+
+	// Restart the datastore
+	let ds = ds.restart();
+
+	// Run again 1000 sequence::nextval()
+	let set2 = concurrent_task(&ds, "sq", 1000).await;
+
+	// Let's merge the 2 sets
+	let set: BTreeSet<i64> = set1.into_iter().chain(set2.into_iter()).collect();
+	// We should have 2000 unique numbers
+	assert_eq!(set.len(), 2000);
+	// They should be consecutive
+	assert_eq!(set.first().cloned(), Some(0));
+	assert_eq!(set.last().cloned(), Some(1999));
 
 	Ok(())
 }
