@@ -345,16 +345,8 @@ macro_rules! impl_basic_has_kind{
 impl_basic_has_kind! {
 	bool => Bool,
 
-	// Only numbers which fully convert to an int
 	i64 => Int,
-	i32 => Int,
-	i16 => Int,
-	i8 => Int,
-	u32 => Int,
-	u16 => Int,
-	u8 => Int,
 	f64 => Float,
-
 	Decimal => Decimal,
 
 	String => String,
