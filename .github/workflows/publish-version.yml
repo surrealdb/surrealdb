@@ -452,7 +452,7 @@ jobs:
               # Package
               ./target/x86_64-pc-windows-msvc/release/surreal.exe version
               cp target/x86_64-pc-windows-msvc/release/surreal.exe surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe
-              echo $(certutil -hashfile surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe SHA256 | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.txt
+              echo $(certutil -hashfile surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe SHA256 | cut -f2 -d"'") > surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.txt
 
     runs-on: ${{ matrix.runner }}
     steps:
