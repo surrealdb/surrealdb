@@ -21,7 +21,12 @@ on:
         required: false
         type: boolean
         default: false
-        description: "Consider this release as the latest one and update the Docker image tag and the binary pointer for the installers"
+        description: "Consider this release as the latest one"
+      extra-features:
+        required: false
+        type: string
+        default: "ml"
+        description: "Extra features enabled in the binary"
       publish:
         required: false
         type: boolean
@@ -45,5 +50,6 @@ jobs:
       latest: ${{ inputs.latest }}
       suffix: ${{ inputs.suffix }}
       publish: ${{ inputs.publish }}
+      extra-features: ${{ inputs.extra-features }}
       create-release: ${{ inputs.publish }}
     secrets: inherit
