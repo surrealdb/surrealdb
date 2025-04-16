@@ -42,8 +42,9 @@ pub(crate) fn extract_allowed_paths(input: &str) -> Vec<PathBuf> {
 				None
 			} else {
 				let path = PathBuf::from(trimmed).clean();
-				debug!("Allowed file path: {}", path.to_string_lossy());
-				Some(path)
+				let canonical_path = fs::canonicalize(path).expect("failed to get canonical path");
+				debug!("Allowed file path: {}", canonical_path.to_string_lossy());
+				Some(canonical_path)
 			}
 		})
 		.collect()
