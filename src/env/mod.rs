@@ -7,7 +7,7 @@ use surrealdb::env::{arch, os};
 pub static RELEASE: LazyLock<String> =
 	LazyLock::new(|| format!("{} for {} on {}", *PKG_VERSION, os(), arch()));
 
-pub async fn init() -> Result<(), Error> {
+pub fn init() -> Result<(), Error> {
 	// Log version
 	info!("Running {}", *RELEASE);
 	// All ok

@@ -8,7 +8,7 @@ use surrealdb::kvs::Datastore;
 
 use crate::gql::GraphQL;
 
-pub(super) async fn router<S>(ds: Arc<Datastore>) -> Router<S>
+pub(super) fn router<S>(ds: Arc<Datastore>) -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
