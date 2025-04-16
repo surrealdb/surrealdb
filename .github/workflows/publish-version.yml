@@ -711,7 +711,7 @@ jobs:
 
   cleanup:
     name: Delete release branch
-    if: ${{ inputs.publish }}
+    if: ${{ inputs.publish && (inputs.suffix != 'none' && inputs.suffix != 'metadata') }}
     needs: [publish, prepare-vars]
     runs-on: ubuntu-latest
     steps:
