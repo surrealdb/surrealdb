@@ -92,7 +92,7 @@ jobs:
             if [[ -z $patch ]]; then
               echo "Pre-releases require a patch number, e.g. beta.3"
               exit 404
-            elif ! [[ $patch =~ '^[0-9]+$' ]]; then
+            elif ! [[ $patch =~ ^[0-9]+$ ]]; then
               echo "The patch number should be an integer, found ${patch}"
               exit 404
             fi
