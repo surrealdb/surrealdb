@@ -188,7 +188,7 @@ reqwest = { workspace = true, default-features = false, features = [
     "stream",
     "multipart",
 ], optional = true }
-tempfile = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true, features = ["nightly"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
