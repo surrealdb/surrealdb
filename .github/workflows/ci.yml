@@ -810,12 +810,14 @@ jobs:
         run: bun test
         env:
           SURREAL_PROTOCOL: http
+          SURREAL_VERSION_CHECK: "false"
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
       - name: Run JavaScript tests (WebSocket)
         run: bun test
         env:
           SURREAL_PROTOCOL: ws
+          SURREAL_VERSION_CHECK: "false"
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
   sdk-golang:
