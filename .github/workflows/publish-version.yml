@@ -57,6 +57,7 @@ jobs:
       git-ref: ${{ steps.outputs.outputs.git-ref }}
       environment: ${{ steps.outputs.outputs.environment }}
       version: ${{ steps.outputs.outputs.version }}
+      patch: ${{ steps.outputs.outputs.patch }}
       current-version: ${{ steps.outputs.outputs.current-version }}
       name: ${{ steps.outputs.outputs.name }}
       build-metadata: ${{ steps.outputs.outputs.build-metadata }}
@@ -78,6 +79,7 @@ jobs:
           set -x
 
           suffix=$(echo ${{ inputs.suffix }} | tr "." "\n" | sed -n 1p)
+          patch=$(echo ${{ inputs.suffix }} | tr "." "\n" | sed -n 2p)
           version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           echo "current-version=${version}" >> $GITHUB_OUTPUT
 
@@ -87,24 +89,30 @@ jobs:
           fi
 
           if [[ $suffix == "none" ]]; then
+            patch=$(echo ${version} | tr "." "\n" | sed -n 1p)
             environment=stable
             buildMetadata=""
           elif [[ $suffix == "metadata" ]]; then
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+            # This sets the nightly version to something like `1.3.20250224221932`
+            patch=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
             rev=$(git rev-parse --short HEAD)
             buildMetadata=${date}.${rev}
             environment=nightly
           elif [[  $suffix == "rc" ]]; then
             version=${version}-${{ inputs.suffix }}
+            patch=$(($patch - 1))
             environment=release-candidate
             buildMetadata=""
           else
             version=${version}-${{ inputs.suffix }}
+            patch=$(($patch - 1))
             environment=${suffix}
             buildMetadata=""
           fi
 
           echo "version=${version}" >> $GITHUB_OUTPUT
+          echo "patch=${patch}" >> $GITHUB_OUTPUT
           echo "environment=${environment}" >> $GITHUB_OUTPUT
           echo "build-metadata=${buildMetadata}" >> $GITHUB_OUTPUT
           echo "release-branch=releases/${version}" >> $GITHUB_OUTPUT
@@ -521,26 +529,21 @@ jobs:
       - name: Create a temporary branch
         run: git checkout -b crate
 
-      - name: Patch nightly crate version
-        if: ${{ needs.prepare-vars.outputs.environment == 'nightly' }}
+      - name: Patch crate version
         run: |
           set -x
-
-          # Get the date of the last commit
-          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
 
           # Derive crate version
           currentVersion=${{ needs.prepare-vars.outputs.current-version }}
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-          # This sets the nightly version to something like `1.3.20250224221932`
-          version=${major}.${minor}.${date}
+          version=${major}.${minor}.${{ needs.prepare-vars.outputs.patch }}
 
           # Update the version to a nightly one
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#^version = \"${{ needs.prepare-vars.outputs.version }}\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \"${{ needs.prepare-vars.outputs.version }}\"#version = \"${version}\"#" crates/core/Cargo.toml
+          sed -i "s#surrealdb = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
