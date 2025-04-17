@@ -1893,9 +1893,11 @@ impl Value {
 				Error::CoerceTo {
 					from,
 					..
-				} => Error::CoerceTo {
+				} => Error::NestedCoerceTo {
 					from,
-					into: format!("array<{kind}>"),
+					into: kind.to_string(),
+					path: Idiom(vec![Part::All]),
+					parent: format!("array<{kind}>"),
 				},
 				e => e,
 			})
@@ -1911,9 +1913,11 @@ impl Value {
 				Error::CoerceTo {
 					from,
 					..
-				} => Error::CoerceTo {
+				} => Error::NestedCoerceTo {
 					from,
-					into: format!("array<{kind}, {len}>"),
+					into: kind.to_string(),
+					path: Idiom(vec![Part::All]),
+					parent: format!("array<{kind}, {len}>"),
 				},
 				e => e,
 			})
@@ -1937,9 +1941,11 @@ impl Value {
 				Error::CoerceTo {
 					from,
 					..
-				} => Error::CoerceTo {
+				} => Error::NestedCoerceTo {
 					from,
-					into: format!("set<{kind}>"),
+					into: kind.to_string(),
+					path: Idiom(vec![Part::All]),
+					parent: format!("set<{kind}>"),
 				},
 				e => e,
 			})
@@ -1956,9 +1962,11 @@ impl Value {
 				Error::CoerceTo {
 					from,
 					..
-				} => Error::CoerceTo {
+				} => Error::NestedCoerceTo {
 					from,
-					into: format!("set<{kind}, {len}>"),
+					into: kind.to_string(),
+					path: Idiom(vec![Part::All]),
+					parent: format!("set<{kind}, {len}>"),
 				},
 				e => e,
 			})
@@ -2653,9 +2661,11 @@ impl Value {
 				Error::ConvertTo {
 					from,
 					..
-				} => Error::ConvertTo {
+				} => Error::NestedConvertTo {
 					from,
-					into: format!("array<{kind}>"),
+					into: kind.to_string(),
+					path: Idiom(vec![Part::All]),
+					parent: format!("array<{kind}>"),
 				},
 				e => e,
 			})
@@ -2671,9 +2681,11 @@ impl Value {
 				Error::ConvertTo {
 					from,
 					..
-				} => Error::ConvertTo {
+				} => Error::NestedConvertTo {
 					from,
-					into: format!("array<{kind}, {len}>"),
+					into: kind.to_string(),
+					path: Idiom(vec![Part::All]),
+					parent: format!("array<{kind}, {len}>"),
 				},
 				e => e,
 			})
@@ -2697,9 +2709,11 @@ impl Value {
 				Error::ConvertTo {
 					from,
 					..
-				} => Error::ConvertTo {
+				} => Error::NestedConvertTo {
 					from,
-					into: format!("set<{kind}>"),
+					into: kind.to_string(),
+					path: Idiom(vec![Part::All]),
+					parent: format!("set<{kind}>"),
 				},
 				e => e,
 			})
@@ -2716,9 +2730,11 @@ impl Value {
 				Error::ConvertTo {
 					from,
 					..
-				} => Error::ConvertTo {
+				} => Error::NestedConvertTo {
 					from,
-					into: format!("set<{kind}, {len}>"),
+					into: kind.to_string(),
+					path: Idiom(vec![Part::All]),
+					parent: format!("set<{kind}, {len}>"),
 				},
 				e => e,
 			})

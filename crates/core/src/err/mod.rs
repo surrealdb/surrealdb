@@ -703,6 +703,24 @@ pub enum Error {
 	},
 
 	/// Unable to coerce to a value to another value
+	#[error("Expected a {into} for property {path} but found {from}, whilst coercing a value into a {parent}")]
+	NestedCoerceTo {
+		from: Value,
+		into: String,
+		path: Idiom,
+		parent: String,
+	},
+
+	/// Unable to convert a value to another value
+	#[error("Expected a {into} for property {path} but cannot convert {from} into a {into}, whilst converting a value into a {parent}")]
+	NestedConvertTo {
+		from: Value,
+		into: String,
+		path: Idiom,
+		parent: String,
+	},
+
+	/// Unable to coerce to a value to another value
 	#[error("Expected a {kind} but the array had {size} items")]
 	LengthInvalid {
 		kind: String,
