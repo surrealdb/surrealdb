@@ -43,6 +43,7 @@ pub(crate) mod cache;
 mod index;
 #[cfg(any(feature = "kv-tikv", feature = "kv-fdb", feature = "kv-indxdb",))]
 mod savepoint;
+pub(crate) mod sequences;
 #[cfg(test)]
 mod tests;
 mod util;

@@ -365,6 +365,12 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The requested database does not exist
+	#[error("The sequence '{name}' does not exist")]
+	SeqNotFound {
+		name: String,
+	},
+
 	/// The requested config does not exist
 	#[error("The config for {name} does not exist")]
 	CgNotFound {
@@ -986,6 +992,12 @@ pub enum Error {
 	/// The requested config already exists
 	#[error("The config for {name} already exists")]
 	CgAlreadyExists {
+		name: String,
+	},
+
+	/// The requested sequence already exists
+	#[error("The sequence '{name}' already exists")]
+	SeqAlreadyExists {
 		name: String,
 	},
 

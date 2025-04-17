@@ -12,6 +12,7 @@ mod index;
 mod model;
 mod namespace;
 mod param;
+mod sequence;
 mod table;
 mod user;
 
@@ -28,6 +29,7 @@ pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
 pub use param::DefineParamStatement;
+pub use sequence::DefineSequenceStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 
@@ -51,7 +53,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -86,6 +88,8 @@ pub enum DefineStatement {
 	Api(DefineApiStatement),
 	#[revision(start = 4)]
 	Bucket(DefineBucketStatement),
+	#[revision(start = 5)]
+	Sequence(DefineSequenceStatement),
 }
 
 // Revision implementations
@@ -134,6 +138,7 @@ impl DefineStatement {
 			Self::Config(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Api(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(ref v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Sequence(ref v) => v.compute(ctx, opt).await,
 		}
 	}
 }
@@ -156,6 +161,7 @@ impl Display for DefineStatement {
 			Self::Config(v) => Display::fmt(v, f),
 			Self::Api(v) => Display::fmt(v, f),
 			Self::Bucket(v) => Display::fmt(v, f),
+			Self::Sequence(v) => Display::fmt(v, f),
 		}
 	}
 }

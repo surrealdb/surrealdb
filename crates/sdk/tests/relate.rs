@@ -288,6 +288,7 @@ async fn relate_enforced() -> Result<(), Error> {
 	functions: {},
 	models: {},
 	params: {},
+	sequences: {},
 	tables: {
 		a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE',
 		edge: 'DEFINE TABLE edge TYPE RELATION ENFORCED SCHEMALESS PERMISSIONS NONE'
