@@ -88,7 +88,7 @@ jobs:
             exit 404
           fi
 
-          if [[ $suffix != "alpha" || $suffix != "beta" || $suffix != "rc" ]]; then
+          if [[ $suffix == "alpha" || $suffix == "beta" || $suffix == "rc" ]]; then
             if [[ -z $patch ]]; then
               echo "Pre-releases require a patch number, e.g. beta.3"
               exit 404
