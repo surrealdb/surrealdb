@@ -111,7 +111,14 @@ pub static GENERATION_ALLOCATION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 /// Specifies a list of paths in which files can be accessed (default: empty)
 pub static FILE_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
 	std::env::var("SURREAL_FILE_ALLOWLIST")
-		.map(|input| extract_allowed_paths(&input))
+		.map(|input| extract_allowed_paths(&input, true, "file"))
+		.unwrap_or_default()
+});
+
+/// Specifies a list of paths in which files can be accessed (default: empty)
+pub static BUCKET_FOLDER_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
+	std::env::var("SURREAL_BUCKET_FOLDER_ALLOWLIST")
+		.map(|input| extract_allowed_paths(&input, false, "bucket folder"))
 		.unwrap_or_default()
 });
 
