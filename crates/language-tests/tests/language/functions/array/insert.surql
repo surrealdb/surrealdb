@@ -2,10 +2,10 @@
 [test]
 
 [[test.results]]
-error = "Incorrect arguments for function array::insert(). Expected 2 or 3 arguments."
+error = "Incorrect arguments for function array::insert(). Expected 2 to 3 arguments"
 
 [[test.results]]
-error = "Incorrect arguments for function array::insert(). Expected 2 or 3 arguments."
+error = "Incorrect arguments for function array::insert(). Expected 2 to 3 arguments"
 
 [[test.results]]
 value = "[1]"

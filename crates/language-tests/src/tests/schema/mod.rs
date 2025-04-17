@@ -161,8 +161,11 @@ pub struct ErrorTestResult {
 #[serde(rename_all = "kebab-case")]
 pub struct ValueTestResult {
 	pub value: SurrealValue,
+	#[serde(default)]
 	pub skip_datetime: Option<bool>,
+	#[serde(default)]
 	pub skip_record_id_key: Option<bool>,
+	#[serde(default)]
 	pub skip_uuid: Option<bool>,
 }
 
@@ -171,6 +174,7 @@ pub struct ValueTestResult {
 pub struct MatchTestResult {
 	#[serde(rename = "match")]
 	pub _match: SurrealValue,
+	#[serde(default)]
 	pub error: Option<bool>,
 }
 

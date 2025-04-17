@@ -2,19 +2,19 @@
 [test]
 
 [[test.results]]
-error = "Incorrect arguments for function array::intersect(). Expected 2 arguments."
+error = "Incorrect arguments for function array::intersect(). Expected 2 arguments"
 
 [[test.results]]
-error = "Incorrect arguments for function array::intersect(). Expected 2 arguments."
+error = "Incorrect arguments for function array::intersect(). Expected 2 arguments"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::intersect(). Argument 1 was the wrong type. Expected a array but found 3"
+error = "Incorrect arguments for function array::intersect(). Argument 1 was the wrong type. Expected `array` but found `3`"
 
 [[test.results]]
-error = "Incorrect arguments for function array::intersect(). Argument 2 was the wrong type. Expected a array but found true"
+error = "Incorrect arguments for function array::intersect(). Argument 2 was the wrong type. Expected `array` but found `true`"
 
 [[test.results]]
 value = "[3, 4]"

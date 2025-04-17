@@ -50,7 +50,7 @@ impl DefineBucketStatement {
 		}
 		// Process the backend input
 		let backend = if let Some(ref url) = self.backend {
-			Some(url.compute(stk, ctx, opt, doc).await.catch_return()?.coerce_to_string()?)
+			Some(url.compute(stk, ctx, opt, doc).await.catch_return()?.coerce_to::<String>()?)
 		} else {
 			None
 		};

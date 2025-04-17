@@ -8,7 +8,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Found '1' for field `a`, with record `t:1`, but expected a number"
+error = "Couldn't coerce value for field `a` of `t:1`: Expected `number` but found `'1'`"
 
 */
 

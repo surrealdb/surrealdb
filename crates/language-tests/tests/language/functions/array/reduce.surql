@@ -5,7 +5,7 @@
 value = "15"
 
 [[test.results]]
-error = "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected a array but found 1"
+error = "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected `array` but found `1`"
 
 [[test.results]]
 value = "[[[[1, 2], 3], 4], 5]"

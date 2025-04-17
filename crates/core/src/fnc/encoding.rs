@@ -1,5 +1,6 @@
 pub mod base64 {
 	use crate::err::Error;
+	use crate::fnc::args::Optional;
 	use crate::sql::{Bytes, Value};
 	use base64::engine::general_purpose::{
 		GeneralPurpose, GeneralPurposeConfig, STANDARD, STANDARD_NO_PAD,
@@ -16,7 +17,7 @@ pub mod base64 {
 	);
 
 	/// Encodes a `Bytes` value to a base64 string without padding.
-	pub fn encode((arg, padded): (Bytes, Option<bool>)) -> Result<Value, Error> {
+	pub fn encode((arg, Optional(padded)): (Bytes, Optional<bool>)) -> Result<Value, Error> {
 		let padded = padded.unwrap_or_default();
 		let engine = if padded {
 			STANDARD
@@ -79,22 +80,25 @@ pub mod cbor {
 mod tests {
 	use super::*;
 
-	use crate::sql::{Bytes, Value};
+	use crate::{
+		fnc::args::Optional,
+		sql::{Bytes, Value},
+	};
 
 	#[test]
 	fn test_base64_encode() {
 		let input = Bytes(b"hello".to_vec());
-		let result = base64::encode((input.clone(), None)).unwrap();
+		let result = base64::encode((input.clone(), Optional(None))).unwrap();
 		assert_eq!(result, Value::from("aGVsbG8"));
 
-		let result = base64::encode((input, Some(false))).unwrap();
+		let result = base64::encode((input, Optional(Some(false)))).unwrap();
 		assert_eq!(result, Value::from("aGVsbG8"));
 	}
 
 	#[test]
 	fn test_base64_encode_padded() {
 		let input = Bytes(b"hello".to_vec());
-		let result = base64::encode((input, Some(true))).unwrap();
+		let result = base64::encode((input, Optional(Some(true)))).unwrap();
 		assert_eq!(result, Value::from("aGVsbG8="));
 	}
 

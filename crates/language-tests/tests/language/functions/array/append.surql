@@ -14,13 +14,13 @@ value = "[1, NULL]"
 value = "[1, NONE]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but found NULL"
+error = "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected `array` but found `NULL`"
 
 [[test.results]]
-error = "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but found NONE"
+error = "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected `array` but found `NONE`"
 
 [[test.results]]
-error = "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but found 3"
+error = "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected `array` but found `3`"
 
 [[test.results]]
 value = "[1, 2, [2, 3]]"

@@ -189,7 +189,7 @@ async fn idiom_recursion_graph() -> Result<(), Error> {
 			{ id: knows:4, in: person:jaime, out: person:mary },
 			{ id: knows:5, in: person:mary, out: person:tim },
 		];
-		
+
 		SELECT name, @{1}(->knows->person).name AS names_1sts FROM person;
 		SELECT name, @{2}(->knows->person).name AS names_2nds FROM person;
 		SELECT name, @{3}(->knows->person).name AS names_3rds FROM person;
@@ -942,8 +942,8 @@ async fn idiom_recursion_repeat_recurse_nested_destructure() -> Result<(), Error
 							a: [
 								{
 									name: 'Three',
-									links: { 
-										a: [] 
+									links: {
+										a: []
 									}
 								}
 							]
@@ -997,7 +997,7 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 
 		DEFINE FIELD emails.address ON TABLE user TYPE string;
 		-- Previously `emails.*` would be considered the same as `emails`
-		-- Resulting in two conflicting types for the same field. But now 
+		-- Resulting in two conflicting types for the same field. But now
 		-- `emails.*`, for objects, targets all values when `emails` is an object
 		-- and all entries when `emails` is an array.
 		DEFINE FIELD emails.*.address ON TABLE user TYPE option<number>;
@@ -1028,12 +1028,12 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 		.expect_val("[1, 2]")?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
-		.expect_error("Found 'a' for field `obj[*]`, with record `test:1`, but expected a number")?
+		.expect_error("Couldn't coerce value for field `obj[*]` of `test:1`: Expected `number` but found `'a'`")?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
 		.expect_error(
-			"Found 9 for field `emails.address`, with record `user:1`, but expected a string",
+			"Couldn't coerce value for field `emails.address` of `user:1`: Expected `string` but found `9`"
 		)?
 		.expect_val(
 			"[
@@ -1130,7 +1130,7 @@ async fn idiom_function_argument_computation() -> Result<(), Error> {
 		LET $str = "abc";
 		"abcdef".starts_with($str);
 
-		LET $obj = { 
+		LET $obj = {
 			a: |$a: int| $a,
 			b: |$b: function| $b()
 		};

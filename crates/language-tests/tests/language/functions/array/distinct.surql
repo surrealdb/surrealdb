@@ -5,7 +5,7 @@
 value = "[]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::distinct(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+error = "Incorrect arguments for function array::distinct(). Argument 1 was the wrong type. Expected `array` but found `'some text'`"
 
 [[test.results]]
 value = "[1, 2, 3, 4]"

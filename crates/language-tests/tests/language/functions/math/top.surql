@@ -26,7 +26,7 @@ value = "[1, 2, 3]"
 value = "[2, 3]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::top(). Argument 1 was the wrong type. Expected a array<number> but found []"
+error = "Incorrect arguments for function math::top(). Argument 1 was the wrong type. Expected `number` but found `[]` when coercing an element of `array<number>`"
 
 */
 math::top([1,2,3], 0);

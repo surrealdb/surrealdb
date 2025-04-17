@@ -24,5 +24,5 @@ array::repeat(1, 10);
 array::repeat("hello", 2);
 array::repeat(NONE, 3);
 array::repeat(44, 0);
-array::repeat(0, -1);
 array::repeat(0, -256);
+array::repeat(0, 9_223_372_036_854_775_807);

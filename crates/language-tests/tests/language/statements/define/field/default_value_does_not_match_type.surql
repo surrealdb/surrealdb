@@ -8,7 +8,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Found 0 for field `bar`, with record `foo:1`, but expected a string"
+error = "Couldn't coerce value for field `bar` of `foo:1`: Expected `string` but found `0`"
 
 */
 

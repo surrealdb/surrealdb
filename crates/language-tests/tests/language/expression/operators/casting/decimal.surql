@@ -20,37 +20,37 @@ value = "1dec"
 value = "'1dec'"
 
 [[test.results]]
-error = "Expected a object but cannot convert 1dec into a object"
+error = "Expected `object` but found a `1dec`"
 
 [[test.results]]
-error = "Expected a array but cannot convert 1dec into a array"
+error = "Expected `array` but found a `1dec`"
 
 [[test.results]]
-error = "Expected a datetime but cannot convert 1dec into a datetime"
+error = "Expected `datetime` but found a `1dec`"
 
 [[test.results]]
-error = "Expected a duration but cannot convert 1dec into a duration"
+error = "Expected `duration` but found a `1dec`"
 
 [[test.results]]
-error = "Expected a point but cannot convert 1dec into a point"
+error = "Expected `point` but found a `1dec`"
 
 [[test.results]]
-error = "Expected a uuid but cannot convert 1dec into a uuid"
+error = "Expected `uuid` but found a `1dec`"
 
 [[test.results]]
-error = "Expected a record but cannot convert 1dec into a record"
+error = "Expected `record` but found a `1dec`"
 
 [[test.results]]
-error = "Expected a geometry but cannot convert 1dec into a geometry"
+error = "Expected `geometry` but found a `1dec`"
 
 [[test.results]]
-error = "Expected a set but cannot convert 1dec into a set"
+error = "Expected `array` but found a `1dec`"
 
 [[test.results]]
-error = "Expected a function but cannot convert 1dec into a function"
+error = "Expected `function` but found a `1dec`"
 
 [[test.results]]
-error = "Expected a range but cannot convert 1dec into a range"
+error = "Expected `range` but found a `1dec`"
 
 */
 <number> 1dec;

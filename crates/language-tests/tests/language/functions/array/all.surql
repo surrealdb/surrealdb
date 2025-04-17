@@ -8,10 +8,10 @@ imports = ["harness/assert.surql"]
 value = "'OK'"
 
 [[test.results]]
-error = "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+error = "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected `array` but found `'some text'`"
 
 [[test.results]]
-error = "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but found { bar: 2, foo: 1 }"
+error = "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected `array` but found `{ bar: 2, foo: 1 }`"
 
 
 */

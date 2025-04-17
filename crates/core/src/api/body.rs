@@ -10,9 +10,11 @@ use futures::StreamExt;
 use http::header::CONTENT_TYPE;
 
 use crate::err::Error;
-use crate::rpc::format::{cbor, json, revision};
+use crate::rpc::format::cbor;
+use crate::rpc::format::json;
+use crate::rpc::format::revision;
+use crate::sql;
 use crate::sql::Bytesize;
-use crate::sql::Kind;
 use crate::sql::Value;
 
 use super::context::InvocationContext;
@@ -89,7 +91,7 @@ impl ApiBody {
 			}
 
 			if ctx.request_body_raw {
-				value.coerce_to(&Kind::Bytes)
+				Ok(value.coerce_to::<sql::Bytes>()?.into())
 			} else {
 				Ok(value)
 			}

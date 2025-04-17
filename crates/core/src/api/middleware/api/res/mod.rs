@@ -3,17 +3,21 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 use crate::{
 	api::context::InvocationContext,
 	err::Error,
-	sql::{Object, Value},
+	fnc::args::Optional,
+	sql::{Object, Strand, Value},
 };
 
-pub fn raw_body(context: &mut InvocationContext, (raw,): (Option<bool>,)) -> Result<(), Error> {
+pub fn raw_body(
+	context: &mut InvocationContext,
+	(Optional(raw),): (Optional<bool>,),
+) -> Result<(), Error> {
 	context.response_body_raw = raw.unwrap_or(true);
 	Ok(())
 }
 
 pub fn header(
 	context: &mut InvocationContext,
-	(name, value): (String, Value),
+	(Strand(name), value): (Strand, Value),
 ) -> Result<(), Error> {
 	let name: HeaderName = name.parse()?;
 	if let Value::None = value {
@@ -21,7 +25,8 @@ pub fn header(
 			v.remove(&name);
 		}
 	} else {
-		let value: HeaderValue = value.coerce_to_string()?.parse()?;
+		// TODO: Decide on whether to use cast or coerce.
+		let value: HeaderValue = value.coerce_to::<String>()?.parse()?;
 		if let Some(v) = context.response_headers.as_mut() {
 			v.insert(name, value);
 		} else {
@@ -45,7 +50,8 @@ pub fn headers(context: &mut InvocationContext, (headers,): (Object,)) -> Result
 			}
 			value => {
 				let name: HeaderName = name.parse()?;
-				let value: HeaderValue = value.convert_to_string()?.parse()?;
+				// TODO: Decide on whether to use cast or coerce.
+				let value: HeaderValue = value.cast_to::<String>()?.parse()?;
 				headermap.insert(name, value);
 			}
 		}

@@ -11,7 +11,8 @@ async fn typed_set() -> Result<(), Error> {
         LET $bar: int = 'hello';
         RETURN $bar;
 	";
-	let error = "Found 'hello' for param $bar, but expected a int";
+	let error =
+		"Tried to set `$bar`, but couldn't coerce value: Expected `int` but found `'hello'`";
 	Test::new(sql)
 		.await?
 		.expect_val("None")?

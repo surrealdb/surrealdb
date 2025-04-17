@@ -5,12 +5,13 @@
 value = "[]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::union(). Argument 1 was the wrong type. Expected a array but found 3"
+error = "Incorrect arguments for function array::union(). Argument 1 was the wrong type. Expected `array` but found `3`"
 
 [[test.results]]
 value = "[1, 2, 6, 3, 4, 5]"
 
 [[test.results]]
+# TODO: Look into the result her sometimes being inconsistant, sometimes the normal `1` is being omitted.
 value = "[{  }, 1d, 'foo', 1f, 1h, '', 1dec, 1]"
 
 [[test.results]]

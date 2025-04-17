@@ -8,10 +8,10 @@ value = "a:1"
 value = "a:1"
 
 [[test.results]]
-error = "Expected a record<b> but cannot convert a:1 into a record<b>"
+error = "Expected `record<b>` but found a `a:1`"
 
 [[test.results]]
-error = "Expected a record<b> but cannot convert 'a:1' into a record<b>"
+error = "Expected `record<b>` but found a `'a:1'`"
 
 */
 <record<a>> a:1;

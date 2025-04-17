@@ -5,7 +5,7 @@
 value = "[]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::shuffle(). Argument 1 was the wrong type. Expected a array but found 3"
+error = "Incorrect arguments for function array::shuffle(). Argument 1 was the wrong type. Expected `array` but found `3`"
 
 [[test.results]]
 value = "[4]"
@@ -14,11 +14,11 @@ value = "[4]"
 value = "[1, 1, 1]"
 
 [[test.results]]
-match = """
-	1 in $result && 2 in $result && 3 in $result && 4 in $result && "text" in $result
-"""
-
+# TODO: Look into why this test succeeded with `CONSTAINSALL`, invalid syntax and `$results` the wrong parameter.
+match = "$result CONTAINSALL [1,2,'text',3,4]"
+error = false
 */
+
 array::shuffle([]);
 array::shuffle(3);
 array::shuffle([4]);
