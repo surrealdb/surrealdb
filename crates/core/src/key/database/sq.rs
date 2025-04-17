@@ -21,13 +21,13 @@ pub struct Sq<'a> {
 impl_key!(Sq<'a>);
 pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
 	let mut k = super::all::new(ns, db).encode()?;
-	k.extend_from_slice(b"!sq\x00");
+	k.extend_from_slice(b"*sq\x00");
 	Ok(k)
 }
 
 pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
 	let mut k = super::all::new(ns, db).encode()?;
-	k.extend_from_slice(b"!sq\xff");
+	k.extend_from_slice(b"*sq\xff");
 	Ok(k)
 }
 
@@ -45,7 +45,7 @@ impl<'a> Sq<'a> {
 			ns,
 			_b: b'*', // *
 			db,
-			_c: b'!', // !
+			_c: b'*', // *
 			_d: b's', // s
 			_e: b'q', // q
 			sq,
@@ -66,7 +66,7 @@ mod tests {
             "test",
         );
 		let enc = Sq::encode(&val).unwrap();
-		assert_eq!(enc, b"/*ns\0*db\0!sqtest\0");
+		assert_eq!(enc, b"/*ns\0*db\0*sqtest\0");
 		let dec = Sq::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
@@ -74,12 +74,12 @@ mod tests {
 	#[test]
 	fn prefix() {
 		let val = super::prefix("namespace", "database").unwrap();
-		assert_eq!(val, b"/*namespace\0*database\0!sq\0");
+		assert_eq!(val, b"/*namespace\0*database\0*sq\0");
 	}
 
 	#[test]
 	fn suffix() {
 		let val = super::suffix("namespace", "database").unwrap();
-		assert_eq!(val, b"/*namespace\0*database\0!sq\xff");
+		assert_eq!(val, b"/*namespace\0*database\0*sq\xff");
 	}
 }

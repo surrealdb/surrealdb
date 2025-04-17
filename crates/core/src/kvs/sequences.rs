@@ -151,7 +151,7 @@ impl Sequence {
 		}
 		let v = self.st.next;
 		self.st.next += 1;
-		// write the state on the kv store
+		// write the state on the KV store
 		let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
 		tx.set(&self.key, revision::to_vec(&self.st)?, None).await?;
 		tx.commit().await?;

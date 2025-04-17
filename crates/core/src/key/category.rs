@@ -90,7 +90,7 @@ pub enum Category {
 	DatabaseVersionstamp,
 	/// crate::key::database::cg             /*{ns}*{db}!cg{ty}
 	DatabaseConfig,
-	/// crate::key::database::sq             /*{ns}*{db}!sq{sq}
+	/// crate::key::database::sq             /*{ns}*{db}*sq{sq}
 	DatabaseSequence,
 	///
 	/// ------------------------------
