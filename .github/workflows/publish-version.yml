@@ -83,9 +83,19 @@ jobs:
           version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           echo "current-version=${version}" >> $GITHUB_OUTPUT
 
-          if [[ $suffix != "none" && $suffix != "metadata" && $suffix != "alpha."* && $suffix != "beta."* && $suffix != "rc."* ]]; then
+          if [[ $suffix != "none" && $suffix != "metadata" && $suffix != "alpha" && $suffix != "beta" && $suffix != "rc" ]]; then
             echo "'${suffix}' is not a supported suffix"
             exit 404
+          fi
+
+          if [[ $suffix != "alpha" || $suffix != "beta" || $suffix != "rc" ]]; then
+            if [[ -z $patch ]]; then
+              echo "Pre-releases require a patch number, e.g. beta.3"
+              exit 404
+            elif ! [[ $patch =~ '^[0-9]+$' ]]; then
+              echo "The patch number should be an integer, found ${patch}"
+              exit 404
+            fi
           fi
 
           if [[ $suffix == "none" ]]; then
