@@ -1584,7 +1584,11 @@ impl Transaction {
 			match self.get(key, version).await? {
 				// The value exists in the datastore
 				Some(val) => {
-					let val = cache::tx::Entry::Val(Arc::new(revision::from_slice(&val)?));
+					let mut val: Value = revision::from_slice(&val)?;
+					// Inject the id field into the document
+					let rid = crate::sql::Thing::from((tb, id.clone()));
+					val.def(&rid);
+					let val = cache::tx::Entry::Val(Arc::new(val));
 					val.try_into_val()
 				}
 				// The value is not in the datastore
@@ -1602,7 +1606,11 @@ impl Transaction {
 					match self.get(key, None).await? {
 						// The value exists in the datastore
 						Some(val) => {
-							let val = cache::tx::Entry::Val(Arc::new(revision::from_slice(&val)?));
+							let mut val: Value = revision::from_slice(&val)?;
+							// Inject the id field into the document
+							let rid = crate::sql::Thing::from((tb, id.clone()));
+							val.def(&rid);
+							let val = cache::tx::Entry::Val(Arc::new(val));
 							self.cache.insert(qey, val.clone());
 							val.try_into_val()
 						}
