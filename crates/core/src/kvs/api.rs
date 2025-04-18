@@ -102,6 +102,7 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
+	#[allow(clippy::unused_async, reason = "Implementers will want to use async")]
 	async fn keysr<K>(
 		&mut self,
 		_rng: Range<K>,
@@ -117,6 +118,7 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	#[allow(clippy::unused_async, reason = "Implementers will want to use async")]
 	async fn scan<K>(
 		&mut self,
 		_rng: Range<K>,
@@ -132,6 +134,7 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	#[allow(clippy::unused_async, reason = "Implementers will want to use async")]
 	async fn scanr<K>(
 		&mut self,
 		_rng: Range<K>,

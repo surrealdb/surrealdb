@@ -38,6 +38,7 @@ pub(super) struct PlanBuilderParameters {
 
 impl PlanBuilder {
 	#[allow(clippy::mutable_key_type)]
+	#[expect(clippy::unused_async)]
 	pub(super) async fn build(
 		ctx: &StatementContext<'_>,
 		p: PlanBuilderParameters,
@@ -50,13 +51,13 @@ impl PlanBuilder {
 		};
 
 		if let Some(With::NoIndex) = ctx.with {
-			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
+			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp);
 		}
 
 		// Browse the AST and collect information
 		if let Some(root) = &p.root {
 			if let Err(e) = b.eval_node(root) {
-				return Self::table_iterator(ctx, Some(&e), p.gp).await;
+				return Self::table_iterator(ctx, Some(&e), p.gp);
 			}
 		}
 
@@ -126,10 +127,10 @@ impl PlanBuilder {
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
-		Self::table_iterator(ctx, None, p.gp).await
+		Self::table_iterator(ctx, None, p.gp)
 	}
 
-	async fn table_iterator(
+	fn table_iterator(
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
 		granted_permission: GrantedPermission,
@@ -372,7 +373,7 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self) -> Value {
 		let mut e = HashMap::new();
-		e.insert("index", Value::from(self.ix_ref().name.0.to_owned()));
+		e.insert("index", Value::from(self.ix_ref().name.0.clone()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
@@ -491,7 +492,7 @@ impl RangeValue {
 impl From<&RangeValue> for Value {
 	fn from(rv: &RangeValue) -> Self {
 		Value::from(Object::from(HashMap::from([
-			("value", rv.value.to_owned()),
+			("value", rv.value.clone()),
 			("inclusive", Value::from(rv.inclusive)),
 		])))
 	}

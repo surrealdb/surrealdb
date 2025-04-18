@@ -72,7 +72,7 @@ impl Fetch {
 	) -> Result<(), Error> {
 		let strand_or_idiom = |v: Value| match v {
 			Value::Strand(s) => Ok(Idiom::from(s.0)),
-			Value::Idiom(i) => Ok(i.to_owned()),
+			Value::Idiom(i) => Ok(i.clone()),
 			v => Err(Error::InvalidFetch {
 				value: v,
 			}),

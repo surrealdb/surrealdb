@@ -142,7 +142,7 @@ impl Part {
 							(
 								field.to_owned(),
 								plan.0.to_vec(),
-								Box::new(plan.1.to_owned()),
+								Box::new(plan.1.clone()),
 								plan.2.to_vec(),
 							)
 						}),

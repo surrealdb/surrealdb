@@ -621,8 +621,8 @@ impl Transactor {
 	/// But also allows for lexicographical ordering.
 	///
 	/// Public for tests, but not required for usage from a user perspective.
-	pub async fn clock(&self) -> Timestamp {
-		self.clock.now().await
+	pub fn clock(&self) -> Timestamp {
+		self.clock.now()
 	}
 
 	// change will record the change in the changefeed if enabled.
@@ -659,9 +659,9 @@ impl Transactor {
 		} else {
 			let val = self.get(key.clone(), None).await?;
 			if let Some(val) = val {
-				U32::new(key.clone(), Some(val)).await?
+				U32::new(key.clone(), Some(val))?
 			} else {
-				U32::new(key.clone(), None).await?
+				U32::new(key.clone(), None)?
 			}
 		})
 	}
@@ -824,6 +824,7 @@ impl Transactor {
 		Ok(None)
 	}
 
+	#[expect(clippy::unused_async)]
 	pub(crate) async fn new_save_point(&mut self) {
 		expand_inner!(&mut self.inner, v => { v.new_save_point() })
 	}
@@ -832,6 +833,7 @@ impl Transactor {
 		expand_inner!(&mut self.inner, v => { v.rollback_to_save_point().await })
 	}
 
+	#[expect(clippy::unused_async)]
 	pub(crate) async fn release_last_save_point(&mut self) -> Result<(), Error> {
 		expand_inner!(&mut self.inner, v => { v.release_last_save_point() })
 	}

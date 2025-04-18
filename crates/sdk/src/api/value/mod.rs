@@ -200,6 +200,7 @@ impl From<Vec<Value>> for RecordIdKey {
 	}
 }
 
+#[expect(clippy::fallible_impl_from)]
 impl From<RecordIdKey> for Value {
 	fn from(key: RecordIdKey) -> Self {
 		match key.0 {

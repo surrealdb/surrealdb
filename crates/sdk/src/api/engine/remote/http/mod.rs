@@ -328,12 +328,12 @@ async fn router(
 			let out = send_request(req, base_url, client, headers, auth).await?;
 			if let Some(ns) = namespace {
 				let value =
-					HeaderValue::try_from(&ns).map_err(|_| Error::InvalidNsName(ns.to_owned()))?;
+					HeaderValue::try_from(&ns).map_err(|_| Error::InvalidNsName(ns.clone()))?;
 				headers.insert(&NS, value);
 			};
 			if let Some(db) = database {
 				let value =
-					HeaderValue::try_from(&db).map_err(|_| Error::InvalidDbName(db.to_owned()))?;
+					HeaderValue::try_from(&db).map_err(|_| Error::InvalidDbName(db.clone()))?;
 				headers.insert(&DB, value);
 			};
 

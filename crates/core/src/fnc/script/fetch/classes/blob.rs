@@ -175,12 +175,14 @@ impl Blob {
 		}
 	}
 
+	#[expect(clippy::unused_async)]
 	pub async fn text(&self) -> Result<String> {
 		let text = String::from_utf8(self.data.to_vec())?;
 		Ok(text)
 	}
 
 	#[qjs(rename = "arrayBuffer")]
+	#[expect(clippy::unused_async)]
 	pub async fn array_buffer<'js>(&self, ctx: Ctx<'js>) -> Result<ArrayBuffer<'js>> {
 		ArrayBuffer::new(ctx, self.data.to_vec())
 	}

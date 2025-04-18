@@ -765,6 +765,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for getting info
 	// ------------------------------
 
+	#[expect(clippy::unused_async)]
 	async fn version(&self, params: Array) -> Result<Data, RpcError> {
 		match params.len() {
 			0 => Ok(self.version_data()),

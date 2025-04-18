@@ -528,7 +528,7 @@ impl IndexRangeThingIterator {
 		if from.value == Value::None {
 			return value_type.prefix_beg(ns, db, ix_what, ix_name);
 		}
-		let fd = Array::from(from.value.to_owned());
+		let fd = Array::from(from.value.clone());
 		if from.inclusive {
 			Index::prefix_ids_beg(ns, db, ix_what, ix_name, &fd)
 		} else {
@@ -547,7 +547,7 @@ impl IndexRangeThingIterator {
 		if to.value == Value::None {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
-		let fd = Array::from(to.value.to_owned());
+		let fd = Array::from(to.value.clone());
 		if to.inclusive {
 			Index::prefix_ids_end(ns, db, ix_what, ix_name, &fd)
 		} else {
@@ -722,7 +722,7 @@ impl IndexRangeReverseThingIterator {
 
 		// Update the ending for the next batch
 		if let Some(key) = res.last() {
-			self.r.r.end = key.clone();
+			self.r.r.end.clone_from(key);
 		}
 
 		// The next batch should not include the end anymore
@@ -1085,7 +1085,7 @@ impl UniqueRangeThingIterator {
 		if from.value == Value::None {
 			return value_type.prefix_beg(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(from.value.to_owned()), None).encode()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(from.value.clone()), None).encode()
 	}
 
 	fn compute_end(
@@ -1099,7 +1099,7 @@ impl UniqueRangeThingIterator {
 		if to.value == Value::None {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(to.value.to_owned()), None).encode()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(to.value.clone()), None).encode()
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1214,7 +1214,7 @@ impl UniqueRangeReverseThingIterator {
 		let mut res = tx.scanr(self.r.r.range(), limit, None).await?;
 		if let Some((k, _)) = res.last() {
 			// We set the ending for the next batch
-			self.r.r.end = k.clone();
+			self.r.r.end.clone_from(k);
 			// If the last key is the beginning of the range, we're done
 			if self.r.r.beg.eq(k) {
 				self.done = true;
@@ -1257,7 +1257,7 @@ impl UniqueRangeReverseThingIterator {
 		let mut res = tx.keysr(self.r.r.range(), limit, None).await?;
 		if let Some(k) = res.last() {
 			// We set the ending for the next batch
-			self.r.r.end = k.clone();
+			self.r.r.end.clone_from(k);
 			// If the last key is the beginning of the range, we're done
 			if self.r.r.beg.eq(k) {
 				self.done = true;
@@ -1393,7 +1393,7 @@ pub(crate) struct MatchesThingIterator {
 }
 
 impl MatchesThingIterator {
-	pub(super) async fn new(
+	pub(super) fn new(
 		irf: IteratorRef,
 		fti: &FtIndex,
 		terms_docs: TermsDocs,

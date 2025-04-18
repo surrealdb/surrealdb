@@ -21,7 +21,7 @@ pub struct U32 {
 }
 
 impl U32 {
-	pub(crate) async fn new(state_key: Key, v: Option<Val>) -> Result<Self, Error> {
+	pub(crate) fn new(state_key: Key, v: Option<Val>) -> Result<Self, Error> {
 		let state: State = if let Some(val) = v {
 			State::try_from_val(val)?
 		} else {
@@ -118,7 +118,7 @@ mod tests {
 		let txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let key = "foo";
 		let v = txn.get(key, None).await.unwrap();
-		let d = U32::new(key.into(), v).await.unwrap();
+		let d = U32::new(key.into(), v).unwrap();
 		(txn, d)
 	}
 

@@ -81,7 +81,7 @@ impl ApiBody {
 	) -> Result<Value, Error> {
 		#[allow(irrefutable_let_patterns)] // For WASM this is the only pattern
 		if let ApiBody::Native(value) = self {
-			let max = ctx.request_body_max.to_owned().unwrap_or(Bytesize::MAX);
+			let max = ctx.request_body_max.unwrap_or(Bytesize::MAX);
 			let size = std::mem::size_of_val(&value);
 
 			if size > max.0 as usize {
@@ -94,7 +94,7 @@ impl ApiBody {
 				Ok(value)
 			}
 		} else {
-			let bytes = self.stream(ctx.request_body_max.to_owned()).await?;
+			let bytes = self.stream(ctx.request_body_max).await?;
 
 			if ctx.request_body_raw {
 				Ok(Value::Bytes(crate::sql::Bytes(bytes)))

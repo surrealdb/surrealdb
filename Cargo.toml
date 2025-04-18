@@ -353,13 +353,13 @@ priority = "optional"
 section = "utility"
 systemd-units = { enable = true }
 
-[lints.rust]
+[workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(docker)',
     'cfg(storage)',
 ] }
 
-[lints.clippy]
+[workspace.lints.clippy]
 
 # Checks for code like `foo = bar.clone();`.
 # Custom `Clone::clone_from()` or `ToOwned::clone_into` implementations allow the objects to share resources and

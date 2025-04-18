@@ -26,13 +26,13 @@ impl SizedClock {
 		Self::System(Default::default())
 	}
 
-	pub async fn now(&self) -> Timestamp {
+	pub fn now(&self) -> Timestamp {
 		match self {
 			SizedClock::System(c) => c.now(),
 			#[cfg(test)]
-			SizedClock::Fake(c) => c.now().await,
+			SizedClock::Fake(c) => c.now(),
 			#[cfg(test)]
-			SizedClock::Inc(c) => c.now().await,
+			SizedClock::Inc(c) => c.now(),
 		}
 	}
 }
@@ -61,13 +61,13 @@ impl FakeClock {
 		}
 	}
 
-	pub async fn now(&self) -> Timestamp {
+	pub fn now(&self) -> Timestamp {
 		Timestamp {
 			value: self.now.load(Ordering::SeqCst),
 		}
 	}
 
-	pub async fn set(&self, timestamp: Timestamp) {
+	pub fn set(&self, timestamp: Timestamp) {
 		self.now.store(timestamp.value, Ordering::SeqCst);
 	}
 }
@@ -100,7 +100,7 @@ impl IncFakeClock {
 		}
 	}
 
-	pub async fn now(&self) -> Timestamp {
+	pub fn now(&self) -> Timestamp {
 		self.now.fetch_add(self.increment.as_millis() as u64, Ordering::SeqCst);
 		Timestamp {
 			value: self.now.load(Ordering::SeqCst),

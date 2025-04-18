@@ -52,6 +52,7 @@ impl std::convert::From<Role> for Ident {
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl std::convert::From<&Role> for EntityUid {
 	fn from(role: &Role) -> Self {
 		EntityUid::from_type_name_and_id(
@@ -67,6 +68,7 @@ impl std::convert::From<&Role> for Entity {
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl std::convert::From<&Role> for RestrictedExpression {
 	fn from(role: &Role) -> Self {
 		format!("{}", EntityUid::from(role)).parse().unwrap()

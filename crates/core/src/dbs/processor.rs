@@ -97,8 +97,8 @@ impl Collected {
 	) -> Result<Processed, Error> {
 		match self {
 			Self::Edge(key) => Self::process_edge(opt, txn, key, rid_only).await,
-			Self::RangeKey(key) => Self::process_range_key(key).await,
-			Self::TableKey(key) => Self::process_table_key(key).await,
+			Self::RangeKey(key) => Self::process_range_key(key),
+			Self::TableKey(key) => Self::process_table_key(key),
 			Self::Relatable {
 				f,
 				v,
@@ -145,7 +145,7 @@ impl Collected {
 		})
 	}
 
-	async fn process_range_key(key: Key) -> Result<Processed, Error> {
+	fn process_range_key(key: Key) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
 		let val = Value::Null;
 		let rid = Thing::from((key.tb, key.id));
@@ -162,7 +162,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_table_key(key: Key) -> Result<Processed, Error> {
+	fn process_table_key(key: Key) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record
@@ -826,7 +826,7 @@ pub(super) trait Collector {
 				Dir::In => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -838,7 +838,7 @@ pub(super) trait Collector {
 				Dir::Out => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -850,7 +850,7 @@ pub(super) trait Collector {
 				Dir::Both => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.flat_map(|v| {
 						[
 							(

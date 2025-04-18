@@ -195,11 +195,13 @@ impl<'js> Response<'js> {
 
 	// Returns a promise with the response body as FormData
 	#[qjs(rename = "formData")]
+	#[expect(clippy::unused_async)]
 	pub async fn form_data(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
 		Err(Exception::throw_internal(&ctx, "Not yet implemented"))
 	}
 
 	// Returns a promise with the response body as JSON
+	#[expect(clippy::unused_async)]
 	pub async fn json(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
 		let text = self.text(ctx.clone()).await?;
 		ctx.json_parse(text)

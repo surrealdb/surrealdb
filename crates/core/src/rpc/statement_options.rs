@@ -237,7 +237,7 @@ impl StatementOptions {
 	}
 
 	pub(crate) fn data_expr(&self) -> Option<Data> {
-		self.data.to_owned().map(|v| v.into())
+		self.data.clone().map(|v| v.into())
 	}
 
 	pub(crate) fn merge_vars(&self, v: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {

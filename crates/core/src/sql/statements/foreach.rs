@@ -88,7 +88,7 @@ impl ForeachStatement {
 					Entry::Set(v) => {
 						let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
 						let mut c = MutableContext::unfreeze(ctx)?;
-						c.add_value(v.name.to_owned(), val.into());
+						c.add_value(v.name.clone(), val.into());
 						ctx = c.freeze();
 						Ok(Value::None)
 					}

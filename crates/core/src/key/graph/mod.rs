@@ -203,7 +203,7 @@ impl<'a> Graph<'a> {
 			id,
 			eg,
 			ft: &fk.tb,
-			fk: fk.id.to_owned(),
+			fk: fk.id.clone(),
 		}
 	}
 

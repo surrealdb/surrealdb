@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 mod common;
 
 #[cfg(all(docker, feature = "storage-rocksdb"))]

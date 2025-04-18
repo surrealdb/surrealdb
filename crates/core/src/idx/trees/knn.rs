@@ -425,7 +425,7 @@ impl Ids64 {
 			}
 			Self::Vec2(a) => a.iter().find(|&&i| i != d).map(|&i| Self::One(i)),
 			Self::Vec3(a) => {
-				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).cloned().collect();
+				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).copied().collect();
 				if v.len() == 2 {
 					Some(Self::Vec2([v[0], v[1]]))
 				} else {
@@ -433,7 +433,7 @@ impl Ids64 {
 				}
 			}
 			Self::Vec4(a) => {
-				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).cloned().collect();
+				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).copied().collect();
 				if v.len() == 3 {
 					Some(Self::Vec3([v[0], v[1], v[2]]))
 				} else {
@@ -441,7 +441,7 @@ impl Ids64 {
 				}
 			}
 			Self::Vec5(a) => {
-				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).cloned().collect();
+				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).copied().collect();
 				if v.len() == 4 {
 					Some(Self::Vec4([v[0], v[1], v[2], v[3]]))
 				} else {
@@ -449,7 +449,7 @@ impl Ids64 {
 				}
 			}
 			Self::Vec6(a) => {
-				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).cloned().collect();
+				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).copied().collect();
 				if v.len() == 5 {
 					Some(Self::Vec5([v[0], v[1], v[2], v[3], v[4]]))
 				} else {
@@ -457,7 +457,7 @@ impl Ids64 {
 				}
 			}
 			Self::Vec7(a) => {
-				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).cloned().collect();
+				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).copied().collect();
 				if v.len() == 6 {
 					Some(Self::Vec6([v[0], v[1], v[2], v[3], v[4], v[5]]))
 				} else {
@@ -465,7 +465,7 @@ impl Ids64 {
 				}
 			}
 			Self::Vec8(a) => {
-				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).cloned().collect();
+				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).copied().collect();
 				if v.len() == 7 {
 					Some(Self::Vec7([v[0], v[1], v[2], v[3], v[4], v[5], v[6]]))
 				} else {
@@ -515,7 +515,7 @@ where
 	type Item = DocId;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.0.next().cloned()
+		self.0.next().copied()
 	}
 }
 

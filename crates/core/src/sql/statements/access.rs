@@ -365,7 +365,7 @@ pub async fn create_grant(
 				// The grant is initially not revoked.
 				revocation: None,
 				// Subject associated with the grant.
-				subject: stmt.subject.to_owned(),
+				subject: stmt.subject.clone(),
 				// The contents of the grant.
 				grant: Grant::Bearer(grant.clone()),
 			};
@@ -452,7 +452,7 @@ pub async fn create_grant(
 				// The grant is initially not revoked.
 				revocation: None,
 				// Subject associated with the grant.
-				subject: stmt.subject.to_owned(),
+				subject: stmt.subject.clone(),
 				// The contents of the grant.
 				grant: Grant::Bearer(grant.clone()),
 			};
@@ -592,7 +592,7 @@ async fn compute_show(
 				// If provided, check if grant matches conditions.
 				if let Some(cond) = &stmt.cond {
 					// Redact grant before evaluating conditions.
-					let redacted_gr = Value::Object(gr.redacted().to_owned().into());
+					let redacted_gr = Value::Object(gr.redacted().clone().into());
 					if !cond
 						.compute(
 							stk,
@@ -614,7 +614,7 @@ async fn compute_show(
 				}
 
 				// Store revoked version of the redacted grant.
-				show.push(Value::Object(gr.redacted().to_owned().into()));
+				show.push(Value::Object(gr.redacted().clone().into()));
 			}
 
 			Ok(Value::Array(show.into()))
@@ -738,7 +738,7 @@ pub async fn revoke_grant(
 				// If provided, check if grant matches conditions.
 				if let Some(cond) = &stmt.cond {
 					// Redact grant before evaluating conditions.
-					let redacted_gr = Value::Object(gr.redacted().to_owned().into());
+					let redacted_gr = Value::Object(gr.redacted().clone().into());
 					if !cond
 						.compute(
 							stk,
@@ -910,7 +910,7 @@ async fn compute_purge(
 				opt.auth.id()
 			);
 
-			purged = purged + Value::Object(gr.redacted().to_owned().into());
+			purged = purged + Value::Object(gr.redacted().clone().into());
 		}
 	}
 

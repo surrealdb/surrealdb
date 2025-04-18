@@ -202,7 +202,7 @@ impl Document {
 					inp,
 				};
 				// Process a potential `references` TYPE
-				let res = field.process_refs_type().await?;
+				let res = field.process_refs_type()?;
 				if let Some(v) = res {
 					// We found a `references` TYPE
 					// No other clauses will be present, so no need to process them
@@ -324,6 +324,7 @@ enum RefAction<'a> {
 
 impl FieldEditContext<'_> {
 	/// Process any TYPE clause for the field definition
+	#[expect(clippy::unused_async)]
 	async fn process_type_clause(&self, val: Value) -> Result<Value, Error> {
 		// Check for a TYPE clause
 		if let Some(kind) = &self.def.kind {
@@ -669,7 +670,7 @@ impl FieldEditContext<'_> {
 						.collect()
 				};
 
-				RefAction::Delete(removed, self.def.name.to_owned().push(Part::All).to_string())
+				RefAction::Delete(removed, self.def.name.clone().push(Part::All).to_string())
 			// We found a new reference, let's create the link
 			} else if let Value::Thing(thing) = val {
 				RefAction::Set(thing)
@@ -729,7 +730,7 @@ impl FieldEditContext<'_> {
 		}
 	}
 	/// Process any `TYPE reference` clause for the field definition
-	async fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
+	fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
 		}

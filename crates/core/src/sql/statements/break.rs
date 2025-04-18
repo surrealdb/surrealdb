@@ -20,6 +20,7 @@ impl BreakStatement {
 		false
 	}
 	/// Process this type returning a computed simple Value
+	#[expect(clippy::unused_async)]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context,
