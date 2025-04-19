@@ -315,6 +315,7 @@ impl Datastore {
 					let (path, enable_versions) =
 						super::surrealkv::Datastore::parse_start_string(s)?;
 					let v = super::surrealkv::Datastore::new(path, enable_versions)
+						.await
 						.map(DatastoreFlavor::SurrealKV);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store at {} with versions {}", path, if enable_versions { "enabled" } else { "disabled" });
@@ -360,7 +361,7 @@ impl Datastore {
 					info!(target: TARGET, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
-					let v = super::fdb::Datastore::new(s).map(DatastoreFlavor::FoundationDB);
+					let v = super::fdb::Datastore::new(s).await.map(DatastoreFlavor::FoundationDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Connected to kvs store at {}", path);
 					Ok((v, c))
