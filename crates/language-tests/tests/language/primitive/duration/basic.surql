@@ -34,6 +34,9 @@ value = "1w"
 [[test.results]]
 value = "584942417355y3w5d7h15s999ms999µs999ns"
 
+[[test.results]]
+value = "true"
+
 */
 1ns;
 1us;
@@ -47,4 +50,6 @@ value = "584942417355y3w5d7h15s999ms999µs999ns"
 1w;
 
 /// Maximum duration
-18446744073709551615s999999999ns
+18446744073709551615s999999999ns;
+
+duration::MAX = 18446744073709551615s999999999ns;
