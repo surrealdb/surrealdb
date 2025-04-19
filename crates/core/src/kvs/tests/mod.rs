@@ -32,20 +32,20 @@ mod timestamp_to_versionstamp;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Kvs {
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	Mem,
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	Rocksdb,
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	Tikv,
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	Fdb,
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	SurrealKV,
 }
 
 // This type is unsused when no store is enabled.
-#[allow(dead_code)]
+#[expect(dead_code)]
 type ClockType = Arc<SizedClock>;
 
 trait CreateDs {

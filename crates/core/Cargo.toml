@@ -39,8 +39,18 @@ kv-rocksdb = [
     "dep:ext-sort",
     "dep:affinitypool",
 ]
-kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
-kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-tikv = [
+    "dep:tikv",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+]
+kv-fdb = [
+    "dep:foundationdb",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+]
 kv-surrealkv = [
     "dep:surrealkv",
     "tokio/time",

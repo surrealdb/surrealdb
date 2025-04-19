@@ -610,7 +610,7 @@ impl KnnResultBuilder {
 pub struct KnnResult {
 	pub(in crate::idx::trees) docs: VecDeque<(DocId, f64)>,
 	#[cfg(debug_assertions)]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub(in crate::idx::trees) visited_nodes: HashMap<NodeId, usize>,
 }
 

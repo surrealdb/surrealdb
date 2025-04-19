@@ -36,7 +36,7 @@ pub struct DefineUserStatement {
 	pub overwrite: bool,
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from)]
 impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 	fn from((base, user, pass, role): (Base, &str, &str, &str)) -> Self {
 		DefineUserStatement {

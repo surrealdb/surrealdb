@@ -256,7 +256,6 @@ pub struct GrantBearer {
 }
 
 impl GrantBearer {
-	#[allow(clippy::new_without_default)]
 	pub fn new(prefix: &str) -> Self {
 		let id = format!(
 			"{}{}",

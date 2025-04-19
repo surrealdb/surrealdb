@@ -314,8 +314,7 @@ transparent_wrapper!(
 impl_serialize_wrapper!(Value);
 
 impl Value {
-	// TODO: Check if all of theses are actually used.
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub(crate) fn core_to_array(v: Vec<CoreValue>) -> Vec<Value> {
 		unsafe {
 			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
@@ -324,7 +323,7 @@ impl Value {
 		}
 	}
 
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub(crate) fn core_to_array_ref(v: &Vec<CoreValue>) -> &Vec<Value> {
 		unsafe {
 			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
@@ -333,7 +332,7 @@ impl Value {
 		}
 	}
 
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub(crate) fn core_to_array_mut(v: &mut Vec<CoreValue>) -> &mut Vec<Value> {
 		unsafe {
 			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
@@ -342,7 +341,6 @@ impl Value {
 		}
 	}
 
-	#[allow(dead_code)]
 	pub(crate) fn array_to_core(v: Vec<Value>) -> Vec<CoreValue> {
 		unsafe {
 			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
@@ -351,7 +349,7 @@ impl Value {
 		}
 	}
 
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub(crate) fn array_to_core_ref(v: &Vec<Value>) -> &Vec<CoreValue> {
 		unsafe {
 			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
@@ -360,7 +358,7 @@ impl Value {
 		}
 	}
 
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub(crate) fn array_to_core_mut(v: &mut Vec<Value>) -> &mut Vec<CoreValue> {
 		unsafe {
 			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
@@ -452,7 +450,7 @@ pub enum Action {
 }
 
 impl Action {
-	#[allow(dead_code)] // Used by other engines except the HTTP one
+	#[allow(dead_code, reason = "Used by other engines except the HTTP one")]
 	pub(crate) fn from_core(action: CoreAction) -> Self {
 		match action {
 			CoreAction::Create => Self::Create,

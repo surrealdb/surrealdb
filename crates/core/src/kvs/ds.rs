@@ -21,7 +21,7 @@ use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
-#[allow(unused_imports)]
+#[expect(unused_imports)]
 use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
@@ -61,7 +61,6 @@ const LQ_CHANNEL_SIZE: usize = 15_000;
 const INITIAL_USER_ROLE: &str = "owner";
 
 /// The underlying datastore instance which stores the dataset.
-#[allow(dead_code)]
 #[non_exhaustive]
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
@@ -105,26 +104,23 @@ pub(super) struct TransactionFactory {
 }
 
 impl TransactionFactory {
-	#[allow(unreachable_code)]
+	#[allow(unused_variables, reason = "Some variables are unused when no backends are enabled.")]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
 		// Specify if the transaction is writeable
-		#[allow(unused_variables)]
 		let write = match write {
 			Read => false,
 			Write => true,
 		};
 		// Specify if the transaction is lockable
-		#[allow(unused_variables)]
 		let lock = match lock {
 			Pessimistic => true,
 			Optimistic => false,
 		};
 		// Create a new transaction on the datastore
-		#[allow(unused_variables)]
 		let (inner, local, reverse_scan) = match self.flavor.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
@@ -156,7 +152,7 @@ impl TransactionFactory {
 				let tx = v.transaction(write, lock).await?;
 				(super::tr::Inner::SurrealKV(tx), true, false)
 			}
-			#[allow(unreachable_patterns)]
+			#[expect(unreachable_patterns)]
 			_ => unreachable!(),
 		};
 		Ok(Transaction::new(
@@ -172,7 +168,6 @@ impl TransactionFactory {
 	}
 }
 
-#[allow(clippy::large_enum_variant)]
 pub(super) enum DatastoreFlavor {
 	#[cfg(feature = "kv-mem")]
 	Mem(super::mem::Datastore),
@@ -204,7 +199,7 @@ impl fmt::Display for Datastore {
 			DatastoreFlavor::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(_) => write!(f, "surrealkv"),
-			#[allow(unreachable_patterns)]
+			#[expect(unreachable_patterns)]
 			_ => unreachable!(),
 		}
 	}
@@ -252,7 +247,6 @@ impl Datastore {
 		Self::new_with_clock(path, None).await
 	}
 
-	#[allow(unused_variables)]
 	pub async fn new_with_clock(
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
@@ -410,7 +404,6 @@ impl Datastore {
 
 	/// Create a new datastore with the same persistent data (inner), with flushed cache.
 	/// Simulating a server restart
-	#[allow(dead_code)]
 	pub fn restart(self) -> Self {
 		Self {
 			id: self.id,
@@ -534,7 +527,6 @@ impl Datastore {
 	}
 
 	// Used for testing live queries
-	#[allow(dead_code)]
 	pub fn get_cache(&self) -> Arc<DatastoreCache> {
 		self.cache.clone()
 	}
@@ -738,7 +730,7 @@ impl Datastore {
 			DatastoreFlavor::FoundationDB(v) => v.shutdown().await,
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => v.shutdown().await,
-			#[allow(unreachable_patterns)]
+			#[expect(unreachable_patterns)]
 			_ => unreachable!(),
 		}
 	}
@@ -757,7 +749,6 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[allow(unreachable_code)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,

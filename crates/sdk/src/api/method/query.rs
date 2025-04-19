@@ -386,7 +386,7 @@ impl Response {
 	/// use surrealdb::RecordId;
 	///
 	/// #[derive(Debug, Deserialize)]
-	/// # #[allow(dead_code)]
+	/// # #[expect(dead_code)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -456,7 +456,7 @@ impl Response {
 	/// use surrealdb::Value;
 	///
 	/// #[derive(Debug, Deserialize)]
-	/// # #[allow(dead_code)]
+	/// # #[expect(dead_code)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -587,7 +587,7 @@ impl WithStats<Response> {
 	/// use surrealdb::RecordId;
 	///
 	/// #[derive(Debug, Deserialize)]
-	/// # #[allow(dead_code)]
+	/// # #[expect(dead_code)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String

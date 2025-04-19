@@ -25,7 +25,6 @@ use super::Config;
 
 /// A server address used to connect to the server
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // used by the embedded and remote connections
 pub struct Endpoint {
 	#[doc(hidden)]
 	pub url: Url,
@@ -72,7 +71,7 @@ fn replace_tilde(path: &str) -> String {
 	}
 }
 
-#[allow(dead_code)]
+
 pub(crate) fn path_to_string(protocol: &str, path: impl AsRef<std::path::Path>) -> String {
 	use path_clean::PathClean;
 	use std::path::Path;

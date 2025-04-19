@@ -1,4 +1,4 @@
-#[allow(unused_imports)] // not used when non of the storage backends are enabled.
+#[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
 use super::api::Transaction;
 use super::Key;
 use super::KeyEncode;
@@ -69,7 +69,6 @@ impl From<bool> for LockType {
 }
 
 /// A set of undoable updates and requests against a dataset.
-#[allow(dead_code)]
 #[non_exhaustive]
 pub struct Transactor {
 	pub(super) inner: Inner,
@@ -78,7 +77,6 @@ pub struct Transactor {
 	pub(super) clock: Arc<SizedClock>,
 }
 
-#[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
 	#[cfg(feature = "kv-mem")]
 	Mem(super::mem::Transaction),
@@ -110,7 +108,7 @@ impl fmt::Display for Transactor {
 			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
-			#[allow(unreachable_patterns)]
+			#[expect(unreachable_patterns)]
 			_ => unreachable!(),
 		}
 	}
@@ -131,7 +129,7 @@ macro_rules! expand_inner {
 			Inner::FoundationDB($arm) => $b,
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV($arm) => $b,
-			#[allow(unreachable_patterns)]
+			#[expect(unreachable_patterns)]
 			_ => unreachable!(),
 		}
 	};
@@ -628,7 +626,7 @@ impl Transactor {
 	// change will record the change in the changefeed if enabled.
 	// To actually persist the record changes into the underlying kvs,
 	// you must call the `complete_changes` function and then commit the transaction.
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn record_change(
 		&mut self,
 		ns: &str,
@@ -700,7 +698,7 @@ impl Transactor {
 	}
 
 	/// Removes the given namespace from the sequence.
-	#[allow(unused)]
+	#[expect(unused)]
 	pub(crate) async fn remove_ns_id(&mut self, ns: u32) -> Result<(), Error> {
 		let key = crate::key::root::ni::Ni::default().encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
@@ -712,7 +710,7 @@ impl Transactor {
 	}
 
 	/// Removes the given database from the sequence.
-	#[allow(unused)]
+	#[expect(unused)]
 	pub(crate) async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<(), Error> {
 		let key = crate::key::namespace::di::new(ns).encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
@@ -724,7 +722,7 @@ impl Transactor {
 	}
 
 	/// Removes the given table from the sequence.
-	#[allow(unused)]
+	#[expect(unused)]
 	pub(crate) async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<(), Error> {
 		let key = crate::key::database::ti::new(ns, db).encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;

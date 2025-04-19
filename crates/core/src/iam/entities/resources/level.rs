@@ -156,7 +156,7 @@ impl From<(Option<&str>, Option<&str>, Option<&str>)> for Level {
 	}
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from)]
 impl std::convert::From<Level> for EntityUid {
 	fn from(level: Level) -> Self {
 		EntityUid::from_type_name_and_id(
@@ -184,7 +184,7 @@ impl std::convert::From<&Level> for Entity {
 	}
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from)]
 impl std::convert::From<Level> for RestrictedExpression {
 	fn from(level: Level) -> Self {
 		format!("{}", EntityUid::from(level)).parse().unwrap()

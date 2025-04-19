@@ -18,7 +18,7 @@ pub async fn new_ds() -> Result<Datastore, Error> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub async fn iam_run_case(
 	prepare: &str,
 	test: &str,
@@ -103,7 +103,7 @@ pub async fn iam_run_case(
 
 type CaseIter<'a> = std::slice::Iter<'a, ((Level, Role), (&'a str, &'a str), bool)>;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub async fn iam_check_cases(
 	cases: CaseIter<'_>,
 	scenario: &HashMap<&str, &str>,
@@ -171,11 +171,11 @@ pub async fn iam_check_cases(
 	Ok(())
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub fn with_enough_stack(
 	fut: impl Future<Output = Result<(), Error>> + Send + 'static,
 ) -> Result<(), Error> {
-	#[allow(unused_mut)]
+	#[expect(unused_mut)]
 	let mut builder = Builder::new();
 
 	// Roughly how much stack is allocated for surreal server workers in release mode
@@ -201,7 +201,7 @@ pub fn with_enough_stack(
 }
 
 #[track_caller]
-#[allow(dead_code)]
+#[expect(dead_code)]
 fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<(), Error> {
 	assert!(!res.is_empty(), "At position {pos} - No more result!");
 	let r = res.remove(0).result;
@@ -214,7 +214,7 @@ fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<(), Error> {
 /// Skip the specified number of successful results from a vector of responses.
 /// This function will panic if there are not enough results in the vector or if an error occurs.
 #[track_caller]
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
 	for i in 0..skip {
 		skip_ok_pos(res, i)?;
@@ -229,7 +229,7 @@ pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
 /// - `session`: The session for the test.
 /// - `responses`: The list of responses for the test.
 /// - `pos`: The current position in the responses list.
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct Test {
 	pub ds: Datastore,
 	pub session: Session,
@@ -244,7 +244,7 @@ impl Debug for Test {
 }
 
 impl Test {
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub async fn new_ds_session(ds: Datastore, session: Session, sql: &str) -> Result<Self, Error> {
 		let responses = ds.execute(sql, &session, None).await?;
 		Ok(Self {
@@ -255,15 +255,15 @@ impl Test {
 		})
 	}
 
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub async fn new_ds(ds: Datastore, sql: &str) -> Result<Self, Error> {
 		Self::new_ds_session(ds, Session::owner().with_ns("test").with_db("test"), sql).await
 	}
 
 	/// Creates a new instance of the `Self` struct with the given SQL query.
 	/// Arguments `sql` - A string slice representing the SQL query.
-	/// Panics if an error occurs.#[allow(dead_code)]
-	#[allow(dead_code)]
+	/// Panics if an error occurs.#[expect(dead_code)]
+	#[expect(dead_code)]
 	pub async fn new(sql: &str) -> Result<Self, Error> {
 		Self::new_ds(new_ds().await?, sql).await
 	}
@@ -271,7 +271,7 @@ impl Test {
 	/// Simulates restarting the Datastore
 	/// - Data are persistent (including memory store)
 	/// - Flushing caches (jwks, IndexStore, ...)
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub async fn restart(self, sql: &str) -> Result<Self, Error> {
 		Self::new_ds(self.ds.restart(), sql).await
 	}
@@ -279,7 +279,7 @@ impl Test {
 	/// Checks if the number of responses matches the expected size.
 	/// Panics if the number of responses does not match the expected size
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_size(&mut self, expected: usize) -> Result<&mut Self, Error> {
 		assert_eq!(
 			self.responses.len(),
@@ -294,8 +294,8 @@ impl Test {
 	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
 	/// The panic message will include the last position in the responses list before it was emptied.
 	#[track_caller]
-	#[allow(dead_code)]
-	#[allow(clippy::should_implement_trait)]
+	#[expect(dead_code)]
+	#[expect(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Result<Response, Error> {
 		assert!(!self.responses.is_empty(), "No response left - last position: {}", self.pos);
 		self.pos += 1;
@@ -313,7 +313,7 @@ impl Test {
 	/// Skips a specified number of elements from the beginning of the `responses` vector
 	/// and updates the position.
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn skip_ok(&mut self, skip: usize) -> Result<&mut Self, Error> {
 		for _ in 0..skip {
 			skip_ok_pos(&mut self.responses, self.pos)?;
@@ -326,7 +326,7 @@ impl Test {
 	/// Panics if the expected value is not equal to the actual value.
 	/// Compliant with NaN and Constants.
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_value_info<I: Display>(
 		&mut self,
 		val: Value,
@@ -351,7 +351,7 @@ impl Test {
 	}
 
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_regex(&mut self, regex: &str) -> Result<&mut Self, Error> {
 		let tmp = self.next_value()?.to_string();
 		let regex = Regex::new(regex)?;
@@ -360,14 +360,14 @@ impl Test {
 	}
 
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_value(&mut self, val: Value) -> Result<&mut Self, Error> {
 		self.expect_value_info(val, "")
 	}
 
 	/// Expect values in the given slice to be present in the responses, following the same order.
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_values(&mut self, values: &[Value]) -> Result<&mut Self, Error> {
 		for value in values {
 			self.expect_value(value.clone())?;
@@ -377,13 +377,13 @@ impl Test {
 
 	/// Expect the given value to be equals to the next response.
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_val(&mut self, val: &str) -> Result<&mut Self, Error> {
 		self.expect_val_info(val, "")
 	}
 
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self, Error> {
 		self.expect_value_info(
 			value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
@@ -392,7 +392,7 @@ impl Test {
 	}
 
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	/// Expect values in the given slice to be present in the responses, following the same order.
 	pub fn expect_vals(&mut self, vals: &[&str]) -> Result<&mut Self, Error> {
 		for (i, val) in vals.iter().enumerate() {
@@ -405,7 +405,7 @@ impl Test {
 	/// This function will panic if the next result is not an error or if the error
 	/// message does not pass the check.
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_error_func<F: Fn(&Error) -> bool>(
 		&mut self,
 		check: F,
@@ -423,14 +423,14 @@ impl Test {
 	}
 
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	/// Expects the next result to be an error with the specified error message.
 	pub fn expect_error(&mut self, error: &str) -> Result<&mut Self, Error> {
 		self.expect_error_func(|e| e.to_string() == error)
 	}
 
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_errors(&mut self, errors: &[&str]) -> Result<&mut Self, Error> {
 		for error in errors {
 			self.expect_error(error)?;
@@ -450,7 +450,7 @@ impl Test {
 	/// Panics if the next value is not a number or if the difference
 	/// between the expected and actual value exceeds the precision.
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_float(&mut self, val: f64, precision: f64) -> Result<&mut Self, Error> {
 		let tmp = self.next_value()?;
 		if let Value::Number(Number::Float(n)) = tmp {
@@ -466,7 +466,7 @@ impl Test {
 	}
 
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_floats(&mut self, vals: &[f64], precision: f64) -> Result<&mut Self, Error> {
 		for val in vals {
 			self.expect_float(*val, precision)?;
@@ -476,7 +476,7 @@ impl Test {
 
 	/// Expects the next value to be bytes
 	#[track_caller]
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	pub fn expect_bytes(&mut self, val: impl Into<Vec<u8>>) -> Result<&mut Self, Error> {
 		self.expect_bytes_info(val, "")
 	}

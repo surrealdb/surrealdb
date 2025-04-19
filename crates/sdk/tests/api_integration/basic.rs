@@ -535,7 +535,7 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 
 	#[derive(Debug, Serialize, Deserialize)]
 	pub struct Record {
-		#[allow(dead_code)]
+		#[expect(dead_code)]
 		pub id: RecordId,
 	}
 

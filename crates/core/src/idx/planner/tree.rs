@@ -456,7 +456,7 @@ impl<'a> TreeBuilder<'a> {
 		}
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	fn lookup_index_options(
 		&mut self,
 		o: &Operator,

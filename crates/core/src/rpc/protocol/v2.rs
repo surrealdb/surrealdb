@@ -23,7 +23,7 @@ use crate::{
 	},
 };
 
-#[allow(async_fn_in_trait)]
+#[expect(async_fn_in_trait)]
 pub trait RpcProtocolV2: RpcContext {
 	// ------------------------------
 	// Method execution

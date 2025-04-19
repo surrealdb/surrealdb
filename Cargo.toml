@@ -361,6 +361,14 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 
 [workspace.lints.clippy]
 
+# Checks for usage of `#[allow]` attribute and suggests replacing it with `#[expect]`.
+# `#[expect]` attributes suppress the lint emission, but emit a warning if the expectation is unfulfilled.
+# This is useful to be notified when the lint is no longer triggered.
+# https://rust-lang.github.io/rust-clippy/master/#allow_attributes
+# TODO(stu): We should try to replace all of these with `#[expect]` instead. Setting to `allow` for now to avoid
+# more changes.
+allow_attributes = "allow"
+
 # Checks for code like `foo = bar.clone();`.
 # Custom `Clone::clone_from()` or `ToOwned::clone_into` implementations allow the objects to share resources and
 # therefore avoid allocations.

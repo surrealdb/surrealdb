@@ -27,7 +27,7 @@ impl Action {
 	}
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from)]
 impl std::convert::From<&Action> for EntityUid {
 	fn from(action: &Action) -> Self {
 		EntityUid::from_type_name_and_id(

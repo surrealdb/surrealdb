@@ -14,7 +14,7 @@ use reqwest::Url;
 mod init;
 pub use init::ResponseInit;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Clone, Copy)]
 #[non_exhaustive]
 pub enum ResponseType {
@@ -26,7 +26,6 @@ pub enum ResponseType {
 	OpaqueRedirect,
 }
 
-#[allow(dead_code)]
 #[derive(Trace, JsLifetime)]
 #[js::class]
 #[non_exhaustive]
@@ -201,7 +200,6 @@ impl<'js> Response<'js> {
 	}
 
 	// Returns a promise with the response body as JSON
-	#[expect(clippy::unused_async)]
 	pub async fn json(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
 		let text = self.text(ctx.clone()).await?;
 		ctx.json_parse(text)

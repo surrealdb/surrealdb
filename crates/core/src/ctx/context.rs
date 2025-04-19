@@ -452,13 +452,12 @@ impl MutableContext {
 	}
 
 	/// Get the capabilities for this context
-	#[allow(dead_code)]
 	pub(crate) fn get_capabilities(&self) -> Arc<Capabilities> {
 		self.capabilities.clone()
 	}
 
 	/// Check if scripting is allowed
-	#[allow(dead_code)]
+	#[cfg_attr(target_family = "wasm", expect(dead_code))]
 	pub(crate) fn check_allowed_scripting(&self) -> Result<(), Error> {
 		if !self.capabilities.allows_scripting() {
 			warn!("Capabilities denied scripting attempt");

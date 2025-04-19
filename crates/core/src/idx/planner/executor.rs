@@ -107,8 +107,8 @@ impl IteratorEntry {
 	}
 }
 impl InnerQueryExecutor {
-	#[allow(clippy::too_many_arguments)]
-	#[allow(clippy::mutable_key_type)]
+	#[expect(clippy::too_many_arguments)]
+	#[expect(clippy::mutable_key_type)]
 	pub(super) async fn new(
 		stk: &mut Stk,
 		ctx: &Context,
@@ -951,7 +951,7 @@ impl QueryExecutor {
 		Ok(iterators)
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) async fn matches(
 		&self,
 		stk: &mut Stk,
@@ -1195,7 +1195,7 @@ pub(super) struct HnswEntry {
 }
 
 impl HnswEntry {
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn new(
 		stk: &mut Stk,
 		ctx: &Context,

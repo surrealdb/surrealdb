@@ -101,7 +101,6 @@ pub(crate) fn default_headers() -> HeaderMap {
 	headers
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 enum Auth {
 	Basic {
@@ -154,7 +153,7 @@ struct Credentials {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 struct AuthResponse {
 	code: u16,
 	details: String,

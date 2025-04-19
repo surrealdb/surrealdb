@@ -25,7 +25,7 @@ pub type NodeId = u64;
 pub type StoreGeneration = u64;
 
 #[non_exhaustive]
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 pub enum TreeStore<N>
 where
 	N: TreeNode + Debug + Clone,

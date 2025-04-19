@@ -118,7 +118,7 @@ impl Deref for Actor {
 	}
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from)]
 impl std::convert::From<&Actor> for EntityUid {
 	fn from(actor: &Actor) -> Self {
 		EntityUid::from_type_name_and_id(

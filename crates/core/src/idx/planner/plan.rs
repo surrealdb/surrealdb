@@ -37,7 +37,6 @@ pub(super) struct PlanBuilderParameters {
 }
 
 impl PlanBuilder {
-	#[allow(clippy::mutable_key_type)]
 	#[expect(clippy::unused_async)]
 	pub(super) async fn build(
 		ctx: &StatementContext<'_>,
@@ -583,7 +582,7 @@ mod tests {
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
-	#[allow(clippy::mutable_key_type)]
+	#[expect(clippy::mutable_key_type)]
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();
