@@ -457,7 +457,7 @@ impl MutableContext {
 	}
 
 	/// Check if scripting is allowed
-	#[cfg_attr(target_family = "wasm", expect(dead_code))]
+	#[cfg_attr(not(feature = "scripting"), expect(dead_code))]
 	pub(crate) fn check_allowed_scripting(&self) -> Result<(), Error> {
 		if !self.capabilities.allows_scripting() {
 			warn!("Capabilities denied scripting attempt");

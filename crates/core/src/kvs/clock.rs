@@ -20,7 +20,7 @@ pub enum SizedClock {
 }
 
 impl SizedClock {
-	#[allow(dead_code, reason = "Not used when non of the storage backends are enabled.")]
+	#[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
 	pub(crate) fn system() -> Self {
 		Self::System(Default::default())
 	}
@@ -52,7 +52,7 @@ impl Clone for FakeClock {
 	}
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 impl FakeClock {
 	pub fn new(now: Timestamp) -> Self {
 		FakeClock {
@@ -90,7 +90,7 @@ impl Clone for IncFakeClock {
 	}
 }
 
-#[expect(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 impl IncFakeClock {
 	pub fn new(now: Timestamp, increment: Duration) -> Self {
 		IncFakeClock {
