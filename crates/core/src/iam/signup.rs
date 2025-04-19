@@ -117,9 +117,9 @@ pub async fn db_access(
 												nbf: Some(Utc::now().timestamp()),
 												exp: expiration(av.duration.token)?,
 												jti: Some(Uuid::new_v4().to_string()),
-												ns: Some(ns.to_owned()),
-												db: Some(db.to_owned()),
-												ac: Some(ac.to_owned()),
+												ns: Some(ns.clone()),
+												db: Some(db.clone()),
+												ac: Some(ac.clone()),
 												id: Some(rid.to_raw()),
 												..Claims::default()
 											};
@@ -165,10 +165,10 @@ pub async fn db_access(
 												encode(&Header::new(iss.alg.into()), &claims, &key);
 											// Set the authentication on the session
 											session.tk = Some((&claims).into());
-											session.ns = Some(ns.to_owned());
-											session.db = Some(db.to_owned());
-											session.ac = Some(ac.to_owned());
-											session.rd = Some(Value::from(rid.to_owned()));
+											session.ns = Some(ns.clone());
+											session.db = Some(db.clone());
+											session.ac = Some(ac.clone());
+											session.rd = Some(Value::from(rid.clone()));
 											session.exp = expiration(av.duration.session)?;
 											session.au = Arc::new(Auth::new(Actor::new(
 												rid.to_string(),

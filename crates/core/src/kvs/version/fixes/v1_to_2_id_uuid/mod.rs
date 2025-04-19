@@ -61,9 +61,9 @@ async fn migrate_tb_records(
 		// Get a fixed id
 		let fixed = broken.fix().unwrap();
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let val = tx.get(broken.clone().to_owned(), None).await?.unwrap();
+		let val = tx.get(broken.clone(), None).await?.unwrap();
 		// Delete the old key
-		tx.del(broken.to_owned()).await?;
+		tx.del(broken.clone()).await?;
 		// Set the fixed key
 		tx.set(fixed, val, None).await?;
 	}

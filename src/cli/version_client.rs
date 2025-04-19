@@ -1,5 +1,3 @@
-#[allow(unused_imports)]
-// This is used in format! macro
 use crate::cli::upgrade::ROOT;
 use crate::err::Error;
 use reqwest::Client;

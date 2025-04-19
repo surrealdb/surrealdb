@@ -190,7 +190,7 @@ impl DefineFieldStatement {
 						let val = DefineTableStatement {
 							cache_fields_ts: Uuid::now_v7(),
 							kind: TableType::Relation(Relation {
-								from: self.kind.to_owned(),
+								from: self.kind.clone(),
 								..relation.to_owned()
 							}),
 							..tb.as_ref().to_owned()
@@ -226,7 +226,7 @@ impl DefineFieldStatement {
 						let val = DefineTableStatement {
 							cache_fields_ts: Uuid::now_v7(),
 							kind: TableType::Relation(Relation {
-								to: self.kind.to_owned(),
+								to: self.kind.clone(),
 								..relation.to_owned()
 							}),
 							..tb.as_ref().to_owned()

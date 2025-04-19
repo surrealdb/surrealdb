@@ -86,19 +86,19 @@ impl Session {
 	}
 
 	pub(crate) fn values(&self) -> Vec<(&'static str, Value)> {
-		let access: Value = self.ac.to_owned().into();
-		let auth: Value = self.rd.to_owned().into();
-		let token: Value = self.tk.to_owned().into();
+		let access: Value = self.ac.clone().into();
+		let auth: Value = self.rd.clone().into();
+		let token: Value = self.tk.clone().into();
 		let session: Value = Value::from(map! {
-			"ac".to_string() => self.ac.to_owned().into(),
-			"exp".to_string() => self.exp.to_owned().into(),
-			"db".to_string() => self.db.to_owned().into(),
-			"id".to_string() => self.id.to_owned().into(),
-			"ip".to_string() => self.ip.to_owned().into(),
-			"ns".to_string() => self.ns.to_owned().into(),
-			"or".to_string() => self.or.to_owned().into(),
-			"rd".to_string() => self.rd.to_owned().into(),
-			"tk".to_string() => self.tk.to_owned().into(),
+			"ac".to_string() => self.ac.clone().into(),
+			"exp".to_string() => self.exp.into(),
+			"db".to_string() => self.db.clone().into(),
+			"id".to_string() => self.id.clone().into(),
+			"ip".to_string() => self.ip.clone().into(),
+			"ns".to_string() => self.ns.clone().into(),
+			"or".to_string() => self.or.clone().into(),
+			"rd".to_string() => self.rd.clone().into(),
+			"tk".to_string() => self.tk.clone().into(),
 		});
 
 		vec![("access", access), ("auth", auth), ("token", token), ("session", session)]

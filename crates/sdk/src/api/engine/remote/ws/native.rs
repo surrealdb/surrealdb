@@ -69,7 +69,8 @@ impl From<Tls> for Connector {
 pub(crate) async fn connect(
 	endpoint: &Endpoint,
 	config: Option<WebSocketConfig>,
-	#[allow(unused_variables)] maybe_connector: Option<Connector>,
+	#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_variables))]
+	maybe_connector: Option<Connector>,
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
 	let mut request = (&endpoint.url).into_client_request()?;
 

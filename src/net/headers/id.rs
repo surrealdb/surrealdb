@@ -45,7 +45,7 @@ impl From<SurrealId> for HeaderValue {
 	}
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from)]
 impl From<&SurrealId> for HeaderValue {
 	fn from(value: &SurrealId) -> Self {
 		HeaderValue::from_str(value.0.as_str()).unwrap()

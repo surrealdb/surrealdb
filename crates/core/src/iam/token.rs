@@ -147,7 +147,7 @@ impl From<Claims> for Value {
 						continue;
 					}
 				};
-				out.insert(claim.to_owned(), claim_value);
+				out.insert(claim.clone(), claim_value);
 			}
 		}
 		// Return value

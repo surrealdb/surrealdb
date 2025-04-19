@@ -64,7 +64,7 @@ fn filter_name_from_table(tb_name: impl Display) -> String {
 	format!("_filter_{tb_name}")
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn process_tbs(
 	tbs: Arc<[DefineTableStatement]>,
 	mut query: Object,
@@ -426,7 +426,7 @@ fn make_table_field_resolver(
 							Some(Kind::Either(ks)) if ks.len() != 1 => {}
 							_ => {}
 						}
-						let out = sql_value_to_gql_value(v.to_owned())
+						let out = sql_value_to_gql_value(v.clone())
 							.map_err(|_| "SQL to GQL translation failed")?;
 						Ok(Some(FieldValue::value(out)))
 					}

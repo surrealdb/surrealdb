@@ -6,7 +6,6 @@ use crate::vs::VersionStamp;
 use std::str;
 
 // gc_all_at deletes all change feed entries that become stale at the given timestamp.
-#[allow(unused)]
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
 pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
 	// Fetch all namespaces
@@ -24,7 +23,6 @@ pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
 }
 
 // gc_ns deletes all change feed entries in the given namespace that are older than the given watermark.
-#[allow(unused)]
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
 pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 	// Fetch all databases

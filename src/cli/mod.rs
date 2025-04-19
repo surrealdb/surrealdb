@@ -71,7 +71,7 @@ struct Cli {
 	online_version_check: bool,
 }
 
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Commands {
 	#[command(about = "Start the database server")]

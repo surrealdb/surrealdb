@@ -1,4 +1,4 @@
-#[allow(unused_macros)]
+#[expect(unused_macros)]
 macro_rules! assert_empty_val {
 	($tx:expr, $key:expr) => {{
 		let r = $tx.get($key).await?;
@@ -6,7 +6,7 @@ macro_rules! assert_empty_val {
 	}};
 }
 
-#[allow(unused_macros)]
+#[expect(unused_macros)]
 macro_rules! assert_empty_prefix {
 	($tx:expr, $rng:expr) => {{
 		let r = $tx.getp($rng).await?;
@@ -14,7 +14,7 @@ macro_rules! assert_empty_prefix {
 	}};
 }
 
-#[allow(unused_macros)]
+#[expect(unused_macros)]
 macro_rules! assert_empty_range {
 	($tx:expr, $rng:expr) => {{
 		let r = $tx.getr($rng).await?;

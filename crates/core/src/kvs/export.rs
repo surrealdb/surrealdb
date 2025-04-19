@@ -147,7 +147,7 @@ impl TryFrom<&Value> for TableConfig {
 				.cloned()
 				.map(|v| match v {
 					Value::Strand(str) => Ok(str.0),
-					v => Err(Error::InvalidExportConfig(v.to_owned(), "a string".into())),
+					v => Err(Error::InvalidExportConfig(v.clone(), "a string".into())),
 				})
 				.collect::<Result<Vec<String>, Error>>()
 				.map(TableConfig::Some),

@@ -376,7 +376,6 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 	}
 }
 
-#[allow(dead_code)]
 #[js::class]
 #[derive(Trace, JsLifetime)]
 #[non_exhaustive]
@@ -519,6 +518,7 @@ impl<'js> Request<'js> {
 
 	// Returns a promise with the request body as FormData
 	#[qjs(rename = "formData")]
+	#[expect(clippy::unused_async)]
 	pub async fn form_data(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
 		Err(Exception::throw_internal(&ctx, "Not yet implemented"))
 	}

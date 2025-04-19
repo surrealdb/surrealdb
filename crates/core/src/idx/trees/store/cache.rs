@@ -76,6 +76,7 @@ impl<N> TreeCaches<N>
 where
 	N: TreeNode + Debug + Clone + Display,
 {
+	#[expect(clippy::unused_async)]
 	pub(super) async fn get_cache(
 		&self,
 		generation: StoreGeneration,

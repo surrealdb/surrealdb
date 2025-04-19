@@ -148,14 +148,14 @@ impl Statement {
 			// to convert these statements into `UPSERT` statements.
 			(true, Self::Update(stm)) => &Statement::Upsert(UpsertStatement {
 				only: stm.only,
-				what: stm.what.to_owned(),
-				with: stm.with.to_owned(),
-				data: stm.data.to_owned(),
-				cond: stm.cond.to_owned(),
-				output: stm.output.to_owned(),
-				timeout: stm.timeout.to_owned(),
+				what: stm.what.clone(),
+				with: stm.with.clone(),
+				data: stm.data.clone(),
+				cond: stm.cond.clone(),
+				output: stm.output.clone(),
+				timeout: stm.timeout.clone(),
 				parallel: stm.parallel,
-				explain: stm.explain.to_owned(),
+				explain: stm.explain.clone(),
 			}),
 			(_, stm) => stm,
 		};

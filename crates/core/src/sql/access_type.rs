@@ -107,7 +107,6 @@ impl InfoStructure for AccessType {
 impl AccessType {
 	/// Returns whether or not the access method can issue non-token grants
 	/// In this context, token refers exclusively to JWT
-	#[allow(unreachable_patterns)]
 	pub fn can_issue_grants(&self) -> bool {
 		match self {
 			// The JWT access method cannot issue stateful grants.

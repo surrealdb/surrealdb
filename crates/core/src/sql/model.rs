@@ -84,7 +84,7 @@ impl Model {
 				Permission::Full => (),
 				Permission::None => {
 					return Err(ControlFlow::from(Error::FunctionPermissions {
-						name: self.name.to_owned(),
+						name: self.name.clone(),
 					}))
 				}
 				Permission::Specific(e) => {
@@ -93,7 +93,7 @@ impl Model {
 					// Process the PERMISSION clause
 					if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
 						return Err(ControlFlow::from(Error::FunctionPermissions {
-							name: self.name.to_owned(),
+							name: self.name.clone(),
 						}));
 					}
 				}

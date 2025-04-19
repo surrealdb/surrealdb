@@ -15,7 +15,6 @@ use uuid::Uuid;
 use surrealdb_core::sql::Table as CoreTable;
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) enum Command {
 	Use {
 		namespace: Option<String>,
@@ -77,11 +76,15 @@ pub(crate) enum Command {
 		variables: CoreObject,
 	},
 	ExportFile {
+		#[cfg_attr(target_family = "wasm", expect(dead_code))]
 		path: PathBuf,
+		#[cfg_attr(target_family = "wasm", expect(dead_code))]
 		config: Option<DbExportConfig>,
 	},
 	ExportMl {
+		#[cfg_attr(target_family = "wasm", expect(dead_code))]
 		path: PathBuf,
+		#[cfg_attr(target_family = "wasm", expect(dead_code))]
 		config: MlExportConfig,
 	},
 	ExportBytes {
@@ -93,9 +96,11 @@ pub(crate) enum Command {
 		config: MlExportConfig,
 	},
 	ImportFile {
+		#[cfg_attr(target_family = "wasm", expect(dead_code))]
 		path: PathBuf,
 	},
 	ImportMl {
+		#[cfg_attr(target_family = "wasm", expect(dead_code))]
 		path: PathBuf,
 	},
 	Health,
@@ -241,7 +246,7 @@ impl Command {
 				let table = match what {
 					Some(w) => {
 						let mut tmp = CoreTable::default();
-						tmp.0 = w.clone();
+						tmp.0.clone_from(&w);
 						CoreValue::from(tmp)
 					}
 					None => CoreValue::None,

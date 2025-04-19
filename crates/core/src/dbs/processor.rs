@@ -145,6 +145,7 @@ impl Collected {
 		})
 	}
 
+	#[expect(clippy::unused_async)]
 	async fn process_range_key(key: Key) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
 		let val = Value::Null;
@@ -162,6 +163,7 @@ impl Collected {
 		Ok(pro)
 	}
 
+	#[expect(clippy::unused_async)]
 	async fn process_table_key(key: Key) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
 		let rid = Thing::from((key.tb, key.id));
@@ -826,7 +828,7 @@ pub(super) trait Collector {
 				Dir::In => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -838,7 +840,7 @@ pub(super) trait Collector {
 				Dir::Out => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -850,7 +852,7 @@ pub(super) trait Collector {
 				Dir::Both => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.flat_map(|v| {
 						[
 							(

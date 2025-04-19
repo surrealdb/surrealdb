@@ -12,7 +12,7 @@ macro_rules! dispatch {
 			match $name {
 				$($function_name => {
 					let args = args::FromArgs::from_args($name, $args)?;
-					#[allow(clippy::redundant_closure_call)]
+					#[expect(clippy::redundant_closure_call)]
 					$($wrapper)*(|| $($function_path)::+($context, args))()
 				},)+
 				_ => {

@@ -85,7 +85,7 @@ impl HnswDocs {
 		let doc_key = self.ikb.new_hd_key(Some(doc_id))?;
 		if let Some(val) = tx.get(doc_key, None).await? {
 			let id: Id = revision::from_slice(&val)?;
-			Ok(Some(Thing::from((self.tb.to_owned(), id))))
+			Ok(Some(Thing::from((self.tb.clone(), id))))
 		} else {
 			Ok(None)
 		}

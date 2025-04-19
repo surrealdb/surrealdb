@@ -1,5 +1,5 @@
 use crate::api::engine::local::Db;
-#[allow(deprecated)]
+#[expect(deprecated)]
 use crate::api::engine::local::File;
 use crate::api::engine::local::RocksDb;
 use crate::api::opt::Config;
@@ -36,7 +36,7 @@ macro_rules! endpoints {
 				}
 			}
 
-			#[allow(deprecated)]
+			#[expect(deprecated)]
 			impl IntoEndpoint<File> for $name {
 				type Client = Db;
 
@@ -50,7 +50,7 @@ macro_rules! endpoints {
 				}
 			}
 
-			#[allow(deprecated)]
+			#[expect(deprecated)]
 			impl IntoEndpoint<File> for ($name, Config) {
 				type Client = Db;
 

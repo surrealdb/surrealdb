@@ -23,8 +23,6 @@ impl Parser<'_> {
 	) -> ParseResult<Thing> {
 		let thing = self.parse_thing(ctx).await?;
 
-		debug_assert!(self.last_span().is_followed_by(&self.peek_whitespace().span));
-
 		if double {
 			expected_whitespace!(self, t!("\""));
 		} else {

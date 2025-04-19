@@ -111,7 +111,7 @@ macro_rules! impl_roughly_eq_enum {
     };
 
     (@match_pattern $this:expr, $other:expr, $ty_name:ident, $config:ident, $name:ident($($field:ident),* $(,)?)) => {
-        #[allow(non_camel_case_types)]
+        #[expect(non_camel_case_types)]
         struct $name<$($field,)*> {
             $($field: $field),*
         }

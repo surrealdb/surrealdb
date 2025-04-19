@@ -206,9 +206,9 @@ pub async fn db_access(
 												nbf: Some(Utc::now().timestamp()),
 												exp: expiration(av.duration.token)?,
 												jti: Some(Uuid::new_v4().to_string()),
-												ns: Some(ns.to_owned()),
-												db: Some(db.to_owned()),
-												ac: Some(ac.to_owned()),
+												ns: Some(ns.clone()),
+												db: Some(db.clone()),
+												ac: Some(ac.clone()),
 												id: Some(rid.to_raw()),
 												..Claims::default()
 											};
@@ -257,10 +257,10 @@ pub async fn db_access(
 												encode(&Header::new(iss.alg.into()), &claims, &key);
 											// Set the authentication on the session
 											session.tk = Some((&claims).into());
-											session.ns = Some(ns.to_owned());
-											session.db = Some(db.to_owned());
-											session.ac = Some(ac.to_owned());
-											session.rd = Some(Value::from(rid.to_owned()));
+											session.ns = Some(ns.clone());
+											session.db = Some(db.clone());
+											session.ac = Some(ac.clone());
+											session.rd = Some(Value::from(rid.clone()));
 											session.exp = expiration(av.duration.session)?;
 											session.au = Arc::new(Auth::new(Actor::new(
 												rid.to_string(),
@@ -339,8 +339,8 @@ pub async fn db_user(
 				nbf: Some(Utc::now().timestamp()),
 				exp: expiration(u.duration.token)?,
 				jti: Some(Uuid::new_v4().to_string()),
-				ns: Some(ns.to_owned()),
-				db: Some(db.to_owned()),
+				ns: Some(ns.clone()),
+				db: Some(db.clone()),
 				id: Some(user),
 				..Claims::default()
 			};
@@ -350,10 +350,10 @@ pub async fn db_user(
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
 			session.tk = Some((&val).into());
-			session.ns = Some(ns.to_owned());
-			session.db = Some(db.to_owned());
+			session.ns = Some(ns.clone());
+			session.db = Some(db.clone());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).try_into()?);
+			session.au = Arc::new((&u, Level::Database(ns.clone(), db.clone())).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -424,7 +424,7 @@ pub async fn ns_user(
 				nbf: Some(Utc::now().timestamp()),
 				exp: expiration(u.duration.token)?,
 				jti: Some(Uuid::new_v4().to_string()),
-				ns: Some(ns.to_owned()),
+				ns: Some(ns.clone()),
 				id: Some(user),
 				..Claims::default()
 			};
@@ -434,9 +434,9 @@ pub async fn ns_user(
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
 			session.tk = Some((&val).into());
-			session.ns = Some(ns.to_owned());
+			session.ns = Some(ns.clone());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).try_into()?);
+			session.au = Arc::new((&u, Level::Namespace(ns.clone())).try_into()?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -614,8 +614,8 @@ pub async fn signin_bearer(
 		nbf: Some(Utc::now().timestamp()),
 		exp: expiration(av.duration.token)?,
 		jti: Some(Uuid::new_v4().to_string()),
-		ns: ns.to_owned(),
-		db: db.to_owned(),
+		ns: ns.clone(),
+		db: db.clone(),
 		ac: Some(av.name.to_string()),
 		id: match &gr.subject {
 			access::Subject::User(user) => Some(user.to_raw()),
@@ -676,8 +676,8 @@ pub async fn signin_bearer(
 	let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 	// Set the authentication on the session.
 	session.tk = Some((&claims).into());
-	session.ns = ns.to_owned();
-	session.db = db.to_owned();
+	session.ns.clone_from(&ns);
+	session.db.clone_from(&db);
 	session.ac = Some(av.name.to_string());
 	session.exp = expiration(av.duration.session)?;
 	match &gr.subject {

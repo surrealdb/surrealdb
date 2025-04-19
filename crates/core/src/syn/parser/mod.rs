@@ -198,7 +198,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Returns the next token and advance the parser one token forward.
-	#[allow(clippy::should_implement_trait)]
+	#[expect(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Token {
 		let res = loop {
 			let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
@@ -213,7 +213,6 @@ impl<'a> Parser<'a> {
 	/// Returns the next token and advance the parser one token forward.
 	///
 	/// This function is like next but returns whitespace tokens which are normally skipped
-	#[allow(clippy::should_implement_trait)]
 	pub fn next_whitespace(&mut self) -> Token {
 		let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
 		self.last_span = res.span;
@@ -403,7 +402,7 @@ pub struct StatementStream {
 }
 
 impl StatementStream {
-	#[allow(clippy::new_without_default)]
+	#[expect(clippy::new_without_default)]
 	pub fn new() -> Self {
 		Self::new_with_settings(ParserSettings::default())
 	}

@@ -146,7 +146,7 @@ impl KnnBruteForceResults {
 	pub(crate) fn get_dist(&self, pos: usize, thg: &Thing) -> Option<Number> {
 		if let Some(result) = self.0.get(thg.tb.as_str()) {
 			if let Some(things) = result.res.get(pos) {
-				return things.get(thg).cloned();
+				return things.get(thg).copied();
 			}
 		}
 		None

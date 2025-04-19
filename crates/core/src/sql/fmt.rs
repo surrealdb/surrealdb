@@ -168,7 +168,7 @@ pub(crate) struct Pretty<W: std::fmt::Write> {
 }
 
 impl<W: std::fmt::Write> Pretty<W> {
-	#[allow(unused)]
+	#[expect(unused)]
 	pub fn new(inner: W) -> Self {
 		Self::conditional(inner, true)
 	}

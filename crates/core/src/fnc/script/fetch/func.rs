@@ -19,7 +19,6 @@ use std::sync::Arc;
 use super::classes::Headers;
 
 #[js::function]
-#[allow(unused_variables)]
 pub async fn fetch<'js>(
 	ctx: Ctx<'js>,
 	input: Value<'js>,

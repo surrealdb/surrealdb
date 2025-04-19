@@ -62,7 +62,7 @@ impl From<ContentType> for HeaderValue {
 	}
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from)]
 impl From<&ContentType> for HeaderValue {
 	fn from(value: &ContentType) -> Self {
 		HeaderValue::from_str(value.to_string().as_str()).unwrap()

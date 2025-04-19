@@ -25,7 +25,7 @@ pub type NodeId = u64;
 pub type StoreGeneration = u64;
 
 #[non_exhaustive]
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 pub enum TreeStore<N>
 where
 	N: TreeNode + Debug + Clone,
@@ -40,6 +40,7 @@ impl<N> TreeStore<N>
 where
 	N: TreeNode + Debug + Display + Clone,
 {
+	#[expect(clippy::unused_async)]
 	pub async fn new(np: TreeNodeProvider, cache: Arc<TreeCache<N>>, tt: TransactionType) -> Self {
 		match tt {
 			TransactionType::Read => Self::Read(TreeRead::new(cache)),
@@ -83,6 +84,7 @@ where
 		}
 	}
 
+	#[expect(clippy::unused_async)]
 	pub(in crate::idx) async fn set_node(
 		&mut self,
 		node: StoredNode<N>,
@@ -101,6 +103,7 @@ where
 		}
 	}
 
+	#[expect(clippy::unused_async)]
 	pub(in crate::idx) async fn remove_node(
 		&mut self,
 		node_id: NodeId,

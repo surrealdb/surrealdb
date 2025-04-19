@@ -37,7 +37,6 @@ use super::opt::Resource;
 use super::opt::Table;
 
 // used in http and all local engines.
-#[allow(dead_code)]
 pub(crate) fn resource_to_values(r: Resource) -> CoreValues {
 	let mut res = CoreValues::default();
 	match r {
@@ -59,7 +58,6 @@ struct IntervalStream {
 }
 
 impl IntervalStream {
-	#[allow(unused)]
 	fn new(interval: Interval) -> Self {
 		Self {
 			inner: interval,

@@ -9,7 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 // Traits cannot have async and we need sized structs for Clone + Send + Sync
-#[allow(dead_code)]
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum SizedClock {
@@ -21,11 +20,12 @@ pub enum SizedClock {
 }
 
 impl SizedClock {
-	#[allow(dead_code)] // not used when non of the storage backends are enabled.
+	#[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
 	pub(crate) fn system() -> Self {
 		Self::System(Default::default())
 	}
 
+	#[expect(clippy::unused_async)]
 	pub async fn now(&self) -> Timestamp {
 		match self {
 			SizedClock::System(c) => c.now(),
@@ -53,7 +53,7 @@ impl Clone for FakeClock {
 	}
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 impl FakeClock {
 	pub fn new(now: Timestamp) -> Self {
 		FakeClock {
@@ -61,12 +61,14 @@ impl FakeClock {
 		}
 	}
 
+	#[expect(clippy::unused_async)]
 	pub async fn now(&self) -> Timestamp {
 		Timestamp {
 			value: self.now.load(Ordering::SeqCst),
 		}
 	}
 
+	#[expect(clippy::unused_async)]
 	pub async fn set(&self, timestamp: Timestamp) {
 		self.now.store(timestamp.value, Ordering::SeqCst);
 	}
@@ -91,7 +93,7 @@ impl Clone for IncFakeClock {
 	}
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 impl IncFakeClock {
 	pub fn new(now: Timestamp, increment: Duration) -> Self {
 		IncFakeClock {
@@ -100,6 +102,7 @@ impl IncFakeClock {
 		}
 	}
 
+	#[expect(clippy::unused_async)]
 	pub async fn now(&self) -> Timestamp {
 		self.now.fetch_add(self.increment.as_millis() as u64, Ordering::SeqCst);
 		Timestamp {

@@ -1229,7 +1229,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
-			Value::Strand(v) => v.0.to_owned(),
+			Value::Strand(v) => v.0.clone(),
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),

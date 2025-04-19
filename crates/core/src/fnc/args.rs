@@ -192,9 +192,23 @@ impl FromArgs for Vec<Array> {
 /// Some functions take a fixed number of arguments.
 /// The len must match the number of type idents that follow.
 macro_rules! impl_tuple {
+	($len:expr) => {
+		impl FromArgs for () {
+			fn from_args(_name: &str, args: Vec<Value>) -> Result<Self, Error> {
+				if args.is_empty() {
+					Ok(())
+				} else {
+					Err(Error::InvalidArguments {
+						name: String::new(),
+						message: String::from("Expected no arguments."),
+					})
+				}
+			}
+		}
+	};
 	($len:expr, $( $T:ident ),*) => {
 		impl<$($T:FromArg),*> FromArgs for ($($T,)*) {
-			#[allow(non_snake_case)]
+			#[expect(non_snake_case)]
 			fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 				let [$($T),*]: [Value; $len] = args.try_into().map_err(|_| Error::InvalidArguments {
 					name: name.to_owned(),
@@ -205,7 +219,7 @@ macro_rules! impl_tuple {
 						_ => format!("Expected {} arguments.", $len),
 					}
 				})?;
-				#[allow(unused_mut, unused_variables)]
+
 				let mut i = 0;
 				Ok((
 					$({
@@ -222,7 +236,7 @@ macro_rules! impl_tuple {
 }
 
 // It is possible to add larger sequences to support higher quantities of fixed arguments.
-impl_tuple!(0,);
+impl_tuple!(0);
 impl_tuple!(1, A);
 impl_tuple!(2, A, B);
 impl_tuple!(3, A, B, C);
