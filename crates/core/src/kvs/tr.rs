@@ -619,8 +619,8 @@ impl Transactor {
 	/// But also allows for lexicographical ordering.
 	///
 	/// Public for tests, but not required for usage from a user perspective.
-	pub fn clock(&self) -> Timestamp {
-		self.clock.now()
+	pub async fn clock(&self) -> Timestamp {
+		self.clock.now().await
 	}
 
 	// change will record the change in the changefeed if enabled.
@@ -657,9 +657,9 @@ impl Transactor {
 		} else {
 			let val = self.get(key.clone(), None).await?;
 			if let Some(val) = val {
-				U32::new(key.clone(), Some(val))?
+				U32::new(key.clone(), Some(val)).await?
 			} else {
-				U32::new(key.clone(), None)?
+				U32::new(key.clone(), None).await?
 			}
 		})
 	}

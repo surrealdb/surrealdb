@@ -259,7 +259,7 @@ impl Datastore {
 				{
 					// Innitialise the storage engine
 					info!(target: TARGET, "Starting kvs store in {}", path);
-					let v = super::mem::Datastore::new().map(DatastoreFlavor::Mem);
+					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store in {}", path);
 					Ok((v, c))
@@ -278,7 +278,7 @@ impl Datastore {
 					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
-					let v = super::rocksdb::Datastore::new(s).map(DatastoreFlavor::RocksDB);
+					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
@@ -296,7 +296,7 @@ impl Datastore {
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
-					let v = super::rocksdb::Datastore::new(s).map(DatastoreFlavor::RocksDB);
+					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store at {}", path);
 					Ok((v, c))
@@ -523,7 +523,7 @@ impl Datastore {
 
 	#[expect(clippy::unused_async)]
 	pub(super) async fn clock_now(&self) -> Timestamp {
-		self.transaction_factory.clock.now()
+		self.transaction_factory.clock.now().await
 	}
 
 	// Used for testing live queries

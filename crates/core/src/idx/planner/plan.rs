@@ -50,13 +50,13 @@ impl PlanBuilder {
 		};
 
 		if let Some(With::NoIndex) = ctx.with {
-			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp);
+			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
 		}
 
 		// Browse the AST and collect information
 		if let Some(root) = &p.root {
 			if let Err(e) = b.eval_node(root) {
-				return Self::table_iterator(ctx, Some(&e), p.gp);
+				return Self::table_iterator(ctx, Some(&e), p.gp).await;
 			}
 		}
 
@@ -126,10 +126,11 @@ impl PlanBuilder {
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
-		Self::table_iterator(ctx, None, p.gp)
+		Self::table_iterator(ctx, None, p.gp).await
 	}
 
-	fn table_iterator(
+	#[expect(clippy::unused_async)]
+	async fn table_iterator(
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
 		granted_permission: GrantedPermission,

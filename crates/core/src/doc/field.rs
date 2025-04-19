@@ -202,7 +202,7 @@ impl Document {
 					inp,
 				};
 				// Process a potential `references` TYPE
-				let res = field.process_refs_type()?;
+				let res = field.process_refs_type().await?;
 				if let Some(v) = res {
 					// We found a `references` TYPE
 					// No other clauses will be present, so no need to process them
@@ -730,7 +730,8 @@ impl FieldEditContext<'_> {
 		}
 	}
 	/// Process any `TYPE reference` clause for the field definition
-	fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
+	#[expect(clippy::unused_async)]
+	async fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
 		}

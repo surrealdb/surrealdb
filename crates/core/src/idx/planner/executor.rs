@@ -356,7 +356,7 @@ impl QueryExecutor {
 			Index::Uniq => Ok(self.new_unique_index_iterator(opt, irf, ixr, io.clone()).await?),
 			Index::Search {
 				..
-			} => self.new_search_index_iterator(irf, io.clone()),
+			} => self.new_search_index_iterator(irf, io.clone()).await,
 			Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(irf)),
 			Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(irf)),
 		}
@@ -898,7 +898,7 @@ impl QueryExecutor {
 		}
 	}
 
-	fn new_search_index_iterator(
+	async fn new_search_index_iterator(
 		&self,
 		ir: IteratorRef,
 		io: IndexOption,
@@ -907,7 +907,8 @@ impl QueryExecutor {
 			if let Matches(_, _) = io.op() {
 				if let Some(fti) = self.0.ft_map.get(io.ix_ref()) {
 					if let Some(fte) = self.0.exp_entries.get(exp) {
-						let it = MatchesThingIterator::new(ir, fti, fte.0.terms_docs.clone())?;
+						let it =
+							MatchesThingIterator::new(ir, fti, fte.0.terms_docs.clone()).await?;
 						return Ok(Some(ThingIterator::Matches(it)));
 					}
 				}

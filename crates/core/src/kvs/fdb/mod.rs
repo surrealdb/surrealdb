@@ -78,7 +78,8 @@ impl Datastore {
 	/// dependent location (defined by FoundationDB) will be used.
 	/// See https://apple.github.io/foundationdb/administration.html
 	/// for more information on cluster connection files.
-	pub(crate) fn new(path: &str) -> Result<Datastore, Error> {
+	#[expect(clippy::unused_async)]
+	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		// Initialize the FoundationDB Client API
 		static NETWORK: LazyLock<Arc<foundationdb::api::NetworkAutoStop>> =
 			LazyLock::new(|| Arc::new(unsafe { foundationdb::boot() }));

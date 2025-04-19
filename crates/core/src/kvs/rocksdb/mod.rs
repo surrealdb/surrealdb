@@ -62,7 +62,8 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) fn new(path: &str) -> Result<Datastore, Error> {
+	#[expect(clippy::unused_async)]
+	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		// Configure custom options
 		let mut opts = Options::default();
 		// Ensure we use fdatasync

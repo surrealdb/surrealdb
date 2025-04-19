@@ -97,8 +97,8 @@ impl Collected {
 	) -> Result<Processed, Error> {
 		match self {
 			Self::Edge(key) => Self::process_edge(opt, txn, key, rid_only).await,
-			Self::RangeKey(key) => Self::process_range_key(key),
-			Self::TableKey(key) => Self::process_table_key(key),
+			Self::RangeKey(key) => Self::process_range_key(key).await,
+			Self::TableKey(key) => Self::process_table_key(key).await,
 			Self::Relatable {
 				f,
 				v,
@@ -145,7 +145,8 @@ impl Collected {
 		})
 	}
 
-	fn process_range_key(key: Key) -> Result<Processed, Error> {
+	#[expect(clippy::unused_async)]
+	async fn process_range_key(key: Key) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
 		let val = Value::Null;
 		let rid = Thing::from((key.tb, key.id));
@@ -162,7 +163,8 @@ impl Collected {
 		Ok(pro)
 	}
 
-	fn process_table_key(key: Key) -> Result<Processed, Error> {
+	#[expect(clippy::unused_async)]
+	async fn process_table_key(key: Key) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record

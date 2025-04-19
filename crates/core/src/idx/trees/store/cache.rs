@@ -30,7 +30,7 @@ impl IndexTreeCaches {
 		cache_size: usize,
 	) -> Result<BTreeStore<FstKeys>, Error> {
 		let cache = self.btree_fst_caches.get_cache(generation, &keys, cache_size).await?;
-		Ok(TreeStore::new(keys, cache, tt))
+		Ok(TreeStore::new(keys, cache, tt).await)
 	}
 
 	pub(crate) fn advance_store_btree_fst(&self, new_cache: TreeCache<BTreeNode<FstKeys>>) {
@@ -45,7 +45,7 @@ impl IndexTreeCaches {
 		cache_size: usize,
 	) -> Result<BTreeStore<TrieKeys>, Error> {
 		let cache = self.btree_trie_caches.get_cache(generation, &keys, cache_size).await?;
-		Ok(TreeStore::new(keys, cache, tt))
+		Ok(TreeStore::new(keys, cache, tt).await)
 	}
 
 	pub(crate) fn advance_store_btree_trie(&self, new_cache: TreeCache<BTreeNode<TrieKeys>>) {
@@ -60,7 +60,7 @@ impl IndexTreeCaches {
 		cache_size: usize,
 	) -> Result<MTreeStore, Error> {
 		let cache = self.mtree_caches.get_cache(generation, &keys, cache_size).await?;
-		Ok(TreeStore::new(keys, cache, tt))
+		Ok(TreeStore::new(keys, cache, tt).await)
 	}
 
 	pub(crate) fn advance_store_mtree(&self, new_cache: TreeCache<MTreeNode>) {

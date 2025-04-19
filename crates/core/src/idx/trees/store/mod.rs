@@ -40,7 +40,8 @@ impl<N> TreeStore<N>
 where
 	N: TreeNode + Debug + Display + Clone,
 {
-	pub fn new(np: TreeNodeProvider, cache: Arc<TreeCache<N>>, tt: TransactionType) -> Self {
+	#[expect(clippy::unused_async)]
+	pub async fn new(np: TreeNodeProvider, cache: Arc<TreeCache<N>>, tt: TransactionType) -> Self {
 		match tt {
 			TransactionType::Read => Self::Read(TreeRead::new(cache)),
 			TransactionType::Write => Self::Write(TreeWrite::new(np, cache)),

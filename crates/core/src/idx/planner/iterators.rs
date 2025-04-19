@@ -1393,7 +1393,8 @@ pub(crate) struct MatchesThingIterator {
 }
 
 impl MatchesThingIterator {
-	pub(super) fn new(
+	#[expect(clippy::unused_async)]
+	pub(super) async fn new(
 		irf: IteratorRef,
 		fti: &FtIndex,
 		terms_docs: TermsDocs,

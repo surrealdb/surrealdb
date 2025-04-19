@@ -50,7 +50,8 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) fn new(path: &str, enable_versions: bool) -> Result<Datastore, Error> {
+	#[expect(clippy::unused_async)]
+	pub(crate) async fn new(path: &str, enable_versions: bool) -> Result<Datastore, Error> {
 		// Create new configuration options
 		let mut opts = Options::new();
 		// Configure versions
