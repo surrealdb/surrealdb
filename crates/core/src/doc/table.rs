@@ -396,9 +396,13 @@ impl Document {
 				if idiom.is_id() {
 					continue;
 				}
+
+				// Check if this field is aggregated
+				let is_aggregate = fdc.groups.iter().any(|x| x.0 == idiom);
+
 				// Process the field projection
-				match expr {
-					Value::Function(f) if f.is_rolling() => match f.name() {
+				match (is_aggregate, expr) {
+					(false, Value::Function(f)) if f.is_rolling() => match f.name() {
 						Some("count") => {
 							let val =
 								f.compute(stk, ctx, opt, Some(fdc.doc)).await.catch_return()?;
