@@ -79,7 +79,10 @@ impl ApiBody {
 		ctx: &InvocationContext,
 		invocation: &ApiInvocation,
 	) -> Result<Value, Error> {
-		#[cfg_attr(target_family = "wasm", expect(irrefutable_let_patterns, reason = "For WASM this is the only pattern."))]
+		#[cfg_attr(
+			target_family = "wasm",
+			expect(irrefutable_let_patterns, reason = "For WASM this is the only pattern.")
+		)]
 		if let ApiBody::Native(value) = self {
 			let max = ctx.request_body_max.unwrap_or(Bytesize::MAX);
 			let size = std::mem::size_of_val(&value);

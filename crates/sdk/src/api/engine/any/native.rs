@@ -32,7 +32,12 @@ use tokio_tungstenite::Connector;
 impl crate::api::Connection for Any {}
 
 impl Connection for Any {
-	#[allow(unused_variables, unreachable_code, unused_mut, reason = "These are all used depending on the enabled features.")]
+	#[allow(
+		unused_variables,
+		unreachable_code,
+		unused_mut,
+		reason = "These are all used depending on the enabled features."
+	)]
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
@@ -127,7 +132,10 @@ impl Connection for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						let headers = http::default_headers();
-						#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_mut))]
+						#[cfg_attr(
+							not(any(feature = "native-tls", feature = "rustls")),
+							expect(unused_mut)
+						)]
 						let mut builder = ClientBuilder::new().default_headers(headers);
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
 						if let Some(tls) = address.config.tls_config {

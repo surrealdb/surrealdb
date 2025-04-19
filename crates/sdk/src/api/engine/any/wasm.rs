@@ -19,7 +19,12 @@ use wasm_bindgen_futures::spawn_local;
 impl crate::api::Connection for Any {}
 
 impl Connection for Any {
-	#[allow(unused_variables, unreachable_code, unused_mut, reason = "Thse are all used depending on the enabled features.")]
+	#[allow(
+		unused_variables,
+		unreachable_code,
+		unused_mut,
+		reason = "Thse are all used depending on the enabled features."
+	)]
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {

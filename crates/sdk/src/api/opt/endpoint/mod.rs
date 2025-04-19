@@ -71,7 +71,6 @@ fn replace_tilde(path: &str) -> String {
 	}
 }
 
-
 pub(crate) fn path_to_string(protocol: &str, path: impl AsRef<std::path::Path>) -> String {
 	use path_clean::PathClean;
 	use std::path::Path;
