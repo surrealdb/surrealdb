@@ -74,6 +74,7 @@ impl Parser<'_> {
 			_ => self.parse_thing_or_table(ctx).await,
 		}
 	}
+
 	pub async fn parse_relate_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
