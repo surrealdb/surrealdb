@@ -1,10 +1,15 @@
 use super::escape::EscapeKey;
 use super::{Duration, Ident, Idiom, Number, Part, Strand};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
 	Table, Value,
 };
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -42,6 +47,7 @@ pub enum Kind {
 	Literal(Literal),
 	References(Option<Table>, Option<Idiom>),
 	File(Vec<Ident>),
+	Custom(Ident),
 }
 
 impl Default for Kind {
@@ -60,6 +66,8 @@ impl Kind {
 	pub(crate) fn is_record(&self) -> bool {
 		matches!(self, Kind::Record(_))
 	}
+
+	/// Returns true if this type is a custom type
 
 	/// Returns true if this type is optional
 	pub(crate) fn can_be_none(&self) -> bool {
@@ -152,8 +160,13 @@ impl Kind {
 	//
 	// For example: for `array<number>` or `set<number>` this returns `number`.
 	// For `array<number> | set<float>` this returns `number | float`.
-	pub(crate) fn inner_kind(&self) -> Option<Kind> {
-		let mut this = self;
+	pub(crate) async fn inner_kind(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Option<Kind>, Error> {
+		let mut this = self.clone();
 		loop {
 			match &this {
 				Kind::Any
@@ -177,19 +190,35 @@ impl Kind {
 				| Kind::Range
 				| Kind::Literal(_)
 				| Kind::References(_, _)
-				| Kind::File(_) => return None,
-				Kind::Option(x) => {
-					this = x;
+				| Kind::File(_) => return Ok(None),
+				// TODO(kearfy) this function needs to become async for custom types to work properly. Check implication before going ahead with that
+				Kind::Custom(x) => {
+					let tx = ctx.tx();
+					let (ns, db) = opt.ns_db()?;
+					let ty = tx.get_db_type(ns, db, &x).await?;
+					this = ty.kind.to_owned();
 				}
-				Kind::Array(x, _) | Kind::Set(x, _) => return Some(x.as_ref().clone()),
+				Kind::Option(x) => {
+					this = x.as_ref().to_owned();
+				}
+				Kind::Array(x, _) | Kind::Set(x, _) => return Ok(Some(x.as_ref().clone())),
 				Kind::Either(x) => {
 					// a either shouldn't be able to contain a either itself so recursing here
 					// should be fine.
-					let kinds: Vec<Kind> = x.iter().filter_map(Self::inner_kind).collect();
+					let kinds: Vec<Kind> = stk
+						.scope(|scope| {
+							try_join_all(
+								x.iter().map(|v| scope.run(|stk| v.inner_kind(stk, ctx, opt))),
+							)
+						})
+						.await?
+						.into_iter()
+						.filter_map(|option| option)
+						.collect();
 					if kinds.is_empty() {
-						return None;
+						return Ok(None);
 					}
-					return Some(Kind::Either(kinds));
+					return Ok(Some(Kind::Either(kinds)));
 				}
 			}
 		}
@@ -308,6 +337,7 @@ impl Display for Kind {
 					write!(f, "file<{}>", Fmt::verbar_separated(k))
 				}
 			}
+			Kind::Custom(u) => write!(f, "type<{}>", u),
 		}
 	}
 }

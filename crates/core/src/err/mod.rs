@@ -395,6 +395,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested type does not exist
+	#[error("The type '{name}' does not exist")]
+	TyNotFound {
+		name: String,
+	},
+
 	/// The requested analyzer does not exist
 	#[error("The analyzer '{name}' does not exist")]
 	AzNotFound {
@@ -923,6 +929,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested type already exists
+	#[error("The type '{name}' already exists")]
+	TyAlreadyExists {
+		name: String,
+	},
+
 	/// The requested analyzer already exists
 	#[error("The analyzer '{name}' already exists")]
 	AzAlreadyExists {
@@ -1335,6 +1347,18 @@ pub enum Error {
 
 	#[error("Failed to connect to bucket: {0}")]
 	BucketConnectionFailed(String),
+
+	#[error("Type '{0}' already exists")]
+	TypeExists(String),
+
+	#[error("Type '{0}' not found")]
+	TypeNotFound(String),
+
+	#[error("Expected a {expected} but found {found}")]
+	InvalidType {
+		expected: String,
+		found: String,
+	},
 }
 
 impl From<Error> for String {

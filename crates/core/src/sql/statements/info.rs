@@ -159,6 +159,7 @@ impl InfoStatement {
 						"models".to_string() => process(txn.all_db_models(ns, db).await?),
 						"params".to_string() => process(txn.all_db_params(ns, db).await?),
 						"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
+						"types".to_string() => process(txn.all_db_types(ns, db).await?),
 						"users".to_string() => process(txn.all_db_users(ns, db).await?),
 						"configs".to_string() => process(txn.all_db_configs(ns, db).await?),
 					}),
@@ -215,6 +216,13 @@ impl InfoStatement {
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb(ns, db, version).await?.iter() {
+								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"types".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_types(ns, db).await?.iter() {
 								out.insert(v.name.to_raw(), v.to_string().into());
 							}
 							out.into()

@@ -43,6 +43,8 @@ pub(crate) enum Lookup<'a> {
 	Cgs(&'a str, &'a str),
 	/// A cache key for parameters (on a database)
 	Pas(&'a str, &'a str),
+	/// A cache key for types (on a database)
+	Tys(&'a str, &'a str),
 	/// A cache key for tables
 	Tbs(&'a str, &'a str),
 	/// A cache key for events (on a table)
@@ -93,6 +95,8 @@ pub(crate) enum Lookup<'a> {
 	Cg(&'a str, &'a str, &'a str),
 	/// A cache key for a parameter (on a database)
 	Pa(&'a str, &'a str, &'a str),
+	/// A cache key for a type (on a database)
+	Ty(&'a str, &'a str, &'a str),
 	/// A cache key for a table
 	Tb(&'a str, &'a str, &'a str),
 	/// A cache key for an event (on a table)
@@ -129,6 +133,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Mls(la, lb), Key::Mls(ka, kb)) => la == ka && lb == kb,
 			(Self::Cgs(la, lb), Key::Cgs(ka, kb)) => la == ka && lb == kb,
 			(Self::Pas(la, lb), Key::Pas(ka, kb)) => la == ka && lb == kb,
+			(Self::Tys(la, lb), Key::Tys(ka, kb)) => la == ka && lb == kb,
 			(Self::Tbs(la, lb), Key::Tbs(ka, kb)) => la == ka && lb == kb,
 			(Self::Evs(la, lb, lc), Key::Evs(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Fds(la, lb, lc), Key::Fds(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
@@ -155,6 +160,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ml(la, lb, lc, ld), Key::Ml(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Cg(la, lb, lc), Key::Cg(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Pa(la, lb, lc), Key::Pa(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::Ty(la, lb, lc), Key::Ty(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Tb(la, lb, lc), Key::Tb(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Ev(la, lb, lc, ld), Key::Ev(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Fd(la, lb, lc, ld), Key::Fd(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,

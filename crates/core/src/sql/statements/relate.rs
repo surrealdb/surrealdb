@@ -55,6 +55,7 @@ impl RelateStatement {
 			}
 			None => ctx.clone(),
 		};
+
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();

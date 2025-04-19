@@ -13,6 +13,7 @@ mod model;
 mod namespace;
 mod param;
 mod table;
+mod r#type;
 mod user;
 
 pub use access::DefineAccessStatement;
@@ -28,6 +29,7 @@ pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
 pub use param::DefineParamStatement;
+pub use r#type::DefineTypeStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 
@@ -44,14 +46,14 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::sql::Value;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -86,6 +88,8 @@ pub enum DefineStatement {
 	Api(DefineApiStatement),
 	#[revision(start = 4)]
 	Bucket(DefineBucketStatement),
+	#[revision(start = 5)]
+	Type(DefineTypeStatement),
 }
 
 // Revision implementations
@@ -125,7 +129,7 @@ impl DefineStatement {
 			Self::Param(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Event(ref v) => v.compute(ctx, opt, doc).await,
-			Self::Field(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Field(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Index(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, doc).await,
 			Self::User(ref v) => v.compute(ctx, opt, doc).await,
@@ -134,6 +138,7 @@ impl DefineStatement {
 			Self::Config(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Api(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(ref v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Type(ref v) => v.compute(ctx, opt, doc).await,
 		}
 	}
 }
@@ -156,6 +161,7 @@ impl Display for DefineStatement {
 			Self::Config(v) => Display::fmt(v, f),
 			Self::Api(v) => Display::fmt(v, f),
 			Self::Bucket(v) => Display::fmt(v, f),
+			Self::Type(v) => Display::fmt(v, f),
 		}
 	}
 }

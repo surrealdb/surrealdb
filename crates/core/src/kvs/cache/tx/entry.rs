@@ -15,6 +15,7 @@ use crate::sql::statements::DefineModelStatement;
 use crate::sql::statements::DefineNamespaceStatement;
 use crate::sql::statements::DefineParamStatement;
 use crate::sql::statements::DefineTableStatement;
+use crate::sql::statements::DefineTypeStatement;
 use crate::sql::statements::DefineUserStatement;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value;
@@ -46,7 +47,7 @@ pub(crate) enum Entry {
 	Nag(Arc<[AccessGrant]>),
 	/// A slice of DefineDatabaseStatement specified on a namespace.
 	Dbs(Arc<[DefineDatabaseStatement]>),
-	/// A slice of ApiDefinition specified on a namespace.
+	/// A slice of ApiDefinition specified on a database.
 	Aps(Arc<[ApiDefinition]>),
 	/// A slice of DefineAnalyzerStatement specified on a namespace.
 	Azs(Arc<[DefineAnalyzerStatement]>),
@@ -60,6 +61,8 @@ pub(crate) enum Entry {
 	Dus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineFunctionStatement specified on a database.
 	Fcs(Arc<[DefineFunctionStatement]>),
+	/// A slice of DefineTypeStatement specified on a database.
+	Tys(Arc<[DefineTypeStatement]>),
 	/// A slice of DefineTableStatement specified on a database.
 	Tbs(Arc<[DefineTableStatement]>),
 	/// A slice of DefineModelStatement specified on a database.
@@ -241,6 +244,14 @@ impl Entry {
 		match self {
 			Entry::Cgs(v) => Ok(v),
 			_ => Err(fail!("Unable to convert type into Entry::Cgs")),
+		}
+	}
+	/// Converts this cache entry into a slice of [`DefineTypeStatement`].
+	/// This panics if called on a cache entry that is not an [`Entry::Tys`].
+	pub(crate) fn try_into_tys(self) -> Result<Arc<[DefineTypeStatement]>, Error> {
+		match self {
+			Entry::Tys(v) => Ok(v),
+			_ => Err(fail!("Unable to convert type into Entry::Tys")),
 		}
 	}
 	/// Converts this cache entry into a slice of [`DefineTableStatement`].

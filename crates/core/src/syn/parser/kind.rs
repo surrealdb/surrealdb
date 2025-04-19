@@ -185,6 +185,12 @@ impl Parser<'_> {
 					Ok(Kind::File(Vec::new()))
 				}
 			}
+			t!("TYPE") => {
+				expected!(self, t!("<"));
+				let name = self.next_token_value()?;
+				expected!(self, t!(">"));
+				Ok(Kind::Custom(name))
+			}
 			_ => unexpected!(self, next, "a kind name"),
 		}
 	}

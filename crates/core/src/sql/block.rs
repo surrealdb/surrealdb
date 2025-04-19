@@ -5,8 +5,8 @@ use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
-	AlterStatement, BreakStatement, ContinueStatement, CreateStatement, DefineStatement,
-	DeleteStatement, ForeachStatement, IfelseStatement, InsertStatement, OutputStatement,
+	AlterStatement, BreakStatement, ContinueStatement, CreateStatement, DeleteStatement,
+	DefineStatement, ForeachStatement, IfelseStatement, InsertStatement, OutputStatement,
 	RelateStatement, RemoveStatement, SelectStatement, SetStatement, ThrowStatement,
 	UpdateStatement, UpsertStatement,
 };

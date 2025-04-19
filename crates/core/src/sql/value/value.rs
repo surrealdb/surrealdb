@@ -22,6 +22,7 @@ use crate::sql::{
 use crate::sql::{Closure, ControlFlow, FlowResult, Ident};
 use chrono::{DateTime, Utc};
 
+use futures::future::try_join_all;
 use geo::Point;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -1346,7 +1347,13 @@ impl Value {
 	// -----------------------------------
 
 	/// Try to coerce this value to the specified `Kind`
-	pub(crate) fn coerce_to(self, kind: &Kind) -> Result<Value, Error> {
+	pub(crate) async fn coerce_to(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		kind: &Kind,
+	) -> Result<Value, Error> {
 		// Attempt to convert to the desired type
 		let res = match kind {
 			Kind::Any => Ok(self),
@@ -1365,14 +1372,17 @@ impl Value {
 			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
 			Kind::Regex => self.coerce_to_regex().map(Value::from),
 			Kind::Range => self.coerce_to_range().map(Value::from),
+			Kind::Custom(_) => Ok(self),
 			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
-				Some(l) => self.coerce_to_set_type_len(t, l).map(Value::from),
-				None => self.coerce_to_set_type(t).map(Value::from),
+				Some(l) => self.coerce_to_set_type_len(stk, ctx, opt, t, l).await.map(Value::from),
+				None => self.coerce_to_set_type(stk, ctx, opt, t).await.map(Value::from),
 			},
 			Kind::Array(t, l) => match l {
-				Some(l) => self.coerce_to_array_type_len(t, l).map(Value::from),
-				None => self.coerce_to_array_type(t).map(Value::from),
+				Some(l) => {
+					self.coerce_to_array_type_len(stk, ctx, opt, t, l).await.map(Value::from)
+				}
+				None => self.coerce_to_array_type(stk, ctx, opt, t).await.map(Value::from),
 			},
 			Kind::Record(t) => match t.is_empty() {
 				true => self.coerce_to_record().map(Value::from),
@@ -1384,12 +1394,12 @@ impl Value {
 			},
 			Kind::Option(k) => match self {
 				Self::None => Ok(Self::None),
-				v => v.coerce_to(k),
+				v => v.coerce_to(stk, ctx, opt, k).await,
 			},
 			Kind::Either(k) => {
 				let mut val = self;
 				for k in k {
-					match val.coerce_to(k) {
+					match val.coerce_to(stk, ctx, opt, k).await {
 						Err(Error::CoerceTo {
 							from,
 							..
@@ -1884,91 +1894,121 @@ impl Value {
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type
-	pub(crate) fn coerce_to_array_type(self, kind: &Kind) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("array<{kind}>"),
-				},
-				e => e,
-			})
+	pub(crate) async fn coerce_to_array_type(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		kind: &Kind,
+	) -> Result<Array, Error> {
+		let arr = self.coerce_to_array()?;
+		stk.scope(|scope| {
+			try_join_all(arr.into_iter().map(|v| scope.run(|stk| v.coerce_to(stk, ctx, opt, kind))))
+		})
+		.await
+		.map(Array)
+		.map_err(|e| match e {
+			Error::CoerceTo {
+				from,
+				..
+			} => Error::CoerceTo {
+				from,
+				into: format!("array<{kind}>"),
+			},
+			e => e,
+		})
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type, and length
-	pub(crate) fn coerce_to_array_type_len(self, kind: &Kind, len: &u64) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("array<{kind}, {len}>"),
-				},
-				e => e,
-			})
-			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("array<{kind}, {len}>"),
-					size: v,
-				}),
-				_ => Ok(v),
-			})
+	pub(crate) async fn coerce_to_array_type_len(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		kind: &Kind,
+		len: &u64,
+	) -> Result<Array, Error> {
+		let arr = self.coerce_to_array()?;
+		stk.scope(|scope| {
+			try_join_all(arr.into_iter().map(|v| scope.run(|stk| v.coerce_to(stk, ctx, opt, kind))))
+		})
+		.await
+		.map_err(|e| match e {
+			Error::CoerceTo {
+				from,
+				..
+			} => Error::CoerceTo {
+				from,
+				into: format!("array<{kind}, {len}>"),
+			},
+			e => e,
+		})
+		.and_then(|v| match v.len() {
+			v if v > *len as usize => Err(Error::LengthInvalid {
+				kind: format!("array<{kind}, {len}>"),
+				size: v,
+			}),
+			_ => Ok(Array(v)),
+		})
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type, unique values
-	pub(crate) fn coerce_to_set_type(self, kind: &Kind) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.uniq()
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("set<{kind}>"),
-				},
-				e => e,
-			})
+	pub(crate) async fn coerce_to_set_type(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		kind: &Kind,
+	) -> Result<Array, Error> {
+		let arr = self.coerce_to_array()?.uniq();
+		stk.scope(|scope| {
+			try_join_all(arr.into_iter().map(|v| scope.run(|stk| v.coerce_to(stk, ctx, opt, kind))))
+		})
+		.await
+		.map(Array)
+		.map_err(|e| match e {
+			Error::CoerceTo {
+				from,
+				..
+			} => Error::CoerceTo {
+				from,
+				into: format!("set<{kind}>"),
+			},
+			e => e,
+		})
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type, unique values, and length
-	pub(crate) fn coerce_to_set_type_len(self, kind: &Kind, len: &u64) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.uniq()
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("set<{kind}, {len}>"),
-				},
-				e => e,
-			})
-			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("set<{kind}, {len}>"),
-					size: v,
-				}),
-				_ => Ok(v),
-			})
+	pub(crate) async fn coerce_to_set_type_len(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		kind: &Kind,
+		len: &u64,
+	) -> Result<Array, Error> {
+		let arr = self.coerce_to_array()?.uniq();
+		stk.scope(|scope| {
+			try_join_all(arr.into_iter().map(|v| scope.run(|stk| v.coerce_to(stk, ctx, opt, kind))))
+		})
+		.await
+		.map_err(|e| match e {
+			Error::CoerceTo {
+				from,
+				..
+			} => Error::CoerceTo {
+				from,
+				into: format!("set<{kind}, {len}>"),
+			},
+			e => e,
+		})
+		.and_then(|v| match v.len() {
+			v if v > *len as usize => Err(Error::LengthInvalid {
+				kind: format!("set<{kind}, {len}>"),
+				size: v,
+			}),
+			_ => Ok(Array(v)),
+		})
 	}
 
 	// -----------------------------------
@@ -1995,6 +2035,7 @@ impl Value {
 			Kind::Uuid => self.convert_to_uuid().map(Value::from),
 			Kind::Regex => self.convert_to_regex().map(Value::from),
 			Kind::Range => self.convert_to_range().map(Value::from),
+			Kind::Custom(_) => Ok(self),
 			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
 			Kind::Set(t, l) => match l {
 				Some(l) => self.convert_to_set_type_len(t, l).map(Value::from),

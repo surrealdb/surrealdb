@@ -23,14 +23,14 @@ use crate::{
 			ContinueStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
 			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
-			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-			OptionStatement, OutputStatement, RelateStatement, RemoveAccessStatement,
-			RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
-			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
-			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
-			UpsertStatement, UseStatement,
+			DefineParamStatement, DefineStatement, DefineTableStatement, DefineTypeStatement,
+			DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
+			KillStatement, OptionStatement, OutputStatement, RelateStatement,
+			RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement,
+			RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
+			RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
+			RemoveTableStatement, RemoveUserStatement, SelectStatement, SetStatement,
+			ThrowStatement, UpdateStatement, UpsertStatement, UseStatement,
 		},
 		tokenizer::Tokenizer,
 		user::UserDuration,
@@ -223,7 +223,7 @@ fn parse_define_function() {
 			if_not_exists: false,
 			overwrite: false,
 			returns: None,
-		}))
+		})),
 	)
 }
 
@@ -1929,6 +1929,32 @@ fn parse_define_field() {
 		)
 	}
 
+	// Custom type
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE FIELD email ON TABLE user TYPE email_type"#).unwrap();
+
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Field(DefineFieldStatement {
+				name: Idiom(vec![Part::Field(Ident("email".to_owned()))]),
+				what: Ident("user".to_owned()),
+				flex: false,
+				kind: Some(Kind::Custom(Ident("email_type".to_owned()))),
+				readonly: false,
+				value: None,
+				assert: None,
+				default: None,
+				permissions: Permissions::default(),
+				comment: None,
+				if_not_exists: false,
+				overwrite: false,
+				reference: None,
+				default_always: false,
+			}))
+		)
+	}
+
 	// Invalid DELETE permission
 	{
 		// TODO(gguillemas): Providing the DELETE permission should return a parse error in 3.0.0.
@@ -2114,6 +2140,51 @@ fn parse_define_analyzer() {
 			overwrite: false,
 		})),
 	)
+}
+
+#[test]
+fn parse_define_type() {
+	let res =
+		test_parse!(parse_stmt, "DEFINE TYPE example AS 'tall' | 'short' COMMENT 'Height type'")
+			.unwrap();
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Type(DefineTypeStatement {
+			id: None,
+			name: Ident("example".to_string()),
+			kind: Kind::Set(Box::new(Kind::String), None),
+			comment: Some(Strand("Height type".to_string())),
+			if_not_exists: false,
+			overwrite: false,
+		}))
+	);
+
+	let res =
+		test_parse!(parse_stmt, "DEFINE TYPE IF NOT EXISTS example AS 'tall' | 'short'").unwrap();
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Type(DefineTypeStatement {
+			id: None,
+			name: Ident("example".to_string()),
+			kind: Kind::Set(Box::new(Kind::String), None),
+			comment: None,
+			if_not_exists: true,
+			overwrite: false,
+		}))
+	);
+
+	let res = test_parse!(parse_stmt, "DEFINE TYPE OVERWRITE example AS 'tall' | 'short'").unwrap();
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Type(DefineTypeStatement {
+			id: None,
+			name: Ident("example".to_string()),
+			kind: Kind::Set(Box::new(Kind::String), None),
+			comment: None,
+			if_not_exists: false,
+			overwrite: true,
+		}))
+	);
 }
 
 #[test]

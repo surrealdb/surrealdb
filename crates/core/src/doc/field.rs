@@ -324,7 +324,7 @@ enum RefAction<'a> {
 
 impl FieldEditContext<'_> {
 	/// Process any TYPE clause for the field definition
-	async fn process_type_clause(&self, val: Value) -> Result<Value, Error> {
+	async fn process_type_clause(&mut self, val: Value) -> Result<Value, Error> {
 		// Check for a TYPE clause
 		if let Some(kind) = &self.def.kind {
 			// Check if this is the `id` field
@@ -336,19 +336,21 @@ impl FieldEditContext<'_> {
 						// Get the value of the ID only
 						let inner = Value::from(id.id.clone());
 						// Check the type of the ID part
-						inner.coerce_to(kind).map_err(|e| match e {
-							// There was a conversion error
-							Error::CoerceTo {
-								from,
-								..
-							} => Error::FieldCheck {
-								thing: self.rid.to_string(),
-								field: self.def.name.clone(),
-								check: kind.to_string(),
-								value: from.to_string(),
-							},
-							// There was a different error
-							e => e,
+						inner.coerce_to(self.stk, self.ctx, self.opt, kind).await.map_err(|e| {
+							match e {
+								// There was a conversion error
+								Error::CoerceTo {
+									from,
+									..
+								} => Error::FieldCheck {
+									thing: self.rid.to_string(),
+									field: self.def.name.clone(),
+									check: kind.to_string(),
+									value: from.to_string(),
+								},
+								// There was a different error
+								e => e,
+							}
 						})?;
 					}
 				}
@@ -366,19 +368,21 @@ impl FieldEditContext<'_> {
 			// This is not the `id` field
 			else {
 				// Check the type of the field value
-				let val = val.coerce_to(kind).map_err(|e| match e {
-					// There was a conversion error
-					Error::CoerceTo {
-						from,
-						..
-					} => Error::FieldCheck {
-						thing: self.rid.to_string(),
-						field: self.def.name.clone(),
-						check: kind.to_string(),
-						value: from.to_string(),
-					},
-					// There was a different error
-					e => e,
+				let val = val.coerce_to(self.stk, self.ctx, self.opt, kind).await.map_err(|e| {
+					match e {
+						// There was a conversion error
+						Error::CoerceTo {
+							from,
+							..
+						} => Error::FieldCheck {
+							thing: self.rid.to_string(),
+							field: self.def.name.clone(),
+							check: kind.to_string(),
+							value: from.to_string(),
+						},
+						// There was a different error
+						e => e,
+					}
 				})?;
 				// Return the modified value
 				return Ok(val);
