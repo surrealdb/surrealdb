@@ -84,6 +84,12 @@ impl From<Uuid> for Id {
 	}
 }
 
+impl From<uuid::Uuid> for Id {
+	fn from(v: uuid::Uuid) -> Self {
+		Self::Uuid(v.into())
+	}
+}
+
 impl From<Strand> for Id {
 	fn from(v: Strand) -> Self {
 		Self::String(v.as_string())
