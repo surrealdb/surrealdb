@@ -108,7 +108,7 @@ impl fmt::Display for Transactor {
 			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
-			#[expect(unreachable_patterns)]
+			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
 	}
@@ -129,7 +129,7 @@ macro_rules! expand_inner {
 			Inner::FoundationDB($arm) => $b,
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV($arm) => $b,
-			#[expect(unreachable_patterns)]
+			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
 	};

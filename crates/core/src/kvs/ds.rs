@@ -104,7 +104,12 @@ pub(super) struct TransactionFactory {
 }
 
 impl TransactionFactory {
-	#[allow(unused_variables, reason = "Some variables are unused when no backends are enabled.")]
+	#[allow(
+		unreachable_code,
+		unreachable_patterns,
+		unused_variables,
+		reason = "Some variables are unused when no backends are enabled."
+	)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
@@ -152,7 +157,6 @@ impl TransactionFactory {
 				let tx = v.transaction(write, lock).await?;
 				(super::tr::Inner::SurrealKV(tx), true, false)
 			}
-			#[expect(unreachable_patterns)]
 			_ => unreachable!(),
 		};
 		Ok(Transaction::new(
@@ -199,7 +203,7 @@ impl fmt::Display for Datastore {
 			DatastoreFlavor::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(_) => write!(f, "surrealkv"),
-			#[expect(unreachable_patterns)]
+			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
 	}
@@ -247,6 +251,7 @@ impl Datastore {
 		Self::new_with_clock(path, None).await
 	}
 
+	#[allow(unused_variables)]
 	pub async fn new_with_clock(
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
@@ -730,7 +735,7 @@ impl Datastore {
 			DatastoreFlavor::FoundationDB(v) => v.shutdown().await,
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => v.shutdown().await,
-			#[expect(unreachable_patterns)]
+			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
 	}

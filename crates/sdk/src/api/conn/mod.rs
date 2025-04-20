@@ -23,14 +23,18 @@ pub(crate) use cmd::RouterRequest;
 use super::opt::Config;
 
 #[derive(Debug)]
+#[allow(dead_code, reason = "Used by the embedded and remote connections.")]
 pub struct RequestData {
 	pub(crate) id: i64,
 	pub(crate) command: Command,
 }
 
 #[derive(Debug)]
+#[allow(dead_code, reason = "Used by the embedded and remote connections.")]
 pub(crate) struct Route {
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) request: RequestData,
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) response: Sender<Result<DbResponse>>,
 }
 
