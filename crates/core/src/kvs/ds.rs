@@ -522,7 +522,6 @@ impl Datastore {
 		&self.jwks_cache
 	}
 
-	#[expect(clippy::unused_async)]
 	pub(super) async fn clock_now(&self) -> Timestamp {
 		self.transaction_factory.clock.now().await
 	}

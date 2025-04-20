@@ -37,7 +37,6 @@ pub(super) struct PlanBuilderParameters {
 }
 
 impl PlanBuilder {
-	#[expect(clippy::unused_async)]
 	pub(super) async fn build(
 		ctx: &StatementContext<'_>,
 		p: PlanBuilderParameters,
