@@ -433,6 +433,21 @@ run_task = { name = [
     "test-api-integration",
 ], fork = true, parallel = false }
 
+[tasks.ci-api-integration-all]
+category = "CI - INTEGRATION TESTS"
+description = "Run all integration tests"
+dependencies = [
+    "ci-api-integration-mem",
+    "ci-api-integration-file",
+    "ci-api-integration-rocksdb",
+    "ci-api-integration-surrealkv",
+    "ci-api-integration-tikv",
+    "ci-api-integration-fdb-7_1",
+    "ci-api-integration-fdb-7_3",
+    "ci-api-integration-http",
+    "ci-api-integration-ws",
+]
+
 #
 # Services
 #

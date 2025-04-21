@@ -185,8 +185,9 @@ pub enum DbResponse {
 
 #[derive(Debug, Clone)]
 pub(crate) struct MlExportConfig {
-	// fields are used in http and local non-wasm with ml features
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) name: String,
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) version: String,
 }
 
