@@ -2381,7 +2381,6 @@ async fn function_time_from_unix() -> Result<(), Error> {
 
 #[tokio::test]
 async fn function_time_from_unix_limit_and_beyond() -> Result<(), Error> {
-
 	test_queries(
 		r#"
 		RETURN <string>time::from::unix(-8334601228800);
