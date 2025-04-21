@@ -2381,29 +2381,27 @@ async fn function_time_from_unix() -> Result<(), Error> {
 
 #[tokio::test]
 async fn function_time_from_unix_limit_and_beyond() -> Result<(), Error> {
-	let sql = r#"
+
+	test_queries(
+		r#"
 		RETURN <string>time::from::unix(-8334601228800);
-		RETURN time::from::unix(-8334601228801);
 		RETURN <string>time::from::unix(8210266876799);
+		"#,
+		&["-262143-01-01T00:00:00Z", "+262142-12-31T23:59:59Z"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r#"
+		RETURN time::from::unix(-8334601228801);
 		RETURN time::from::unix(8210266876800);
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("-262143-01-01T00:00:00Z");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("Incorrect arguments for function time::from::unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("+262142-12-31T23:59:59Z");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::from("Incorrect arguments for function time::from::unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.");
-	assert_eq!(tmp, val);
+	"#,
+		&[
+			"Incorrect arguments for function time::from::unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+			"Incorrect arguments for function time::from::unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."
+		],
+	).await?;
+
 	Ok(())
 }
 
