@@ -14,6 +14,7 @@ use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
+use crate::mdl::namespace::Namespace;
 use crate::sql::statements::define::ApiDefinition;
 use crate::sql::statements::define::BucketDefinition;
 use crate::sql::statements::define::DefineConfigStatement;
@@ -26,7 +27,6 @@ use crate::sql::statements::DefineFieldStatement;
 use crate::sql::statements::DefineFunctionStatement;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::statements::DefineModelStatement;
-use crate::sql::statements::DefineNamespaceStatement;
 use crate::sql::statements::DefineParamStatement;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::DefineUserStatement;
@@ -537,7 +537,7 @@ impl Transaction {
 
 	/// Retrieve all namespace definitions in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_ns(&self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
+	pub async fn all_ns(&self) -> Result<Arc<[Namespace]>, Error> {
 		let qey = cache::tx::Lookup::Nss;
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nss(),
@@ -1074,7 +1074,7 @@ impl Transaction {
 
 	/// Retrieve a specific namespace definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_ns(&self, ns: &str) -> Result<Arc<DefineNamespaceStatement>, Error> {
+	pub async fn get_ns(&self, ns: &str) -> Result<Arc<Namespace>, Error> {
 		let qey = cache::tx::Lookup::Ns(ns);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1083,7 +1083,7 @@ impl Transaction {
 				let val = self.get(key, None).await?.ok_or_else(|| Error::NsNotFound {
 					name: ns.to_owned(),
 				})?;
-				let val: DefineNamespaceStatement = revision::from_slice(&val)?;
+				let val: Namespace = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1663,11 +1663,7 @@ impl Transaction {
 
 	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_or_add_ns(
-		&self,
-		ns: &str,
-		strict: bool,
-	) -> Result<Arc<DefineNamespaceStatement>, Error> {
+	pub async fn get_or_add_ns(&self, ns: &str, strict: bool) -> Result<Arc<Namespace>, Error> {
 		self.get_or_add_ns_upwards(ns, strict, false).await
 	}
 
@@ -1782,7 +1778,7 @@ impl Transaction {
 		ns: &str,
 		strict: bool,
 		_upwards: bool,
-	) -> Result<Arc<DefineNamespaceStatement>, Error> {
+	) -> Result<Arc<Namespace>, Error> {
 		let qey = cache::tx::Lookup::Ns(ns);
 		match self.cache.get(&qey) {
 			// The entry is in the cache
@@ -1800,8 +1796,8 @@ impl Transaction {
 					Err(Error::NsNotFound {
 						..
 					}) if !strict => {
-						let val = DefineNamespaceStatement {
-							name: ns.to_owned().into(),
+						let val = Namespace {
+							name: ns.to_string(),
 							..Default::default()
 						};
 						let val = {
@@ -1813,7 +1809,7 @@ impl Transaction {
 					}
 					// Store the fetched value in the cache
 					Ok(val) => {
-						let val: DefineNamespaceStatement = revision::from_slice(&val)?;
+						let val: Namespace = revision::from_slice(&val)?;
 						let val = cache::tx::Entry::Any(Arc::new(val));
 						self.cache.insert(qey, val.clone());
 						val

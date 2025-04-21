@@ -152,12 +152,11 @@ mod tests {
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
+	use crate::mdl::namespace::Namespace;
 	use crate::sql::changefeed::ChangeFeed;
 	use crate::sql::id::Id;
 	use crate::sql::statements::show::ShowSince;
-	use crate::sql::statements::{
-		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,
-	};
+	use crate::sql::statements::{DefineDatabaseStatement, DefineTableStatement};
 	use crate::sql::thing::Thing;
 	use crate::sql::value::Value;
 	use crate::sql::Datetime;
@@ -416,8 +415,8 @@ mod tests {
 	}
 
 	async fn init(store_diff: bool) -> Datastore {
-		let dns = DefineNamespaceStatement {
-			name: crate::sql::Ident(NS.to_string()),
+		let dns = Namespace {
+			name: NS.to_string(),
 			..Default::default()
 		};
 		let ddb = DefineDatabaseStatement {

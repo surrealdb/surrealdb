@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
+use crate::mdl::namespace::Namespace;
 use crate::sql::{Base, Ident, Strand, Value};
 
 use revision::revisioned;
@@ -48,22 +48,14 @@ impl DefineNamespaceStatement {
 		}
 		// Process the statement
 		let key = crate::key::root::ns::new(&self.name);
-		txn.set(
-			key,
-			revision::to_vec(&DefineNamespaceStatement {
-				id: if self.id.is_none() {
-					Some(txn.lock().await.get_next_ns_id().await?)
-				} else {
-					None
-				},
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
+		let mut ns = Namespace::from(self);
+		ns.id = if let Some(id) = self.id {
+			Some(id.into())
+		} else {
+			Some(txn.lock().await.get_next_ns_id().await?)
+		};
+
+		txn.set(key, revision::to_vec(&ns)?, None).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good
@@ -85,14 +77,5 @@ impl Display for DefineNamespaceStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineNamespaceStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

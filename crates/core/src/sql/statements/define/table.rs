@@ -88,10 +88,11 @@ impl DefineTableStatement {
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 		let dbv = txn.get_or_add_db(ns, db, opt.strict).await?;
 		let mut dt = DefineTableStatement {
-			id: if self.id.is_none() && nsv.id.is_some() && dbv.id.is_some() {
-				Some(txn.lock().await.get_next_tb_id(nsv.id.unwrap(), dbv.id.unwrap()).await?)
-			} else {
-				None
+			id: match (self.id, nsv.id, dbv.id) {
+				(None, Some(nsv_id), Some(dbv_id)) => {
+					Some(txn.lock().await.get_next_tb_id(nsv_id, dbv_id).await?)
+				}
+				_ => None,
 			},
 			// Don't persist the `IF NOT EXISTS` clause to schema
 			if_not_exists: false,

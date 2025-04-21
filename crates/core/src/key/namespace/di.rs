@@ -2,6 +2,7 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::mdl::namespace::NamespaceId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -9,14 +10,14 @@ use serde::{Deserialize, Serialize};
 pub struct Di {
 	__: u8,
 	_a: u8,
-	pub ns: u32,
+	pub ns: NamespaceId,
 	_b: u8,
 	_c: u8,
 	_d: u8,
 }
 impl_key!(Di);
 
-pub fn new(ns: u32) -> Di {
+pub fn new(ns: NamespaceId) -> Di {
 	Di::new(ns)
 }
 
@@ -26,7 +27,7 @@ impl Categorise for Di {
 	}
 }
 impl Di {
-	pub fn new(ns: u32) -> Self {
+	pub fn new(ns: NamespaceId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'+',
@@ -46,7 +47,7 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Di::new(
-			123,
+			123.into(),
 		);
 		let enc = Di::encode(&val).unwrap();
 		assert_eq!(enc, vec![0x2f, 0x2b, 0, 0, 0, 0x7b, 0x21, 0x64, 0x69]);

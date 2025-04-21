@@ -16,6 +16,7 @@ use crate::kvs::clock::SizedClock;
 use crate::kvs::savepoint::SavePointImpl;
 use crate::kvs::stash::Stash;
 use crate::kvs::KeyDecode as _;
+use crate::mdl::namespace::NamespaceId;
 use crate::sql;
 use crate::sql::thing::Thing;
 use crate::vs::VersionStamp;
@@ -667,18 +668,18 @@ impl Transactor {
 	}
 
 	/// Gets the next namespace id
-	pub(crate) async fn get_next_ns_id(&mut self) -> Result<u32, Error> {
+	pub(crate) async fn get_next_ns_id(&mut self) -> Result<NamespaceId, Error> {
 		let key = crate::key::root::ni::Ni::default().encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
 		self.replace(k, v).await?;
-		Ok(nid)
+		Ok(nid.into())
 	}
 
 	/// Gets the next database id for the given namespace
-	pub(crate) async fn get_next_db_id(&mut self, ns: u32) -> Result<u32, Error> {
+	pub(crate) async fn get_next_db_id(&mut self, ns: NamespaceId) -> Result<u32, Error> {
 		let key = crate::key::namespace::di::new(ns).encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
@@ -689,7 +690,7 @@ impl Transactor {
 	}
 
 	/// Gets the next table id for the given namespace and database
-	pub(crate) async fn get_next_tb_id(&mut self, ns: u32, db: u32) -> Result<u32, Error> {
+	pub(crate) async fn get_next_tb_id(&mut self, ns: NamespaceId, db: u32) -> Result<u32, Error> {
 		let key = crate::key::database::ti::new(ns, db).encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
@@ -701,10 +702,10 @@ impl Transactor {
 
 	/// Removes the given namespace from the sequence.
 	#[allow(unused)]
-	pub(crate) async fn remove_ns_id(&mut self, ns: u32) -> Result<(), Error> {
+	pub(crate) async fn remove_ns_id(&mut self, ns: NamespaceId) -> Result<(), Error> {
 		let key = crate::key::root::ni::Ni::default().encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
-		seq.remove_id(ns);
+		seq.remove_id(ns.into_inner());
 		self.stash.set(key, seq.clone());
 		let (k, v) = seq.finish().unwrap();
 		self.replace(k, v).await?;
@@ -713,7 +714,7 @@ impl Transactor {
 
 	/// Removes the given database from the sequence.
 	#[allow(unused)]
-	pub(crate) async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<(), Error> {
+	pub(crate) async fn remove_db_id(&mut self, ns: NamespaceId, db: u32) -> Result<(), Error> {
 		let key = crate::key::namespace::di::new(ns).encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		seq.remove_id(db);
@@ -725,7 +726,12 @@ impl Transactor {
 
 	/// Removes the given table from the sequence.
 	#[allow(unused)]
-	pub(crate) async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<(), Error> {
+	pub(crate) async fn remove_tb_id(
+		&mut self,
+		ns: NamespaceId,
+		db: u32,
+		tb: u32,
+	) -> Result<(), Error> {
 		let key = crate::key::database::ti::new(ns, db).encode_owned()?;
 		let mut seq = self.get_idg(&key).await?;
 		seq.remove_id(tb);

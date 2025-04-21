@@ -74,8 +74,8 @@ impl InfoStatement {
 						},
 						"namespaces".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_ns().await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+							for ns in txn.all_ns().await?.iter() {
+								out.insert(ns.name.clone(), ns.definition.clone().into());
 							}
 							out.into()
 						},

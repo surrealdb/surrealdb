@@ -2,6 +2,7 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::mdl::namespace::NamespaceId;
 use serde::{Deserialize, Serialize};
 
 // Table ID generator
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct Ti {
 	__: u8,
 	_a: u8,
-	pub ns: u32,
+	pub ns: NamespaceId,
 	_b: u8,
 	pub db: u32,
 	_c: u8,
@@ -19,7 +20,7 @@ pub struct Ti {
 }
 impl_key!(Ti);
 
-pub fn new(ns: u32, db: u32) -> Ti {
+pub fn new(ns: NamespaceId, db: u32) -> Ti {
 	Ti::new(ns, db)
 }
 
@@ -30,7 +31,7 @@ impl Categorise for Ti {
 }
 
 impl Ti {
-	pub fn new(ns: u32, db: u32) -> Self {
+	pub fn new(ns: NamespaceId, db: u32) -> Self {
 		Ti {
 			__: b'/',
 			_a: b'+',
@@ -52,7 +53,7 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Ti::new(
-			123u32,
+			123u32.into(),
 			234u32,
 		);
 		let enc = Ti::encode(&val).unwrap();
