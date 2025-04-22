@@ -5,6 +5,7 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::mac::{expected_whitespace, unexpected};
+use crate::sql::operator::BindingPower;
 use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
 use crate::sql::{Function, Range};
 use crate::syn::error::bail;
@@ -13,27 +14,6 @@ use crate::syn::{
 	parser::{mac::expected, ParseResult, Parser},
 	token::{t, TokenKind},
 };
-
-/// An enum which defines how strong a operator binds it's operands.
-///
-/// If a binding power is higher the operator is more likely to directly operate on it's
-/// neighbours.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-pub enum BindingPower {
-	Base,
-	Or,
-	And,
-	Equality,
-	Relation,
-	AddSub,
-	MulDiv,
-	Power,
-	Cast,
-	Range,
-	Nullish,
-	Unary,
-	Postfix,
-}
 
 impl Parser<'_> {
 	/// Parsers a generic value.
@@ -333,6 +313,8 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		min_bp: BindingPower,
 		lhs: Value,
+		lhs_prime: bool, // if lhs was a prime expression, required for ensuring (a..b)..c does not
+		                 // fail.
 	) -> ParseResult<Value> {
 		let token = self.next();
 		let operator = match token.kind {
@@ -398,12 +380,12 @@ impl Parser<'_> {
 			t!(">") => {
 				if self.peek_whitespace().kind == t!("..") {
 					self.pop_peek();
-					return self.parse_infix_range(ctx, true, lhs).await;
+					return self.parse_infix_range(ctx, true, lhs, lhs_prime).await;
 				}
 				Operator::MoreThan
 			}
 			t!("..") => {
-				return self.parse_infix_range(ctx, false, lhs).await;
+				return self.parse_infix_range(ctx, false, lhs, lhs_prime).await;
 			}
 
 			// should be unreachable as we previously check if the token was a prefix op.
@@ -431,20 +413,23 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		exclusive: bool,
 		lhs: Value,
+		lhs_prime: bool,
 	) -> ParseResult<Value> {
 		let inclusive = self.eat_whitespace(t!("="));
 
 		let before = self.recent_span();
 		let peek = self.peek_whitespace();
-		let rhs = if inclusive {
+		let (rhs, rhs_covered) = if inclusive {
 			// ..= must be followed by an expression.
 			if peek.kind == TokenKind::WhiteSpace {
 				bail!("Unexpected whitespace, expected inclusive range to be immediately followed by a expression",
 					@peek.span => "Whitespace between a range and it's operands is dissallowed")
 			}
-			ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?
+			let rhs_covered = self.peek().kind == t!("(");
+			(ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?, rhs_covered)
 		} else if Self::kind_starts_expression(peek.kind) {
-			ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?
+			let rhs_covered = self.peek().kind == t!("(");
+			(ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?, rhs_covered)
 		} else {
 			return Ok(Value::Range(Box::new(Range {
 				beg: if exclusive {
@@ -456,7 +441,14 @@ impl Parser<'_> {
 			})));
 		};
 
-		if matches!(lhs, Value::Range(_)) {
+		if matches!(lhs, Value::Range(_)) && !lhs_prime {
+			let span = before.covers(self.recent_span());
+			// a..b..c is ambiguous, so throw an error
+			bail!("Chaining range operators has no specified associativity",
+				@span => "use parens, '()', to specify which operator must be evaluated first")
+		}
+
+		if matches!(rhs, Value::Range(_)) && !rhs_covered {
 			let span = before.covers(self.recent_span());
 			// a..b..c is ambiguous, so throw an error
 			bail!("Chaining range operators has no specified associativity",
@@ -544,10 +536,10 @@ impl Parser<'_> {
 		min_bp: BindingPower,
 	) -> ParseResult<Value> {
 		let peek = self.peek();
-		let mut lhs = if let Some(bp) = self.prefix_binding_power(peek.kind) {
-			self.parse_prefix_op(ctx, bp).await?
+		let (mut lhs, mut lhs_prime) = if let Some(bp) = self.prefix_binding_power(peek.kind) {
+			(self.parse_prefix_op(ctx, bp).await?, false)
 		} else {
-			self.parse_idiom_expression(ctx).await?
+			(self.parse_idiom_expression(ctx).await?, true)
 		};
 
 		loop {
@@ -575,7 +567,8 @@ impl Parser<'_> {
 				break;
 			}
 
-			lhs = self.parse_infix_op(ctx, bp, lhs).await?;
+			lhs = self.parse_infix_op(ctx, bp, lhs, lhs_prime).await?;
+			lhs_prime = false;
 		}
 
 		Ok(lhs)
@@ -622,7 +615,7 @@ mod test {
 	fn expression_left_closed() {
 		let sql = "(3 * 3 * 3) = 27";
 		let out = Value::parse(sql);
-		assert_eq!("(3 * 3 * 3) = 27", format!("{}", out));
+		assert_eq!("3 * 3 * 3 = 27", format!("{}", out));
 	}
 
 	#[test]
@@ -636,7 +629,7 @@ mod test {
 	fn expression_right_closed() {
 		let sql = "27 = (3 * 3 * 3)";
 		let out = Value::parse(sql);
-		assert_eq!("27 = (3 * 3 * 3)", format!("{}", out));
+		assert_eq!("27 = 3 * 3 * 3", format!("{}", out));
 	}
 
 	#[test]
@@ -650,7 +643,21 @@ mod test {
 	fn expression_both_closed() {
 		let sql = "(3 * 3 * 3) = (3 * 3 * 3)";
 		let out = Value::parse(sql);
-		assert_eq!("(3 * 3 * 3) = (3 * 3 * 3)", format!("{}", out));
+		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", format!("{}", out));
+	}
+
+	#[test]
+	fn expression_closed_required() {
+		let sql = "(3 + 3) * 3";
+		let out = Value::parse(sql);
+		assert_eq!("(3 + 3) * 3", format!("{}", out));
+	}
+
+	#[test]
+	fn range_closed_required() {
+		let sql = "(1..2)..3";
+		let out = Value::parse(sql);
+		assert_eq!("(1..2)..3", format!("{}", out));
 	}
 
 	#[test]
@@ -664,7 +671,7 @@ mod test {
 	fn expression_with_unary() {
 		let sql = "-(5) + 5";
 		let out = Value::parse(sql);
-		assert_eq!(sql, format!("{}", out));
+		assert_eq!("-5 + 5", format!("{}", out));
 	}
 
 	#[test]

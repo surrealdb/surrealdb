@@ -739,7 +739,7 @@ mod tests {
 	fn subquery_expression_statement() {
 		let sql = "(1 + 2 + 3)";
 		let out = Value::parse(sql);
-		assert_eq!("(1 + 2 + 3)", format!("{}", out))
+		assert_eq!("1 + 2 + 3", format!("{}", out))
 	}
 
 	#[test]

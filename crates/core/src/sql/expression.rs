@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
+use super::operator::BindingPower;
 use super::ControlFlow;
 use super::FlowResult;
 
@@ -205,12 +206,32 @@ impl fmt::Display for Expression {
 			Self::Unary {
 				o,
 				v,
-			} => write!(f, "{o}{v}"),
+			} => {
+				if BindingPower::for_value(v) < BindingPower::Unary {
+					write!(f, "{o}({v})")
+				} else {
+					write!(f, "{o}{v}")
+				}
+			}
 			Self::Binary {
 				l,
 				o,
 				r,
-			} => write!(f, "{l} {o} {r}"),
+			} => {
+				let op_bp = BindingPower::for_operator(o);
+				if BindingPower::for_value(l) < op_bp {
+					write!(f, "({l})")?;
+				} else {
+					write!(f, "{l}")?;
+				}
+				write!(f, " {o} ")?;
+				if BindingPower::for_value(r) < op_bp {
+					write!(f, "({r})")?;
+				} else {
+					write!(f, "{r}")?;
+				}
+				Ok(())
+			}
 		}
 	}
 }
