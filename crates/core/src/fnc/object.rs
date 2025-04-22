@@ -74,6 +74,38 @@ pub fn keys((object,): (Object,)) -> Result<Value, Error> {
 	Ok(Value::Array(Array(object.keys().map(|v| Value::Strand(Strand(v.to_owned()))).collect())))
 }
 
+pub fn remove((mut object, targets): (Object, Value)) -> Result<Value, Error> {
+	match targets {
+		Value::Strand(target) => {
+			object.remove(&target.0);
+		}
+		Value::Array(targets) => {
+			let mut remove_targets = Vec::with_capacity(targets.len());
+			for target in targets {
+				let Value::Strand(s) = target else {
+					return Err(Error::InvalidArguments {
+						name: "object::remove".to_string(),
+						message: format!(
+							"'{target}' cannot be used as a key. Please use a string instead."
+						),
+					});
+				};
+				remove_targets.push(s.0);
+			}
+			for target in remove_targets {
+				object.remove(&target);
+			}
+		}
+		other => {
+			return Err(Error::InvalidArguments {
+				name: "object::remove".to_string(),
+				message: format!("'{other}' cannot be used as a key. Please use a string instead."),
+			})
+		}
+	}
+	Ok(Value::Object(object))
+}
+
 pub fn values((object,): (Object,)) -> Result<Value, Error> {
 	Ok(Value::Array(Array(object.values().map(|v| v.to_owned()).collect())))
 }

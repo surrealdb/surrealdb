@@ -209,6 +209,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("object::keys") => PathKind::Function,
 		UniCase::ascii("object::len") => PathKind::Function,
 		UniCase::ascii("object::matches") => PathKind::Function,
+		UniCase::ascii("object::remove") => PathKind::Function,
 		UniCase::ascii("object::values") => PathKind::Function,
 		//
 		UniCase::ascii("parse::email::host") => PathKind::Function,

@@ -13,5 +13,6 @@ impl_module_def!(
 	"is_empty" => run,
 	"keys" => run,
 	"len" => run,
+	"remove" => run,
 	"values" => run
 );

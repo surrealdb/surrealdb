@@ -287,6 +287,7 @@ pub fn synchronous(
 		//
 		"object::entries" => object::entries,
 		"object::extend" => object::extend,
+		"object::remove" => object::extend,
 		"object::from_entries" => object::from_entries,
 		"object::is_empty" => object::is_empty,
 		"object::keys" => object::keys,
@@ -758,6 +759,7 @@ pub async fn idiom(
 				"is_empty" => object::is_empty,
 				"keys" => object::keys,
 				"len" => object::len,
+				"remove" => object::remove,
 				"values" => object::values,
 			)
 		}

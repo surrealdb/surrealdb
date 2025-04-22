@@ -269,6 +269,7 @@
 "object::is_empty("
 "object::keys("
 "object::len("
+"object::remove("
 "object::values("
 "parse"
 "parse::"
