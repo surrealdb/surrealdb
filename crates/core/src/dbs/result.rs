@@ -121,7 +121,6 @@ impl Results {
 		}
 	}
 
-	#[expect(clippy::unused_async)]
 	pub(super) async fn start_limit(
 		&mut self,
 		skip: Option<usize>,

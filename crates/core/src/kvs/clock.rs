@@ -25,7 +25,6 @@ impl SizedClock {
 		Self::System(Default::default())
 	}
 
-	#[expect(clippy::unused_async)]
 	pub async fn now(&self) -> Timestamp {
 		match self {
 			SizedClock::System(c) => c.now(),
@@ -61,14 +60,12 @@ impl FakeClock {
 		}
 	}
 
-	#[expect(clippy::unused_async)]
 	pub async fn now(&self) -> Timestamp {
 		Timestamp {
 			value: self.now.load(Ordering::SeqCst),
 		}
 	}
 
-	#[expect(clippy::unused_async)]
 	pub async fn set(&self, timestamp: Timestamp) {
 		self.now.store(timestamp.value, Ordering::SeqCst);
 	}
@@ -102,7 +99,6 @@ impl IncFakeClock {
 		}
 	}
 
-	#[expect(clippy::unused_async)]
 	pub async fn now(&self) -> Timestamp {
 		self.now.fetch_add(self.increment.as_millis() as u64, Ordering::SeqCst);
 		Timestamp {

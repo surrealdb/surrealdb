@@ -62,7 +62,7 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	#[expect(clippy::unused_async)]
+
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		// Configure custom options
 		let mut opts = Options::default();
@@ -238,7 +238,7 @@ impl Datastore {
 		})
 	}
 	/// Shutdown the database
-	#[expect(clippy::unused_async)]
+
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Create new flush options
 		let mut opts = FlushOptions::default();
@@ -256,7 +256,7 @@ impl Datastore {
 		Ok(())
 	}
 	/// Start a new transaction
-	#[expect(clippy::unused_async)]
+
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
@@ -793,7 +793,6 @@ impl Transaction {
 		inner.set_savepoint();
 	}
 
-	#[expect(clippy::unused_async)]
 	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();

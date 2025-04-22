@@ -822,7 +822,6 @@ impl Transactor {
 		Ok(None)
 	}
 
-	#[expect(clippy::unused_async)]
 	pub(crate) async fn new_save_point(&mut self) {
 		expand_inner!(&mut self.inner, v => { v.new_save_point() })
 	}
@@ -831,7 +830,6 @@ impl Transactor {
 		expand_inner!(&mut self.inner, v => { v.rollback_to_save_point().await })
 	}
 
-	#[expect(clippy::unused_async)]
 	pub(crate) async fn release_last_save_point(&mut self) -> Result<(), Error> {
 		expand_inner!(&mut self.inner, v => { v.release_last_save_point() })
 	}

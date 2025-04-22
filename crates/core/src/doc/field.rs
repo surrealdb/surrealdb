@@ -324,7 +324,7 @@ enum RefAction<'a> {
 
 impl FieldEditContext<'_> {
 	/// Process any TYPE clause for the field definition
-	#[expect(clippy::unused_async)]
+
 	async fn process_type_clause(&self, val: Value) -> Result<Value, Error> {
 		// Check for a TYPE clause
 		if let Some(kind) = &self.def.kind {
@@ -730,7 +730,7 @@ impl FieldEditContext<'_> {
 		}
 	}
 	/// Process any `TYPE reference` clause for the field definition
-	#[expect(clippy::unused_async)]
+
 	async fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);

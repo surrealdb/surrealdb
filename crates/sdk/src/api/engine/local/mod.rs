@@ -407,7 +407,6 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 	}
 }
 
-#[expect(clippy::unused_async)]
 async fn take(one: bool, responses: Vec<Response>) -> Result<CoreValue> {
 	if let Some((_stats, result)) = process(responses).results.swap_remove(&0) {
 		let value = result?;

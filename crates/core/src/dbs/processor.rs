@@ -145,7 +145,6 @@ impl Collected {
 		})
 	}
 
-	#[expect(clippy::unused_async)]
 	async fn process_range_key(key: Key) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
 		let val = Value::Null;
@@ -163,7 +162,6 @@ impl Collected {
 		Ok(pro)
 	}
 
-	#[expect(clippy::unused_async)]
 	async fn process_table_key(key: Key) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
 		let rid = Thing::from((key.tb, key.id));

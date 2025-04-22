@@ -128,7 +128,6 @@ impl PlanBuilder {
 		Self::table_iterator(ctx, None, p.gp).await
 	}
 
-	#[expect(clippy::unused_async)]
 	async fn table_iterator(
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,

@@ -21,7 +21,6 @@ pub struct U32 {
 }
 
 impl U32 {
-	#[expect(clippy::unused_async)]
 	pub(crate) async fn new(state_key: Key, v: Option<Val>) -> Result<Self, Error> {
 		let state: State = if let Some(val) = v {
 			State::try_from_val(val)?

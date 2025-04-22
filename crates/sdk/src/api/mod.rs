@@ -324,7 +324,6 @@ impl<C> Surreal<C>
 where
 	C: Connection,
 {
-	#[expect(clippy::unused_async)]
 	async fn check_server_version(&self, version: &Version) -> Result<()> {
 		let (versions, build_meta) = SUPPORTED_VERSIONS;
 		// invalid version requirements should be caught during development

@@ -50,7 +50,7 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	#[expect(clippy::unused_async)]
+
 	pub(crate) async fn new(path: &str, enable_versions: bool) -> Result<Datastore, Error> {
 		// Create new configuration options
 		let mut opts = Options::new();
@@ -93,7 +93,7 @@ impl Datastore {
 		}
 	}
 	/// Shutdown the database
-	#[expect(clippy::unused_async)]
+
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Shutdown the database
 		if let Err(e) = self.db.close() {
@@ -103,7 +103,7 @@ impl Datastore {
 		Ok(())
 	}
 	/// Start a new transaction
-	#[expect(clippy::unused_async)]
+
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Specify the check level
 		#[cfg(not(debug_assertions))]
@@ -624,7 +624,6 @@ impl Transaction {
 		}
 	}
 
-	#[expect(clippy::unused_async)]
 	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
 		if let Some(inner) = &mut self.inner {
 			inner.rollback_to_savepoint()?;

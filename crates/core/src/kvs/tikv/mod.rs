@@ -95,7 +95,7 @@ impl Datastore {
 		}
 	}
 	/// Shutdown the database
-	#[expect(clippy::unused_async)]
+
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Nothing to do here
 		Ok(())
