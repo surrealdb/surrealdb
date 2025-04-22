@@ -48,12 +48,8 @@ impl DefineNamespaceStatement {
 		}
 		// Process the statement
 		let key = crate::key::root::ns::new(&self.name);
-		let mut ns = Namespace::from(self);
-		ns.id = if let Some(id) = self.id {
-			Some(id.into())
-		} else {
-			Some(txn.lock().await.get_next_ns_id().await?)
-		};
+
+		let ns = Namespace::try_from_statement(&txn, self).await?;
 
 		txn.set(key, revision::to_vec(&ns)?, None).await?;
 		// Clear the cache

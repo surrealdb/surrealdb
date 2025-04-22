@@ -415,7 +415,22 @@ mod tests {
 	}
 
 	async fn init(store_diff: bool) -> Datastore {
-		let dns = Namespace::new(NS.to_string());
+		let ds = Datastore::new("memory").await.unwrap();
+
+		//
+		// Create the ns, db, and tb to let the GC and the timestamp-to-versionstamp conversion
+		// work.
+		//
+
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		// Create namespace
+		let nsid = tx.get_next_ns_id().await.unwrap();
+		let dns = Namespace::new(nsid, NS.to_string());
+
+		let ns_root = crate::key::root::ns::new(NS);
+		tx.put(&ns_root, revision::to_vec(&dns).unwrap(), None).await.unwrap();
+
+		// Create database
 		let ddb = DefineDatabaseStatement {
 			name: crate::sql::Ident(DB.to_string()),
 			changefeed: Some(ChangeFeed {
@@ -424,6 +439,11 @@ mod tests {
 			}),
 			..Default::default()
 		};
+
+		let db_root = crate::key::namespace::db::new(NS, DB);
+		tx.put(&db_root, revision::to_vec(&ddb).unwrap(), None).await.unwrap();
+
+		// Create table
 		let dtb = DefineTableStatement {
 			name: TB.into(),
 			changefeed: Some(ChangeFeed {
@@ -433,20 +453,9 @@ mod tests {
 			..Default::default()
 		};
 
-		let ds = Datastore::new("memory").await.unwrap();
-
-		//
-		// Create the ns, db, and tb to let the GC and the timestamp-to-versionstamp conversion
-		// work.
-		//
-
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let ns_root = crate::key::root::ns::new(NS);
-		tx.put(&ns_root, revision::to_vec(&dns).unwrap(), None).await.unwrap();
-		let db_root = crate::key::namespace::db::new(NS, DB);
-		tx.put(&db_root, revision::to_vec(&ddb).unwrap(), None).await.unwrap();
 		let tb_root = crate::key::database::tb::new(NS, DB, TB);
 		tx.put(&tb_root, revision::to_vec(&dtb).unwrap(), None).await.unwrap();
+
 		tx.commit().await.unwrap();
 		ds
 	}

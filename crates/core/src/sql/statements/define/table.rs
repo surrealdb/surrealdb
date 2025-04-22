@@ -88,9 +88,9 @@ impl DefineTableStatement {
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 		let dbv = txn.get_or_add_db(ns, db, opt.strict).await?;
 		let mut dt = DefineTableStatement {
-			id: match (self.id, nsv.id, dbv.id) {
-				(None, Some(nsv_id), Some(dbv_id)) => {
-					Some(txn.lock().await.get_next_tb_id(nsv_id, dbv_id).await?)
+			id: match (self.id, dbv.id) {
+				(None, Some(dbv_id)) => {
+					Some(txn.lock().await.get_next_tb_id(nsv.id, dbv_id).await?)
 				}
 				_ => None,
 			},

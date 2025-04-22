@@ -1796,20 +1796,21 @@ impl Transaction {
 					Err(Error::NsNotFound {
 						..
 					}) if !strict => {
-						let val = Namespace::new(ns.to_string());
-						let val = {
-							self.put(&key, revision::to_vec(&val)?, None).await?;
-							cache::tx::Entry::Any(Arc::new(val))
+						let nsid = self.lock().await.get_next_ns_id().await?;
+						let ns = Namespace::new(nsid, ns.to_string());
+						let cache_entry = {
+							self.put(&key, revision::to_vec(&ns)?, None).await?;
+							cache::tx::Entry::Any(Arc::new(ns))
 						};
-						self.cache.insert(qey, val.clone());
-						val
+						self.cache.insert(qey, cache_entry.clone());
+						cache_entry
 					}
 					// Store the fetched value in the cache
 					Ok(val) => {
-						let val: Namespace = revision::from_slice(&val)?;
-						let val = cache::tx::Entry::Any(Arc::new(val));
-						self.cache.insert(qey, val.clone());
-						val
+						let ns: Namespace = revision::from_slice(&val)?;
+						let cache_entry = cache::tx::Entry::Any(Arc::new(ns));
+						self.cache.insert(qey, cache_entry.clone());
+						cache_entry
 					}
 					// Throw any received errors
 					Err(err) => Err(err)?,

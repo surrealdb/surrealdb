@@ -5,6 +5,7 @@
 //! collection of databases, and is used to group related databases
 //! together.
 
+use crate::kvs::Transaction;
 use crate::sql::{
 	statements::{info::InfoStructure, DefineNamespaceStatement},
 	Value,
@@ -12,6 +13,7 @@ use crate::sql::{
 use newtype::NewType;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Namespace identifier.
 #[revisioned(revision = 1)]
@@ -29,7 +31,7 @@ pub struct NamespaceId(pub u32);
 #[non_exhaustive]
 pub struct Namespace {
 	/// Namespace identifier.
-	pub id: Option<NamespaceId>,
+	pub id: NamespaceId,
 	/// Namespace name.
 	pub name: String,
 	/// Optional comment.
@@ -40,25 +42,35 @@ pub struct Namespace {
 
 impl Namespace {
 	/// Create a new namespace.
-	pub fn new(name: String) -> Self {
+	pub fn new(id: NamespaceId, name: String) -> Self {
 		let definition = format!("DEFINE NAMESPACE {name}");
 		Self {
-			id: None,
+			id,
 			name,
 			comment: None,
 			definition,
 		}
 	}
-}
 
-impl From<&DefineNamespaceStatement> for Namespace {
-	fn from(value: &DefineNamespaceStatement) -> Self {
-		Self {
-			id: value.id.map(NamespaceId::from),
-			name: value.name.to_string(),
-			comment: value.comment.as_ref().map(|s| s.to_string()),
-			definition: value.to_string(),
-		}
+	/// Convert a [`DefineNamespaceStatement`] to a [`Namespace`].
+	pub async fn try_from_statement(
+		tx: &Arc<Transaction>,
+		statement: &DefineNamespaceStatement,
+	) -> Result<Self, crate::err::Error> {
+		let id = match statement.id {
+			Some(id) => NamespaceId::from(id),
+			None => {
+				// Generate a new ID if not provided
+				tx.lock().await.get_next_ns_id().await?
+			}
+		};
+
+		Ok(Self {
+			id: NamespaceId::from(id),
+			name: statement.name.to_string(),
+			comment: statement.comment.as_ref().map(|s| s.to_string()),
+			definition: statement.to_string(),
+		})
 	}
 }
 
