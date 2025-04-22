@@ -108,6 +108,7 @@ impl ForeachStatement {
 					Entry::Alter(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
 					Entry::Rebuild(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
 					Entry::Remove(v) => Ok(v.compute(&ctx, opt, doc).await?),
+					Entry::Info(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
 					Entry::Output(v) => {
 						return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
 					}

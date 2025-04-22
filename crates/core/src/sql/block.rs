@@ -18,6 +18,7 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
+use super::statements::InfoStatement;
 use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
@@ -120,6 +121,9 @@ impl Block {
 				Entry::Alter(v) => {
 					v.compute(stk, &ctx, opt, doc).await?;
 				}
+				Entry::Info(v) => {
+					v.compute(stk, &ctx, opt, doc).await?;
+				}
 				Entry::Value(v) => {
 					if i == self.len() - 1 {
 						// If the last entry then return the value
@@ -187,7 +191,7 @@ impl InfoStructure for Block {
 	}
 }
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -214,6 +218,8 @@ pub enum Entry {
 	Upsert(UpsertStatement),
 	#[revision(start = 4)]
 	Alter(AlterStatement),
+	#[revision(start = 5)]
+	Info(InfoStatement),
 }
 
 impl PartialOrd for Entry {
@@ -246,6 +252,7 @@ impl Entry {
 			Self::Continue(v) => v.writeable(),
 			Self::Foreach(v) => v.writeable(),
 			Self::Alter(v) => v.writeable(),
+			Self::Info(v) => v.writeable(),
 		}
 	}
 }
@@ -272,6 +279,7 @@ impl Display for Entry {
 			Self::Continue(v) => write!(f, "{v}"),
 			Self::Foreach(v) => write!(f, "{v}"),
 			Self::Alter(v) => write!(f, "{v}"),
+			Self::Info(v) => write!(f, "{v}"),
 		}
 	}
 }
