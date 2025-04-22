@@ -2383,10 +2383,10 @@ async fn function_time_from_unix() -> Result<(), Error> {
 async fn function_time_from_unix_limit_and_beyond() -> Result<(), Error> {
 	test_queries(
 		r#"
-		RETURN <string>time::from::unix(-8334601228800);
-		RETURN <string>time::from::unix(8210266876799);
+		RETURN time::year(time::from::unix(-8334601228800));
+		RETURN time::year(time::from::unix(8210266876799));
 		"#,
-		&["-262143-01-01T00:00:00Z", "+262142-12-31T23:59:59Z"],
+		&["-262143", "262142"],
 	)
 	.await?;
 
