@@ -17,7 +17,7 @@ value = "{ events: {  }, fields: { test: 'DEFINE FIELD test ON user TYPE string 
 value = "[{ id: user:a, test: 'a' }]"
 
 [[test.results]]
-error = "Found 1 for field `test`, with record `user:b`, but expected a string"
+error = "Couldn't coerce value for field `test` of `user:b`: Expected `string` but found `1`"
 
 */
 DEFINE FIELD test ON user TYPE string;
