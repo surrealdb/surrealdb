@@ -142,7 +142,7 @@ pub type Result<T> = std::result::Result<T, crate::Error>;
 // Channel for waiters
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);
 
-const SUPPORTED_VERSIONS: (&str, &str) = (">=1.2.0, <3.0.0", "20230701.55918b7c");
+const SUPPORTED_VERSIONS: (&str, &str) = (">=1.2.0, <4.0.0", "20230701.55918b7c");
 
 /// Connection trait implemented by supported engines
 pub trait Connection: conn::Connection {}
@@ -273,7 +273,11 @@ struct Inner {
 	waiter: Waiter,
 }
 
-/// A database client instance for embedded or remote databases
+/// A database client instance for embedded or remote databases.
+///
+/// See [Running SurrealDB embedded in Rust](crate#running-surrealdb-embedded-in-rust)
+/// for tips on how to optimize performance for the client when working
+/// with embedded instances.
 pub struct Surreal<C: Connection> {
 	inner: Arc<Inner>,
 	engine: PhantomData<C>,

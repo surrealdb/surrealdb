@@ -228,7 +228,7 @@ async fn router_handle_route(
 			state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {
-			..
+			token: _,
 		} => {
 			state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}

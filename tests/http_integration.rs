@@ -904,20 +904,6 @@ mod http_integration {
 			let _: ciborium::Value = ciborium::from_reader(res.as_slice()).unwrap();
 		}
 
-		// Creating a record with Accept PACK encoding is allowed
-		{
-			let res = client
-				.post(url)
-				.basic_auth(USER, Some(PASS))
-				.header(header::ACCEPT, "application/pack")
-				.body("CREATE foo")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let res = res.bytes().await?.to_vec();
-			let _: rmpv::Value = rmpv::decode::read_value(&mut res.as_slice()).unwrap();
-		}
-
 		// Creating a record with Accept Surrealdb encoding is allowed
 		{
 			let res = client

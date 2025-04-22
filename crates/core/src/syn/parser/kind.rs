@@ -175,6 +175,19 @@ impl Parser<'_> {
 			t!("NONE") => {
 				unexpected!(self, next, "a kind name.", => "to define a field that can be NONE, use option<type_name> instead.")
 			}
+			t!("FILE") => {
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let mut buckets = vec![self.next_token_value()?];
+					while self.eat(t!("|")) {
+						buckets.push(self.next_token_value()?);
+					}
+					self.expect_closing_delimiter(t!(">"), span)?;
+					Ok(Kind::File(buckets))
+				} else {
+					Ok(Kind::File(Vec::new()))
+				}
+			}
 			_ => unexpected!(self, next, "a kind name"),
 		}
 	}
@@ -271,7 +284,7 @@ mod tests {
 	use reblessive::Stack;
 
 	use super::*;
-	use crate::sql::table::Table;
+	use crate::sql::{table::Table, Ident};
 
 	fn kind(i: &str) -> ParseResult<Kind> {
 		let mut parser = Parser::new(i.as_bytes());
@@ -580,5 +593,32 @@ mod tests {
 				})),
 			])
 		);
+	}
+
+	#[test]
+	fn file_record_any() {
+		let sql = "file";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!("file", format!("{}", out));
+		assert_eq!(out, Kind::File(vec![]));
+	}
+
+	#[test]
+	fn file_record_one() {
+		let sql = "file<one>";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!("file<one>", format!("{}", out));
+		assert_eq!(out, Kind::File(vec![Ident::from("one")]));
+	}
+
+	#[test]
+	fn file_record_many() {
+		let sql = "file<one | two>";
+		let res = kind(sql);
+		let out = res.unwrap();
+		assert_eq!("file<one | two>", format!("{}", out));
+		assert_eq!(out, Kind::File(vec![Ident::from("one"), Ident::from("two")]));
 	}
 }

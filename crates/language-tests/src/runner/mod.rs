@@ -1,3 +1,5 @@
+mod provider;
+
 use std::{future::Future, sync::Arc};
 
 use tokio::{sync::Semaphore, task::JoinSet};
