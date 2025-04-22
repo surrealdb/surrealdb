@@ -1,4 +1,4 @@
-//! Namespace data model.
+//! Namespace Catalog data model.
 //!
 //! This module defines the namespace data model, which is used to
 //! represent a namespace in the database. The namespace is a

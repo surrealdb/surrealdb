@@ -14,7 +14,7 @@ use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
-use crate::mdl::namespace::Namespace;
+use crate::cat::namespace::Namespace;
 use crate::sql::statements::define::ApiDefinition;
 use crate::sql::statements::define::BucketDefinition;
 use crate::sql::statements::define::DefineConfigStatement;

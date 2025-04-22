@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
 	err::Error,
 	kvs::{util, Transaction},
-	mdl::namespace::Namespace,
+	cat::namespace::Namespace,
 	sql::statements::DefineNamespaceStatement,
 };
 

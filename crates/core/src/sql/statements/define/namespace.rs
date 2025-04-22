@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::mdl::namespace::Namespace;
+use crate::cat::namespace::Namespace;
 use crate::sql::{Base, Ident, Strand, Value};
 
 use revision::revisioned;

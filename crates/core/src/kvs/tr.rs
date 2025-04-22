@@ -16,7 +16,7 @@ use crate::kvs::clock::SizedClock;
 use crate::kvs::savepoint::SavePointImpl;
 use crate::kvs::stash::Stash;
 use crate::kvs::KeyDecode as _;
-use crate::mdl::namespace::NamespaceId;
+use crate::cat::namespace::NamespaceId;
 use crate::sql;
 use crate::sql::thing::Thing;
 use crate::vs::VersionStamp;

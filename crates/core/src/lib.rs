@@ -40,7 +40,7 @@ pub mod gql;
 pub mod iam;
 pub mod idx;
 pub mod kvs;
-pub mod mdl;
+pub mod cat;
 pub mod mem;
 pub mod obs;
 pub mod options;

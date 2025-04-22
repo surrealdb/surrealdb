@@ -1,6 +1,6 @@
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::mdl::namespace::Namespace;
+use crate::cat::namespace::Namespace;
 use crate::sql::statements::define::ApiDefinition;
 use crate::sql::statements::define::BucketDefinition;
 use crate::sql::statements::define::DefineConfigStatement;

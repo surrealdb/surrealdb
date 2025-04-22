@@ -2,7 +2,7 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
-use crate::mdl::namespace::NamespaceId;
+use crate::cat::namespace::NamespaceId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

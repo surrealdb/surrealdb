@@ -152,7 +152,7 @@ mod tests {
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
-	use crate::mdl::namespace::Namespace;
+	use crate::cat::namespace::Namespace;
 	use crate::sql::changefeed::ChangeFeed;
 	use crate::sql::id::Id;
 	use crate::sql::statements::show::ShowSince;
