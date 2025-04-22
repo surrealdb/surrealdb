@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// Namespace identifier.
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derive(
 	Copy, Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, NewType,
 )]
