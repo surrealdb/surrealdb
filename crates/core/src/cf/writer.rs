@@ -415,10 +415,7 @@ mod tests {
 	}
 
 	async fn init(store_diff: bool) -> Datastore {
-		let dns = Namespace {
-			name: NS.to_string(),
-			..Default::default()
-		};
+		let dns = Namespace::new(NS.to_string());
 		let ddb = DefineDatabaseStatement {
 			name: crate::sql::Ident(DB.to_string()),
 			changefeed: Some(ChangeFeed {

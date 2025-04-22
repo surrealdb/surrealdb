@@ -24,7 +24,7 @@ pub struct NamespaceId(pub u32);
 
 /// Namespace data model.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Namespace {
@@ -36,6 +36,19 @@ pub struct Namespace {
 	pub comment: Option<String>,
 	/// The SQL definition of the namespace.
 	pub definition: String,
+}
+
+impl Namespace {
+	/// Create a new namespace.
+	pub fn new(name: String) -> Self {
+		let definition = format!("DEFINE NAMESPACE {name}");
+		Self {
+			id: None,
+			name,
+			comment: None,
+			definition,
+		}
+	}
 }
 
 impl From<&DefineNamespaceStatement> for Namespace {

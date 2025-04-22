@@ -1796,10 +1796,7 @@ impl Transaction {
 					Err(Error::NsNotFound {
 						..
 					}) if !strict => {
-						let val = Namespace {
-							name: ns.to_string(),
-							..Default::default()
-						};
+						let val = Namespace::new(ns.to_string());
 						let val = {
 							self.put(&key, revision::to_vec(&val)?, None).await?;
 							cache::tx::Entry::Any(Arc::new(val))
