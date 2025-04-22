@@ -277,7 +277,7 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 				match response.id {
 					// If `id` is set this is a normal response
 					Some(id) => {
-						if let Ok(id) = id.coerce_to_i64() {
+						if let Ok(id) = id.coerce_to() {
 							if let Some(pending) = state.pending_requests.remove(&id) {
 								let resp = match DbResponse::from_server_result(response.result) {
 									Ok(x) => x,
@@ -381,7 +381,7 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 				}) = deserialize(&binary, true)
 				{
 					// Return an error if an ID was returned
-					if let Some(Ok(id)) = id.map(CoreValue::coerce_to_i64) {
+					if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
 						if let Some(pending) = state.pending_requests.remove(&id) {
 							let _res = pending.response_channel.send(Err(error)).await;
 						} else {

@@ -26,10 +26,7 @@ async fn strict_typing_inline() -> Result<(), Error> {
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Expected a int but cannot convert NONE into a int"
-	));
+	assert_eq!(tmp.unwrap_err().to_string(), "Expected `int` but found a `NONE`");
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -43,10 +40,7 @@ async fn strict_typing_inline() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Expected a bool | int but cannot convert NONE into a bool | int"
-	));
+	assert_eq!(tmp.unwrap_err().to_string(), "Expected `bool | int` but found a `NONE`");
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -116,10 +110,10 @@ async fn strict_typing_inline() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Expected a array<float, 5> but the array had 10 items"
-	));
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Expected `array<float,5>` buf found an collection of length `10`"
+	);
 	//
 	Ok(())
 }
@@ -154,22 +148,23 @@ async fn strict_typing_defined() -> Result<(), Error> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Found NONE for field `age`, with record `person:test`, but expected a int"
-	));
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Couldn't coerce value for field `age` of `person:test`: Expected `int` but found `NONE`"
+	);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Found NONE for field `enabled`, with record `person:test`, but expected a bool | int"
-	));
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Couldn't coerce value for field `enabled` of `person:test`: Expected `bool | int` but found `NONE`"
+	);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Found NONE for field `name`, with record `person:test`, but expected a string"
-	));
+
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Couldn't coerce value for field `name` of `person:test`: Expected `string` but found `NONE`"
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -223,7 +218,7 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 		]",
 	)?;
 	t.expect_error(
-		"Found NULL for field `name`, with record `person:test`, but expected a option<string>",
+		"Couldn't coerce value for field `name` of `person:test`: Expected `string` but found `NULL`",
 	)?;
 	t.expect_val(
 		"[
@@ -276,7 +271,7 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 		]",
 	)?;
 	t.expect_error(
-		"Found NONE for field `name`, with record `person:test`, but expected a string | null",
+		"Couldn't coerce value for field `name` of `person:test`: Expected `string | null` but found `NONE`"
 	)?;
 	//
 	Ok(())
@@ -311,7 +306,7 @@ async fn literal_typing() -> Result<(), Error> {
 		}",
 	)?;
 	t.expect_error(
-		"Found { a: 3, b: 'bar', c: 'forbidden' } for field `obj`, with record `test:3`, but expected a { a: int, b: option<string> }",
+		"Couldn't coerce value for field `obj` of `test:3`: Expected `{ a: int, b: option<string> }` but found `{ a: 3, b: 'bar', c: 'forbidden' }`"
 	)?;
 	//
 	Ok(())
@@ -338,7 +333,9 @@ async fn strict_typing_optional_object() -> Result<(), Error> {
         }",
 	)?;
 	//
-	t.expect_error("Found NONE for field `obj.a`, with record `test:2`, but expected a string")?;
+	t.expect_error(
+		"Couldn't coerce value for field `obj.a` of `test:2`: Expected `string` but found `NONE`",
+	)?;
 	//
 	t.expect_val(
 		"{
