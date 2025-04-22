@@ -555,6 +555,7 @@ mod tests {
 		if let Some(mut hits) = hits {
 			let mut map = HashMap::new();
 			while let Some((k, d)) = hits.next(&tx).await.unwrap() {
+				yield_now!();
 				let s = scr.score(&tx, d).await.unwrap();
 				map.insert(k, s);
 			}

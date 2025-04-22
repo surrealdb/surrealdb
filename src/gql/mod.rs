@@ -1,5 +1,3 @@
-#![cfg(surrealdb_unstable)]
-
 use std::{
 	convert::Infallible,
 	sync::Arc,

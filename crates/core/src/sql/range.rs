@@ -1,11 +1,13 @@
-use super::{FlowResult, Id};
+use super::kind::HasKind;
+use super::value::{Coerce, CoerceError, CoerceErrorExt as _};
+use super::{Array, FlowResult, Id};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::operator::BindingPower;
-use crate::sql::{Number, Value};
+use crate::sql::Value;
 use crate::syn;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -28,37 +30,73 @@ pub struct Range {
 }
 
 impl Range {
+	pub fn can_coerce_to_typed<T: Coerce>(&self) -> bool {
+		match self.beg {
+			Bound::Included(ref x) | Bound::Excluded(ref x) => {
+				if !x.can_coerce_to::<T>() {
+					return false;
+				}
+			}
+			Bound::Unbounded => {}
+		}
+
+		match self.end {
+			Bound::Included(ref x) | Bound::Excluded(ref x) => x.can_coerce_to::<T>(),
+			Bound::Unbounded => true,
+		}
+	}
+
+	pub fn coerce_to_typed<T: Coerce + HasKind>(self) -> Result<TypedRange<T>, CoerceError> {
+		let beg = match self.beg {
+			Bound::Included(x) => Bound::Included(
+				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind()))?,
+			),
+			Bound::Excluded(x) => Bound::Excluded(
+				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind()))?,
+			),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+		let end = match self.end {
+			Bound::Included(x) => Bound::Included(
+				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind()))?,
+			),
+			Bound::Excluded(x) => Bound::Excluded(
+				x.coerce_to::<T>().with_element_of(|| format!("range<{}>", T::kind()))?,
+			),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		Ok(TypedRange {
+			beg,
+			end,
+		})
+	}
+
 	pub fn slice<'a, T>(&self, s: &'a [T]) -> Option<&'a [T]> {
-		let r = match self.end {
-			Bound::Included(ref x) => {
-				let Value::Number(ref x) = x else {
-					return None;
-				};
-				let x = x.to_usize();
+		let range = self.clone().coerce_to_typed::<i64>().ok()?;
+		let r = match range.end {
+			Bound::Included(x) => {
+				//TODO: Handle negative truncation
+				let x = x as usize;
 				s.get(..=x)?
 			}
-			Bound::Excluded(ref x) => {
-				let Value::Number(ref x) = x else {
-					return None;
-				};
-				let x = x.to_usize();
+			Bound::Excluded(x) => {
+				//TODO: Handle negative truncation
+				let x = x as usize;
 				s.get(..x)?
 			}
 			Bound::Unbounded => s,
 		};
-		let r = match self.beg {
-			Bound::Included(ref x) => {
-				let Value::Number(ref x) = x else {
-					return None;
-				};
-				let x = x.to_usize();
+
+		let r = match range.beg {
+			Bound::Included(x) => {
+				//TODO: Handle negative truncation
+				let x = x as usize;
 				r.get(x..)?
 			}
-			Bound::Excluded(ref x) => {
-				let Value::Number(ref x) = x else {
-					return None;
-				};
-				let x = x.to_usize().saturating_add(1);
+			Bound::Excluded(x) => {
+				//TODO: Handle negative truncation
+				let x = (x as usize).saturating_add(1);
 				r.get(x..)?
 			}
 			Bound::Unbounded => r,
@@ -67,36 +105,30 @@ impl Range {
 	}
 
 	pub fn slice_mut<'a, T>(&self, s: &'a mut [T]) -> Option<&'a mut [T]> {
-		let r = match self.end {
-			Bound::Included(ref x) => {
-				let Value::Number(ref x) = x else {
-					return None;
-				};
-				let x = x.to_usize();
-				s.get_mut(..x)?
-			}
-			Bound::Excluded(ref x) => {
-				let Value::Number(ref x) = x else {
-					return None;
-				};
-				let x = x.to_usize();
+		let range = self.clone().coerce_to_typed::<i64>().ok()?;
+		let r = match range.end {
+			Bound::Included(x) => {
+				//TODO: Handle negative truncation
+				let x = x as usize;
 				s.get_mut(..=x)?
+			}
+			Bound::Excluded(x) => {
+				//TODO: Handle negative truncation
+				let x = x as usize;
+				s.get_mut(..x)?
 			}
 			Bound::Unbounded => s,
 		};
-		let r = match self.beg {
-			Bound::Included(ref x) => {
-				let Value::Number(ref x) = x else {
-					return None;
-				};
-				let x = x.to_usize();
+
+		let r = match range.beg {
+			Bound::Included(x) => {
+				//TODO: Handle negative truncation
+				let x = x as usize;
 				r.get_mut(x..)?
 			}
-			Bound::Excluded(ref x) => {
-				let Value::Number(ref x) = x else {
-					return None;
-				};
-				let x = x.to_usize().saturating_add(1);
+			Bound::Excluded(x) => {
+				//TODO: Handle negative truncation
+				let x = (x as usize).saturating_add(1);
 				r.get_mut(x..)?
 			}
 			Bound::Unbounded => r,
@@ -105,61 +137,112 @@ impl Range {
 	}
 }
 
-impl FromStr for Range {
-	type Err = ();
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Self::try_from(s)
-	}
+/// A range but with specific value types.
+#[derive(Clone, Debug)]
+pub struct TypedRange<T> {
+	pub beg: Bound<T>,
+	pub end: Bound<T>,
 }
 
-impl TryFrom<&str> for Range {
-	type Error = ();
-	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::range(v) {
-			Ok(v) => Ok(v),
-			_ => Err(()),
+impl TypedRange<i64> {
+	/// Turn the typed range into an array, returning None if the size of the array would be too
+	/// big.
+	pub fn cast_to_array(self) -> Option<Array> {
+		match self.size_hint().1 {
+			Some(x) if x > *GENERATION_ALLOCATION_LIMIT => return None,
+			None => return None,
+			_ => {}
 		}
+
+		Some(Array(self.map(Value::from).collect()))
 	}
 }
 
-impl From<(Bound<Id>, Bound<Id>)> for Range {
-	fn from(v: (Bound<Id>, Bound<Id>)) -> Self {
-		fn convert(v: Bound<Id>) -> Bound<Value> {
-			match v {
-				Bound::Included(v) => Bound::Included(v.into()),
-				Bound::Excluded(v) => Bound::Excluded(v.into()),
-				Bound::Unbounded => Bound::Unbounded,
+impl Iterator for TypedRange<i64> {
+	type Item = i64;
+
+	fn next(&mut self) -> Option<i64> {
+		let next = match self.beg {
+			Bound::Included(x) => x,
+			Bound::Excluded(x) => x.checked_add(1)?,
+			Bound::Unbounded => i64::MIN,
+		};
+		match self.end {
+			Bound::Unbounded => {}
+			Bound::Excluded(x) => {
+				if next >= x {
+					return None;
+				}
+			}
+			Bound::Included(x) => {
+				if next > x {
+					return None;
+				}
 			}
 		}
 
-		Self {
-			beg: convert(v.0),
-			end: convert(v.1),
+		self.beg = match next.checked_add(1) {
+			Some(x) => Bound::Included(x),
+			None => Bound::Excluded(i64::MAX),
+		};
+
+		Some(next)
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		let end = match self.end {
+			Bound::Unbounded => i64::MAX,
+			Bound::Excluded(x) => match x.checked_sub(1) {
+				Some(x) => x,
+				// The upper bound is the lowest number excluded, so the iterator must be zero
+				// length.
+				None => return (0, Some(0)),
+			},
+			Bound::Included(x) => x,
+		};
+		let beg = match self.beg {
+			Bound::Unbounded => i64::MIN,
+			Bound::Excluded(x) => match x.checked_add(1) {
+				Some(x) => x,
+				// The lower bound is the highest number excluded, so the iterator must be zero
+				// length.
+				None => return (0, Some(0)),
+			},
+			Bound::Included(x) => x,
+		};
+		// beg and end are now the bounds inclusive.
+
+		if beg > end {
+			return (0, Some(0));
+		}
+
+		let len = beg.abs_diff(end);
+
+		match usize::try_from(len) {
+			Ok(x) => (x, Some(x)),
+			Err(_) => (usize::MAX, None),
 		}
 	}
 }
 
-impl TryInto<std::ops::Range<i64>> for Range {
-	type Error = Error;
-	fn try_into(self) -> Result<std::ops::Range<i64>, Self::Error> {
-		let beg = match self.beg {
-			Bound::Unbounded => i64::MIN,
-			Bound::Included(beg) => to_i64(beg)?,
-			Bound::Excluded(beg) => to_i64(beg)? + 1,
-		};
+impl<T> From<TypedRange<T>> for Range
+where
+	Value: From<T>,
+{
+	fn from(value: TypedRange<T>) -> Self {
+		Range {
+			beg: value.beg.map(Value::from),
+			end: value.end.map(Value::from),
+		}
+	}
+}
 
-		let end = match self.end {
-			Bound::Unbounded => i64::MAX,
-			Bound::Included(end) => to_i64(end)? + 1,
-			Bound::Excluded(end) => to_i64(end)?,
-		};
-
-		if (beg + *GENERATION_ALLOCATION_LIMIT as i64) < end {
-			Err(Error::RangeTooBig {
-				max: *GENERATION_ALLOCATION_LIMIT,
-			})
-		} else {
-			Ok(beg..end)
+impl FromStr for Range {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match syn::range(s) {
+			Ok(v) => Ok(v),
+			_ => Err(()),
 		}
 	}
 }
@@ -311,16 +394,6 @@ impl fmt::Display for Range {
 			}
 		}?;
 		Ok(())
-	}
-}
-
-fn to_i64(v: Value) -> Result<i64, Error> {
-	match v {
-		Value::Number(Number::Int(v)) => Ok(v),
-		v => Err(Error::InvalidRangeValue {
-			expected: "int".to_string(),
-			found: v.kindof().to_string(),
-		}),
 	}
 }
 

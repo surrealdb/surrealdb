@@ -6,7 +6,10 @@ use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use serde::{de, Deserialize, Serialize};
 use surrealdb_core::{
-	dbs::capabilities::{ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget},
+	dbs::capabilities::{
+		Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
+		RouteTarget, Targets,
+	},
 	sql::{Thing, Value as CoreValue},
 	syn,
 };
@@ -158,8 +161,11 @@ pub struct ErrorTestResult {
 #[serde(rename_all = "kebab-case")]
 pub struct ValueTestResult {
 	pub value: SurrealValue,
+	#[serde(default)]
 	pub skip_datetime: Option<bool>,
+	#[serde(default)]
 	pub skip_record_id_key: Option<bool>,
+	#[serde(default)]
 	pub skip_uuid: Option<bool>,
 }
 
@@ -168,6 +174,7 @@ pub struct ValueTestResult {
 pub struct MatchTestResult {
 	#[serde(rename = "match")]
 	pub _match: SurrealValue,
+	#[serde(default)]
 	pub error: Option<bool>,
 }
 
@@ -328,7 +335,9 @@ impl<'de> Deserialize<'de> for SurrealValue {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let mut v = syn::value(&source).map_err(<D::Error as serde::de::Error>::custom)?;
+		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
+		let mut v = syn::value_with_capabilities(&source, &capabilities)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
 		bytes_hack::compute_bytes_inplace(&mut v);
 		Ok(SurrealValue(v))
 	}
@@ -353,7 +362,9 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let v = syn::value(&source).map_err(<D::Error as serde::de::Error>::custom)?;
+		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
+		let v = syn::value_with_capabilities(&source, &capabilities)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
 		if let CoreValue::Thing(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {

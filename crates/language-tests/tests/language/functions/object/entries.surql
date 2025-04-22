@@ -11,7 +11,7 @@ value = "[]"
 value = "[[' ', 1]]"
 
 [[test.results]]
-error = "Incorrect arguments for function object::entries(). Argument 1 was the wrong type. Expected a object but found []"
+error = "Incorrect arguments for function object::entries(). Argument 1 was the wrong type. Expected `object` but found `[]`"
 
 
 */

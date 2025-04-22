@@ -23,7 +23,7 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ac: &'a str) -> Access<'a> {
 
 impl Categorise for Access<'_> {
 	fn categorise(&self) -> Category {
-		Category::DatabaseAccessGrant
+		Category::DatabaseAccessRoot
 	}
 }
 

@@ -102,7 +102,6 @@ async fn select_all(
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			// TODO: remove format in 2.0.0
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
@@ -154,7 +153,6 @@ async fn create_all(
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -208,7 +206,6 @@ async fn update_all(
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -262,7 +259,6 @@ async fn modify_all(
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -309,7 +305,6 @@ async fn delete_all(
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
@@ -366,7 +361,6 @@ async fn select_one(
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
@@ -423,7 +417,6 @@ async fn create_one(
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -483,7 +476,6 @@ async fn update_one(
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -543,7 +535,6 @@ async fn modify_one(
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 					// Internal serialization
 					Some(Accept::Surrealdb) => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -594,7 +585,6 @@ async fn delete_one(
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res)?)),
 			// Internal serialization
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested

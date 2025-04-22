@@ -4,7 +4,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{pretty_indent, Fmt};
-use crate::sql::{Base, FlowResultExt as _, Object, Value};
+use crate::sql::{Base, FlowResultExt as _, Object, Strand, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -14,7 +14,7 @@ use std::fmt::{self, Display};
 use super::config::api::ApiConfig;
 use super::CursorDoc;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,6 +25,8 @@ pub struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Value>,
 	pub config: Option<ApiConfig>,
+	#[revision(start = 2)]
+	pub comment: Option<Strand>,
 }
 
 impl DefineApiStatement {
@@ -57,7 +59,7 @@ impl DefineApiStatement {
 			.await
 			// Might be correct to not catch here.
 			.catch_return()?
-			.coerce_to_string()?
+			.coerce_to::<String>()?
 			.parse()?;
 		let name = path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);
@@ -69,6 +71,7 @@ impl DefineApiStatement {
 			actions: self.actions.clone(),
 			fallback: self.fallback.clone(),
 			config: self.config.clone(),
+			comment: self.comment.clone(),
 			..Default::default()
 		};
 		txn.set(key, revision::to_vec(&ap)?, None).await?;
@@ -110,6 +113,10 @@ impl Display for DefineApiStatement {
 			write!(f, "{}", action)?;
 		}
 
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {}", comment)?;
+		}
+
 		drop(indent);
 		Ok(())
 	}
@@ -122,6 +129,7 @@ impl InfoStructure for DefineApiStatement {
 			"config".to_string(), if let Some(config) = self.config => config.structure(),
 			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
 			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
+			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
 		})
 	}
 }
@@ -135,6 +143,7 @@ pub struct ApiDefinition {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Value>,
 	pub config: Option<ApiConfig>,
+	pub comment: Option<Strand>,
 }
 
 impl From<ApiDefinition> for DefineApiStatement {
@@ -146,6 +155,7 @@ impl From<ApiDefinition> for DefineApiStatement {
 			actions: value.actions,
 			fallback: value.fallback,
 			config: value.config,
+			comment: value.comment,
 		}
 	}
 }

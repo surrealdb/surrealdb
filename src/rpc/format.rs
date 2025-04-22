@@ -16,7 +16,6 @@ impl From<&Accept> for Format {
 			Accept::TextPlain => Format::Unsupported,
 			Accept::ApplicationJson => Format::Json,
 			Accept::ApplicationCbor => Format::Cbor,
-			Accept::ApplicationPack => Format::Msgpack,
 			Accept::ApplicationOctetStream => Format::Unsupported,
 			Accept::Surrealdb => Format::Bincode,
 		}
@@ -29,7 +28,6 @@ impl From<&ContentType> for Format {
 			ContentType::TextPlain => Format::Unsupported,
 			ContentType::ApplicationJson => Format::Json,
 			ContentType::ApplicationCbor => Format::Cbor,
-			ContentType::ApplicationPack => Format::Msgpack,
 			ContentType::ApplicationOctetStream => Format::Unsupported,
 			ContentType::Surrealdb => Format::Bincode,
 		}
@@ -41,7 +39,6 @@ impl From<&Format> for ContentType {
 		match format {
 			Format::Json => ContentType::ApplicationJson,
 			Format::Cbor => ContentType::ApplicationCbor,
-			Format::Msgpack => ContentType::ApplicationPack,
 			Format::Unsupported => ContentType::ApplicationOctetStream,
 			Format::Bincode => ContentType::Surrealdb,
 			_ => ContentType::TextPlain,

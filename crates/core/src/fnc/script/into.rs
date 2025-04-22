@@ -111,6 +111,13 @@ impl<'js> IntoJs<'js> for &Value {
 			}
 			Value::Bytes(ref v) => TypedArray::new_copy(ctx.clone(), v.0.as_slice())?.into_js(ctx),
 			Value::Geometry(ref v) => v.into_js(ctx),
+			Value::File(ref v) => Ok(Class::<classes::file::File>::instance(
+				ctx.clone(),
+				classes::file::File {
+					value: v.to_owned(),
+				},
+			)?
+			.into_value()),
 			_ => Undefined.into_js(ctx),
 		}
 	}

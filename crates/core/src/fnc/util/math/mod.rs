@@ -1,7 +1,3 @@
-// TODO
-// https://docs.rs/statistical/1.0.0/src/statistical/stats_.rs.html
-// https://rust-lang-nursery.github.io/rust-cookbook/science/mathematics/statistics.html
-
 pub mod bottom;
 pub mod deviation;
 pub mod interquartile;

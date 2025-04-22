@@ -7,32 +7,43 @@ use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{FlowResultExt as _, Kind, Strand};
+use crate::sql::{
+	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Kind, Number, Range,
+	Strand, Uuid,
+};
 use crate::syn;
+use geo::Point;
 use reblessive::tree::Stk;
+use rust_decimal::Decimal;
+
+use super::args::Optional;
 
 pub fn array((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_array().map(Value::from)
+	Ok(val.cast_to::<Array>()?.into())
 }
 
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_bool().map(Value::from)
+	Ok(val.cast_to::<bool>()?.into())
+}
+
+pub fn file((bucket, key): (String, String)) -> Result<Value, Error> {
+	Ok(Value::File(File::new(bucket, key)))
 }
 
 pub fn bytes((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_bytes().map(Value::from)
+	Ok(val.cast_to::<Bytes>()?.into())
 }
 
 pub fn datetime((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_datetime().map(Value::from)
+	Ok(val.cast_to::<Datetime>()?.into())
 }
 
 pub fn decimal((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_decimal().map(Value::from)
+	Ok(val.cast_to::<Decimal>()?.into())
 }
 
 pub fn duration((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_duration().map(Value::from)
+	Ok(val.cast_to::<Duration>()?.into())
 }
 
 pub async fn field(
@@ -70,30 +81,30 @@ pub async fn fields(
 }
 
 pub fn float((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_float().map(Value::from)
+	Ok(val.cast_to::<f64>()?.into())
 }
 
 pub fn geometry((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_geometry().map(Value::from)
+	Ok(val.cast_to::<Geometry>()?.into())
 }
 
 pub fn int((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_int().map(Value::from)
+	Ok(val.cast_to::<i64>()?.into())
 }
 
 pub fn number((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_number().map(Value::from)
+	Ok(val.cast_to::<Number>()?.into())
 }
 
 pub fn point((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_point().map(Value::from)
+	Ok(val.cast_to::<Point<f64>>()?.into())
 }
 
 pub fn range((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_range().map(Value::from)
+	Ok(val.cast_to::<Box<Range>>()?.into())
 }
 
-pub fn record((rid, tb): (Value, Option<Value>)) -> Result<Value, Error> {
+pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value, Error> {
 	match tb {
 		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) if tb.is_empty() => {
 			Err(Error::TbInvalid {
@@ -101,18 +112,26 @@ pub fn record((rid, tb): (Value, Option<Value>)) -> Result<Value, Error> {
 			})
 		}
 		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) => {
-			rid.convert_to(&Kind::Record(vec![tb.into()]))
+			rid.cast_to_kind(&Kind::Record(vec![tb.into()])).map_err(From::from)
 		}
 		Some(_) => Err(Error::InvalidArguments {
 			name: "type::record".into(),
 			message: "The second argument must be a table name or a string.".into(),
 		}),
-		None => rid.convert_to(&Kind::Record(vec![])),
+		None => rid.cast_to_kind(&Kind::Record(vec![])).map_err(From::from),
 	}
 }
 
 pub fn string((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_strand().map(Value::from)
+	Ok(val.cast_to::<Strand>()?.into())
+}
+
+pub fn string_lossy((val,): (Value,)) -> Result<Value, Error> {
+	match val {
+		//TODO: Replace with from_utf8_lossy_owned once stablized.
+		Value::Bytes(x) => Ok(String::from_utf8_lossy(&x).into_owned().into()),
+		x => x.cast_to::<String>().map(Value::from).map_err(Error::from),
+	}
 }
 
 pub fn table((val,): (Value,)) -> Result<Value, Error> {
@@ -122,53 +141,47 @@ pub fn table((val,): (Value,)) -> Result<Value, Error> {
 	})))
 }
 
-pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
+pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value, Error> {
 	match (arg1, arg2) {
 		// Empty table name
 		(Value::Strand(arg1), _) if arg1.is_empty() => Err(Error::TbInvalid {
 			value: arg1.as_string(),
 		}),
 
-		// Empty ID part
-		(_, Some(Value::Strand(arg2))) if arg2.is_empty() => Err(Error::IdInvalid {
-			value: arg2.as_string(),
-		}),
-
 		// Handle second argument
 		(arg1, Some(arg2)) => Ok(Value::Thing(Thing {
-			tb: arg1.as_string(),
 			id: match arg2 {
 				Value::Thing(v) => v.id,
 				Value::Array(v) => v.into(),
 				Value::Object(v) => v.into(),
 				Value::Number(v) => v.into(),
 				Value::Range(v) => v.deref().to_owned().try_into()?,
-				v => v.as_string().into(),
+				Value::Uuid(u) => u.into(),
+				ref v => {
+					let s = v.clone().as_string();
+					if s.is_empty() {
+						return Err(Error::IdInvalid {
+							value: arg2.as_string(),
+						});
+					} else {
+						s.into()
+					}
+				}
 			},
+			tb: arg1.as_string(),
 		})),
 
-		// No second argument passed
-		(arg1, _) => Ok(match arg1 {
-			Value::Thing(v) => Ok(v),
-			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
-				from: Value::Strand(v),
-				into: "record".into(),
-			}),
-			v => Err(Error::ConvertTo {
-				from: v,
-				into: "record".into(),
-			}),
-		}?
-		.into()),
+		(arg1, None) => arg1.cast_to::<Thing>().map(Value::from).map_err(Error::from),
 	}
 }
 
 pub fn uuid((val,): (Value,)) -> Result<Value, Error> {
-	val.convert_to_uuid().map(Value::from)
+	val.cast_to::<Uuid>().map(Value::from).map_err(Error::from)
 }
 
 pub mod is {
 	use crate::err::Error;
+	use crate::fnc::args::Optional;
 	use crate::sql::table::Table;
 	use crate::sql::value::Value;
 	use crate::sql::Geometry;
@@ -257,10 +270,10 @@ pub mod is {
 		Ok(arg.is_range().into())
 	}
 
-	pub fn record((arg, table): (Value, Option<String>)) -> Result<Value, Error> {
+	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value, Error> {
 		Ok(match table {
 			Some(tb) => arg.is_record_type(&[Table(tb)]).into(),
-			None => arg.is_record().into(),
+			None => arg.is_thing().into(),
 		})
 	}
 
@@ -276,6 +289,7 @@ pub mod is {
 #[cfg(test)]
 mod tests {
 	use crate::err::Error;
+	use crate::fnc::args::Optional;
 	use crate::sql::value::Value;
 
 	#[test]
@@ -289,7 +303,7 @@ mod tests {
 
 	#[test]
 	fn no_empty_thing() {
-		let value = super::thing(("".into(), None));
+		let value = super::thing(("".into(), Optional(None)));
 		let _expected = Error::TbInvalid {
 			value: "".into(),
 		};
@@ -297,7 +311,7 @@ mod tests {
 			panic!("An empty thing tb part should result in an error");
 		}
 
-		let value = super::thing(("table".into(), Some("".into())));
+		let value = super::thing(("table".into(), Optional(Some("".into()))));
 		let _expected = Error::IdInvalid {
 			value: "".into(),
 		};
