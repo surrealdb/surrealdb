@@ -1,5 +1,3 @@
-#[cfg(test)]
-use crate::dbs::fuzzy_eq::FuzzyEq;
 use crate::sql::{Object, Uuid, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -61,12 +59,5 @@ impl Notification {
 			record,
 			result,
 		}
-	}
-}
-
-#[cfg(test)]
-impl FuzzyEq for Notification {
-	fn fuzzy_eq(&self, other: &Self) -> bool {
-		self.action == other.action && self.record == other.record && self.result == other.result
 	}
 }

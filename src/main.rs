@@ -11,10 +11,10 @@
 #![forbid(unsafe_code)]
 
 #[macro_use]
-extern crate tracing;
+extern crate surrealdb_core;
 
 #[macro_use]
-mod mac;
+extern crate tracing;
 
 mod cli;
 mod cnf;

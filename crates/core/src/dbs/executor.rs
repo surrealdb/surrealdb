@@ -254,6 +254,7 @@ impl Executor {
 			// couldn't create a transaction.
 			// Fast forward until we hit CANCEL or COMMIT
 			while let Some(stmt) = stream.next().await {
+				yield_now!();
 				let stmt = stmt?;
 				if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
 					return Ok(());
@@ -285,6 +286,7 @@ impl Executor {
 
 		// loop over the statements until we hit a cancel or a commit statement.
 		while let Some(stmt) = stream.next().await {
+			yield_now!();
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
@@ -296,7 +298,7 @@ impl Executor {
 
 			// check for timeout and cancellation.
 			if let Some(done) = self.ctx.done(true)? {
-				// a cancellation happened. Cancel the transaction, fast forward the remaining
+				// A cancellation happened. Cancel the transaction, fast-forward the remaining
 				// results and then return.
 				let _ = txn.cancel().await;
 
@@ -306,6 +308,7 @@ impl Executor {
 				}
 
 				while let Some(stmt) = stream.next().await {
+					yield_now!();
 					let stmt = stmt?;
 					if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
 						return Ok(());
@@ -361,6 +364,7 @@ impl Executor {
 					self.opt.sender = None;
 
 					while let Some(stmt) = stream.next().await {
+						yield_now!();
 						let stmt = stmt?;
 						if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
 							return Ok(());
@@ -470,6 +474,7 @@ impl Executor {
 							self.opt.sender = None;
 
 							while let Some(stmt) = stream.next().await {
+								yield_now!();
 								let stmt = stmt?;
 								if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
 									return Ok(());
@@ -546,6 +551,7 @@ impl Executor {
 		let mut stream = pin!(stream);
 
 		while let Some(stmt) = stream.next().await {
+			yield_now!();
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {

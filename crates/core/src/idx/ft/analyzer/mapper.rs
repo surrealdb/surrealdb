@@ -67,6 +67,7 @@ impl Mapper {
 		let mut lines = reader.lines();
 		let mut line_number = 0;
 		while let Some(line) = lines.next_line().await? {
+			yield_now!();
 			Self::add_line_tree(terms, line, line_number)?;
 			line_number += 1;
 		}

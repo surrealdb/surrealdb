@@ -144,6 +144,12 @@ impl<'js> FromJs<'js> for Value {
 						None => Ok(Value::None),
 					};
 				}
+				// Check to see if this object is a file
+				if let Some(v) = v.as_class::<classes::file::File>() {
+					let borrow = v.borrow();
+					let v: &classes::file::File = &borrow;
+					return Ok(v.value.clone().into());
+				}
 
 				if let Some(v) = v.as_typed_array::<u8>() {
 					let Some(data) = v.as_bytes() else {
