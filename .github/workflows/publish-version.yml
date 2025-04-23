@@ -102,7 +102,7 @@ jobs:
           fi
 
           if [[ $suffix == "none" ]]; then
-            patch=$(echo ${version} | tr "." "\n" | sed -n 1p)
+            patch=$(echo ${version} | tr "." "\n" | sed -n 3p)
             environment=stable
           elif [[ $suffix == "nightly" ]]; then
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
@@ -529,7 +529,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare-vars.outputs.release-branch }}
+          ref: ${{ inputs.git-ref }}
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -538,6 +538,7 @@ jobs:
         run: git checkout -b crate
 
       - name: Patch crate version
+        if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
         run: |
           set -x
 
@@ -548,10 +549,10 @@ jobs:
           version=${major}.${minor}.${{ needs.prepare-vars.outputs.patch }}
 
           # Update the version to a nightly one
-          sed -i "s#^version = \"${{ needs.prepare-vars.outputs.version }}\"#version = \"${version}\"#" crates/sdk/Cargo.toml
-          sed -i "s#^version = \"${{ needs.prepare-vars.outputs.version }}\"#version = \"${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#^version = \"${currentVersion}\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \"${currentVersion}\"#version = \"${version}\"#" crates/core/Cargo.toml
+          sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
