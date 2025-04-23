@@ -15,8 +15,8 @@ on:
       suffix:
         required: true
         type: string
-        default: metadata
-        description: "The suffix of the version, e.g. none, metadata, alpha.1 or beta.1"
+        default: nightly
+        description: "The suffix of the version, e.g. none, nightly, alpha.1 or beta.1"
       latest:
         required: false
         type: boolean

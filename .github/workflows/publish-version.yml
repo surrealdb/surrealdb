@@ -7,8 +7,8 @@ on:
         description: "The git ref of this release version. All 'actions/checkout' steps will use it"
       suffix:
         type: string
-        default: metadata
-        description: "The suffix of the version, e.g. none, metadata, alpha.1 or beta.1"
+        default: nightly
+        description: "The suffix of the version, e.g. none, nightly, alpha.1 or beta.1"
       latest:
         required: false
         type: boolean
@@ -54,7 +54,6 @@ jobs:
     name: Prepare vars
     runs-on: ubuntu-latest
     outputs:
-      git-ref: ${{ steps.outputs.outputs.git-ref }}
       environment: ${{ steps.outputs.outputs.environment }}
       version: ${{ steps.outputs.outputs.version }}
       patch: ${{ steps.outputs.outputs.patch }}
@@ -83,18 +82,23 @@ jobs:
           version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           echo "current-version=${version}" >> $GITHUB_OUTPUT
 
-          if [[ $suffix != "none" && $suffix != "metadata" && $suffix != "alpha" && $suffix != "beta" && $suffix != "rc" ]]; then
+          if [[ $version == *"-"* ]]; then
+            echo "Found an unexpected pre-release version, '${version}', in ${{ inputs.git-ref }}"
+            exit 400
+          fi
+
+          if [[ $suffix != "none" && $suffix != "nightly" && $suffix != "alpha" && $suffix != "beta" && $suffix != "rc" ]]; then
             echo "'${suffix}' is not a supported suffix"
-            exit 404
+            exit 400
           fi
 
           if [[ $suffix == "alpha" || $suffix == "beta" || $suffix == "rc" ]]; then
             if [[ -z $patch ]]; then
               echo "Pre-releases require a patch number, e.g. beta.3"
-              exit 404
+              exit 400
             elif ! [[ $patch =~ ^[0-9]+$ ]]; then
               echo "The patch number should be an integer, found ${patch}"
-              exit 404
+              exit 400
             fi
           fi
 
@@ -102,13 +106,14 @@ jobs:
             patch=$(echo ${version} | tr "." "\n" | sed -n 1p)
             environment=stable
             buildMetadata=""
-          elif [[ $suffix == "metadata" ]]; then
+          elif [[ $suffix == "nightly" ]]; then
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
             # This sets the nightly version to something like `1.3.20250224221932`
             patch=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
             rev=$(git rev-parse --short HEAD)
             buildMetadata=${date}.${rev}
-            environment=nightly
+            version=${version}-${{ inputs.suffix }}
+            environment=${{ inputs.suffix }}
           elif [[  $suffix == "rc" ]]; then
             version=${version}-${{ inputs.suffix }}
             patch=$(($patch - 1))
@@ -127,12 +132,6 @@ jobs:
           echo "build-metadata=${buildMetadata}" >> $GITHUB_OUTPUT
           echo "release-branch=releases/${version}" >> $GITHUB_OUTPUT
 
-          if [[ "${{ inputs.publish }}" == "true" && "${{ inputs.suffix }}" != "metadata"  ]]; then
-            echo "git-ref=v${version}" >> $GITHUB_OUTPUT
-          else
-            echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
-          fi
-
           if [[ "${environment}" == "nightly" ]]; then
             echo "name=${environment}" >> $GITHUB_OUTPUT
           else
@@ -145,15 +144,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config --add --bool push.autoSetupRemote true
 
+      - name: Create release branch
+        run: git checkout -b ${{ steps.outputs.outputs.release-branch }}
+
       - name: Patch release version
-        if: ${{ inputs.suffix != 'none' && inputs.suffix != 'metadata' }}
+        if: ${{ inputs.suffix != 'none' }}
         run: |
           set -x
 
           version=${{ steps.outputs.outputs.version }}
           currentVersion=${{ steps.outputs.outputs.current-version }}
-
-          git checkout -b ${{ steps.outputs.outputs.release-branch }}
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
@@ -171,15 +171,7 @@ jobs:
           git commit -am "Prepare v${version} release"
 
       - name: Push version bump
-        if: ${{ inputs.publish && (inputs.suffix != 'none' && inputs.suffix != 'metadata') }}
         run: git push
-
-      - name: Tag the release
-        if: ${{ inputs.publish && inputs.suffix != 'metadata'}}
-        run: |
-          set -x
-          git tag -a v${{ steps.outputs.outputs.version }} -m "Release ${{ steps.outputs.outputs.version }}" || true
-          git push --tags || true
 
   test:
     name: Test
@@ -194,12 +186,12 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ needs.prepare-vars.outputs.git-ref == 'main' }}
+          save-if: ${{ inputs.git-ref == 'main' }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -234,7 +226,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -477,10 +469,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Create a temporary branch
-        run: git checkout -b binary
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -525,13 +514,12 @@ jobs:
   publish:
     name: Publish crate and artifacts binaries
     needs: [prepare-vars, test, lint, build]
-    environment: ${{ needs.prepare-vars.outputs.environment }}
     runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -612,14 +600,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: ${{ inputs.publish && inputs.create-release }}
         with:
-          name: "Release ${{ needs.prepare-vars.outputs.git-ref }}"
-          tag_name: ${{ needs.prepare-vars.outputs.git-ref }}
+          name: "Release ${{ needs.prepare-vars.outputs.version }}"
+          tag_name: v${{ needs.prepare-vars.outputs.version }}
           prerelease: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
           fail_on_unmatched_files: true
           files: |
             LICENSE
-            artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.tgz
-            artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.exe
+            artifacts/surreal-${{ needs.prepare-vars.outputs.name }}.*/*.tgz
+            artifacts/surreal-${{ needs.prepare-vars.outputs.name }}.*/*.exe
 
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -632,13 +620,13 @@ jobs:
       - name: Set latest release version
         if: ${{ inputs.publish && inputs.create-release && inputs.latest }}
         run: |
-          echo ${{ needs.prepare-vars.outputs.git-ref }} > latest.txt
+          echo v${{ needs.prepare-vars.outputs.version }} > latest.txt
           aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
 
       - name: Set latest alpha or beta version
         if: ${{ inputs.publish && (needs.prepare-vars.outputs.environment == 'alpha' || needs.prepare-vars.outputs.environment == 'beta') }}
         run: |
-          echo ${{ needs.prepare-vars.outputs.git-ref }} > ${{ needs.prepare-vars.outputs.environment }}.txt
+          echo v${{ needs.prepare-vars.outputs.version }} > ${{ needs.prepare-vars.outputs.environment }}.txt
           aws s3 cp --cache-control 'no-store' ${{ needs.prepare-vars.outputs.environment }}.txt s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.environment }}.txt
 
       - name: Publish binaries
@@ -648,6 +636,25 @@ jobs:
             aws s3 cp --cache-control 'no-store' $file s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
           done
 
+  tag-release:
+    name: Tag release
+    needs: [publish, prepare-vars]
+    environment: ${{ needs.prepare-vars.outputs.environment }}
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
+
+      - name: Tag the release
+        if: ${{ inputs.suffix != 'nightly' }}
+        run: |
+          set -x
+          git tag -a v${{ needs.prepare-vars.outputs.version }} -m "Release ${{ needs.prepare-vars.outputs.version }}"
+          git push --tags
+
   docker:
     name: Docker images
     needs: [prepare-vars, publish]
@@ -655,7 +662,7 @@ jobs:
     uses: ./.github/workflows/docker.yml
     with:
       environment: ${{ needs.prepare-vars.outputs.environment }}
-      git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
+      git-ref: ${{ needs.prepare-vars.outputs.name }}
       tag-prefix: ${{ needs.prepare-vars.outputs.name }}
       latest: ${{ inputs.latest }}
       build: true
@@ -722,8 +729,7 @@ jobs:
           done
 
   cleanup:
-    name: Delete release branch
-    if: ${{ inputs.publish && (inputs.suffix != 'none' && inputs.suffix != 'metadata') }}
+    name: Cleanup
     needs: [publish, prepare-vars]
     runs-on: ubuntu-latest
     steps:
