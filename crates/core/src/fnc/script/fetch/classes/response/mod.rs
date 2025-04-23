@@ -194,7 +194,6 @@ impl<'js> Response<'js> {
 
 	// Returns a promise with the response body as FormData
 	#[qjs(rename = "formData")]
-
 	pub async fn form_data(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
 		Err(Exception::throw_internal(&ctx, "Not yet implemented"))
 	}

@@ -181,7 +181,6 @@ impl Blob {
 	}
 
 	#[qjs(rename = "arrayBuffer")]
-
 	pub async fn array_buffer<'js>(&self, ctx: Ctx<'js>) -> Result<ArrayBuffer<'js>> {
 		ArrayBuffer::new(ctx, self.data.to_vec())
 	}
