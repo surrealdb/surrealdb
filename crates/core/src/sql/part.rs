@@ -474,6 +474,10 @@ impl DestructurePart {
 			}
 		}
 	}
+
+	pub fn idiom(&self) -> Idiom {
+		Idiom(self.path())
+	}
 }
 
 impl fmt::Display for DestructurePart {
