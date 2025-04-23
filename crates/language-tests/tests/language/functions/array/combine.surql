@@ -5,7 +5,7 @@
 value = "[]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::combine(). Argument 1 was the wrong type. Expected a array but found 3"
+error = "Incorrect arguments for function array::combine(). Argument 1 was the wrong type. Expected `array` but found `3`"
 
 [[test.results]]
 value = "[[1, 2], [1, 3], [2, 2], [2, 3]]"

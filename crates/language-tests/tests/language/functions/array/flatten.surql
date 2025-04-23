@@ -2,13 +2,13 @@
 [test]
 
 [[test.results]]
-error = "Incorrect arguments for function array::flatten(). Expected 1 argument."
+error = "Incorrect arguments for function array::flatten(). Expected 1 argument"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::flatten(). Argument 1 was the wrong type. Expected a array but found 'some text'"
+error = "Incorrect arguments for function array::flatten(). Argument 1 was the wrong type. Expected `array` but found `'some text'`"
 
 [[test.results]]
 value = "[1, 2, 3, 4]"
