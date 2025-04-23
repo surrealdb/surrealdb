@@ -1328,3 +1328,6 @@ allow_proc_macro = true
 
 [pkg.xattr]
 allow_unsafe = true
+
+[pkg.filetime]
+allow_unsafe = true
