@@ -141,7 +141,11 @@ jobs:
           git config --add --bool push.autoSetupRemote true
 
       - name: Create release branch
-        run: git checkout -b ${{ steps.outputs.outputs.release-branch }}
+        run: |
+          set -x
+
+          git push origin --delete ${{ steps.outputs.outputs.release-branch }} || true
+          git checkout -b ${{ steps.outputs.outputs.release-branch }}
 
       - name: Patch release version
         if: ${{ inputs.suffix != 'none' }}
