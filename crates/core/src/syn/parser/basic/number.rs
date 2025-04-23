@@ -114,7 +114,7 @@ impl TokenValue for Number {
 								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
 							)?
 						};
-						Ok(Number::Decimal(decimal))
+						Ok(Number::Decimal(decimal.normalize()))
 					}
 				}
 			}

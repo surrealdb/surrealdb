@@ -184,7 +184,7 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Number, SyntaxError> {
 					|e| syntax_error!("Failed to parser decimal: {e}", @lexer.current_span()),
 				)?
 			};
-			Ok(Number::Decimal(decimal))
+			Ok(Number::Decimal(decimal.normalize()))
 		}
 	}
 }

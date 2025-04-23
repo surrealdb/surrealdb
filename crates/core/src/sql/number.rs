@@ -323,7 +323,7 @@ impl Number {
 	pub fn to_decimal(&self) -> Decimal {
 		match self {
 			Number::Int(v) => Decimal::from(*v),
-			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
+			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default().normalize(),
 			Number::Decimal(v) => *v,
 		}
 	}
