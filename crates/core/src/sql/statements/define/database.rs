@@ -55,10 +55,9 @@ impl DefineDatabaseStatement {
 		txn.set(
 			key,
 			revision::to_vec(&DefineDatabaseStatement {
-				id: if self.id.is_none() && nsv.id.is_some() {
-					Some(txn.lock().await.get_next_db_id(nsv.id.unwrap()).await?)
-				} else {
-					None
+				id: match self.id {
+					Some(id) => Some(id),
+					None => Some(txn.lock().await.get_next_db_id(nsv.id).await?),
 				},
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,

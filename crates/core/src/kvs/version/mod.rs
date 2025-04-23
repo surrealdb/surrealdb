@@ -89,10 +89,16 @@ impl Version {
 			}
 
 			// Apply fixes based on the current version
-			if v == 1 {
-				apply_fix!(v1_to_2_id_uuid);
-				apply_fix!(v1_to_2_migrate_to_access);
-			}
+			match v {
+				1 => {
+					apply_fix!(v1_to_2_id_uuid);
+					apply_fix!(v1_to_2_migrate_to_access);
+				}
+				2 => {
+					apply_fix!(v2_to_v3_data_model_migration);
+				}
+				_ => {}
+			};
 
 			// Obtain storage version key and value
 			let key = crate::key::version::new();
