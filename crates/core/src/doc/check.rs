@@ -88,7 +88,6 @@ impl Document {
 	/// If the user specifies a record directly
 	/// using a Record ID, and that record does not
 	/// exist, then this function will exit early.
-
 	pub(super) async fn check_record_exists(
 		&self,
 		_ctx: &Context,

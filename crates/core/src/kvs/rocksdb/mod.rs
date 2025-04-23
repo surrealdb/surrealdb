@@ -62,7 +62,6 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		// Configure custom options
 		let mut opts = Options::default();
@@ -237,8 +236,8 @@ impl Datastore {
 			db,
 		})
 	}
-	/// Shutdown the database
 
+	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Create new flush options
 		let mut opts = FlushOptions::default();
@@ -255,8 +254,8 @@ impl Datastore {
 		// All good
 		Ok(())
 	}
-	/// Start a new transaction
 
+	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();

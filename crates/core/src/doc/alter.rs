@@ -70,7 +70,6 @@ impl Document {
 	/// of the document within a `DELETE` statement.
 	/// This function only clears the document in
 	/// memory, and does not store this on disk.
-
 	pub(super) async fn clear_record_data(
 		&mut self,
 		_ctx: &Context,
@@ -86,7 +85,6 @@ impl Document {
 	/// hidden `edge` field are always present. This
 	/// ensures that any user modifications of these
 	/// fields are reset back to the original state.
-
 	pub(super) async fn default_record_data(
 		&mut self,
 		_ctx: &Context,

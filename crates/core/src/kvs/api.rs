@@ -102,7 +102,6 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
-
 	async fn keysr<K>(
 		&mut self,
 		_rng: Range<K>,
@@ -118,7 +117,6 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
-
 	async fn scan<K>(
 		&mut self,
 		_rng: Range<K>,
@@ -134,7 +132,6 @@ pub trait Transaction {
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
-
 	async fn scanr<K>(
 		&mut self,
 		_rng: Range<K>,

@@ -18,8 +18,8 @@ impl ContinueStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		false
 	}
-	/// Process this type returning a computed simple Value
 
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context,

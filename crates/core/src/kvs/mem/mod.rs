@@ -60,7 +60,6 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-
 	pub(crate) async fn new() -> Result<Datastore, Error> {
 		// Create new configuration options
 		let mut opts = Options::new();
@@ -76,14 +75,14 @@ impl Datastore {
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
-	/// Shutdown the database
 
+	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Nothing to do here
 		Ok(())
 	}
-	/// Start a new transaction
 
+	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Specify the check level
 		#[cfg(not(debug_assertions))]

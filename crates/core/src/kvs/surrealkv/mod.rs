@@ -50,7 +50,6 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-
 	pub(crate) async fn new(path: &str, enable_versions: bool) -> Result<Datastore, Error> {
 		// Create new configuration options
 		let mut opts = Options::new();
@@ -92,8 +91,8 @@ impl Datastore {
 			_ => Err(Error::Ds("Invalid start string".into())),
 		}
 	}
-	/// Shutdown the database
 
+	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Shutdown the database
 		if let Err(e) = self.db.close() {
@@ -102,8 +101,8 @@ impl Datastore {
 		// Nothing to do here
 		Ok(())
 	}
-	/// Start a new transaction
 
+	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Specify the check level
 		#[cfg(not(debug_assertions))]

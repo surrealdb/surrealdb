@@ -78,7 +78,6 @@ impl Datastore {
 	/// dependent location (defined by FoundationDB) will be used.
 	/// See https://apple.github.io/foundationdb/administration.html
 	/// for more information on cluster connection files.
-
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
 		// Initialize the FoundationDB Client API
 		static NETWORK: LazyLock<Arc<foundationdb::api::NetworkAutoStop>> =
@@ -116,14 +115,14 @@ impl Datastore {
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
-	/// Shutdown the database
 
+	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Nothing to do here
 		Ok(())
 	}
-	/// Start a new transaction
 
+	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		// Specify the check level
 		#[cfg(not(debug_assertions))]
