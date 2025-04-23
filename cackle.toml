@@ -1319,3 +1319,9 @@ allow_proc_macro = true
 
 [pkg.fs-err]
 allow_apis = ["fs"]
+
+[pkg.derive-new]
+allow_proc_macro = true
+
+[pkg.async-recursion]
+allow_proc_macro = true
