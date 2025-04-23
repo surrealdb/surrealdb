@@ -170,7 +170,7 @@ jobs:
           # Commit changes
           git commit -am "Prepare v${version} release"
 
-      - name: Push version bump
+      - name: Push the release branch
         run: git push
 
   test:
