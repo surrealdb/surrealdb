@@ -108,19 +108,19 @@ impl ExplainItem {
 			},
 			Iterable::Yield(t) => Self {
 				name: "Iterate Yield".into(),
-				details: vec![("table", Value::from(t.0.to_owned()))],
+				details: vec![("table", Value::from(t.0.clone()))],
 			},
 			Iterable::Thing(t) => Self {
 				name: "Iterate Thing".into(),
-				details: vec![("thing", Value::Thing(t.to_owned()))],
+				details: vec![("thing", Value::Thing(t.clone()))],
 			},
 			Iterable::Defer(t) => Self {
 				name: "Iterate Defer".into(),
-				details: vec![("thing", Value::Thing(t.to_owned()))],
+				details: vec![("thing", Value::Thing(t.clone()))],
 			},
 			Iterable::Edges(e) => Self {
 				name: "Iterate Edges".into(),
-				details: vec![("from", Value::Thing(e.from.to_owned()))],
+				details: vec![("from", Value::Thing(e.from.clone()))],
 			},
 			Iterable::Table(t, rs, sc) => Self {
 				name: match rs {
@@ -130,7 +130,7 @@ impl ExplainItem {
 				}
 				.into(),
 				details: vec![
-					("table", Value::from(t.0.to_owned())),
+					("table", Value::from(t.0.clone())),
 					("direction", sc.to_string().into()),
 				],
 			},
@@ -169,7 +169,7 @@ impl ExplainItem {
 				],
 			},
 			Iterable::Index(t, ir, rs) => {
-				let mut details = vec![("table", Value::from(t.0.to_owned()))];
+				let mut details = vec![("table", Value::from(t.0.clone()))];
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(&t.0) {
 						details.push(("plan", exe.explain(*ir)));

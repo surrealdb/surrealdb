@@ -45,7 +45,7 @@ impl From<SurrealAuthDatabase> for HeaderValue {
 	}
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from)]
 impl From<&SurrealAuthDatabase> for HeaderValue {
 	fn from(value: &SurrealAuthDatabase) -> Self {
 		HeaderValue::from_str(value.0.as_str()).unwrap()

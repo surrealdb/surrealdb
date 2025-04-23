@@ -154,7 +154,7 @@ where
 	fn promote(&mut self, key: CacheKey, pos: usize) {
 		// Promotion is flipping the current entry with the entry before
 		let new_pos = pos - 1;
-		let flip_key = self.vec[new_pos].as_ref().map(|(k, _)| k).cloned();
+		let flip_key = self.vec[new_pos].as_ref().map(|(k, _)| k).copied();
 		self.vec.swap(pos, new_pos);
 		self.map.insert(key, new_pos);
 		if let Some(flip_key) = flip_key {

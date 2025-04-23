@@ -10,7 +10,6 @@ use reblessive::tree::Stk;
 use std::sync::Arc;
 
 impl Document {
-	#[allow(dead_code)]
 	pub(crate) async fn process(
 		stk: &mut Stk,
 		ctx: &Context,

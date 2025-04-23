@@ -37,7 +37,6 @@ pub(super) struct PlanBuilderParameters {
 }
 
 impl PlanBuilder {
-	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn build(
 		ctx: &StatementContext<'_>,
 		p: PlanBuilderParameters,
@@ -372,7 +371,7 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self) -> Value {
 		let mut e = HashMap::new();
-		e.insert("index", Value::from(self.ix_ref().name.0.to_owned()));
+		e.insert("index", Value::from(self.ix_ref().name.0.clone()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
@@ -491,7 +490,7 @@ impl RangeValue {
 impl From<&RangeValue> for Value {
 	fn from(rv: &RangeValue) -> Self {
 		Value::from(Object::from(HashMap::from([
-			("value", rv.value.to_owned()),
+			("value", rv.value.clone()),
 			("inclusive", Value::from(rv.inclusive)),
 		])))
 	}
@@ -582,7 +581,7 @@ mod tests {
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
-	#[allow(clippy::mutable_key_type)]
+	#[expect(clippy::mutable_key_type)]
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();

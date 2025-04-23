@@ -654,7 +654,7 @@ impl FieldEditContext<'_> {
 						.collect()
 				};
 
-				RefAction::Delete(removed, self.def.name.to_owned().push(Part::All).to_string())
+				RefAction::Delete(removed, self.def.name.clone().push(Part::All).to_string())
 			// We found a new reference, let's create the link
 			} else if let Value::Thing(thing) = val {
 				RefAction::Set(thing)
@@ -713,6 +713,7 @@ impl FieldEditContext<'_> {
 			Ok(())
 		}
 	}
+
 	/// Process any `TYPE reference` clause for the field definition
 	async fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {

@@ -76,7 +76,6 @@ impl From<Failure> for Value {
 	}
 }
 
-#[allow(dead_code)]
 impl Failure {
 	pub const PARSE_ERROR: Failure = Failure {
 		code: -32700,
