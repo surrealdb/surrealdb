@@ -1328,9 +1328,21 @@ allow_proc_macro = true
 
 [pkg.xattr]
 allow_unsafe = true
+allow_apis = ["fs"]
 
 [pkg.filetime]
 allow_unsafe = true
+allow_apis = ["fs"]
 
 [pkg.tar]
 allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.ureq]
+allow_apis = ["net"]
+
+[pkg.zip]
+allow_apis = ["fs"]
+
+[pkg.ort]
+allow_apis = ["fs", "process"]
