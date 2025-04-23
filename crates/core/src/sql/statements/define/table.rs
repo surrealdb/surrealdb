@@ -196,7 +196,7 @@ impl DefineTableStatement {
 					key,
 					revision::to_vec(&DefineFieldStatement {
 						name: Idiom::from(IN.to_vec()),
-						what: tb.name.to_owned(),
+						what: tb.name.clone(),
 						kind: Some(val),
 						..Default::default()
 					})?,
@@ -212,7 +212,7 @@ impl DefineTableStatement {
 					key,
 					revision::to_vec(&DefineFieldStatement {
 						name: Idiom::from(OUT.to_vec()),
-						what: tb.name.to_owned(),
+						what: tb.name.clone(),
 						kind: Some(val),
 						..Default::default()
 					})?,

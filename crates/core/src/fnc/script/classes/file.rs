@@ -39,10 +39,10 @@ impl File {
 	}
 	// Get the bucket for this file
 	pub fn bucket(&self) -> String {
-		self.value.bucket.to_owned()
+		self.value.bucket.clone()
 	}
 	// Get the key for this file
 	pub fn key(&self) -> String {
-		self.value.key.to_owned()
+		self.value.key.clone()
 	}
 }

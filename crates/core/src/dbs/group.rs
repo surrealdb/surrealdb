@@ -32,7 +32,7 @@ struct Aggregator {
 }
 
 impl GroupsCollector {
-	#[allow(clippy::mutable_key_type)]
+	#[expect(clippy::mutable_key_type)]
 	pub(super) fn new(stm: &Statement<'_>) -> Self {
 		let mut idioms_agr: HashMap<Idiom, Aggregator> = HashMap::new();
 		if let Some(fields) = stm.expr() {

@@ -77,7 +77,7 @@ pub struct Snippet {
 	label: Option<String>,
 	/// The kind of snippet,
 	// Unused for now but could in the future be used to color snippets.
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	kind: MessageKind,
 }
 

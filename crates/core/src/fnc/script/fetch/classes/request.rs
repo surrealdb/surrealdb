@@ -376,7 +376,6 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 	}
 }
 
-#[allow(dead_code)]
 #[js::class]
 #[derive(Trace, JsLifetime)]
 #[non_exhaustive]
