@@ -546,7 +546,7 @@ impl<'a> TreeBuilder<'a> {
 	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Knn(k, None) = op {
 			if let Node::Computed(v) = n {
-				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
+				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
 				self.knn_expressions.insert(exp.clone());
 				return Ok(Some(IndexOperator::Knn(vec, *k)));
 			}
@@ -562,7 +562,7 @@ impl<'a> TreeBuilder<'a> {
 	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Ann(k, ef) = op {
 			if let Node::Computed(v) = n {
-				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
+				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
 				self.knn_expressions.insert(exp.clone());
 				return Ok(Some(IndexOperator::Ann(vec, *k, *ef)));
 			}
@@ -578,7 +578,7 @@ impl<'a> TreeBuilder<'a> {
 	) -> Result<(), Error> {
 		if let Operator::Knn(k, Some(d)) = exp.operator() {
 			if let Node::Computed(v) = val {
-				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
+				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
 				self.knn_expressions.insert(exp.clone());
 				self.knn_brute_force_expressions.insert(
 					exp.clone(),

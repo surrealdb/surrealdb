@@ -20,7 +20,7 @@ value = "NONE"
 value = "'works'"
 
 [[test.results]]
-error = "There was a problem running the ANONYMOUS function. Expected this function to return a value of type string, but found 123"
+error = "Couldn't coerce return value from function `ANONYMOUS`: Expected `string` but found `123`"
 
 [[test.results]]
 value = "NONE"

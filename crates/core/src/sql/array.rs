@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
 	fmt::{pretty_indent, Fmt, Pretty},
-	Number, Operation, Value,
+	Value,
 };
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -32,63 +32,12 @@ impl From<Value> for Array {
 	}
 }
 
-impl From<Vec<Value>> for Array {
-	fn from(v: Vec<Value>) -> Self {
-		Self(v)
-	}
-}
-
-impl From<Vec<i32>> for Array {
-	fn from(v: Vec<i32>) -> Self {
-		Self(v.into_iter().map(Value::from).collect())
-	}
-}
-
-impl From<Vec<f32>> for Array {
-	fn from(v: Vec<f32>) -> Self {
-		Self(v.into_iter().map(Value::from).collect())
-	}
-}
-
-impl From<Vec<f64>> for Array {
-	fn from(v: Vec<f64>) -> Self {
-		Self(v.into_iter().map(Value::from).collect())
-	}
-}
-
-impl From<Vec<usize>> for Array {
-	fn from(v: Vec<usize>) -> Self {
-		Self(v.into_iter().map(Value::from).collect())
-	}
-}
-
-impl From<Vec<&str>> for Array {
-	fn from(v: Vec<&str>) -> Self {
-		Self(v.into_iter().map(Value::from).collect())
-	}
-}
-
-impl From<Vec<String>> for Array {
-	fn from(v: Vec<String>) -> Self {
-		Self(v.into_iter().map(Value::from).collect())
-	}
-}
-
-impl From<Vec<Number>> for Array {
-	fn from(v: Vec<Number>) -> Self {
-		Self(v.into_iter().map(Value::from).collect())
-	}
-}
-
-impl From<Vec<Operation>> for Array {
-	fn from(v: Vec<Operation>) -> Self {
-		Self(v.into_iter().map(Value::from).collect())
-	}
-}
-
-impl From<Vec<bool>> for Array {
-	fn from(v: Vec<bool>) -> Self {
-		Self(v.into_iter().map(Value::from).collect())
+impl<T> From<Vec<T>> for Array
+where
+	Value: From<T>,
+{
+	fn from(v: Vec<T>) -> Self {
+		v.into_iter().map(Value::from).collect()
 	}
 }
 

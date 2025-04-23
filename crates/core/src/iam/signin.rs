@@ -2127,12 +2127,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let key = grant.get("key").unwrap().clone().as_string();
 
@@ -2244,12 +2244,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let key = grant.get("key").unwrap().clone().as_string();
 
@@ -2361,12 +2361,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let key = grant.get("key").unwrap().clone().as_string();
 
@@ -2447,12 +2447,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let key = grant.get("key").unwrap().clone().as_string();
 
@@ -2534,12 +2534,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let key = grant.get("key").unwrap().clone().as_string();
 
@@ -2630,12 +2630,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let key = grant.get("key").unwrap().clone().as_string();
 
@@ -2719,12 +2719,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let _key = grant.get("key").unwrap().clone().as_string();
 
@@ -2806,12 +2806,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let valid_key = grant.get("key").unwrap().clone().as_string();
 
@@ -2895,12 +2895,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let valid_key = grant.get("key").unwrap().clone().as_string();
 
@@ -2984,12 +2984,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let valid_key = grant.get("key").unwrap().clone().as_string();
 
@@ -3073,12 +3073,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let valid_key = grant.get("key").unwrap().clone().as_string();
 
@@ -3162,12 +3162,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap()
 					.get("grant")
 					.unwrap()
 					.clone()
-					.coerce_to_object()
+					.coerce_to::<Object>()
 					.unwrap();
 				let id = grant.get("id").unwrap().clone().as_string();
 				let key = grant.get("key").unwrap().clone().as_string();
@@ -3238,12 +3238,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let key = grant.get("key").unwrap().clone().as_string();
 
@@ -3313,12 +3313,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let key = grant.get("key").unwrap().clone().as_string();
 
@@ -3392,12 +3392,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let key = grant.get("key").unwrap().clone().as_string();
 
@@ -3472,12 +3472,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let key = grant.get("key").unwrap().clone().as_string();
 
@@ -3537,12 +3537,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let key = grant.get("key").unwrap().clone().as_string();
 
@@ -3603,12 +3603,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let key = grant.get("key").unwrap().clone().as_string();
 
@@ -3674,12 +3674,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let key = grant.get("key").unwrap().clone().as_string();
 
@@ -3740,12 +3740,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let _key = grant.get("key").unwrap().clone().as_string();
 
@@ -3804,12 +3804,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let valid_key = grant.get("key").unwrap().clone().as_string();
 
@@ -3872,12 +3872,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let valid_key = grant.get("key").unwrap().clone().as_string();
 
@@ -3940,12 +3940,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let valid_key = grant.get("key").unwrap().clone().as_string();
 
@@ -4008,12 +4008,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let valid_key = grant.get("key").unwrap().clone().as_string();
 
@@ -4076,12 +4076,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap()
 				.get("grant")
 				.unwrap()
 				.clone()
-				.coerce_to_object()
+				.coerce_to::<Object>()
 				.unwrap();
 			let id = grant.get("id").unwrap().clone().as_string();
 			let key = grant.get("key").unwrap().clone().as_string();

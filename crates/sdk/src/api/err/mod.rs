@@ -222,6 +222,9 @@ pub enum Error {
 	#[error("Insert queries on unspecified resource with no data are not supported")]
 	InsertOnUnspecified,
 
+	#[error("Crendentials for signin and signup should be an object")]
+	CrendentialsNotObject,
+
 	#[error("{0}")]
 	InvalidNetTarget(#[from] ParseNetTargetError),
 
