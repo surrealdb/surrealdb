@@ -158,8 +158,12 @@ default = [
     "storage-mem",
     "storage-surrealkv",
     "storage-rocksdb",
+    "storage-tikv",
     "scripting",
     "http",
+    "http-compression",
+    "jwks",
+    "ml"
 ]
 http = ["surrealdb/http"]
 http-compression = []
