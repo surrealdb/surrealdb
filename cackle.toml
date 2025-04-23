@@ -1331,3 +1331,6 @@ allow_unsafe = true
 
 [pkg.filetime]
 allow_unsafe = true
+
+[pkg.tar]
+allow_unsafe = true
