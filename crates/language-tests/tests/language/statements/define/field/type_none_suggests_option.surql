@@ -2,11 +2,13 @@
 [test]
 
 [test.results]
-parsing-error = """Unexpected token `NONE`, expected a kind name.
-  --> [13:41]
+parsing-error = """
+Unexpected token `NONE`, expected a kind name.
+  --> [15:41]
    |
-13 | DEFINE FIELD name ON user TYPE string | NONE;
-   |                                         ^^^^ to define a field that can be NONE, use option<type_name> instead."""
+15 | DEFINE FIELD name ON user TYPE string | NONE;
+   |                                         ^^^^ to define a field that can be NONE, use option<type_name> instead.
+"""
 
 */
 
