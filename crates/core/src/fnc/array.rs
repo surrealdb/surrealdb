@@ -603,7 +603,7 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 
 pub fn repeat((value, count): (Value, usize)) -> Result<Value, Error> {
 	limit("array::repeat", size_of_val(&value).saturating_mul(count))?;
-	Ok(Array(std::iter::repeat(value).take(count).collect()).into())
+	Ok(Array(std::iter::repeat_n(value, count).collect()).into())
 }
 
 pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {

@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
-use crate::sql::{Base, Ident, Value};
+use crate::sql::{Base, Ident, Table, Value};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -33,9 +33,12 @@ impl RemoveIndexStatement {
 			let txn = ctx.tx();
 			// Clear the index store cache
 			#[cfg(not(target_family = "wasm"))]
-			ctx.get_index_stores()
-				.index_removed(ctx.get_index_builder(), &txn, ns, db, &self.what, &self.name)
-				.await?;
+			{
+				let tb: Table = self.what.clone().into();
+				ctx.get_index_stores()
+					.index_removed(ctx.get_index_builder(), &txn, ns, db, &tb, &self.name)
+					.await?;
+			}
 			#[cfg(target_family = "wasm")]
 			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
 			// Delete the definition

@@ -30,7 +30,7 @@ use crate::key::index::hv::Hv;
 use crate::key::index::vm::Vm;
 use crate::kvs::{Key, KeyEncode as _, Val};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Id, Thing};
+use crate::sql::{Id, Table, Thing};
 use revision::Revisioned;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -46,7 +46,7 @@ pub struct IndexKeyBase {
 struct Inner {
 	ns: String,
 	db: String,
-	tb: String,
+	tb: Table,
 	ix: String,
 }
 
@@ -56,10 +56,14 @@ impl IndexKeyBase {
 			inner: Arc::new(Inner {
 				ns: ns.to_string(),
 				db: db.to_string(),
-				tb: ix.what.to_string(),
+				tb: ix.what.clone().into(),
 				ix: ix.name.to_string(),
 			}),
 		})
+	}
+
+	pub(crate) fn tb(&self) -> &Table {
+		&self.inner.tb
 	}
 
 	fn new_bc_key(&self, term_id: TermId) -> Result<Key, Error> {
