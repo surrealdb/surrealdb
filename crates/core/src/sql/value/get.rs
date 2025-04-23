@@ -249,12 +249,23 @@ impl Value {
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Destructure(p) => {
+						let cur_doc = CursorDoc::from(self.clone());
 						let mut obj = BTreeMap::<String, Value>::new();
 						for p in p.iter() {
 							let path = p.path();
-							let v = stk
-								.run(|stk| self.get(stk, ctx, opt, doc, path.as_slice()))
-								.await?;
+							let v = if let Some(Part::Start(start)) = path.get(0) {
+								let start = start.compute(stk, ctx, opt, Some(&cur_doc)).await?;
+								stk.run(|stk| {
+									start.get(stk, ctx, opt, Some(&cur_doc), &path.as_slice()[1..])
+								})
+								.await?
+							} else {
+								stk.run(|stk| {
+									self.get(stk, ctx, opt, Some(&cur_doc), path.as_slice())
+								})
+								.await?
+							};
+
 							obj.insert(p.field().to_raw(), v);
 						}
 
