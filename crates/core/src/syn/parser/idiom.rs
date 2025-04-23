@@ -2,8 +2,9 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
+		graph::GraphSubjects,
 		part::{DestructurePart, Recurse, RecurseInstruction},
-		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Tables, Value,
+		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Value,
 	},
 	syn::{
 		error::bail,
@@ -706,19 +707,17 @@ impl Parser<'_> {
 				let what = match token.kind {
 					t!("?") => {
 						self.pop_peek();
-						Tables::default()
+						GraphSubjects::default()
 					}
 					x if Self::kind_is_identifier(x) => {
-						// The following function should always succeed here,
-						// returning an error here would be a bug, so unwrap.
-						let table = self.next_token_value().unwrap();
-						let mut tables = Tables(vec![table]);
+						let subject = self.parse_graph_subject(ctx).await?;
+						let mut subjects = GraphSubjects(vec![subject]);
 						while self.eat(t!(",")) {
-							tables.0.push(self.next_token_value()?);
+							subjects.0.push(self.parse_graph_subject(ctx).await?);
 						}
-						tables
+						subjects
 					}
-					_ => unexpected!(self, token, "`?` or an identifier"),
+					_ => unexpected!(self, token, "`?`, an identifier or a range"),
 				};
 
 				let cond = self.try_parse_condition(ctx).await?;
@@ -766,10 +765,10 @@ impl Parser<'_> {
 			x if Self::kind_is_identifier(x) => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
-				let table = self.next_token_value().unwrap();
+				let subject = self.parse_graph_subject(ctx).await?;
 				Ok(Graph {
 					dir,
-					what: Tables(vec![table]),
+					what: GraphSubjects(vec![subject]),
 					..Default::default()
 				})
 			}
