@@ -18,10 +18,16 @@ value = "[{ email: 'testB@surrealdb.com', id: user:3 }]"
 value = "NONE"
 
 [[test.results]]
+error = "The index 'test' already exists"
+
+[[test.results]]
 value = "NONE"
 
 [[test.results]]
 value = "{ events: {  }, fields: {  }, indexes: { test: 'DEFINE INDEX test ON user FIELDS email' }, lives: {  }, tables: {  } }"
+
+[[test.results]]
+value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
 value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
@@ -40,9 +46,11 @@ CREATE user:1 SET email = 'testA@surrealdb.com';
 CREATE user:2 SET email = 'testA@surrealdb.com';
 CREATE user:3 SET email = 'testB@surrealdb.com';
 DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
+DEFINE INDEX `test` ON `user` FIELDS email CONCURRENTLY;
 SLEEP 1s;
 INFO FOR TABLE user;
 INFO FOR INDEX test ON user;
+INFO FOR INDEX `test` ON `user`;
 SELECT * FROM user WHERE email = 'testA@surrealdb.com' EXPLAIN;
 SELECT * FROM user WHERE email = 'testA@surrealdb.com';
 SELECT * FROM user WHERE email = 'testB@surrealdb.com';
