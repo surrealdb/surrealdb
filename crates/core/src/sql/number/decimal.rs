@@ -22,6 +22,7 @@ use std::str::FromStr;
 #[derive(
 	Clone, Copy, Default, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
 pub struct Decimal(pub RustDecimal);
 
