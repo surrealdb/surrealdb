@@ -23,16 +23,18 @@ pub(crate) use cmd::RouterRequest;
 use super::opt::Config;
 
 #[derive(Debug)]
-#[allow(dead_code)] // used by the embedded and remote connections
+#[allow(dead_code, reason = "Used by the embedded and remote connections.")]
 pub struct RequestData {
 	pub(crate) id: i64,
 	pub(crate) command: Command,
 }
 
 #[derive(Debug)]
-#[allow(dead_code)] // used by the embedded and remote connections
+#[allow(dead_code, reason = "Used by the embedded and remote connections.")]
 pub(crate) struct Route {
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) request: RequestData,
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) response: Sender<Result<DbResponse>>,
 }
 
@@ -183,10 +185,9 @@ pub enum DbResponse {
 
 #[derive(Debug, Clone)]
 pub(crate) struct MlExportConfig {
-	// fields are used in http and local non-wasm with ml features
-	#[allow(dead_code)]
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) name: String,
-	#[allow(dead_code)]
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) version: String,
 }
 

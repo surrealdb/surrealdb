@@ -222,7 +222,7 @@ async fn router_handle_response(
 				match response.id {
 					// If `id` is set this is a normal response
 					Some(id) => {
-						if let Ok(id) = id.coerce_to_i64() {
+						if let Ok(id) = id.coerce_to() {
 							// We can only route responses with IDs
 							if let Some(pending) = state.pending_requests.remove(&id) {
 								match pending.effect {
@@ -325,7 +325,7 @@ async fn router_handle_response(
 				}) = deserialize(&mut &binary[..], true)
 				{
 					// Return an error if an ID was returned
-					if let Some(Ok(id)) = id.map(CoreValue::coerce_to_i64) {
+					if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
 						if let Some(req) = state.pending_requests.remove(&id) {
 							let _res = req.response_channel.send(Err(error)).await;
 						} else {

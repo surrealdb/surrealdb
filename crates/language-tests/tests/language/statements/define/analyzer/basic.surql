@@ -1,4 +1,7 @@
 /**
+# Extra timeout due to file reading.
+timeout = 2000
+
 [test]
 
 [[test.results]]

@@ -5,10 +5,10 @@ use crate::{
 	ctx::Context,
 	dbs::Options,
 	err::Error,
-	sql::{File, Object, Value},
+	sql::{File, Object, Strand, Value},
 };
 
-use super::CursorDoc;
+use super::{args::Optional, CursorDoc};
 
 pub async fn put(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
@@ -60,7 +60,7 @@ pub async fn delete(
 
 pub async fn copy(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(file, target): (File, String),
+	(file, Strand(target)): (File, Strand),
 ) -> Result<Value, Error> {
 	let target = ObjectKey::from(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
@@ -71,7 +71,7 @@ pub async fn copy(
 
 pub async fn copy_if_not_exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(file, target): (File, String),
+	(file, Strand(target)): (File, Strand),
 ) -> Result<Value, Error> {
 	let target = ObjectKey::from(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
@@ -82,7 +82,7 @@ pub async fn copy_if_not_exists(
 
 pub async fn rename(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(file, target): (File, String),
+	(file, Strand(target)): (File, Strand),
 ) -> Result<Value, Error> {
 	let target = ObjectKey::from(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
@@ -93,7 +93,7 @@ pub async fn rename(
 
 pub async fn rename_if_not_exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(file, target): (File, String),
+	(file, Strand(target)): (File, Strand),
 ) -> Result<Value, Error> {
 	let target = ObjectKey::from(target);
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
@@ -114,7 +114,7 @@ pub async fn exists(
 
 pub async fn list(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(bucket, opts): (String, Option<Object>),
+	(bucket, Optional(opts)): (String, Optional<Object>),
 ) -> Result<Value, Error> {
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &bucket).await?;
 	let opts = opts.map(|v| v.try_into()).transpose()?.unwrap_or_default();

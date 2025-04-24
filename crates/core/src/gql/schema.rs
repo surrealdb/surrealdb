@@ -319,7 +319,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		// generate custom scalar from other literals?
 		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
 		Kind::References(ft, _) => {
-			let inner = match ft.to_owned() {
+			let inner = match ft.clone() {
 				Some(ft) => Kind::Record(vec![ft]),
 				None => Kind::Record(vec![]),
 			};

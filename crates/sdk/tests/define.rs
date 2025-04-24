@@ -254,9 +254,9 @@ async fn define_statement_index_concurrently_building_status(
 							continue;
 						}
 						"ready" => {
-							let initial = new_initial.unwrap().coerce_to_i64()? as usize;
-							let pending = new_pending.unwrap().coerce_to_i64()?;
-							let updated = new_updated.unwrap().coerce_to_i64()? as usize;
+							let initial = new_initial.unwrap().coerce_to::<i64>()? as usize;
+							let pending = new_pending.unwrap().coerce_to::<i64>()?;
+							let updated = new_updated.unwrap().coerce_to::<i64>()? as usize;
 							assert!(initial > 0, "{initial} > 0");
 							assert!(initial <= initial_size, "{initial} <= {initial_size}");
 							assert_eq!(pending, 0);

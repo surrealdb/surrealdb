@@ -162,6 +162,7 @@ impl Resource {
 	}
 }
 
+#[expect(clippy::fallible_impl_from)]
 impl std::convert::From<&Resource> for EntityUid {
 	fn from(res: &Resource) -> Self {
 		EntityUid::from_type_name_and_id(
@@ -177,6 +178,7 @@ impl std::convert::From<&Resource> for Entity {
 	}
 }
 
+#[expect(clippy::fallible_impl_from)]
 impl std::convert::From<&Resource> for RestrictedExpression {
 	fn from(res: &Resource) -> Self {
 		format!("{}", EntityUid::from(res)).parse().unwrap()
