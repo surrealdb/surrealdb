@@ -14,7 +14,6 @@ use crate::{
 	sql::FlowResultExt as _,
 };
 
-#[allow(clippy::module_inception)]
 mod classes;
 
 use crate::ctx::MutableContext;

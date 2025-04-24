@@ -27,7 +27,7 @@ impl Connection for Client {
 			let headers = super::default_headers();
 			let config = address.config.clone();
 
-			#[allow(unused_mut)]
+			#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_mut))]
 			let mut builder = ClientBuilder::new().default_headers(headers);
 
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]

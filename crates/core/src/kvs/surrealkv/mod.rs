@@ -91,6 +91,7 @@ impl Datastore {
 			_ => Err(Error::Ds("Invalid start string".into())),
 		}
 	}
+
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Shutdown the database
@@ -100,6 +101,7 @@ impl Datastore {
 		// Nothing to do here
 		Ok(())
 	}
+
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Specify the check level

@@ -9,7 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 // Traits cannot have async and we need sized structs for Clone + Send + Sync
-#[allow(dead_code)]
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum SizedClock {
@@ -21,7 +20,7 @@ pub enum SizedClock {
 }
 
 impl SizedClock {
-	#[allow(dead_code)] // not used when non of the storage backends are enabled.
+	#[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
 	pub(crate) fn system() -> Self {
 		Self::System(Default::default())
 	}
@@ -53,7 +52,7 @@ impl Clone for FakeClock {
 	}
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 impl FakeClock {
 	pub fn new(now: Timestamp) -> Self {
 		FakeClock {
@@ -91,7 +90,7 @@ impl Clone for IncFakeClock {
 	}
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 impl IncFakeClock {
 	pub fn new(now: Timestamp, increment: Duration) -> Self {
 		IncFakeClock {

@@ -51,10 +51,9 @@ impl DefineNamespaceStatement {
 		txn.set(
 			key,
 			revision::to_vec(&DefineNamespaceStatement {
-				id: if self.id.is_none() {
-					Some(txn.lock().await.get_next_ns_id().await?)
-				} else {
-					None
+				id: match self.id {
+					Some(id) => Some(id),
+					None => Some(txn.lock().await.get_next_ns_id().await?),
 				},
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,

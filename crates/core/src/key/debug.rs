@@ -6,7 +6,7 @@ pub trait Sprintable {
 
 impl Sprintable for &str {
 	fn sprint(&self) -> String {
-		self.to_string()
+		(*self).to_string()
 	}
 }
 

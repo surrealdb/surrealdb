@@ -17,7 +17,7 @@
 //!
 //! In your project’s Cargo.toml file, ensure that the release profile uses the following configuration:
 //!
-//! ```no_run
+//! ```toml
 //! [profile.release]
 //! lto = true
 //! strip = true
@@ -28,7 +28,7 @@
 //!
 //! In your project’s Cargo.toml file, ensure that the allocator feature is among those enabled on the surrealdb dependency:
 //!
-//! ```no_run
+//! ```toml
 //! surrealdb = { version = "2", features = ["allocator", "storage-mem", "storage-surrealkv", "storage-rocksdb", "protocol-http", "protocol-ws", "rustls"] }
 //! ```
 //!
@@ -157,7 +157,7 @@ pub use surrealdb_core::*;
 
 pub use uuid::Uuid;
 
-#[allow(hidden_glob_reexports)]
+#[expect(hidden_glob_reexports)]
 mod api;
 
 #[doc(hidden)]

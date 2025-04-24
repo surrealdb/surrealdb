@@ -175,7 +175,6 @@ pub async fn iam_check_cases(
 pub fn with_enough_stack(
 	fut: impl Future<Output = Result<(), Error>> + Send + 'static,
 ) -> Result<(), Error> {
-	#[allow(unused_mut)]
 	let mut builder = Builder::new();
 
 	// Roughly how much stack is allocated for surreal server workers in release mode
@@ -262,7 +261,7 @@ impl Test {
 
 	/// Creates a new instance of the `Self` struct with the given SQL query.
 	/// Arguments `sql` - A string slice representing the SQL query.
-	/// Panics if an error occurs.#[allow(dead_code)]
+	/// Panics if an error occurs.#[expect(dead_code)]
 	#[allow(dead_code)]
 	pub async fn new(sql: &str) -> Result<Self, Error> {
 		Self::new_ds(new_ds().await?, sql).await
@@ -295,7 +294,7 @@ impl Test {
 	/// The panic message will include the last position in the responses list before it was emptied.
 	#[track_caller]
 	#[allow(dead_code)]
-	#[allow(clippy::should_implement_trait)]
+	#[expect(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Result<Response, Error> {
 		assert!(!self.responses.is_empty(), "No response left - last position: {}", self.pos);
 		self.pos += 1;
@@ -341,11 +340,13 @@ impl Test {
 		} else {
 			val
 		};
-		if val.is_nan() {
-			assert!(tmp.is_nan(), "Expected NaN but got {info}: {tmp}");
-		} else {
-			assert_eq!(tmp, val, "{info} {tmp:#}");
+		if val.as_number().map(|x| x.is_nan()).unwrap_or(false) {
+			assert!(
+				tmp.as_number().map(|x| x.is_nan()).unwrap_or(false),
+				"Expected NaN but got {info}: {tmp}"
+			);
 		}
+		assert_eq!(tmp, val, "{info} {tmp:#}");
 		//
 		Ok(self)
 	}

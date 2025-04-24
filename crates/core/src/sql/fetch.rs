@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
+use super::Array;
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -72,7 +74,7 @@ impl Fetch {
 	) -> Result<(), Error> {
 		let strand_or_idiom = |v: Value| match v {
 			Value::Strand(s) => Ok(Idiom::from(s.0)),
-			Value::Idiom(i) => Ok(i.to_owned()),
+			Value::Idiom(i) => Ok(i.clone()),
 			v => Err(Error::InvalidFetch {
 				value: v,
 			}),
@@ -102,7 +104,7 @@ impl Fetch {
 						v => v.to_owned(),
 					};
 					// This value is always an array, so we can convert it
-					let args: Vec<Value> = args.try_into()?;
+					let Array(args) = args.coerce_to()?;
 					// This value is always an array, so we can convert it
 					for v in args.into_iter() {
 						let i = match v {

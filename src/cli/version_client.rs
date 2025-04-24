@@ -1,5 +1,3 @@
-#[allow(unused_imports)]
-// This is used in format! macro
 use crate::cli::upgrade::ROOT;
 use crate::err::Error;
 use reqwest::Client;
@@ -51,7 +49,7 @@ pub(crate) struct MapVersionClient {
 #[cfg(test)]
 impl VersionClient for MapVersionClient {
 	async fn fetch(&self, version: &str) -> Result<Cow<'static, str>, Error> {
-		let found = self.fetch_mock.get(version).unwrap();
+		let found = self.fetch_mock[version];
 		found().map(Cow::Owned)
 	}
 }

@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.3.0"
+version = "3.0.0"
 rust-version = "1.84.0"
 readme = "README.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -39,8 +39,18 @@ kv-rocksdb = [
     "dep:ext-sort",
     "dep:affinitypool",
 ]
-kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
-kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-tikv = [
+    "dep:tikv",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+]
+kv-fdb = [
+    "dep:foundationdb",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+]
 kv-surrealkv = [
     "dep:surrealkv",
     "tokio/time",
@@ -235,8 +245,8 @@ mimalloc = { workspace = true, optional = true, default-features = false }
 [target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 jemallocator = { workspace = true, optional = true }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(storage)'] }
+[lints]
+workspace = true
 
 [lib]
 name = "surrealdb_core"
