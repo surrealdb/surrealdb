@@ -1355,3 +1355,4 @@ allow_unsafe = true
 
 [pkg.surrealdb-tikv-client]
 allow_unsafe = true
+allow_apis = ["fs", "net"]
