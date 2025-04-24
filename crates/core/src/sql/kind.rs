@@ -554,7 +554,7 @@ impl Literal {
 					let value = x.get(key).unwrap_or(&Value::None);
 					if let Some(o) = discriminants
 						.iter()
-						.find(|o| value.to_owned().coerce_to_kind(o.get(key).unwrap()).is_ok())
+						.find(|o| value.to_owned().coerce_to_kind(&o[key]).is_ok())
 					{
 						if o.len() < x.len() {
 							return false;

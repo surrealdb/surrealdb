@@ -7,7 +7,10 @@ publish = false
 version = "3.0.0"
 
 [workspace]
-members = ["crates/core", "crates/sdk"]
+members = [
+    "crates/core",
+    "crates/sdk",
+]
 
 [workspace.dependencies]
 # workspace internal dependencies
