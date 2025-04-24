@@ -240,7 +240,7 @@ impl GraphSubject {
 						id,
 						dir,
 						&Thing {
-							tb: t.0.to_owned(),
+							tb: t.0.clone(),
 							id: v.to_owned(),
 						},
 					)
@@ -252,7 +252,7 @@ impl GraphSubject {
 						id,
 						dir,
 						&Thing {
-							tb: t.0.to_owned(),
+							tb: t.0.clone(),
 							id: v.to_owned(),
 						},
 					)
@@ -272,7 +272,7 @@ impl GraphSubject {
 						id,
 						dir,
 						&Thing {
-							tb: t.0.to_owned(),
+							tb: t.0.clone(),
 							id: v.to_owned(),
 						},
 					)
@@ -284,7 +284,7 @@ impl GraphSubject {
 						id,
 						dir,
 						&Thing {
-							tb: t.0.to_owned(),
+							tb: t.0.clone(),
 							id: v.to_owned(),
 						},
 					)
