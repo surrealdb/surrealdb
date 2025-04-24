@@ -37,11 +37,6 @@ impl Ident {
 		self.0.to_string()
 	}
 
-	/// Exposes the Ident to a raw str
-	pub fn as_raw_str(&self) -> &str {
-		self.0.as_str()
-	}
-
 	/// Checks if this field is the `id` field
 	pub(crate) fn is_dash(&self) -> bool {
 		self.0.as_str() == "-"

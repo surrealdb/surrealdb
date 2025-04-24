@@ -159,7 +159,7 @@ impl IndexBuilder {
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<(), Error> {
 		let (ns, db) = opt.ns_db()?;
-		let key = IndexKey::new(ns, db, ix.what.as_raw_str(), ix.name.as_raw_str());
+		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		match self.indexes.entry(key) {
 			Entry::Occupied(e) => {
 				// If the building is currently running, we return error
@@ -193,7 +193,7 @@ impl IndexBuilder {
 		new_values: Option<Vec<Value>>,
 		rid: &Thing,
 	) -> Result<ConsumeResult, Error> {
-		let key = IndexKey::new(ns, db, ix.what.as_raw_str(), ix.name.as_raw_str());
+		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		if let Some(r) = self.indexes.get(&key) {
 			let (b, _) = r.value();
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
@@ -207,7 +207,7 @@ impl IndexBuilder {
 		db: &str,
 		ix: &DefineIndexStatement,
 	) -> BuildingStatus {
-		let key = IndexKey::new(ns, db, ix.what.as_raw_str(), ix.name.as_raw_str());
+		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		if let Some(a) = self.indexes.get(&key) {
 			a.value().0.status.read().await.clone()
 		} else {
@@ -355,12 +355,12 @@ impl Building {
 
 	fn new_ia_key(&self, i: u32) -> Result<Ia, Error> {
 		let (ns, db) = self.opt.ns_db()?;
-		Ok(Ia::new(ns, db, self.ix.what.as_raw_str(), self.ix.name.as_raw_str(), i))
+		Ok(Ia::new(ns, db, &self.ix.what, &self.ix.name, i))
 	}
 
 	fn new_ip_key(&self, id: Id) -> Result<Ip, Error> {
 		let (ns, db) = self.opt.ns_db()?;
-		Ok(Ip::new(ns, db, self.ix.what.as_raw_str(), self.ix.name.as_raw_str(), id))
+		Ok(Ip::new(ns, db, &self.ix.what, &self.ix.name, id))
 	}
 
 	async fn new_read_tx(&self) -> Result<Transaction, Error> {
