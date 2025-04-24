@@ -333,38 +333,11 @@ impl Parser<'_> {
 			let part = match self.peek_kind() {
 				t!(":") => {
 					self.pop_peek();
-					let start = match self.peek_kind() {
-						x if Parser::kind_is_identifier(x) => Part::Field(self.next_token_value()?),
-						t!("->") => {
-							self.pop_peek();
-							let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
-							Part::Graph(graph)
-						}
-						found @ t!("<") => match self.peek_whitespace1().kind {
-							t!("-") => {
-								self.pop_peek();
-								self.pop_peek();
-								let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
-								Part::Graph(graph)
-							}
-							t!("->") => {
-								self.pop_peek();
-								self.pop_peek();
-								let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
-								Part::Graph(graph)
-							}
-							_ => {
-								bail!("Unexpected token `{}` expected an identifier, `->`, `<-` or `<->`", found, @self.recent_span());
-							}
-						},
-						found => {
-							bail!("Unexpected token `{}` expected an identifier, `->`, `<-` or `<->`", found, @self.recent_span());
-						}
+					let idiom = match self.parse_value_inherit(ctx).await? {
+						Value::Idiom(x) => x,
+						v => Idiom(vec![Part::Start(v)]),
 					};
-					DestructurePart::Aliased(
-						field,
-						self.parse_remaining_idiom(ctx, vec![start]).await?,
-					)
+					DestructurePart::Aliased(field, idiom)
 				}
 				t!(".") => {
 					self.pop_peek();

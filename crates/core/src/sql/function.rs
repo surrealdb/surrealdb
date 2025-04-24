@@ -358,7 +358,7 @@ impl Function {
 					Ok(result)
 				}
 			}
-			#[allow(unused_variables)]
+			#[cfg_attr(not(feature = "scripting"), expect(unused_variables))]
 			Self::Script(s, x) => {
 				#[cfg(feature = "scripting")]
 				{

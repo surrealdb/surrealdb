@@ -24,19 +24,17 @@ pub struct Cf<'a> {
 }
 impl_key!(Cf<'a>);
 
-#[allow(unused)]
+#[expect(unused)]
 pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
 	Cf::new(ns, db, VersionStamp::from_u64(ts), tb)
 }
 
-#[allow(unused)]
 pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
 	Ok(k)
 }
 
-#[allow(unused)]
 pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 	let mut k: Vec<u8> = vec![];
 	k.extend_from_slice(b"*");
@@ -48,7 +46,6 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.
-#[allow(unused)]
 pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>, Error> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
@@ -57,7 +54,7 @@ pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>, Error>
 }
 
 /// Returns the prefix for the whole database change feeds
-#[allow(unused)]
+#[expect(unused)]
 pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
@@ -65,7 +62,6 @@ pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
 }
 
 /// Returns the suffix for the whole database change feeds
-#[allow(unused)]
 pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(&[b'#', 0xff]);

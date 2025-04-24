@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
 
-#[allow(unused)]
+#[expect(unused)]
 pub(crate) trait Categorise {
 	/// Returns the category of the key for error reporting
 	fn categorise(&self) -> Category;
@@ -8,7 +8,7 @@ pub(crate) trait Categorise {
 
 #[derive(Debug, Copy, Clone)]
 #[non_exhaustive]
-#[allow(unused)]
+#[expect(unused)]
 pub enum Category {
 	/// crate::key::storage::version         /sv
 	Version,

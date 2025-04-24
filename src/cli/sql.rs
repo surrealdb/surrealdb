@@ -410,7 +410,7 @@ struct InputValidator<'a> {
 	capabilities: &'a CoreCapabilities,
 }
 
-#[allow(clippy::if_same_then_else)]
+#[expect(clippy::if_same_then_else)]
 impl Validator for InputValidator<'_> {
 	fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
 		use ValidationResult::{Incomplete, Invalid, Valid};
