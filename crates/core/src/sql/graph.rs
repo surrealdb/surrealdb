@@ -1,4 +1,8 @@
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::exe::try_join_all_buffered;
 use crate::kvs::KeyEncode;
 use crate::sql::cond::Cond;
 use crate::sql::dir::Dir;
@@ -10,6 +14,7 @@ use crate::sql::order::{OldOrders, Order, OrderList, Ordering};
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
 use crate::sql::table::Tables;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
@@ -164,6 +169,23 @@ impl Deref for GraphSubjects {
 	}
 }
 
+impl GraphSubjects {
+	pub(crate) async fn compute(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Self, Error> {
+		stk.scope(|scope| {
+			let futs = self.0.into_iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc)));
+			try_join_all_buffered(futs)
+		})
+		.await
+		.map(GraphSubjects)
+	}
+}
+
 impl Display for GraphSubjects {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
@@ -180,6 +202,21 @@ pub enum GraphSubject {
 }
 
 impl GraphSubject {
+	pub(crate) async fn compute(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Self, Error> {
+		if let Self::Range(tb, rng) = self {
+			let rng = rng.compute(stk, ctx, opt, doc).await?;
+			Ok(Self::Range(tb, rng))
+		} else {
+			Ok(self)
+		}
+	}
+
 	pub(crate) fn presuf(
 		&self,
 		ns: &str,
@@ -228,7 +265,7 @@ impl GraphSubject {
 				// Prepare the range end key
 				let end = match &r.end {
 					Bound::Unbounded => crate::key::graph::ftsuffix(ns, db, tb, id, dir, &t.0),
-					Bound::Included(v) => crate::key::graph::new(
+					Bound::Excluded(v) => crate::key::graph::new(
 						ns,
 						db,
 						tb,
@@ -240,7 +277,7 @@ impl GraphSubject {
 						},
 					)
 					.encode(),
-					Bound::Excluded(v) => crate::key::graph::new(
+					Bound::Included(v) => crate::key::graph::new(
 						ns,
 						db,
 						tb,
