@@ -1349,3 +1349,6 @@ allow_apis = ["fs", "process"]
 
 [pkg.prometheus]
 allow_unsafe = true
+
+[pkg.take_mut]
+allow_unsafe = true
