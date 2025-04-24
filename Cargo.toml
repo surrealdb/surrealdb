@@ -177,6 +177,7 @@ storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 # Deprecated features
 # Doesn't do anything. Use a version specific `storage-fdb-*` feature instead.
 storage-fdb = ["surrealdb/kv-fdb"]
+enterprise = ["surrealdb-core/enterprise"]
 
 [profile.release]
 codegen-units = 1

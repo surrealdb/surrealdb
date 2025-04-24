@@ -39,18 +39,8 @@ kv-rocksdb = [
     "dep:ext-sort",
     "dep:affinitypool",
 ]
-kv-tikv = [
-    "dep:tikv",
-    "tokio/time",
-    "dep:tempfile",
-    "dep:ext-sort",
-]
-kv-fdb = [
-    "dep:foundationdb",
-    "tokio/time",
-    "dep:tempfile",
-    "dep:ext-sort",
-]
+kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = [
     "dep:surrealkv",
     "tokio/time",
@@ -75,6 +65,7 @@ allocation-tracking = []
 # Special features
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 kv-fdb-7_3 = ["foundationdb/fdb-7_3", "kv-fdb"]
+enterprise = []
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
