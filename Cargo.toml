@@ -10,6 +10,7 @@ version = "3.0.0"
 members = [
     "crates/core",
     "crates/sdk",
+    "crates/language-tests",
 ]
 
 [workspace.dependencies]

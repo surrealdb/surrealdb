@@ -63,7 +63,7 @@ fn try_collect_reports<W: io::Write>(
 
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let path: &String = matches.get_one("path").unwrap();
-	let (testset, load_errors) = TestSet::collect_directory(&path).await?;
+	let (testset, load_errors) = TestSet::collect_directory(path).await?;
 	let backend = *matches.get_one::<Backend>("backend").unwrap();
 
 	// Check if the backend is supported by the enabled features.
@@ -317,14 +317,14 @@ async fn run_test_with_dbs(
 		let Some(test) = set.find_all(import) else {
 			return Ok(TestTaskResult::Import(
 				import.to_string(),
-				format!("Could not find import."),
+				"Could not find import.".to_string(),
 			));
 		};
 
 		let Ok(source) = str::from_utf8(&set[test].source) else {
 			return Ok(TestTaskResult::Import(
 				import.to_string(),
-				format!("Import file was not valid utf-8."),
+				"Import file was not valid utf-8.".to_string(),
 			));
 		};
 

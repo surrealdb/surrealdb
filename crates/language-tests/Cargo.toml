@@ -3,9 +3,7 @@ name = "surrealql-test"
 version = "0.1.0"
 publish = false
 edition = "2021"
-
-[workspace]
-members = []
+publish = false
 
 [features]
 default = ["backend-mem"]
@@ -18,9 +16,9 @@ upgrade = ["backend-surrealkv"] # Upgrade test suite.
 
 [dependencies]
 # Crates for running surrealdb.
-surrealdb-core = { path = "../core/", default-features=false, features = ["scripting"] }
-reblessive = { version = "0.4.3" }
-rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
+surrealdb-core = { workspace = true, default-features=false, features = ["scripting"] }
+reblessive = { workspace = true }
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 
 # Used for capturing logs from core
 #tracing = "*"
@@ -44,3 +42,5 @@ semver = "1.0.26"
 base64 = "0.21.5"
 similar = "2.6.0"
 
+[lints]
+workspace = true
