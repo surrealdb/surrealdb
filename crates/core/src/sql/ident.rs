@@ -36,7 +36,6 @@ impl Ident {
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
 	}
-
 	/// Checks if this field is the `id` field
 	pub(crate) fn is_dash(&self) -> bool {
 		self.0.as_str() == "-"
