@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub(in crate::idx) struct HnswDocs {
+	tb: String,
 	ikb: IndexKeyBase,
 	state_key: Key,
 	state_updated: bool,
@@ -30,7 +31,11 @@ struct State {
 impl VersionedStore for State {}
 
 impl HnswDocs {
-	pub(in crate::idx) async fn new(tx: &Transaction, ikb: IndexKeyBase) -> Result<Self, Error> {
+	pub(in crate::idx) async fn new(
+		tx: &Transaction,
+		tb: String,
+		ikb: IndexKeyBase,
+	) -> Result<Self, Error> {
 		let state_key = ikb.new_hd_key(None)?;
 		let state = if let Some(k) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(k)?
@@ -38,6 +43,7 @@ impl HnswDocs {
 			State::default()
 		};
 		Ok(Self {
+			tb,
 			ikb,
 			state_updated: false,
 			state_key,
@@ -79,7 +85,7 @@ impl HnswDocs {
 		let doc_key = self.ikb.new_hd_key(Some(doc_id))?;
 		if let Some(val) = tx.get(doc_key, None).await? {
 			let id: Id = revision::from_slice(&val)?;
-			Ok(Some(Thing::from((self.ikb.tb().as_str(), id))))
+			Ok(Some(Thing::from((self.tb.to_owned(), id))))
 		} else {
 			Ok(None)
 		}

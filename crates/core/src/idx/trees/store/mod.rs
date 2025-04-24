@@ -239,7 +239,7 @@ impl IndexStores {
 	) -> Result<SharedHnswIndex, Error> {
 		let (ns, db) = opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, ix)?;
-		self.0.hnsw_indexes.get(ctx, &ikb, p).await
+		self.0.hnsw_indexes.get(ctx, ix.what.as_raw_str(), &ikb, p).await
 	}
 
 	pub(crate) async fn index_removed(

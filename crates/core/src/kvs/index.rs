@@ -11,7 +11,7 @@ use crate::kvs::ds::TransactionFactory;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Id, Object, Table, Thing, Value};
+use crate::sql::{Id, Object, Thing, Value};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use reblessive::TreeStack;
@@ -159,8 +159,7 @@ impl IndexBuilder {
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<(), Error> {
 		let (ns, db) = opt.ns_db()?;
-		let tb: Table = ix.what.clone().into();
-		let key = IndexKey::new(ns, db, &tb, &ix.name);
+		let key = IndexKey::new(ns, db, ix.what.as_raw_str(), ix.name.as_raw_str());
 		match self.indexes.entry(key) {
 			Entry::Occupied(e) => {
 				// If the building is currently running, we return error
@@ -172,7 +171,7 @@ impl IndexBuilder {
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, tb)?);
+				let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
 				let b = building.clone();
 				let jh = task::spawn(async move {
 					if let Err(err) = b.run().await {
@@ -194,8 +193,7 @@ impl IndexBuilder {
 		new_values: Option<Vec<Value>>,
 		rid: &Thing,
 	) -> Result<ConsumeResult, Error> {
-		let tb: Table = ix.what.clone().into();
-		let key = IndexKey::new(ns, db, &tb, &ix.name);
+		let key = IndexKey::new(ns, db, ix.what.as_raw_str(), ix.name.as_raw_str());
 		if let Some(r) = self.indexes.get(&key) {
 			let (b, _) = r.value();
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
@@ -209,8 +207,7 @@ impl IndexBuilder {
 		db: &str,
 		ix: &DefineIndexStatement,
 	) -> BuildingStatus {
-		let tb: Table = ix.what.clone().into();
-		let key = IndexKey::new(ns, db, &tb, &ix.name);
+		let key = IndexKey::new(ns, db, ix.what.as_raw_str(), ix.name.as_raw_str());
 		if let Some(a) = self.indexes.get(&key) {
 			a.value().0.status.read().await.clone()
 		} else {
@@ -285,7 +282,7 @@ struct Building {
 	opt: Options,
 	tf: TransactionFactory,
 	ix: Arc<DefineIndexStatement>,
-	tb: Table,
+	tb: String,
 	status: Arc<RwLock<BuildingStatus>>,
 	queue: Arc<RwLock<QueueSequences>>,
 	aborted: AtomicBool,
@@ -297,13 +294,12 @@ impl Building {
 		tf: TransactionFactory,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
-		tb: Table,
 	) -> Result<Self, Error> {
 		Ok(Self {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,
 			tf,
-			tb,
+			tb: ix.what.to_raw(),
 			ix,
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
@@ -359,12 +355,12 @@ impl Building {
 
 	fn new_ia_key(&self, i: u32) -> Result<Ia, Error> {
 		let (ns, db) = self.opt.ns_db()?;
-		Ok(Ia::new(ns, db, &self.tb, &self.ix.name, i))
+		Ok(Ia::new(ns, db, self.ix.what.as_raw_str(), self.ix.name.as_raw_str(), i))
 	}
 
 	fn new_ip_key(&self, id: Id) -> Result<Ip, Error> {
 		let (ns, db) = self.opt.ns_db()?;
-		Ok(Ip::new(ns, db, &self.tb, &self.ix.name, id))
+		Ok(Ip::new(ns, db, self.ix.what.as_raw_str(), self.ix.name.as_raw_str(), id))
 	}
 
 	async fn new_read_tx(&self) -> Result<Transaction, Error> {
@@ -547,7 +543,7 @@ impl Building {
 			if let Some(v) = tx.get(ia.clone(), None).await? {
 				tx.del(ia).await?;
 				let a: Appending = revision::from_slice(&v)?;
-				let rid = Thing::from((self.tb.as_str(), a.id));
+				let rid = Thing::from((self.tb.clone(), a.id));
 				let mut io =
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
 				stack.enter(|stk| io.compute(stk)).finish().await?;

@@ -71,12 +71,17 @@ impl<'a> HnswCheckedSearchContext<'a> {
 }
 
 impl HnswIndex {
-	pub async fn new(tx: &Transaction, ikb: IndexKeyBase, p: &HnswParams) -> Result<Self, Error> {
+	pub async fn new(
+		tx: &Transaction,
+		ikb: IndexKeyBase,
+		tb: String,
+		p: &HnswParams,
+	) -> Result<Self, Error> {
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
 			hnsw: HnswFlavor::new(ikb.clone(), p)?,
-			docs: HnswDocs::new(tx, ikb.clone()).await?,
+			docs: HnswDocs::new(tx, tb, ikb.clone()).await?,
 			vec_docs: VecDocs::new(ikb),
 		})
 	}

@@ -23,6 +23,7 @@ impl HnswIndexes {
 	pub(super) async fn get(
 		&self,
 		ctx: &Context,
+		tb: &str,
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex, Error> {
@@ -35,7 +36,9 @@ impl HnswIndexes {
 		let ix = match w.entry(key) {
 			Entry::Occupied(e) => e.get().clone(),
 			Entry::Vacant(e) => {
-				let h = Arc::new(RwLock::new(HnswIndex::new(&ctx.tx(), ikb.clone(), p).await?));
+				let h = Arc::new(RwLock::new(
+					HnswIndex::new(&ctx.tx(), ikb.clone(), tb.to_string(), p).await?,
+				));
 				e.insert(h.clone());
 				h
 			}
