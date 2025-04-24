@@ -187,25 +187,6 @@ pub fn duration((dur1, dur2): (Duration, Duration)) -> Result<Value, Error> {
 	Ok(Value::Duration(Duration::new(secs, nanos)))
 }
 
-pub fn duration((dur1, dur2): (Duration, Duration)) -> Result<Value, Error> {
-	// Sort from low to high
-	let (from, to) = match dur2 > dur1 {
-		true => (dur1, dur2),
-		false => (dur2, dur1),
-	};
-
-	let rand = rand::thread_rng().gen_range(from.as_nanos()..=to.as_nanos());
-
-	let nanos = (rand % 1_000_000_000) as u32;
-
-	// Max Duration is made of (u64::MAX, NANOS_PER_SEC - 1) so will never overflow
-	let Ok(secs) = u64::try_from(rand / 1_000_000_000) else {
-		return Err(Error::Unreachable("Overflow inside rand::duration()".into()));
-	};
-
-	Ok(Value::Duration(Duration::new(secs, nanos)))
-}
-
 pub fn time((NoneOrRange(range),): (NoneOrRange<Value>,)) -> Result<Value, Error> {
 	// Process the arguments
 	let range = match range {
