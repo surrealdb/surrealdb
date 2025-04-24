@@ -25,7 +25,7 @@ on:
       extra-features:
         required: false
         type: string
-        default: ml
+        default: storage-tikv,http-compression,jwks,ml
         description: "Extra features enabled in the binary"
       publish:
         required: false
