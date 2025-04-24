@@ -127,16 +127,7 @@ jobs:
           sudo systemctl reload apparmor
 
       - name: Check dependencies for unauthorized access
-        run: |
-          set -x
-
-          # Download libonnxruntime's static library and tell ORT crate to use it
-          tmpDir=$(mktemp -d)
-          curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v1.16.3/onnxruntime-linux-x64-static_lib-1.16.3.tgz | \
-            tar -xz -C $tmpDir
-          export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpDir/lib
-
-          cargo acl -n
+        run: cargo acl -n
 
       - name: Dependency check failure
         if: failure()
