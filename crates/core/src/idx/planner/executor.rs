@@ -31,13 +31,13 @@ use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs::TransactionType;
 use crate::sql::index::{Distance, Index};
+use crate::sql::number::Decimal;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{
 	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
 };
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
-use rust_decimal::Decimal;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -529,7 +529,7 @@ impl QueryExecutor {
 			Number::Float(f) => {
 				oi = float_to_int(f);
 				of = Some(*f);
-				od = Decimal::from_f64(*f).map(|d| d.normalize());
+				od = Decimal::from_f64(*f);
 			}
 			Number::Decimal(d) => {
 				oi = d.to_i64();

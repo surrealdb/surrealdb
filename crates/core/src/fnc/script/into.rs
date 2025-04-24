@@ -14,7 +14,7 @@ use js::Null;
 use js::Object;
 use js::TypedArray;
 use js::Undefined;
-use rust_decimal::prelude::ToPrimitive;
+use num_traits::ToPrimitive;
 
 const F64_INT_MAX: i64 = ((1u64 << f64::MANTISSA_DIGITS) - 1) as i64;
 const F64_INT_MIN: i64 = -F64_INT_MAX - 1;

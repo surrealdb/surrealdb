@@ -341,12 +341,14 @@ impl Test {
 			val
 		};
 		if val.as_number().map(|x| x.is_nan()).unwrap_or(false) {
+			eprintln!("HERE");
 			assert!(
 				tmp.as_number().map(|x| x.is_nan()).unwrap_or(false),
 				"Expected NaN but got {info}: {tmp}"
 			);
+		} else {
+			assert_eq!(tmp, val, "{info} {tmp:#}");
 		}
-		assert_eq!(tmp, val, "{info} {tmp:#}");
 		//
 		Ok(self)
 	}

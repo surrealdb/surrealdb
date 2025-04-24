@@ -24,7 +24,7 @@ where
 	match_type!(value, {
 		Value as v => Ok(v),
 		sql::Number as v => Ok(v.into()),
-		rust_decimal::Decimal as v => Ok(v.into()),
+		crate::sql::number::Decimal as v => Ok(v.into()),
 		sql::Strand as v => Ok(v.into()),
 		sql::Duration as v => Ok(v.into()),
 		core::time::Duration as v => Ok(v.into()),

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::sql::number::Decimal;
 use reblessive::Stack;
-use rust_decimal::Decimal;
 
 use crate::{
 	sql::{

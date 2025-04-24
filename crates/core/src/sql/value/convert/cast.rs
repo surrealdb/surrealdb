@@ -1,7 +1,7 @@
 use std::{fmt, ops::Bound, str::FromStr as _};
 
+use crate::sql::number::Decimal;
 use geo::Point;
-use rust_decimal::Decimal;
 
 use crate::sql::{
 	array::Uniq as _, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, Duration, File,

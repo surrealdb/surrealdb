@@ -1,7 +1,7 @@
+use crate::sql::number::Decimal;
 use ciborium::Value as Data;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
-use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::iter::once;
 use std::ops::Bound;
@@ -124,7 +124,7 @@ impl TryFrom<Cbor> for Value {
 					// A literal decimal
 					TAG_STRING_DECIMAL => match *v {
 						Data::Text(v) => match Decimal::from_str(v.as_str()) {
-							Ok(v) => Ok(v.normalize().into()),
+							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Decimal value"),
 						},
 						_ => Err("Expected a CBOR text data type"),

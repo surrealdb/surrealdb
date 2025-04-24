@@ -72,6 +72,7 @@ pub trait Divide {
 }
 
 fn vector_div(a: &Number, b: &Number) -> Number {
+	eprintln!("vector_div: a = {:?}, b = {:?}", a, b);
 	if a.is_nan() || b.is_nan() || b.is_zero() {
 		Number::NAN
 	} else {

@@ -220,6 +220,7 @@ mod tests {
 	mod into_json {
 		use crate::sql;
 		use crate::sql::from_value;
+		use crate::sql::number::Decimal;
 		use crate::sql::Value;
 		use chrono::DateTime;
 		use chrono::Utc;
@@ -232,7 +233,6 @@ mod tests {
 		use geo::MultiPolygon;
 		use geo::Point;
 		use geo::Polygon;
-		use rust_decimal::Decimal;
 		use serde_json::json;
 		use serde_json::Value as Json;
 		use std::collections::BTreeMap;

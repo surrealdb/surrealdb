@@ -2,8 +2,8 @@ use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, 
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
+pub use num_traits::{FromPrimitive, Signed, ToPrimitive};
 use revision::revisioned;
-use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::f64::consts::PI;
@@ -13,8 +13,13 @@ use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
+use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
+
+mod decimal;
+
+pub use decimal::Decimal;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
@@ -323,7 +328,7 @@ impl Number {
 	pub fn to_decimal(&self) -> Decimal {
 		match self {
 			Number::Int(v) => Decimal::from(*v),
-			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default().normalize(),
+			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
 			Number::Decimal(v) => *v,
 		}
 	}
@@ -1021,10 +1026,11 @@ impl ToFloat for Number {
 mod tests {
 	use std::cmp::Ordering;
 
+	use super::*;
+	use num_traits::FromPrimitive;
 	use rand::seq::SliceRandom;
 	use rand::thread_rng;
 	use rand::Rng;
-	use rust_decimal::Decimal;
 
 	use super::Number;
 	use super::TryFloatDiv;
@@ -1147,5 +1153,14 @@ mod tests {
 			let c = random_permutation(b);
 			assert_consistent(a, b, c);
 		}
+	}
+
+	#[test]
+	fn test_decimal_quickly() {
+		let a = Decimal::from_str_exact("0.0").unwrap();
+		let b = Decimal::from_f64(0.0).unwrap();
+
+		assert_eq!(a, b);
+		assert_eq!(storekey::serialize(&a).unwrap(), storekey::serialize(&b).unwrap());
 	}
 }

@@ -627,10 +627,10 @@ pub(super) mod tests {
 	use ahash::HashMap;
 	use ahash::HashSet;
 	use flate2::read::GzDecoder;
+	use num_traits::Zero;
 	use rand::prelude::SmallRng;
 	use rand::{Rng, SeedableRng};
 	use roaring::RoaringTreemap;
-	use rust_decimal::prelude::Zero;
 	use std::cmp::Reverse;
 	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
 	use std::fs::File;

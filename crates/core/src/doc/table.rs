@@ -7,6 +7,7 @@ use crate::sql::data::Data;
 use crate::sql::expression::Expression;
 use crate::sql::field::{Field, Fields};
 use crate::sql::idiom::Idiom;
+use crate::sql::number::Decimal;
 use crate::sql::number::Number;
 use crate::sql::operator::Operator;
 use crate::sql::part::Part;
@@ -21,7 +22,6 @@ use crate::sql::value::{Value, Values};
 use crate::sql::{Cond, FlowResultExt as _, Function, Groups, View};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
-use rust_decimal::Decimal;
 
 type Ops = Vec<(Idiom, Operator, Value)>;
 

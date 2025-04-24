@@ -4,6 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::number::Decimal;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -14,7 +15,6 @@ use crate::sql::{
 use crate::syn;
 use geo::Point;
 use reblessive::tree::Stk;
-use rust_decimal::Decimal;
 
 use super::args::Optional;
 

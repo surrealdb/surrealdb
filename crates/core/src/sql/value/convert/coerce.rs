@@ -4,8 +4,8 @@ use std::{
 	hash::BuildHasher,
 };
 
+use crate::sql::number::Decimal;
 use geo::Point;
-use rust_decimal::Decimal;
 
 use crate::sql::{
 	array::Uniq, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, Duration, File,

@@ -140,8 +140,8 @@ pub mod similarity {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::sql::number::Decimal;
 	use crate::sql::Number;
-	use rust_decimal::Decimal;
 
 	#[test]
 	fn vector_scale_int() {

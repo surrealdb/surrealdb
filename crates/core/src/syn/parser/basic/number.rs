@@ -1,6 +1,6 @@
 use std::{mem, num::ParseIntError, str::FromStr};
 
-use rust_decimal::Decimal;
+use crate::sql::number::Decimal;
 
 use crate::{
 	sql::Number,
@@ -114,7 +114,7 @@ impl TokenValue for Number {
 								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
 							)?
 						};
-						Ok(Number::Decimal(decimal.normalize()))
+						Ok(Number::Decimal(decimal))
 					}
 				}
 			}

@@ -5,7 +5,7 @@ use std::{
 	time::Duration,
 };
 
-use rust_decimal::Decimal;
+use crate::sql::number::Decimal;
 
 use crate::{
 	sql::{
@@ -184,7 +184,7 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Number, SyntaxError> {
 					|e| syntax_error!("Failed to parser decimal: {e}", @lexer.current_span()),
 				)?
 			};
-			Ok(Number::Decimal(decimal.normalize()))
+			Ok(Number::Decimal(decimal))
 		}
 	}
 }
