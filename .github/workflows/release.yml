@@ -10,8 +10,8 @@ on:
       branch:
         required: true
         type: string
-        description: "The github branch of this release"
         default: main
+        description: "The github branch of this release"
       suffix:
         required: true
         type: string
@@ -25,6 +25,7 @@ on:
       extra-features:
         required: false
         type: string
+        default: ml
         description: "Extra features enabled in the binary"
       publish:
         required: false

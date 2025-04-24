@@ -163,7 +163,6 @@ default = [
     "http",
     "http-compression",
     "jwks",
-    "ml"
 ]
 http = ["surrealdb/http"]
 http-compression = []

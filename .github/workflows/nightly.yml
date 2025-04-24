@@ -29,5 +29,6 @@ jobs:
     with:
       suffix: nightly
       git-ref: main
+      extra-features: ml
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
     secrets: inherit
