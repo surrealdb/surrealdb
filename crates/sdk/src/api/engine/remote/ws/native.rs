@@ -224,9 +224,7 @@ async fn router_handle_route(
 		} => {
 			state.replay.insert(ReplayMethod::Signin, command.clone());
 		}
-		Command::Invalidate {
-			..
-		} => {
+		Command::Invalidate => {
 			state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {

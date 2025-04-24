@@ -56,8 +56,8 @@ impl IndexKeyBase {
 			inner: Arc::new(Inner {
 				ns: ns.to_string(),
 				db: db.to_string(),
-				tb: ix.what.to_string(),
-				ix: ix.name.to_string(),
+				tb: ix.what.to_raw(),
+				ix: ix.name.to_raw(),
 			}),
 		})
 	}
