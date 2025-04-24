@@ -277,7 +277,7 @@ jobs:
           ref: ${{ needs.prepare-vars.outputs.git-ref }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@1.85.0
         with:
           toolchain: ${{ inputs.rust_version }}
           targets: wasm32-unknown-unknown
