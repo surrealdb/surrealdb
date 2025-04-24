@@ -241,13 +241,14 @@ impl Value {
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Destructure(p) => {
+						let cur_doc = CursorDoc::from(self.clone());
 						let mut obj = BTreeMap::<String, Value>::new();
 						for p in p.iter() {
-							let path = p.path();
-							let v = stk
-								.run(|stk| self.get(stk, ctx, opt, doc, path.as_slice()))
-								.await?;
-							obj.insert(p.field().to_raw(), v);
+							let idiom = p.idiom();
+							obj.insert(
+								p.field().to_raw(),
+								stk.run(|stk| idiom.compute(stk, ctx, opt, Some(&cur_doc))).await?,
+							);
 						}
 
 						let obj = Value::from(obj);
