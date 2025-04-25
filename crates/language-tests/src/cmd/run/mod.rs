@@ -261,7 +261,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	}
 
 	if reports.iter().any(|x| x.grade() == TestGrade::Failed) {
-		bail!("Not all tests where successfull")
+		bail!("Not all tests were successfull")
 	}
 
 	if !load_errors.is_empty() {

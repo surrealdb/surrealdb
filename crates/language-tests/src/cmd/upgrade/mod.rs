@@ -315,7 +315,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	}
 
 	if reports.iter().any(|x| x.grade() == TestGrade::Failed) {
-		bail!("Not all tests where successfull")
+		bail!("Not all tests were successfull")
 	}
 
 	Ok(())
@@ -519,8 +519,23 @@ async fn run_task_inner(
 	process.quit().await?;
 
 	// run tests on existing dataset.
-	let process = process::SurrealProcess::new(&config, &task.to, dir, port).await?;
-	let result = run_upgrade_test(&task, &test_set, process, namespace, database).await?;
+	// Loop is a workaround for some cases where the start up of the database suddenly becomes
+	// excessivly slow, so we just retry once in this case.
+	let mut retried = false;
+	let result = loop {
+		let process = process::SurrealProcess::new(&config, &task.to, dir, port).await?;
+		match run_upgrade_test(&task, &test_set, process, namespace, database).await {
+			Ok(x) => break x,
+			Err(e) => {
+				if retried || !format!("{:#?}", e).contains("open connection") {
+					return Err(e);
+				} else {
+					retried = true;
+					continue;
+				}
+			}
+		}
+	};
 
 	if !config.keep_files {
 		let _ = tokio::fs::remove_dir_all(dir).await;

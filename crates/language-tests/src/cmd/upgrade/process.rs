@@ -96,6 +96,8 @@ impl SurrealProcess {
 
 		command
 			.args(common_args)
+			// Set the worker threads to 1 so the different processes interver less with eachother
+			.env("SURREAL_RUNTIME_WORKER_THREADS", "1")
 			.stdin(Stdio::null())
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped())
