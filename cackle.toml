@@ -9,7 +9,7 @@ features = ["default"]
 build_flags = ["--tests"]
 
 [sandbox]
-kind = "Bubblewrap"
+kind = "Disabled"
 
 [api.fs]
 include = ["rustix::fs", "tokio::fs"]
@@ -1031,6 +1031,9 @@ allow_apis = ["net"]
 
 [pkg.cpp_demangle]
 allow_unsafe = true
+build.allow_apis = [
+    "fs",
+]
 
 [pkg.memmap2]
 allow_unsafe = true
@@ -1064,6 +1067,9 @@ allow_unsafe = true
 
 [pkg.object]
 allow_unsafe = true
+build.allow_apis = [
+    "process",
+]
 
 [pkg.findshlibs]
 allow_unsafe = true
@@ -1223,6 +1229,7 @@ allow_apis = ["fs"]
 
 [pkg.equator-macro]
 allow_proc_macro = true
+allow_unsafe = true
 
 [pkg.zerovec-derive]
 allow_proc_macro = true
@@ -1359,3 +1366,9 @@ allow_apis = ["fs", "net"]
 
 [pkg.derive_arbitrary]
 allow_proc_macro = true
+
+[pkg.equator]
+allow_unsafe = true
+
+[pkg.aligned-vec]
+allow_unsafe = true

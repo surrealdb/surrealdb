@@ -550,7 +550,7 @@ category = "CI - LANGUAGE TESTS"
 command = "cargo"
 args = [
     "run",
-    # "--locked",
+    "--locked",
     "--package",
     "language-tests",
     "--",
@@ -630,3 +630,67 @@ run_task = { name = ["bench-target"] }
 category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
 run_task = { name = ["bench-target"] }
+
+#
+# Supply Chain
+#
+[tasks.install-cargo-vet]
+category = "CI - SUPPLY CHAIN"
+command = "cargo"
+args = [
+    "binstall",
+    "--debug",
+    "--locked",
+    "cargo-vet",
+]
+
+[tasks.vet]
+category = "CI - SUPPLY CHAIN"
+command = "cargo"
+args = [
+    "vet",
+    "check",
+]
+dependencies = [
+    "install-cargo-vet",
+]
+
+[tasks.install-cargo-acl]
+category = "CI - SUPPLY CHAIN"
+command = "cargo"
+args = [
+    "binstall",
+    "--debug",
+    "--locked",
+    "cargo-acl",
+]
+
+[tasks.build-docker-image]
+script = '''
+docker build -t surrealdb-local/builder --target builder -f docker/Dockerfile .
+'''
+
+
+[tasks.acl]
+category = "CI - SUPPLY CHAIN"
+command = "cargo"
+linux_alias = "acl-linux"
+mac_alias = "acl-mac"
+
+[tasks.acl-linux]
+command = "cargo"
+args = [
+    "acl"
+]
+dependencies = [
+    "install-cargo-acl",
+]
+
+[tasks.acl-mac]
+script = '''
+docker run --entrypoint /bin/bash -it --rm -v $(pwd):/app -w /app surrealdb-local/builder \
+    -c "cargo acl -n"
+'''
+dependencies = [
+    "build-docker-image",
+]

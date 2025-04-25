@@ -40,7 +40,7 @@ docker build -t surrealdb-local/builder --target builder -f docker/Dockerfile .
 sed -i 's/kind = "Bubblewrap"/kind = "Disabled"/g' cackle.toml
 # Run Cackle interactively inside the Docker image.
 docker run --entrypoint /bin/bash -it --rm -v $(pwd):/app -w /app surrealdb-local/builder \
-  -c "cargo install cargo-acl && cargo acl"
+  -c "cargo acl"
 # Revert the sandboxing configuration before committing your changes.
 sed -i 's/kind = "Disabled"/kind = "Bubblewrap"/g' cackle.toml
 ```
