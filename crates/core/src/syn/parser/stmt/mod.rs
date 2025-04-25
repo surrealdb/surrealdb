@@ -303,6 +303,10 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_upsert_stmt(ctx).await.map(Entry::Upsert)
 			}
+			t!("INFO") => {
+				self.pop_peek();
+				self.parse_info_stmt(ctx).await.map(Entry::Info)
+			}
 			_ => {
 				// TODO: Provide information about keywords.
 				let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
