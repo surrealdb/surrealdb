@@ -21,10 +21,40 @@ who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
 delta = "4.7.0 -> 4.7.1"
 
+[[audits.attohttpc]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.28.5"
+
+[[audits.aws-creds]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.37.0"
+
+[[audits.aws-region]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.25.5"
+
+[[audits.const-random]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.1.18"
+
+[[audits.const-random-macro]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.1.16"
+
 [[audits.core-foundation-sys]]
 who = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
 criteria = "safe-to-deploy"
 delta = "0.8.6 -> 0.8.7"
+
+[[audits.dlv-list]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.5.2"
 
 [[audits.easy-parallel]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
@@ -46,6 +76,61 @@ delta = "0.2.161 -> 0.2.162"
 who = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.162 -> 0.2.168"
+
+[[audits.md5]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.7.0"
+
+[[audits.minidom]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.15.2"
+
+[[audits.ordered-multimap]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.7.3"
+
+[[audits.quick-xml]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.32.0"
+
+[[audits.quick-xml]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+delta = "0.26.0 -> 0.37.2"
+
+[[audits.rust-ini]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.21.1"
+
+[[audits.rust-s3]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.35.1"
+
+[[audits.rxml]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.9.1"
+
+[[audits.rxml_validation]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.9.1"
+
+[[audits.smartstring]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "1.0.1"
+
+[[audits.trim-in-place]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+version = "0.1.7"
 
 [[trusted.addr]]
 criteria = "safe-to-deploy"
@@ -553,96 +638,96 @@ end = "2025-08-31"
 
 [[trusted.windows]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2021-01-15"
 end = "2025-12-16"
 
 [[trusted.windows-core]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2021-11-15"
 end = "2025-09-03"
 
 [[trusted.windows-implement]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2022-01-27"
 end = "2025-12-16"
 
 [[trusted.windows-interface]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2022-02-18"
 end = "2025-12-16"
 
 [[trusted.windows-registry]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2024-02-15"
 end = "2025-09-03"
 
 [[trusted.windows-result]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2024-02-02"
 end = "2025-09-03"
 
 [[trusted.windows-strings]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2024-02-02"
 end = "2025-09-03"
 
 [[trusted.windows-targets]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2022-09-09"
 end = "2025-09-03"
 
 [[trusted.windows_aarch64_gnullvm]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2022-09-01"
 end = "2025-09-03"
 
 [[trusted.windows_aarch64_msvc]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2021-11-05"
 end = "2025-09-03"
 
 [[trusted.windows_i686_gnu]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2021-10-28"
 end = "2025-09-03"
 
 [[trusted.windows_i686_gnullvm]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2024-04-02"
 end = "2025-09-03"
 
 [[trusted.windows_i686_msvc]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2021-10-27"
 end = "2025-09-03"
 
 [[trusted.windows_x86_64_gnu]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2021-10-28"
 end = "2025-09-03"
 
 [[trusted.windows_x86_64_gnullvm]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2022-09-01"
 end = "2025-09-03"
 
 [[trusted.windows_x86_64_msvc]]
 criteria = "safe-to-deploy"
-user-id = 64539 # Kenny Kerr (kennykerr)
+user-id = 64539
 start = "2021-10-27"
 end = "2025-09-03"
