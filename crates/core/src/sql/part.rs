@@ -5,7 +5,10 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	exe::try_join_all_buffered,
-	sql::{fmt::Fmt, strand::no_nul_bytes, FlowResultExt as _, Graph, Ident, Idiom, Number, Value},
+	sql::{
+		fmt::Fmt, strand::no_nul_bytes, FlowResultExt as _, Graph, Ident, Idiom, Number, Thing,
+		Value,
+	},
 };
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -142,7 +145,7 @@ impl Part {
 							(
 								field.to_owned(),
 								plan.0.to_vec(),
-								Box::new(plan.1.to_owned()),
+								Box::new(plan.1.clone()),
 								plan.2.to_vec(),
 							)
 						}),
@@ -471,6 +474,10 @@ impl DestructurePart {
 			}
 		}
 	}
+
+	pub fn idiom(&self) -> Idiom {
+		Idiom(self.path())
+	}
 }
 
 impl fmt::Display for DestructurePart {
@@ -694,9 +701,12 @@ impl RecurseInstruction {
 				expects,
 				inclusive,
 			} => {
-				let expects = Value::from(
-					expects.compute(stk, ctx, opt, doc).await.catch_return()?.coerce_to_record()?,
-				);
+				let expects = expects
+					.compute(stk, ctx, opt, doc)
+					.await
+					.catch_return()?
+					.coerce_to::<Thing>()?
+					.into();
 				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Some(&expects))
 			}
 			Self::Collect {

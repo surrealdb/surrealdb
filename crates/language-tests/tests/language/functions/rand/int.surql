@@ -17,10 +17,10 @@ value = "true"
 value = "true"
 
 [[test.results]]
-error = "Incorrect arguments for function rand::int(). Expected 0 or 2 arguments."
+error = "Incorrect arguments for function rand::int(). Expected 0 or 2 arguments"
 
 [[test.results]]
-error = "Incorrect arguments for function rand::int(). Argument 1 was the wrong type. Expected a i64 but found NULL"
+error = "Incorrect arguments for function rand::int(). Argument 1 was the wrong type. Expected `int` but found `NULL`"
 
 */
 let $a = (<array> 0..1000).map(|$_| rand::int());

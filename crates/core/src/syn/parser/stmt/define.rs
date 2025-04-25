@@ -1762,7 +1762,7 @@ impl Parser<'_> {
 								res.verify = access_type::JwtAccessVerify::Key(
 									access_type::JwtAccessVerifyKey {
 										alg,
-										key: key.to_owned(),
+										key: key.clone(),
 									},
 								);
 

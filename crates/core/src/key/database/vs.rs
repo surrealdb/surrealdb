@@ -19,7 +19,6 @@ pub struct Vs<'a> {
 }
 impl_key!(Vs<'a>);
 
-#[allow(unused)]
 pub fn new<'a>(ns: &'a str, db: &'a str) -> Vs<'a> {
 	Vs::new(ns, db)
 }

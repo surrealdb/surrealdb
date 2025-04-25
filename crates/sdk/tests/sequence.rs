@@ -15,7 +15,7 @@ async fn concurrent_task(ds: &Datastore, seq: &str, count: usize) -> HashSet<i64
 	let sql = format!("RETURN sequence::nextval('{seq}');");
 	for _ in 0..count {
 		let res = &mut ds.execute(&sql, &ses, None).await.unwrap();
-		let val = res.remove(0).result.unwrap().coerce_to_i64().unwrap();
+		let val = res.remove(0).result.unwrap().coerce_to().unwrap();
 		set.insert(val);
 	}
 	set

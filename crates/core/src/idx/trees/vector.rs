@@ -453,7 +453,7 @@ impl Vector {
 
 	fn check_vector_value<T>(value: &Value, vec: &mut Vec<T>) -> Result<(), Error>
 	where
-		T: for<'a> TryFrom<&'a Number, Error = Error>,
+		T: TryFrom<Number, Error = Error>,
 	{
 		match value {
 			Value::Array(a) => {
@@ -463,7 +463,7 @@ impl Vector {
 				Ok(())
 			}
 			Value::Number(n) => {
-				vec.push(n.try_into()?);
+				vec.push((*n).try_into()?);
 				Ok(())
 			}
 			_ => Err(Error::InvalidVectorValue(value.clone().to_raw_string())),
@@ -503,10 +503,10 @@ impl Vector {
 
 	fn check_vector_number<T>(v: &[Number], vec: &mut Vec<T>) -> Result<(), Error>
 	where
-		T: for<'a> TryFrom<&'a Number, Error = Error>,
+		T: TryFrom<Number, Error = Error>,
 	{
 		for n in v {
-			vec.push(n.try_into()?);
+			vec.push((*n).try_into()?);
 		}
 		Ok(())
 	}

@@ -10,18 +10,23 @@ on:
       branch:
         required: true
         type: string
-        description: "The github branch of this release"
         default: main
+        description: "The github branch of this release"
       suffix:
         required: true
         type: string
-        default: metadata
-        description: "The suffix of the version, e.g. none, metadata, alpha.1 or beta.1"
+        default: nightly
+        description: "The suffix of the version, e.g. none, nightly, alpha.1 or beta.1"
       latest:
         required: false
         type: boolean
         default: false
-        description: "Consider this release as the latest one and update the Docker image tag and the binary pointer for the installers"
+        description: "Make this the latest release"
+      extra-features:
+        required: false
+        type: string
+        default: storage-tikv,http-compression,jwks,ml
+        description: "Extra features enabled in the binary"
       publish:
         required: false
         type: boolean
@@ -45,5 +50,6 @@ jobs:
       latest: ${{ inputs.latest }}
       suffix: ${{ inputs.suffix }}
       publish: ${{ inputs.publish }}
+      extra-features: ${{ inputs.extra-features }}
       create-release: ${{ inputs.publish }}
     secrets: inherit

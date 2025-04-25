@@ -8,7 +8,7 @@ imports = ["datasets/type_order.surql"]
 value = "[]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::sort::desc(). Expected 1 argument."
+error = "Incorrect arguments for function array::sort::desc(). Expected 1 argument"
 
 [[test.results]]
 value = "['text', 4, 4, 3, 2, 1]"

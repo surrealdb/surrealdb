@@ -327,22 +327,26 @@ impl InfoStatement {
 					false => Value::from(res.to_string()),
 				})
 			}
-			#[allow(unused_variables)]
+			#[cfg_attr(target_family = "wasm", expect(unused_variables))]
 			InfoStatement::Index(index, table, _structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
-				// Get the transaction
-				let txn = ctx.tx();
+
 				// Output
 				#[cfg(not(target_family = "wasm"))]
-				if let Some(ib) = ctx.get_index_builder() {
-					// Obtain the index
-					let (ns, db) = opt.ns_db()?;
-					let res = txn.get_tb_index(ns, db, table, index).await?;
-					let status = ib.get_status(ns, db, &res).await;
-					let mut out = Object::default();
-					out.insert("building".to_string(), status.into());
-					return Ok(out.into());
+				{
+					// Get the transaction
+					let txn = ctx.tx();
+
+					if let Some(ib) = ctx.get_index_builder() {
+						// Obtain the index
+						let (ns, db) = opt.ns_db()?;
+						let res = txn.get_tb_index(ns, db, table, index).await?;
+						let status = ib.get_status(ns, db, &res).await;
+						let mut out = Object::default();
+						out.insert("building".to_string(), status.into());
+						return Ok(out.into());
+					}
 				}
 				Ok(Object::default().into())
 			}

@@ -322,8 +322,10 @@ impl Collected {
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
-		let val: Value = revision::from_slice(&val)?;
+		let mut val: Value = revision::from_slice(&val)?;
 		let rid = Thing::from((key.tb, key.id));
+		// Inject the id field into the document
+		val.def(&rid);
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
@@ -826,7 +828,7 @@ pub(super) trait Collector {
 				Dir::In => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -838,7 +840,7 @@ pub(super) trait Collector {
 				Dir::Out => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -850,7 +852,7 @@ pub(super) trait Collector {
 				Dir::Both => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.flat_map(|v| {
 						[
 							(
