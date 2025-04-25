@@ -154,11 +154,11 @@ rand.workspace = true
 rayon.workspace = true
 regex.workspace = true
 roaring = { workspace = true, features = ["serde"] }
-rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+rust_decimal = { workspace = true }
 rust-stemmers.workspace = true
 scrypt.workspace = true
 semver = { workspace = true, features = ["serde"] }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true }
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true

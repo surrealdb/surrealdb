@@ -758,13 +758,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build SurrealQL test tool
-        run: |
-          cargo build --release --project language-tests
-
       - name: Run SurrealQL test suite
         run: |
-          cargo run --release --project language-tests -- --color always run 
+          cargo run --project language-tests -- --color always run 
 
   # ----------------------------------------
   # Other SDK tests

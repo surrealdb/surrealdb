@@ -1,5 +1,5 @@
 [workspace]
-# 
+# Superset of all the crates in the workspace (published and unpublished).
 members = [
     ".",
     "crates/core",
@@ -7,6 +7,7 @@ members = [
     "crates/sdk",
     "crates/language-tests",
 ]
+# The crates to build and test by default when running `cargo test` or `cargo build`.
 default-members = [".", "crates/core", "crates/sdk"]
 resolver = "2"
 
