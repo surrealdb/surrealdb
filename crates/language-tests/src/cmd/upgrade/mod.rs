@@ -15,7 +15,7 @@ use clap::ArgMatches;
 use process::SurrealProcess;
 use protocol::{ProxyObject, ProxyValue};
 use semver::Version;
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::{api::middleware::api::res, kvs::Datastore};
 use tokio::task::JoinSet;
 
 use crate::{
@@ -416,46 +416,20 @@ async fn run_imports(
 	Ok(None)
 }
 
-async fn run_task_inner(
-	task: Task,
-	test_set: TestSet,
-	port: u16,
-	config: Arc<Config>,
-) -> Result<TestTaskResult> {
-	let dir = &task.path;
-	tokio::fs::create_dir(dir).await.context("Failed to create tempory directory for datastore")?;
-
-	tokio::fs::write(Path::new(dir).join("test.info"), format!("{} => {}", task.from, task.to))
-		.await?;
-
-	if test_set[task.test].config.env.as_ref().and_then(|x| x.capabilities.as_ref()).is_some() {
-		bail!("Setting capabilities are not supported for upgrade tests")
-	}
-
-	let mut process = process::SurrealProcess::new(&config, &task.from, dir, port).await?;
-
-	let namespace =
-		test_set[task.test].config.env.as_ref().map(|x| x.namespace()).unwrap_or(Some("test"));
-	let database =
-		test_set[task.test].config.env.as_ref().map(|x| x.database()).unwrap_or(Some("test"));
-
-	if database.is_some() && namespace.is_none() {
-		bail!("Cannot have a database set but not a namespace.")
-	}
-
-	match run_imports(&task, &test_set, &mut process, namespace, database).await? {
-		Some(x) => return Ok(x),
-		None => {}
+async fn run_upgrade_test(
+	task: &Task,
+	set: &TestSet,
+	mut process: SurrealProcess,
+	namespace: Option<&str>,
+	database: Option<&str>,
+) -> anyhow::Result<TestTaskResult> {
+	let mut connection = match process.open_connection().await {
+		Ok(x) => x,
+		Err(e) => {
+			let out = process.quit_with_output().await?;
+			return Err(e.context(format!("Failed to open connection to upgrading database\n\n  > process stdout:\n{}\n  > process stderr:\n{}\n",out.stdout,out.stderr)));
+		}
 	};
-
-	process.quit().await?;
-
-	let mut process = process::SurrealProcess::new(&config, &task.to, dir, port).await?;
-
-	let mut connection = process
-		.open_connection()
-		.await
-		.context("Failed to open connection to upgrading datastore")?;
 
 	let mut params = Vec::new();
 	if let Some(ns) = namespace {
@@ -493,7 +467,7 @@ async fn run_task_inner(
 		bail!("Failed to authenticate on upgrading database: {}", e.message)
 	}
 
-	let source = &test_set[task.test].source;
+	let source = &set[task.test].source;
 	let source = std::str::from_utf8(source).context("Text source was not valid utf-8")?;
 	let result = match connection.query(&source).await {
 		Ok(x) => x,
@@ -506,6 +480,47 @@ async fn run_task_inner(
 			)
 		}
 	};
+
+	Ok(result)
+}
+
+async fn run_task_inner(
+	task: Task,
+	test_set: TestSet,
+	port: u16,
+	config: Arc<Config>,
+) -> Result<TestTaskResult> {
+	let dir = &task.path;
+	tokio::fs::create_dir(dir).await.context("Failed to create tempory directory for datastore")?;
+
+	// write some info to the test directory usefull for later debugging.
+	tokio::fs::write(Path::new(dir).join("test.info"), format!("{} => {}", task.from, task.to))
+		.await?;
+
+	if test_set[task.test].config.env.as_ref().and_then(|x| x.capabilities.as_ref()).is_some() {
+		bail!("Setting capabilities are not supported for upgrade tests")
+	}
+
+	let namespace =
+		test_set[task.test].config.env.as_ref().map(|x| x.namespace()).unwrap_or(Some("test"));
+	let database =
+		test_set[task.test].config.env.as_ref().map(|x| x.database()).unwrap_or(Some("test"));
+
+	if database.is_some() && namespace.is_none() {
+		bail!("Cannot have a database set but not a namespace.")
+	}
+
+	// run imports
+	let mut process = process::SurrealProcess::new(&config, &task.from, dir, port).await?;
+	match run_imports(&task, &test_set, &mut process, namespace, database).await? {
+		Some(x) => return Ok(x),
+		None => {}
+	};
+	process.quit().await?;
+
+	// run tests on existing dataset.
+	let process = process::SurrealProcess::new(&config, &task.to, dir, port).await?;
+	let result = run_upgrade_test(&task, &test_set, process, namespace, database).await?;
 
 	if !config.keep_files {
 		let _ = tokio::fs::remove_dir_all(dir).await;
