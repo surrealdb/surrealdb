@@ -87,6 +87,16 @@ who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
 version = "0.15.2"
 
+[[audits.openssl]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+delta = "0.10.71 -> 0.10.72"
+
+[[audits.openssl-sys]]
+who = "Micha de Vries <micha@devrie.sh>"
+criteria = "safe-to-deploy"
+delta = "0.9.106 -> 0.9.107"
+
 [[audits.ordered-multimap]]
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
