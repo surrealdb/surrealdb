@@ -5,6 +5,7 @@ mod protocol;
 use std::{
 	collections::HashMap,
 	net::{Ipv4Addr, SocketAddr},
+	path::Path,
 	sync::Arc,
 	thread,
 };
@@ -46,6 +47,7 @@ pub struct Config {
 	jobs: u32,
 	download_permission: bool,
 	backend: UpgradeBackend,
+	keep_files: bool,
 }
 
 impl Config {
@@ -57,8 +59,77 @@ impl Config {
 			jobs: matches.get_one::<u32>("jobs").copied().unwrap_or_else(|| {
 				thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(1)
 			}),
+			keep_files: matches.get_one::<bool>("keep-files").copied().unwrap_or(false),
 		}
 	}
+}
+
+pub fn generate_tasks(
+	from_versions: &[DsVersion],
+	to_versions: &[DsVersion],
+	actual_version: &HashMap<DsVersion, Version>,
+	subset: &TestSet,
+	temp_dir: &TempDir,
+) -> Vec<Task> {
+	let mut tasks = Vec::new();
+	for from in from_versions.iter() {
+		for to in to_versions.iter() {
+			let from_v = actual_version.get(from).unwrap();
+			let to_v = actual_version.get(to).unwrap();
+
+			if from_v >= to_v {
+				continue;
+			}
+
+			'include_test: for (t, case) in subset.iter_ids() {
+				// if the test contains an error don't run it.
+				if case.contains_error {
+					continue;
+				}
+
+				if !case.config.should_run() {
+					continue;
+				}
+
+				// Ensure that the test can run on the upgrading version.
+				if let Some(ver_req) = case.config.test.as_ref().map(|x| &x.version) {
+					if !ver_req.matches(to_v) {
+						continue 'include_test;
+					}
+				}
+
+				// Ensure that the test can run on the importing version.
+				if let Some(ver_req) = case.config.test.as_ref().map(|x| &x.importing_version) {
+					if !ver_req.matches(from_v) {
+						continue 'include_test;
+					}
+				}
+
+				// Ensure that the imports can run on importing version.
+				for import in case.imports.iter() {
+					if let Some(ver_req) =
+						subset[import.id].config.test.as_ref().map(|x| &x.version)
+					{
+						if !ver_req.matches(from_v) {
+							continue 'include_test;
+						}
+					}
+				}
+
+				tasks.push(Task {
+					from: from.clone(),
+					to: to.clone(),
+					test: t,
+					path: temp_dir
+						.sub_dir_path()
+						.to_str()
+						.expect("Paths should be utf-8")
+						.to_owned(),
+				})
+			}
+		}
+	}
+	tasks
 }
 
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
@@ -123,44 +194,21 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		subset
 	};
 
+	let mut actual_version = HashMap::new();
 	println!("Preparing used versions of surrealdb");
 	for v in all_versions {
-		binaries::prepare(v, config.download_permission).await?;
+		let actual = binaries::actual_version(v.clone()).await?;
+		binaries::prepare(v.clone(), config.download_permission).await?;
+		actual_version.insert(v, actual);
 	}
 
 	let temp_dir = TempDir::new("surreal_upgrade_tests")
 		.await
 		.context("Failed to create temporary directory for datastore")?;
 
-	let mut tasks = Vec::new();
-	for from in from_versions.iter() {
-		for to in to_versions.iter() {
-			if let DsVersion::Version(ref from) = from {
-				match to {
-					DsVersion::Path(_) => {}
-					DsVersion::Version(to) => {
-						if from >= to {
-							continue;
-						}
-					}
-				}
-			}
+	let tasks = generate_tasks(&from_versions, &to_versions, &actual_version, &subset, &temp_dir);
 
-			for (t, _) in subset.iter_ids() {
-				tasks.push(Task {
-					from: from.clone(),
-					to: to.clone(),
-					test: t,
-					path: temp_dir
-						.sub_dir_path()
-						.to_str()
-						.expect("Paths should be utf-8")
-						.to_owned(),
-				})
-			}
-		}
-	}
-
+	println!("Using directory '{}' as a store directory", temp_dir.path().display());
 	println!("Running {} tasks for {} tests", tasks.len(), subset.len());
 
 	let mut progress = Progress::from_stderr(tasks.len(), color);
@@ -225,9 +273,13 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		progress.finish_item(id, grade).unwrap();
 	}
 
-	if let Err(e) = temp_dir.cleanup().await {
-		println!();
-		println!("Failed to clean up temporary directory:{e}");
+	if config.keep_files {
+		temp_dir.keep();
+	} else {
+		if let Err(e) = temp_dir.cleanup().await {
+			println!();
+			println!("Failed to clean up temporary directory:{e}");
+		}
 	}
 
 	println!();
@@ -293,9 +345,7 @@ async fn run_imports(
 	namespace: Option<&str>,
 	database: Option<&str>,
 ) -> anyhow::Result<Option<TestTaskResult>> {
-	let Some(imports) = set[task.test].config.env.as_ref().and_then(|x| x.imports.as_ref()) else {
-		bail!("Upgrade test did not specify any imports, can't run upgrade tests without first importing data")
-	};
+	let imports = &set[task.test].imports;
 
 	let mut connection = process
 		.open_connection()
@@ -339,16 +389,9 @@ async fn run_imports(
 	}
 
 	for import in imports {
-		let Some(test) = set.find_all(import) else {
+		let Ok(source) = std::str::from_utf8(&set[import.id].source) else {
 			return Ok(Some(TestTaskResult::Import(
-				import.to_owned(),
-				format!("Could not find import."),
-			)));
-		};
-
-		let Ok(source) = std::str::from_utf8(&set[test].source) else {
-			return Ok(Some(TestTaskResult::Import(
-				import.to_owned(),
+				import.path.clone(),
 				format!("Import file was not valid utf-8."),
 			)));
 		};
@@ -356,13 +399,13 @@ async fn run_imports(
 		match connection.query(source).await {
 			Ok(TestTaskResult::RunningError(e)) => {
 				return Ok(Some(TestTaskResult::Import(
-					import.to_owned(),
+					import.path.clone().to_owned(),
 					format!("Failed to run import: {e:?}"),
 				)))
 			}
 			Err(e) => {
 				return Ok(Some(TestTaskResult::Import(
-					import.to_owned(),
+					import.path.clone().to_owned(),
 					format!("Failed to run import: {e:?}."),
 				)));
 			}
@@ -381,6 +424,9 @@ async fn run_task_inner(
 ) -> Result<TestTaskResult> {
 	let dir = &task.path;
 	tokio::fs::create_dir(dir).await.context("Failed to create tempory directory for datastore")?;
+
+	tokio::fs::write(Path::new(dir).join("test.info"), format!("{} => {}", task.from, task.to))
+		.await?;
 
 	if test_set[task.test].config.env.as_ref().and_then(|x| x.capabilities.as_ref()).is_some() {
 		bail!("Setting capabilities are not supported for upgrade tests")
@@ -461,7 +507,9 @@ async fn run_task_inner(
 		}
 	};
 
-	let _ = tokio::fs::remove_dir_all(dir).await;
+	if !config.keep_files {
+		let _ = tokio::fs::remove_dir_all(dir).await;
+	}
 
 	Ok(result)
 }

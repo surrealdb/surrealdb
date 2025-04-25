@@ -6,7 +6,7 @@ use std::{
 };
 
 pub struct TempDir {
-	path: PathBuf,
+	path: Option<PathBuf>,
 	id_gen: AtomicUsize,
 }
 
@@ -38,13 +38,13 @@ impl TempDir {
 		tokio::fs::create_dir(&dir).await?;
 
 		Ok(TempDir {
-			path: dir,
+			path: Some(dir),
 			id_gen: AtomicUsize::new(0),
 		})
 	}
 
 	pub fn path(&self) -> &Path {
-		self.path.as_path()
+		self.path.as_ref().unwrap().as_path()
 	}
 
 	pub fn sub_dir_path(&self) -> PathBuf {
@@ -52,13 +52,19 @@ impl TempDir {
 		self.path().join(format!("sub_dir_{id}"))
 	}
 
-	pub async fn cleanup(&self) -> Result<(), io::Error> {
-		tokio::fs::remove_dir_all(&self.path).await
+	pub async fn cleanup(mut self) -> Result<(), io::Error> {
+		tokio::fs::remove_dir_all(&self.path.take().unwrap()).await
+	}
+
+	pub fn keep(mut self) {
+		self.path = None;
 	}
 }
 
 impl Drop for TempDir {
 	fn drop(&mut self) {
-		let _ = std::fs::remove_dir_all(&self.path);
+		if let Some(path) = self.path.take() {
+			let _ = std::fs::remove_dir_all(path);
+		}
 	}
 }

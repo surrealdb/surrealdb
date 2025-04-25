@@ -12,9 +12,11 @@ use crate::{
 use anyhow::{bail, Context, Result};
 use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
+use semver::Version;
 use std::{io, mem, str, thread, time::Duration};
 use surrealdb_core::{
 	dbs::{capabilities::ExperimentalTarget, Session},
+	env::VERSION,
 	kvs::Datastore,
 	syn,
 };
@@ -48,6 +50,28 @@ fn try_collect_reports<W: io::Write>(
 	}
 }
 
+fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> TestSet {
+	let subset = if let Some(x) = matches.get_one::<String>("filter") {
+		testset.filter_map(|name, _| name.contains(x))
+	} else {
+		testset
+	};
+
+	let subset = if matches.get_flag("no-wip") {
+		subset.filter_map(|_, set| !set.config.is_wip())
+	} else {
+		subset
+	};
+
+	if matches.get_flag("no-results") {
+		subset.filter_map(|_, set| {
+			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
+		})
+	} else {
+		subset
+	}
+}
+
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let path: &String = matches.get_one("path").unwrap();
 	let (testset, load_errors) = TestSet::collect_directory(&path).await?;
@@ -71,25 +95,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
-	let subset = if let Some(x) = matches.get_one::<String>("filter") {
-		testset.filter_map(|name, _| name.contains(x))
-	} else {
-		testset
-	};
-
-	let subset = if matches.get_flag("no-wip") {
-		subset.filter_map(|_, set| !set.config.is_wip())
-	} else {
-		subset
-	};
-
-	let subset = if matches.get_flag("no-results") {
-		subset.filter_map(|_, set| {
-			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
-		})
-	} else {
-		subset
-	};
+	let subset = filter_testset_from_arguments(testset, matches);
 
 	// check for unused keys in tests
 	for t in subset.iter() {
@@ -104,6 +110,51 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.unwrap_or_else(|| thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(8));
 
 	let failure_mode = matches.get_one::<ResultsMode>("results").unwrap();
+
+	let core_version = Version::parse(VERSION).unwrap();
+
+	// filter tasks.
+	let tasks: Vec<_> = subset
+		.iter_ids()
+		.filter_map(|(id, test)| {
+			if test.contains_error {
+				return None;
+			}
+
+			let config = test.config.clone();
+
+			// Ensure this test can run on this version.
+			if let Some(version_req) = config.test.as_ref().map(|x| &x.version) {
+				if !version_req.matches(&core_version) {
+					return None;
+				}
+			}
+
+			// Ensure this test imports can run on this version as specified by the test itself.
+			if let Some(version_req) = config.test.as_ref().map(|x| &x.importing_version) {
+				if !version_req.matches(&core_version) {
+					return None;
+				}
+			}
+
+			// Ensure this test imports can run on this version as specified by the imports.
+			for import in test.imports.iter() {
+				if let Some(version_req) =
+					subset[import.id].config.test.as_ref().map(|x| &x.version)
+				{
+					if !version_req.matches(&core_version) {
+						return None;
+					}
+				}
+			}
+
+			if !config.should_run() {
+				return None;
+			}
+
+			Some(id)
+		})
+		.collect();
 
 	println!(" Running with {num_jobs} jobs");
 	let mut schedular = Schedular::new(num_jobs);
@@ -121,18 +172,12 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	tokio::spawn(grade_task(subset.clone(), res_recv, report_send));
 
 	let mut reports = Vec::new();
-	let mut progress = Progress::from_stderr(subset.len(), color);
+	let mut progress = Progress::from_stderr(tasks.len(), color);
 
 	// spawn all tests.
-	for (id, test) in subset.iter_ids() {
-		let config = test.config.clone();
-
-		progress.start_item(id, test.path.as_str()).unwrap();
-
-		if !config.should_run() {
-			progress.finish_item(id, TestGrade::Success).unwrap();
-			continue;
-		}
+	for id in tasks {
+		let config = subset[id].config.as_ref();
+		progress.start_item(id, subset[id].path.as_str()).unwrap();
 
 		let ds = if config.can_use_reusable_ds() {
 			provisioner.obtain().await

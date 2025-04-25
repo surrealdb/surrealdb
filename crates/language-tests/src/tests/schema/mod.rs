@@ -4,6 +4,7 @@ mod bytes_hack;
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
+use semver::VersionReq;
 use serde::{de, Deserialize, Serialize};
 use surrealdb_core::{
 	dbs::capabilities::{ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget},
@@ -39,7 +40,7 @@ impl TestConfig {
 
 	/// Returns the imports for this file, empty if no imports are defined.
 	pub fn imports(&self) -> &[String] {
-		self.env.as_ref().and_then(|x| x.imports.as_ref()).map(|x| x.as_slice()).unwrap_or(&[])
+		self.env.as_ref().map(|x| x.imports.as_slice()).unwrap_or(&[])
 	}
 
 	/// Returns if this test must be run without other test running.
@@ -84,7 +85,8 @@ pub struct TestEnv {
 
 	pub login: Option<TestLogin>,
 
-	pub imports: Option<Vec<String>>,
+	#[serde(default)]
+	pub imports: Vec<String>,
 	pub timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
 
@@ -254,7 +256,10 @@ pub struct TestDetails {
 	#[serde(default)]
 	pub upgrade: bool,
 
-	pub version: Option<Version>,
+	#[serde(default)]
+	pub version: VersionReq,
+	#[serde(default)]
+	pub importing_version: VersionReq,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]

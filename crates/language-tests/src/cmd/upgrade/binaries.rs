@@ -2,9 +2,17 @@ use std::{io::Write, path::Path, process::Stdio};
 
 use anyhow::{bail, Context};
 use semver::Version;
+use serde_json::Value;
 use tokio::process::Command;
 
 use crate::cli::DsVersion;
+
+pub async fn actual_version(version: DsVersion) -> anyhow::Result<Version> {
+	match version {
+		DsVersion::Version(x) => Ok(x),
+		DsVersion::Path(ref x) => retrieve_version_from_path(x).await,
+	}
+}
 
 pub async fn prepare(version: DsVersion, download_permission: bool) -> anyhow::Result<()> {
 	match version {
@@ -42,7 +50,9 @@ pub async fn prepare_version(version: Version, download_permission: bool) -> any
 		.output()
 		.await
 	{
-		Ok(_) => return prepare_curl(version, download_permission).await,
+		Ok(_) => {
+			return prepare_curl(version.clone(), download_permission).await;
+		}
 		_ => {}
 	}
 
@@ -53,7 +63,9 @@ pub async fn prepare_version(version: Version, download_permission: bool) -> any
 		.output()
 		.await
 	{
-		Ok(_) => return prepare_wget(version, download_permission).await,
+		Ok(_) => {
+			return prepare_wget(version.clone(), download_permission).await;
+		}
 		_ => {}
 	}
 
@@ -202,6 +214,35 @@ async fn unzip(version: Version) -> anyhow::Result<()> {
 	Ok(())
 }
 
+pub async fn retrieve_version_from_path(path: &str) -> anyhow::Result<Version> {
+	let output = Command::new("cargo")
+		.current_dir(path)
+		.args(["metadata", "--format-version", "1", "--no-deps"])
+		.output()
+		.await
+		.with_context(|| {
+			format!("failed to 'cargo metadata', could not find surrealdb version for '{path}'")
+		})?;
+
+	let text = String::from_utf8(output.stdout)
+		.context("Command 'cargo metadata' returned a non-utf8 string")?;
+
+	let json: Value =
+		serde_json::from_str(&text).context("Failed to parser 'cargo metadata' json output")?;
+
+	let version = json
+		.get("packages")
+		.and_then(|x| x.as_array())
+		.and_then(|x| {
+			x.iter().find(|x| x.get("name").and_then(|x| x.as_str()) == Some("surrealdb"))
+		})
+		.and_then(|x| x.get("version"))
+		.and_then(|x| x.as_str())
+		.ok_or_else(|| anyhow::anyhow!("Could not find 'surrealdb' package in rust workspace"))?;
+
+	Version::parse(version).context("Failed to parse 'surreealdb' package config")
+}
+
 pub async fn prepare_path(path: &str) -> anyhow::Result<()> {
 	let mut child = Command::new("cargo")
 		.current_dir(path)
@@ -217,5 +258,6 @@ pub async fn prepare_path(path: &str) -> anyhow::Result<()> {
 	if !output.success() {
 		bail!("Build command failed")
 	}
+
 	Ok(())
 }

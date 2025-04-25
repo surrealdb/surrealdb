@@ -17,7 +17,7 @@ use crate::{
 	format::{ansi, IndentFormatter},
 };
 
-use super::TestCase;
+use super::{ResolvedImport, TestCase};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct TestId(usize);
@@ -128,6 +128,7 @@ impl TestSet {
 		let mut map = HashMap::new();
 		let mut errors = Vec::new();
 		Self::collect_recursive(path, &path, &mut map, &mut all, &mut errors).await?;
+		Self::resolve_imports(&mut all, &map, &mut errors);
 		let map = Arc::new(map);
 		Ok((
 			Self {
@@ -138,6 +139,58 @@ impl TestSet {
 			},
 			errors,
 		))
+	}
+
+	fn resolve_imports(
+		all: &mut Vec<TestCase>,
+		map: &HashMap<String, TestId>,
+		errors: &mut Vec<TestLoadError>,
+	) {
+		// resolve all import paths.
+		for t in all.iter_mut() {
+			for import_path in t.config.imports() {
+				let mut import_name = Cow::Borrowed(import_path);
+				if !import_name.starts_with(path::MAIN_SEPARATOR) {
+					import_name = Cow::Owned(format!("{}{import_name}", path::MAIN_SEPARATOR));
+				}
+
+				if let Some(resolved) = map.get(import_name.as_ref()) {
+					t.imports.push(ResolvedImport {
+						id: *resolved,
+						path: t.path.clone(),
+					});
+				} else {
+					errors.push(TestLoadError {
+						path: t.path.clone(),
+						error: anyhow::anyhow!(
+							"Could not find import `{}` for test `{}`",
+							import_path,
+							t.path
+						),
+					});
+					t.contains_error = true;
+				}
+			}
+		}
+
+		// ensure that imports don't have imports themselves.
+		for test_index in 0..all.len() {
+			let mut contains_error = false;
+			for import in all[test_index].imports.iter() {
+				if !all[import.id.0].config.imports().is_empty() {
+					contains_error = true;
+					errors.push(TestLoadError {
+						path: all[test_index].path.clone(),
+						error: anyhow::anyhow!(
+								"Importing test `{}` for test `{}` which contains imports itself is not supported.",
+								import.path,
+								all[test_index].path
+							),
+					});
+				}
+			}
+			all[test_index].contains_error |= contains_error;
+		}
 	}
 
 	async fn collect_recursive(

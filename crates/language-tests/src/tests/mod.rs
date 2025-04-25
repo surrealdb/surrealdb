@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use schema::TestConfig;
 use serde::{de::IntoDeserializer, Deserialize};
+use set::TestId;
 pub use set::TestSet;
 use std::ops::Range;
 use std::sync::Arc;
@@ -59,6 +60,11 @@ pub enum ConfigKind {
 	None,
 }
 
+pub struct ResolvedImport {
+	pub id: TestId,
+	pub path: String,
+}
+
 pub struct TestCase {
 	pub path: String,
 	pub toml: DocumentMut,
@@ -66,6 +72,8 @@ pub struct TestCase {
 	pub source: Vec<u8>,
 	pub config_slice: Range<usize>,
 	pub config_kind: ConfigKind,
+	pub imports: Vec<ResolvedImport>,
+	pub contains_error: bool,
 }
 
 impl TestCase {
@@ -93,6 +101,8 @@ impl TestCase {
 			path,
 			config_slice: range,
 			config_kind,
+			imports: Vec::new(),
+			contains_error: false,
 		})
 	}
 
