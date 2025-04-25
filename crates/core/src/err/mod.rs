@@ -1,11 +1,12 @@
 use crate::api::err::ApiError;
+use crate::buc::BucketOperation;
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
 use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
-use crate::sql::value::Value;
+use crate::sql::value::{CastError, CoerceError, Value};
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
@@ -400,6 +401,12 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The requested api does not exist
+	#[error("The bucket '{value}' does not exist")]
+	BuNotFound {
+		value: String,
+	},
+
 	/// The requested analyzer does not exist
 	#[error("The index '{name}' does not exist")]
 	IxNotFound {
@@ -556,6 +563,13 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The permissions do not allow this query to be run on this table
+	#[error("You don't have permission to {op} this file in the `{name}` bucket")]
+	BucketPermissions {
+		name: String,
+		op: BucketOperation,
+	},
+
 	/// The specified table can not be written as it is setup as a foreign table view
 	#[error("Unable to write to the `{table}` table while setup as a view")]
 	TableIsView {
@@ -584,15 +598,6 @@ pub enum Error {
 		target_type: String,
 	},
 
-	/// The specified field did not conform to the field type check
-	#[error("Found {value} for field `{field}`, with record `{thing}`, but expected a {check}")]
-	FieldCheck {
-		thing: String,
-		value: String,
-		field: Idiom,
-		check: String,
-	},
-
 	/// The specified field did not conform to the field ASSERT clause
 	#[error("Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}")]
 	FieldValue {
@@ -603,11 +608,33 @@ pub enum Error {
 	},
 
 	/// The specified value did not conform to the LET type check
-	#[error("Found {value} for param ${name}, but expected a {check}")]
-	SetCheck {
-		value: String,
+	#[error("Tried to set `${name}`, but couldn't coerce value: {error}")]
+	SetCoerce {
 		name: String,
-		check: String,
+		error: Box<CoerceError>,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Couldn't coerce return value from function `{name}`: {error}")]
+	ReturnCoerce {
+		name: String,
+		error: Box<CoerceError>,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Couldn't coerce argument `{argument_idx}` for function `{func_name}`: {error}")]
+	ArgumentCoerce {
+		func_name: String,
+		argument_idx: usize,
+		error: Box<CoerceError>,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Couldn't coerce value for field `{field_name}` of `{thing}`: {error}")]
+	FieldCoerce {
+		thing: String,
+		field_name: String,
+		error: Box<CoerceError>,
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
@@ -675,18 +702,12 @@ pub enum Error {
 	},
 
 	/// Unable to coerce to a value to another value
-	#[error("Expected a {into} but found {from}")]
-	CoerceTo {
-		from: Value,
-		into: String,
-	},
+	#[error("{0}")]
+	Coerce(#[from] CoerceError),
 
 	/// Unable to convert a value to another value
-	#[error("Expected a {into} but cannot convert {from} into a {into}")]
-	ConvertTo {
-		from: Value,
-		into: String,
-	},
+	#[error("{0}")]
+	Cast(#[from] CastError),
 
 	/// Unable to coerce to a value to another value
 	#[error("Expected a {kind} but the array had {size} items")]
@@ -913,6 +934,12 @@ pub enum Error {
 	#[error("The analyzer '{name}' already exists")]
 	AzAlreadyExists {
 		name: String,
+	},
+
+	/// The requested api already exists
+	#[error("The bucket '{value}' already exists")]
+	BuAlreadyExists {
+		value: String,
 	},
 
 	/// The requested database already exists
@@ -1288,6 +1315,33 @@ pub enum Error {
 
 	#[error("File access denied: {0}")]
 	FileAccessDenied(String),
+
+	#[error("No global bucket has been configured")]
+	NoGlobalBucket,
+
+	#[error("Bucket `{0}` is unavailable")]
+	BucketUnavailable(String),
+
+	#[error("File key `{0}` cannot be parsed into a path")]
+	InvalidBucketKey(String),
+
+	#[error("Bucket is unavailable")]
+	GlobalBucketEnforced,
+
+	#[error("Bucket url could not be processed: {0}")]
+	InvalidBucketUrl(String),
+
+	#[error("Bucket backend is not supported")]
+	UnsupportedBackend,
+
+	#[error("Write operation is not supported, as bucket `{0}` is in read-only mode")]
+	ReadonlyBucket(String),
+
+	#[error("Operation for bucket `{0}` failed: {1}")]
+	ObjectStoreFailure(String, String),
+
+	#[error("Failed to connect to bucket: {0}")]
+	BucketConnectionFailed(String),
 }
 
 impl From<Error> for String {
@@ -1454,40 +1508,10 @@ impl Error {
 	pub fn is_schema_related(&self) -> bool {
 		matches!(
 			self,
-			Error::FieldCheck { .. }
+			Error::FieldCoerce { .. }
 				| Error::FieldValue { .. }
 				| Error::FieldReadonly { .. }
 				| Error::FieldUndefined { .. }
 		)
-	}
-
-	/// Convert CoerceTo errors in LET statements
-	pub fn set_check_from_coerce(self, name: String) -> Error {
-		match self {
-			Error::CoerceTo {
-				from,
-				into,
-			} => Error::SetCheck {
-				name,
-				value: from.to_string(),
-				check: into,
-			},
-			e => e,
-		}
-	}
-
-	/// Convert CoerceTo errors in functions and closures
-	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
-		match self {
-			Error::CoerceTo {
-				from,
-				into,
-			} => Error::FunctionCheck {
-				name: name.into(),
-				value: from.to_string(),
-				check: into,
-			},
-			e => e,
-		}
 	}
 }

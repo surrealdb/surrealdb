@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "2.3.0"
+version = "3.0.0"
 rust-version = "1.82.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -32,7 +32,6 @@ kv-indxdb = ["surrealdb-core/kv-indxdb"]
 kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
 kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
-kv-surrealcs = ["surrealdb-core/kv-surrealcs", "tokio/time"]
 scripting = ["surrealdb-core/scripting"]
 http = ["surrealdb-core/http"]
 native-tls = [
@@ -84,8 +83,7 @@ revision = { workspace = true, features = [
     "uuid",
 ] }
 reblessive = { workspace = true, features = ["tree"] }
-trice = {workspace = true, optional = true }
-
+trice = { workspace = true, optional = true }
 
 # Other crates
 arrayvec.workspace = true
@@ -131,9 +129,7 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
-wasmtimer = { workspace = true, default-features = false, features = [
-    "tokio",
-] }
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 ws_stream_wasm.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
@@ -170,12 +166,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 ulid = { workspace = true, features = ["serde"] }
 wiremock.workspace = true
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(kv_fdb)',
-    'cfg(storage)',
-    'cfg(surrealdb_unstable)',
-] }
+[lints]
+workspace = true
 
 [lib]
 name = "surrealdb" # Needed for the nightly crate as we will be renaming it

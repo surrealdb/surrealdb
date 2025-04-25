@@ -322,8 +322,10 @@ impl Collected {
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
-		let val: Value = revision::from_slice(&val)?;
+		let mut val: Value = revision::from_slice(&val)?;
 		let rid = Thing::from((key.tb, key.id));
+		// Inject the id field into the document
+		val.def(&rid);
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
@@ -462,7 +464,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		iterable: Iterable,
 	) -> Result<(), Error> {
-		if ctx.is_ok(true)? {
+		if ctx.is_ok(true).await? {
 			match iterable {
 				Iterable::Value(v) => {
 					if v.is_some() {
@@ -540,7 +542,7 @@ pub(super) trait Collector {
 		let mut skipped = 0;
 		let mut last_key = vec![];
 		while let Some(res) = stream.next().await {
-			if ctx.is_done(skipped % 100 == 0)? {
+			if ctx.is_done(skipped % 100 == 0).await? {
 				break;
 			}
 			last_key = res?;
@@ -594,7 +596,7 @@ pub(super) trait Collector {
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0)? {
+			if ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -635,7 +637,7 @@ pub(super) trait Collector {
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0)? {
+			if ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -728,7 +730,7 @@ pub(super) trait Collector {
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0)? {
+			if ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -767,7 +769,7 @@ pub(super) trait Collector {
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0)? {
+			if ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -826,7 +828,7 @@ pub(super) trait Collector {
 				Dir::In => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -838,7 +840,7 @@ pub(super) trait Collector {
 				Dir::Out => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.map(|v| {
 						(
 							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
@@ -850,7 +852,7 @@ pub(super) trait Collector {
 				Dir::Both => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
+					.map(|v| v.0.clone())
 					.flat_map(|v| {
 						[
 							(
@@ -878,7 +880,7 @@ pub(super) trait Collector {
 			let mut count = 0;
 			while let Some(res) = stream.next().await {
 				// Check if the context is finished
-				if ctx.is_done(count % 100 == 0)? {
+				if ctx.is_done(count % 100 == 0).await? {
 					break;
 				}
 				// Parse the key from the result
@@ -936,14 +938,14 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		mut iterator: ThingIterator,
 	) -> Result<(), Error> {
-		while !ctx.is_done(true)? {
+		while !ctx.is_done(true).await? {
 			let records: Vec<IndexItemRecord> =
 				iterator.next_batch(ctx, txn, *NORMAL_FETCH_SIZE).await?;
 			if records.is_empty() {
 				break;
 			}
 			for (c, r) in records.into_iter().enumerate() {
-				if ctx.is_done(c % 100 == 0)? {
+				if ctx.is_done(c % 100 == 0).await? {
 					break;
 				}
 				self.collect(Collected::IndexItemKey(r)).await?;
@@ -958,14 +960,14 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		mut iterator: ThingIterator,
 	) -> Result<(), Error> {
-		while !ctx.is_done(true)? {
+		while !ctx.is_done(true).await? {
 			let records: Vec<IndexItemRecord> =
 				iterator.next_batch(ctx, txn, *NORMAL_FETCH_SIZE).await?;
 			if records.is_empty() {
 				break;
 			}
 			for (c, r) in records.into_iter().enumerate() {
-				if ctx.is_done(c % 100 == 0)? {
+				if ctx.is_done(c % 100 == 0).await? {
 					break;
 				}
 				self.collect(Collected::IndexItem(r)).await?;
@@ -981,7 +983,7 @@ pub(super) trait Collector {
 		mut iterator: ThingIterator,
 	) -> Result<(), Error> {
 		let mut total_count = 0;
-		while !ctx.is_done(true)? {
+		while !ctx.is_done(true).await? {
 			let count = iterator.next_count(ctx, txn, *NORMAL_FETCH_SIZE).await?;
 			if count == 0 {
 				break;

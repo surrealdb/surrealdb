@@ -319,13 +319,14 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		// generate custom scalar from other literals?
 		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
 		Kind::References(ft, _) => {
-			let inner = match ft.to_owned() {
+			let inner = match ft.clone() {
 				Some(ft) => Kind::Record(vec![ft]),
 				None => Kind::Record(vec![]),
 			};
 
 			TypeRef::List(Box::new(kind_to_type(inner, types)?))
 		}
+		Kind::File(_) => return Err(schema_error("Kind::File is not yet supported")),
 	};
 
 	let out = match optional {
@@ -654,5 +655,6 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Literal(_) => Err(resolver_error("Literals are not yet supported")),
 		Kind::Regex => Err(resolver_error("Regexes are not yet supported")),
 		Kind::References(_, _) => Err(resolver_error("Cannot convert value into references")),
+		Kind::File(_) => Err(resolver_error("Files are not yet supported")),
 	}
 }

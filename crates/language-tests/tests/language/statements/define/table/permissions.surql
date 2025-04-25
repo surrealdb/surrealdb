@@ -15,6 +15,7 @@ value = """{
 	accesses: {},
 	analyzers: {},
 	apis: {},
+	buckets: {},
 	configs: {},
 	functions: {},
 	models: {},

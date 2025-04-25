@@ -9,7 +9,7 @@ use super::Level;
 use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -34,6 +34,8 @@ pub enum ResourceKind {
 	Config(ConfigKind),
 	#[revision(start = 3)]
 	Api,
+	#[revision(start = 4)]
+	Bucket,
 
 	// IAM
 	Actor,
@@ -69,6 +71,7 @@ impl std::fmt::Display for ResourceKind {
 			ResourceKind::Access => write!(f, "Access"),
 			ResourceKind::Actor => write!(f, "Actor"),
 			ResourceKind::Config(c) => write!(f, "Config::{c}"),
+			ResourceKind::Bucket => write!(f, "Bucket"),
 		}
 	}
 }
@@ -157,6 +160,7 @@ impl Resource {
 	}
 }
 
+#[expect(clippy::fallible_impl_from)]
 impl std::convert::From<&Resource> for EntityUid {
 	fn from(res: &Resource) -> Self {
 		EntityUid::from_type_name_and_id(
@@ -172,6 +176,7 @@ impl std::convert::From<&Resource> for Entity {
 	}
 }
 
+#[expect(clippy::fallible_impl_from)]
 impl std::convert::From<&Resource> for RestrictedExpression {
 	fn from(res: &Resource) -> Self {
 		format!("{}", EntityUid::from(res)).parse().unwrap()

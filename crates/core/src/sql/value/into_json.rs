@@ -53,6 +53,7 @@ impl From<Value> for serde_json::Value {
 			Value::Expression(expression) => json!(expression),
 			Value::Closure(closure) => json!(closure),
 			Value::Refs(_) => json!(sql::Array::new()),
+			Value::File(file) => file.to_string().into(),
 		}
 	}
 }
@@ -77,7 +78,7 @@ impl From<sql::Object> for Object {
 	fn from(obj: sql::Object) -> Self {
 		let mut map = Map::with_capacity(obj.len());
 		for (key, value) in obj {
-			map.insert(key.to_owned(), value.into());
+			map.insert(key.clone(), value.into());
 		}
 		Self(map)
 	}

@@ -41,15 +41,18 @@ impl SetStatement {
 				let result = self.what.compute(stk, ctx, opt, doc).await?;
 				match self.kind {
 					Some(ref kind) => result
-						.coerce_to(kind)
-						.map_err(|e| e.set_check_from_coerce(self.name.to_string()))
+						.coerce_to_kind(kind)
+						.map_err(|e| Error::SetCoerce {
+							name: self.name.to_string(),
+							error: Box::new(e),
+						})
 						.map_err(ControlFlow::from),
 					None => Ok(result),
 				}
 			}
 			// The user tried to set a protected variable
 			true => Err(ControlFlow::from(Error::InvalidParam {
-				name: self.name.to_owned(),
+				name: self.name.clone(),
 			})),
 		}
 	}

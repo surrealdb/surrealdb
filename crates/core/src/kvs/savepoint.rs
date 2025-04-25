@@ -1,4 +1,4 @@
-#![allow(dead_code)] // Not used on Wasm
+#![cfg_attr(target_family = "wasm", expect(dead_code, reason = "Not used in WASM."))]
 
 use crate::err::Error;
 use crate::kvs::api::Transaction;

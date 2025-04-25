@@ -10,9 +10,11 @@ use futures::StreamExt;
 use http::header::CONTENT_TYPE;
 
 use crate::err::Error;
-use crate::rpc::format::{cbor, json, msgpack, revision};
+use crate::rpc::format::cbor;
+use crate::rpc::format::json;
+use crate::rpc::format::revision;
+use crate::sql;
 use crate::sql::Bytesize;
-use crate::sql::Kind;
 use crate::sql::Value;
 
 use super::context::InvocationContext;
@@ -46,7 +48,7 @@ impl ApiBody {
 	}
 
 	// The `max` variable is unused in WASM only
-	#[allow(unused_variables)]
+	#[cfg_attr(target_family = "wasm", expect(unused_variables))]
 	pub async fn stream(self, max: Option<Bytesize>) -> Result<Vec<u8>, Error> {
 		match self {
 			#[cfg(not(target_family = "wasm"))]
@@ -56,6 +58,7 @@ impl ApiBody {
 				let mut bytes: Vec<u8> = Vec::new();
 
 				while let Some(chunk) = stream.next().await {
+					yield_now!();
 					let chunk = chunk.map_err(|_| Error::ApiError(ApiError::InvalidRequestBody))?;
 					size += chunk.len() as u64;
 					if size > max.0 {
@@ -78,9 +81,12 @@ impl ApiBody {
 		ctx: &InvocationContext,
 		invocation: &ApiInvocation,
 	) -> Result<Value, Error> {
-		#[allow(irrefutable_let_patterns)] // For WASM this is the only pattern
+		#[cfg_attr(
+			target_family = "wasm",
+			expect(irrefutable_let_patterns, reason = "For WASM this is the only pattern.")
+		)]
 		if let ApiBody::Native(value) = self {
-			let max = ctx.request_body_max.to_owned().unwrap_or(Bytesize::MAX);
+			let max = ctx.request_body_max.unwrap_or(Bytesize::MAX);
 			let size = std::mem::size_of_val(&value);
 
 			if size > max.0 as usize {
@@ -88,12 +94,12 @@ impl ApiBody {
 			}
 
 			if ctx.request_body_raw {
-				value.coerce_to(&Kind::Bytes)
+				Ok(value.coerce_to::<sql::Bytes>()?.into())
 			} else {
 				Ok(value)
 			}
 		} else {
-			let bytes = self.stream(ctx.request_body_max.to_owned()).await?;
+			let bytes = self.stream(ctx.request_body_max).await?;
 
 			if ctx.request_body_raw {
 				Ok(Value::Bytes(crate::sql::Bytes(bytes)))
@@ -104,7 +110,6 @@ impl ApiBody {
 				let parsed = match content_type {
 					Some("application/json") => json::parse_value(&bytes),
 					Some("application/cbor") => cbor::parse_value(bytes),
-					Some("application/pack") => msgpack::parse_value(bytes),
 					Some("application/surrealdb") => revision::parse_value(bytes),
 					_ => return Ok(Value::Bytes(crate::sql::Bytes(bytes))),
 				};

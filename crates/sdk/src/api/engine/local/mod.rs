@@ -328,7 +328,7 @@ pub struct TiKv;
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(kv_fdb)]
+#[cfg(feature = "kv-fdb")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb-7_3")))]
 #[derive(Debug)]
 pub struct FDb;
@@ -368,52 +368,6 @@ pub struct FDb;
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealkv")))]
 #[derive(Debug)]
 pub struct SurrealKv;
-
-/// SurrealKV database
-#[deprecated(note = "Incorrect case, use SurrealKv instead")]
-#[cfg(feature = "kv-surrealkv")]
-pub type SurrealKV = SurrealKv;
-
-/// SurrealCS database
-///
-/// # Examples
-///
-/// Instantiating a SurrealCS-backed instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealCs;
-///
-/// let db = Surreal::new::<SurrealCs>("path/to/database-folder").await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Instantiating a SurrealCS-backed strict instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealCs;
-///
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<SurrealCs>(("path/to/database-folder", config)).await?;
-/// # Ok(())
-/// # }
-/// ```
-#[cfg(feature = "kv-surrealcs")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealcs")))]
-#[derive(Debug)]
-pub struct SurrealCs;
-
-/// SurrealCS database
-#[deprecated(note = "Incorrect case, use SurrealCs instead")]
-#[cfg(feature = "kv-surrealcs")]
-pub type SurrealCS = SurrealCs;
 
 /// An embedded database
 #[derive(Debug, Clone)]
@@ -517,7 +471,7 @@ async fn export_ml(
 	// Attempt to get the model definition
 	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
 	// Export the file data in to the store
-	let mut data = crate::obs::stream(info.hash.to_owned()).await?;
+	let mut data = crate::obs::stream(info.hash.clone()).await?;
 	// Process all stream values
 	while let Some(Ok(bytes)) = data.next().await {
 		if chn.send(bytes.to_vec()).await.is_err() {
@@ -1150,7 +1104,7 @@ async fn router(
 					#[cfg(feature = "ml")]
 					Some(name) => {
 						let mut tmp = Model::default();
-						tmp.name = name.to_owned();
+						name.clone_into(&mut tmp.name);
 						tmp.args = args.0;
 						tmp.version = _version
 							.ok_or(Error::Query("ML functions must have a version".to_string()))?;

@@ -8,10 +8,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+error = "Expected `regex` but found `'a'`"
 
 [[test.results]]
-error = "Expected a regex but found 1"
+error = "Expected `regex` but found `1`"
 
 */
 DEFINE FUNCTION fn::takes_regex($r: regex){};

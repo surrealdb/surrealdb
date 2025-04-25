@@ -55,7 +55,7 @@
 
 use self::token_buffer::TokenBuffer;
 use crate::{
-	sql::{self, Datetime, Duration, Strand, Uuid},
+	sql::{self, Bytes, Datetime, Duration, File, Strand, Uuid},
 	syn::{
 		error::{bail, SyntaxError},
 		lexer::{compound::NumberKind, Lexer},
@@ -119,6 +119,8 @@ pub enum GluedValue {
 	Strand(Strand),
 	#[default]
 	None,
+	Bytes(Bytes),
+	File(File),
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +145,8 @@ pub struct ParserSettings {
 	pub bearer_access_enabled: bool,
 	/// Whether bearer access is enabled
 	pub define_api_enabled: bool,
+	/// Whether the files feature is enabled
+	pub files_enabled: bool,
 }
 
 impl Default for ParserSettings {
@@ -155,6 +159,7 @@ impl Default for ParserSettings {
 			references_enabled: false,
 			bearer_access_enabled: false,
 			define_api_enabled: false,
+			files_enabled: false,
 		}
 	}
 }
@@ -193,7 +198,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Returns the next token and advance the parser one token forward.
-	#[allow(clippy::should_implement_trait)]
+	#[expect(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Token {
 		let res = loop {
 			let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
@@ -208,7 +213,6 @@ impl<'a> Parser<'a> {
 	/// Returns the next token and advance the parser one token forward.
 	///
 	/// This function is like next but returns whitespace tokens which are normally skipped
-	#[allow(clippy::should_implement_trait)]
 	pub fn next_whitespace(&mut self) -> Token {
 		let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
 		self.last_span = res.span;
@@ -398,7 +402,7 @@ pub struct StatementStream {
 }
 
 impl StatementStream {
-	#[allow(clippy::new_without_default)]
+	#[expect(clippy::new_without_default)]
 	pub fn new() -> Self {
 		Self::new_with_settings(ParserSettings::default())
 	}

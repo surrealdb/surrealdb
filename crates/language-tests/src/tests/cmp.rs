@@ -2,9 +2,9 @@ use std::{collections::BTreeMap, ops::Bound};
 
 use rust_decimal::Decimal;
 use surrealdb_core::sql::{
-	Array, Block, Bytes, Cast, Closure, Constant, Datetime, Duration, Edges, Expression, Function,
-	Future, Geometry, Id, IdRange, Idiom, Mock, Model, Number, Object, Param, Query, Range, Regex,
-	Subquery, Thing, Uuid, Value,
+	Array, Block, Bytes, Cast, Closure, Constant, Datetime, Duration, Edges, Expression, File,
+	Function, Future, Geometry, Id, IdRange, Idiom, Mock, Model, Number, Object, Param, Query,
+	Range, Regex, Subquery, Thing, Uuid, Value,
 };
 
 #[derive(Debug, Clone)]
@@ -111,7 +111,7 @@ macro_rules! impl_roughly_eq_enum {
     };
 
     (@match_pattern $this:expr, $other:expr, $ty_name:ident, $config:ident, $name:ident($($field:ident),* $(,)?)) => {
-        #[allow(non_camel_case_types)]
+        #[expect(non_camel_case_types)]
         struct $name<$($field,)*> {
             $($field: $field),*
         }
@@ -192,7 +192,7 @@ impl RoughlyEq for Uuid {
 impl_roughly_eq_delegate!(
 	i64, f64, Decimal, Query, bool, String, Closure, Expression, Number, Geometry, Bytes, Param,
 	Model, Subquery, Function, Constant, Future, Edges, Range, Block, Cast, Regex, Mock, Idiom,
-	Duration
+	Duration, File
 );
 
 impl_roughly_eq_struct!(Array, 0);
@@ -232,5 +232,6 @@ impl_roughly_eq_enum!(
 	Query(q),
 	Model(m),
 	Closure(c),
+	File(f),
 	}
 );

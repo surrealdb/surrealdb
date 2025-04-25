@@ -29,6 +29,7 @@ async fn define_global_param() -> Result<(), Error> {
 			accesses: {},
 			analyzers: {},
 			apis: {},
+			buckets: {},
 			configs: {},
 			functions: {},
 			models: {},

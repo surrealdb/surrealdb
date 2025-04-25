@@ -41,6 +41,10 @@ pub enum InfoStatement {
 }
 
 impl InfoStatement {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		false
+	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -154,6 +158,7 @@ impl InfoStatement {
 						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
 						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
+						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
 						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
 						"models".to_string() => process(txn.all_db_models(ns, db).await?),
 						"params".to_string() => process(txn.all_db_params(ns, db).await?),
@@ -180,6 +185,13 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_analyzers( ns, db).await?.iter() {
 								out.insert(v.name.to_raw(), v.to_string().into());
+							}
+							out.into()
+						},
+						"buckets".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_buckets(ns, db).await?.iter() {
+								out.insert(v.name.to_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -311,22 +323,26 @@ impl InfoStatement {
 					false => Value::from(res.to_string()),
 				})
 			}
-			#[allow(unused_variables)]
+			#[cfg_attr(target_family = "wasm", expect(unused_variables))]
 			InfoStatement::Index(index, table, _structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
-				// Get the transaction
-				let txn = ctx.tx();
+
 				// Output
 				#[cfg(not(target_family = "wasm"))]
-				if let Some(ib) = ctx.get_index_builder() {
-					// Obtain the index
-					let (ns, db) = opt.ns_db()?;
-					let res = txn.get_tb_index(ns, db, table, index).await?;
-					let status = ib.get_status(ns, db, &res).await;
-					let mut out = Object::default();
-					out.insert("building".to_string(), status.into());
-					return Ok(out.into());
+				{
+					// Get the transaction
+					let txn = ctx.tx();
+
+					if let Some(ib) = ctx.get_index_builder() {
+						// Obtain the index
+						let (ns, db) = opt.ns_db()?;
+						let res = txn.get_tb_index(ns, db, table, index).await?;
+						let status = ib.get_status(ns, db, &res).await;
+						let mut out = Object::default();
+						out.insert("building".to_string(), status.into());
+						return Ok(out.into());
+					}
 				}
 				Ok(Object::default().into())
 			}

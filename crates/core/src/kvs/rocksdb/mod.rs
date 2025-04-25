@@ -147,10 +147,10 @@ impl Datastore {
 		opts.set_row_cache(&cache);
 		// Configure memory-mapped reads
 		info!(target: TARGET, "Enable memory-mapped reads: {}", *cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_READS);
-		opts.set_allow_mmap_reads(true);
+		opts.set_allow_mmap_reads(*cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_READS);
 		// Configure memory-mapped writes
 		info!(target: TARGET, "Enable memory-mapped writes: {}", *cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_WRITES);
-		opts.set_allow_mmap_writes(true);
+		opts.set_allow_mmap_writes(*cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_WRITES);
 		// Set the delete compaction factory
 		info!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
@@ -236,6 +236,7 @@ impl Datastore {
 			db,
 		})
 	}
+
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Create new flush options
@@ -253,6 +254,7 @@ impl Datastore {
 		// All good
 		Ok(())
 	}
+
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Set the transaction options

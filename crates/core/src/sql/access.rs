@@ -94,7 +94,7 @@ impl Deref for Access {
 impl Access {
 	pub fn generate(&self) -> Thing {
 		Thing {
-			tb: self.0.to_owned(),
+			tb: self.0.clone(),
 			id: Id::rand(),
 		}
 	}

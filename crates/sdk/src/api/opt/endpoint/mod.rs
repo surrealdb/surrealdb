@@ -3,7 +3,7 @@ mod http;
 #[cfg(feature = "protocol-ws")]
 mod ws;
 
-#[cfg(kv_fdb)]
+#[cfg(feature = "kv-fdb")]
 mod fdb;
 #[cfg(feature = "kv-indxdb")]
 mod indxdb;
@@ -11,8 +11,6 @@ mod indxdb;
 mod mem;
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb;
-#[cfg(feature = "kv-surrealcs")]
-mod surrealcs;
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv;
 #[cfg(feature = "kv-tikv")]
@@ -27,7 +25,6 @@ use super::Config;
 
 /// A server address used to connect to the server
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // used by the embedded and remote connections
 pub struct Endpoint {
 	#[doc(hidden)]
 	pub url: Url,
@@ -74,7 +71,6 @@ fn replace_tilde(path: &str) -> String {
 	}
 }
 
-#[allow(dead_code)]
 pub(crate) fn path_to_string(protocol: &str, path: impl AsRef<std::path::Path>) -> String {
 	use path_clean::PathClean;
 	use std::path::Path;
@@ -131,7 +127,6 @@ pub enum EndpointKind {
 	Unsupported(String),
 	SurrealKv,
 	SurrealKvVersioned,
-	SurrealCs,
 }
 
 impl From<&str> for EndpointKind {
@@ -150,7 +145,6 @@ impl From<&str> for EndpointKind {
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKv,
 			"surrealkv+versioned" => Self::SurrealKvVersioned,
-			"surrealcs" => Self::SurrealCs,
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}

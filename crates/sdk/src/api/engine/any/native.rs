@@ -1,6 +1,6 @@
 use crate::api::conn::Connection;
 use crate::api::conn::Router;
-#[allow(unused_imports)] // used by the DB engines
+#[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::engine;
 use crate::api::engine::any::Any;
 #[cfg(feature = "protocol-http")]
@@ -11,11 +11,11 @@ use crate::api::method::BoxFuture;
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
-#[allow(unused_imports)] // used by the DB engines
+#[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
-#[allow(unused_imports)]
+#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
 #[cfg(feature = "protocol-http")]
@@ -32,7 +32,12 @@ use tokio_tungstenite::Connector;
 impl crate::api::Connection for Any {}
 
 impl Connection for Any {
-	#[allow(unused_variables, unreachable_code, unused_mut)] // these are all used depending on feature
+	#[allow(
+		unused_variables,
+		unreachable_code,
+		unused_mut,
+		reason = "These are all used depending on the enabled features."
+	)]
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
@@ -46,7 +51,7 @@ impl Connection for Any {
 
 			match EndpointKind::from(address.url.scheme()) {
 				EndpointKind::FoundationDb => {
-					#[cfg(kv_fdb)]
+					#[cfg(feature = "kv-fdb")]
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
@@ -54,7 +59,7 @@ impl Connection for Any {
 						conn_rx.recv().await??
 					}
 
-					#[cfg(not(kv_fdb))]
+					#[cfg(not(feature = "kv-fdb"))]
 					return Err(
 						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
 					);
@@ -122,28 +127,15 @@ impl Connection for Any {
 					.into());
 				}
 
-				EndpointKind::SurrealCs => {
-					#[cfg(feature = "kv-surrealcs")]
-					{
-						features.insert(ExtraFeatures::Backup);
-						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
-						conn_rx.recv().await??
-					}
-
-					#[cfg(not(feature = "kv-surrealcs"))]
-					return Err(DbError::Ds(
-						"Cannot connect to the `surrealcs` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
-					)
-					.into());
-				}
-
 				EndpointKind::Http | EndpointKind::Https => {
 					#[cfg(feature = "protocol-http")]
 					{
 						features.insert(ExtraFeatures::Backup);
 						let headers = http::default_headers();
-						#[allow(unused_mut)]
+						#[cfg_attr(
+							not(any(feature = "native-tls", feature = "rustls")),
+							expect(unused_mut)
+						)]
 						let mut builder = ClientBuilder::new().default_headers(headers);
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
 						if let Some(tls) = address.config.tls_config {

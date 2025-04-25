@@ -5,22 +5,17 @@ use std::collections::BTreeMap;
 use crate::{
 	api::{body::ApiBody, invocation::ApiInvocation, method::Method},
 	ctx::Context,
-	dbs::{capabilities::ExperimentalTarget, Options},
+	dbs::Options,
 	err::Error,
 	sql::{statements::FindApi, Object, Value},
 };
 
+use super::args::Optional;
+
 pub async fn invoke(
 	(stk, ctx, opt): (&mut Stk, &Context, &Options),
-	(path, opts): (String, Option<Object>),
+	(path, Optional(opts)): (String, Optional<Object>),
 ) -> Result<Value, Error> {
-	if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::DefineApi) {
-		return Err(Error::InvalidFunction {
-			name: "api::invoke".to_string(),
-			message: "Experimental feature is disabled".to_string(),
-		});
-	}
-
 	let (body, method, query, headers) = if let Some(opts) = opts {
 		let body = match opts.get("body") {
 			Some(v) => v.to_owned(),
@@ -34,13 +29,13 @@ pub async fn invoke(
 		};
 
 		let query: BTreeMap<String, String> = if let Some(v) = opts.get("query") {
-			v.to_owned().convert_to_object()?.try_into()?
+			v.to_owned().cast_to::<Object>()?.try_into()?
 		} else {
 			Default::default()
 		};
 
 		let headers: HeaderMap = if let Some(v) = opts.get("headers") {
-			v.to_owned().convert_to_object()?.try_into()?
+			v.to_owned().cast_to::<Object>()?.try_into()?
 		} else {
 			Default::default()
 		};

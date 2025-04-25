@@ -2,6 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::range::TypedRange;
 use crate::sql::{block::Entry, Block, Param, Value};
 use crate::sql::{ControlFlow, FlowResult};
 
@@ -9,7 +10,6 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
-use std::ops::Deref;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -23,7 +23,7 @@ pub struct ForeachStatement {
 
 enum ForeachIter {
 	Array(std::vec::IntoIter<Value>),
-	Range(std::iter::Map<std::ops::Range<i64>, fn(i64) -> Value>),
+	Range(std::iter::Map<TypedRange<i64>, fn(i64) -> Value>),
 }
 
 impl Iterator for ForeachIter {
@@ -57,7 +57,7 @@ impl ForeachStatement {
 		let iter = match data {
 			Value::Array(arr) => ForeachIter::Array(arr.into_iter()),
 			Value::Range(r) => {
-				let r: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
+				let r = r.coerce_to_typed::<i64>().map_err(Error::from)?;
 				ForeachIter::Range(r.map(Value::from))
 			}
 
@@ -70,7 +70,7 @@ impl ForeachStatement {
 
 		// Loop over the values
 		for v in iter {
-			if ctx.is_timedout()? {
+			if ctx.is_timedout().await? {
 				return Err(ControlFlow::from(Error::QueryTimedout));
 			}
 			// Duplicate context
@@ -88,7 +88,7 @@ impl ForeachStatement {
 					Entry::Set(v) => {
 						let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
 						let mut c = MutableContext::unfreeze(ctx)?;
-						c.add_value(v.name.to_owned(), val.into());
+						c.add_value(v.name.clone(), val.into());
 						ctx = c.freeze();
 						Ok(Value::None)
 					}
@@ -108,6 +108,7 @@ impl ForeachStatement {
 					Entry::Alter(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
 					Entry::Rebuild(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
 					Entry::Remove(v) => Ok(v.compute(&ctx, opt, doc).await?),
+					Entry::Info(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
 					Entry::Output(v) => {
 						return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
 					}
@@ -121,7 +122,7 @@ impl ForeachStatement {
 					_ => (),
 				};
 			}
-			// Cooperitively yield if the task has been running for too long.
+			// Cooperatively yield if the task has been running for too long.
 			yield_now!();
 		}
 		// Ok all good

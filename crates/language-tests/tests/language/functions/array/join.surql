@@ -2,10 +2,10 @@
 [test]
 
 [[test.results]]
-error = "Incorrect arguments for function array::join(). Expected 2 arguments."
+error = "Incorrect arguments for function array::join(). Expected 2 arguments"
 
 [[test.results]]
-error = "Incorrect arguments for function array::join(). Expected 2 arguments."
+error = "Incorrect arguments for function array::join(). Expected 2 arguments"
 
 [[test.results]]
 value = "''"
