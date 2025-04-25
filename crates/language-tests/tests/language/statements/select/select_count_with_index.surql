@@ -20,7 +20,7 @@ value = "[{ count: 10 }]"
 value = "[{ count: 10 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idx_indexedField', operator: '=', value: 'cake' }, table: 'test' }, operation: 'Iterate Index Count' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'idx_indexedField', operator: '=', value: 'cake' }, table: 'test' }, operation: 'Iterate Index' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[]"
