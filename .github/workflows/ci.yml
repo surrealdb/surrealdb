@@ -760,7 +760,7 @@ jobs:
 
       - name: Run SurrealQL test suite
         run: |
-          cargo run --project language-tests -- --color always run 
+          cargo make language-tests
 
   # ----------------------------------------
   # Other SDK tests
