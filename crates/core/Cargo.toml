@@ -65,7 +65,7 @@ allocation-tracking = []
 # Special features
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 kv-fdb-7_3 = ["foundationdb/fdb-7_3", "kv-fdb"]
-enterprise = []
+enterprise = ["dep:rust-s3"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -235,6 +235,9 @@ mimalloc = { workspace = true, optional = true, default-features = false }
 
 [target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 jemallocator = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rust-s3 = { workspace = true, optional = true }
 
 [lints]
 workspace = true
