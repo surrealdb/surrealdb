@@ -1,0 +1,6 @@
+
+
+disallowed-methods = [
+  { path = "rust_decimal::Decimal::from_str_exact", suggest = "stu" },
+  { path = "rust_decimal::Decimal::from_str", suggest = "stu" },
+]
