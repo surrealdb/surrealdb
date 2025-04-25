@@ -99,9 +99,8 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("ALTER")
 			| t!("REMOVE")
-			| t!("REBUILD") => {
-				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))
-			}
+			| t!("REBUILD")
+			| t!("INFO") => self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x))),
 			t!("IF") => {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_if_stmt(ctx))

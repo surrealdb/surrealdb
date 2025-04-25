@@ -14,11 +14,12 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
 
+use super::statements::InfoStatement;
 use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Subquery")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -41,6 +42,8 @@ pub enum Subquery {
 	Upsert(UpsertStatement),
 	#[revision(start = 4)]
 	Alter(AlterStatement),
+	#[revision(start = 5)]
+	Info(InfoStatement),
 }
 
 impl PartialOrd for Subquery {
@@ -68,6 +71,7 @@ impl Subquery {
 			Self::Remove(v) => v.writeable(),
 			Self::Rebuild(v) => v.writeable(),
 			Self::Alter(v) => v.writeable(),
+			Self::Info(v) => v.writeable(),
 		}
 	}
 
@@ -102,6 +106,7 @@ impl Subquery {
 			Self::Relate(ref v) => v.compute(stk, &ctx, opt, doc).await?,
 			Self::Insert(ref v) => v.compute(stk, &ctx, opt, doc).await?,
 			Self::Alter(ref v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Info(ref v) => v.compute(stk, &ctx, opt, doc).await?,
 		};
 
 		Ok(res)
@@ -124,6 +129,7 @@ impl Display for Subquery {
 			Self::Remove(v) => write!(f, "({v})"),
 			Self::Rebuild(v) => write!(f, "({v})"),
 			Self::Alter(v) => write!(f, "({v})"),
+			Self::Info(v) => write!(f, "({v})"),
 			Self::Ifelse(v) => Display::fmt(v, f),
 		}
 	}
