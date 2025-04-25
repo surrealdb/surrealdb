@@ -8,7 +8,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { seq1: 'DEFINE SEQUENCE seq1 BATCH 1000 START 0', seq2: 'DEFINE SEQUENCE seq2 BATCH 100 START 0' }, tables: {  }, users: {  } }'''
+value = "NONE"
+
+[[test.results]]
+value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { seq1: 'DEFINE SEQUENCE seq1 BATCH 1000 START 0', seq2: 'DEFINE SEQUENCE seq2 BATCH 100 START 0', seq3: 'DEFINE SEQUENCE seq3 BATCH 1000 START 0 TIMEOUT 5s' }, tables: {  }, users: {  } }'''
 
 [[test.results]]
 value = "NONE"
@@ -17,11 +20,12 @@ value = "NONE"
 error = "The sequence 'seq2' already exists"
 
 [[test.results]]
-value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { seq1: 'DEFINE SEQUENCE seq1 BATCH 1000 START 0', seq2: 'DEFINE SEQUENCE seq2 BATCH 250 START -25' }, tables: {  }, users: {  } }'''
+value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { seq1: 'DEFINE SEQUENCE seq1 BATCH 1000 START 0', seq2: 'DEFINE SEQUENCE seq2 BATCH 250 START -25', seq3: 'DEFINE SEQUENCE seq3 BATCH 1000 START 0 TIMEOUT 5s' }, tables: {  }, users: {  } }'''
 
 */
 DEFINE SEQUENCE seq1;
 DEFINE SEQUENCE seq2 BATCH 100;
+DEFINE SEQUENCE seq3 TIMEOUT 5s;
 INFO FOR DB;
 DEFINE SEQUENCE OVERWRITE seq2 BATCH 250 START -25;
 DEFINE SEQUENCE seq2 BATCH 150;

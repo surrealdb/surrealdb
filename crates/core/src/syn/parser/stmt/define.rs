@@ -1480,12 +1480,14 @@ impl Parser<'_> {
 		} else {
 			0
 		};
+		let timeout = self.try_parse_timeout()?;
 		Ok(DefineSequenceStatement {
 			name,
-			batch,
-			start,
 			if_not_exists,
 			overwrite,
+			batch,
+			start,
+			timeout,
 		})
 	}
 

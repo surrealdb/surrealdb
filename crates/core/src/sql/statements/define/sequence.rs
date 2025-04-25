@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Value};
+use crate::sql::{Base, Ident, Timeout, Value};
 
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
@@ -17,10 +17,11 @@ use std::fmt::{self, Display};
 #[non_exhaustive]
 pub struct DefineSequenceStatement {
 	pub name: Ident,
-	pub batch: u32,
-	pub start: i64,
 	pub if_not_exists: bool,
 	pub overwrite: bool,
+	pub batch: u32,
+	pub start: i64,
+	pub timeout: Option<Timeout>,
 }
 
 impl DefineSequenceStatement {
@@ -74,6 +75,9 @@ impl Display for DefineSequenceStatement {
 			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
+		if let Some(ref v) = self.timeout {
+			write!(f, " {v}")?
+		}
 		Ok(())
 	}
 }
@@ -84,6 +88,7 @@ impl InfoStructure for DefineSequenceStatement {
 				"name".to_string() => self.name.structure(),
 				"batch".to_string() => Value::from(self.batch).structure(),
 				"start".to_string() => Value::from(self.start).structure(),
+				"timeout".to_string() => self.timeout.as_ref().map(|t|t.0.into()).unwrap_or(Value::None),
 		})
 	}
 }
