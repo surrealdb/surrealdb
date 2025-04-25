@@ -233,6 +233,12 @@ user-id = 51017 # Yuki Okushi (JohnTitor)
 start = "2020-03-17"
 end = "2025-11-14"
 
+[[trusted.libfuzzer-sys]]
+criteria = "safe-to-deploy"
+user-id = 696 # Nick Fitzgerald (fitzgen)
+start = "2020-01-14"
+end = "2026-04-25"
+
 [[trusted.loom]]
 criteria = "safe-to-deploy"
 user-id = 10 # Carl Lerche (carllerche)
@@ -395,6 +401,18 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-08-20"
 end = "2025-08-06"
 
+[[trusted.serde_spanned]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2023-01-20"
+end = "2026-04-25"
+
+[[trusted.similar]]
+criteria = "safe-to-deploy"
+user-id = 39 # Armin Ronacher (mitsuhiko)
+start = "2021-01-24"
+end = "2026-04-25"
+
 [[trusted.slab]]
 criteria = "safe-to-deploy"
 user-id = 6741 # Alice Ryhl (Darksonn)
@@ -502,6 +520,12 @@ criteria = "safe-to-deploy"
 user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2021-01-12"
 end = "2025-09-03"
+
+[[trusted.toml]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2022-12-14"
+end = "2026-04-25"
 
 [[trusted.tower]]
 criteria = "safe-to-deploy"

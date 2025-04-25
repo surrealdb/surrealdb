@@ -2,11 +2,11 @@
 # cargo-vet imports lock
 
 [[unpublished.surrealdb]]
-version = "2.3.0"
+version = "3.0.0"
 audited_as = "2.2.2"
 
 [[unpublished.surrealdb-core]]
-version = "2.3.0"
+version = "3.0.0"
 audited_as = "2.2.2"
 
 [[publisher.addr]]
@@ -254,6 +254,13 @@ user-id = 51017
 user-login = "JohnTitor"
 user-name = "Yuki Okushi"
 
+[[publisher.libfuzzer-sys]]
+version = "0.4.9"
+when = "2025-01-28"
+user-id = 696
+user-login = "fitzgen"
+user-name = "Nick Fitzgerald"
+
 [[publisher.memchr]]
 version = "2.7.4"
 when = "2024-06-14"
@@ -436,6 +443,20 @@ user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
 
+[[publisher.serde_spanned]]
+version = "0.6.8"
+when = "2024-09-25"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
+[[publisher.similar]]
+version = "2.7.0"
+when = "2025-01-19"
+user-id = 39
+user-login = "mitsuhiko"
+user-name = "Armin Ronacher"
+
 [[publisher.slab]]
 version = "0.4.9"
 when = "2023-08-22"
@@ -526,6 +547,13 @@ when = "2025-03-13"
 user-id = 6741
 user-login = "Darksonn"
 user-name = "Alice Ryhl"
+
+[[publisher.toml]]
+version = "0.8.20"
+when = "2025-02-05"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
 
 [[publisher.trice]]
 version = "0.4.0"
@@ -1024,6 +1052,21 @@ notes = "Just a dependency version bump and a bug fix for redox"
 who = "Dan Gohman <dev@sunfishcode.online>"
 criteria = "safe-to-deploy"
 delta = "0.3.9 -> 0.3.10"
+
+[[audits.bytecode-alliance.audits.fastrand]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "2.0.0 -> 2.0.1"
+notes = """
+This update had a few doc updates but no otherwise-substantial source code
+updates.
+"""
+
+[[audits.bytecode-alliance.audits.fastrand]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "2.1.1 -> 2.3.0"
+notes = "Minor refactoring, nothing new."
 
 [[audits.bytecode-alliance.audits.fd-lock]]
 who = "Pat Hickey <phickey@fastly.com>"
@@ -1627,6 +1670,16 @@ criteria = "safe-to-deploy"
 delta = "1.0.1 -> 1.0.2"
 notes = "No changes to any .rs files or Rust code."
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
+[[audits.google.audits.fastrand]]
+who = "George Burgess IV <gbiv@google.com>"
+criteria = "safe-to-deploy"
+version = "1.9.0"
+notes = """
+`does-not-implement-crypto` is certified because this crate explicitly says
+that the RNG here is not cryptographically secure.
+"""
+aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
 
 [[audits.google.audits.flate2]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
@@ -2536,6 +2589,13 @@ end = "2024-06-16"
 notes = "Maintained by Henri Sivonen who works at Mozilla."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.android-tzdata]]
+who = "Mark Hammond <mhammond@skippinet.com.au>"
+criteria = "safe-to-deploy"
+version = "0.1.1"
+notes = "Small crate parsing a file. No unsafe code"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.android_system_properties]]
 who = "Nicolas Silva <nical@fastmail.com>"
 criteria = "safe-to-deploy"
@@ -2716,6 +2776,25 @@ aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supp
 who = "Mike Hommey <mh+mozilla@glandium.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.1 -> 0.3.3"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.fastrand]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "1.9.0 -> 2.0.0"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.fastrand]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "2.0.1 -> 2.1.0"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.fastrand]]
+who = "Chris Martin <cmartin@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "2.1.0 -> 2.1.1"
+notes = "Fairly trivial changes, no chance of security regression."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.fd-lock]]
@@ -3273,6 +3352,13 @@ who = "Henri Sivonen <hsivonen@hsivonen.fi>"
 criteria = "safe-to-deploy"
 version = "1.0.5"
 notes = "I, Henri Sivonen, wrote this crate."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.windows-link]]
+who = "Mark Hammond <mhammond@skippinet.com.au>"
+criteria = "safe-to-deploy"
+version = "0.1.1"
+notes = "A microsoft crate allowing unsafe calls to windows apis."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.write16]]
