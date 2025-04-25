@@ -232,7 +232,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	}
 
 	if reports.iter().any(|x| x.grade() == TestGrade::Failed) {
-		bail!("Not all tests where successfull")
+		bail!("Not all tests were successful")
 	}
 
 	if !load_errors.is_empty() {
@@ -304,6 +304,8 @@ async fn run_test_with_dbs(
 		.as_ref()
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
+
+	eprintln!("\n\nRunning test `{}`: ({timeout_duration:?})\n\n", set[id].path);
 
 	let mut import_session = Session::owner();
 	if let Some(ns) = session.ns.as_ref() {

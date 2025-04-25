@@ -757,17 +757,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: crates/language-tests
 
       - name: Build SurrealQL test tool
         run: |
-          cd crates/language-tests
-          cargo build
+          cargo build --release --project language-tests
 
       - name: Run SurrealQL test suite
         run: |
-          cd crates/language-tests
-          ./target/debug/surrealql-test --color always run
+          cargo run --release --project language-tests -- --color always run 
 
   # ----------------------------------------
   # Other SDK tests

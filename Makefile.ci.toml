@@ -33,7 +33,6 @@ command = "cargo"
 args = [
     "check",
     "--locked",
-    "--workspace",
     "--all-targets",
     "--features",
     "${ALL_FEATURES}",
@@ -46,7 +45,6 @@ args = [
     "check",
     "--release",
     "--locked",
-    "--workspace",
     "--all-targets",
     "--features",
     "${ALL_FEATURES}",
@@ -242,7 +240,6 @@ args = [
     "--no-default-features",
     "--features",
     "storage-mem,scripting,http,jwks",
-    "--workspace",
     "--",
     "--skip",
     "api_integration",
@@ -543,6 +540,23 @@ args = [
     "--no-default-features",
     "--features",
     "storage-mem",
+]
+
+#
+# Language Tests
+#
+[tasks.language-tests]
+category = "CI - LANGUAGE TESTS"
+command = "cargo"
+args = [
+    "run",
+    # "--locked",
+    "--package",
+    "language-tests",
+    "--",
+    "--color",
+    "always",
+    "run",
 ]
 
 #

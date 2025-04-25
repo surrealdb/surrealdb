@@ -1,8 +1,7 @@
 [package]
-name = "surrealql-test"
-version = "0.1.0"
-publish = false
-edition = "2021"
+name = "language-tests"
+version.workspace = true
+edition.workspace = true
 publish = false
 
 [features]
@@ -12,13 +11,15 @@ backend-surrealkv = ["surrealdb-core/kv-surrealkv"]
 backend-rocksdb = ["surrealdb-core/kv-rocksdb"]
 backend-foundation-7_1 = ["surrealdb-core/kv-fdb-7_1"]
 backend-foundation-7_3 = ["surrealdb-core/kv-fdb-7_3"]
-upgrade = ["backend-surrealkv"] # Upgrade test suite.
+upgrade = ["backend-surrealkv"]                        # Upgrade test suite.
 
 [dependencies]
 # Crates for running surrealdb.
-surrealdb-core = { workspace = true, default-features=false, features = ["scripting"] }
-reblessive = { workspace = true }
-rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+surrealdb-core = { workspace = true, default-features = false, features = [
+    "scripting",
+] }
+reblessive.workspace = true
+rust_decimal.workspace = true
 
 # Used for capturing logs from core
 #tracing = "*"
@@ -28,18 +29,18 @@ rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 anyhow = "1.0.81"
 
 # Async utility crates
-tokio = { version = "1.41.1", features = ["full"] }
-futures = "0.3.30"
+tokio = { workspace = true, features = ["full"] }
+futures.workspace = true
 
 # Config and cli parsing
 clap = { version = "4.4.11", features = ["cargo"] }
-serde = { version = "1.0.209", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 toml = "0.8.19"
 toml_edit = { version = "0.22", features = ["serde"] }
-semver = "1.0.26"
+semver.workspace = true
 
 # Used for formatting output
-base64 = "0.21.5"
+base64.workspace = true
 similar = "2.6.0"
 
 [lints]

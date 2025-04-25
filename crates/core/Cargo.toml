@@ -1,25 +1,19 @@
 [package]
 name = "surrealdb-core"
 publish = true
-edition = "2021"
-version = "3.0.0"
-rust-version = "1.84.0"
 readme = "README.md"
-authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
-repository = "https://github.com/surrealdb/surrealdb"
-homepage = "https://github.com/surrealdb/surrealdb"
 documentation = "https://docs.rs/surrealdb-core/"
-keywords = [
-    "database",
-    "embedded-database",
-    "key-value",
-    "key-value-store",
-    "kv-store",
-]
-categories = ["database-implementations", "data-structures", "embedded"]
-license-file = "../../LICENSE"
-resolver = "2"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
+
 
 [features]
 # Public features
@@ -39,18 +33,8 @@ kv-rocksdb = [
     "dep:ext-sort",
     "dep:affinitypool",
 ]
-kv-tikv = [
-    "dep:tikv",
-    "tokio/time",
-    "dep:tempfile",
-    "dep:ext-sort",
-]
-kv-fdb = [
-    "dep:foundationdb",
-    "tokio/time",
-    "dep:tempfile",
-    "dep:ext-sort",
-]
+kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = [
     "dep:surrealkv",
     "tokio/time",
@@ -190,7 +174,7 @@ unicase.workspace = true
 url.workspace = true
 
 # Other optional crates
-arbitrary = { workspace = true, features = ["derive"], optional = true }
+arbitrary = { workspace = true, optional = true }
 ext-sort = { workspace = true, optional = true }
 regex-syntax = { workspace = true, optional = true }
 reqwest = { workspace = true, default-features = false, features = [

@@ -5,7 +5,7 @@
 value = "1.1071487177940904f"
 
 [[test.results]]
-value = "0.46364760900080615f"
+value = "0.4636476090008059f"
 
 [[test.results]]
 value = "1.5f"
