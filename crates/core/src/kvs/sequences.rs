@@ -9,6 +9,7 @@ use crate::kvs::{KeyEncode, LockType, Transaction, TransactionType};
 use crate::sql::statements::define::DefineSequenceStatement;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use rand::{thread_rng, Rng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -181,25 +182,32 @@ impl Sequence {
 		let (ns, db) = opt.ns_db()?;
 		let nid = opt.id()?;
 		// Use for exponential backoff
-		let mut tempo = 5;
+		let mut rng = thread_rng();
+		let mut tempo = 4;
+		const MAX_BACKOFF: u64 = 32_768;
 		let start = if to.is_some() {
 			Some(Instant::now())
 		} else {
 			None
 		};
-		// Loop until we have a successful allocation
+		// Loop until we have a successful allocation.
+		// We check the timeout inherited from the context
 		while !ctx.is_timedout().await? {
 			if let (Some(ref start), Some(ref to)) = (start, to) {
-				if start.elapsed().gt(to) {
+				// We check the time associated with the sequence
+				if start.elapsed().ge(to) {
 					break;
 				}
 			}
 			if let Ok(r) = Self::check_batch_allocation(tf, ns, db, seq, nid, next, batch).await {
 				return Ok(r);
 			}
-			// exponential backoff
-			sleep(Duration::from_millis(tempo)).await;
-			tempo *= 2;
+			// exponential backoff with full jitter
+			let sleep_ms = rng.gen_range(1..=tempo);
+			sleep(Duration::from_millis(sleep_ms)).await;
+			if tempo < MAX_BACKOFF {
+				tempo *= 2;
+			}
 		}
 		Err(Error::QueryTimedout)
 	}

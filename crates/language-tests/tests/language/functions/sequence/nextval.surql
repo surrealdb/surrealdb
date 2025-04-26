@@ -20,7 +20,7 @@ error = "The sequence 'sq' does not exist"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+error = "The query was not executed because it exceeded the timeout"
 
 */
 DEFINE SEQUENCE sq START 10;
@@ -29,5 +29,5 @@ RETURN sequence::nextval('sq');
 REMOVE SEQUENCE sq;
 RETURN sequence::nextval('sq');
 
-DEFINE SEQUENCE sq TIMEOUT 0s;
-RETURN sequence::nextval('sq');
+DEFINE SEQUENCE sq BATCH 10 TIMEOUT 0s;
+CREATE |test:20| CONTENT { sq: sequence::nextval('sq') } RETURN NONE;
