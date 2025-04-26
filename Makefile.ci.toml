@@ -57,6 +57,7 @@ category = "CI - CHECK"
 command = "cargo"
 args = [
     "clippy",
+    "--workspace",
     "--all-targets",
     "--features",
     "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,storage-fdb-7_1",
@@ -73,7 +74,9 @@ category = "CI - CHECK"
 command = "cargo"
 args = [
     "clippy",
+    "--workspace",
     "--all-targets",
+    "--release",
     "--features",
     "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,storage-fdb-7_1",
     "--tests",

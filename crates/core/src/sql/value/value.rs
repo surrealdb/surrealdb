@@ -1099,13 +1099,13 @@ impl TryNeg for Value {
 /// Macro implementing conversion methods for the variants of the value enum.
 macro_rules! subtypes {
 	($($name:ident$( ( $($t:tt)* ) )? => ($is:ident,$as:ident,$into:ident)),*$(,)?) => {
-		pub enum Type{
+		pub enum Type {
 			$($name),*
 		}
 
 		impl Value {
 
-			pub fn type_of(&self) -> Type{
+			pub fn type_of(&self) -> Type {
 				match &self{
 					$(subtypes!{@pat $name $( ($($t)*) )?} => Type::$name),*
 				}

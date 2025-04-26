@@ -1451,7 +1451,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let CoreValue::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
-	let changes = a.get("changes").unwrap().clone().to_owned();
+	let changes = a.get("changes").unwrap().clone().clone();
 	assert_eq!(
 		Value::from_inner(changes),
 		"[
@@ -1465,7 +1465,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 		.unwrap()
 	);
 	// UPDATE testuser:amos
-	let a = array.get(1).unwrap();
+	let a = &array[1];
 	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
 	};
@@ -1487,7 +1487,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 		.unwrap()
 	);
 	// UPDATE testuser:jane
-	let a = array.get(2).unwrap();
+	let a = &array[2];
 	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
 	};
@@ -1510,7 +1510,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 		.unwrap()
 	);
 	// UPDATE testuser:amos
-	let a = array.get(3).unwrap();
+	let a = &array[3];
 	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
 	};
@@ -1533,7 +1533,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 		.unwrap()
 	);
 	// UPDATE table
-	let a = array.get(4).unwrap();
+	let a = &array[4];
 	let CoreValue::Object(a) = a.clone() else {
 		unreachable!()
 	};
