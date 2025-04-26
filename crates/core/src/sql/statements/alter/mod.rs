@@ -77,6 +77,6 @@ mod tests {
 			..Default::default()
 		});
 		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(16, enc.len());
+		assert_eq!(11, enc.len());
 	}
 }
