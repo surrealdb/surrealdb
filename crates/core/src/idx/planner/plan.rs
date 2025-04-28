@@ -74,7 +74,9 @@ impl PlanBuilder {
 			}
 			if let Some((_, io)) = compound_index {
 				// Evaluate if we can use keys only
-				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
+				let record_strategy = ctx
+					.check_record_strategy(all_expressions_with_index, granted_permission)
+					.await?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
@@ -83,8 +85,9 @@ impl PlanBuilder {
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
-					let record_strategy =
-						ctx.check_record_strategy(true, granted_permission).await?;
+					let record_strategy = ctx
+						.check_record_strategy(all_expressions_with_index, granted_permission)
+						.await?;
 					// Return the plan
 					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy));
 				}
@@ -93,14 +96,18 @@ impl PlanBuilder {
 			// Otherwise, we try to find the most interesting (todo: TBD) single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
+				let record_strategy = ctx
+					.check_record_strategy(all_expressions_with_index, granted_permission)
+					.await?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
 			}
 			// If there is an order option
 			if let Some(o) = order {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
+				let record_strategy = ctx
+					.check_record_strategy(all_expressions_with_index, granted_permission)
+					.await?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
 			}
@@ -116,7 +123,8 @@ impl PlanBuilder {
 				}
 			}
 			// Evaluate the record strategy
-			let record_strategy = ctx.check_record_strategy(true, granted_permission).await?;
+			let record_strategy =
+				ctx.check_record_strategy(all_expressions_with_index, granted_permission).await?;
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
