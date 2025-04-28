@@ -1051,12 +1051,12 @@ mod tests {
 		let b = Number::Float(-f64::INFINITY);
 		let c = Number::Float(1f64);
 		let d = Number::Decimal(
-			Decimal::from_str_normalized("1.0000000000000000000000000002").unwrap(),
+			Decimal::from_str_exact_normalized("1.0000000000000000000000000002").unwrap(),
 		);
-		let e = Number::Decimal(Decimal::from_str_normalized("1.1").unwrap());
+		let e = Number::Decimal(Decimal::from_str_exact_normalized("1.1").unwrap());
 		let f = Number::Float(1.1f64);
 		let g = Number::Float(1.5f64);
-		let h = Number::Decimal(Decimal::from_str_normalized("1.5").unwrap());
+		let h = Number::Decimal(Decimal::from_str_exact_normalized("1.5").unwrap());
 		let i = Number::Float(f64::INFINITY);
 		let j = Number::Float(f64::NAN);
 		let original = vec![a, b, c, d, e, f, g, h, i, j];
