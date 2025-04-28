@@ -133,7 +133,7 @@ impl<'a> StatementContext<'a> {
 
 	pub(crate) fn check_record_strategy(
 		&self,
-		with_all_indexes: bool,
+		all_expressions_with_index: bool,
 		granted_permission: GrantedPermission,
 	) -> Result<RecordStrategy, Error> {
 		// Update / Upsert / Delete need to retrieve the values:
@@ -142,10 +142,10 @@ impl<'a> StatementContext<'a> {
 		if matches!(self.stm, Statement::Update(_) | Statement::Upsert(_) | Statement::Delete(_)) {
 			return Ok(RecordStrategy::KeysAndValues);
 		}
-		// If there is a WHERE clause, then
-		// we need to fetch and process
+		// If there is an index backs a WHERE clause but not all expressions,
+		// then we need to fetch and process
 		// record content values too.
-		if !with_all_indexes && self.cond.is_some() {
+		if !all_expressions_with_index && self.cond.is_some() {
 			return Ok(RecordStrategy::KeysAndValues);
 		}
 
