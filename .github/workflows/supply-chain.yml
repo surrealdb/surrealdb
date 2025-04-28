@@ -81,6 +81,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
+      - name: Install cargo-vet
+        run: cargo install --debug --locked cargo-vet
+
       - name: Check dependencies for untrusted sources
         run: cargo vet check
 
