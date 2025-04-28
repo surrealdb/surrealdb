@@ -871,8 +871,16 @@ criteria = "safe-to-deploy"
 version = "11.1.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.openssl]]
+version = "0.10.72"
+criteria = "safe-to-deploy"
+
 [[exemptions.openssl-probe]]
 version = "0.1.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.openssl-sys]]
+version = "0.9.107"
 criteria = "safe-to-deploy"
 
 [[exemptions.opentelemetry]]
