@@ -123,7 +123,7 @@ pub fn parse() -> ArgMatches {
             Command::new("run")
                 .about("Run surrealdb tests")
                 .arg(arg!([filter] "Filter the tests by their path"))
-                .arg(arg!(--path <PATH> "The path to tests directory").default_value("./crates/language-tests/tests"))
+                .arg(arg!(--path <PATH> "The path to tests directory").default_value("./tests"))
                 .arg(
                     arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")
                         .value_parser(value_parser!(u32).range(1..))
