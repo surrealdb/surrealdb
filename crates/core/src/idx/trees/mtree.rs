@@ -1712,7 +1712,7 @@ mod tests {
 			// We check that the results are sorted by ascending distance
 			let mut dist = 0.0;
 			for (doc, d) in res.docs {
-				let o = map.get(&doc).unwrap();
+				let o = &map[&doc];
 				debug!("doc: {doc} - d: {d} - {obj:?} - {o:?}");
 				assert!(d >= dist, "d: {d} - dist: {dist}");
 				dist = d;

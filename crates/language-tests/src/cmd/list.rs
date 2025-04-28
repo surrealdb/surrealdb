@@ -5,7 +5,7 @@ use crate::tests::TestSet;
 
 pub async fn run(matches: &ArgMatches) -> Result<()> {
 	let path: &String = matches.get_one("path").unwrap();
-	let (testset, errors) = TestSet::collect_directory(&path).await?;
+	let (testset, errors) = TestSet::collect_directory(path).await?;
 	if !errors.is_empty() {
 		println!(" Failed to load some of the tests");
 	}
