@@ -4,9 +4,9 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::sql::{
-	array::Uniq as _, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, Duration, File,
-	Geometry, Ident, Kind, Literal, Number, Object, Range, Regex, Strand, Table, Thing, Uuid,
-	Value,
+	array::Uniq as _, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, DecimalExt,
+	Duration, File, Geometry, Ident, Kind, Literal, Number, Object, Range, Regex, Strand, Table,
+	Thing, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -262,7 +262,7 @@ impl Cast for Decimal {
 				}),
 			},
 			// Attempt to convert a string value
-			Value::Strand(ref s) => match s.parse() {
+			Value::Strand(ref s) => match Decimal::from_str_normalized(s) {
 				// The string can be parsed as a Decimal
 				Ok(v) => Ok(v),
 				// This string is not a Decimal
