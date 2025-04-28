@@ -12,13 +12,13 @@ use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode;
 use crate::sql::dir::Dir;
 use crate::sql::edges::Edges;
+use crate::sql::graph::GraphSubjects;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::reference::ReferenceDeleteStrategy;
 use crate::sql::statements::DeleteStatement;
 use crate::sql::statements::UpdateStatement;
-use crate::sql::table::Tables;
 use crate::sql::value::{Value, Values};
 use crate::sql::Data;
 use crate::sql::FlowResultExt as _;
@@ -80,7 +80,7 @@ impl Document {
 						what: Values(vec![Value::from(Edges {
 							dir: Dir::Both,
 							from: rid.as_ref().clone(),
-							what: Tables::default(),
+							what: GraphSubjects::default(),
 						})]),
 						..DeleteStatement::default()
 					};
