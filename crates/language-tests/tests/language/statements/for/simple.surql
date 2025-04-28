@@ -1,6 +1,5 @@
 /**
 [test]
-wip = true
 
 [[test.results]]
 value = "NONE"
@@ -15,7 +14,7 @@ value = "NONE"
 value = "[{ id: person:1, test: 1 }, { id: person:4, test: 4 }, { id: person:6, test: 6 }]"
 
 [[test.results]]
-error = "This is an error"
+error = "Can not execute statement using value: <future> { [7, 8, 9] }"
 
 [[test.results]]
 value = "[{ id: person:1, test: 1 }, { id: person:4, test: 4 }, { id: person:6, test: 6 }]"
