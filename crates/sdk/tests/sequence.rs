@@ -65,18 +65,18 @@ async fn concurrent_sequence_next_val() -> Result<(), Error> {
 	let set1: BTreeSet<i64> =
 		set11.into_iter().chain(set12.into_iter()).chain(set13.into_iter()).collect();
 	assert_eq!(set1.len(), count * 3);
-	assert_eq!(set1.first().cloned(), Some(-250));
-	assert_eq!(set1.last().cloned(), Some(2749));
+	assert_eq!(set1.first().copied(), Some(-250));
+	assert_eq!(set1.last().copied(), Some(2749));
 
 	let set2: BTreeSet<i64> = set21.into_iter().chain(set22.into_iter()).collect();
 	assert_eq!(set2.len(), count * 2);
-	assert_eq!(set2.first().cloned(), Some(0));
-	assert_eq!(set2.last().cloned(), Some(1999));
+	assert_eq!(set2.first().copied(), Some(0));
+	assert_eq!(set2.last().copied(), Some(1999));
 
 	let set3: BTreeSet<i64> = set31.into_iter().collect();
 	assert_eq!(set3.len(), count);
-	assert_eq!(set3.first().cloned(), Some(1000));
-	assert_eq!(set3.last().cloned(), Some(1999));
+	assert_eq!(set3.first().copied(), Some(1000));
+	assert_eq!(set3.last().copied(), Some(1999));
 
 	Ok(())
 }
@@ -104,8 +104,8 @@ async fn sequence_next_val_after_restart() -> Result<(), Error> {
 	// We should have 2000 unique numbers
 	assert_eq!(set.len(), 2000);
 	// They should be consecutive
-	assert_eq!(set.first().cloned(), Some(0));
-	assert_eq!(set.last().cloned(), Some(1999));
+	assert_eq!(set.first().copied(), Some(0));
+	assert_eq!(set.last().copied(), Some(1999));
 
 	Ok(())
 }
