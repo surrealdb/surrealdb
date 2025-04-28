@@ -423,11 +423,3 @@ lossy_float_literal = "warn"
 # SurrealDB relies on async functions in the AST parser and executor to avoid stack overflows.
 # Warning or denying this lint can cause unexpected errors.
 unused_async = "allow"
-
-[workspace.metadata.clippy]
-disallowed-methods = [
-  { path = "rust_decimal::Decimal::from_str_exact", suggest = "rust_decimal::Decimal::new" },
-  { path = "rust_decimal::Decimal::from_str", suggest = "rust_decimal::Decimal::from_str(...).normalize()" },
-#   { path = "rust_decimal::Decimal::from_f64", suggest = "rust_decimal::Decimal::from_f64(...).normalize()" },
-  # Add other constructors you want to disallow
-]

@@ -434,7 +434,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 				if let Some(int) = n.as_i64() {
 					Ok(SqlValue::Number(sql::Number::Decimal(int.into())))
 				} else if let Some(d) = n.as_f64().and_then(Decimal::from_f64) {
-					Ok(SqlValue::Number(sql::Number::Decimal(d.normalize())))
+					Ok(SqlValue::Number(sql::Number::Decimal(d)))
 				} else if let Some(uint) = n.as_u64() {
 					Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
 				} else {
@@ -445,7 +445,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 				Ok(SqlValue::Number(n)) => match n {
 					sql::Number::Int(i) => Ok(SqlValue::Number(sql::Number::Decimal(i.into()))),
 					sql::Number::Float(f) => match Decimal::from_f64(f) {
-						Some(d) => Ok(SqlValue::Number(sql::Number::Decimal(d.normalize()))),
+						Some(d) => Ok(SqlValue::Number(sql::Number::Decimal(d))),
 						None => Err(type_error(kind, val)),
 					},
 					sql::Number::Decimal(d) => Ok(SqlValue::Number(sql::Number::Decimal(d))),

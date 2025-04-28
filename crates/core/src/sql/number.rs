@@ -14,6 +14,10 @@ use std::iter::Product;
 use std::iter::Sum;
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 
+pub mod decimal;
+
+pub use decimal::DecimalExt;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
 #[revisioned(revision = 1)]
@@ -323,7 +327,7 @@ impl Number {
 	pub fn to_decimal(&self) -> Decimal {
 		match self {
 			Number::Int(v) => Decimal::from(*v),
-			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default().normalize(),
+			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
 			Number::Decimal(v) => *v,
 		}
 	}
@@ -1026,8 +1030,8 @@ mod tests {
 	use rand::Rng;
 	use rust_decimal::Decimal;
 
-	use super::Number;
-	use super::TryFloatDiv;
+	use super::*;
+
 	#[test]
 	fn test_try_float_div() {
 		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
@@ -1046,11 +1050,13 @@ mod tests {
 		let a = Number::Float(-f64::NAN);
 		let b = Number::Float(-f64::INFINITY);
 		let c = Number::Float(1f64);
-		let d = Number::Decimal(Decimal::from_str_exact("1.0000000000000000000000000002").unwrap());
-		let e = Number::Decimal(Decimal::from_str_exact("1.1").unwrap());
+		let d = Number::Decimal(
+			Decimal::from_str_normalized("1.0000000000000000000000000002").unwrap(),
+		);
+		let e = Number::Decimal(Decimal::from_str_normalized("1.1").unwrap());
 		let f = Number::Float(1.1f64);
 		let g = Number::Float(1.5f64);
-		let h = Number::Decimal(Decimal::from_str_exact("1.5").unwrap());
+		let h = Number::Decimal(Decimal::from_str_normalized("1.5").unwrap());
 		let i = Number::Float(f64::INFINITY);
 		let j = Number::Float(f64::NAN);
 		let original = vec![a, b, c, d, e, f, g, h, i, j];
