@@ -8,9 +8,9 @@ use std::ops::Bound;
 use std::ops::Deref;
 
 use crate::sql::id::range::IdRange;
-use crate::sql::number::DecimalExt;
 use crate::sql::Array;
 use crate::sql::Datetime;
+use crate::sql::DecimalExt;
 use crate::sql::Duration;
 use crate::sql::File;
 use crate::sql::Future;
@@ -124,7 +124,7 @@ impl TryFrom<Cbor> for Value {
 					// A literal decimal
 					TAG_STRING_DECIMAL => match *v {
 						Data::Text(v) => match Decimal::from_str_normalized(v.as_str()) {
-							Ok(v) => Ok(v.normalize().into()),
+							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Decimal value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
