@@ -263,7 +263,7 @@ impl Value {
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Method(name, args) => {
-						let a = stk
+						let args = stk
 							.scope(|scope| {
 								try_join_all(
 									args.iter()
@@ -282,7 +282,7 @@ impl Value {
 								..
 							}) => match v.get(name) {
 								Some(v) => {
-									let fnc = Function::Anonymous(v.clone(), a, true);
+									let fnc = Function::Anonymous(v.clone(), args, true);
 									match stk
 										.run(|stk| fnc.compute(stk, ctx, opt, doc))
 										.await
