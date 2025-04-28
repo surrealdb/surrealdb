@@ -593,6 +593,7 @@ pub async fn idiom(
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
+	ctx.check_allowed_function(&format!("{}.{name}", value.kindof()))?;
 	let args = [vec![value.clone()], args].concat();
 	let specific = match value {
 		Value::Array(_) => {

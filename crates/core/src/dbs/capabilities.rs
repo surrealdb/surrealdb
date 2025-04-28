@@ -14,38 +14,76 @@ pub trait Target<Item: ?Sized = Self> {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 #[non_exhaustive]
-pub struct FuncTarget(pub String, pub Option<String>);
+pub struct FuncTarget(pub String, pub FuncTargetKind, Option<String>);
 
 impl fmt::Display for FuncTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match &self.1 {
-			Some(name) => write!(f, "{}:{name}", self.0),
-			None => write!(f, "{}::*", self.0),
+		match &self.2 {
+			Some(name) => write!(f, "{}{}{name}", self.0, self.1),
+			None => write!(f, "{}{}*", self.0, self.1),
+		}
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum FuncTargetKind {
+	Normal,
+	Idiom,
+}
+
+impl FuncTargetKind {
+	fn wildcard(&self) -> &str {
+		match self {
+			Self::Normal => "::*",
+			Self::Idiom => ".*",
+		}
+	}
+}
+
+impl fmt::Display for FuncTargetKind {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.as_ref())
+	}
+}
+
+impl AsRef<str> for FuncTargetKind {
+	fn as_ref(&self) -> &str {
+		match self {
+			Self::Normal => "::",
+			Self::Idiom => ".",
 		}
 	}
 }
 
 impl Target for FuncTarget {
 	fn matches(&self, elem: &FuncTarget) -> bool {
-		match self {
-			Self(family, Some(name)) => {
-				family == &elem.0 && (elem.1.as_ref().is_some_and(|n| n == name))
-			}
-			Self(family, None) => family == &elem.0,
+		if self.1 != elem.1 {
+			return false;
+		}
+
+		if self.0 != self.0 {
+			return false;
+		}
+
+		if let Some(name) = self.2.as_ref() {
+			elem.2.as_ref().is_some_and(|n| n == name)
+		} else {
+			true
 		}
 	}
 }
 
 impl Target<str> for FuncTarget {
 	fn matches(&self, elem: &str) -> bool {
-		if let Some(x) = self.1.as_ref() {
-			let Some((f, r)) = elem.split_once("::") else {
+		if let Some(x) = self.2.as_ref() {
+			let Some((f, r)) = elem.split_once(self.1.as_ref()) else {
 				return false;
 			};
 
 			f == self.0 && r == x
 		} else {
-			let f = elem.split_once("::").map(|(f, _)| f).unwrap_or(elem);
+			let f = elem.split_once(self.1.as_ref()).map(|(f, _)| f).unwrap_or(elem);
 			f == self.0
 		}
 	}
@@ -79,13 +117,18 @@ impl std::str::FromStr for FuncTarget {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		let s = s.trim();
+		let kind = if s.contains("::") {
+			FuncTargetKind::Normal
+		} else {
+			FuncTargetKind::Idiom
+		};
 
 		if s.is_empty() {
 			return Err(ParseFuncTargetError::InvalidName);
 		}
 
-		if let Some(family) = s.strip_suffix("::*") {
-			if family.contains("::") {
+		if let Some(family) = s.strip_suffix(kind.wildcard()) {
+			if family.contains(kind.as_ref()) {
 				return Err(ParseFuncTargetError::InvalidWildcardFamily);
 			}
 
@@ -93,17 +136,17 @@ impl std::str::FromStr for FuncTarget {
 				return Err(ParseFuncTargetError::InvalidName);
 			}
 
-			return Ok(FuncTarget(family.to_string(), None));
+			return Ok(FuncTarget(family.to_string(), kind, None));
 		}
 
 		if !s.bytes().all(|x| x.is_ascii_alphanumeric() || x == b':') {
 			return Err(ParseFuncTargetError::InvalidName);
 		}
 
-		if let Some((first, rest)) = s.split_once("::") {
-			Ok(FuncTarget(first.to_string(), Some(rest.to_string())))
+		if let Some((first, rest)) = s.split_once(kind.as_ref()) {
+			Ok(FuncTarget(first.to_string(), kind, Some(rest.to_string())))
 		} else {
-			Ok(FuncTarget(s.to_string(), None))
+			Ok(FuncTarget(s.to_string(), kind, None))
 		}
 	}
 }
