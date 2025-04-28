@@ -466,7 +466,7 @@ impl Value {
 									what: Values(vec![Value::from(Edges {
 										from: val,
 										dir: g.dir.clone(),
-										what: g.what.clone(),
+										what: g.what.clone().compute(stk, ctx, opt, doc).await?,
 									})]),
 									cond: g.cond.clone(),
 									limit: g.limit.clone(),
