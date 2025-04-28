@@ -897,6 +897,7 @@ impl Value {
 			Value::Subquery(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Expression(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Refs(v) => v.compute(ctx, opt, doc).await,
+			Value::Edges(v) => v.compute(stk, ctx, opt, doc).await,
 			_ => Ok(self.to_owned()),
 		};
 
