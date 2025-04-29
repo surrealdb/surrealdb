@@ -574,7 +574,7 @@ impl Parser<'_> {
 			t!("INFO") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_info_stmt(ctx)).await?;
-				Subquery::Info(stmt)
+				Value::Subquery(Box::new(Subquery::Info(stmt)))
 			}
 			TokenKind::Digits | TokenKind::Glued(Glued::Number) | t!("+") | t!("-") => {
 				if self.glue_and_peek1()?.kind == t!(",") {
