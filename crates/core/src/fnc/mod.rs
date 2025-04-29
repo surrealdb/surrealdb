@@ -288,7 +288,7 @@ pub fn synchronous(
 		//
 		"object::entries" => object::entries,
 		"object::extend" => object::extend,
-		"object::remove" => object::extend,
+		"object::remove" => object::remove,
 		"object::from_entries" => object::from_entries,
 		"object::is_empty" => object::is_empty,
 		"object::keys" => object::keys,
