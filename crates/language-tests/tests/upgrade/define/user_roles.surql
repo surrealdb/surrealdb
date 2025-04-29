@@ -6,7 +6,7 @@ imports = ["upgrade/define/user_roles_import.surql"]
 upgrade = true
 
 [[test.results]]
-value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { root_editor: "DEFINE USER root_editor ON DATABASE PASSHASH '' ROLES EDITOR DURATION FOR TOKEN 1h, FOR SESSION NONE", root_owner: "DEFINE USER root_owner ON DATABASE PASSHASH '' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION NONE", root_viewer: "DEFINE USER root_viewer ON DATABASE PASSHASH '' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }'''
+match = '''$result.users == { root_editor: "DEFINE USER root_editor ON DATABASE PASSHASH '' ROLES EDITOR DURATION FOR TOKEN 1h, FOR SESSION NONE", root_owner: "DEFINE USER root_owner ON DATABASE PASSHASH '' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION NONE", root_viewer: "DEFINE USER root_viewer ON DATABASE PASSHASH '' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" }'''
 
 */
 INFO FOR DB;

@@ -1,8 +1,8 @@
-use std::{path::Path, process::Stdio, time::Duration};
-
-use anyhow::{bail, Context};
+use anyhow::{bail, Context, Result};
+use core::fmt;
 use futures::{SinkExt, StreamExt};
 use revision::revisioned;
+use std::{future::Future, path::Path, process::Stdio, time::Duration};
 use surrealdb_core::{
 	dbs::{self, Status},
 	sql::Value,
@@ -11,6 +11,7 @@ use tokio::{
 	io::AsyncReadExt,
 	net::TcpStream,
 	process::{Child, Command},
+	select,
 };
 use tokio_tungstenite::{
 	connect_async,
@@ -59,6 +60,12 @@ pub struct Response {
 pub struct ProcessOutput {
 	pub stdout: String,
 	pub stderr: String,
+}
+
+impl fmt::Display for ProcessOutput {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "  > process stdout:\n{}\n  > process stderr:\n{}\n", self.stdout, self.stderr)
+	}
 }
 
 pub struct SurrealProcess {
@@ -158,23 +165,23 @@ impl SurrealProcess {
 		Ok(())
 	}
 
-	async fn retrieve_output(proc: &mut Child) -> ProcessOutput {
+	async fn retrieve_output(proc: &mut Child) -> Option<ProcessOutput> {
 		let mut buffer = Vec::new();
 
-		proc.stdout.take().unwrap().read_to_end(&mut buffer).await.unwrap();
+		proc.stdout.take()?.read_to_end(&mut buffer).await.unwrap();
 		let stdout = String::from_utf8_lossy(&buffer).into_owned();
 
 		buffer.clear();
 		proc.stderr.take().unwrap().read_to_end(&mut buffer).await.unwrap();
 		let stderr = String::from_utf8_lossy(&buffer).into_owned();
 
-		ProcessOutput {
+		Some(ProcessOutput {
 			stdout,
 			stderr,
-		}
+		})
 	}
 
-	pub async fn quit_with_output(mut self) -> anyhow::Result<ProcessOutput> {
+	pub async fn quit_with_output(mut self) -> anyhow::Result<Option<ProcessOutput>> {
 		self.stop().await?;
 
 		if let Err(_) = tokio::time::timeout(Duration::from_secs(5), self.process.wait()).await {
@@ -187,49 +194,64 @@ impl SurrealProcess {
 	}
 
 	pub async fn open_connection(&mut self) -> anyhow::Result<SurrealConnection> {
-		let request = tokio_tungstenite::tungstenite::handshake::client::Request::builder()
-			.uri(format!("ws://127.0.0.1:{}/rpc", self.port))
-			.header(SEC_WEBSOCKET_PROTOCOL, "revision")
-			.header("Upgrade", "websocket")
-			.header(SEC_WEBSOCKET_VERSION, "13")
-			.header(SEC_WEBSOCKET_KEY, generate_key())
-			.header(CONNECTION, "upgrade")
-			.header(HOST, format!("127.0.0.1:{}", self.port))
-			.body(())
-			.context("failed to create request")?;
+		let port = self.port;
+		self.assert_running_while(async {
+			let request = tokio_tungstenite::tungstenite::handshake::client::Request::builder()
+				.uri(format!("ws://127.0.0.1:{}/rpc", port))
+				.header(SEC_WEBSOCKET_PROTOCOL, "revision")
+				.header("Upgrade", "websocket")
+				.header(SEC_WEBSOCKET_VERSION, "13")
+				.header(SEC_WEBSOCKET_KEY, generate_key())
+				.header(CONNECTION, "upgrade")
+				.header(HOST, format!("127.0.0.1:{}", port))
+				.body(())
+				.context("failed to create request")?;
 
-		let mut wait_duration = Duration::from_millis(100);
-		let mut retries = 0;
+			let mut wait_duration = Duration::from_millis(5);
+			let mut retries = 0;
 
-		let socket = loop {
-			match connect_async(request.clone()).await.context("Failed to connect to socket.") {
-				Ok((x, _)) => break x,
-				Err(e) => {
-					if retries < 8 {
-						if let Ok(x) =
-							tokio::time::timeout(wait_duration, self.process.wait()).await
-						{
-							x.context("Waiting on the surrealdb process returned an error")?;
-							let output = Self::retrieve_output(&mut self.process).await;
-							bail!(
-								"Surrealdb process quit early.\n> Stdout:\n {}\n> Stderr:\n {}",
-								output.stdout,
-								output.stderr
-							)
+			let socket = loop {
+				tokio::time::sleep(wait_duration).await;
+				match connect_async(request.clone()).await.context("Failed to connect to socket.") {
+					Ok((x, _)) => break x,
+					Err(e) => {
+						if retries < 10 {
+							wait_duration *= 2;
+							retries += 1;
+						} else {
+							return Err(e);
 						}
-						wait_duration *= 2;
-						retries += 1;
-					} else {
-						return Err(e);
 					}
 				}
-			}
-		};
+			};
 
-		Ok(SurrealConnection {
-			id: 0,
-			socket,
+			Ok(SurrealConnection {
+				id: 0,
+				socket,
+			})
 		})
+		.await?
+	}
+
+	/// Ensures that the process is still running while the future is executing.
+	///
+	/// Will return an error if the process quit during the execution of the future.
+	pub async fn assert_running_while<R, Fut: Future<Output = R>>(&mut self, f: Fut) -> Result<R> {
+		select! {
+			// Biased because if the process quit we want to know it first.
+			biased;
+
+			_ = self.process.wait() => {
+				if let Some(output) = Self::retrieve_output(&mut self.process).await{
+					bail!("Surrealdb process quit early.\n{}",output);
+				}else{
+					bail!("Surrealdb process quit early")
+				}
+			}
+			res = f => {
+				Ok(res)
+			}
+		}
 	}
 }
 
