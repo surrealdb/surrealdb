@@ -532,7 +532,7 @@ impl QueryExecutor {
 			Number::Float(f) => {
 				oi = float_to_int(f);
 				of = Some(*f);
-				od = Decimal::from_f64(*f);
+				od = Decimal::from_f64(*f).map(|d| d.normalize());
 			}
 			Number::Decimal(d) => {
 				oi = d.to_i64();
