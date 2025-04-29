@@ -34,9 +34,29 @@ where
 	}
 }
 
+fn parse_signed_integer<I>(parser: &mut Parser<'_>) -> ParseResult<I>
+where
+	I: FromStr<Err = ParseIntError>,
+{
+	let token = parser.peek();
+	match token.kind {
+		t!("+") | t!("-") | TokenKind::Digits => {
+			parser.pop_peek();
+			Ok(parser.lexer.lex_compound(token, compound::integer)?.value)
+		}
+		_ => unexpected!(parser, token, "an signed integer"),
+	}
+}
+
 impl TokenValue for u64 {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		parse_integer(parser)
+	}
+}
+
+impl TokenValue for i64 {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		parse_signed_integer(parser)
 	}
 }
 

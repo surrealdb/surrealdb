@@ -9,7 +9,7 @@ use super::Level;
 use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -36,7 +36,8 @@ pub enum ResourceKind {
 	Api,
 	#[revision(start = 4)]
 	Bucket,
-
+	#[revision(start = 5)]
+	Sequence,
 	// IAM
 	Actor,
 }
@@ -72,6 +73,7 @@ impl std::fmt::Display for ResourceKind {
 			ResourceKind::Actor => write!(f, "Actor"),
 			ResourceKind::Config(c) => write!(f, "Config::{c}"),
 			ResourceKind::Bucket => write!(f, "Bucket"),
+			ResourceKind::Sequence => write!(f, "Sequence"),
 		}
 	}
 }

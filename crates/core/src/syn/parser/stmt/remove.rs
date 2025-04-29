@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::sql::statements::remove::RemoveSequenceStatement;
 use crate::{
 	sql::{
 		statements::{
@@ -205,6 +206,19 @@ impl Parser<'_> {
 				let name = self.next_token_value()?;
 
 				RemoveStatement::Analyzer(RemoveAnalyzerStatement {
+					name,
+					if_exists,
+				})
+			}
+			t!("SEQUENCE") => {
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+				let name = self.next_token_value()?;
+				RemoveStatement::Sequence(RemoveSequenceStatement {
 					name,
 					if_exists,
 				})
