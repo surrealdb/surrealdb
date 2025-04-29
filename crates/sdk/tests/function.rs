@@ -2438,10 +2438,15 @@ async fn function_type_datetime() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_decimal() -> Result<(), Error> {
 	let sql = r#"
+		RETURN type::decimal("0.0");
 		RETURN type::decimal("13.1043784018");
 		RETURN type::decimal("13.5719384719384719385639856394139476937756394756");
 	"#;
 	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Number(Number::Decimal("0".parse().unwrap()));
+	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
 	let val = Value::Number(Number::Decimal("13.1043784018".parse().unwrap()));

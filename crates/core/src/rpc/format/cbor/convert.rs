@@ -10,6 +10,7 @@ use std::ops::Deref;
 use crate::sql::id::range::IdRange;
 use crate::sql::Array;
 use crate::sql::Datetime;
+use crate::sql::DecimalExt;
 use crate::sql::Duration;
 use crate::sql::File;
 use crate::sql::Future;
@@ -21,7 +22,6 @@ use crate::sql::Range;
 use crate::sql::Thing;
 use crate::sql::Uuid;
 use crate::sql::Value;
-use std::str::FromStr;
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 const TAG_SPEC_DATETIME: u64 = 0;
@@ -123,7 +123,7 @@ impl TryFrom<Cbor> for Value {
 					TAG_SPEC_UUID => v.deref().to_owned().try_into().map(Value::Uuid),
 					// A literal decimal
 					TAG_STRING_DECIMAL => match *v {
-						Data::Text(v) => match Decimal::from_str(v.as_str()) {
+						Data::Text(v) => match Decimal::from_str_normalized(v.as_str()) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Decimal value"),
 						},
