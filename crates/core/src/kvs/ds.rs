@@ -1264,7 +1264,6 @@ impl Datastore {
 #[cfg(test)]
 mod test {
 	use super::*;
-	use crate::sql::FlowResultExt as _;
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<(), Error> {
