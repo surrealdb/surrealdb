@@ -1,3 +1,5 @@
+use super::headers::Accept;
+use crate::err::Error;
 use axum::response::{IntoResponse, Response};
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
@@ -5,15 +7,12 @@ use serde::Serialize;
 use serde_json::Value as Json;
 use surrealdb::sql;
 
-use super::headers::Accept;
-
 pub enum Output {
 	None,
 	Fail,
 	Text(String),
 	Json(Vec<u8>), // JSON
 	Cbor(Vec<u8>), // CBOR
-	Pack(Vec<u8>), // MessagePack
 	Full(Vec<u8>), // Full type serialization
 }
 
@@ -46,16 +45,6 @@ where
 	}
 }
 
-pub fn pack<T>(val: &T) -> Output
-where
-	T: Serialize,
-{
-	match serde_pack::to_vec(val) {
-		Ok(v) => Output::Pack(v),
-		Err(_) => Output::Fail,
-	}
-}
-
 pub fn full<T>(val: &T) -> Output
 where
 	T: Serialize,
@@ -67,8 +56,8 @@ where
 }
 
 /// Convert and simplify the value into JSON
-pub fn simplify<T: Serialize + 'static>(v: T) -> Json {
-	sql::to_value(v).unwrap().into()
+pub fn simplify<T: Serialize + 'static>(v: T) -> Result<Json, Error> {
+	Ok(sql::to_value(v)?.into())
 }
 
 impl IntoResponse for Output {
@@ -82,9 +71,6 @@ impl IntoResponse for Output {
 			}
 			Output::Cbor(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor))], v).into_response()
-			}
-			Output::Pack(v) => {
-				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationPack))], v).into_response()
 			}
 			Output::Full(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::Surrealdb))], v).into_response()

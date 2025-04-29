@@ -8,8 +8,10 @@
   buildSpec = with pkgs; {
       nativeBuildInputs = [ pkg-config ];
 
-      buildInputs = [ openssl ];
+      buildInputs = [ openssl onnxruntime ];
 
       CARGO_BUILD_TARGET = target;
+
+      ONNXRUNTIME_LIB_PATH = "${onnxruntime.outPath}/lib/libonnxruntime.so";
     };
 }

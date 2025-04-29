@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use crate::cnf::TELEMETRY_NAMESPACE;
 use opentelemetry::metrics::Meter;
 use opentelemetry::{global, KeyValue};
 use opentelemetry::{
@@ -42,7 +43,11 @@ pub static RPC_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(||
 });
 
 fn otel_common_attrs() -> Vec<KeyValue> {
-	vec![KeyValue::new("rpc.service", "surrealdb")]
+	let mut common = vec![KeyValue::new("rpc.service", "surrealdb")];
+	if let Some(namespace) = TELEMETRY_NAMESPACE.clone() {
+		common.push(KeyValue::new("namespace", namespace.trim().to_owned()));
+	}
+	common
 }
 
 /// Registers the callback that increases the number of active RPC connections.
@@ -57,7 +62,6 @@ pub fn on_disconnect() -> Result<(), MetricsError> {
 
 pub(super) fn observe_active_connection(value: i64) -> Result<(), MetricsError> {
 	let attrs = otel_common_attrs();
-
 	RPC_SERVER_ACTIVE_CONNECTIONS.add(value, &attrs);
 	Ok(())
 }

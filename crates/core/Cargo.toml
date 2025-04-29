@@ -1,0 +1,246 @@
+[package]
+name = "surrealdb-core"
+publish = true
+edition = "2021"
+version = "3.0.0"
+rust-version = "1.84.0"
+readme = "README.md"
+authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
+repository = "https://github.com/surrealdb/surrealdb"
+homepage = "https://github.com/surrealdb/surrealdb"
+documentation = "https://docs.rs/surrealdb-core/"
+keywords = [
+    "database",
+    "embedded-database",
+    "key-value",
+    "key-value-store",
+    "kv-store",
+]
+categories = ["database-implementations", "data-structures", "embedded"]
+license-file = "../../LICENSE"
+resolver = "2"
+
+[features]
+# Public features
+default = ["kv-mem"]
+kv-mem = [
+    "dep:surrealkv",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+    "dep:affinitypool",
+]
+kv-indxdb = ["dep:indxdb"]
+kv-rocksdb = [
+    "dep:rocksdb",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+    "dep:affinitypool",
+]
+kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-surrealkv = [
+    "dep:surrealkv",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+    "dep:affinitypool",
+]
+scripting = ["dep:js"]
+http = ["dep:reqwest"]
+ml = ["dep:surrealml"]
+jwks = ["dep:reqwest"]
+allocator = ["dep:jemallocator", "dep:mimalloc"]
+arbitrary = [
+    "dep:arbitrary",
+    "dep:regex-syntax",
+    "regex-syntax/arbitrary",
+    "rust_decimal/rust-fuzz",
+    "geo-types/arbitrary",
+    "uuid/arbitrary",
+]
+allocation-tracking = []
+# Special features
+kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
+kv-fdb-7_3 = ["foundationdb/fdb-7_3", "kv-fdb"]
+enterprise = ["dep:rust-s3"]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+features = ["kv-mem", "kv-rocksdb", "http", "scripting"]
+targets = []
+
+[dependencies]
+# workspace internal dependencies
+
+# External surreal crates
+surrealkv = { workspace = true, optional = true }
+surrealml = { workspace = true, optional = true }
+affinitypool = { workspace = true, optional = true }
+#derive.workspace = true
+dmp.workspace = true
+indxdb = { workspace = true, optional = true }
+js = { workspace = true, features = [
+    "array-buffer",
+    "bindgen",
+    "classes",
+    "futures",
+    "loader",
+    "macro",
+    "parallel",
+    "properties",
+    "rust-alloc",
+], optional = true }
+lexicmp.workspace = true
+reblessive = { workspace = true, features = ["tree"] }
+revision = { workspace = true, features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
+serde-content.workspace = true
+storekey.workspace = true
+vart.workspace = true
+
+# External KV stores
+foundationdb = { workspace = true, optional = true }
+rocksdb = { workspace = true, optional = true }
+tikv = { workspace = true, optional = true }
+
+# Other crates
+addr.workspace = true
+ahash.workspace = true
+ammonia.workspace = true
+argon2.workspace = true
+async-channel.workspace = true
+async-executor.workspace = true
+async-graphql = { workspace = true, default-features = false, features = [
+    "dynamic-schema",
+] }
+base64.workspace = true
+bcrypt.workspace = true
+bincode.workspace = true
+blake3.workspace = true
+bytes.workspace = true
+castaway.workspace = true
+cedar-policy.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+ciborium.workspace = true
+dashmap.workspace = true
+deunicode.workspace = true
+fst.workspace = true
+futures.workspace = true
+fuzzy-matcher.workspace = true
+geo = { workspace = true, features = ["use-serde"] }
+geo-types = { workspace = true }
+http.workspace = true
+hex.workspace = true
+ipnet.workspace = true
+jsonwebtoken.workspace = true
+linfa-linalg.workspace = true
+md-5.workspace = true
+nanoid.workspace = true
+ndarray.workspace = true
+ndarray-stats.workspace = true
+num_cpus.workspace = true
+num-traits.workspace = true
+object_store.workspace = true
+parking_lot.workspace = true
+path-clean.workspace = true
+pbkdf2 = { workspace = true, features = ["simple"] }
+phf = { workspace = true, features = ["macros", "unicase"] }
+pin-project-lite.workspace = true
+quick_cache.workspace = true
+radix_trie = { workspace = true, features = ["serde"] }
+rand.workspace = true
+rayon.workspace = true
+regex.workspace = true
+roaring = { workspace = true, features = ["serde"] }
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+rust-stemmers.workspace = true
+scrypt.workspace = true
+semver = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+snap.workspace = true
+strsim.workspace = true
+subtle.workspace = true
+sysinfo.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+trice.workspace = true
+ulid = { workspace = true, features = ["serde"] }
+unicase.workspace = true
+url.workspace = true
+
+# Other optional crates
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+ext-sort = { workspace = true, optional = true }
+regex-syntax = { workspace = true, optional = true }
+reqwest = { workspace = true, default-features = false, features = [
+    "json",
+    "stream",
+    "multipart",
+], optional = true }
+tempfile = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
+env_logger.workspace = true
+flate2.workspace = true
+pprof = { workspace = true, features = ["flamegraph", "criterion"] }
+serial_test.workspace = true
+temp-dir.workspace = true
+test-log = { workspace = true, features = ["trace"] }
+time = { workspace = true, features = ["serde"] }
+tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+wiremock.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+pharos.workspace = true
+ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
+tokio = { workspace = true, default-features = false, features = [
+    "rt",
+    "sync",
+] }
+uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
+wasm-bindgen-futures.workspace = true
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
+ws_stream_wasm.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, default-features = false, features = [
+    "macros",
+    "io-util",
+    "io-std",
+    "fs",
+    "rt-multi-thread",
+    "time",
+    "sync",
+] }
+tokio-tungstenite = { workspace = true, optional = true }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
+mimalloc = { workspace = true, optional = true, default-features = false }
+
+[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+jemallocator = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rust-s3 = { workspace = true, optional = true }
+
+[lints]
+workspace = true
+
+[lib]
+name = "surrealdb_core"

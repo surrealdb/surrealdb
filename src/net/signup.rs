@@ -12,6 +12,7 @@ use axum::Router;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use serde::Serialize;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -21,12 +22,14 @@ struct Success {
 	code: u16,
 	details: String,
 	token: Option<String>,
+	refresh: Option<String>,
 }
 
 impl Success {
-	fn new(token: Option<String>) -> Success {
+	fn new(token: Option<String>, refresh: Option<String>) -> Success {
 		Success {
 			token,
+			refresh,
 			code: 200,
 			details: String::from("Authentication succeeded"),
 		}
@@ -51,6 +54,11 @@ async fn handler(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
 	let kvs = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !kvs.allows_http_route(&RouteTarget::Signup) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Signup);
+		return Err(Error::ForbiddenRoute(RouteTarget::Signup.to_string()));
+	}
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body)?;
 	// Parse the provided data as JSON
@@ -62,13 +70,17 @@ async fn handler(
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {
 					// Simple serialization
-					Some(Accept::ApplicationJson) => Ok(output::json(&Success::new(v))),
-					Some(Accept::ApplicationCbor) => Ok(output::cbor(&Success::new(v))),
-					Some(Accept::ApplicationPack) => Ok(output::pack(&Success::new(v))),
+					Some(Accept::ApplicationJson) => {
+						Ok(output::json(&Success::new(v.token, v.refresh)))
+					}
+					Some(Accept::ApplicationCbor) => {
+						Ok(output::cbor(&Success::new(v.token, v.refresh)))
+					}
 					// Text serialization
-					Some(Accept::TextPlain) => Ok(output::text(v.unwrap_or_default())),
+					// NOTE: Only the token is returned in a plain text response.
+					Some(Accept::TextPlain) => Ok(output::text(v.token.unwrap_or_default())),
 					// Internal serialization
-					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v))),
+					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v.token, v.refresh))),
 					// Return nothing
 					None => Ok(output::none()),
 					// An incorrect content-type was requested

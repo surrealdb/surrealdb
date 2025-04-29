@@ -5,7 +5,11 @@ use std::{
 	time::Duration,
 };
 
-use surrealdb::dbs::capabilities::{FuncTarget, NetTarget, Targets};
+use surrealdb::dbs::capabilities::{
+	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
+	Targets,
+};
+use surrealdb::kvs::export::TableConfig;
 
 pub(crate) mod parser;
 
@@ -15,7 +19,7 @@ pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 		v if v.starts_with("file:") => Ok(v.to_string()),
 		v if v.starts_with("rocksdb:") => Ok(v.to_string()),
 		v if v.starts_with("surrealkv:") => Ok(v.to_string()),
-		v if v.starts_with("surrealcs:") => Ok(v.to_string()),
+		v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
 		v if v.starts_with("tikv:") => Ok(v.to_string()),
 		v if v.starts_with("fdb:") => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database path parameter")),
@@ -59,8 +63,17 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 
 	let scheme = split_endpoint(v).0;
 	match scheme {
-		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "surrealkv" | "file"
-		| "surrealcs" | "tikv" => Ok(v.to_string()),
+		"http"
+		| "https"
+		| "ws"
+		| "wss"
+		| "fdb"
+		| "mem"
+		| "rocksdb"
+		| "surrealkv"
+		| "surrealkv+versioned"
+		| "file"
+		| "tikv" => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database connection string")),
 	}
 }
@@ -106,6 +119,76 @@ pub(crate) fn func_targets(value: &str) -> Result<Targets<FuncTarget>, String> {
 	Ok(Targets::Some(result))
 }
 
+pub(crate) fn experimental_targets(value: &str) -> Result<Targets<ExperimentalTarget>, String> {
+	if ["*", ""].contains(&value) {
+		return Ok(Targets::All);
+	}
+
+	let mut result = HashSet::new();
+
+	for target in value.split(',').filter(|s| !s.is_empty()) {
+		result.insert(ExperimentalTarget::from_str(target).map_err(|e| e.to_string())?);
+	}
+
+	Ok(Targets::Some(result))
+}
+
+pub(crate) fn query_arbitrary_targets(
+	value: &str,
+) -> Result<Targets<ArbitraryQueryTarget>, String> {
+	if ["*", ""].contains(&value) {
+		return Ok(Targets::All);
+	}
+
+	let mut result = HashSet::new();
+
+	for target in value.split(',').filter(|s| !s.is_empty()) {
+		result.insert(ArbitraryQueryTarget::from_str(target).map_err(|e| e.to_string())?);
+	}
+
+	Ok(Targets::Some(result))
+}
+
+pub(crate) fn method_targets(value: &str) -> Result<Targets<MethodTarget>, String> {
+	if ["*", ""].contains(&value) {
+		return Ok(Targets::All);
+	}
+
+	let mut result = HashSet::new();
+
+	for target in value.split(',').filter(|s| !s.is_empty()) {
+		result.insert(MethodTarget::from_str(target).map_err(|e| e.to_string())?);
+	}
+
+	Ok(Targets::Some(result))
+}
+
+pub(crate) fn route_targets(value: &str) -> Result<Targets<RouteTarget>, String> {
+	if ["*", ""].contains(&value) {
+		return Ok(Targets::All);
+	}
+
+	let mut result = HashSet::new();
+
+	for target in value.split(',').filter(|s| !s.is_empty()) {
+		result.insert(RouteTarget::from_str(target).map_err(|e| e.to_string())?);
+	}
+
+	Ok(Targets::Some(result))
+}
+
+pub(crate) fn export_tables(value: &str) -> Result<TableConfig, String> {
+	if ["*", "", "true"].contains(&value) {
+		return Ok(TableConfig::All);
+	}
+
+	if value == "false" {
+		return Ok(TableConfig::None);
+	}
+
+	Ok(TableConfig::Some(value.split(",").filter(|s| !s.is_empty()).map(str::to_string).collect()))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -149,5 +232,39 @@ mod tests {
 
 		assert!(net_targets("127777.0.0.1").is_err());
 		assert!(net_targets("127.0.0.1,127777.0.0.1").is_err());
+	}
+
+	#[test]
+	fn test_method_targets() {
+		assert_eq!(method_targets("*").unwrap(), Targets::<MethodTarget>::All);
+		assert_eq!(method_targets("").unwrap(), Targets::<MethodTarget>::All);
+		assert_eq!(
+			method_targets("query").unwrap(),
+			Targets::<MethodTarget>::Some(vec!["query".parse().unwrap()].into_iter().collect())
+		);
+		assert_eq!(
+			method_targets("query,authenticate").unwrap(),
+			Targets::<MethodTarget>::Some(
+				vec!["query".parse().unwrap(), "authenticate".parse().unwrap()]
+					.into_iter()
+					.collect()
+			)
+		);
+	}
+
+	#[test]
+	fn test_route_targets() {
+		assert_eq!(route_targets("*").unwrap(), Targets::<RouteTarget>::All);
+		assert_eq!(route_targets("").unwrap(), Targets::<RouteTarget>::All);
+		assert_eq!(
+			route_targets("key").unwrap(),
+			Targets::<RouteTarget>::Some(vec!["key".parse().unwrap()].into_iter().collect())
+		);
+		assert_eq!(
+			route_targets("key,sql").unwrap(),
+			Targets::<RouteTarget>::Some(
+				vec!["key".parse().unwrap(), "sql".parse().unwrap()].into_iter().collect()
+			)
+		);
 	}
 }

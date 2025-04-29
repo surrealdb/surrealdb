@@ -1,7 +1,7 @@
+mod api;
 mod auth;
 pub mod client_ip;
 mod export;
-#[cfg(surrealdb_unstable)]
 mod gql;
 pub(crate) mod headers;
 mod health;
@@ -21,7 +21,7 @@ mod tracer;
 mod version;
 
 use crate::cli::CF;
-use crate::cnf::{self, GRAPHQL_ENABLE};
+use crate::cnf;
 use crate::err::Error;
 use crate::net::signals::graceful_shutdown;
 use crate::rpc::{notifications, RpcState};
@@ -32,9 +32,11 @@ use axum::{middleware, Router};
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use http::header;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
@@ -83,9 +85,14 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 
 	// Build the middleware to our service.
 	let service = ServiceBuilder::new()
+		// Ensure any panics are caught and handled
 		.catch_panic()
+		// Ensure a X-Request-Id header is specified
 		.set_x_request_id(MakeRequestUuid)
-		.propagate_x_request_id();
+		// Ensure the Request-Id is sent in the response
+		.propagate_x_request_id()
+		// Limit the number of requests handled at once
+		.concurrency_limit(*cnf::NET_MAX_CONCURRENT_REQUESTS);
 
 	#[cfg(feature = "http-compression")]
 	let service = service.layer(
@@ -142,6 +149,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.layer(AsyncRequireAuthorizationLayer::new(auth::SurrealAuth))
 		.layer(headers::add_server_header(!opt.no_identification_headers))
 		.layer(headers::add_version_header(!opt.no_identification_headers))
+		// Apply CORS headers to relevant responses
 		.layer(
 			CorsLayer::new()
 				.allow_methods([
@@ -172,22 +180,13 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		.merge(signin::router())
 		.merge(signup::router())
 		.merge(key::router())
-		.merge(ml::router());
+		.merge(ml::router())
+		.merge(api::router())
+		.merge(gql::router(ds.clone()));
 
-	let axum_app = if *GRAPHQL_ENABLE {
-		#[cfg(surrealdb_unstable)]
-		{
-			warn!("❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌");
-			axum_app.merge(gql::router(ds.clone()).await)
-		}
-		#[cfg(not(surrealdb_unstable))]
-		{
-			warn!("GraphQL is a pre-release feature and only available on builds with the surrealdb_unstable flag");
-			axum_app
-		}
-	} else {
-		axum_app
-	};
+	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
+		warn!("❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌");
+	}
 
 	let axum_app = axum_app.layer(service);
 
@@ -203,10 +202,10 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 
 	// Spawn a task to handle notifications
 	tokio::spawn(async move { notifications(ds, rpc_state, ct.clone()).await });
-	// If a certificate and key are specified then setup TLS
-	if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
+	// If a certificate and key are specified, then setup TLS
+	let res = if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
 		// Configure certificate and private key used by https
-		let tls = RustlsConfig::from_pem_file(cert, key).await.unwrap();
+		let tls = RustlsConfig::from_pem_file(cert, key).await?;
 		// Setup the Axum server with TLS
 		let server = axum_server::bind_rustls(opt.bind, tls);
 		// Log the server startup to the CLI
@@ -215,7 +214,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		server
 			.handle(handle)
 			.serve(axum_app.into_make_service_with_connect_info::<SocketAddr>())
-			.await?;
+			.await
 	} else {
 		// Setup the Axum server
 		let server = axum_server::bind(opt.bind);
@@ -225,8 +224,17 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error
 		server
 			.handle(handle)
 			.serve(axum_app.into_make_service_with_connect_info::<SocketAddr>())
-			.await?;
+			.await
 	};
+	// Catch the error and try to provide some guidance
+	if let Err(e) = res {
+		if opt.bind.port() < 1024 {
+			if let io::ErrorKind::PermissionDenied = e.kind() {
+				error!(target: LOG, "Binding to ports below 1024 requires privileged access or special permissions.");
+			}
+		}
+		return Err(e.into());
+	}
 	// Wait for the shutdown to finish
 	let _ = shutdown_handler.await;
 	// Log the server shutdown to the CLI

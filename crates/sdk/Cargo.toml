@@ -1,0 +1,226 @@
+[package]
+name = "surrealdb"
+publish = true
+edition = "2021"
+version = "3.0.0"
+rust-version = "1.82.0"
+readme = "CARGO.md"
+authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
+repository = "https://github.com/surrealdb/surrealdb"
+homepage = "https://github.com/surrealdb/surrealdb"
+documentation = "https://docs.rs/surrealdb/"
+keywords = [
+    "database",
+    "embedded-database",
+    "key-value",
+    "key-value-store",
+    "kv-store",
+]
+categories = ["database-implementations", "data-structures", "embedded"]
+license-file = "../../LICENSE"
+resolver = "2"
+
+[features]
+# Public features
+default = ["protocol-ws", "rustls"]
+allocator = ["surrealdb-core/allocator"]
+protocol-http = ["dep:reqwest"]
+protocol-ws = ["dep:tokio-tungstenite", "dep:trice", "tokio/time"]
+kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
+kv-indxdb = ["surrealdb-core/kv-indxdb"]
+kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
+kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
+kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
+scripting = ["surrealdb-core/scripting"]
+http = ["surrealdb-core/http"]
+native-tls = [
+    "dep:native-tls",
+    "reqwest?/native-tls",
+    "tokio-tungstenite?/native-tls",
+]
+rustls = [
+    "dep:rustls",
+    "reqwest?/rustls-tls",
+    "tokio-tungstenite?/rustls-tls-webpki-roots",
+]
+ml = ["surrealdb-core/ml"]
+jwks = ["surrealdb-core/jwks"]
+arbitrary = ["surrealdb-core/arbitrary"]
+allocation-tracking = ["surrealdb-core/allocation-tracking"]
+# FoundationDB features
+kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
+kv-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]
+# Deprecated features
+kv-fdb = [] # Use a version specific `kv-fdb-*` feature instead
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+features = [
+    "protocol-ws",
+    "protocol-http",
+    "kv-mem",
+    "kv-rocksdb",
+    "rustls",
+    "native-tls",
+    "http",
+    "scripting",
+]
+targets = []
+
+[dependencies]
+# workspace internal dependencies
+surrealdb-core = { workspace = true, default-features = false }
+
+# External surreal crates
+dmp.workspace = true
+revision = { workspace = true, features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
+reblessive = { workspace = true, features = ["tree"] }
+trice = { workspace = true, optional = true }
+
+# Other crates
+arrayvec.workspace = true
+bincode.workspace = true
+async-channel.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+futures.workspace = true
+geo = { workspace = true, features = ["use-serde"] }
+indexmap = { workspace = true, features = ["serde"] }
+path-clean.workspace = true
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+serde-content.workspace = true
+semver = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio-util = { workspace = true, features = ["compat"] }
+url.workspace = true
+
+# Optional crates
+native-tls = { workspace = true, optional = true }
+reqwest = { workspace = true, default-features = false, features = [
+    "json",
+    "multipart",
+    "stream",
+], optional = true }
+rustls = { workspace = true, default-features = false, features = [
+    "ring",
+    "logging",
+    "std",
+    "tls12",
+], optional = true }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+pharos.workspace = true
+rustls-pki-types = { version = "1.7.0", features = ["web"] }
+ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
+tokio = { workspace = true, default-features = false, features = [
+    "rt",
+    "sync",
+] }
+uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
+wasm-bindgen-futures.workspace = true
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
+ws_stream_wasm.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, default-features = false, features = [
+    "macros",
+    "io-util",
+    "io-std",
+    "fs",
+    "rt-multi-thread",
+    "time",
+    "sync",
+] }
+tokio-tungstenite = { workspace = true, optional = true, features = ["url"] }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+[dev-dependencies]
+ciborium.workspace = true
+criterion = { workspace = true, features = ["async_tokio"] }
+env_logger.workspace = true
+flate2.workspace = true
+hashbrown.workspace = true
+parking_lot.workspace = true
+pprof = { workspace = true, features = ["flamegraph", "criterion"] }
+radix_trie.workspace = true
+rand.workspace = true
+rayon.workspace = true
+regex.workspace = true
+serial_test.workspace = true
+temp-dir.workspace = true
+test-log = { workspace = true, features = ["trace"] }
+time = { workspace = true, features = ["serde"] }
+tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+ulid = { workspace = true, features = ["serde"] }
+wiremock.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "surrealdb" # Needed for the nightly crate as we will be renaming it
+bench = false
+
+[[bench]]
+name = "executor"
+harness = false
+
+[[bench]]
+name = "parser"
+harness = false
+
+[[bench]]
+name = "processor"
+harness = false
+
+[[bench]]
+name = "hash_trie_btree"
+harness = false
+
+[[bench]]
+name = "index_btree"
+harness = false
+
+[[bench]]
+name = "index_mtree"
+harness = false
+
+[[bench]]
+name = "index_hnsw"
+harness = false
+
+[[bench]]
+name = "move_vs_clone"
+harness = false
+
+[[bench]]
+name = "sdb"
+harness = false
+
+[[bench]]
+name = "hashset_vs_vector"
+harness = false
+
+[[bench]]
+name = "with_or_without_index"
+harness = false
+
+[[bench]]
+name = "order"
+harness = false
+
+[[bench]]
+name = "allocator"
+harness = false
