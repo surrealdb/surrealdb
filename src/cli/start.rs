@@ -18,6 +18,9 @@ use surrealdb::engine::tasks::start_tasks;
 use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
+#[cfg(feature = "ml")]
+use surrealml::execution::session::set_environment;
+
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
 	#[arg(help = "Database path used for storing data")]
@@ -184,6 +187,11 @@ pub async fn init(
 		crt,
 		key,
 	});
+
+	// load the embedded onnx environment if ML feature is working
+	#[cfg(feature = "ml")]
+	set_environment().unwrap();
+
 	// This is the cancellation token propagated down to
 	// all the async functions that needs to be stopped gracefully.
 	let ct = CancellationToken::new();
