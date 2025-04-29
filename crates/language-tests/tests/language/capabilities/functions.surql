@@ -1,7 +1,7 @@
 /**
 
 [env.capabilities]
-allow-functions = ["object::*", "array.*"]
+allow-functions = ["object::*", "<array>.*"]
 
 [test]
 
