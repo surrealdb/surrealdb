@@ -1,0 +1,8 @@
+{
+  "lspconfig": {
+    "rust_analyzer": {
+      "rust-analyzer.check.command": "clippy",
+      "rust-analyzer.check.extraArgs": ["--no-deps"]
+    }
+  }
+}
