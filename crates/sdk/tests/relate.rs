@@ -250,10 +250,10 @@ async fn schemafull_relate() -> Result<(), Error> {
 	)?;
 
 	// reason is bool not string
-	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }))?;
+	t.expect_error_func(|e| matches!(e, Error::FieldCoerce { .. }))?;
 
 	// dog:1 is not a person
-	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }))?;
+	t.expect_error_func(|e| matches!(e, Error::FieldCoerce { .. }))?;
 
 	Ok(())
 }
@@ -288,6 +288,7 @@ async fn relate_enforced() -> Result<(), Error> {
 	functions: {},
 	models: {},
 	params: {},
+	sequences: {},
 	tables: {
 		a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE',
 		edge: 'DEFINE TABLE edge TYPE RELATION ENFORCED SCHEMALESS PERMISSIONS NONE'

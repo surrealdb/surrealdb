@@ -139,7 +139,7 @@ pub struct HnswParams {
 }
 
 impl HnswParams {
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub fn new(
 		dimension: u16,
 		distance: Distance,

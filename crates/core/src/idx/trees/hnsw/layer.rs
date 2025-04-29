@@ -99,7 +99,7 @@ where
 		Ok(q.peek_first().map(|(_, e_id)| e_id))
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn search_single_checked(
 		&self,
 		tx: &Transaction,
@@ -149,7 +149,7 @@ where
 		self.search(tx, elements, pt, candidates, visited, w, efc).await
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn search(
 		&self,
 		tx: &Transaction,
@@ -188,7 +188,7 @@ where
 		Ok(w)
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn search_checked(
 		&self,
 		tx: &Transaction,
@@ -234,7 +234,7 @@ where
 		Ok(w)
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn add_if_truthy(
 		tx: &Transaction,
 		stk: &mut Stk,

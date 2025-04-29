@@ -249,20 +249,21 @@ impl Value {
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Destructure(p) => {
+						let cur_doc = CursorDoc::from(self.clone());
 						let mut obj = BTreeMap::<String, Value>::new();
 						for p in p.iter() {
-							let path = p.path();
-							let v = stk
-								.run(|stk| self.get(stk, ctx, opt, doc, path.as_slice()))
-								.await?;
-							obj.insert(p.field().to_raw(), v);
+							let idiom = p.idiom();
+							obj.insert(
+								p.field().to_raw(),
+								stk.run(|stk| idiom.compute(stk, ctx, opt, Some(&cur_doc))).await?,
+							);
 						}
 
 						let obj = Value::from(obj);
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Method(name, args) => {
-						let a = stk
+						let args = stk
 							.scope(|scope| {
 								try_join_all(
 									args.iter()
@@ -281,7 +282,7 @@ impl Value {
 								..
 							}) => match v.get(name) {
 								Some(v) => {
-									let fnc = Function::Anonymous(v.clone(), a, true);
+									let fnc = Function::Anonymous(v.clone(), args, true);
 									match stk
 										.run(|stk| fnc.compute(stk, ctx, opt, doc))
 										.await
@@ -465,7 +466,7 @@ impl Value {
 									what: Values(vec![Value::from(Edges {
 										from: val,
 										dir: g.dir.clone(),
-										what: g.what.clone(),
+										what: g.what.clone().compute(stk, ctx, opt, doc).await?,
 									})]),
 									cond: g.cond.clone(),
 									limit: g.limit.clone(),

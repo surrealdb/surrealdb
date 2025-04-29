@@ -8,7 +8,7 @@ value = "1029944667.4192368f"
 value = "0f"
 
 [[test.results]]
-error = "Incorrect arguments for function geo::area(). Argument 1 was the wrong type. Expected a geometry but found ''"
+error = "Incorrect arguments for function geo::area(). Argument 1 was the wrong type. Expected `geometry` but found `''`"
 
 */
 geo::area({

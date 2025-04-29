@@ -386,7 +386,6 @@ impl Response {
 	/// use surrealdb::RecordId;
 	///
 	/// #[derive(Debug, Deserialize)]
-	/// # #[allow(dead_code)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -456,7 +455,6 @@ impl Response {
 	/// use surrealdb::Value;
 	///
 	/// #[derive(Debug, Deserialize)]
-	/// # #[allow(dead_code)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -587,7 +585,6 @@ impl WithStats<Response> {
 	/// use surrealdb::RecordId;
 	///
 	/// #[derive(Debug, Deserialize)]
-	/// # #[allow(dead_code)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -1048,13 +1045,13 @@ mod tests {
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		let crate::Error::Api(Error::DuplicateRequestId(0)) = errors.get(&10).unwrap() else {
+		let crate::Error::Api(Error::DuplicateRequestId(0)) = errors[&10] else {
 			panic!("index `10` is not `DuplicateRequestId`");
 		};
-		let crate::Error::Api(Error::BackupsNotSupported) = errors.get(&7).unwrap() else {
+		let crate::Error::Api(Error::BackupsNotSupported) = errors[&7] else {
 			panic!("index `7` is not `BackupsNotSupported`");
 		};
-		let crate::Error::Api(Error::ConnectionUninitialised) = errors.get(&3).unwrap() else {
+		let crate::Error::Api(Error::ConnectionUninitialised) = errors[&3] else {
 			panic!("index `3` is not `ConnectionUninitialised`");
 		};
 		let Some(value): Option<i32> = response.take(2).unwrap() else {

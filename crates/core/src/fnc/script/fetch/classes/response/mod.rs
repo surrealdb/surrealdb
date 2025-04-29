@@ -14,7 +14,7 @@ use reqwest::Url;
 mod init;
 pub use init::ResponseInit;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Clone, Copy)]
 #[non_exhaustive]
 pub enum ResponseType {
@@ -26,7 +26,6 @@ pub enum ResponseType {
 	OpaqueRedirect,
 }
 
-#[allow(dead_code)]
 #[derive(Trace, JsLifetime)]
 #[js::class]
 #[non_exhaustive]

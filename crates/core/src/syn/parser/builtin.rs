@@ -246,6 +246,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("search::highlight") => PathKind::Function,
 		UniCase::ascii("search::offsets") => PathKind::Function,
 		//
+		UniCase::ascii("sequence::nextval") => PathKind::Function,
+		//
 		UniCase::ascii("session::ac") => PathKind::Function,
 		UniCase::ascii("session::db") => PathKind::Function,
 		UniCase::ascii("session::id") => PathKind::Function,

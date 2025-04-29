@@ -13,14 +13,7 @@ use std::sync::Arc;
 use super::store::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 
 fn accept_payload(value: Value) -> Result<bytes::Bytes, Error> {
-	match value {
-		Value::Bytes(v) => Ok(v.0.into()),
-		Value::Strand(v) => Ok(v.0.into_bytes().into()),
-		from => Err(Error::ConvertTo {
-			from,
-			into: "bytes".into(),
-		}),
-	}
+	value.cast_to::<Bytes>().map(|x| bytes::Bytes::from(x.0)).map_err(Error::from)
 }
 
 /// Allows you to control a specific bucket in the context of the current user

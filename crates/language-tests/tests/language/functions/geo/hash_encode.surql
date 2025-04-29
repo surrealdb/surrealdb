@@ -5,7 +5,7 @@
 value = "'gcpvhchdswz9'"
 
 [[test.results]]
-error = "Incorrect arguments for function geo::hash::encode(). Argument 1 was the wrong type. Expected a geometry but found ''"
+error = "Incorrect arguments for function geo::hash::encode(). Argument 1 was the wrong type. Expected `geometry` but found `''`"
 
 [[test.results]]
 value = "NONE"

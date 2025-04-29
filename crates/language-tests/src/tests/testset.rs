@@ -119,14 +119,14 @@ impl TestSet {
 		if !name.starts_with(std::path::MAIN_SEPARATOR) {
 			name = Cow::Owned(format!("{}{name}", std::path::MAIN_SEPARATOR));
 		}
-		self.all_map.get(name.as_ref()).cloned()
+		self.all_map.get(name.as_ref()).copied()
 	}
 
 	pub async fn collect_directory(path: &str) -> Result<(Self, Vec<TestLoadError>)> {
 		let mut all = Vec::new();
 		let mut map = HashMap::new();
 		let mut errors = Vec::new();
-		Self::collect_recursive(path, &path, &mut map, &mut all, &mut errors).await?;
+		Self::collect_recursive(path, path, &mut map, &mut all, &mut errors).await?;
 		let map = Arc::new(map);
 		Ok((
 			Self {

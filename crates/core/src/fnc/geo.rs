@@ -52,14 +52,15 @@ pub fn distance((v, w): (Geometry, Geometry)) -> Result<Value, Error> {
 pub mod hash {
 
 	use crate::err::Error;
+	use crate::fnc::args::Optional;
 	use crate::fnc::util::geo;
 	use crate::sql::geometry::Geometry;
 	use crate::sql::value::Value;
 
-	pub fn encode((arg, len): (Geometry, Option<usize>)) -> Result<Value, Error> {
+	pub fn encode((arg, Optional(len)): (Geometry, Optional<i64>)) -> Result<Value, Error> {
 		let len = match len {
-			Some(len) if (1..=12).contains(&len) => len,
-			None => 12,
+			Some(len) if (1..=12).contains(&len) => len as usize,
+			None => 12usize,
 			_ => return Err(Error::InvalidArguments {
 				name: String::from("geo::encode"),
 				message: String::from("The second argument must be an integer greater than 0 and less than or equal to 12."),

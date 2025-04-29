@@ -27,7 +27,6 @@ use super::client_ip::ExtractClientIP;
 ///   .route("/version", get(|| async { "0.1.0" }))
 ///   .layer(trace);
 /// ```
-
 #[derive(Default, Clone)]
 pub(crate) struct HttpTraceLayerHooks;
 

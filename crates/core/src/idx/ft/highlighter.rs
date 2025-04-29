@@ -7,26 +7,10 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 pub(crate) struct HighlightParams {
-	prefix: Value,
-	suffix: Value,
-	match_ref: Value,
-	partial: bool,
-}
-
-impl TryFrom<(Value, Value, Value, Option<Value>)> for HighlightParams {
-	type Error = Error;
-
-	fn try_from(
-		(prefix, suffix, match_ref, partial): (Value, Value, Value, Option<Value>),
-	) -> Result<Self, Error> {
-		let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
-		Ok(Self {
-			prefix,
-			suffix,
-			match_ref,
-			partial,
-		})
-	}
+	pub(crate) prefix: Value,
+	pub(crate) suffix: Value,
+	pub(crate) match_ref: Value,
+	pub(crate) partial: bool,
 }
 
 impl HighlightParams {
