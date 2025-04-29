@@ -285,6 +285,7 @@
 "rand("
 "rand"
 "rand::bool("
+"rand::duration("
 "rand::enum("
 "rand::float("
 "rand::guid("
