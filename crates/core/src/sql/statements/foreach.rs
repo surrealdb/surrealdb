@@ -60,6 +60,19 @@ impl ForeachStatement {
 				let r = r.coerce_to_typed::<i64>().map_err(Error::from)?;
 				ForeachIter::Range(r.map(Value::from))
 			}
+			Value::Future(fut) => {
+				let result = fut.compute(stk, ctx, opt, doc).await?;
+
+				// We only accept arrays as output of a future in a foreach statement.
+				match result {
+					Value::Array(arr) => ForeachIter::Array(arr.into_iter()),
+					v => {
+						return Err(ControlFlow::from(Error::InvalidStatementTarget {
+							value: v.to_string(),
+						}));
+					}
+				}
+			}
 
 			v => {
 				return Err(ControlFlow::from(Error::InvalidStatementTarget {
