@@ -4,7 +4,7 @@ repos:
     - id: fmt
       name: fmt
       description: Format files with cargo fmt.
-      entry: cargo fmt
+      entry: cargo +nightly fmt
       language: system
       types: [rust]
       args: ["--all", "--", "--check"]

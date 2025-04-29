@@ -41,8 +41,9 @@ args = ["test", "--profile", "make", "--workspace", "--no-fail-fast"]
 # Format
 [tasks.cargo-fmt]
 category = "LOCAL USAGE"
-command = "cargo"
-args = ["fmt", "--all", "--check"]
+script = """
+cargo +nightly fmt --all -- --check
+"""
 
 # Check
 [tasks.cargo-check]
