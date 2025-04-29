@@ -14,12 +14,14 @@ value = "NONE"
 value = "[{ id: person:1, test: 1 }, { id: person:4, test: 4 }, { id: person:6, test: 6 }]"
 
 [[test.results]]
-error = "Can not execute statement using value: <future> { [7, 8, 9] }"
+error = "An error occurred: This is an error"
 
 [[test.results]]
 value = "[{ id: person:1, test: 1 }, { id: person:4, test: 4 }, { id: person:6, test: 6 }]"
 
 */
+
+OPTION FUTURES = true;
 
 FOR $test IN [1, 2, 3] {
 	IF $test == 2 {
