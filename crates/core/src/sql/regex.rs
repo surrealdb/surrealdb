@@ -1,18 +1,17 @@
-use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
-use quick_cache::sync::{Cache, GuardResult};
-use regex::RegexBuilder;
-use revision::revisioned;
-use serde::{
-	de::{self, Visitor},
-	Deserialize, Deserializer, Serialize, Serializer,
-};
 use std::cmp::Ordering;
-use std::fmt::Debug;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str;
 use std::str::FromStr;
 use std::sync::LazyLock;
+
+use quick_cache::sync::{Cache, GuardResult};
+use regex::RegexBuilder;
+use revision::revisioned;
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
 
@@ -22,7 +21,8 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
 pub struct Regex(pub regex::Regex);
 
 impl Regex {
-	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/' delimiters.
+	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/'
+	// delimiters.
 	pub fn regex(&self) -> &regex::Regex {
 		&self.0
 	}

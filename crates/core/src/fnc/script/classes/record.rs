@@ -1,6 +1,8 @@
+use js::class::Trace;
+use js::JsLifetime;
+
 use crate::sql::thing;
 use crate::sql::value::Value;
-use js::{class::Trace, JsLifetime};
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
@@ -37,15 +39,18 @@ impl Record {
 	pub fn id(&self) -> Value {
 		self.value.id.clone().into()
 	}
+
 	// Compare two Record instances
 	pub fn is(a: &Record, b: &Record) -> bool {
 		a.value == b.value
 	}
+
 	/// Convert the object to a string
 	#[qjs(rename = "toString")]
 	pub fn js_to_string(&self) -> String {
 		self.value.to_raw()
 	}
+
 	/// Convert the object to JSON
 	#[qjs(rename = "toJSON")]
 	pub fn to_json(&self) -> String {

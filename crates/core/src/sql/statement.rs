@@ -1,30 +1,48 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::sql::statements::rebuild::RebuildStatement;
-use crate::sql::statements::AccessStatement;
-use crate::sql::{
-	fmt::{Fmt, Pretty},
-	statements::{
-		AlterStatement, AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
-		CommitStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
-		ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-		LiveStatement, OptionStatement, OutputStatement, RelateStatement, RemoveStatement,
-		SelectStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
-		UpdateStatement, UpsertStatement, UseStatement,
-	},
-	value::Value,
-};
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::Deref;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::{
-	fmt::{self, Display, Formatter, Write},
-	ops::Deref,
-};
 
 use super::{ControlFlow, FlowResult};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::sql::fmt::{Fmt, Pretty};
+use crate::sql::statements::rebuild::RebuildStatement;
+use crate::sql::statements::{
+	AccessStatement,
+	AlterStatement,
+	AnalyzeStatement,
+	BeginStatement,
+	BreakStatement,
+	CancelStatement,
+	CommitStatement,
+	ContinueStatement,
+	CreateStatement,
+	DefineStatement,
+	DeleteStatement,
+	ForeachStatement,
+	IfelseStatement,
+	InfoStatement,
+	InsertStatement,
+	KillStatement,
+	LiveStatement,
+	OptionStatement,
+	OutputStatement,
+	RelateStatement,
+	RemoveStatement,
+	SelectStatement,
+	SetStatement,
+	ShowStatement,
+	SleepStatement,
+	ThrowStatement,
+	UpdateStatement,
+	UpsertStatement,
+	UseStatement,
+};
+use crate::sql::value::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -34,14 +52,16 @@ pub struct Statements(pub Vec<Statement>);
 
 impl Deref for Statements {
 	type Target = Vec<Statement>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Statements {
-	type Item = Statement;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Statement;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -134,6 +154,7 @@ impl Statement {
 			_ => false,
 		}
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

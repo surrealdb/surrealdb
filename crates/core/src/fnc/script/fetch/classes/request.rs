@@ -1,14 +1,16 @@
 //! Request class implementation
 
-use crate::fnc::script::fetch::{body::Body, RequestError};
 use bytes::Bytes;
-use js::{
-	class::Trace, function::Opt, prelude::Coerced, Class, Ctx, Exception, FromJs, JsLifetime,
-	Object, Result, Value,
-};
-use reqwest::{header::HeaderName, Method, Url};
+use js::class::Trace;
+use js::function::Opt;
+use js::prelude::Coerced;
+use js::{Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value};
+use reqwest::header::HeaderName;
+use reqwest::{Method, Url};
 
 use super::{Blob, Headers};
+use crate::fnc::script::fetch::body::Body;
+use crate::fnc::script::fetch::RequestError;
 
 #[derive(Clone, Copy, Eq, PartialEq, JsLifetime)]
 #[non_exhaustive]
@@ -282,11 +284,12 @@ fn normalize_method(ctx: &Ctx<'_>, m: String) -> Result<Method> {
 		|| m.as_bytes().eq_ignore_ascii_case(b"TRACE")
 		|| m.as_bytes().eq_ignore_ascii_case(b"TRACK")
 	{
-		//methods that are not allowed [`https://fetch.spec.whatwg.org/#methods`]
+		// methods that are not allowed [`https://fetch.spec.whatwg.org/#methods`]
 		return Err(Exception::throw_type(ctx, &format!("method {m} is forbidden")));
 	}
 
-	// The following methods must be uppercased to the default case insensitive equivalent.
+	// The following methods must be uppercased to the default case insensitive
+	// equivalent.
 	if m.as_bytes().eq_ignore_ascii_case(b"DELETE") {
 		return Ok(Method::DELETE);
 	}
@@ -463,6 +466,7 @@ impl<'js> Request<'js> {
 	pub fn referrer(&self) -> String {
 		self.init.referrer.clone()
 	}
+
 	// TODO
 
 	// ------------------------------
@@ -543,8 +547,10 @@ impl<'js> Request<'js> {
 
 #[cfg(test)]
 mod test {
+	use js::promise::Promise;
+	use js::CatchResultExt;
+
 	use crate::fnc::script::fetch::test::create_test_context;
-	use js::{promise::Promise, CatchResultExt};
 
 	#[tokio::test]
 	async fn basic_request_use() {

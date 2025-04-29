@@ -2,17 +2,13 @@ use std::collections::BTreeMap;
 
 use reblessive::Stk;
 
-use crate::{
-	sql::{Block, Geometry, Object, Strand, Value},
-	syn::{
-		error::bail,
-		lexer::compound,
-		parser::{enter_object_recursion, mac::expected, ParseResult, Parser},
-		token::{t, Glued, Span, TokenKind},
-	},
-};
-
 use super::mac::unexpected;
+use crate::sql::{Block, Geometry, Object, Strand, Value};
+use crate::syn::error::bail;
+use crate::syn::lexer::compound;
+use crate::syn::parser::mac::expected;
+use crate::syn::parser::{enter_object_recursion, ParseResult, Parser};
+use crate::syn::token::{t, Glued, Span, TokenKind};
 
 impl Parser<'_> {
 	/// Parse an production which starts with an `{`
@@ -56,12 +52,13 @@ impl Parser<'_> {
 				.map(Value::Object);
 		};
 
-		// We know it is a strand so check if the type is one of the allowe geometry types.
-		// If it is, there are some which all take roughly the save type of value and produce a
-		// similar output, which is parsed with parse_geometry_after_type
+		// We know it is a strand so check if the type is one of the allowe geometry
+		// types. If it is, there are some which all take roughly the save type of
+		// value and produce a similar output, which is parsed with
+		// parse_geometry_after_type
 		//
-		// GeometryCollection however has a different object key for its value, so it is handled
-		// appart from the others.
+		// GeometryCollection however has a different object key for its value, so it is
+		// handled appart from the others.
 		let type_value = self.next_token_value::<Strand>()?.0;
 		match type_value.as_str() {
 			"Point" => {
@@ -348,7 +345,8 @@ impl Parser<'_> {
 		start: Span,
 		key: String,
 	) -> ParseResult<Value> {
-		// 'geometries' key can only happen in a GeometryCollection, so try to parse that.
+		// 'geometries' key can only happen in a GeometryCollection, so try to parse
+		// that.
 		expected!(self, t!(":"));
 
 		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
@@ -423,15 +421,16 @@ impl Parser<'_> {
 		.map(Value::Object)
 	}
 
-	/// Parse a production starting with an `{` as either an object or a geometry.
+	/// Parse a production starting with an `{` as either an object or a
+	/// geometry.
 	///
-	/// This function tries to match an object to an geometry like object and if it is unable
-	/// fallsback to parsing normal objects.
+	/// This function tries to match an object to an geometry like object and if
+	/// it is unable fallsback to parsing normal objects.
 	async fn parse_object_or_geometry(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Value> {
 		// empty object was already matched previously so next must be a key.
 		let key = self.parse_object_key()?;
-		// the order of fields of a geometry does not matter so check if it is any of geometry like keys
-		// "type" : could be the type of the object.
+		// the order of fields of a geometry does not matter so check if it is any of
+		// geometry like keys "type" : could be the type of the object.
 		// "collections": could be a geometry collection.
 		// "geometry": could be the values of geometry.
 		match key.as_str() {
@@ -568,8 +567,8 @@ impl Parser<'_> {
 	/// Parses a block of statements
 	///
 	/// # Parser State
-	/// Expects the starting `{` to have already been eaten and its span to be handed to this
-	/// functions as the `start` parameter.
+	/// Expects the starting `{` to have already been eaten and its span to be
+	/// handed to this functions as the `start` parameter.
 	pub async fn parse_block(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Block> {
 		let mut statements = Vec::new();
 		loop {
@@ -588,8 +587,8 @@ impl Parser<'_> {
 		Ok(Block(statements))
 	}
 
-	/// Parse a single entry in the object, i.e. `field: value + 1` in the object `{ field: value +
-	/// 1 }`
+	/// Parse a single entry in the object, i.e. `field: value + 1` in the
+	/// object `{ field: value + 1 }`
 	async fn parse_object_entry(&mut self, ctx: &mut Stk) -> ParseResult<(String, Value)> {
 		let text = self.parse_object_key()?;
 		expected!(self, t!(":"));

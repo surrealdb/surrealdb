@@ -1,10 +1,10 @@
 //! Stores a record document
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::{impl_key, KeyEncode};
 use crate::sql::Id;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]

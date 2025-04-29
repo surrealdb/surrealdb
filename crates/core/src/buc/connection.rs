@@ -1,11 +1,11 @@
-use crate::{
-	cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED},
-	err::Error,
-};
-use dashmap::DashMap;
 use std::sync::Arc;
 
-use super::store::{prefixed::PrefixedStore, ObjectKey, ObjectStore};
+use dashmap::DashMap;
+
+use super::store::prefixed::PrefixedStore;
+use super::store::{ObjectKey, ObjectStore};
+use crate::cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED};
+use crate::err::Error;
 
 // Helper type to represent how bucket connections are persisted
 pub(crate) type BucketConnections = DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>;

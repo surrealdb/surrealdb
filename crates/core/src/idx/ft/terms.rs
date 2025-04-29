@@ -1,12 +1,13 @@
+use revision::{revisioned, Revisioned};
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
-use revision::{revisioned, Revisioned};
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
 
 pub(crate) type TermId = u64;
 pub(crate) type TermLen = u32;
@@ -212,14 +213,17 @@ impl VersionedStore for State {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashSet;
+
+	use rand::{thread_rng, Rng};
+	use test_log::test;
+
 	use crate::idx::ft::postings::TermFrequency;
 	use crate::idx::ft::terms::{State, Terms};
 	use crate::idx::{IndexKeyBase, VersionedStore};
+	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::{Read, Write};
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
-	use rand::{thread_rng, Rng};
-	use std::collections::HashSet;
-	use test_log::test;
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 
 	#[test]
 	fn test_state_serde() {

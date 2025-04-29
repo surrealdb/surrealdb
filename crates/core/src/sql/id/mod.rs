@@ -1,19 +1,22 @@
+use std::collections::BTreeMap;
+use std::fmt::{self, Display, Formatter};
+use std::ops::{Bound, Deref};
+
+use nanoid::nanoid;
+use range::IdRange;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use ulid::Ulid;
+
 use super::{FlowResultExt as _, Range};
 use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{escape::EscapeRid, Array, Number, Object, Strand, Thing, Uuid, Value};
-use nanoid::nanoid;
-use range::IdRange;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt::{self, Display, Formatter};
-use std::ops::{Bound, Deref};
-use ulid::Ulid;
+use crate::sql::escape::EscapeRid;
+use crate::sql::{Array, Number, Object, Strand, Thing, Uuid, Value};
 
 pub mod range;
 
@@ -144,6 +147,7 @@ impl From<IdRange> for Id {
 
 impl TryFrom<(Bound<Id>, Bound<Id>)> for Id {
 	type Error = Error;
+
 	fn try_from(v: (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
 		Ok(Self::Range(Box::new(v.try_into()?)))
 	}
@@ -151,6 +155,7 @@ impl TryFrom<(Bound<Id>, Bound<Id>)> for Id {
 
 impl TryFrom<Range> for Id {
 	type Error = Error;
+
 	fn try_from(v: Range) -> Result<Self, Self::Error> {
 		Ok(Id::Range(Box::new(v.try_into()?)))
 	}
@@ -158,6 +163,7 @@ impl TryFrom<Range> for Id {
 
 impl TryFrom<Value> for Id {
 	type Error = Error;
+
 	fn try_from(v: Value) -> Result<Self, Self::Error> {
 		match v {
 			Value::Number(Number::Int(v)) => Ok(v.into()),
@@ -183,14 +189,17 @@ impl Id {
 	pub fn rand() -> Self {
 		Self::String(nanoid!(20, &ID_CHARS))
 	}
+
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {
 		Self::String(Ulid::new().to_string())
 	}
+
 	/// Generate a new random UUID
 	pub fn uuid() -> Self {
 		Self::Uuid(Uuid::new_v7())
 	}
+
 	/// Check if this Id matches a value
 	pub fn is(&self, val: &Value) -> bool {
 		match (self, val) {
@@ -203,6 +212,7 @@ impl Id {
 			_ => false,
 		}
 	}
+
 	/// Convert the Id to a raw String
 	pub fn to_raw(&self) -> String {
 		match self {

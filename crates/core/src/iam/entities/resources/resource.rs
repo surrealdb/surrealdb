@@ -1,13 +1,11 @@
-use revision::revisioned;
-use std::{
-	collections::{HashMap, HashSet},
-	str::FromStr,
-};
-
-use super::Level;
+use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 
 use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpression};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+use super::Level;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
@@ -88,7 +86,8 @@ impl std::fmt::Display for ConfigKind {
 }
 
 impl ResourceKind {
-	// Helpers for building default resources for specific levels. Useful for authorization checks.
+	// Helpers for building default resources for specific levels. Useful for
+	// authorization checks.
 	pub fn on_level(self, level: Level) -> Resource {
 		Resource::new("".into(), self, level)
 	}

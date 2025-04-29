@@ -1,47 +1,46 @@
+use std::fmt::Debug;
+use std::ops::Range;
+use std::sync::Arc;
+
+use futures::lock::{Mutex, MutexGuard};
+use futures::stream::Stream;
+use uuid::Uuid;
+
 use super::batch::Batch;
 use super::tr::Check;
-use super::util;
-use super::Key;
-use super::KeyEncode;
-use super::Val;
-use super::Version;
+use super::{util, Key, KeyEncode, Val, Version};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
-use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
-use crate::kvs::Transactor;
-use crate::sql::statements::define::BucketDefinition;
-use crate::sql::statements::define::DefineConfigStatement;
-use crate::sql::statements::define::{ApiDefinition, DefineSequenceStatement};
-use crate::sql::statements::AccessGrant;
-use crate::sql::statements::DefineAccessStatement;
-use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::statements::DefineDatabaseStatement;
-use crate::sql::statements::DefineEventStatement;
-use crate::sql::statements::DefineFieldStatement;
-use crate::sql::statements::DefineFunctionStatement;
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::statements::DefineModelStatement;
-use crate::sql::statements::DefineNamespaceStatement;
-use crate::sql::statements::DefineParamStatement;
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::statements::DefineUserStatement;
-use crate::sql::statements::LiveStatement;
-use crate::sql::Id;
-use crate::sql::Permissions;
-use crate::sql::Value;
-use futures::lock::Mutex;
-use futures::lock::MutexGuard;
-use futures::stream::Stream;
-use std::fmt::Debug;
-use std::ops::Range;
-use std::sync::Arc;
-use uuid::Uuid;
+use crate::kvs::{cache, Transactor};
+use crate::sql::statements::define::{
+	ApiDefinition,
+	BucketDefinition,
+	DefineConfigStatement,
+	DefineSequenceStatement,
+};
+use crate::sql::statements::{
+	AccessGrant,
+	DefineAccessStatement,
+	DefineAnalyzerStatement,
+	DefineDatabaseStatement,
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineFunctionStatement,
+	DefineIndexStatement,
+	DefineModelStatement,
+	DefineNamespaceStatement,
+	DefineParamStatement,
+	DefineTableStatement,
+	DefineUserStatement,
+	LiveStatement,
+};
+use crate::sql::{Id, Permissions, Value};
 
 #[non_exhaustive]
 pub struct Transaction {
@@ -149,7 +148,8 @@ impl Transaction {
 
 	/// Retrieve a specific prefix of keys from the datastore.
 	///
-	/// This function fetches key-value pairs from the underlying datastore in grouped batches.
+	/// This function fetches key-value pairs from the underlying datastore in
+	/// grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn getp<K>(&self, key: K) -> Result<Vec<(Key, Val)>, Error>
 	where
@@ -160,7 +160,8 @@ impl Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches key-value pairs from the underlying datastore in grouped batches.
+	/// This function fetches key-value pairs from the underlying datastore in
+	/// grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn getr<K>(
 		&self,
@@ -182,7 +183,8 @@ impl Transaction {
 		self.lock().await.del(key).await
 	}
 
-	/// Delete a key from the datastore if the current value matches a condition.
+	/// Delete a key from the datastore if the current value matches a
+	/// condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn delc<K, V>(&self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
@@ -194,7 +196,8 @@ impl Transaction {
 
 	/// Delete a range of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn delr<K>(&self, rng: Range<K>) -> Result<(), Error>
 	where
@@ -205,7 +208,8 @@ impl Transaction {
 
 	/// Delete a prefix of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn delp<K>(&self, key: K) -> Result<(), Error>
 	where
@@ -223,7 +227,8 @@ impl Transaction {
 		self.lock().await.clr(key).await
 	}
 
-	/// Delete all versions of a key from the datastore if the current value matches a condition.
+	/// Delete all versions of a key from the datastore if the current value
+	/// matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clrc<K, V>(&self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
@@ -235,7 +240,8 @@ impl Transaction {
 
 	/// Delete all versions of a range of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clrr<K>(&self, rng: Range<K>) -> Result<(), Error>
 	where
@@ -246,7 +252,8 @@ impl Transaction {
 
 	/// Delete all versions of a prefix of keys from the datastore.
 	///
-	/// This function deletes entries from the underlying datastore in grouped batches.
+	/// This function deletes entries from the underlying datastore in grouped
+	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clrp<K>(&self, key: K) -> Result<(), Error>
 	where
@@ -297,7 +304,8 @@ impl Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of keys, in a single request to the underlying datastore.
+	/// This function fetches the full range of keys, in a single request to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn keys<K>(
 		&self,
@@ -313,7 +321,8 @@ impl Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of keys, in a single request to the underlying datastore.
+	/// This function fetches the full range of keys, in a single request to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn keysr<K>(
 		&self,
@@ -329,7 +338,8 @@ impl Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	/// This function fetches the full range of key-value pairs, in a single
+	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn scan<K>(
 		&self,
@@ -358,7 +368,8 @@ impl Transaction {
 
 	/// Count the total number of keys within a range in the datastore.
 	///
-	/// This function fetches the total count, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the total count, in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn count<K>(&self, rng: Range<K>) -> Result<usize, Error>
 	where
@@ -369,7 +380,8 @@ impl Transaction {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches the keys in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the keys in batches, with multiple requests to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn batch_keys<K>(
 		&self,
@@ -385,7 +397,8 @@ impl Transaction {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the key-value pairs in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn batch_keys_vals<K>(
 		&self,
@@ -401,7 +414,8 @@ impl Transaction {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value-version pairs in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the key-value-version pairs in batches, with
+	/// multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn batch_keys_vals_versions<K>(
 		&self,
@@ -416,7 +430,8 @@ impl Transaction {
 
 	/// Retrieve a stream over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple requests to the underlying datastore.
+	/// This function fetches the key-value pairs in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream(
 		&self,
@@ -1716,7 +1731,8 @@ impl Transaction {
 		Ok(())
 	}
 
-	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
+	/// Get or add a namespace with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_ns(
 		&self,
@@ -1726,7 +1742,8 @@ impl Transaction {
 		self.get_or_add_ns_upwards(ns, strict, false).await
 	}
 
-	/// Get or add a database with a default configuration, only if we are in dynamic mode.
+	/// Get or add a database with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_db(
 		&self,
@@ -1737,7 +1754,8 @@ impl Transaction {
 		self.get_or_add_db_upwards(ns, db, strict, false).await
 	}
 
-	/// Get or add a table with a default configuration, only if we are in dynamic mode.
+	/// Get or add a table with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_or_add_tb(
 		&self,
@@ -1830,7 +1848,8 @@ impl Transaction {
 	// Private methods
 	// --------------------------------------------------
 
-	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
+	/// Get or add a namespace with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_ns_upwards(
 		&self,
@@ -1881,7 +1900,8 @@ impl Transaction {
 		.try_into_type()
 	}
 
-	/// Get or add a database with a default configuration, only if we are in dynamic mode.
+	/// Get or add a database with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_db_upwards(
 		&self,
@@ -1947,7 +1967,8 @@ impl Transaction {
 		.try_into_type()
 	}
 
-	/// Get or add a table with a default configuration, only if we are in dynamic mode.
+	/// Get or add a table with a default configuration, only if we are in
+	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_or_add_tb_upwards(
 		&self,

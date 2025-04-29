@@ -1,7 +1,8 @@
-use crate::dbs;
-use crate::err::Error;
 use clap::Args;
 use surrealdb::engine::any::IntoEndpoint;
+
+use crate::dbs;
+use crate::err::Error;
 
 #[derive(Args, Debug)]
 pub struct FixCommandArguments {

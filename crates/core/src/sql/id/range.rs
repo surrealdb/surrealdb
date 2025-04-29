@@ -1,15 +1,17 @@
-use super::Id;
-use crate::{
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	sql::{Range, Value},
-};
+use std::cmp::Ordering;
+use std::fmt;
+use std::ops::Bound;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt, ops::Bound};
+
+use super::Id;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::sql::{Range, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -21,6 +23,7 @@ pub struct IdRange {
 
 impl TryFrom<(Bound<Id>, Bound<Id>)> for IdRange {
 	type Error = Error;
+
 	fn try_from((beg, end): (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
 		if matches!(beg, Bound::Included(Id::Range(_)) | Bound::Excluded(Id::Range(_))) {
 			return Err(Error::IdInvalid {
@@ -43,6 +46,7 @@ impl TryFrom<(Bound<Id>, Bound<Id>)> for IdRange {
 
 impl TryFrom<Range> for IdRange {
 	type Error = Error;
+
 	fn try_from(v: Range) -> Result<Self, Self::Error> {
 		let beg = match v.beg {
 			Bound::Included(beg) => Bound::Included(Id::try_from(beg)?),
@@ -56,13 +60,15 @@ impl TryFrom<Range> for IdRange {
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
-		// The TryFrom implementation ensures that the bounds do not contain an `Id::Range` value
+		// The TryFrom implementation ensures that the bounds do not contain an
+		// `Id::Range` value
 		IdRange::try_from((beg, end))
 	}
 }
 
 impl TryFrom<Value> for IdRange {
 	type Error = Error;
+
 	fn try_from(v: Value) -> Result<Self, Self::Error> {
 		match v {
 			Value::Range(v) => IdRange::try_from(*v),
@@ -178,7 +184,8 @@ impl IdRange {
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
-		// The TryFrom implementation ensures that the bounds do not contain an `Id::Range` value
+		// The TryFrom implementation ensures that the bounds do not contain an
+		// `Id::Range` value
 		IdRange::try_from((beg, end))
 	}
 }

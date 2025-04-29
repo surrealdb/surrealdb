@@ -1,3 +1,11 @@
+use std::borrow::Cow;
+use std::collections::VecDeque;
+use std::ops::Range;
+use std::sync::Arc;
+
+use radix_trie::Trie;
+use rust_decimal::Decimal;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -7,16 +15,9 @@ use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
-use crate::kvs::{Key, Val};
-use crate::kvs::{KeyEncode, Transaction};
+use crate::kvs::{Key, KeyEncode, Transaction, Val};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Ident, Number, Thing, Value};
-use radix_trie::Trie;
-use rust_decimal::Decimal;
-use std::borrow::Cow;
-use std::collections::VecDeque;
-use std::ops::Range;
-use std::sync::Arc;
 
 pub(crate) type IteratorRef = usize;
 
@@ -31,6 +32,7 @@ impl IteratorRecord {
 	pub(crate) fn irf(&self) -> IteratorRef {
 		self.irf
 	}
+
 	pub(crate) fn doc_id(&self) -> Option<DocId> {
 		self.doc_id
 	}
@@ -66,6 +68,7 @@ impl IteratorBatch for Vec<IndexItemRecord> {
 	fn with_capacity(capacity: usize) -> Self {
 		Vec::with_capacity(capacity)
 	}
+
 	fn from_one(record: IndexItemRecord) -> Self {
 		Vec::from([record])
 	}
@@ -87,9 +90,11 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 	fn empty() -> Self {
 		VecDeque::from([])
 	}
+
 	fn with_capacity(capacity: usize) -> Self {
 		VecDeque::with_capacity(capacity)
 	}
+
 	fn from_one(record: IndexItemRecord) -> Self {
 		VecDeque::from([record])
 	}
@@ -101,6 +106,7 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 	fn len(&self) -> usize {
 		VecDeque::len(self)
 	}
+
 	fn is_empty(&self) -> bool {
 		VecDeque::is_empty(self)
 	}
@@ -195,6 +201,7 @@ impl IndexItemRecord {
 	fn new_key(t: Thing, ir: IteratorRecord) -> Self {
 		Self::Key(Arc::new(t), ir)
 	}
+
 	fn thing(&self) -> &Thing {
 		match self {
 			Self::Key(t, _) => t,
@@ -362,6 +369,7 @@ impl ReverseRangeScan {
 			r,
 		}
 	}
+
 	fn matches_check(&self, k: &Key) -> bool {
 		// We check if we should match the key matching the beginning of the range
 		if !self.r.beg_excl_match_checked && self.r.beg.eq(k) {
@@ -626,6 +634,7 @@ impl IndexRangeReverseThingIterator {
 		let range = full_iterator_range();
 		Self::new(irf, ns, db, ix, &range)
 	}
+
 	async fn check_batch_ending(
 		&mut self,
 		tx: &Transaction,
@@ -665,7 +674,8 @@ impl IndexRangeReverseThingIterator {
 		tx: &Transaction,
 		mut limit: u32,
 	) -> Result<B, Error> {
-		// Check if we need to retrieve the key at end of the range (not returned by the scanr)
+		// Check if we need to retrieve the key at end of the range (not returned by the
+		// scanr)
 		let ending = self.check_batch_ending(tx, &mut limit).await?;
 
 		// Do we have enough limit left to collect additional records?
@@ -707,7 +717,8 @@ impl IndexRangeReverseThingIterator {
 	}
 
 	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize, Error> {
-		// Check if we need to retrieve the key at end of the range (not returned by the keysr)
+		// Check if we need to retrieve the key at end of the range (not returned by the
+		// keysr)
 		let mut count = self.check_keys_ending(tx, &mut limit).await? as usize;
 
 		// Do we have enough limit left to collect additional records?
@@ -747,7 +758,8 @@ impl IndexUnionThingIterator {
 		ix: &DefineIndexStatement,
 		arrays: &[Array],
 	) -> Result<Self, Error> {
-		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
+		// We create a VecDeque to hold the prefix keys (begin and end) for each value
+		// in the array.
 		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(arrays.len());
 
 		for a in arrays {
@@ -1196,7 +1208,8 @@ impl UniqueRangeReverseThingIterator {
 		let ending_record = if self.r.end_incl {
 			// we don't include the ending key for the next batches
 			self.r.end_incl = false;
-			// tx.scanr is end exclusive, so we have to manually collect the value using a get
+			// tx.scanr is end exclusive, so we have to manually collect the value using a
+			// get
 			if let Some(v) = tx.get(&self.r.r.end, None).await? {
 				let rid: Thing = revision::from_slice(&v)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());
@@ -1483,6 +1496,7 @@ impl KnnIterator {
 			res,
 		}
 	}
+
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context,

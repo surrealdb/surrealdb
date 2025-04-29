@@ -1,24 +1,19 @@
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::api::method::Content;
-use crate::api::method::Merge;
-use crate::api::method::Patch;
-use crate::api::opt::PatchOp;
-use crate::api::opt::Resource;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::method::OnceLockExt;
-use crate::opt::KeyRange;
-use crate::Surreal;
-use crate::Value;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 use super::validate_data;
+use crate::api::conn::Command;
+use crate::api::method::{BoxFuture, Content, Merge, Patch};
+use crate::api::opt::{PatchOp, Resource};
+use crate::api::{Connection, Result};
+use crate::method::OnceLockExt;
+use crate::opt::KeyRange;
+use crate::{Surreal, Value};
 
 /// An update future
 #[derive(Debug)]
@@ -33,7 +28,8 @@ impl<C, R> Update<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Update<'static, C, R> {
 		Update {
 			client: Cow::Owned(self.client.into_owned()),
@@ -67,8 +63,8 @@ impl<'r, Client> IntoFuture for Update<'r, Client, Value>
 where
 	Client: Connection,
 {
-	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Value>;
 
 	into_future! {execute_value}
 }
@@ -78,8 +74,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Option<R>>;
 
 	into_future! {execute_opt}
 }
@@ -89,8 +85,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Vec<R>>;
 
 	into_future! {execute_vec}
 }
@@ -160,7 +156,8 @@ where
 		}
 	}
 
-	/// Patches the current document / record data with the specified JSON Patch data
+	/// Patches the current document / record data with the specified JSON Patch
+	/// data
 	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
 		let PatchOp(result) = patch.into();
 		let patches = match result {

@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use super::Auth;
 use crate::dbs::Session;
 use crate::err::Error;
-use std::collections::BTreeMap;
-use std::sync::Arc;
 
 pub fn reset(session: &mut Session) -> Result<(), Error> {
 	session.au = Arc::new(Auth::default());

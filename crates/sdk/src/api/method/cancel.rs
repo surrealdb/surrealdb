@@ -1,9 +1,9 @@
-use crate::api::method::BoxFuture;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::api::Surreal;
 use std::future::IntoFuture;
+
 use surrealdb_core::sql::statements::CancelStatement;
+
+use crate::api::method::BoxFuture;
+use crate::api::{Connection, Result, Surreal};
 
 /// A transaction cancellation future
 #[derive(Debug)]
@@ -16,8 +16,8 @@ impl<C> IntoFuture for Cancel<C>
 where
 	C: Connection,
 {
-	type Output = Result<Surreal<C>>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
+	type Output = Result<Surreal<C>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

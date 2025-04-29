@@ -1,6 +1,7 @@
+use std::fmt::{self};
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self};
 
 use super::Ident;
 

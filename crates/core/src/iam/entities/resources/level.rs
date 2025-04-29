@@ -1,10 +1,8 @@
-use revision::revisioned;
-use std::{
-	collections::{HashMap, HashSet},
-	str::FromStr,
-};
+use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 
 use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]

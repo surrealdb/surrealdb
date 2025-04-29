@@ -1,5 +1,4 @@
-use crate::sql::part::Next;
-use crate::sql::part::Part;
+use crate::sql::part::{Next, Part};
 use crate::sql::value::Value;
 
 impl Value {

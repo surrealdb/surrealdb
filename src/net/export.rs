@@ -1,13 +1,9 @@
 use std::ops::Deref;
 
-use super::headers::ContentType;
-use super::AppState;
-use crate::err::Error;
 use axum::body::Body;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::options;
-use axum::Router;
-use axum::{response::Response, Extension};
+use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::StatusCode;
@@ -18,6 +14,10 @@ use surrealdb::iam::Action::View;
 use surrealdb::iam::ResourceKind::Any;
 use surrealdb::kvs::export;
 use surrealdb::rpc::format::Format;
+
+use super::headers::ContentType;
+use super::AppState;
+use crate::err::Error;
 
 pub(super) fn router<S>() -> Router<S>
 where

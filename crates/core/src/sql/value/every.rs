@@ -14,6 +14,7 @@ impl Value {
 			None => self._every(steps, arrays.into(), Idiom::default()),
 		}
 	}
+
 	fn _every(&self, steps: bool, arrays: ArrayBehaviour, mut prev: Idiom) -> Vec<Idiom> {
 		match self {
 			// Current path part is an object and is not empty

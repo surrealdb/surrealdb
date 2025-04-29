@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::iam::Action;
@@ -16,8 +19,6 @@ use crate::sql::thing::Thing;
 use crate::sql::value::every::ArrayBehaviour;
 use crate::sql::value::{CoerceError, Value};
 use crate::sql::{FlowResultExt as _, Part};
-use reblessive::tree::Stk;
-use std::sync::Arc;
 
 impl Document {
 	/// Ensures that any remaining fields on a
@@ -87,6 +88,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Processes `DEFINE FIELD` statements which
 	/// have been defined on the table for this
 	/// record. These fields are executed for
@@ -243,6 +245,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Processes `DEFINE FIELD` statements which
 	/// have been defined on the table for this
 	/// record, with a `REFERENCE` clause, and remove
@@ -372,6 +375,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any DEFAULT clause for the field definition
 	async fn process_default_clause(&mut self, val: Value) -> Result<Value, Error> {
 		// This field has a value specified
@@ -425,6 +429,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any VALUE clause for the field definition
 	async fn process_value_clause(&mut self, val: Value) -> Result<Value, Error> {
 		// Check for a VALUE clause
@@ -461,6 +466,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any ASSERT clause for the field definition
 	async fn process_assert_clause(&mut self, val: Value) -> Result<Value, Error> {
 		// If the field TYPE is optional, and the
@@ -510,6 +516,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any PERMISSIONS clause for the field definition
 	async fn process_permissions_clause(&mut self, val: Value) -> Result<Value, Error> {
 		// Check for a PERMISSIONS clause
@@ -587,6 +594,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<(), Error> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
@@ -624,12 +632,14 @@ impl FieldEditContext<'_> {
 					RefAction::Delete(vec![thing], self.def.name.to_string())
 				}
 			} else if let Value::Array(oldarr) = old {
-				// If the new value is still an array, we only filter out the record ids that are not present in the new array
+				// If the new value is still an array, we only filter out the record ids that
+				// are not present in the new array
 				let removed = if let Value::Array(newarr) = val {
 					oldarr
 						.iter()
 						.filter_map(|v| {
-							// If the record id is still present in the new array, we do not remove the reference
+							// If the record id is still present in the new array, we do not remove
+							// the reference
 							if newarr.contains(v) {
 								None
 							} else if let Value::Thing(thing) = v {
@@ -640,7 +650,8 @@ impl FieldEditContext<'_> {
 						})
 						.collect()
 
-				// If the new value is not an array, then all record ids in the old array are removed
+				// If the new value is not an array, then all record ids in the
+				// old array are removed
 				} else {
 					oldarr
 						.iter()

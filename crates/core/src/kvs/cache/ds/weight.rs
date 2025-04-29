@@ -1,6 +1,7 @@
+use quick_cache::Weighter;
+
 use super::entry::Entry;
 use super::key::Key;
-use quick_cache::Weighter;
 
 #[derive(Clone)]
 pub(crate) struct Weight;

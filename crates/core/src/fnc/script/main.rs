@@ -1,30 +1,24 @@
 use std::cell::RefCell;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use super::classes;
-use super::fetch;
-use super::globals;
-use super::modules;
-use super::modules::loader;
-use super::modules::resolver;
+use js::prelude::*;
+use js::{async_with, CatchResultExt, Ctx, Function, Module, Promise};
+
 use super::modules::surrealdb::query::QueryContext;
-use crate::cnf::SCRIPTING_MAX_MEMORY_LIMIT;
-use crate::cnf::SCRIPTING_MAX_STACK_SIZE;
+use super::modules::{loader, resolver};
+use super::{classes, fetch, globals, modules};
+use crate::cnf::{SCRIPTING_MAX_MEMORY_LIMIT, SCRIPTING_MAX_STACK_SIZE};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
-use js::async_with;
-use js::prelude::*;
-use js::CatchResultExt;
-use js::{Ctx, Function, Module, Promise};
 
 /// Insert query data into the context,
 ///
 /// # Safety
-/// Caller must ensure that the runtime from which `Ctx` originates cannot outlife 'a.
+/// Caller must ensure that the runtime from which `Ctx` originates cannot
+/// outlife 'a.
 pub unsafe fn create_query_data<'a>(
 	context: &'a Context,
 	opt: &'a Options,
@@ -60,7 +54,7 @@ pub async fn run(
 	// Scripting functions are pretty heavy so make the increase pretty heavy.
 	let opt = opt.dive(4)?;
 
-	//TODO: Maybe check memory usage?
+	// TODO: Maybe check memory usage?
 
 	let instant_start = Instant::now();
 	let time_limit = Duration::from_millis(*crate::cnf::SCRIPTING_MAX_TIME_LIMIT as u64);

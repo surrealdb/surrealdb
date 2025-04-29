@@ -1,3 +1,11 @@
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::Array;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -5,13 +13,6 @@ use crate::sql::fmt::Fmt;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Idiom, Value};
 use crate::syn;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
-
-use super::Array;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -21,14 +22,16 @@ pub struct Fetchs(pub Vec<Fetch>);
 
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Fetchs {
-	type Item = Fetch;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Fetch;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -143,6 +146,7 @@ impl From<Value> for Fetch {
 
 impl Deref for Fetch {
 	type Target = Value;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

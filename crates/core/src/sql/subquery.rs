@@ -1,21 +1,31 @@
+use std::cmp::Ordering;
+use std::fmt::{self, Display, Formatter};
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::statements::InfoStatement;
+use super::FlowResult;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
-	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, IfelseStatement,
-	InsertStatement, OutputStatement, RelateStatement, RemoveStatement, SelectStatement,
-	UpdateStatement, UpsertStatement,
+	AlterStatement,
+	CreateStatement,
+	DefineStatement,
+	DeleteStatement,
+	IfelseStatement,
+	InsertStatement,
+	OutputStatement,
+	RelateStatement,
+	RemoveStatement,
+	SelectStatement,
+	UpdateStatement,
+	UpsertStatement,
 };
 use crate::sql::value::Value;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt::{self, Display, Formatter};
-
-use super::statements::InfoStatement;
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
@@ -75,7 +85,8 @@ impl Subquery {
 		}
 	}
 
-	/// Process this type returning a computed simple Value, without catching errors
+	/// Process this type returning a computed simple Value, without catching
+	/// errors
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

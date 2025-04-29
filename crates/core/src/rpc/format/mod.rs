@@ -6,7 +6,8 @@ pub mod revision;
 use ::revision::Revisioned;
 use serde::Serialize;
 
-use super::{request::Request, RpcError};
+use super::request::Request;
+use super::RpcError;
 use crate::sql::Value;
 
 pub const PROTOCOLS: [&str; 4] = [

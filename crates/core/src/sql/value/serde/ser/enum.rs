@@ -1,14 +1,13 @@
+use std::collections::BTreeMap;
+
+use serde::de::IntoDeserializer;
+use serde::Deserialize;
+use serde_content::{Data, Expected, Unexpected};
+
 use super::Content;
 use crate::err::Error;
 use crate::sql;
-use crate::sql::Object;
-use crate::sql::Value;
-use serde::de::IntoDeserializer;
-use serde::Deserialize;
-use serde_content::Data;
-use serde_content::Expected;
-use serde_content::Unexpected;
-use std::collections::BTreeMap;
+use crate::sql::{Object, Value};
 
 pub(super) fn to_value(content: Content) -> Result<Value, Error> {
 	match content {

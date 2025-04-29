@@ -1,7 +1,8 @@
 //! Stores Things of an HNSW index
+use serde::{Deserialize, Serialize};
+
 use crate::kvs::impl_key;
 use crate::sql::Id;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]

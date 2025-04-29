@@ -1,16 +1,15 @@
 #![cfg(feature = "kv-mem")]
 
-use crate::err::Error;
-use crate::key::debug::Sprintable;
-use crate::kvs::{Key, Val, Version};
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::OnceLock;
-use surrealkv::Options;
-use surrealkv::Store;
-use surrealkv::Transaction as Tx;
+
+use surrealkv::{Options, Store, Transaction as Tx};
 
 use super::{Check, KeyEncode};
+use crate::err::Error;
+use crate::key::debug::Sprintable;
+use crate::kvs::{Key, Val, Version};
 
 pub(crate) static SKV_COMMIT_POOL: OnceLock<affinitypool::Threadpool> = OnceLock::new();
 

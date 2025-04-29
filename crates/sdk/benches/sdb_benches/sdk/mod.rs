@@ -1,8 +1,11 @@
-use criterion::{Criterion, Throughput};
-use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 use std::time::Duration;
-use surrealdb::{engine::any::Any, sql::Id, Surreal};
+
+use criterion::{Criterion, Throughput};
+use serde::{Deserialize, Serialize};
+use surrealdb::engine::any::Any;
+use surrealdb::sql::Id;
+use surrealdb::Surreal;
 
 mod routines;
 

@@ -1,14 +1,16 @@
-use super::Value;
-use crate::err::Error;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::statements::DefineAccessStatement;
-use crate::sql::{escape::QuoteStr, Algorithm};
-use revision::revisioned;
-use revision::Error as RevisionError;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
+
+use revision::{revisioned, Error as RevisionError};
+use serde::{Deserialize, Serialize};
+
+use super::Value;
+use crate::err::Error;
+use crate::sql::escape::QuoteStr;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::statements::DefineAccessStatement;
+use crate::sql::Algorithm;
 
 /// The type of access methods available
 #[revisioned(revision = 2)]
@@ -111,11 +113,13 @@ impl AccessType {
 		match self {
 			// The JWT access method cannot issue stateful grants.
 			AccessType::Jwt(_) => false,
-			// The record access method can be used to issue grants if defined with bearer AKA refresh.
+			// The record access method can be used to issue grants if defined with bearer AKA
+			// refresh.
 			AccessType::Record(ac) => ac.bearer.is_some(),
 			AccessType::Bearer(_) => true,
 		}
 	}
+
 	/// Returns whether or not the access method can issue tokens
 	/// In this context, tokens refers exclusively to JWT
 	pub fn can_issue_tokens(&self) -> bool {
@@ -393,6 +397,7 @@ impl BearerAccessType {
 
 impl FromStr for BearerAccessType {
 	type Err = Error;
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.to_ascii_lowercase().as_str() {
 			"bearer" => Ok(Self::Bearer),

@@ -1,3 +1,12 @@
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::{Bound, Deref};
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::fmt::Fmt;
+use super::{Id, IdRange, Table, Thing};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -14,14 +23,6 @@ use crate::sql::order::{OldOrders, Order, OrderList, Ordering};
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
 use crate::sql::table::Tables;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter, Write};
-use std::ops::{Bound, Deref};
-
-use super::fmt::Fmt;
-use super::{Id, IdRange, Table, Thing};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -86,8 +87,9 @@ impl Graph {
 	}
 
 	fn convert_old_expr(&mut self, _rev: u16, _old_value: Fields) -> Result<(), revision::Error> {
-		// Before this change, users would not have been able to set the value of the `expr` field, it's always `Fields(vec![Field::All], false)`.
-		// None is the new default value, mimmicking that behaviour.
+		// Before this change, users would not have been able to set the value of the
+		// `expr` field, it's always `Fields(vec![Field::All], false)`. None is the
+		// new default value, mimmicking that behaviour.
 		self.expr = None;
 		Ok(())
 	}
@@ -164,6 +166,7 @@ impl From<Table> for GraphSubjects {
 
 impl Deref for GraphSubjects {
 	type Target = Vec<GraphSubject>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

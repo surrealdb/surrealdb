@@ -1,13 +1,12 @@
-use crate::sql::fmt::is_pretty;
-use crate::sql::fmt::pretty_indent;
-use crate::sql::fmt::pretty_sequence_item;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::Value;
+use std::fmt::{self, Display, Formatter, Write};
+use std::str;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::Write;
-use std::fmt::{self, Display, Formatter};
-use std::str;
+
+use crate::sql::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

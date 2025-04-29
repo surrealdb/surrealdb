@@ -1,13 +1,16 @@
 //! Module specifying the token representation of the parser.
 
-use std::{fmt, hash::Hash};
+use std::fmt;
+use std::hash::Hash;
 
 mod keyword;
 pub(crate) use keyword::keyword_t;
 pub use keyword::Keyword;
 mod mac;
-use crate::sql::{language::Language, Algorithm};
 pub(crate) use mac::t;
+
+use crate::sql::language::Language;
+use crate::sql::Algorithm;
 
 /// A location in the source passed to the lexer.
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
@@ -32,7 +35,8 @@ impl Span {
 		self.len == 0
 	}
 
-	/// Create a span that covers the range of both spans as well as possible space inbetween.
+	/// Create a span that covers the range of both spans as well as possible
+	/// space inbetween.
 	pub fn covers(self, other: Span) -> Span {
 		let start = self.offset.min(other.offset);
 		let end = (self.offset + self.len).max(other.offset + other.len);
@@ -50,6 +54,7 @@ impl Span {
 			len: 0,
 		}
 	}
+
 	// returns a zero-length span that starts after the current span.
 	pub fn after_offset(self) -> u32 {
 		self.offset + self.len
@@ -402,8 +407,9 @@ pub enum TokenKind {
 	Digits,
 	/// The Not-A-Number number token.
 	NaN,
-	/// A token which is a compound token which has been glued together and then put back into the
-	/// token buffer. This is required for some places where we need to look past possible compound tokens.
+	/// A token which is a compound token which has been glued together and then
+	/// put back into the token buffer. This is required for some places where
+	/// we need to look past possible compound tokens.
 	Glued(Glued),
 	/// A token which could not be properly lexed.
 	Invalid,
@@ -415,7 +421,8 @@ impl fmt::Display for TokenKind {
 	}
 }
 
-/// An assertion statically checking that the size of Tokenkind remains two bytes
+/// An assertion statically checking that the size of Tokenkind remains two
+/// bytes
 const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {

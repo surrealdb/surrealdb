@@ -1,3 +1,12 @@
+use std::cmp::Ordering;
+use std::fmt;
+use std::ops::Bound;
+use std::str::FromStr;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::kind::HasKind;
 use super::value::{Coerce, CoerceError, CoerceErrorExt as _};
 use super::{Array, FlowResult, Id};
@@ -8,13 +17,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Subquery, Value};
 use crate::syn;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt;
-use std::ops::Bound;
-use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
@@ -75,12 +77,12 @@ impl Range {
 		let range = self.clone().coerce_to_typed::<i64>().ok()?;
 		let r = match range.end {
 			Bound::Included(x) => {
-				//TODO: Handle negative truncation
+				// TODO: Handle negative truncation
 				let x = x as usize;
 				s.get(..=x)?
 			}
 			Bound::Excluded(x) => {
-				//TODO: Handle negative truncation
+				// TODO: Handle negative truncation
 				let x = x as usize;
 				s.get(..x)?
 			}
@@ -89,12 +91,12 @@ impl Range {
 
 		let r = match range.beg {
 			Bound::Included(x) => {
-				//TODO: Handle negative truncation
+				// TODO: Handle negative truncation
 				let x = x as usize;
 				r.get(x..)?
 			}
 			Bound::Excluded(x) => {
-				//TODO: Handle negative truncation
+				// TODO: Handle negative truncation
 				let x = (x as usize).saturating_add(1);
 				r.get(x..)?
 			}
@@ -107,12 +109,12 @@ impl Range {
 		let range = self.clone().coerce_to_typed::<i64>().ok()?;
 		let r = match range.end {
 			Bound::Included(x) => {
-				//TODO: Handle negative truncation
+				// TODO: Handle negative truncation
 				let x = x as usize;
 				s.get_mut(..=x)?
 			}
 			Bound::Excluded(x) => {
-				//TODO: Handle negative truncation
+				// TODO: Handle negative truncation
 				let x = x as usize;
 				s.get_mut(..x)?
 			}
@@ -121,12 +123,12 @@ impl Range {
 
 		let r = match range.beg {
 			Bound::Included(x) => {
-				//TODO: Handle negative truncation
+				// TODO: Handle negative truncation
 				let x = x as usize;
 				r.get_mut(x..)?
 			}
 			Bound::Excluded(x) => {
-				//TODO: Handle negative truncation
+				// TODO: Handle negative truncation
 				let x = (x as usize).saturating_add(1);
 				r.get_mut(x..)?
 			}
@@ -144,8 +146,8 @@ pub struct TypedRange<T> {
 }
 
 impl TypedRange<i64> {
-	/// Turn the typed range into an array, returning None if the size of the array would be too
-	/// big.
+	/// Turn the typed range into an array, returning None if the size of the
+	/// array would be too big.
 	pub fn cast_to_array(self) -> Option<Array> {
 		match self.size_hint().1 {
 			Some(x) if x > *GENERATION_ALLOCATION_LIMIT => return None,
@@ -238,6 +240,7 @@ where
 
 impl FromStr for Range {
 	type Err = ();
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match syn::range(s) {
 			Ok(v) => Ok(v),

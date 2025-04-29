@@ -1,22 +1,25 @@
-use crate::{
-	api::{err::Error, Result},
-	Object, RecordId, RecordIdKey, Value,
-};
 use std::ops::{self, Bound};
-use surrealdb_core::sql::{
-	Edges as CoreEdges, Id as CoreId, IdRange as CoreIdRange, Table as CoreTable,
-	Thing as CoreThing,
-};
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::sql::{
+	Edges as CoreEdges,
+	Id as CoreId,
+	IdRange as CoreIdRange,
+	Table as CoreTable,
+	Thing as CoreThing,
+};
+
+use crate::api::err::Error;
+use crate::api::Result;
+use crate::{Object, RecordId, RecordIdKey, Value};
 
 /// A wrapper type to assert that you ment to use a string as a table name.
 ///
-/// To prevent some possible errors, by defauit [`IntoResource`] does not allow `:` in table names
-/// as this might be an indication that the user might have intended to use a record id instead.
-/// If you wrap your table name string in this tupe the [`IntoResource`] trait will accept any
-/// table names.
+/// To prevent some possible errors, by defauit [`IntoResource`] does not allow
+/// `:` in table names as this might be an indication that the user might have
+/// intended to use a record id instead. If you wrap your table name string in
+/// this tupe the [`IntoResource`] trait will accept any table names.
 #[derive(Debug)]
 pub struct Table<T>(pub T);
 
@@ -59,7 +62,8 @@ transparent_wrapper!(
 
 /// A database resource
 ///
-/// A resource is a location, or a range of locations, from which data can be fetched.
+/// A resource is a location, or a range of locations, from which data can be
+/// fetched.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Resource {
@@ -105,6 +109,7 @@ impl Resource {
 			Resource::Unspecified => CoreValue::None,
 		}
 	}
+
 	pub fn is_single_recordid(&self) -> bool {
 		match self {
 			Resource::RecordId(rid) => !matches!(rid.into_inner_ref().id, CoreId::Range(_)),
@@ -315,7 +320,8 @@ pub trait IntoResource<Output> {
 	fn into_resource(self) -> Result<Resource>;
 }
 
-/// A trait for types which can be used as a resource selection for a query that returns an `Option`.
+/// A trait for types which can be used as a resource selection for a query that
+/// returns an `Option`.
 pub trait CreateResource<Output> {
 	fn into_resource(self) -> Result<Resource>;
 }

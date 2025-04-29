@@ -1,15 +1,18 @@
-use crate::err::Error;
-use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::str::FromStr;
+
+use serde::Deserialize;
 use surrealdb::sql::Value;
+
+use crate::err::Error;
 
 #[derive(Debug, Clone)]
 pub struct Param(pub String);
 
 impl Deref for Param {
 	type Target = str;
+
 	#[inline]
 	fn deref(&self) -> &Self::Target {
 		self.0.as_str()
@@ -18,6 +21,7 @@ impl Deref for Param {
 
 impl FromStr for Param {
 	type Err = Error;
+
 	#[inline]
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		let s = urlencoding::decode(s)?.into_owned();

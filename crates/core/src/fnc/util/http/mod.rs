@@ -1,13 +1,13 @@
-use crate::ctx::Context;
-use crate::err::Error;
-use crate::sql::{Bytes, Object, Strand, Value};
-use crate::syn;
-
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
 use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
 use url::Url;
+
+use crate::ctx::Context;
+use crate::err::Error;
+use crate::sql::{Bytes, Object, Strand, Value};
+use crate::syn;
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()

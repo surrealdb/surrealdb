@@ -1,8 +1,7 @@
 #![cfg(feature = "scripting")]
 
 mod parse;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use parse::Parse;
 mod helpers;
@@ -10,9 +9,7 @@ use helpers::new_ds;
 use rust_decimal::Decimal;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::Geometry;
-use surrealdb::sql::Number;
-use surrealdb::sql::Value;
+use surrealdb::sql::{Geometry, Number, Value};
 
 #[tokio::test]
 async fn script_function_error() -> Result<(), Error> {

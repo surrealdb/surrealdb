@@ -5,8 +5,7 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
-use surrealdb::sql::Thing;
-use surrealdb::sql::Value;
+use surrealdb::sql::{Thing, Value};
 
 #[tokio::test]
 async fn create_or_insert_with_permissions() -> Result<(), Error> {
@@ -66,7 +65,6 @@ async fn create_or_insert_with_permissions() -> Result<(), Error> {
 	Ok(())
 }
 
-//
 // Permissions
 //
 
@@ -187,12 +185,10 @@ async fn common_permissions_checks(auth_enabled: bool) {
 #[tokio::test]
 async fn check_permissions_auth_enabled() {
 	let auth_enabled = true;
-	//
 	// Test common scenarios
 	//
 	common_permissions_checks(auth_enabled).await;
 
-	//
 	// Test Anonymous user
 	//
 
@@ -266,12 +262,10 @@ async fn check_permissions_auth_enabled() {
 #[tokio::test]
 async fn check_permissions_auth_disabled() {
 	let auth_enabled = false;
-	//
 	// Test common scenarios
 	//
 	common_permissions_checks(auth_enabled).await;
 
-	//
 	// Test Anonymous user
 	//
 

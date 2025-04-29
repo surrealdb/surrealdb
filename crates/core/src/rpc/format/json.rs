@@ -1,9 +1,8 @@
+use super::ResTrait;
 use crate::rpc::request::Request;
 use crate::rpc::RpcError;
 use crate::sql::Value;
 use crate::syn;
-
-use super::ResTrait;
 
 pub fn parse_value(val: &[u8]) -> Result<Value, RpcError> {
 	syn::value_legacy_strand(std::str::from_utf8(val).or(Err(RpcError::ParseError))?)

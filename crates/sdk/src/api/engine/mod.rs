@@ -17,10 +17,10 @@ pub mod remote;
 #[doc(hidden)]
 pub mod tasks;
 
-use futures::Stream;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
+use std::task::{Context, Poll};
+
+use futures::Stream;
 use surrealdb_core::sql::Values as CoreValues;
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
@@ -31,10 +31,8 @@ use wasmtimer::std::Instant;
 #[cfg(target_family = "wasm")]
 use wasmtimer::tokio::Interval;
 
+use super::opt::{Resource, Table};
 use crate::Value;
-
-use super::opt::Resource;
-use super::opt::Table;
 
 // used in http and all local engines.
 pub(crate) fn resource_to_values(r: Resource) -> CoreValues {

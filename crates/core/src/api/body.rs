@@ -9,17 +9,13 @@ use futures::Stream;
 use futures::StreamExt;
 use http::header::CONTENT_TYPE;
 
-use crate::err::Error;
-use crate::rpc::format::cbor;
-use crate::rpc::format::json;
-use crate::rpc::format::revision;
-use crate::sql;
-use crate::sql::Bytesize;
-use crate::sql::Value;
-
 use super::context::InvocationContext;
 use super::err::ApiError;
 use super::invocation::ApiInvocation;
+use crate::err::Error;
+use crate::rpc::format::{cbor, json, revision};
+use crate::sql;
+use crate::sql::{Bytesize, Value};
 
 pub enum ApiBody {
 	#[cfg(not(target_family = "wasm"))]

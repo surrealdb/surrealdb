@@ -1,3 +1,9 @@
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Display, Formatter};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::sql::array::Array;
 use crate::sql::object::Object;
 use crate::sql::statements::DefineTableStatement;
@@ -5,10 +11,6 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Operation;
 use crate::vs::VersionStamp;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Display, Formatter};
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 2)]
@@ -21,10 +23,11 @@ pub enum TableMutation {
 	Del(Thing),
 	Def(DefineTableStatement),
 	#[revision(start = 2)]
-	/// Includes the ID, current value (after change), changes that can be applied to get the original
-	/// value
-	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
-	/// Means that we have already applied the add "/note" operation to achieve the recorded result
+	/// Includes the ID, current value (after change), changes that can be
+	/// applied to get the original value
+	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path":
+	/// "/note", "value": "surreal"}], false) Means that we have already
+	/// applied the add "/note" operation to achieve the recorded result
 	SetWithDiff(Thing, Value, Vec<Operation>),
 	#[revision(start = 2)]
 	/// Delete a record where the ID is stored, and the now-deleted value
@@ -79,7 +82,8 @@ pub struct ChangeSet(pub VersionStamp, pub DatabaseMutation);
 
 impl TableMutation {
 	/// Convert a stored change feed table mutation (record change) into a
-	/// Value that can be used in the storage of change feeds and their transmission to consumers
+	/// Value that can be used in the storage of change feeds and their
+	/// transmission to consumers
 	pub fn into_value(self) -> Value {
 		let mut h = BTreeMap::<String, Value>::new();
 		let h = match self {
@@ -188,7 +192,8 @@ impl Display for ChangeSet {
 	}
 }
 
-// WriteMutationSet is a set of mutations to be to a table at the specific timestamp.
+// WriteMutationSet is a set of mutations to be to a table at the specific
+// timestamp.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
@@ -210,8 +215,9 @@ impl Default for WriteMutationSet {
 mod tests {
 	#[test]
 	fn serialization() {
-		use super::*;
 		use std::collections::HashMap;
+
+		use super::*;
 		let cs = ChangeSet(
 			VersionStamp::from_u64(1),
 			DatabaseMutation(vec![TableMutations(
@@ -245,8 +251,9 @@ mod tests {
 
 	#[test]
 	fn serialization_rev2() {
-		use super::*;
 		use std::collections::HashMap;
+
+		use super::*;
 		let cs = ChangeSet(
 			VersionStamp::from_u64(1),
 			DatabaseMutation(vec![TableMutations(

@@ -1,33 +1,51 @@
 use reblessive::Stk;
 
+use super::mac::expected;
+use super::{ParseResult, Parser};
 use crate::sql::block::Entry;
+use crate::sql::statements::access::{
+	AccessStatement,
+	AccessStatementGrant,
+	AccessStatementPurge,
+	AccessStatementRevoke,
+	AccessStatementShow,
+	Subject,
+};
+use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
-	access::{
-		AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
-		AccessStatementShow, Subject,
-	},
-	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
+	BeginStatement,
+	BreakStatement,
+	CancelStatement,
+	CommitStatement,
+	ContinueStatement,
+	ForeachStatement,
+	InfoStatement,
+	KillStatement,
+	LiveStatement,
+	OptionStatement,
+	OutputStatement,
+	SetStatement,
+	ThrowStatement,
+	UseStatement,
 };
-use crate::sql::{Duration, Fields, Ident, Param};
+use crate::sql::{
+	Duration,
+	Expression,
+	Fields,
+	Ident,
+	Operator,
+	Param,
+	Statement,
+	Statements,
+	Value,
+};
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
+use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{t, Glued, TokenKind};
-use crate::{
-	sql::{
-		statements::{
-			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
-			CommitStatement, ContinueStatement, ForeachStatement, InfoStatement, OutputStatement,
-			UseStatement,
-		},
-		Expression, Operator, Statement, Statements, Value,
-	},
-	syn::parser::mac::unexpected,
-};
-
-use super::{mac::expected, ParseResult, Parser};
 
 mod alter;
 mod create;
@@ -734,8 +752,8 @@ impl Parser<'_> {
 	///
 	/// SurrealQL has support for `LET` less let statements.
 	/// These are not parsed here but after a statement is fully parsed.
-	/// A expression statement which matches a let-less let statement is then refined into a let
-	/// statement.
+	/// A expression statement which matches a let-less let statement is then
+	/// refined into a let statement.
 	///
 	/// # Parser State
 	/// Expects `LET` to already be consumed.

@@ -1,7 +1,8 @@
-use http::{header, HeaderMap, StatusCode};
-use reqwest::Client;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
+
+use http::{header, HeaderMap, StatusCode};
+use reqwest::Client;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
@@ -29,6 +30,7 @@ impl DockerContainer {
 		info!("Logging Docker container {}", self.id);
 		Self::docker(Arguments::new(["logs", &self.id]));
 	}
+
 	pub fn stop(&mut self) {
 		if self.running {
 			info!("Stopping Docker container {}", self.id);

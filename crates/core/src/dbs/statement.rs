@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+use std::fmt;
+
 use crate::ctx::{Context, MutableContext};
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
@@ -24,8 +27,6 @@ use crate::sql::statements::update::UpdateStatement;
 use crate::sql::statements::upsert::UpsertStatement;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Explain, Permission, Timeout, With};
-use std::borrow::Cow;
-use std::fmt;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Statement<'a> {
@@ -181,15 +182,16 @@ impl Statement<'_> {
 	/// UPSERT some:thing UNSET test;
 	/// UPSERT some:thing SET test = true;
 	/// UPSERT some:thing MERGE { test: true };
-	/// UPSERT some:thing PATCH [{ op: 'replace', path: '/', value: { test: true } }];
-	/// UPSERT |some:1000| UNSET test;
+	/// UPSERT some:thing PATCH [{ op: 'replace', path: '/', value: { test: true
+	/// } }]; UPSERT |some:1000| UNSET test;
 	/// UPSERT |some:1000| SET test = true;
 	/// UPSERT |some:1000| MERGE { test: true };
-	/// UPSERT |some:1000| PATCH [{ op: 'replace', path: '/', value: { test: true } }];
-	/// UPSERT |some:1..1000| UNSET test;
+	/// UPSERT |some:1000| PATCH [{ op: 'replace', path: '/', value: { test:
+	/// true } }]; UPSERT |some:1..1000| UNSET test;
 	/// UPSERT |some:1..1000| SET test = true;
 	/// UPSERT |some:1..1000| MERGE { test: true };
-	/// UPSERT |some:1..1000| PATCH [{ op: 'replace', path: '/', value: { test: true } }];
+	/// UPSERT |some:1..1000| PATCH [{ op: 'replace', path: '/', value: { test:
+	/// true } }];
 	///
 	/// Importantly, when a WHERE clause condition is
 	/// specified on an UPSERT clause, then we do
@@ -416,6 +418,7 @@ impl Statement<'_> {
 			_ => None,
 		}
 	}
+
 	pub(crate) fn setup_timeout<'a>(&self, ctx: &'a Context) -> Result<Cow<'a, Context>, Error> {
 		if let Some(t) = self.timeout() {
 			let mut ctx = MutableContext::new(ctx);

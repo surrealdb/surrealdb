@@ -16,12 +16,16 @@ mod sequence;
 mod table;
 mod user;
 
+use std::fmt::{self, Display};
+
 pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
-pub use api::DefineApiStatement;
-pub use bucket::DefineBucketStatement;
+pub use api::{ApiAction, ApiDefinition, DefineApiStatement, FindApi};
+pub use bucket::{BucketDefinition, DefineBucketStatement};
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
+pub use deprecated::scope::DefineScopeStatement;
+pub use deprecated::token::DefineTokenStatement;
 pub use event::DefineEventStatement;
 pub use field::DefineFieldStatement;
 pub use function::DefineFunctionStatement;
@@ -29,29 +33,18 @@ pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
 pub use param::DefineParamStatement;
+use reblessive::tree::Stk;
+use revision::revisioned;
 pub use sequence::DefineSequenceStatement;
+use serde::{Deserialize, Serialize};
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
-
-pub use deprecated::scope::DefineScopeStatement;
-pub use deprecated::token::DefineTokenStatement;
-
-pub use api::ApiAction;
-pub use api::ApiDefinition;
-pub use api::FindApi;
-
-pub use bucket::BucketDefinition;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -114,6 +107,7 @@ impl DefineStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

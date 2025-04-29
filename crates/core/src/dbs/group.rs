@@ -1,3 +1,8 @@
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
+
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
@@ -7,9 +12,6 @@ use crate::idx::planner::RecordStrategy;
 use crate::sql::function::OptimisedAggregate;
 use crate::sql::value::{TryAdd, TryFloatDiv, Value};
 use crate::sql::{Array, Field, FlowResultExt as _, Function, Idiom};
-use reblessive::tree::Stk;
-use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
 
 pub(super) struct GroupsCollector {
 	base: Vec<Aggregator>,
@@ -152,7 +154,8 @@ impl GroupsCollector {
 									Value::Function(f) if f.is_aggregate() => {
 										let a = f.get_optimised_aggregate();
 										let x = if matches!(a, OptimisedAggregate::None) {
-											// The aggregation is not optimised, let's compute it with the values
+											// The aggregation is not optimised, let's compute it
+											// with the values
 											let vals = agr.take();
 											f.aggregate(vals)?
 												.compute(stk, ctx, opt, None)

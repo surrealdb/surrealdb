@@ -1,8 +1,10 @@
-use crate::err::Error;
+use std::io::{Error as IoError, ErrorKind};
+
 use clap::Args;
 use glob::glob;
-use std::io::{Error as IoError, ErrorKind};
 use surrealdb::sql::parse;
+
+use crate::err::Error;
 
 #[derive(Args, Debug)]
 pub struct ValidateCommandArguments {

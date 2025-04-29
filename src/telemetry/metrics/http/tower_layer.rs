@@ -1,18 +1,18 @@
-use crate::cnf::TELEMETRY_NAMESPACE;
-use axum::extract::MatchedPath;
-use opentelemetry::{metrics::MetricsError, KeyValue};
-use pin_project_lite::pin_project;
-use std::{
-	cell::Cell,
-	fmt,
-	pin::Pin,
-	task::{Context, Poll},
-	time::{Duration, Instant},
-};
+use std::cell::Cell;
+use std::fmt;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
+use axum::extract::MatchedPath;
 use futures::Future;
 use http::{Request, Response, StatusCode, Version};
+use opentelemetry::metrics::MetricsError;
+use opentelemetry::KeyValue;
+use pin_project_lite::pin_project;
 use tower::{Layer, Service};
+
+use crate::cnf::TELEMETRY_NAMESPACE;
 
 #[derive(Clone, Default)]
 pub struct HttpMetricsLayer;
@@ -39,9 +39,9 @@ where
 	ResBody: http_body::Body,
 	S::Error: fmt::Display + 'static,
 {
-	type Response = Response<ResBody>;
 	type Error = S::Error;
 	type Future = HttpCallMetricsFuture<S::Future>;
+	type Response = Response<ResBody>;
 
 	fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
 		self.inner.poll_ready(cx)
@@ -88,7 +88,8 @@ where
 
 			if let Err(err) = on_request_start(this.tracker) {
 				error!("Failed to setup metrics when request started: {}", err);
-				// Consider this request not tracked: reset the state to None, so that the drop handler does not decrease the counter.
+				// Consider this request not tracked: reset the state to None, so that the drop
+				// handler does not decrease the counter.
 				this.tracker.set_state(ResultState::None);
 			};
 		}
@@ -229,10 +230,12 @@ impl Drop for HttpCallMetricTracker {
 				return;
 			}
 			ResultState::Started => {
-				// If the response was never processed, we can't get a valid status code
+				// If the response was never processed, we can't get a valid
+				// status code
 			}
 			ResultState::Failed => {
-				// If there's an error processing the request and we don't have a response, we can't get a valid status code
+				// If there's an error processing the request and we don't have
+				// a response, we can't get a valid status code
 			}
 			ResultState::Result(s, v, size) => {
 				self.status_code = Some(s);

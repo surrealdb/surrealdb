@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use surrealdb::dbs::Session;
-use surrealdb::{kvs::Datastore, sql::Id};
-use tokio::{runtime::Runtime, task::JoinSet};
+use surrealdb::kvs::Datastore;
+use surrealdb::sql::Id;
+use tokio::runtime::Runtime;
+use tokio::task::JoinSet;
 
 pub struct Read {
 	runtime: &'static Runtime,

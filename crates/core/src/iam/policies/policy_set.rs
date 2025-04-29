@@ -1,7 +1,7 @@
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use cedar_policy::PolicySet;
-use std::sync::LazyLock;
 
 pub static POLICY_SET: LazyLock<PolicySet> = LazyLock::new(|| {
 	PolicySet::from_str(

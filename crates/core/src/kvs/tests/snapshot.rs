@@ -1,15 +1,12 @@
-use super::CreateDs;
 use std::sync::Arc;
+
 use uuid::Uuid;
 
-use crate::{
-	dbs::node::Timestamp,
-	kvs::{
-		clock::{FakeClock, SizedClock},
-		LockType::*,
-		TransactionType::*,
-	},
-};
+use super::CreateDs;
+use crate::dbs::node::Timestamp;
+use crate::kvs::clock::{FakeClock, SizedClock};
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 
 pub async fn snapshot(new_ds: impl CreateDs) {
 	// Create a new datastore

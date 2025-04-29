@@ -1,10 +1,15 @@
-use super::{FlowResultExt, Ident, Kind};
-use crate::ctx::MutableContext;
-use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::value::Value};
+use std::fmt;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use super::{FlowResultExt, Ident, Kind};
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::sql::value::Value;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Closure";
 

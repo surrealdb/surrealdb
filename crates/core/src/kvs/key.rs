@@ -16,8 +16,8 @@ pub trait KeyEncode {
 	/// Push the bytes this key would encode into the buffer.
 	///
 	/// Implementation can make no assumption about the contents of the buffer.
-	/// The buffer should not be cleared and if there are bytes present in the buffer they should
-	/// also be present when this function returns.
+	/// The buffer should not be cleared and if there are bytes present in the
+	/// buffer they should also be present when this function returns.
 	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error>;
 
 	fn encode_owned_into(self, buffer: &mut Vec<u8>) -> Result<(), crate::err::Error>
@@ -38,8 +38,8 @@ pub trait KeyDecode<'a> {
 pub trait KeyDecodeOwned: for<'a> KeyDecode<'a> {
 	/// Decode the key from an owned vector.
 	///
-	/// A lot of kv query methods return vectors for keys, which some key types might be able to
-	/// use to more effeciently decode the data.
+	/// A lot of kv query methods return vectors for keys, which some key types
+	/// might be able to use to more effeciently decode the data.
 	///
 	/// The default implementation just calls decode
 	fn decode_from_vec(bytes: Vec<u8>) -> Result<Self, crate::err::Error>
@@ -129,8 +129,8 @@ impl KeyDecodeOwned for () {
 	}
 }
 
-/// Implements KeyEncode and KeyDecode uusing storekey and deserialize and serialize
-/// implementations.
+/// Implements KeyEncode and KeyDecode uusing storekey and deserialize and
+/// serialize implementations.
 macro_rules! impl_key {
 	($name:ident$(<$l:lifetime>)?) => {
 		impl$(<$l>)? crate::kvs::KeyEncode for $name $(<$l>)?{

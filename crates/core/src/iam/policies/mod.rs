@@ -6,7 +6,8 @@ use policy_set::*;
 
 use crate::iam::{Action, Actor, Resource};
 
-/// Checks if the actor is allowed to do the action on the resource, given the context and based on the default policy set.
+/// Checks if the actor is allowed to do the action on the resource, given the
+/// context and based on the default policy set.
 pub fn is_allowed(
 	actor: &Actor,
 	action: &Action,
@@ -55,9 +56,9 @@ fn _is_allowed(
 mod tests {
 	use cedar_policy::{ValidationMode, ValidationResult, Validator};
 
-	use crate::iam::{default_schema, entities::Level, ResourceKind, Role};
-
 	use super::*;
+	use crate::iam::entities::Level;
+	use crate::iam::{default_schema, ResourceKind, Role};
 
 	#[test]
 	fn validate_policy_set() {

@@ -1,9 +1,11 @@
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::value::Value;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::value::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -13,6 +15,7 @@ pub struct Cond(pub Value);
 
 impl Deref for Cond {
 	type Target = Value;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

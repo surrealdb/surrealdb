@@ -1,27 +1,22 @@
-use std::{
-	borrow::Cow,
-	num::{ParseFloatError, ParseIntError},
-	str::FromStr,
-	time::Duration,
-};
+use std::borrow::Cow;
+use std::num::{ParseFloatError, ParseIntError};
+use std::str::FromStr;
+use std::time::Duration;
 
-use crate::sql::number::decimal::DecimalExt;
 use rust_decimal::Decimal;
 
-use crate::{
-	sql::{
-		duration::{
-			SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
-			SECONDS_PER_YEAR,
-		},
-		Number,
-	},
-	syn::{
-		error::{bail, syntax_error, SyntaxError},
-		lexer::Lexer,
-		token::{t, Span, Token, TokenKind},
-	},
+use crate::sql::duration::{
+	SECONDS_PER_DAY,
+	SECONDS_PER_HOUR,
+	SECONDS_PER_MINUTE,
+	SECONDS_PER_WEEK,
+	SECONDS_PER_YEAR,
 };
+use crate::sql::number::decimal::DecimalExt;
+use crate::sql::Number;
+use crate::syn::error::{bail, syntax_error, SyntaxError};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{t, Span, Token, TokenKind};
 
 pub enum Numeric {
 	Number(Number),

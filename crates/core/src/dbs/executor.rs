@@ -1,35 +1,29 @@
-use crate::ctx::reason::Reason;
-use crate::ctx::Context;
-use crate::dbs::response::Response;
-use crate::dbs::Force;
-use crate::dbs::Options;
-use crate::dbs::QueryType;
-use crate::err::Error;
-use crate::iam::Action;
-use crate::iam::ResourceKind;
-use crate::kvs::Datastore;
-use crate::kvs::TransactionType;
-use crate::kvs::{LockType, Transaction};
-use crate::sql::paths::DB;
-use crate::sql::paths::NS;
-use crate::sql::query::Query;
-use crate::sql::statement::Statement;
-use crate::sql::statements::{OptionStatement, UseStatement};
-use crate::sql::value::Value;
-use crate::sql::Base;
-use crate::sql::ControlFlow;
-use crate::sql::FlowResult;
-use futures::{Stream, StreamExt};
-use reblessive::TreeStack;
 use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::time::Duration;
+
+use futures::{Stream, StreamExt};
+use reblessive::TreeStack;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;
 use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
+
+use crate::ctx::reason::Reason;
+use crate::ctx::Context;
+use crate::dbs::response::Response;
+use crate::dbs::{Force, Options, QueryType};
+use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
+use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::sql::paths::{DB, NS};
+use crate::sql::query::Query;
+use crate::sql::statement::Statement;
+use crate::sql::statements::{OptionStatement, UseStatement};
+use crate::sql::value::Value;
+use crate::sql::{Base, ControlFlow, FlowResult};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -100,7 +94,8 @@ impl Executor {
 		Ok(())
 	}
 
-	/// Executes a statement which needs a transaction with the supplied transaction.
+	/// Executes a statement which needs a transaction with the supplied
+	/// transaction.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	async fn execute_transaction_statement(
 		&mut self,
@@ -241,7 +236,8 @@ impl Executor {
 		}
 	}
 
-	/// Execute the begin statement and all statements after which are within a transaction block.
+	/// Execute the begin statement and all statements after which are within a
+	/// transaction block.
 	async fn execute_begin_statement<S>(
 		&mut self,
 		kvs: &Datastore,
@@ -273,7 +269,8 @@ impl Executor {
 			return Ok(());
 		};
 
-		// Create a sender for this transaction only if the context allows for notifications.
+		// Create a sender for this transaction only if the context allows for
+		// notifications.
 		let receiver = self.ctx.has_notifications().then(|| {
 			let (send, recv) = async_channel::unbounded();
 			self.opt.sender = Some(send);
@@ -462,7 +459,8 @@ impl Executor {
 								res.result = Err(Error::QueryNotExecuted);
 							}
 
-							// statement return an error. Consume all the other statement until we hit a cancel or commit.
+							// statement return an error. Consume all the other statement until we
+							// hit a cancel or commit.
 							self.results.push(Response {
 								time: before.elapsed(),
 								result: Err(*e),
@@ -602,7 +600,9 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
-	use crate::{dbs::Session, iam::Role, kvs::Datastore};
+	use crate::dbs::Session;
+	use crate::iam::Role;
+	use crate::kvs::Datastore;
 
 	#[tokio::test]
 	async fn check_execute_option_permissions() {

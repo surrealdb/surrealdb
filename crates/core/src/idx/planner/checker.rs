@@ -1,3 +1,10 @@
+use std::collections::hash_map::Entry;
+use std::collections::VecDeque;
+use std::sync::Arc;
+
+use ahash::HashMap;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Options};
 use crate::doc::CursorDoc;
@@ -8,11 +15,6 @@ use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
 use crate::sql::{Cond, FlowResultExt as _, Thing, Value};
-use ahash::HashMap;
-use reblessive::tree::Stk;
-use std::collections::hash_map::Entry;
-use std::collections::VecDeque;
-use std::sync::Arc;
 
 pub enum HnswConditionChecker<'a> {
 	Hnsw(HnswChecker),

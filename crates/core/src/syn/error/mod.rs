@@ -1,5 +1,6 @@
-use crate::syn::token::Span;
 use std::fmt::Display;
+
+use crate::syn::token::Span;
 
 mod location;
 mod mac;
@@ -59,8 +60,8 @@ impl SyntaxError {
 		self.data_pending
 	}
 
-	/// Indicate that this error might be the result of missing data and could be resolved with
-	/// more data.
+	/// Indicate that this error might be the result of missing data and could
+	/// be resolved with more data.
 	pub fn with_data_pending(mut self) -> Self {
 		self.data_pending = true;
 		self

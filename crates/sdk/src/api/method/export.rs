@@ -1,26 +1,20 @@
-use crate::api::conn::Command;
-use crate::api::conn::MlExportConfig;
-use crate::api::method::BoxFuture;
-use crate::api::Connection;
-use crate::api::Error;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::method::ExportConfig as Config;
-use crate::method::Model;
-use crate::method::OnceLockExt;
-use crate::Surreal;
-use async_channel::Receiver;
-use futures::Stream;
-use futures::StreamExt;
-use semver::Version;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
+use std::task::{Context, Poll};
+
+use async_channel::Receiver;
+use futures::{Stream, StreamExt};
+use semver::Version;
 use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
+
+use crate::api::conn::{Command, MlExportConfig};
+use crate::api::method::BoxFuture;
+use crate::api::{Connection, Error, ExtraFeatures, Result};
+use crate::method::{ExportConfig as Config, Model, OnceLockExt};
+use crate::Surreal;
 
 /// A database export future
 #[derive(Debug)]
@@ -155,7 +149,8 @@ impl<C, R, T> Export<'_, C, R, T>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Export<'static, C, R, T> {
 		Export {
 			client: Cow::Owned(self.client.into_owned()),
@@ -168,8 +163,8 @@ impl<'r, Client, T> IntoFuture for Export<'r, Client, PathBuf, T>
 where
 	Client: Connection,
 {
-	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<()>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -201,8 +196,8 @@ impl<'r, Client, T> IntoFuture for Export<'r, Client, (), T>
 where
 	Client: Connection,
 {
-	type Output = Result<Backup>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Backup>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

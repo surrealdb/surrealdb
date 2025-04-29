@@ -2,9 +2,10 @@
 pub mod ba;
 pub mod st;
 
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::kvs::{impl_key, KeyEncode};
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Prefix<'a> {

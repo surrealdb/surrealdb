@@ -1,5 +1,4 @@
-use bincode::Options;
-use bincode::Result;
+use bincode::{Options, Result};
 use serde::{Deserialize, Serialize};
 
 pub fn serialize<T>(value: &T) -> Result<Vec<u8>>

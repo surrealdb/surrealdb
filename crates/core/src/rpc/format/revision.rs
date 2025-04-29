@@ -1,8 +1,9 @@
+use revision::Revisioned;
+
 use crate::rpc::format::ResTrait;
 use crate::rpc::request::Request;
 use crate::rpc::RpcError;
 use crate::sql::Value;
-use revision::Revisioned;
 
 pub fn parse_value(val: Vec<u8>) -> Result<Value, RpcError> {
 	Value::deserialize_revisioned(&mut val.as_slice()).map_err(|_| RpcError::ParseError)

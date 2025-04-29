@@ -1,11 +1,15 @@
-use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
-use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
-};
-use crate::err::Error;
 use clap::Args;
 use surrealdb::engine::any::{connect, IntoEndpoint};
-use surrealdb::opt::{capabilities::Capabilities, Config};
+use surrealdb::opt::capabilities::Capabilities;
+use surrealdb::opt::Config;
+
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
+use crate::cli::abstraction::{
+	AuthArguments,
+	DatabaseConnectionArguments,
+	DatabaseSelectionArguments,
+};
+use crate::err::Error;
 
 #[derive(Args, Debug)]
 pub struct ImportCommandArguments {
@@ -40,8 +44,11 @@ pub async fn init(
 ) -> Result<(), Error> {
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
-	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If username and password are specified, and we are connecting to a remote
+	// SurrealDB server, then we need to authenticate. If we are connecting
+	// directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we
+	// don't need to authenticate because we use an embedded (local) SurrealDB
+	// instance with auth disabled.
 	let client = if username.is_some()
 		&& password.is_some()
 		&& !endpoint.clone().into_endpoint()?.parse_kind()?.is_local()

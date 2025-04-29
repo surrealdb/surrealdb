@@ -1,3 +1,9 @@
+use std::fmt;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,11 +12,6 @@ use crate::iam::Auth;
 use crate::kvs::Live;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -174,8 +175,7 @@ mod tests {
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
-	use crate::sql::Thing;
-	use crate::sql::Value;
+	use crate::sql::{Thing, Value};
 	use crate::syn::Parse;
 
 	pub async fn new_ds() -> Result<Datastore, crate::err::Error> {

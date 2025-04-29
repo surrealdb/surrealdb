@@ -1,8 +1,8 @@
 use std::ops::Deref;
 
 use crate::sql::statements::define::config::graphql::TableConfig;
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::{statements::UseStatement, Cond, Ident, Idiom, Limit, Part, Start, Table, Value};
+use crate::sql::statements::{DefineTableStatement, UseStatement};
+use crate::sql::{Cond, Ident, Idiom, Limit, Part, Start, Table, Value};
 
 pub trait IntoExt<T> {
 	fn intox(self) -> T;
@@ -122,8 +122,7 @@ impl ValidatorExt for Scalar {
 	}
 }
 
-use crate::sql::Thing as SqlThing;
-use crate::sql::Value as SqlValue;
+use crate::sql::{Thing as SqlThing, Value as SqlValue};
 
 pub trait TryAsExt {
 	fn try_as_thing(self) -> Result<SqlThing, Self>

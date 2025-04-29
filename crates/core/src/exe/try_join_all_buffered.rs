@@ -1,11 +1,12 @@
-use futures::{
-	future::IntoFuture, ready, stream::FuturesOrdered, TryFuture, TryFutureExt, TryStream,
-};
-use pin_project_lite::pin_project;
 use std::future::Future;
 use std::mem;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+use futures::future::IntoFuture;
+use futures::stream::FuturesOrdered;
+use futures::{ready, TryFuture, TryFutureExt, TryStream};
+use pin_project_lite::pin_project;
 
 pin_project! {
 	/// Future for the [`try_join_all_buffered`] function.
@@ -82,16 +83,16 @@ where
 
 #[cfg(test)]
 mod tests {
-	use super::try_join_all_buffered;
+	use std::future::Future;
+	use std::task::Poll;
+	use std::time::{Duration, Instant};
+
 	use futures::ready;
 	use pin_project_lite::pin_project;
 	use rand::{thread_rng, Rng};
-	use std::{
-		future::Future,
-		task::Poll,
-		time::{Duration, Instant},
-	};
 	use tokio::time::{sleep, Sleep};
+
+	use super::try_join_all_buffered;
 
 	pin_project! {
 		struct BenchFuture {

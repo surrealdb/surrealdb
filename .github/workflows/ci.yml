@@ -67,9 +67,10 @@ jobs:
     name: Check format
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2025-04-27
           components: rustfmt
 
       - name: Checkout sources

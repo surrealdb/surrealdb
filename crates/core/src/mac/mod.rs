@@ -10,8 +10,8 @@
 ///
 /// # Return Value
 ///
-/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed value
-/// from the environment variable or the default value.
+/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed
+/// value from the environment variable or the default value.
 #[macro_export]
 macro_rules! lazy_env_parse {
 	// With no default specified

@@ -3,13 +3,27 @@ use std::collections::BTreeMap;
 use reblessive::Stack;
 use rust_decimal::Decimal;
 
-use crate::{
-	sql::{
-		Array, Constant, Expression, Geometry, Id, Ident, Idiom, Number, Object, Operator, Part,
-		Query, Statement, Statements, Strand, Thing, Value,
-	},
-	syn::parser::{mac::test_parse, Parser, ParserSettings},
+use crate::sql::{
+	Array,
+	Constant,
+	Expression,
+	Geometry,
+	Id,
+	Ident,
+	Idiom,
+	Number,
+	Object,
+	Operator,
+	Part,
+	Query,
+	Statement,
+	Statements,
+	Strand,
+	Thing,
+	Value,
 };
+use crate::syn::parser::mac::test_parse;
+use crate::syn::parser::{Parser, ParserSettings};
 
 #[test]
 fn parse_index_expression() {

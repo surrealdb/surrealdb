@@ -1,20 +1,21 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
-use crate::sql::array::Array;
-use crate::sql::fmt::Fmt;
-use crate::sql::value::Value;
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
+use std::iter::once;
+use std::{fmt, hash};
+
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, LinesIter, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::iter::once;
-use std::{fmt, hash};
 
 use super::Object;
+use crate::sql::array::Array;
+use crate::sql::fmt::Fmt;
+use crate::sql::value::Value;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
 
@@ -39,34 +40,42 @@ impl Geometry {
 	pub fn is_point(&self) -> bool {
 		matches!(self, Self::Point(_))
 	}
+
 	/// Check if this is a Line
 	pub fn is_line(&self) -> bool {
 		matches!(self, Self::Line(_))
 	}
+
 	/// Check if this is a Polygon
 	pub fn is_polygon(&self) -> bool {
 		matches!(self, Self::Polygon(_))
 	}
+
 	/// Check if this is a MultiPoint
 	pub fn is_multipoint(&self) -> bool {
 		matches!(self, Self::MultiPoint(_))
 	}
+
 	/// Check if this is a MultiLine
 	pub fn is_multiline(&self) -> bool {
 		matches!(self, Self::MultiLine(_))
 	}
+
 	/// Check if this is a MultiPolygon
 	pub fn is_multipolygon(&self) -> bool {
 		matches!(self, Self::MultiPolygon(_))
 	}
+
 	/// Check if this is not a Collection
 	pub fn is_geometry(&self) -> bool {
 		!matches!(self, Self::Collection(_))
 	}
+
 	/// Check if this is a Collection
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
 	}
+
 	/// Check if this has valid latitude and longitude points:
 	/// * -90 <= lat <= 90
 	/// * -180 <= lng <= 180
@@ -109,6 +118,7 @@ impl Geometry {
 			Geometry::Collection(v) => v.iter().all(Geometry::is_valid),
 		}
 	}
+
 	/// Get the type of this Geometry as text
 	pub fn as_type(&self) -> &'static str {
 		match self {
@@ -121,6 +131,7 @@ impl Geometry {
 			Self::Collection(_) => "GeometryCollection",
 		}
 	}
+
 	/// Get the raw coordinates of this Geometry as an Array
 	pub fn as_coordinates(&self) -> Value {
 		fn point(v: &Point) -> Value {
@@ -178,7 +189,8 @@ impl Geometry {
 		obj.into()
 	}
 
-	/// Converts a surreal value to a MultiPolygon if the array matches to a MultiPolygon.
+	/// Converts a surreal value to a MultiPolygon if the array matches to a
+	/// MultiPolygon.
 	pub(crate) fn array_to_multipolygon(v: &Value) -> Option<MultiPolygon<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -190,7 +202,8 @@ impl Geometry {
 		Some(MultiPolygon::new(res))
 	}
 
-	/// Converts a surreal value to a MultiLine if the array matches to a MultiLine.
+	/// Converts a surreal value to a MultiLine if the array matches to a
+	/// MultiLine.
 	pub(crate) fn array_to_multiline(v: &Value) -> Option<MultiLineString<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -202,7 +215,8 @@ impl Geometry {
 		Some(MultiLineString::new(res))
 	}
 
-	/// Converts a surreal value to a MultiPoint if the array matches to a MultiPoint.
+	/// Converts a surreal value to a MultiPoint if the array matches to a
+	/// MultiPoint.
 	pub(crate) fn array_to_multipoint(v: &Value) -> Option<MultiPoint<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -230,7 +244,8 @@ impl Geometry {
 		Some(Polygon::new(first, res))
 	}
 
-	/// Converts a surreal value to a LineString if the array matches to a LineString.
+	/// Converts a surreal value to a LineString if the array matches to a
+	/// LineString.
 	pub(crate) fn array_to_line(v: &Value) -> Option<LineString<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {

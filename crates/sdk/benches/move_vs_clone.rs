@@ -1,7 +1,8 @@
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 
 const ITERATIONS: u32 = 1_000_000;
 

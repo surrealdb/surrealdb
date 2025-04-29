@@ -1,11 +1,15 @@
-use super::FlowResultExt;
-use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::datetime::Datetime};
+use std::fmt;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
-use super::Value;
+use super::{FlowResultExt, Value};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::sql::datetime::Datetime;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

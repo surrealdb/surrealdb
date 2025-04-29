@@ -1,10 +1,12 @@
+use std::ops::Deref;
+use std::{cmp, fmt};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::Value;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::ops::Deref;
-use std::{cmp, fmt};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -32,6 +34,7 @@ pub struct OrderList(pub Vec<Order>);
 
 impl Deref for OrderList {
 	type Target = Vec<Order>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

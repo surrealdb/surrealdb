@@ -1,5 +1,19 @@
+use std::str::FromStr;
+use std::sync::Arc;
+
+use chrono::Utc;
+use jsonwebtoken::{encode, EncodingKey, Header};
+use md5::Digest;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
+use uuid::Uuid;
+
 use super::access::{
-	authenticate_generic, authenticate_record, create_refresh_token_record,
+	authenticate_generic,
+	authenticate_record,
+	create_refresh_token_record,
 	revoke_refresh_token_record,
 };
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
@@ -11,19 +25,11 @@ use crate::err::Error;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 use crate::sql::statements::{access, AccessGrant, DefineAccessStatement};
 use crate::sql::{access_type, AccessType, Datetime, Object, Value};
-use chrono::Utc;
-use jsonwebtoken::{encode, EncodingKey, Header};
-use md5::Digest;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use sha2::Sha256;
-use std::str::FromStr;
-use std::sync::Arc;
-use subtle::ConstantTimeEq;
-use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -214,7 +220,8 @@ pub async fn db_access(
 											};
 											// AUTHENTICATE clause
 											if let Some(au) = &av.authenticate {
-												// Setup the system session for finding the signin record
+												// Setup the system session for finding the signin
+												// record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
@@ -223,10 +230,12 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
-											// Create refresh token if defined for the record access method
+											// Create refresh token if defined for the record access
+											// method
 											let refresh = match &at.bearer {
 												Some(_) => {
-													// TODO(gguillemas): Remove this once bearer access is no longer experimental
+													// TODO(gguillemas): Remove this once bearer
+													// access is no longer experimental
 													if !kvs.get_capabilities().allows_experimental(
 														&ExperimentalTarget::BearerAccess,
 													) {
@@ -281,15 +290,18 @@ pub async fn db_access(
 									}
 								}
 								Err(e) => match e {
-									// If the SIGNIN clause throws a specific error, authentication fails with that error
+									// If the SIGNIN clause throws a specific error, authentication
+									// fails with that error
 									Error::Thrown(_) => Err(e),
-									// If the SIGNIN clause failed due to an unexpected error, be more specific
-									// This allows clients to handle these errors, which may be retryable
+									// If the SIGNIN clause failed due to an unexpected error, be
+									// more specific This allows clients to handle these
+									// errors, which may be retryable
 									Error::Tx(_) | Error::TxFailure | Error::TxRetryable => {
 										debug!("Unexpected error found while executing a SIGNIN clause: {e}");
 										Err(Error::UnexpectedAuth)
 									}
-									// Otherwise, return a generic error unless it should be forwarded
+									// Otherwise, return a generic error unless it should be
+									// forwarded
 									e => {
 										debug!("Record user signin query failed: {e}");
 										if *INSECURE_FORWARD_ACCESS_ERRORS {
@@ -785,12 +797,15 @@ pub fn verify_grant_bearer(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::{dbs::Capabilities, iam::Role};
+	use std::collections::HashMap;
+
 	use chrono::Duration;
 	use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 	use regex::Regex;
-	use std::collections::HashMap;
+
+	use super::*;
+	use crate::dbs::Capabilities;
+	use crate::iam::Role;
 
 	struct TestLevel {
 		level: &'static str,
@@ -865,7 +880,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1046,7 +1062,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1089,7 +1106,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1369,7 +1387,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_sess_exp =
 				(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_sess_exp =
@@ -1694,7 +1713,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1789,7 +1809,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -3278,7 +3299,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -3354,7 +3376,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -3433,7 +3456,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -4108,11 +4132,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::{
-			statements::{define::DefineStatement, DefineUserStatement},
-			user::UserDuration,
-			Base, Statement,
-		};
+		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::statements::DefineUserStatement;
+		use crate::sql::user::UserDuration;
+		use crate::sql::{Base, Statement};
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -4156,7 +4179,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				overwrite: false,
 			};
 
-			// Use pre-parsed definition, which bypasses the existent role check during parsing.
+			// Use pre-parsed definition, which bypasses the existent role check during
+			// parsing.
 			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, None)
 				.await
 				.unwrap();

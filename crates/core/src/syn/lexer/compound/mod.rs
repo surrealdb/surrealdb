@@ -1,8 +1,6 @@
-use crate::syn::{
-	error::SyntaxError,
-	lexer::Lexer,
-	token::{Span, Token},
-};
+use crate::syn::error::SyntaxError;
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Span, Token};
 
 mod bytes;
 mod datetime;
@@ -20,7 +18,15 @@ pub use file::file;
 pub use ident::flexible_ident;
 pub use js::javascript;
 pub use number::{
-	duration, float, integer, number, numeric, numeric_kind, NumberKind, Numeric, NumericKind,
+	duration,
+	float,
+	integer,
+	number,
+	numeric,
+	numeric_kind,
+	NumberKind,
+	Numeric,
+	NumericKind,
 };
 pub use regex::regex;
 pub use strand::strand;

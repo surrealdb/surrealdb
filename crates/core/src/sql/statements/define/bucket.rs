@@ -1,15 +1,17 @@
-use crate::buc::{self, BucketConnectionKey};
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, FlowResultExt, Ident, Permission, Strand, Value};
-use crate::{ctx::Context, sql::statements::info::InfoStructure};
+use std::fmt::{self, Display};
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 
 use super::CursorDoc;
+use crate::buc::{self, BucketConnectionKey};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Base, FlowResultExt, Ident, Permission, Strand, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

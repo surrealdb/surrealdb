@@ -1,6 +1,8 @@
 //! Module for rendering errors onto source code.
 
-use std::{cmp::Ordering, fmt, ops::Range};
+use std::cmp::Ordering;
+use std::fmt;
+use std::ops::Range;
 
 use super::{Location, MessageKind};
 
@@ -12,8 +14,8 @@ pub struct RenderedError {
 }
 
 impl RenderedError {
-	/// Offset the snippet locations within the rendered error by a given number of lines and
-	/// columns.
+	/// Offset the snippet locations within the rendered error by a given number
+	/// of lines and columns.
 	///
 	/// The column offset is only applied to the any snippet which is at line 1
 	pub fn offset_location(mut self, line: usize, col: usize) -> Self {
@@ -82,10 +84,11 @@ pub struct Snippet {
 }
 
 impl Snippet {
+	/// How far the will have to be in the source line before everything before
+	/// it gets truncated.
+	const MAX_ERROR_LINE_OFFSET: usize = 50;
 	/// How long with the source line have to be before it gets truncated.
 	const MAX_SOURCE_DISPLAY_LEN: usize = 80;
-	/// How far the will have to be in the source line before everything before it gets truncated.
-	const MAX_ERROR_LINE_OFFSET: usize = 50;
 
 	pub fn from_source_location(
 		source: &str,
@@ -131,9 +134,11 @@ impl Snippet {
 		}
 	}
 
-	/// Trims whitespace of an line and additionally truncates the string around the target_col_offset if it is too long.
+	/// Trims whitespace of an line and additionally truncates the string around
+	/// the target_col_offset if it is too long.
 	///
-	/// returns the trimmed string, how it is truncated, and the offset into truncated the string where the target_col is located.
+	/// returns the trimmed string, how it is truncated, and the offset into
+	/// truncated the string where the target_col is located.
 	fn truncate_line(mut line: &str, target_col: usize) -> (&str, Truncation, usize) {
 		// offset in characters from the start of the string.
 		let mut offset = 0;
@@ -238,10 +243,8 @@ impl fmt::Display for Snippet {
 #[cfg(test)]
 mod test {
 	use super::{RenderedError, Snippet, Truncation};
-	use crate::syn::{
-		error::{Location, MessageKind},
-		token::Span,
-	};
+	use crate::syn::error::{Location, MessageKind};
+	use crate::syn::token::Span;
 
 	#[test]
 	fn truncate_whitespace() {

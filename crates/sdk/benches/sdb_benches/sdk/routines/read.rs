@@ -1,5 +1,8 @@
-use surrealdb::{engine::any::Any, sql::Id, Surreal};
-use tokio::{runtime::Runtime, task::JoinSet};
+use surrealdb::engine::any::Any;
+use surrealdb::sql::Id;
+use surrealdb::Surreal;
+use tokio::runtime::Runtime;
+use tokio::task::JoinSet;
 
 use crate::sdb_benches::sdk::Record;
 

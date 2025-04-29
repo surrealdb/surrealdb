@@ -1,19 +1,24 @@
-use crate::{
-	api::{err::Error, Response as QueryResponse, Result},
-	method::{self, Stats, Stream},
-	value::Notification,
-	Value,
-};
+use std::marker::PhantomData;
+use std::mem;
+
 use futures::future::Either;
 use futures::stream::select_all;
 use serde::de::DeserializeOwned;
-use std::marker::PhantomData;
-use std::mem;
+use surrealdb_core::sql::statements::*;
 use surrealdb_core::sql::{
-	self, from_value as from_core_value, statements::*, Statement, Statements, Value as CoreValue,
+	self,
+	from_value as from_core_value,
+	Statement,
+	Statements,
+	Value as CoreValue,
 };
 
 use super::Raw;
+use crate::api::err::Error;
+use crate::api::{Response as QueryResponse, Result};
+use crate::method::{self, Stats, Stream};
+use crate::value::Notification;
+use crate::Value;
 
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery {

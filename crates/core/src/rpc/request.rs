@@ -1,11 +1,8 @@
-use crate::rpc::format::cbor::Cbor;
-use crate::rpc::Method;
-use crate::rpc::RpcError;
-use crate::sql::Array;
-use crate::sql::Number;
-use crate::sql::Part;
-use crate::sql::Value;
 use std::sync::LazyLock;
+
+use crate::rpc::format::cbor::Cbor;
+use crate::rpc::{Method, RpcError};
+use crate::sql::{Array, Number, Part, Value};
 
 pub static ID: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("id")]);
 pub static METHOD: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("method")]);
@@ -22,6 +19,7 @@ pub struct Request {
 
 impl TryFrom<Cbor> for Request {
 	type Error = RpcError;
+
 	fn try_from(val: Cbor) -> Result<Self, RpcError> {
 		<Cbor as TryInto<Value>>::try_into(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
 	}
@@ -29,6 +27,7 @@ impl TryFrom<Cbor> for Request {
 
 impl TryFrom<Value> for Request {
 	type Error = RpcError;
+
 	fn try_from(val: Value) -> Result<Self, RpcError> {
 		// Fetch the 'id' argument
 		let id = match val.pick(&*ID) {

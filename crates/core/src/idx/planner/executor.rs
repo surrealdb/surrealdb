@@ -1,3 +1,12 @@
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+
+use num_traits::{FromPrimitive, ToPrimitive};
+use reblessive::tree::Stk;
+use rust_decimal::Decimal;
+use tokio::sync::RwLock;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -11,15 +20,28 @@ use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef, KnnIterator,
-	KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
-	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
-	UniqueUnionThingIterator, ValueType,
+	IndexEqualThingIterator,
+	IndexJoinThingIterator,
+	IndexRangeThingIterator,
+	IndexUnionThingIterator,
+	IteratorRange,
+	IteratorRecord,
+	IteratorRef,
+	KnnIterator,
+	KnnIteratorResult,
+	MatchesThingIterator,
+	MultipleIterators,
+	ThingIterator,
+	UniqueEqualThingIterator,
+	UniqueJoinThingIterator,
+	UniqueRangeThingIterator,
+	UniqueUnionThingIterator,
+	ValueType,
 };
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 use crate::idx::planner::iterators::{
-	IndexRangeReverseThingIterator, UniqueRangeReverseThingIterator,
+	IndexRangeReverseThingIterator,
+	UniqueRangeReverseThingIterator,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -33,15 +55,17 @@ use crate::kvs::TransactionType;
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{
-	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
+	Array,
+	Cond,
+	Expression,
+	FlowResultExt as _,
+	Idiom,
+	Number,
+	Object,
+	Table,
+	Thing,
+	Value,
 };
-use num_traits::{FromPrimitive, ToPrimitive};
-use reblessive::tree::Stk;
-use rust_decimal::Decimal;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
 
@@ -491,25 +515,37 @@ impl QueryExecutor {
 		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
 	}
 
-	/// This function takes a reference to a `Number` enum and a conversion function `float_to_int`.
-	/// It returns a tuple containing the variants of the `Number` as `Option<i64>`, `Option<f64>`, and `Option<Decimal>`.
+	/// This function takes a reference to a `Number` enum and a conversion
+	/// function `float_to_int`. It returns a tuple containing the variants of
+	/// the `Number` as `Option<i64>`, `Option<f64>`, and `Option<Decimal>`.
 	///
 	/// The `Number` enum can be one of the following:
 	/// - `Int(i64)`: Integer value.
 	/// - `Float(f64)`: Floating point value.
 	/// - `Decimal(Decimal)`: Decimal value.
 	///
-	/// The function performs the following conversions based on the type of the `Number`:
-	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the equivalent `Float` value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
-	/// - For `Float`, it uses the provided `float_to_int` function to convert the `Float` to `Option<i64>`, returns the original `Float` value as `Option<f64>`, and the equivalent `Decimal` value as `Option<Decimal>`.
-	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if representable as `i64`), returns the equivalent `Float` value as `Option<f64>` (if representable as `f64`), and the original `Decimal` value as `Option<Decimal>`.
+	/// The function performs the following conversions based on the type of the
+	/// `Number`:
+	/// - For `Int`, it returns the original `Int` value as `Option<i64>`, the
+	///   equivalent `Float` value as `Option<f64>`, and the equivalent
+	///   `Decimal` value as `Option<Decimal>`.
+	/// - For `Float`, it uses the provided `float_to_int` function to convert
+	///   the `Float` to `Option<i64>`, returns the original `Float` value as
+	///   `Option<f64>`, and the equivalent `Decimal` value as
+	///   `Option<Decimal>`.
+	/// - For `Decimal`, it converts the `Decimal` to `Option<i64>` (if
+	///   representable as `i64`), returns the equivalent `Float` value as
+	///   `Option<f64>` (if representable as `f64`), and the original `Decimal`
+	///   value as `Option<Decimal>`.
 	///
 	/// # Parameters
 	/// - `n`: A reference to a `Number` enum.
-	/// - `float_to_int`: A function that converts a reference to `f64` to `Option<i64>`.
+	/// - `float_to_int`: A function that converts a reference to `f64` to
+	///   `Option<i64>`.
 	///
 	/// # Returns
-	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing the converted variants of the input `Number`.
+	/// A tuple of `(Option<i64>, Option<f64>, Option<Decimal>)` representing
+	/// the converted variants of the input `Number`.
 	fn get_number_variants<F>(
 		n: &Number,
 		float_to_int: F,
@@ -539,6 +575,7 @@ impl QueryExecutor {
 		};
 		(oi, of, od)
 	}
+
 	fn get_equal_number_variants(n: &Number) -> Vec<Value> {
 		let (oi, of, od) = Self::get_number_variants(n, |f| {
 			if f.trunc().eq(f) {

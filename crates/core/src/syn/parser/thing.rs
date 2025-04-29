@@ -1,20 +1,17 @@
+use std::cmp::Ordering;
+use std::ops::Bound;
+
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-use crate::{
-	sql::{
-		graph::GraphSubject,
-		id::{range::IdRange, Gen},
-		Id, Ident, Param, Range, Thing,
-	},
-	syn::{
-		error::bail,
-		lexer::compound,
-		parser::mac::{expected, expected_whitespace, unexpected},
-		token::{t, Glued, TokenKind},
-	},
-};
-use std::{cmp::Ordering, ops::Bound};
+use crate::sql::graph::GraphSubject;
+use crate::sql::id::range::IdRange;
+use crate::sql::id::Gen;
+use crate::sql::{Id, Ident, Param, Range, Thing};
+use crate::syn::error::bail;
+use crate::syn::lexer::compound;
+use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
+use crate::syn::token::{t, Glued, TokenKind};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_record_string(
@@ -316,9 +313,10 @@ impl Parser<'_> {
 				Ok(Id::String(text))
 			}
 			TokenKind::Glued(_) => {
-				// If we glue before a parsing a record id, for example 123s456z would return an error as it is
-				// an invalid duration, however it is a valid flexible record id identifier.
-				// So calling glue before using that token to create a record id is not allowed.
+				// If we glue before a parsing a record id, for example 123s456z would return an
+				// error as it is an invalid duration, however it is a valid flexible record
+				// id identifier. So calling glue before using that token to create a record
+				// id is not allowed.
 				panic!(
 					"Glueing tokens used in parsing a record id would result in inproper parsing"
 				)

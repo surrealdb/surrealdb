@@ -1,11 +1,10 @@
 mod deps;
-use deps::*;
 use std::sync::Arc;
 
-use crate::{
-	err::Error,
-	kvs::{KeyDecode as _, KeyEncode as _, Transaction},
-};
+use deps::*;
+
+use crate::err::Error;
+use crate::kvs::{KeyDecode as _, KeyEncode as _, Transaction};
 
 pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<(), Error> {
 	for ns in tx.all_ns().await?.iter() {
@@ -28,7 +27,8 @@ async fn migrate_tb_records(
 	db: &str,
 	tb: &str,
 ) -> Result<(), Error> {
-	// mutable beg, as we update it each iteration to the last record id + a null byte
+	// mutable beg, as we update it each iteration to the last record id + a null
+	// byte
 	let mut beg = crate::key::thing::prefix(ns, db, tb)?;
 	let end = crate::key::thing::suffix(ns, db, tb)?;
 
@@ -42,7 +42,8 @@ async fn migrate_tb_records(
 			break 'scan;
 		}
 
-		// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
+		// We suffix the last id with a null byte, to prevent scanning it twice (which
+		// would result in an infinite loop)
 		beg.clone_from(keys.last().unwrap());
 		beg.extend_from_slice(b"\0");
 
@@ -60,7 +61,8 @@ async fn migrate_tb_records(
 		let broken = key::Thing::decode(enc).unwrap();
 		// Get a fixed id
 		let fixed = broken.fix().unwrap();
-		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
+		// Get the value for the old key. We can unwrap the option, as we know that the
+		// key exists in the KV store
 		let val = tx.get(broken.clone(), None).await?.unwrap();
 		// Delete the old key
 		tx.del(broken.clone()).await?;
@@ -72,7 +74,8 @@ async fn migrate_tb_records(
 }
 
 async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) -> Result<(), Error> {
-	// mutable beg, as we update it each iteration to the last record id + a null byte
+	// mutable beg, as we update it each iteration to the last record id + a null
+	// byte
 	let mut beg = crate::key::table::all::new(ns, db, tb).encode_owned()?;
 	beg.extend_from_slice(&[b'~', 0x00]);
 	let mut end = crate::key::table::all::new(ns, db, tb).encode_owned()?;
@@ -88,7 +91,8 @@ async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) ->
 			break 'scan;
 		}
 
-		// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
+		// We suffix the last id with a null byte, to prevent scanning it twice (which
+		// would result in an infinite loop)
 		beg.clone_from(keys.last().unwrap());
 		beg.extend_from_slice(b"\0");
 
@@ -106,7 +110,8 @@ async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) ->
 		let broken = key::Graph::decode(enc)?;
 		// Get a fixed id
 		let fixed = broken.fix().unwrap();
-		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
+		// Get the value for the old key. We can unwrap the option, as we know that the
+		// key exists in the KV store
 		let val = tx.get(broken.clone(), None).await?.unwrap();
 		// Delete the old key
 		tx.del(broken.clone()).await?;

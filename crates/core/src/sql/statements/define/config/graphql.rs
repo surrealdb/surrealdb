@@ -1,11 +1,11 @@
 use std::fmt::{self, Display, Write};
 
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Ident, Part, Value};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

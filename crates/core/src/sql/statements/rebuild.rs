@@ -1,3 +1,10 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,12 +13,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::ident::Ident;
 use crate::sql::value::Value;
 use crate::sql::Base;
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -26,6 +27,7 @@ impl RebuildStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

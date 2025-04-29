@@ -1,19 +1,20 @@
-use crate::dbs::plan::Explanation;
-#[cfg(not(target_family = "wasm"))]
-use crate::err::Error;
-use crate::sql::order::OrderList;
-use crate::sql::value::Value;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
+use std::mem;
+use std::sync::Arc;
 
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 #[cfg(not(target_family = "wasm"))]
 use rayon::prelude::ParallelSliceMut;
-use std::mem;
-use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
+
+use crate::dbs::plan::Explanation;
+#[cfg(not(target_family = "wasm"))]
+use crate::err::Error;
+use crate::sql::order::OrderList;
+use crate::sql::value::Value;
 
 #[derive(Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
@@ -60,7 +61,8 @@ impl From<Vec<Value>> for MemoryCollector {
 
 pub(super) const DEFAULT_BATCH_SIZE: usize = 1024;
 
-/// The struct MemoryRandom represents an in-memory store that aggregates data randomly.
+/// The struct MemoryRandom represents an in-memory store that aggregates data
+/// randomly.
 pub(in crate::dbs) struct MemoryRandom {
 	/// Collected values
 	values: Vec<Value>,
@@ -171,7 +173,8 @@ impl MemoryRandom {
 	}
 }
 
-/// The struct MemoryOrdered represents an in-memory store that aggregates ordered data.
+/// The struct MemoryOrdered represents an in-memory store that aggregates
+/// ordered data.
 pub(in crate::dbs) struct MemoryOrdered {
 	/// Collected values
 	values: Vec<Value>,
@@ -205,7 +208,8 @@ impl MemoryOrdered {
 			// If we have a finalized result, we return its size
 			result.len()
 		} else {
-			// If we don't have a finalized result, we return the amount of value summed with the current batch
+			// If we don't have a finalized result, we return the amount of value summed
+			// with the current batch
 			self.values.len() + self.batch.len()
 		}
 	}

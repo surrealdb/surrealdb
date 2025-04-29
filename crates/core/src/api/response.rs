@@ -1,15 +1,11 @@
-use http::{
-	header::{ACCEPT, CONTENT_TYPE},
-	HeaderMap, StatusCode,
-};
+use http::header::{ACCEPT, CONTENT_TYPE};
+use http::{HeaderMap, StatusCode};
 
-use crate::{
-	err::Error,
-	rpc::format::Format,
-	sql::{Object, Value},
-};
-
-use super::{err::ApiError, invocation::ApiInvocation};
+use super::err::ApiError;
+use super::invocation::ApiInvocation;
+use crate::err::Error;
+use crate::rpc::format::Format;
+use crate::sql::{Object, Value};
 
 #[derive(Debug)]
 pub struct ApiResponse {
@@ -21,6 +17,7 @@ pub struct ApiResponse {
 
 impl TryFrom<Value> for ApiResponse {
 	type Error = Error;
+
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		if let Value::Object(mut opts) = value {
 			let raw = opts.remove("raw").map(|v| v.cast_to()).transpose()?;
@@ -70,6 +67,7 @@ impl TryFrom<Value> for ApiResponse {
 
 impl TryInto<Value> for ApiResponse {
 	type Error = Error;
+
 	fn try_into(self) -> Result<Value, Error> {
 		Ok(Value::Object(
 			map! {

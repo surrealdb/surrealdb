@@ -1,13 +1,14 @@
-use super::tr::Check;
-use super::util;
-use crate::cnf::COUNT_BATCH_SIZE;
-use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::err::Error;
-use crate::key::debug::Sprintable;
-use crate::kvs::{batch::Batch, Key, KeyEncode, Val, Version};
-use crate::vs::VersionStamp;
 use std::fmt::Debug;
 use std::ops::Range;
+
+use super::tr::Check;
+use super::util;
+use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
+use crate::err::Error;
+use crate::key::debug::Sprintable;
+use crate::kvs::batch::Batch;
+use crate::kvs::{Key, KeyEncode, Val, Version};
+use crate::vs::VersionStamp;
 
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
 pub trait Transaction {
@@ -81,7 +82,8 @@ pub trait Transaction {
 	where
 		K: KeyEncode + Sprintable + Debug;
 
-	/// Delete a key from the datastore if the current value matches a condition.
+	/// Delete a key from the datastore if the current value matches a
+	/// condition.
 	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: KeyEncode + Sprintable + Debug,
@@ -89,7 +91,8 @@ pub trait Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
+	/// This function fetches the full range of keys without values, in a single
+	/// request to the underlying datastore.
 	async fn keys<K>(
 		&mut self,
 		rng: Range<K>,
@@ -101,7 +104,8 @@ pub trait Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
+	/// This function fetches the full range of keys without values, in a single
+	/// request to the underlying datastore.
 	async fn keysr<K>(
 		&mut self,
 		_rng: Range<K>,
@@ -116,7 +120,8 @@ pub trait Transaction {
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
-	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	/// This function fetches the full range of key-value pairs, in a single
+	/// request to the underlying datastore.
 	async fn scan<K>(
 		&mut self,
 		_rng: Range<K>,
@@ -131,7 +136,8 @@ pub trait Transaction {
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
-	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	/// This function fetches the full range of key-value pairs, in a single
+	/// request to the underlying datastore.
 	async fn scanr<K>(
 		&mut self,
 		_rng: Range<K>,
@@ -163,7 +169,8 @@ pub trait Transaction {
 		self.del(key).await
 	}
 
-	/// Delete all versions of a key from the datastore if the current value matches a condition.
+	/// Delete all versions of a key from the datastore if the current value
+	/// matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn clrc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
@@ -175,7 +182,8 @@ pub trait Transaction {
 
 	/// Fetch many keys from the datastore.
 	///
-	/// This function fetches all matching keys pairs from the underlying datastore concurrently.
+	/// This function fetches all matching keys pairs from the underlying
+	/// datastore concurrently.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
 	async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Option<Val>>, Error>
 	where
@@ -199,7 +207,8 @@ pub trait Transaction {
 
 	/// Retrieve a range of prefixed keys from the datastore.
 	///
-	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function fetches all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn getp<K>(&mut self, key: K) -> Result<Vec<(Key, Val)>, Error>
 	where
@@ -216,7 +225,8 @@ pub trait Transaction {
 
 	/// Retrieve a range of keys from the datastore.
 	///
-	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function fetches all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn getr<K>(
 		&mut self,
@@ -247,7 +257,8 @@ pub trait Transaction {
 
 	/// Delete a range of prefixed keys from the datastore.
 	///
-	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delp<K>(&mut self, key: K) -> Result<(), Error>
 	where
@@ -268,7 +279,8 @@ pub trait Transaction {
 
 	/// Delete a range of keys from the datastore.
 	///
-	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
@@ -298,7 +310,8 @@ pub trait Transaction {
 
 	/// Delete all versions of a range of prefixed keys from the datastore.
 	///
-	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn clrp<K>(&mut self, key: K) -> Result<(), Error>
 	where
@@ -319,7 +332,8 @@ pub trait Transaction {
 
 	/// Delete all versions of a range of keys from the datastore.
 	///
-	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
+	/// This function deletes all matching key-value pairs from the underlying
+	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn clrr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
@@ -349,7 +363,8 @@ pub trait Transaction {
 
 	/// Count the total number of keys within a range in the datastore.
 	///
-	/// This function fetches the total key count from the underlying datastore in grouped batches.
+	/// This function fetches the total key count from the underlying datastore
+	/// in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn count<K>(&mut self, rng: Range<K>) -> Result<usize, Error>
 	where
@@ -372,9 +387,11 @@ pub trait Transaction {
 		Ok(len)
 	}
 
-	/// Retrieve all the versions for a specific range of keys from the datastore.
+	/// Retrieve all the versions for a specific range of keys from the
+	/// datastore.
 	///
-	/// This function fetches all the versions for the full range of key-value pairs, in a single request to the underlying datastore.
+	/// This function fetches all the versions for the full range of key-value
+	/// pairs, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan_all_versions<K>(
 		&mut self,
@@ -389,7 +406,8 @@ pub trait Transaction {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches keys, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches keys, in batches, with multiple requests to the
+	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn batch_keys<K>(
 		&mut self,
@@ -435,7 +453,8 @@ pub trait Transaction {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches key-value pairs, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches key-value pairs, in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn batch_keys_vals<K>(
 		&mut self,
@@ -482,7 +501,8 @@ pub trait Transaction {
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
-	/// This function fetches key-value-version pairs, in batches, with multiple requests to the underlying datastore.
+	/// This function fetches key-value-version pairs, in batches, with multiple
+	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn batch_keys_vals_versions<K>(
 		&mut self,
@@ -526,10 +546,11 @@ pub trait Transaction {
 	}
 
 	/// Obtain a new change timestamp for a key
-	/// which is replaced with the current timestamp when the transaction is committed.
-	/// NOTE: This should be called when composing the change feed entries for this transaction,
-	/// which should be done immediately before the transaction commit.
-	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
+	/// which is replaced with the current timestamp when the transaction is
+	/// committed. NOTE: This should be called when composing the change feed
+	/// entries for this transaction, which should be done immediately before
+	/// the transaction commit. That is to keep other transactions commit
+	/// delay(pessimistic) or conflict(optimistic) as less as possible.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp, Error>
 	where

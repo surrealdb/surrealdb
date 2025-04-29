@@ -1,52 +1,142 @@
-use crate::{
-	sql::{
-		access::AccessDuration,
-		access_type::{
-			AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess,
-			JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
-		},
-		block::Entry,
-		changefeed::ChangeFeed,
-		filter::Filter,
-		graph::{GraphSubject, GraphSubjects},
-		index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType},
-		language::Language,
-		order::{OrderList, Ordering},
-		statements::{
-			access::{
-				self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
-				AccessStatementShow,
-			},
-			analyze::AnalyzeStatement,
-			show::{ShowSince, ShowStatement},
-			sleep::SleepStatement,
-			AccessStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
-			ContinueStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
-			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
-			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
-			OptionStatement, OutputStatement, RelateStatement, RemoveAccessStatement,
-			RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
-			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
-			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
-			UpsertStatement, UseStatement,
-		},
-		tokenizer::Tokenizer,
-		user::UserDuration,
-		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
-		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
-		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
-	},
-	syn::parser::{
-		mac::{test_parse, test_parse_with_settings},
-		ParserSettings,
-	},
+use chrono::offset::TimeZone;
+use chrono::{NaiveDate, Offset, Utc};
+
+use crate::sql::access::AccessDuration;
+use crate::sql::access_type::{
+	AccessType,
+	BearerAccess,
+	BearerAccessSubject,
+	BearerAccessType,
+	JwtAccess,
+	JwtAccessIssue,
+	JwtAccessVerify,
+	JwtAccessVerifyJwks,
+	JwtAccessVerifyKey,
+	RecordAccess,
 };
-use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
+use crate::sql::block::Entry;
+use crate::sql::changefeed::ChangeFeed;
+use crate::sql::filter::Filter;
+use crate::sql::graph::{GraphSubject, GraphSubjects};
+use crate::sql::index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType};
+use crate::sql::language::Language;
+use crate::sql::order::{OrderList, Ordering};
+use crate::sql::statements::access::{
+	self,
+	AccessStatementGrant,
+	AccessStatementPurge,
+	AccessStatementRevoke,
+	AccessStatementShow,
+};
+use crate::sql::statements::analyze::AnalyzeStatement;
+use crate::sql::statements::show::{ShowSince, ShowStatement};
+use crate::sql::statements::sleep::SleepStatement;
+use crate::sql::statements::{
+	AccessStatement,
+	BeginStatement,
+	BreakStatement,
+	CancelStatement,
+	CommitStatement,
+	ContinueStatement,
+	CreateStatement,
+	DefineAccessStatement,
+	DefineAnalyzerStatement,
+	DefineDatabaseStatement,
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineFunctionStatement,
+	DefineIndexStatement,
+	DefineNamespaceStatement,
+	DefineParamStatement,
+	DefineStatement,
+	DefineTableStatement,
+	DeleteStatement,
+	ForeachStatement,
+	IfelseStatement,
+	InfoStatement,
+	InsertStatement,
+	KillStatement,
+	OptionStatement,
+	OutputStatement,
+	RelateStatement,
+	RemoveAccessStatement,
+	RemoveAnalyzerStatement,
+	RemoveDatabaseStatement,
+	RemoveEventStatement,
+	RemoveFieldStatement,
+	RemoveFunctionStatement,
+	RemoveIndexStatement,
+	RemoveNamespaceStatement,
+	RemoveParamStatement,
+	RemoveStatement,
+	RemoveTableStatement,
+	RemoveUserStatement,
+	SelectStatement,
+	SetStatement,
+	ThrowStatement,
+	UpdateStatement,
+	UpsertStatement,
+	UseStatement,
+};
+use crate::sql::tokenizer::Tokenizer;
+use crate::sql::user::UserDuration;
+use crate::sql::{
+	Algorithm,
+	Array,
+	Base,
+	Block,
+	Cond,
+	Data,
+	Datetime,
+	Dir,
+	Duration,
+	Edges,
+	Explain,
+	Expression,
+	Fetch,
+	Fetchs,
+	Field,
+	Fields,
+	Future,
+	Graph,
+	Group,
+	Groups,
+	Id,
+	Ident,
+	Idiom,
+	Idioms,
+	Index,
+	Kind,
+	Limit,
+	Number,
+	Object,
+	Operator,
+	Order,
+	Output,
+	Param,
+	Part,
+	Permission,
+	Permissions,
+	Scoring,
+	Split,
+	Splits,
+	Start,
+	Statement,
+	Strand,
+	Subquery,
+	Table,
+	TableType,
+	Tables,
+	Thing,
+	Timeout,
+	Uuid,
+	Value,
+	Values,
+	Version,
+	With,
+};
+use crate::syn::parser::mac::{test_parse, test_parse_with_settings};
+use crate::syn::parser::ParserSettings;
 
 fn ident_field(name: &str) -> Value {
 	Value::Idiom(Idiom(vec![Part::Field(Ident(name.to_string()))]))
@@ -390,7 +480,8 @@ fn parse_define_user() {
 	}
 }
 
-// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop
+// in 3.0.0.
 #[test]
 fn parse_define_token() {
 	let res = test_parse!(
@@ -424,7 +515,8 @@ fn parse_define_token() {
 	)
 }
 
-// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop
+// in 3.0.0.
 #[test]
 fn parse_define_token_on_scope() {
 	let res = test_parse!(
@@ -468,7 +560,8 @@ fn parse_define_token_on_scope() {
 	}
 }
 
-// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop
+// in 3.0.0.
 #[test]
 fn parse_define_token_jwks() {
 	let res = test_parse!(
@@ -501,7 +594,8 @@ fn parse_define_token_jwks() {
 	)
 }
 
-// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop
+// in 3.0.0.
 #[test]
 fn parse_define_token_jwks_on_scope() {
 	let res = test_parse!(
@@ -545,7 +639,8 @@ fn parse_define_token_jwks_on_scope() {
 	}
 }
 
-// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop
+// in 3.0.0.
 #[test]
 fn parse_define_scope() {
 	let res = test_parse!(
@@ -1275,7 +1370,8 @@ fn parse_define_access_record() {
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
-							// Issuer key matches verification key by default in symmetric algorithms.
+							// Issuer key matches verification key by default in symmetric
+							// algorithms.
 							key: "foo".to_string(),
 						}),
 					},
@@ -1293,7 +1389,8 @@ fn parse_define_access_record() {
 			})),
 		);
 	}
-	// Verification and issuing with JWT are explicitly defined with two different keys.
+	// Verification and issuing with JWT are explicitly defined with two different
+	// keys.
 	{
 		let res = test_parse!(
 			parse_stmt,
@@ -1332,7 +1429,8 @@ fn parse_define_access_record() {
 			})),
 		);
 	}
-	// Verification and issuing with JWT are explicitly defined with two different keys. Refresh specified before JWT.
+	// Verification and issuing with JWT are explicitly defined with two different
+	// keys. Refresh specified before JWT.
 	{
 		let res = test_parse_with_settings!(
 			parse_stmt,
@@ -1388,7 +1486,8 @@ fn parse_define_access_record() {
 			})),
 		);
 	}
-	// Verification and issuing with JWT are explicitly defined with two different keys. Refresh specified after JWT.
+	// Verification and issuing with JWT are explicitly defined with two different
+	// keys. Refresh specified after JWT.
 	{
 		let res = test_parse_with_settings!(parse_stmt,
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" WITH REFRESH DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#,
@@ -1442,7 +1541,8 @@ fn parse_define_access_record() {
 			})),
 		);
 	}
-	// Verification and issuing with JWT are explicitly defined with two different keys. Token duration is explicitly defined.
+	// Verification and issuing with JWT are explicitly defined with two different
+	// keys. Token duration is explicitly defined.
 	{
 		let res = test_parse!(
 			parse_stmt,
@@ -1481,7 +1581,8 @@ fn parse_define_access_record() {
 			})),
 		);
 	}
-	// Verification with JWT is explicitly defined only with symmetric key. Token duration is none.
+	// Verification with JWT is explicitly defined only with symmetric key. Token
+	// duration is none.
 	{
 		let res =
 			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION FOR TOKEN NONE"#);
@@ -1728,7 +1829,8 @@ fn parse_define_access_bearer() {
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
-							// Issuer key matches verification key by default in symmetric algorithms.
+							// Issuer key matches verification key by default in symmetric
+							// algorithms.
 							key: "foo".to_string(),
 						}),
 					},
@@ -1769,7 +1871,8 @@ fn parse_define_access_bearer() {
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
-							// Issuer key matches verification key by default in symmetric algorithms.
+							// Issuer key matches verification key by default in symmetric
+							// algorithms.
 							key: "foo".to_string(),
 						}),
 					},
@@ -1932,8 +2035,9 @@ fn parse_define_field() {
 
 	// Invalid DELETE permission
 	{
-		// TODO(gguillemas): Providing the DELETE permission should return a parse error in 3.0.0.
-		// Currently, the DELETE permission is just ignored to maintain backward compatibility.
+		// TODO(gguillemas): Providing the DELETE permission should return a parse error
+		// in 3.0.0. Currently, the DELETE permission is just ignored to maintain
+		// backward compatibility.
 		let res =
 			test_parse!(parse_stmt, r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#)
 				.unwrap();

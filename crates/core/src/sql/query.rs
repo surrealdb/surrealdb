@@ -1,24 +1,27 @@
-use crate::sql::fmt::Pretty;
-use crate::sql::function::Function;
-use crate::sql::model::Model;
-use crate::sql::statements::CreateStatement;
-use crate::sql::statements::DeleteStatement;
-use crate::sql::statements::InsertStatement;
-use crate::sql::statements::KillStatement;
-use crate::sql::statements::LiveStatement;
-use crate::sql::statements::RelateStatement;
-use crate::sql::statements::SelectStatement;
-use crate::sql::statements::UpdateStatement;
-use crate::sql::statements::UpsertStatement;
-use crate::sql::statements::{DefineStatement, RemoveStatement};
-use crate::sql::{Statement, Statements};
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::{Deref, DerefMut};
+use std::str;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::Write;
-use std::fmt::{self, Display, Formatter};
-use std::ops::{Deref, DerefMut};
-use std::str;
+
+use crate::sql::fmt::Pretty;
+use crate::sql::function::Function;
+use crate::sql::model::Model;
+use crate::sql::statements::{
+	CreateStatement,
+	DefineStatement,
+	DeleteStatement,
+	InsertStatement,
+	KillStatement,
+	LiveStatement,
+	RelateStatement,
+	RemoveStatement,
+	SelectStatement,
+	UpdateStatement,
+	UpsertStatement,
+};
+use crate::sql::{Statement, Statements};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Query";
 
@@ -121,6 +124,7 @@ impl From<Vec<Statement>> for Query {
 
 impl Deref for Query {
 	type Target = Vec<Statement>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0 .0
 	}
@@ -133,8 +137,9 @@ impl DerefMut for Query {
 }
 
 impl IntoIterator for Query {
-	type Item = Statement;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Statement;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}

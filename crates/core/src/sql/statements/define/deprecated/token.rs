@@ -1,12 +1,10 @@
-use crate::sql::{
-	access::AccessDuration,
-	access_type::{JwtAccessVerify, JwtAccessVerifyKey},
-	statements::DefineAccessStatement,
-	AccessType, Algorithm, Base, Ident, JwtAccess, Strand,
-};
-
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+use crate::sql::access::AccessDuration;
+use crate::sql::access_type::{JwtAccessVerify, JwtAccessVerifyKey};
+use crate::sql::statements::DefineAccessStatement;
+use crate::sql::{AccessType, Algorithm, Base, Ident, JwtAccess, Strand};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

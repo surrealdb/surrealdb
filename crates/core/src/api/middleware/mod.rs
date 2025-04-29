@@ -6,10 +6,9 @@ pub(super) mod invoke;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-	err::Error,
-	sql::{statements::info::InfoStructure, Object, Value},
-};
+use crate::err::Error;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Object, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -25,6 +24,7 @@ impl InfoStructure for RequestMiddleware {
 
 impl Deref for RequestMiddleware {
 	type Target = Vec<(String, Vec<Value>)>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

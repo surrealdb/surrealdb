@@ -1,9 +1,11 @@
-use crate::idx::ft::MatchRef;
-use crate::sql::index::Distance;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::idx::ft::MatchRef;
+use crate::sql::index::Distance;
 
 /// Binary operators.
 #[revisioned(revision = 2)]

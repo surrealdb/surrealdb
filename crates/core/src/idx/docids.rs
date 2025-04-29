@@ -1,12 +1,13 @@
+use revision::{revisioned, Revisioned};
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
-use revision::{revisioned, Revisioned};
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
 
 pub type DocId = u64;
 
@@ -78,7 +79,8 @@ impl DocIds {
 	}
 
 	/// Returns the doc_id for the given doc_key.
-	/// If the doc_id does not exists, a new one is created, and associated to the given key.
+	/// If the doc_id does not exists, a new one is created, and associated to
+	/// the given key.
 	pub(in crate::idx) async fn resolve_doc_id(
 		&mut self,
 		tx: &Transaction,
@@ -249,8 +251,9 @@ impl Resolved {
 mod tests {
 	use crate::idx::docids::{DocIds, Resolved};
 	use crate::idx::IndexKeyBase;
+	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::*;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 
 	const BTREE_ORDER: u32 = 7;
 

@@ -1,11 +1,13 @@
+use std::path::Path;
+
+use ahash::HashSet;
+use dashmap::DashMap;
+
 use crate::err::Error;
 use crate::iam::file::is_path_allowed;
 use crate::idx::ft::analyzer::mapper::Mapper;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::Filter;
-use ahash::HashSet;
-use dashmap::DashMap;
-use std::path::Path;
 
 #[derive(Default)]
 pub(crate) struct Mappers(DashMap<String, Mapper>);

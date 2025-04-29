@@ -1,13 +1,14 @@
 //! Stores a LIVE SELECT query definition on the table
-use crate::err::Error;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Lv is used to track a live query and is cluster independent, i.e. it is tied with a ns/db/tb combo without the cl.
-/// The live statement includes the node id, so lq can be derived purely from an lv.
+use crate::err::Error;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::{impl_key, KeyEncode};
+
+/// Lv is used to track a live query and is cluster independent, i.e. it is tied
+/// with a ns/db/tb combo without the cl. The live statement includes the node
+/// id, so lq can be derived purely from an lv.
 ///
 /// The value of the lv is the statement.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

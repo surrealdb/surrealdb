@@ -1,6 +1,7 @@
-use criterion::{Criterion, Throughput};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+use criterion::{Criterion, Throughput};
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;

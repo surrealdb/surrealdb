@@ -1,7 +1,8 @@
 //! Stores sequence batches
+use serde::{Deserialize, Serialize};
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Ba<'a> {

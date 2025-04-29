@@ -1,25 +1,19 @@
 use std::sync::Arc;
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Session;
-use crate::err::Error;
-use crate::iam::Error as IamError;
-use crate::kvs::Datastore;
-use crate::kvs::LockType;
-use crate::kvs::TransactionType;
-use crate::sql;
-use crate::sql::part::Part;
-use crate::sql::FlowResultExt;
-use crate::sql::Function;
-use crate::sql::Statement;
-use crate::sql::{Thing, Value as SqlValue};
-
+use async_graphql::dynamic::indexmap::IndexMap;
 use async_graphql::dynamic::FieldValue;
-use async_graphql::{dynamic::indexmap::IndexMap, Name, Value as GqlValue};
+use async_graphql::{Name, Value as GqlValue};
 use reblessive::TreeStack;
 
 use super::error::GqlError;
+use crate::ctx::Context;
+use crate::dbs::{Options, Session};
+use crate::err::Error;
+use crate::iam::Error as IamError;
+use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::sql;
+use crate::sql::part::Part;
+use crate::sql::{FlowResultExt, Function, Statement, Thing, Value as SqlValue};
 
 pub(crate) trait GqlValueUtils {
 	fn as_i64(&self) -> Option<i64>;
@@ -44,6 +38,7 @@ impl GqlValueUtils for GqlValue {
 			None
 		}
 	}
+
 	fn as_list(&self) -> Option<&Vec<GqlValue>> {
 		if let GqlValue::List(a) = self {
 			Some(a)
@@ -51,6 +46,7 @@ impl GqlValueUtils for GqlValue {
 			None
 		}
 	}
+
 	fn as_object(&self) -> Option<&IndexMap<Name, GqlValue>> {
 		if let GqlValue::Object(o) = self {
 			Some(o)

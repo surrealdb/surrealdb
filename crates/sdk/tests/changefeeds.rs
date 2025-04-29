@@ -1,7 +1,6 @@
 mod parse;
 
 use chrono::DateTime;
-
 use helpers::new_ds;
 use parse::Parse;
 use surrealdb::dbs::Session;
@@ -527,7 +526,6 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let ts2_dt = "2023-08-01T00:00:05Z";
 	let ts2 = DateTime::parse_from_rfc3339(ts2_dt).unwrap();
 	db.changefeed_process_at(ts2.timestamp().try_into().unwrap()).await.unwrap();
-	//
 	// Show changes using timestamp 1
 	//
 	let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts1_dt}' LIMIT 10; ");
@@ -564,7 +562,6 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let ts3_dt = "2023-08-01T00:00:10Z";
 	let ts3 = DateTime::parse_from_rfc3339(ts3_dt).unwrap();
 	db.changefeed_process_at(ts3.timestamp().try_into().unwrap()).await.unwrap();
-	//
 	// Show changes using timestamp 3
 	//
 	let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts3_dt}' LIMIT 10; ");

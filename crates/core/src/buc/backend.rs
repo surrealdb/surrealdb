@@ -1,9 +1,10 @@
-use super::store::{memory::MemoryStore, ObjectStore};
-use crate::err::Error;
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::store::file::FileStore;
+use super::store::memory::MemoryStore;
+use super::store::ObjectStore;
+use crate::err::Error;
 
 pub(crate) async fn connect(
 	url: &str,

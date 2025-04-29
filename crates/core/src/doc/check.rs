@@ -1,18 +1,15 @@
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Workable;
+use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::iam::Action;
-use crate::sql::paths::ID;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
+use crate::sql::paths::{ID, IN, OUT};
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 use crate::sql::FlowResultExt as _;
-use reblessive::tree::Stk;
 
 impl Document {
 	/// Checks whether this operation is allowed on
@@ -83,6 +80,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks that a specifically selected record
 	/// actually exists in the underlying datastore.
 	/// If the user specifies a record directly
@@ -101,6 +99,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks that the fields of a document are
 	/// correct. If an `id` field is specified then
 	/// it will check that the `id` field does not
@@ -307,6 +306,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks that the `WHERE` condition on a query
 	/// matches before proceeding with processing
 	/// the document. This ensures that records from
@@ -338,6 +338,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks the `PERMISSIONS` clause for viewing a
 	/// record, based on the `select` permissions for
 	/// the table that this record belongs to. This
@@ -382,6 +383,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks the `PERMISSIONS` clause on the table
 	/// for this record, returning immediately if the
 	/// permissions are `NONE`. This function does not
@@ -411,6 +413,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Checks the `PERMISSIONS` clause on the table for
 	/// this record, processing all advanced permissions
 	/// clauses and evaluating the expression. This

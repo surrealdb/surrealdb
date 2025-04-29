@@ -1,6 +1,7 @@
-use semver::BuildMetadata;
 use std::process::Command;
 use std::{env, str};
+
+use semver::BuildMetadata;
 
 const BUILD_METADATA: &str = "SURREAL_BUILD_METADATA";
 

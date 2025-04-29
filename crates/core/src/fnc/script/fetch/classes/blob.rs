@@ -1,11 +1,9 @@
 //! Blob class implementation
 
 use bytes::{Bytes, BytesMut};
-use js::{
-	class::Trace,
-	prelude::{Coerced, Opt},
-	ArrayBuffer, Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value,
-};
+use js::class::Trace;
+use js::prelude::{Coerced, Opt};
+use js::{ArrayBuffer, Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value};
 
 #[derive(Clone, Copy)]
 #[non_exhaustive]
@@ -198,8 +196,10 @@ impl Blob {
 
 #[cfg(test)]
 mod test {
+	use js::promise::Promise;
+	use js::CatchResultExt;
+
 	use crate::fnc::script::fetch::test::create_test_context;
-	use js::{promise::Promise, CatchResultExt};
 
 	#[tokio::test]
 	async fn basic_blob_use() {

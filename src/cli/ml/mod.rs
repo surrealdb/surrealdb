@@ -1,10 +1,11 @@
 mod export;
 mod import;
 
+use clap::Subcommand;
+
 use self::export::ExportCommandArguments;
 use self::import::ImportCommandArguments;
 use crate::err::Error;
-use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum MlCommand {

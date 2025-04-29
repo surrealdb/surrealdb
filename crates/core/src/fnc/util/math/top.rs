@@ -1,6 +1,7 @@
-use crate::sql::number::Number;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+
+use crate::sql::number::Number;
 
 pub trait Top {
 	/// Find the greatest `k` records from the collection in arbetrary order

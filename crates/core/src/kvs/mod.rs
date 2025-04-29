@@ -1,16 +1,21 @@
 //! The module defining the key value store.
-//! Everything related the transaction for the key value store is defined in the `tx.rs` file.
-//! This module enables the following operations on the key value store:
+//! Everything related the transaction for the key value store is defined in the
+//! `tx.rs` file. This module enables the following operations on the key value
+//! store:
 //! - get
 //! - set
 //! - delete
 //! - put
 //!
 //! These operations can be processed by the following storage engines:
-//! - `fdb`: [FoundationDB](https://github.com/apple/foundationdb/) a distributed database designed to handle large volumes of structured data across clusters of commodity servers
+//! - `fdb`: [FoundationDB](https://github.com/apple/foundationdb/) a
+//!   distributed database designed to handle large volumes of structured data
+//!   across clusters of commodity servers
 //! - `indxdb`: WASM based database to store data in the browser
-//! - `rocksdb`: [RocksDB](https://github.com/facebook/rocksdb) an embeddable persistent key-value store for fast storage
-//! - `tikv`: [TiKV](https://github.com/tikv/tikv) a distributed, and transactional key-value database
+//! - `rocksdb`: [RocksDB](https://github.com/facebook/rocksdb) an embeddable
+//!   persistent key-value store for fast storage
+//! - `tikv`: [TiKV](https://github.com/tikv/tikv) a distributed, and
+//!   transactional key-value database
 //! - `mem`: in-memory database
 
 pub mod export;
@@ -48,16 +53,14 @@ pub(crate) mod sequences;
 mod tests;
 mod util;
 
+pub use ds::Datastore;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) use index::{ConsumeResult, IndexBuilder};
 pub(crate) use key::impl_key;
 pub use key::{KeyDecode, KeyDecodeOwned, KeyEncode};
-
-pub use ds::Datastore;
 pub use live::Live;
 pub use tr::{Check, LockType, TransactionType, Transactor};
 pub use tx::Transaction;
-
-#[cfg(not(target_family = "wasm"))]
-pub(crate) use index::{ConsumeResult, IndexBuilder};
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].
 pub type Key = Vec<u8>;

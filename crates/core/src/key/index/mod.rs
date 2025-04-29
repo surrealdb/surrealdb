@@ -21,14 +21,15 @@ pub mod ia;
 pub mod ip;
 pub mod vm;
 
+use std::borrow::Cow;
+
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::{impl_key, KeyEncode};
 use crate::sql::array::Array;
 use crate::sql::id::Id;
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 struct Prefix<'a> {

@@ -1,14 +1,12 @@
-use crate::api::engine::local::Db;
+use std::path::{Path, PathBuf};
+
+use url::Url;
+
 #[expect(deprecated)]
 use crate::api::engine::local::File;
-use crate::api::engine::local::RocksDb;
-use crate::api::opt::Config;
-use crate::api::opt::Endpoint;
-use crate::api::opt::IntoEndpoint;
+use crate::api::engine::local::{Db, RocksDb};
+use crate::api::opt::{Config, Endpoint, IntoEndpoint};
 use crate::api::Result;
-use std::path::Path;
-use std::path::PathBuf;
-use url::Url;
 
 macro_rules! endpoints {
 	($($name:ty),*) => {

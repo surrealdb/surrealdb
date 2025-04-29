@@ -1,11 +1,14 @@
+use reblessive;
+
 use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::ctx::MutableContext;
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 use crate::sql::statements::access;
 use crate::sql::{Base, Ident, Thing, Value};
-use reblessive;
 
 // Execute the AUTHENTICATE clause for a record access method
 pub async fn authenticate_record(
@@ -15,7 +18,8 @@ pub async fn authenticate_record(
 ) -> Result<Thing, Error> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => match val.record() {
-			// If the AUTHENTICATE clause returns a record, authentication continues with that record
+			// If the AUTHENTICATE clause returns a record, authentication continues with that
+			// record
 			Some(id) => Ok(id),
 			// If the AUTHENTICATE clause returns anything else, authentication fails generically
 			_ => {
@@ -25,7 +29,8 @@ pub async fn authenticate_record(
 		},
 		Err(e) => {
 			match e {
-				// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
+				// If the AUTHENTICATE clause throws a specific error, authentication fails with
+				// that error
 				Error::Thrown(_) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
@@ -58,7 +63,8 @@ pub async fn authenticate_generic(
 			match val {
 				// If the AUTHENTICATE clause returns nothing, authentication continues
 				Value::None => Ok(()),
-				// If the AUTHENTICATE clause returns anything else, authentication fails generically
+				// If the AUTHENTICATE clause returns anything else, authentication fails
+				// generically
 				_ => {
 					debug!("Authentication attempt as system user rejected by AUTHENTICATE clause");
 					Err(Error::InvalidAuth)
@@ -67,7 +73,8 @@ pub async fn authenticate_generic(
 		}
 		Err(e) => {
 			match e {
-				// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
+				// If the AUTHENTICATE clause throws a specific error, authentication fails with
+				// that error
 				Error::Thrown(_) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable

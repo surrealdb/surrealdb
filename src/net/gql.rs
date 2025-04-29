@@ -1,8 +1,7 @@
-use axum::Router;
 use std::sync::Arc;
 
 use axum::routing::post_service;
-
+use axum::Router;
 use surrealdb::gql::cache::Pessimistic;
 use surrealdb::kvs::Datastore;
 

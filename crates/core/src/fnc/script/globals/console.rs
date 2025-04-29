@@ -1,6 +1,8 @@
 // Specify the imports
+use js::prelude::Rest;
+use js::{Ctx, Object, Result};
+
 use crate::sql::value::Value;
-use js::{prelude::Rest, Ctx, Object, Result};
 /// Log the input values as INFO
 #[js::function]
 pub fn log(args: Rest<Value>) {

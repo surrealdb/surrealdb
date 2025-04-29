@@ -1,16 +1,15 @@
-use revision::revisioned;
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::str::FromStr;
 
 use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpression};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::{Level, Resource, ResourceKind};
 use crate::iam::{Error, Role};
 use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
 
-//
 // User
 //
 #[revisioned(revision = 1)]
@@ -113,6 +112,7 @@ impl Actor {
 
 impl Deref for Actor {
 	type Target = Resource;
+
 	fn deref(&self) -> &Self::Target {
 		&self.res
 	}
@@ -136,6 +136,7 @@ impl std::convert::From<&Actor> for Entity {
 
 impl std::convert::TryFrom<(&DefineUserStatement, Level)> for Actor {
 	type Error = Error;
+
 	fn try_from(val: (&DefineUserStatement, Level)) -> Result<Self, Self::Error> {
 		let roles = val.0.roles.iter().map(Role::try_from).collect::<Result<_, _>>()?;
 		Ok(Self::new(val.0.name.to_string(), roles, val.1))

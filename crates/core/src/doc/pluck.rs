@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
@@ -11,13 +14,12 @@ use crate::sql::paths::META;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 use crate::sql::FlowResultExt as _;
-use reblessive::tree::Stk;
-use std::sync::Arc;
 
 impl Document {
-	/// Evaluates a doc that has been modified so that it can be further computed into a result Value
-	/// This includes some permissions handling, output format handling (as specified in statement),
-	/// field handling (like params, links etc).
+	/// Evaluates a doc that has been modified so that it can be further
+	/// computed into a result Value This includes some permissions handling,
+	/// output format handling (as specified in statement), field handling
+	/// (like params, links etc).
 	pub(super) async fn pluck(
 		&mut self,
 		stk: &mut Stk,

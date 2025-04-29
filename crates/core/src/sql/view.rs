@@ -1,8 +1,14 @@
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{cond::Cond, field::Fields, group::Groups, table::Tables, Value};
+use std::fmt;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use crate::sql::cond::Cond;
+use crate::sql::field::Fields;
+use crate::sql::group::Groups;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::table::Tables;
+use crate::sql::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

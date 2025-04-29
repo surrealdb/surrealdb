@@ -1,9 +1,7 @@
 use core::fmt;
-use std::{
-	borrow::Borrow,
-	hash::{Hash, Hasher},
-	ops::Deref,
-};
+use std::borrow::Borrow;
+use std::hash::{Hash, Hasher};
+use std::ops::Deref;
 
 use crate::sql::Value;
 

@@ -1,22 +1,25 @@
-use crate::Error;
+use std::cmp::{Ordering, PartialEq, PartialOrd};
+use std::fmt;
+use std::ops::{Deref, Index};
+use std::str::FromStr;
+
 use chrono::{DateTime, Utc};
 use revision::revisioned;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{
-	cmp::{Ordering, PartialEq, PartialOrd},
-	fmt,
-	ops::{Deref, Index},
-	str::FromStr,
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use surrealdb_core::dbs::Action as CoreAction;
+use surrealdb_core::sql::{
+	Array as CoreArray,
+	Datetime as CoreDatetime,
+	Id as CoreId,
+	Number as CoreNumber,
+	Thing as CoreThing,
+	Value as CoreValue,
 };
-use surrealdb_core::{
-	dbs::Action as CoreAction,
-	sql::{
-		Array as CoreArray, Datetime as CoreDatetime, Id as CoreId, Number as CoreNumber,
-		Thing as CoreThing, Value as CoreValue,
-	},
-	syn,
-};
+use surrealdb_core::syn;
 use uuid::Uuid;
+
+use crate::Error;
 
 mod obj;
 pub use obj::{IntoIter, Iter, IterMut, Object};
@@ -29,8 +32,8 @@ pub fn to_value<T: Serialize + 'static>(value: T) -> Result<Value, Error> {
 	Ok(Value(surrealdb_core::sql::to_value(value)?))
 }
 
-// Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
-// instead of a plain Vec<u8>.
+// Keeping bytes implementation minimal since it might be a good idea to use
+// bytes crate here instead of a plain Vec<u8>.
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
 pub struct Bytes(Vec<u8>);
@@ -317,8 +320,8 @@ impl Value {
 	#[expect(dead_code)]
 	pub(crate) fn core_to_array(v: Vec<CoreValue>) -> Vec<Value> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<Vec<CoreValue>, Vec<Value>>(v)
 		}
 	}
@@ -326,8 +329,8 @@ impl Value {
 	#[expect(dead_code)]
 	pub(crate) fn core_to_array_ref(v: &Vec<CoreValue>) -> &Vec<Value> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<&Vec<CoreValue>, &Vec<Value>>(v)
 		}
 	}
@@ -335,16 +338,16 @@ impl Value {
 	#[expect(dead_code)]
 	pub(crate) fn core_to_array_mut(v: &mut Vec<CoreValue>) -> &mut Vec<Value> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<&mut Vec<CoreValue>, &mut Vec<Value>>(v)
 		}
 	}
 
 	pub(crate) fn array_to_core(v: Vec<Value>) -> Vec<CoreValue> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<Vec<Value>, Vec<CoreValue>>(v)
 		}
 	}
@@ -352,8 +355,8 @@ impl Value {
 	#[expect(dead_code)]
 	pub(crate) fn array_to_core_ref(v: &Vec<Value>) -> &Vec<CoreValue> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<&Vec<Value>, &Vec<CoreValue>>(v)
 		}
 	}
@@ -361,8 +364,8 @@ impl Value {
 	#[expect(dead_code)]
 	pub(crate) fn array_to_core_mut(v: &mut Vec<Value>) -> &mut Vec<CoreValue> {
 		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
+			// SAFETY: Because Value is `repr(transparent)` transmuting between value and
+			// corevalue is safe.
 			std::mem::transmute::<&mut Vec<Value>, &mut Vec<CoreValue>>(v)
 		}
 	}
@@ -463,8 +466,10 @@ impl Action {
 
 /// A live query notification
 ///
-/// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.
-/// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
+/// Live queries return a stream of notifications. The notification contains an
+/// `action` that triggered the change in the database record and `data` itself.
+/// For deletions the data is the record before it was deleted. For everything
+/// else, it's the newly created record or updated record depending on whether
 /// the action is create or update.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]

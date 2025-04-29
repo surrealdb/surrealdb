@@ -1,18 +1,19 @@
+use std::borrow::Cow;
+use std::future::IntoFuture;
+use std::marker::PhantomData;
+
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
+
 use super::validate_data;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
-use crate::api::Connection;
-use crate::api::Result;
+use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
 use crate::value::Value;
 use crate::Surreal;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::borrow::Cow;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
-use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
 /// A merge future
 #[derive(Debug)]
@@ -29,7 +30,8 @@ impl<C, D, R> Merge<'_, C, D, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Merge<'static, C, D, R> {
 		Merge {
 			client: Cow::Owned(self.client.into_owned()),
@@ -75,8 +77,8 @@ where
 	Client: Connection,
 	D: Serialize + 'static,
 {
-	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Value>;
 
 	into_future! {}
 }
@@ -87,8 +89,8 @@ where
 	D: Serialize + 'static,
 	R: DeserializeOwned,
 {
-	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Option<R>>;
 
 	into_future! {}
 }
@@ -99,8 +101,8 @@ where
 	D: Serialize + 'static,
 	R: DeserializeOwned,
 {
-	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Vec<R>>;
 
 	into_future! {}
 }

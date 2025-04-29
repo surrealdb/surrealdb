@@ -1,12 +1,34 @@
-use std::{fmt, ops::Bound, str::FromStr as _};
+use std::fmt;
+use std::ops::Bound;
+use std::str::FromStr as _;
 
 use geo::Point;
 use rust_decimal::Decimal;
 
+use crate::sql::array::Uniq as _;
+use crate::sql::kind::HasKind;
+use crate::sql::value::Null;
 use crate::sql::{
-	array::Uniq as _, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, DecimalExt,
-	Duration, File, Geometry, Ident, Kind, Literal, Number, Object, Range, Regex, Strand, Table,
-	Thing, Uuid, Value,
+	Array,
+	Bytes,
+	Closure,
+	Datetime,
+	DecimalExt,
+	Duration,
+	File,
+	Geometry,
+	Ident,
+	Kind,
+	Literal,
+	Number,
+	Object,
+	Range,
+	Regex,
+	Strand,
+	Table,
+	Thing,
+	Uuid,
+	Value,
 };
 
 #[derive(Clone, Debug)]
@@ -86,14 +108,16 @@ impl<T> CastErrorExt for Result<T, CastError> {
 	}
 }
 
-/// Trait for converting the value using casting rules, calling the functions on this trait results
-/// in similar behavior as casting does in surrealql like `<string> 1`.
+/// Trait for converting the value using casting rules, calling the functions on
+/// this trait results in similar behavior as casting does in surrealql like
+/// `<string> 1`.
 ///
 /// Casting rules are more loose then coercing rules.
 pub trait Cast: Sized {
 	/// Returns true if calling cast on the value will succeed.
 	///
-	/// If `T::can_cast(&v)` returns `true` then `T::cast(v) should not return an error.
+	/// If `T::can_cast(&v)` returns `true` then `T::cast(v) should not return
+	/// an error.
 	fn can_cast(v: &Value) -> bool;
 
 	/// Cast a value to the self type.
@@ -844,7 +868,8 @@ impl Value {
 		}
 	}
 
-	/// Try to convert this value to a Literal, returns a `Value` with the coerced value
+	/// Try to convert this value to a Literal, returns a `Value` with the
+	/// coerced value
 	pub(crate) fn cast_to_literal(self, literal: &Literal) -> Result<Value, CastError> {
 		if literal.validate_value(&self) {
 			Ok(self)
@@ -950,7 +975,8 @@ impl Value {
 		Ok(array)
 	}
 
-	/// Try to convert this value to an `Array` of a certain type, unique values, and length
+	/// Try to convert this value to an `Array` of a certain type, unique
+	/// values, and length
 	pub(crate) fn cast_to_set_type_len(self, kind: &Kind, len: u64) -> Result<Array, CastError> {
 		let array = self.cast_to::<Array>()?;
 

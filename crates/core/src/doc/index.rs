@@ -1,6 +1,7 @@
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::{Force, Statement};
+use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
@@ -14,7 +15,6 @@ use crate::sql::array::Array;
 use crate::sql::index::{HnswParams, Index, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{FlowResultExt as _, Part, Thing, Value};
-use reblessive::tree::Stk;
 
 impl Document {
 	pub(super) async fn store_index_data(
@@ -74,8 +74,9 @@ impl Document {
 		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
 			match ib.consume(ctx, opt.ns_db()?, ix, o, n, rid).await? {
-				// The index builder consumed the value, which means it is currently building the index asynchronously,
-				// we don't index the document and let the index builder do it later.
+				// The index builder consumed the value, which means it is currently building the
+				// index asynchronously, we don't index the document and let the index builder
+				// do it later.
 				ConsumeResult::Enqueued => return Ok(()),
 				// The index builder is done, the index has been built, we can proceed normally
 				ConsumeResult::Ignored(o, n) => (o, n),
@@ -98,10 +99,11 @@ impl Document {
 		Ok(())
 	}
 
-	/// Extract from the given document, the values required by the index and put then in an array.
-	/// Eg. IF the index is composed of the columns `name` and `instrument`
-	/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
-	/// It will return: ["Tobie", "piano"]
+	/// Extract from the given document, the values required by the index and
+	/// put then in an array. Eg. IF the index is composed of the columns
+	/// `name` and `instrument` Given this doc: { "id": 1,
+	/// "instrument":"piano", "name":"Tobie" } It will return: ["Tobie",
+	/// "piano"]
 	pub(crate) async fn build_opt_values(
 		stk: &mut Stk,
 		ctx: &Context,
@@ -121,10 +123,10 @@ impl Document {
 	}
 }
 
-/// Extract from the given document, the values required by the index and put then in an array.
-/// Eg. IF the index is composed of the columns `name` and `instrument`
-/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
-/// It will return: ["Tobie", "piano"]
+/// Extract from the given document, the values required by the index and put
+/// then in an array. Eg. IF the index is composed of the columns `name` and
+/// `instrument` Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie"
+/// } It will return: ["Tobie", "piano"]
 struct Indexable(Vec<(Value, bool)>);
 
 impl Indexable {
@@ -139,8 +141,8 @@ impl Indexable {
 }
 
 impl IntoIterator for Indexable {
-	type Item = Array;
 	type IntoIter = Combinator;
+	type Item = Array;
 
 	fn into_iter(self) -> Self::IntoIter {
 		Combinator::new(self.0)

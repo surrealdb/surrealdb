@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::sql::Duration;
-use crate::sql::Value;
+use crate::sql::{Duration, Value};
 
 /// Sleep during the provided duration parameter.
 pub async fn sleep(ctx: &Context, (dur,): (Duration,)) -> Result<Value, Error> {

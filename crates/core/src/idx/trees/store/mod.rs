@@ -4,6 +4,9 @@ mod lru;
 mod mapper;
 pub(crate) mod tree;
 
+use std::fmt::{Debug, Display, Formatter};
+use std::sync::Arc;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -18,8 +21,6 @@ use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::index::HnswParams;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::Index;
-use std::fmt::{Debug, Display, Formatter};
-use std::sync::Arc;
 
 pub type NodeId = u64;
 pub type StoreGeneration = u64;

@@ -1,14 +1,13 @@
+use std::fmt;
+
+use chrono::{TimeZone, Utc};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::Duration;
 use crate::err::Error;
 use crate::sql::value::Value;
 use crate::sql::Datetime;
-use chrono::TimeZone;
-use chrono::Utc;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-
-use super::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
 
@@ -84,6 +83,7 @@ impl Constant {
 			Self::DurationMax => ConstantValue::Duration(Duration::MAX),
 		}
 	}
+
 	/// Process this type returning a computed simple Value
 	pub fn compute(&self) -> Result<Value, Error> {
 		Ok(match self.value() {

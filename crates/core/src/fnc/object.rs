@@ -1,7 +1,8 @@
+use std::collections::BTreeMap;
+
 use crate::err::Error;
 use crate::sql::value::Value;
 use crate::sql::{Array, Object, Strand};
-use std::collections::BTreeMap;
 
 pub fn entries((object,): (Object,)) -> Result<Value, Error> {
 	Ok(Value::Array(Array(

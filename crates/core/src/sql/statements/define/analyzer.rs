@@ -1,14 +1,17 @@
+use std::fmt::{self, Display};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::filter::Filter;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{filter::Filter, tokenizer::Tokenizer, Array, Base, Ident, Strand, Value};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use crate::sql::tokenizer::Tokenizer;
+use crate::sql::{Array, Base, Ident, Strand, Value};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

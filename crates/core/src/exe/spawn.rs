@@ -7,11 +7,13 @@ use futures::channel::oneshot;
 /// When should use this function?
 ///
 /// **Avoiding the Tokio Runtime Block**
-/// When you run CPU-intensive (or otherwise blocking) tasks on the main Tokio runtime or its worker threads,
-/// you risk blocking those threads. Because Tokio uses an asynchronous runtime,
-/// having a long-running, CPU-bound task can prevent other operations (including I/O-bound operations)
-/// from proceeding smoothly. By offloading CPU-intensive tasks to a separate executor in its own thread,
-/// your main Tokio event loop remains free to handle other futures and I/O tasks.
+/// When you run CPU-intensive (or otherwise blocking) tasks on the main Tokio
+/// runtime or its worker threads, you risk blocking those threads. Because
+/// Tokio uses an asynchronous runtime, having a long-running, CPU-bound task
+/// can prevent other operations (including I/O-bound operations)
+/// from proceeding smoothly. By offloading CPU-intensive tasks to a separate
+/// executor in its own thread, your main Tokio event loop remains free to
+/// handle other futures and I/O tasks.
 pub async fn spawn<F, R>(f: F) -> R
 where
 	F: FnOnce() -> R + Send + 'static,

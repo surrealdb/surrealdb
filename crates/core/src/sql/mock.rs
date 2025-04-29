@@ -1,7 +1,10 @@
-use crate::sql::{escape::EscapeIdent, Id, Thing};
+use std::fmt;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use crate::sql::escape::EscapeIdent;
+use crate::sql::{Id, Thing};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Mock";
 
@@ -13,6 +16,7 @@ pub struct IntoIter {
 
 impl Iterator for IntoIter {
 	type Item = Thing;
+
 	fn next(&mut self) -> Option<Thing> {
 		match &self.model {
 			Mock::Count(tb, c) => {
@@ -56,8 +60,9 @@ pub enum Mock {
 }
 
 impl IntoIterator for Mock {
-	type Item = Thing;
 	type IntoIter = IntoIter;
+	type Item = Thing;
+
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {
 			model: self,

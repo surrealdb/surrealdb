@@ -1,19 +1,14 @@
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::Action;
-use crate::dbs::Notification;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::doc::CursorDoc;
-use crate::doc::Document;
+use crate::dbs::{Action, Notification, Options, Statement};
+use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::sql::paths::AC;
-use crate::sql::paths::META;
-use crate::sql::paths::RD;
-use crate::sql::paths::TK;
+use crate::sql::paths::{AC, META, RD, TK};
 use crate::sql::permission::Permission;
 use crate::sql::{FlowResultExt as _, Value};
-use reblessive::tree::Stk;
-use std::sync::Arc;
 
 impl Document {
 	/// Processes any LIVE SELECT statements which
@@ -198,6 +193,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Check the WHERE clause for a LIVE query
 	async fn lq_check(
 		&self,
@@ -218,6 +214,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Check any PERRMISSIONS for a LIVE query
 	async fn lq_allow(
 		&self,

@@ -1,9 +1,9 @@
 //! Stores database timestamps
-use crate::err::Error;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
+
+use crate::err::Error;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::{impl_key, KeyEncode};
 
 // Ts stands for Database Timestamps that corresponds to Versionstamps.
 // Each Ts key is suffixed by a timestamp.

@@ -1,7 +1,4 @@
-use surrealdb::sql::thing;
-use surrealdb::sql::value;
-use surrealdb::sql::Thing;
-use surrealdb::sql::Value;
+use surrealdb::sql::{thing, value, Thing, Value};
 
 #[allow(dead_code)]
 pub trait Parse<T> {

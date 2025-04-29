@@ -1,14 +1,14 @@
+use reblessive::tree::Stk;
+
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{AHashSet, ArraySet};
-use crate::idx::trees::hnsw::docs::HnswDocs;
-use crate::idx::trees::hnsw::docs::VecDocs;
+use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use crate::sql::index::HnswParams;
-use reblessive::tree::Stk;
 
 pub(super) enum HnswFlavor {
 	H5_9(Hnsw<ArraySet<9>, ArraySet<5>>),
@@ -95,6 +95,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.insert(tx, q_pt).await,
 		}
 	}
+
 	pub(super) async fn remove(
 		&mut self,
 		tx: &Transaction,
@@ -117,6 +118,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.remove(tx, e_id).await,
 		}
 	}
+
 	pub(super) async fn knn_search(
 		&self,
 		tx: &Transaction,
@@ -139,6 +141,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.knn_search(tx, search).await,
 		}
 	}
+
 	pub(super) async fn knn_search_checked(
 		&self,
 		tx: &Transaction,
@@ -193,6 +196,7 @@ impl HnswFlavor {
 			}
 		}
 	}
+
 	pub(super) async fn get_vector(
 		&self,
 		tx: &Transaction,
@@ -215,6 +219,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.get_vector(tx, e_id).await,
 		}
 	}
+
 	#[cfg(test)]
 	pub(super) fn check_hnsw_properties(&self, expected_count: usize) {
 		match self {

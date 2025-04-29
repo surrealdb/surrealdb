@@ -4,6 +4,12 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
+use std::sync::Arc;
+
+use revision::Revisioned;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
@@ -31,10 +37,6 @@ use crate::key::index::vm::Vm;
 use crate::kvs::{Key, KeyEncode as _, Val};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Thing};
-use revision::Revisioned;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
@@ -262,7 +264,8 @@ impl IndexKeyBase {
 	}
 }
 
-/// This trait provides `Revision` based default implementations for serialization/deserialization
+/// This trait provides `Revision` based default implementations for
+/// serialization/deserialization
 trait VersionedStore
 where
 	Self: Sized + Serialize + DeserializeOwned + Revisioned,

@@ -1,6 +1,9 @@
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+use rust_decimal::Decimal;
+
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::{Force, Statement};
+use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::sql::data::Data;
@@ -19,9 +22,6 @@ use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use crate::sql::{Cond, FlowResultExt as _, Function, Groups, View};
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
-use rust_decimal::Decimal;
 
 type Ops = Vec<(Idiom, Operator, Value)>;
 
@@ -319,6 +319,7 @@ impl Document {
 		data.cut(ID.as_ref());
 		Ok(Data::ReplaceExpression(data))
 	}
+
 	//
 	async fn data(
 		&self,
@@ -538,6 +539,7 @@ impl Document {
 		// Everything ok
 		Ok(())
 	}
+
 	/// Increment or decrement the field in the foreign table
 	fn chg(
 		&self,
@@ -617,6 +619,7 @@ impl Document {
 		// Everything ok
 		Ok(())
 	}
+
 	/// Set the new maximum value for the field in the foreign table
 	fn max(
 		&self,
@@ -761,7 +764,8 @@ impl Document {
 		key: &Idiom,
 		val: Value,
 	) -> Result<Value, Error> {
-		// Build the condition merging the optional user provided condition and the group
+		// Build the condition merging the optional user provided condition and the
+		// group
 		let mut iter = fdc.groups.0.iter().enumerate();
 		let cond = if let Some((i, g)) = iter.next() {
 			let mut root = Value::Expression(Box::new(Expression::Binary {

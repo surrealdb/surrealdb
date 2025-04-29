@@ -1,11 +1,10 @@
 //! Stores a graph edge pointer
-use crate::err::Error;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
-use crate::kvs::KeyEncode;
-use crate::sql::id::Id;
 use serde::{Deserialize, Serialize};
+
+use crate::err::Error;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::{impl_key, KeyEncode};
+use crate::sql::id::Id;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 struct Prefix<'a> {
@@ -106,7 +105,8 @@ impl<'a> PrefixFf<'a> {
 // The order in this key is made so we can scan:
 // - all references for a given record
 // - all references for a given record, filtered by a origin table
-// - all references for a given record, filtered by a origin table and an origin field
+// - all references for a given record, filtered by a origin table and an origin
+//   field
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]

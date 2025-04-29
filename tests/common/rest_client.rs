@@ -1,10 +1,12 @@
-use crate::common::expected::Expected;
+use std::time::{Duration, SystemTime};
+
 use http::{header, HeaderMap, StatusCode};
 use reqwest::Client;
 use serde_json::Value as JsonValue;
-use std::time::{Duration, SystemTime};
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
+
+use crate::common::expected::Expected;
 
 // A very basic Rest client.
 // The goal is to have a client that can connect to any version of SurrealDB.

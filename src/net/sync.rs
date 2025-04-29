@@ -1,10 +1,10 @@
-use crate::err::Error;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Extension, Router};
 use surrealdb::dbs::capabilities::RouteTarget;
 
 use super::AppState;
+use crate::err::Error;
 
 pub(super) fn router<S>() -> Router<S>
 where

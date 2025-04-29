@@ -1,13 +1,16 @@
-use tokio::sync::RwLock;
-
-use std::{collections::BTreeMap, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
+use std::collections::BTreeMap;
+use std::fmt::Debug;
+use std::hash::Hash;
+use std::marker::PhantomData;
+use std::sync::Arc;
 
 use async_graphql::dynamic::Schema;
+use tokio::sync::RwLock;
 
+use super::error::GqlError;
+use super::schema::generate_schema;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
-
-use super::{error::GqlError, schema::generate_schema};
 
 pub trait Invalidator: Debug + Clone + Send + Sync + 'static {
 	type MetaData: Debug + Clone + Send + Sync + Hash;
@@ -81,6 +84,7 @@ impl<I: Invalidator> SchemaCache<I> {
 			_invalidator: PhantomData,
 		}
 	}
+
 	pub async fn get_schema(&self, session: &Session) -> Result<Schema, GqlError> {
 		let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 		let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;

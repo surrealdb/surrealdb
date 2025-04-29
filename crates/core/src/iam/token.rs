@@ -1,10 +1,10 @@
-use crate::sql::json;
-use crate::sql::Object;
-use crate::sql::Value;
-use jsonwebtoken::{Algorithm, Header};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::LazyLock;
+
+use jsonwebtoken::{Algorithm, Header};
+use serde::{Deserialize, Serialize};
+
+use crate::sql::{json, Object, Value};
 
 pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
 

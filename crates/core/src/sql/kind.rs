@@ -1,19 +1,34 @@
-use super::escape::EscapeKey;
-use super::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Part,
-	Range, Regex, Strand, Thing, Uuid,
-};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{
-	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
-	Table, Value,
-};
+use std::collections::BTreeMap;
+use std::fmt::{self, Display, Formatter, Write};
+
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt::{self, Display, Formatter, Write};
+
+use super::escape::EscapeKey;
+use super::{
+	Array,
+	Bytes,
+	Closure,
+	Datetime,
+	Duration,
+	File,
+	Geometry,
+	Ident,
+	Idiom,
+	Number,
+	Object,
+	Part,
+	Range,
+	Regex,
+	Strand,
+	Thing,
+	Uuid,
+};
+use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Table, Value};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -103,7 +118,8 @@ impl Kind {
 		false
 	}
 
-	/// Returns Some if this type can be converted into a discriminated object, None otherwise
+	/// Returns Some if this type can be converted into a discriminated object,
+	/// None otherwise
 	pub(crate) fn to_discriminated(&self) -> Option<Kind> {
 		match self {
 			Kind::Either(nested) => {
@@ -260,8 +276,8 @@ impl Kind {
 /// Trait for retrieving the `kind` equivalent of a rust type.
 ///
 /// Returns the most general kind for a type.
-/// For example Number could be either number or float or int or decimal but the most general is
-/// number.
+/// For example Number could be either number or float or int or decimal but the
+/// most general is number.
 ///
 /// This trait is only implemented for types which can only be retrieve from
 pub trait HasKind {

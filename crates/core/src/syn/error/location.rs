@@ -1,9 +1,11 @@
-use crate::syn::token::Span;
 use std::ops::Range;
+
+use crate::syn::token::Span;
 
 /// A human readable location inside a string.
 ///
-/// Locations are 1 indexed, the first character on the first line being on line 1 column 1.
+/// Locations are 1 indexed, the first character on the first line being on line
+/// 1 column 1.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct Location {
@@ -38,6 +40,7 @@ impl Location {
 			column: column + 1,
 		}
 	}
+
 	pub fn range_of_span(source: &str, span: Span) -> Range<Self> {
 		if source.len() <= span.offset as usize {
 			return Self::range_of_source_end(source);
@@ -52,8 +55,8 @@ impl Location {
 				// Couldn't find the line, give up and return the last
 				return Self::range_of_source_end(source);
 			};
-			// Safety: line originates from source so it is a substring so calling str_offset is
-			// valid.
+			// Safety: line originates from source so it is a substring so calling
+			// str_offset is valid.
 			let line_offset = unsafe { str_offset(source, line) };
 
 			if start_offset < line_offset {
@@ -92,8 +95,8 @@ impl Location {
 				// Couldn't find the line, give up and return the last
 				break Self::range_of_source_end(source).end;
 			};
-			// Safety: line originates from source so it is a substring so calling str_offset is
-			// valid.
+			// Safety: line originates from source so it is a substring so calling
+			// str_offset is valid.
 			let line_offset = unsafe { str_offset(source, line) };
 
 			if end_offset < line_offset {

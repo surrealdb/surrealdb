@@ -1,11 +1,12 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use parking_lot::Mutex;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::hint::black_box;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+
+use criterion::{criterion_group, criterion_main, Criterion};
+use parking_lot::Mutex;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 trait BenchAllocator: Send + Sync {
 	fn alloc(&self, size: usize);
@@ -106,6 +107,7 @@ impl BenchAllocator for PerThreadBenchAllocator {
 			}
 		}
 	}
+
 	fn total_usage(&self) -> usize {
 		let mut total = 0;
 		if MAIN_PASSED.load(Ordering::Relaxed) {

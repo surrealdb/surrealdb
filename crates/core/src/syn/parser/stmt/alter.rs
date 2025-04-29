@@ -1,19 +1,11 @@
 use reblessive::Stk;
 
 use crate::sql::statements::alter::AlterSequenceStatement;
-use crate::{
-	sql::{
-		statements::{AlterStatement, AlterTableStatement},
-		TableType,
-	},
-	syn::{
-		parser::{
-			mac::{expected, unexpected},
-			ParseResult, Parser,
-		},
-		token::t,
-	},
-};
+use crate::sql::statements::{AlterStatement, AlterTableStatement};
+use crate::sql::TableType;
+use crate::syn::parser::mac::{expected, unexpected};
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::t;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_alter_stmt(&mut self, ctx: &mut Stk) -> ParseResult<AlterStatement> {

@@ -1,3 +1,9 @@
+use std::fmt::{self, Display, Write};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use crate::ctx::Context;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
@@ -8,14 +14,19 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
-use crate::sql::{Literal, Part};
-use crate::sql::{Relation, TableType};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-use uuid::Uuid;
+use crate::sql::{
+	Base,
+	Ident,
+	Idiom,
+	Kind,
+	Literal,
+	Part,
+	Permissions,
+	Relation,
+	Strand,
+	TableType,
+	Value,
+};
 
 #[revisioned(revision = 6)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

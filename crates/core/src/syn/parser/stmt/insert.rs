@@ -1,13 +1,11 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::{statements::InsertStatement, Data, Idiom, Subquery, Value},
-	syn::{
-		error::bail,
-		parser::{mac::expected, ParseResult, Parser},
-		token::t,
-	},
-};
+use crate::sql::statements::InsertStatement;
+use crate::sql::{Data, Idiom, Subquery, Value};
+use crate::syn::error::bail;
+use crate::syn::parser::mac::expected;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::t;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_insert_stmt(

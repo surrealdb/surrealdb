@@ -1,10 +1,9 @@
+use super::args::{Any, Cast, Optional};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
 use crate::sql::Regex;
-
-use super::args::{Any, Cast, Optional};
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -63,7 +62,7 @@ pub fn lowercase((string,): (String,)) -> Result<Value, Error> {
 }
 
 pub fn repeat((val, num): (String, i64)) -> Result<Value, Error> {
-	//TODO: Deal with truncation of neg:
+	// TODO: Deal with truncation of neg:
 	let num = num as usize;
 	limit("string::repeat", val.len().saturating_mul(num))?;
 	Ok(val.repeat(num).into())
@@ -183,10 +182,10 @@ pub fn words((string,): (String,)) -> Result<Value, Error> {
 
 pub mod distance {
 
+	use strsim;
+
 	use crate::err::Error;
 	use crate::sql::Value;
-
-	use strsim;
 
 	/// Calculate the Damerau-Levenshtein distance between two strings
 	/// via [`strsim::damerau_levenshtein`].
@@ -194,8 +193,8 @@ pub mod distance {
 		Ok(strsim::damerau_levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the normalized Damerau-Levenshtein distance between two strings
-	/// via [`strsim::normalized_damerau_levenshtein`].
+	/// Calculate the normalized Damerau-Levenshtein distance between two
+	/// strings via [`strsim::normalized_damerau_levenshtein`].
 	pub fn normalized_damerau_levenshtein((a, b): (String, String)) -> Result<Value, Error> {
 		Ok(strsim::normalized_damerau_levenshtein(&a, &b).into())
 	}
@@ -203,7 +202,8 @@ pub mod distance {
 	/// Calculate the Hamming distance between two strings
 	/// via [`strsim::hamming`].
 	///
-	/// Will result in an [`Error::InvalidArguments`] if the given strings are of different lengths.
+	/// Will result in an [`Error::InvalidArguments`] if the given strings are
+	/// of different lengths.
 	pub fn hamming((a, b): (String, String)) -> Result<Value, Error> {
 		match strsim::hamming(&a, &b) {
 			Ok(v) => Ok(v.into()),
@@ -227,8 +227,8 @@ pub mod distance {
 	}
 
 	/// Calculate the OSA distance &ndash; a variant of the Levenshtein distance
-	/// that allows for transposition of adjacent characters &ndash; between two strings
-	/// via [`strsim::osa_distance`].
+	/// that allows for transposition of adjacent characters &ndash; between two
+	/// strings via [`strsim::osa_distance`].
 	pub fn osa_distance((a, b): (String, String)) -> Result<Value, Error> {
 		Ok(strsim::osa_distance(&a, &b).into())
 	}
@@ -248,19 +248,21 @@ pub mod html {
 }
 
 pub mod is {
+	use std::char;
+	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+	use std::sync::LazyLock;
+
+	use chrono::NaiveDateTime;
+	use regex::Regex;
+	use semver::Version;
+	use ulid::Ulid;
+	use url::Url;
+	use uuid::Uuid;
+
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
 	use crate::sql::value::Value;
 	use crate::sql::{Datetime, Thing};
-	use chrono::NaiveDateTime;
-	use regex::Regex;
-	use semver::Version;
-	use std::char;
-	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-	use std::sync::LazyLock;
-	use ulid::Ulid;
-	use url::Url;
-	use uuid::Uuid;
 
 	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
 	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
@@ -360,11 +362,11 @@ pub mod is {
 
 pub mod similarity {
 
+	use strsim;
+
 	use crate::err::Error;
 	use crate::fnc::util::string::fuzzy::Fuzzy;
 	use crate::sql::Value;
-
-	use strsim;
 
 	pub fn fuzzy((a, b): (String, String)) -> Result<Value, Error> {
 		Ok(a.as_str().fuzzy_score(b.as_str()).into())
@@ -395,9 +397,10 @@ pub mod similarity {
 
 pub mod semver {
 
+	use semver::Version;
+
 	use crate::err::Error;
 	use crate::sql::Value;
-	use semver::Version;
 
 	fn parse_version(ver: &str, func: &str, msg: &str) -> Result<Version, Error> {
 		Version::parse(ver).map_err(|_| Error::InvalidArguments {
@@ -516,11 +519,9 @@ pub mod semver {
 #[cfg(test)]
 mod tests {
 	use super::{contains, matches, replace, slice};
-	use crate::{
-		err::Error,
-		fnc::args::{Cast, Optional},
-		sql::Value,
-	};
+	use crate::err::Error;
+	use crate::fnc::args::{Cast, Optional};
+	use crate::sql::Value;
 
 	#[test]
 	fn string_slice() {

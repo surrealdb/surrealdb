@@ -1,10 +1,11 @@
-use crate::ctx::MutableContext;
-use crate::iam::Auth;
-use crate::iam::{Level, Role};
-use crate::sql::value::Value;
-use chrono::Utc;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+use chrono::Utc;
+
+use crate::ctx::MutableContext;
+use crate::iam::{Auth, Level, Role};
+use crate::sql::value::Value;
 
 /// Specifies the current session information when processing a query.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

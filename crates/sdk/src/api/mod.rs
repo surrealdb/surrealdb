@@ -1,15 +1,13 @@
 //! Functionality for connecting to local and remote databases
 
-use method::BoxFuture;
-use semver::BuildMetadata;
-use semver::Version;
-use semver::VersionReq;
 use std::fmt;
 use std::fmt::Debug;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::sync::Arc;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+use method::BoxFuture;
+use semver::{BuildMetadata, Version, VersionReq};
 use tokio::sync::watch;
 
 macro_rules! transparent_wrapper{
@@ -123,13 +121,11 @@ pub mod value;
 
 mod conn;
 
+pub use method::query::Response;
+
 use self::conn::Router;
 use self::err::Error;
-use self::opt::Endpoint;
-use self::opt::EndpointKind;
-use self::opt::WaitFor;
-
-pub use method::query::Response;
+use self::opt::{Endpoint, EndpointKind, WaitFor};
 
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;
@@ -192,8 +188,8 @@ impl<Client> IntoFuture for Connect<Client, Surreal<Client>>
 where
 	Client: Connection,
 {
-	type Output = Result<Surreal<Client>>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
+	type Output = Result<Surreal<Client>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -222,8 +218,8 @@ impl<Client> IntoFuture for Connect<Client, ()>
 where
 	Client: Connection,
 {
-	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
+	type Output = Result<()>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -270,9 +266,9 @@ struct Inner {
 
 /// A database client instance for embedded or remote databases.
 ///
-/// See [Running SurrealDB embedded in Rust](crate#running-surrealdb-embedded-in-rust)
-/// for tips on how to optimize performance for the client when working
-/// with embedded instances.
+/// See [Running SurrealDB embedded in
+/// Rust](crate#running-surrealdb-embedded-in-rust) for tips on how to optimize
+/// performance for the client when working with embedded instances.
 pub struct Surreal<C: Connection> {
 	inner: Arc<Inner>,
 	engine: PhantomData<C>,

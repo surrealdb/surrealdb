@@ -1,12 +1,13 @@
-use crate::cli::upgrade::ROOT;
-use crate::err::Error;
-use reqwest::Client;
 use std::borrow::Cow;
 #[cfg(test)]
 use std::collections::BTreeMap;
-use std::io::Error as IoError;
-use std::io::ErrorKind;
+use std::io::{Error as IoError, ErrorKind};
 use std::time::Duration;
+
+use reqwest::Client;
+
+use crate::cli::upgrade::ROOT;
+use crate::err::Error;
 
 pub(crate) trait VersionClient {
 	async fn fetch(&self, version: &str) -> Result<Cow<'static, str>, Error>;

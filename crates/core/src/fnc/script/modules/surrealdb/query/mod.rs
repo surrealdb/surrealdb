@@ -1,23 +1,20 @@
 use std::cell::RefCell;
 
-use js::{
-	class::{JsClass, OwnedBorrow, Readable, Trace},
-	prelude::{Coerced, Opt},
-	Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value,
-};
+use js::class::{JsClass, OwnedBorrow, Readable, Trace};
+use js::prelude::{Coerced, Opt};
+use js::{Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value};
 use reblessive::tree::Stk;
 
-use crate::{
-	ctx::Context,
-	dbs::{Attach, Options},
-	doc::CursorDoc,
-	sql::FlowResultExt as _,
-};
+use crate::ctx::Context;
+use crate::dbs::{Attach, Options};
+use crate::doc::CursorDoc;
+use crate::sql::FlowResultExt as _;
 
 mod classes;
 
-use crate::ctx::MutableContext;
 pub use classes::Query;
+
+use crate::ctx::MutableContext;
 
 /// A class to carry the data to run subqueries.
 #[derive(js::JsLifetime)]
@@ -33,9 +30,9 @@ impl<'js> Trace<'js> for QueryContext<'js> {
 }
 
 impl<'js> JsClass<'js> for QueryContext<'js> {
-	const NAME: &'static str = "QueryContext";
-
 	type Mutable = Readable;
+
+	const NAME: &'static str = "QueryContext";
 
 	fn prototype(_ctx: &js::Ctx<'js>) -> Result<Option<js::Object<'js>>> {
 		Ok(None)
@@ -61,7 +58,8 @@ pub fn query<'js>(
 	let promise = Promise::wrap_future(&ctx_clone, async move {
 		let query_ctx = ctx.userdata::<QueryContext<'js>>().expect("query context should be set");
 
-		// Wait on existing query ctx so that we can't spawn more then one query at the same time.
+		// Wait on existing query ctx so that we can't spawn more then one query at the
+		// same time.
 		if let Some(x) = pending_query_future {
 			let _ = x.await;
 		}

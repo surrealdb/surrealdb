@@ -1,11 +1,12 @@
 mod parse;
 use parse::Parse;
 mod helpers;
-use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn strict_typing_inline() -> Result<(), Error> {

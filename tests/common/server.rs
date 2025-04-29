@@ -1,5 +1,3 @@
-use rand::{thread_rng, Rng};
-use rcgen::CertifiedKey;
 use std::collections::btree_set::Iter;
 use std::collections::HashMap;
 use std::error::Error;
@@ -7,6 +5,9 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
+
+use rand::{thread_rng, Rng};
+use rcgen::CertifiedKey;
 use tokio::time;
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info};
@@ -73,8 +74,8 @@ impl Child {
 		output
 	}
 
-	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
-	/// returns successfully, Err otherwise.
+	/// Read the child's stdout concatenated with its stderr. Returns Ok if the
+	/// child returns successfully, Err otherwise.
 	pub fn output(&mut self) -> Result<String, String> {
 		let status = self.inner.as_mut().map(|child| child.wait().unwrap()).unwrap();
 		let buffer = self.stdout_and_stderr();

@@ -1,10 +1,10 @@
 //! Stores the offsets
+use serde::{Deserialize, Serialize};
+
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]

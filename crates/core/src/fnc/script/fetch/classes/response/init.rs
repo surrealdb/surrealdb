@@ -1,11 +1,10 @@
 use std::string::String as StdString;
 
-use js::{
-	class::{Trace, Tracer},
-	Class, Coerced, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value,
-};
+use js::class::{Trace, Tracer};
+use js::{Class, Coerced, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value};
 
-use crate::fnc::script::fetch::{classes::Headers, util};
+use crate::fnc::script::fetch::classes::Headers;
+use crate::fnc::script::fetch::util;
 
 /// Struct containing data from the init argument from the Response constructor.
 #[derive(Clone, JsLifetime)]

@@ -1,16 +1,18 @@
-use crate::cli::version_client;
-use crate::cli::version_client::VersionClient;
-use crate::cnf::PKG_VERSION;
-use crate::err::Error;
-use clap::Args;
-use semver::{Comparator, Op, Version};
 use std::borrow::Cow;
 use std::fs;
 use std::io::{Error as IoError, ErrorKind};
 use std::ops::Deref;
 use std::path::Path;
 use std::process::Command;
+
+use clap::Args;
+use semver::{Comparator, Op, Version};
 use surrealdb::env::{arch, os};
+
+use crate::cli::version_client;
+use crate::cli::version_client::VersionClient;
+use crate::cnf::PKG_VERSION;
+use crate::err::Error;
 
 pub(crate) const ROOT: &str = "https://download.surrealdb.com";
 const ALPHA: &str = "alpha";

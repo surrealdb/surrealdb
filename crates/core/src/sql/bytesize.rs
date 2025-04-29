@@ -1,16 +1,16 @@
-use crate::err::Error;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::Value;
+use std::iter::{Peekable, Sum};
+use std::str::{Chars, FromStr};
+use std::{fmt, ops};
+
 use num_traits::CheckedAdd;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::iter::{Peekable, Sum};
-use std::ops;
-use std::str::{Chars, FromStr};
 
 use super::value::{TryAdd, TrySub};
 use super::Strand;
+use crate::err::Error;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Value;
 
 #[revisioned(revision = 1)]
 #[derive(
@@ -28,6 +28,7 @@ const PIB: u64 = TIB * 1024;
 
 impl FromStr for Bytesize {
 	type Err = ();
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		Self::try_from(s)
 	}
@@ -35,6 +36,7 @@ impl FromStr for Bytesize {
 
 impl TryFrom<String> for Bytesize {
 	type Error = ();
+
 	fn try_from(v: String) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
@@ -42,6 +44,7 @@ impl TryFrom<String> for Bytesize {
 
 impl TryFrom<Strand> for Bytesize {
 	type Error = ();
+
 	fn try_from(v: Strand) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
@@ -49,6 +52,7 @@ impl TryFrom<Strand> for Bytesize {
 
 impl TryFrom<&str> for Bytesize {
 	type Error = ();
+
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		match Bytesize::parse(v) {
 			Ok(v) => Ok(v),
@@ -58,8 +62,8 @@ impl TryFrom<&str> for Bytesize {
 }
 
 impl Bytesize {
-	pub const ZERO: Bytesize = Bytesize(0);
 	pub const MAX: Bytesize = Bytesize(u64::MAX);
+	pub const ZERO: Bytesize = Bytesize(0);
 
 	pub fn new(b: u64) -> Self {
 		Bytesize(b)
@@ -184,6 +188,7 @@ impl fmt::Display for Bytesize {
 
 impl ops::Add for Bytesize {
 	type Output = Self;
+
 	fn add(self, other: Self) -> Self {
 		// checked to make sure it doesn't overflow
 		match self.0.checked_add(other.0) {
@@ -195,6 +200,7 @@ impl ops::Add for Bytesize {
 
 impl TryAdd for Bytesize {
 	type Output = Self;
+
 	fn try_add(self, other: Self) -> Result<Self, Error> {
 		self.0
 			.checked_add(other.0)
@@ -211,6 +217,7 @@ impl CheckedAdd for Bytesize {
 
 impl<'b> ops::Add<&'b Bytesize> for &Bytesize {
 	type Output = Bytesize;
+
 	fn add(self, other: &'b Bytesize) -> Bytesize {
 		match self.0.checked_add(other.0) {
 			Some(v) => Bytesize::new(v),
@@ -221,6 +228,7 @@ impl<'b> ops::Add<&'b Bytesize> for &Bytesize {
 
 impl<'b> TryAdd<&'b Bytesize> for &Bytesize {
 	type Output = Bytesize;
+
 	fn try_add(self, other: &'b Bytesize) -> Result<Bytesize, Error> {
 		self.0
 			.checked_add(other.0)
@@ -231,6 +239,7 @@ impl<'b> TryAdd<&'b Bytesize> for &Bytesize {
 
 impl ops::Sub for Bytesize {
 	type Output = Self;
+
 	fn sub(self, other: Self) -> Self {
 		match self.0.checked_sub(other.0) {
 			Some(v) => Bytesize::new(v),
@@ -241,6 +250,7 @@ impl ops::Sub for Bytesize {
 
 impl TrySub for Bytesize {
 	type Output = Self;
+
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
 		self.0
 			.checked_sub(other.0)
@@ -251,6 +261,7 @@ impl TrySub for Bytesize {
 
 impl<'b> ops::Sub<&'b Bytesize> for &Bytesize {
 	type Output = Bytesize;
+
 	fn sub(self, other: &'b Bytesize) -> Bytesize {
 		match self.0.checked_sub(other.0) {
 			Some(v) => Bytesize::new(v),
@@ -261,6 +272,7 @@ impl<'b> ops::Sub<&'b Bytesize> for &Bytesize {
 
 impl<'b> TrySub<&'b Bytesize> for &Bytesize {
 	type Output = Bytesize;
+
 	fn try_sub(self, other: &'b Bytesize) -> Result<Bytesize, Error> {
 		self.0
 			.checked_sub(other.0)

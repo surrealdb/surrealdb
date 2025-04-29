@@ -1,11 +1,10 @@
-use crate::ctx::Context;
-use crate::ctx::MutableContext;
+use futures::StreamExt;
+use reblessive::tree::Stk;
+
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::doc::CursorDoc;
-use crate::doc::CursorValue;
-use crate::doc::Document;
+use crate::dbs::{Options, Statement};
+use crate::doc::{CursorDoc, CursorValue, Document};
 use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
@@ -13,20 +12,11 @@ use crate::kvs::KeyDecode;
 use crate::sql::dir::Dir;
 use crate::sql::edges::Edges;
 use crate::sql::graph::GraphSubjects;
-use crate::sql::paths::EDGE;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
+use crate::sql::paths::{EDGE, IN, OUT};
 use crate::sql::reference::ReferenceDeleteStrategy;
-use crate::sql::statements::DeleteStatement;
-use crate::sql::statements::UpdateStatement;
+use crate::sql::statements::{DeleteStatement, UpdateStatement};
 use crate::sql::value::{Value, Values};
-use crate::sql::Data;
-use crate::sql::FlowResultExt as _;
-use crate::sql::Operator;
-use crate::sql::Part;
-use crate::sql::Thing;
-use futures::StreamExt;
-use reblessive::tree::Stk;
+use crate::sql::{Data, FlowResultExt as _, Operator, Part, Thing};
 
 impl Document {
 	pub(super) async fn purge(

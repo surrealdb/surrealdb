@@ -1,3 +1,6 @@
+use deunicode::deunicode;
+use rust_stemmers::{Algorithm, Stemmer};
+
 use crate::err::Error;
 use crate::idx::ft::analyzer::mapper::Mapper;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
@@ -5,8 +8,6 @@ use crate::idx::ft::offsets::Position;
 use crate::idx::trees::store::IndexStores;
 use crate::sql::filter::Filter as SqlFilter;
 use crate::sql::language::Language;
-use deunicode::deunicode;
-use rust_stemmers::{Algorithm, Stemmer};
 
 #[derive(Clone, Copy)]
 pub(super) enum FilteringStage {

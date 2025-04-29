@@ -1,6 +1,8 @@
-use crate::idx::trees::hnsw::ElementId;
-use ahash::{HashSet, HashSetExt};
 use std::fmt::Debug;
+
+use ahash::{HashSet, HashSetExt};
+
+use crate::idx::trees::hnsw::ElementId;
 
 pub trait DynamicSet: Debug + Send + Sync {
 	fn with_capacity(capacity: usize) -> Self;
@@ -113,9 +115,10 @@ impl<const N: usize> DynamicSet for ArraySet<N> {
 
 #[cfg(test)]
 mod tests {
+	use ahash::HashSet;
+
 	use crate::idx::trees::dynamicset::{AHashSet, ArraySet, DynamicSet};
 	use crate::idx::trees::hnsw::ElementId;
-	use ahash::HashSet;
 
 	fn test_dynamic_set<S: DynamicSet>(capacity: ElementId) {
 		let mut dyn_set = S::with_capacity(capacity as usize);

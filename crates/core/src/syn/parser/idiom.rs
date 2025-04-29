@@ -1,21 +1,12 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::{
-		graph::GraphSubjects,
-		part::{DestructurePart, Recurse, RecurseInstruction},
-		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Value,
-	},
-	syn::{
-		error::bail,
-		token::{t, Glued, Span, TokenKind},
-	},
-};
-
-use super::{
-	mac::{expected, parse_option, unexpected},
-	ParseResult, Parser,
-};
+use super::mac::{expected, parse_option, unexpected};
+use super::{ParseResult, Parser};
+use crate::sql::graph::GraphSubjects;
+use crate::sql::part::{DestructurePart, Recurse, RecurseInstruction};
+use crate::sql::{Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Value};
+use crate::syn::error::bail;
+use crate::syn::token::{t, Glued, Span, TokenKind};
 
 impl Parser<'_> {
 	pub(super) fn peek_continues_idiom(&mut self) -> bool {
@@ -26,7 +17,8 @@ impl Parser<'_> {
 		peek == t!("<") && matches!(self.peek1().kind, t!("-") | t!("->"))
 	}
 
-	/// Parse fields of a selecting query: `foo, bar` in `SELECT foo, bar FROM baz`.
+	/// Parse fields of a selecting query: `foo, bar` in `SELECT foo, bar FROM
+	/// baz`.
 	///
 	/// # Parser State
 	/// Expects the next tokens to be of a field set.
@@ -80,10 +72,12 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	/// Parses the remaining idiom parts after the start: Any part like `...`, `.foo` and `->foo`
+	/// Parses the remaining idiom parts after the start: Any part like `...`,
+	/// `.foo` and `->foo`
 	///
-	/// This function differes from [`Parser::parse_remaining_value_idiom`] in how it handles graph
-	/// parsing. Graphs inside a plain idioms will remain a normal graph production.
+	/// This function differes from [`Parser::parse_remaining_value_idiom`] in
+	/// how it handles graph parsing. Graphs inside a plain idioms will remain
+	/// a normal graph production.
 	pub(super) async fn parse_remaining_idiom(
 		&mut self,
 		stk: &mut Stk,
@@ -140,12 +134,14 @@ impl Parser<'_> {
 		Ok(Idiom(res))
 	}
 
-	/// Parses the remaining idiom parts after the start: Any part like `...`, `.foo` and `->foo`
+	/// Parses the remaining idiom parts after the start: Any part like `...`,
+	/// `.foo` and `->foo`
 	///
 	///
-	/// This function differes from [`Parser::parse_remaining_value_idiom`] in how it handles graph
-	/// parsing. When parsing a idiom like production which can be a value, the initial start value
-	/// might need to be changed to a Edge depending on what is parsed next.
+	/// This function differes from [`Parser::parse_remaining_value_idiom`] in
+	/// how it handles graph parsing. When parsing a idiom like production
+	/// which can be a value, the initial start value might need to be changed
+	/// to a Edge depending on what is parsed next.
 	pub(super) async fn parse_remaining_value_idiom(
 		&mut self,
 		ctx: &mut Stk,
@@ -207,8 +203,8 @@ impl Parser<'_> {
 		Ok(Value::Idiom(Idiom(res)))
 	}
 
-	/// Parse a graph idiom and possibly rewrite the starting value to be an edge whenever the
-	/// parsed production matches `Thing -> Ident`.
+	/// Parse a graph idiom and possibly rewrite the starting value to be an
+	/// edge whenever the parsed production matches `Thing -> Ident`.
 	async fn parse_graph_idiom(
 		&mut self,
 		ctx: &mut Stk,
@@ -216,8 +212,8 @@ impl Parser<'_> {
 		dir: Dir,
 	) -> ParseResult<Option<Value>> {
 		let graph = ctx.run(|ctx| self.parse_graph(ctx, dir)).await?;
-		// the production `Thing Graph` is reparsed as an edge if the graph does not contain an
-		// alias or a condition.
+		// the production `Thing Graph` is reparsed as an edge if the graph does not
+		// contain an alias or a condition.
 		if res.len() == 1
 			&& graph.alias.is_none()
 			&& graph.cond.is_none()
@@ -304,6 +300,7 @@ impl Parser<'_> {
 		};
 		Ok(res)
 	}
+
 	pub(super) async fn parse_function_part(
 		&mut self,
 		ctx: &mut Stk,
@@ -312,6 +309,7 @@ impl Parser<'_> {
 		let args = self.parse_function_args(ctx).await?;
 		Ok(Part::Method(name.0, args))
 	}
+
 	/// Parse the part after the `.{` in an idiom
 	pub(super) async fn parse_curly_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		match self.peek_kind() {
@@ -319,6 +317,7 @@ impl Parser<'_> {
 			_ => self.parse_destructure_part(ctx).await,
 		}
 	}
+
 	/// Parse a destructure part, expects `.{` to already be parsed
 	pub(super) async fn parse_destructure_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
@@ -364,7 +363,9 @@ impl Parser<'_> {
 
 		Ok(Part::Destructure(destructured))
 	}
-	/// Parse the inner part of a recurse, expects a valid recurse value in the current position
+
+	/// Parse the inner part of a recurse, expects a valid recurse value in the
+	/// current position
 	pub(super) fn parse_recurse_inner(&mut self) -> ParseResult<Recurse> {
 		let min = if matches!(self.peek().kind, TokenKind::Digits) {
 			Some(self.next_token_value::<u32>()?)
@@ -392,6 +393,7 @@ impl Parser<'_> {
 
 		Ok(Recurse::Range(min, max))
 	}
+
 	/// Parse a recursion instruction following the inner recurse part, if any
 	pub(super) async fn parse_recurse_instruction(
 		&mut self,
@@ -457,6 +459,7 @@ impl Parser<'_> {
 
 		Ok(instruction)
 	}
+
 	/// Parse a recurse part, expects `.{` to already be parsed
 	pub(super) async fn parse_recurse_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
@@ -475,6 +478,7 @@ impl Parser<'_> {
 
 		Ok(Part::Recurse(recurse, nest, instruction))
 	}
+
 	/// Parse the part after the `[` in a idiom
 	pub(super) async fn parse_bracket_part(
 		&mut self,
@@ -511,8 +515,9 @@ impl Parser<'_> {
 
 	/// Parse a basic idiom.
 	///
-	/// Basic idioms differ from normal idioms in that they are more restrictive.
-	/// Flatten, graphs, conditions and indexing by param is not allowed.
+	/// Basic idioms differ from normal idioms in that they are more
+	/// restrictive. Flatten, graphs, conditions and indexing by param is not
+	/// allowed.
 	pub(super) async fn parse_basic_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Idiom> {
 		let start = self.next_token_value::<Ident>()?;
 		let mut parts = vec![Part::Field(start)];
@@ -562,8 +567,8 @@ impl Parser<'_> {
 	/// Parse a local idiom.
 	///
 	/// Basic idioms differ from local idioms in that they are more restrictive.
-	/// Only field, all and number indexing is allowed. Flatten is also allowed but only at the
-	/// end.
+	/// Only field, all and number indexing is allowed. Flatten is also allowed
+	/// but only at the end.
 	pub(super) async fn parse_local_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Idiom> {
 		let start = self.next_token_value()?;
 		let mut parts = vec![Part::Field(start)];
@@ -652,8 +657,8 @@ impl Parser<'_> {
 	/// Parses a graph value
 	///
 	/// # Parser state
-	/// Expects to just have eaten a direction (e.g. <-, <->, or ->) and be at the field like part
-	/// of the graph
+	/// Expects to just have eaten a direction (e.g. <-, <->, or ->) and be at
+	/// the field like part of the graph
 	pub(super) async fn parse_graph(&mut self, ctx: &mut Stk, dir: Dir) -> ParseResult<Graph> {
 		let token = self.peek();
 		match token.kind {
@@ -752,10 +757,9 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::sql::{Expression, Id, Number, Object, Operator, Param, Strand, Thing};
 	use crate::syn::Parse;
-
-	use super::*;
 
 	#[test]
 	fn graph_in() {

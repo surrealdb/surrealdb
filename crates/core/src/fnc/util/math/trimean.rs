@@ -1,4 +1,5 @@
-use super::{median::Median, midhinge::Midhinge};
+use super::median::Median;
+use super::midhinge::Midhinge;
 use crate::sql::number::{Number, Sorted};
 
 pub trait Trimean {

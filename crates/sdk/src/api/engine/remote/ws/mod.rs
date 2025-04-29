@@ -5,21 +5,20 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-use crate::api::conn::Command;
-use crate::api::conn::DbResponse;
-use crate::api::Connect;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::opt::IntoEndpoint;
-use crate::value::Notification;
-use async_channel::Sender;
-use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::Duration;
+
+use async_channel::Sender;
+use indexmap::IndexMap;
 use surrealdb_core::sql::Value as CoreValue;
 use trice::Instant;
 use uuid::Uuid;
+
+use crate::api::conn::{Command, DbResponse};
+use crate::api::{Connect, Result, Surreal};
+use crate::opt::IntoEndpoint;
+use crate::value::Notification;
 
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
@@ -108,7 +107,8 @@ pub struct Wss;
 pub struct Client(());
 
 impl Surreal<Client> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
+	/// Connects to a specific database endpoint, saving the connection on the
+	/// static client
 	///
 	/// # Examples
 	///

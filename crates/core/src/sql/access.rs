@@ -1,15 +1,21 @@
-use crate::sql::{escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes, Duration, Id, Ident, Thing};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::sql::escape::EscapeIdent;
+use crate::sql::fmt::Fmt;
+use crate::sql::strand::no_nul_bytes;
+use crate::sql::{Duration, Id, Ident, Thing};
+
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-// Durations representing the expiration of different elements of the access method
-// In this context, the None variant represents that the element does not expire
+// Durations representing the expiration of different elements of the access
+// method In this context, the None variant represents that the element does not
+// expire
 pub struct AccessDuration {
 	// Duration after which the grants generated with the access method expire
 	// For access methods whose grants are tokens, this value is irrelevant
@@ -48,6 +54,7 @@ impl From<Access> for Accesses {
 
 impl Deref for Accesses {
 	type Target = Vec<Access>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -86,6 +93,7 @@ impl From<Ident> for Access {
 
 impl Deref for Access {
 	type Target = String;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

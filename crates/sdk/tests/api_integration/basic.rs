@@ -1,32 +1,21 @@
 // Tests common to all protocols and storage engines
 
-use serde::Deserialize;
-use serde::Serialize;
-use serde_json::json;
 use std::borrow::Cow;
 use std::ops::Bound;
 use std::time::Duration;
-use surrealdb::opt::auth::Database;
-use surrealdb::opt::auth::Namespace;
-use surrealdb::opt::auth::Record as RecordAccess;
-use surrealdb::opt::Raw;
-use surrealdb::opt::Resource;
-use surrealdb::opt::{PatchOp, PatchOps};
-use surrealdb::sql::statements::BeginStatement;
-use surrealdb::sql::statements::CommitStatement;
-use surrealdb::RecordId;
-use surrealdb::Response;
-use surrealdb::Value;
-use surrealdb::{error::Api as ApiError, error::Db as DbError, Error};
+
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use surrealdb::error::{Api as ApiError, Db as DbError};
+use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
+use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
+use surrealdb::sql::statements::{BeginStatement, CommitStatement};
+use surrealdb::{Error, RecordId, Response, Value};
 use surrealdb_core::sql::{Id, Value as CoreValue};
 use ulid::Ulid;
 
-use crate::api_integration::RecordName;
-use crate::api_integration::NS;
-use crate::api_integration::{ApiRecordId, Record, RecordBuf};
-
-use super::AuthParams;
-use super::CreateDb;
+use super::{AuthParams, CreateDb};
+use crate::api_integration::{ApiRecordId, Record, RecordBuf, RecordName, NS};
 
 pub async fn connect(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;

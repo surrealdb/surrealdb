@@ -1,9 +1,9 @@
-use crate::syn::{
-	error::{bail, SyntaxError},
-	lexer::{unicode::is_identifier_continue, Lexer},
-	token::{Token, TokenKind},
-};
 use std::mem;
+
+use crate::syn::error::{bail, SyntaxError};
+use crate::syn::lexer::unicode::is_identifier_continue;
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, TokenKind};
 
 pub fn flexible_ident(lexer: &mut Lexer, start: Token) -> Result<String, SyntaxError> {
 	match start.kind {

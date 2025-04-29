@@ -1,9 +1,6 @@
-use crate::{
-	sql::{self, Id, Ident, Idiom, Part, Query, Statement, Statements, Thing, Value},
-	syn::parser::mac::test_parse,
-};
-
 use super::Parser;
+use crate::sql::{self, Id, Ident, Idiom, Part, Query, Statement, Statements, Thing, Value};
+use crate::syn::parser::mac::test_parse;
 
 mod json;
 mod limit;

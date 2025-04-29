@@ -1,13 +1,15 @@
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use tokio::sync::RwLock;
+
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::trees::hnsw::index::HnswIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs::Key;
 use crate::sql::index::HnswParams;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(crate) type SharedHnswIndex = Arc<RwLock<HnswIndex>>;
 

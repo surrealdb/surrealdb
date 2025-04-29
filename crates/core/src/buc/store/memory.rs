@@ -1,12 +1,12 @@
-use std::{future::Future, pin::Pin};
+use std::future::Future;
+use std::pin::Pin;
 
 use bytes::Bytes;
 use dashmap::DashMap;
 use url::Url;
 
-use crate::sql::Datetime;
-
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
+use crate::sql::Datetime;
 
 #[derive(Clone, Debug, Default)]
 pub struct Entry {

@@ -1,3 +1,9 @@
+use std::collections::VecDeque;
+
+#[cfg(debug_assertions)]
+use ahash::HashMap;
+use reblessive::tree::Stk;
+
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
@@ -11,10 +17,6 @@ use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use crate::sql::index::{HnswParams, VectorType};
 use crate::sql::{Id, Number, Value};
-#[cfg(debug_assertions)]
-use ahash::HashMap;
-use reblessive::tree::Stk;
-use std::collections::VecDeque;
 
 pub struct HnswIndex {
 	dim: usize,

@@ -1,9 +1,10 @@
 //! Stores a record document
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
 use std::ops::Range;
+
+use serde::{Deserialize, Serialize};
+
+use crate::key::category::{Categorise, Category};
+use crate::kvs::impl_key;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]

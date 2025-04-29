@@ -1,9 +1,9 @@
-use crate::dbs;
-use crate::dbs::Notification;
-use crate::sql;
-use crate::sql::Value;
 use revision::revisioned;
 use serde::Serialize;
+
+use crate::dbs::Notification;
+use crate::sql::Value;
+use crate::{dbs, sql};
 
 /// The data returned by the database
 // The variants here should be in exactly the same order as `crate::engine::remote::ws::Data`

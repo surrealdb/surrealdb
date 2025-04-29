@@ -1,6 +1,7 @@
 use thiserror::Error;
 
-use crate::syn::{error::SyntaxError, token::Span};
+use crate::syn::error::SyntaxError;
+use crate::syn::token::Span;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -144,6 +145,7 @@ impl Iterator for BytesReader<'_> {
 		self.current += 1;
 		Some(res)
 	}
+
 	fn size_hint(&self) -> (usize, Option<usize>) {
 		let len = self.len();
 		(len, Some(len))

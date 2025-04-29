@@ -1,26 +1,28 @@
-use crate::{
-	api::{
-		conn::{Connection, Route, Router},
-		engine::local::Db,
-		method::BoxFuture,
-		opt::{Endpoint, EndpointKind},
-		ExtraFeatures, Result, Surreal,
-	},
-	engine::tasks,
-	opt::{auth::Root, WaitFor},
-	value::Notification,
-	Action,
-};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::atomic::AtomicI64;
+use std::sync::Arc;
+use std::task::Poll;
+
 use async_channel::{Receiver, Sender};
-use futures::{stream::poll_fn, StreamExt};
-use std::{
-	collections::{BTreeMap, HashMap, HashSet},
-	sync::{atomic::AtomicI64, Arc},
-	task::Poll,
-};
-use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
+use futures::stream::poll_fn;
+use futures::StreamExt;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::iam::Level;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::options::EngineOptions;
 use tokio::sync::{watch, RwLock};
 use tokio_util::sync::CancellationToken;
+
+use crate::api::conn::{Connection, Route, Router};
+use crate::api::engine::local::Db;
+use crate::api::method::BoxFuture;
+use crate::api::opt::{Endpoint, EndpointKind};
+use crate::api::{ExtraFeatures, Result, Surreal};
+use crate::engine::tasks;
+use crate::opt::auth::Root;
+use crate::opt::WaitFor;
+use crate::value::Notification;
+use crate::Action;
 
 impl crate::api::Connection for Db {}
 

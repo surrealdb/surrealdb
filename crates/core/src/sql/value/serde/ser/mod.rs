@@ -1,22 +1,23 @@
 mod r#enum;
 mod r#struct;
 
-use crate::err::Error;
-use crate::sql;
-use crate::sql::value::Value;
-use crate::sql::Bytes;
-use castaway::match_type;
-use serde::ser::Serialize;
-use serde_content::Number;
-use serde_content::Serializer;
-use serde_content::Unexpected;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
+use castaway::match_type;
+use serde::ser::Serialize;
+use serde_content::{Number, Serializer, Unexpected};
+
+use crate::err::Error;
+use crate::sql;
+use crate::sql::value::Value;
+use crate::sql::Bytes;
+
 type Content = serde_content::Value<'static>;
 
-/// Convert a `T` into `surrealdb::sql::Value` which is an enum that can represent any valid SQL data.
+/// Convert a `T` into `surrealdb::sql::Value` which is an enum that can
+/// represent any valid SQL data.
 pub fn to_value<T>(value: T) -> Result<Value, Error>
 where
 	T: Serialize + 'static,
@@ -183,15 +184,16 @@ impl From<serde_content::Error> for Error {
 
 #[cfg(test)]
 mod tests {
+	use std::ops::Bound;
+
+	use ::serde::Serialize;
+	use graph::{GraphSubject, GraphSubjects};
+
 	use super::*;
 	use crate::sql;
 	use crate::sql::block::Entry;
 	use crate::sql::statements::CreateStatement;
-	use crate::sql::Number;
-	use crate::sql::*;
-	use ::serde::Serialize;
-	use graph::{GraphSubject, GraphSubjects};
-	use std::ops::Bound;
+	use crate::sql::{Number, *};
 
 	#[test]
 	fn value_none() {

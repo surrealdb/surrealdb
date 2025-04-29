@@ -1,10 +1,9 @@
-use crate::api::engine::local::Db;
-use crate::api::engine::local::Mem;
-use crate::api::opt::Endpoint;
-use crate::api::opt::IntoEndpoint;
+use url::Url;
+
+use crate::api::engine::local::{Db, Mem};
+use crate::api::opt::{Endpoint, IntoEndpoint};
 use crate::api::Result;
 use crate::opt::Config;
-use url::Url;
 
 impl IntoEndpoint<Mem> for () {
 	type Client = Db;

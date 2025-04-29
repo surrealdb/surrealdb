@@ -1,10 +1,11 @@
-use crate::err::Error;
-use crate::sql::geometry::Geometry;
-use crate::sql::value::Value;
 use geo::algorithm::bearing::HaversineBearing;
 use geo::algorithm::centroid::Centroid;
 use geo::algorithm::chamberlain_duquette_area::ChamberlainDuquetteArea;
 use geo::algorithm::haversine_distance::HaversineDistance;
+
+use crate::err::Error;
+use crate::sql::geometry::Geometry;
+use crate::sql::value::Value;
 
 pub fn area((arg,): (Geometry,)) -> Result<Value, Error> {
 	match arg {

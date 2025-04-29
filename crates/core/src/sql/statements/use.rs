@@ -1,6 +1,7 @@
+use std::fmt;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 use crate::sql::escape::EscapeIdent;
 

@@ -94,10 +94,13 @@ impl Postings {
 
 #[cfg(test)]
 mod tests {
+	use test_log::test;
+
 	use crate::idx::ft::postings::Postings;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType, TransactionType::*};
-	use test_log::test;
+	use crate::kvs::LockType::*;
+	use crate::kvs::TransactionType::*;
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 
 	async fn new_operation(
 		ds: &Datastore,

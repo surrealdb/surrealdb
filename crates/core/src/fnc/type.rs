@@ -1,5 +1,10 @@
 use std::ops::Deref;
 
+use geo::Point;
+use reblessive::tree::Stk;
+use rust_decimal::Decimal;
+
+use super::args::Optional;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -8,15 +13,20 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{
-	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Kind, Number, Range,
-	Strand, Uuid,
+	Array,
+	Bytes,
+	Datetime,
+	Duration,
+	File,
+	FlowResultExt as _,
+	Geometry,
+	Kind,
+	Number,
+	Range,
+	Strand,
+	Uuid,
 };
 use crate::syn;
-use geo::Point;
-use reblessive::tree::Stk;
-use rust_decimal::Decimal;
-
-use super::args::Optional;
 
 pub fn array((val,): (Value,)) -> Result<Value, Error> {
 	Ok(val.cast_to::<Array>()?.into())
@@ -128,7 +138,7 @@ pub fn string((val,): (Value,)) -> Result<Value, Error> {
 
 pub fn string_lossy((val,): (Value,)) -> Result<Value, Error> {
 	match val {
-		//TODO: Replace with from_utf8_lossy_owned once stablized.
+		// TODO: Replace with from_utf8_lossy_owned once stablized.
 		Value::Bytes(x) => Ok(String::from_utf8_lossy(&x).into_owned().into()),
 		x => x.cast_to::<String>().map(Value::from).map_err(Error::from),
 	}

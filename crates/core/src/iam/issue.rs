@@ -1,9 +1,9 @@
+use chrono::{Duration as ChronoDuration, Utc};
+use jsonwebtoken::EncodingKey;
+
 use crate::err::Error;
 use crate::sql::duration::Duration;
 use crate::sql::Algorithm;
-use chrono::Duration as ChronoDuration;
-use chrono::Utc;
-use jsonwebtoken::EncodingKey;
 
 pub(crate) fn config(alg: Algorithm, key: &str) -> Result<EncodingKey, Error> {
 	match alg {

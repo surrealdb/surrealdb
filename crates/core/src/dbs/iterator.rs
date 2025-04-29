@@ -1,15 +1,22 @@
-use crate::ctx::Context;
-use crate::ctx::{Canceller, MutableContext};
+use std::mem;
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+
+use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
-	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
+	GrantedPermission,
+	IterationStage,
+	QueryPlanner,
+	RecordStrategy,
+	ScanDirection,
 	StatementContext,
 };
 use crate::sql::array::Array;
@@ -20,9 +27,6 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{Fields, Id, IdRange};
-use reblessive::tree::Stk;
-use std::mem;
-use std::sync::Arc;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -368,7 +372,8 @@ impl Iterator {
 			self.start,
 			self.limit,
 		)?;
-		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
+		// Extract the expected behaviour depending on the presence of EXPLAIN with or
+		// without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
 		// Check if we actually need to process and iterate over the results
 		if plan.do_iterate {
@@ -640,7 +645,8 @@ impl Iterator {
 		}
 		// Prevent deep recursion
 		let opt = opt.dive(4)?;
-		// If any iterator requires distinct, we need to create a global distinct instance
+		// If any iterator requires distinct, we need to create a global distinct
+		// instance
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {

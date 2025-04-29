@@ -1,36 +1,35 @@
-use axum::RequestPartsExt;
-use axum::{body::Body, Extension};
-use axum_extra::headers::{
-	authorization::{Basic, Bearer},
-	Authorization, Origin,
-};
+use axum::body::Body;
+use axum::{Extension, RequestPartsExt};
+use axum_extra::headers::authorization::{Basic, Bearer};
+use axum_extra::headers::{Authorization, Origin};
 use axum_extra::TypedHeader;
 use futures_util::future::BoxFuture;
-use http::{request::Parts, StatusCode};
+use http::request::Parts;
+use http::StatusCode;
 use hyper::{Request, Response};
-use surrealdb::{
-	dbs::Session,
-	iam::verify::{basic, token},
-};
+use surrealdb::dbs::Session;
+use surrealdb::iam::verify::{basic, token};
 use tower_http::auth::AsyncAuthorizeRequest;
 use uuid::Uuid;
 
+use super::client_ip::ExtractClientIP;
+use super::headers::{
+	parse_typed_header,
+	SurrealAuthDatabase,
+	SurrealAuthNamespace,
+	SurrealDatabase,
+	SurrealId,
+	SurrealNamespace,
+};
+use super::AppState;
 use crate::err::Error;
 
-use super::{
-	client_ip::ExtractClientIP,
-	headers::{
-		parse_typed_header, SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId,
-		SurrealNamespace,
-	},
-	AppState,
-};
-
+/// SurrealAuth is a tower layer that implements the AsyncAuthorizeRequest
+/// trait. It is used to authorize requests to SurrealDB using Basic or Token
+/// authentication.
 ///
-/// SurrealAuth is a tower layer that implements the AsyncAuthorizeRequest trait.
-/// It is used to authorize requests to SurrealDB using Basic or Token authentication.
-///
-/// It has to be used in conjunction with the tower_http::auth::RequireAuthorizationLayer layer:
+/// It has to be used in conjunction with the
+/// tower_http::auth::RequireAuthorizationLayer layer:
 ///
 /// ```rust
 /// use tower_http::auth::RequireAuthorizationLayer;
@@ -47,9 +46,9 @@ use super::{
 pub(super) struct SurrealAuth;
 
 impl AsyncAuthorizeRequest<Body> for SurrealAuth {
+	type Future = BoxFuture<'static, Result<Request<Body>, Response<Self::ResponseBody>>>;
 	type RequestBody = Body;
 	type ResponseBody = Body;
-	type Future = BoxFuture<'static, Result<Request<Body>, Response<Self::ResponseBody>>>;
 
 	fn authorize(&mut self, request: Request<Body>) -> Self::Future {
 		Box::pin(async {

@@ -1,17 +1,16 @@
+use std::{fmt, str};
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::{ControlFlow, FlowResult};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::fnc;
 use crate::sql::operator::Operator;
 use crate::sql::value::Value;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str;
-
-use super::ControlFlow;
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 

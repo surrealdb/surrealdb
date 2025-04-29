@@ -1,3 +1,10 @@
+use std::fmt::{self, Display, Formatter};
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -7,12 +14,6 @@ use crate::sql::operator::Operator;
 use crate::sql::part::Part;
 use crate::sql::paths::ID;
 use crate::sql::value::Value;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-
-use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -47,6 +48,7 @@ impl Data {
 	) -> Result<Option<Value>, Error> {
 		self.pick(stk, ctx, opt, &*ID).await
 	}
+
 	/// Fetch a field path value if one is specified
 	pub(crate) async fn pick(
 		&self,

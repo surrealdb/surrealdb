@@ -5,26 +5,25 @@ mod heuristic;
 pub mod index;
 mod layer;
 
+use rand::prelude::SmallRng;
+use rand::{Rng, SeedableRng};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
-use crate::idx::trees::hnsw::docs::HnswDocs;
-use crate::idx::trees::hnsw::docs::VecDocs;
+use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
-
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::index::HnswParams;
-use rand::prelude::SmallRng;
-use rand::{Rng, SeedableRng};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 struct HnswSearch {
 	pt: SharedVector,
@@ -413,6 +412,7 @@ where
 	) -> Result<Option<SharedVector>, Error> {
 		self.elements.get_vector(tx, e_id).await
 	}
+
 	#[cfg(test)]
 	fn check_hnsw_properties(&self, expected_count: usize) {
 		check_hnsw_props(self, expected_count);
@@ -433,6 +433,16 @@ where
 
 #[cfg(test)]
 mod tests {
+	use std::collections::hash_map::Entry;
+	use std::ops::Deref;
+	use std::sync::Arc;
+
+	use ahash::{HashMap, HashSet};
+	use ndarray::Array1;
+	use reblessive::tree::Stk;
+	use roaring::RoaringTreemap;
+	use test_log::test;
+
 	use crate::ctx::{Context, MutableContext};
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
@@ -448,14 +458,6 @@ mod tests {
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use crate::sql::{Id, Value};
-	use ahash::{HashMap, HashSet};
-	use ndarray::Array1;
-	use reblessive::tree::Stk;
-	use roaring::RoaringTreemap;
-	use std::collections::hash_map::Entry;
-	use std::ops::Deref;
-	use std::sync::Arc;
-	use test_log::test;
 
 	async fn insert_collection_hnsw(
 		tx: &Transaction,
