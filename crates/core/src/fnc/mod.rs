@@ -305,6 +305,7 @@ pub fn synchronous(
 		//
 		"rand" => rand::rand,
 		"rand::bool" => rand::bool,
+		"rand::duration" => rand::duration,
 		"rand::enum" => rand::r#enum,
 		"rand::float" => rand::float,
 		"rand::guid" => rand::guid,
