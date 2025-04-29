@@ -16,7 +16,7 @@ use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(feature = "ml")]
-use surrealdb::ml::execution::session::set_environment;
+use surrealdb_core::ml::execution::session::set_environment;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
