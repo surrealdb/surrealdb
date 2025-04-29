@@ -159,7 +159,7 @@ impl SurrealProcess {
 	pub async fn quit(mut self) -> anyhow::Result<()> {
 		self.stop().await?;
 
-		if let Err(_) = tokio::time::timeout(Duration::from_secs(5), self.process.wait()).await {
+		if tokio::time::timeout(Duration::from_secs(5), self.process.wait()).await.is_err() {
 			self.process.kill().await?;
 		}
 		Ok(())
@@ -184,7 +184,7 @@ impl SurrealProcess {
 	pub async fn quit_with_output(mut self) -> anyhow::Result<Option<ProcessOutput>> {
 		self.stop().await?;
 
-		if let Err(_) = tokio::time::timeout(Duration::from_secs(5), self.process.wait()).await {
+		if tokio::time::timeout(Duration::from_secs(5), self.process.wait()).await.is_err() {
 			self.process.kill().await?;
 		}
 

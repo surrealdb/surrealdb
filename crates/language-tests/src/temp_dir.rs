@@ -16,7 +16,7 @@ fn xorshift(state: &mut u32) -> u32 {
 	x ^= x >> 17;
 	x ^= x << 5;
 	*state = x;
-	return x;
+	x
 }
 
 impl TempDir {

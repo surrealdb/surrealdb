@@ -127,7 +127,7 @@ impl TestSet {
 		let mut all = Vec::new();
 		let mut map = HashMap::new();
 		let mut errors = Vec::new();
-		Self::collect_recursive(path, &path, &mut map, &mut all, &mut errors).await?;
+		Self::collect_recursive(path, path, &mut map, &mut all, &mut errors).await?;
 		Self::resolve_imports(&mut all, &map, &mut errors);
 		let map = Arc::new(map);
 		Ok((
@@ -142,7 +142,7 @@ impl TestSet {
 	}
 
 	fn resolve_imports(
-		all: &mut Vec<TestCase>,
+		all: &mut [TestCase],
 		map: &HashMap<String, TestId>,
 		errors: &mut Vec<TestLoadError>,
 	) {

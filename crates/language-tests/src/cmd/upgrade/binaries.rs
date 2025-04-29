@@ -33,40 +33,37 @@ pub async fn prepare_version(version: Version, download_permission: bool) -> any
 	}
 
 	#[cfg(not(target_os = "windows"))]
-	if let Err(_) = Command::new("tar")
+	if Command::new("tar")
 		.kill_on_drop(true)
 		.stdout(Stdio::null())
 		.stderr(Stdio::null())
 		.output()
 		.await
+		.is_err()
 	{
 		bail!("Can't find the tar utility, tar is required to be able to unzip downloaded binaries")
 	}
 
-	match Command::new("curl")
+	if Command::new("curl")
 		.kill_on_drop(true)
 		.stdout(Stdio::null())
 		.stderr(Stdio::null())
 		.output()
 		.await
+		.is_err()
 	{
-		Ok(_) => {
-			return prepare_curl(version.clone(), download_permission).await;
-		}
-		_ => {}
+		return prepare_curl(version.clone(), download_permission).await;
 	}
 
-	match Command::new("wget")
+	if Command::new("wget")
 		.kill_on_drop(true)
 		.stdout(Stdio::null())
 		.stderr(Stdio::null())
 		.output()
 		.await
+		.is_ok()
 	{
-		Ok(_) => {
-			return prepare_wget(version.clone(), download_permission).await;
-		}
-		_ => {}
+		return prepare_wget(version.clone(), download_permission).await;
 	}
 
 	bail!("Could not run wget or curl, please install either curl or wget to facilitate downloading surrealdb binaries")

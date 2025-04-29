@@ -294,11 +294,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	if config.keep_files {
 		temp_dir.keep();
-	} else {
-		if let Err(e) = temp_dir.cleanup().await {
-			println!();
-			println!("Failed to clean up temporary directory:{e}");
-		}
+	} else if let Err(e) = temp_dir.cleanup().await {
+		println!();
+		println!("Failed to clean up temporary directory:{e}");
 	}
 
 	println!();
@@ -402,7 +400,7 @@ async fn run_imports(
 				let Ok(source) = std::str::from_utf8(&set[import.id].source) else {
 					return Ok(Some(TestTaskResult::Import(
 						import.path.clone(),
-						format!("Import file was not valid utf-8."),
+						"Import file was not valid utf-8.".to_string(),
 					)));
 				};
 
@@ -488,7 +486,7 @@ async fn run_upgrade_test(
 
 			let source = &set[task.test].source;
 			let source = std::str::from_utf8(source).context("Text source was not valid utf-8")?;
-			connection.query(&source).await
+			connection.query(source).await
 		})
 		.await?
 }
@@ -530,7 +528,7 @@ async fn run_task_inner(
 
 	// run imports
 	let mut process = process::SurrealProcess::new(&config, &task.from, dir, task.port).await?;
-	match run_imports(&task, &test_set, &mut process, namespace, database).await {
+	match run_imports(task, &test_set, &mut process, namespace, database).await {
 		Ok(Some(x)) => return Ok(x),
 		Ok(None) => {}
 		Err(e) => {
@@ -550,7 +548,7 @@ async fn run_task_inner(
 	let mut retried = false;
 	let result = loop {
 		let process = process::SurrealProcess::new(&config, &task.to, dir, task.port).await?;
-		match run_upgrade_test(&task, &test_set, process, namespace, database).await {
+		match run_upgrade_test(task, &test_set, process, namespace, database).await {
 			Ok(x) => break x,
 			Err(e) => {
 				if retried || !format!("{:#?}", e).contains("open connection") {
