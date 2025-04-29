@@ -594,7 +594,6 @@ impl Value {
 			},
 			Value::Uuid(v) => match other {
 				Value::Uuid(w) => v == w,
-				Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
 				_ => false,
 			},
 			Value::Thing(v) => match other {
@@ -609,7 +608,6 @@ impl Value {
 			},
 			Value::Regex(v) => match other {
 				Value::Regex(w) => v == w,
-				Value::Uuid(w) => v.regex().is_match(w.to_raw().as_str()),
 				Value::Thing(w) => v.regex().is_match(w.to_raw().as_str()),
 				Value::Strand(w) => v.regex().is_match(w.as_str()),
 				_ => false,
