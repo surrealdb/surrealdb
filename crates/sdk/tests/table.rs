@@ -273,7 +273,7 @@ async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<(), Error> 
 		// Get the projected result
 		let proj = res.remove(0).result?;
 		// Check they are similar
-		assert_eq!(format!("{proj:#}"), format!("{comp:#}"), "#{i}");
+		assert_eq!(proj, comp, "#{i}");
 	}
 	//
 	Ok(())

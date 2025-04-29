@@ -88,7 +88,7 @@ impl ForeachStatement {
 					Entry::Set(v) => {
 						let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
 						let mut c = MutableContext::unfreeze(ctx)?;
-						c.add_value(v.name.to_owned(), val.into());
+						c.add_value(v.name.clone(), val.into());
 						ctx = c.freeze();
 						Ok(Value::None)
 					}
@@ -108,6 +108,7 @@ impl ForeachStatement {
 					Entry::Alter(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
 					Entry::Rebuild(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
 					Entry::Remove(v) => Ok(v.compute(&ctx, opt, doc).await?),
+					Entry::Info(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
 					Entry::Output(v) => {
 						return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
 					}

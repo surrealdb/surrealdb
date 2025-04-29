@@ -2,7 +2,7 @@ use crate::cnf::ID_CHARS;
 use crate::err::Error;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
-use crate::sql::{Datetime, Number};
+use crate::sql::{Datetime, Duration, Number};
 use chrono::{TimeZone, Utc};
 use nanoid::nanoid;
 use rand::distributions::{Alphanumeric, DistString};
@@ -168,6 +168,25 @@ pub fn string(
 	Ok(Alphanumeric.sample_string(&mut rand::thread_rng(), len).into())
 }
 
+pub fn duration((dur1, dur2): (Duration, Duration)) -> Result<Value, Error> {
+	// Sort from low to high
+	let (from, to) = match dur2 > dur1 {
+		true => (dur1, dur2),
+		false => (dur2, dur1),
+	};
+
+	let rand = rand::thread_rng().gen_range(from.as_nanos()..=to.as_nanos());
+
+	let nanos = (rand % 1_000_000_000) as u32;
+
+	// Max Duration is made of (u64::MAX, NANOS_PER_SEC - 1) so will never overflow
+	let Ok(secs) = u64::try_from(rand / 1_000_000_000) else {
+		return Err(Error::Unreachable("Overflow inside rand::duration()".into()));
+	};
+
+	Ok(Value::Duration(Duration::new(secs, nanos)))
+}
+
 pub fn time((NoneOrRange(range),): (NoneOrRange<Value>,)) -> Result<Value, Error> {
 	// Process the arguments
 	let range = match range {
@@ -175,44 +194,41 @@ pub fn time((NoneOrRange(range),): (NoneOrRange<Value>,)) -> Result<Value, Error
 		Some((Value::Number(Number::Int(min)), Value::Number(Number::Int(max)))) => {
 			Some((min, max))
 		}
-		Some((Value::Datetime(min), Value::Datetime(max))) => match (min.to_i64(), max.to_i64()) {
-			(Some(min), Some(max)) => Some((min, max)),
-			_ => {
-				return Err(Error::InvalidArguments {
-					name: String::from("rand::time"),
-					message: String::from("Failed to convert datetime arguments to i64 timestamps"),
-				})
-			}
-		},
+		Some((Value::Datetime(min), Value::Datetime(max))) => Some((min.to_secs(), max.to_secs())),
+		Some((Value::Number(Number::Int(min)), Value::Datetime(max))) => Some((min, max.to_secs())),
+		Some((Value::Datetime(min), Value::Number(Number::Int(max)))) => Some((min.to_secs(), max)),
 		_ => {
 			return Err(Error::InvalidArguments {
 				name: String::from("rand::time"),
-				message: String::from(
-					"Expected an optional pair of datetimes or pair of i64 numbers to be passed",
-				),
+				message: String::from("Expected two arguments of type datetime or int"),
 			})
 		}
 	};
+
+	// Set the minimum valid seconds
+	const MINIMUM: i64 = -8334601228800;
 	// Set the maximum valid seconds
-	const LIMIT: i64 = 8210298412799;
+	const LIMIT: i64 = 8210266876799;
+
 	// Check the function input arguments
 	let (min, max) = if let Some((min, max)) = range {
 		match min {
-			min if (1..=LIMIT).contains(&min) => match max {
+			min if (MINIMUM..=LIMIT).contains(&min) => match max {
 				max if min <= max && max <= LIMIT => (min, max),
-				max if max >= 1 && max <= min => (max, min),
+				max if max >= MINIMUM && max <= min => (max, min),
 				_ => return Err(Error::InvalidArguments {
 					name: String::from("rand::time"),
-					message: format!("To generate a time between X and Y seconds, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
+					message: format!("To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."),
 				}),
 			},
 			_ => return Err(Error::InvalidArguments {
 				name: String::from("rand::time"),
-				message: format!("To generate a time between X and Y seconds, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
+				message: format!("To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."),
 			}),
 		}
 	} else {
-		(0, LIMIT)
+		// Datetime between d'0000-01-01T00:00:00Z' and d'9999-12-31T23:59:59Z'
+		(-62167219200, 253402300799)
 	};
 	// Generate the random time, try up to 5 times
 	for _ in 0..5 {

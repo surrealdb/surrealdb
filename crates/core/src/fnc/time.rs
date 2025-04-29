@@ -272,7 +272,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::nanos"),
-				message: String::from("The first argument must be an in-bounds number of nanoseconds relative to January 1, 1970 0:00:00 UTC."),
+				message: String::from("The argument must be a number of nanoseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
 			}),
 		}
 	}
@@ -282,7 +282,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::micros"),
-				message: String::from("The first argument must be an in-bounds number of microseconds relative to January 1, 1970 0:00:00 UTC."),
+				message: String::from("The argument must be a number of microseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
 			}),
 		}
 	}
@@ -292,7 +292,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::millis"),
-				message: String::from("The first argument must be an in-bounds number of milliseconds relative to January 1, 1970 0:00:00 UTC."),
+				message: String::from("The argument must be a number of milliseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
 			}),
 		}
 	}
@@ -302,7 +302,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::secs"),
-				message: String::from("The first argument must be an in-bounds number of seconds relative to January 1, 1970 0:00:00 UTC."),
+				message: String::from("The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
 			}),
 		}
 	}
@@ -312,7 +312,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::unix"),
-				message: String::from("The first argument must be an in-bounds number of seconds relative to January 1, 1970 0:00:00 UTC."),
+				message: String::from("The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
 			}),
 		}
 	}

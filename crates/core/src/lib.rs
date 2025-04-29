@@ -52,6 +52,10 @@ pub mod vs;
 #[cfg(feature = "ml")]
 pub use surrealml as ml;
 
+#[cfg(feature = "enterprise")]
+#[rustfmt::skip]
+pub mod ent;
+
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
 	pub use async_channel::bounded;

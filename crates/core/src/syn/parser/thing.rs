@@ -3,6 +3,7 @@ use reblessive::Stk;
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{
+		graph::GraphSubject,
 		id::{range::IdRange, Gen},
 		Id, Ident, Param, Range, Thing,
 	},
@@ -22,8 +23,6 @@ impl Parser<'_> {
 		double: bool,
 	) -> ParseResult<Thing> {
 		let thing = self.parse_thing(ctx).await?;
-
-		debug_assert!(self.last_span().is_followed_by(&self.peek_whitespace().span));
 
 		if double {
 			expected_whitespace!(self, t!("\""));
@@ -118,6 +117,48 @@ impl Parser<'_> {
 				tb: ident,
 				id,
 			})
+		}
+	}
+
+	pub(crate) async fn parse_id_range(&mut self, stk: &mut Stk) -> ParseResult<IdRange> {
+		let beg = if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
+			let v = stk.run(|stk| self.parse_id(stk)).await?;
+
+			// check for exclusive
+			if self.eat_whitespace(t!(">")) {
+				Bound::Excluded(v)
+			} else {
+				Bound::Included(v)
+			}
+		} else {
+			Bound::Unbounded
+		};
+
+		expected!(self, t!(".."));
+
+		let end = if self.eat_whitespace(t!("=")) {
+			let id = stk.run(|stk| self.parse_id(stk)).await?;
+			Bound::Included(id)
+		} else if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
+			let id = stk.run(|stk| self.parse_id(stk)).await?;
+			Bound::Excluded(id)
+		} else {
+			Bound::Unbounded
+		};
+
+		Ok(IdRange {
+			beg,
+			end,
+		})
+	}
+
+	pub(crate) async fn parse_graph_subject(&mut self, stk: &mut Stk) -> ParseResult<GraphSubject> {
+		let tb = self.next_token_value()?;
+		if self.eat_whitespace(t!(":")) {
+			let rng = self.parse_id_range(stk).await?;
+			Ok(GraphSubject::Range(tb, rng))
+		} else {
+			Ok(GraphSubject::Table(tb))
 		}
 	}
 

@@ -119,7 +119,7 @@ pub async fn iam_check_cases(
 		let expected_result = if *should_succeed {
 			check_results.first().unwrap()
 		} else {
-			check_results.get(1).unwrap()
+			&check_results[1]
 		};
 		// Auth enabled
 		{
@@ -151,7 +151,7 @@ pub async fn iam_check_cases(
 			);
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 			let expected_result = if auth_enabled {
-				check_results.get(1).unwrap()
+				&check_results[1]
 			} else {
 				check_results.first().unwrap()
 			};
@@ -175,7 +175,6 @@ pub async fn iam_check_cases(
 pub fn with_enough_stack(
 	fut: impl Future<Output = Result<(), Error>> + Send + 'static,
 ) -> Result<(), Error> {
-	#[allow(unused_mut)]
 	let mut builder = Builder::new();
 
 	// Roughly how much stack is allocated for surreal server workers in release mode
@@ -262,7 +261,7 @@ impl Test {
 
 	/// Creates a new instance of the `Self` struct with the given SQL query.
 	/// Arguments `sql` - A string slice representing the SQL query.
-	/// Panics if an error occurs.#[allow(dead_code)]
+	/// Panics if an error occurs.#[expect(dead_code)]
 	#[allow(dead_code)]
 	pub async fn new(sql: &str) -> Result<Self, Error> {
 		Self::new_ds(new_ds().await?, sql).await
@@ -346,8 +345,9 @@ impl Test {
 				tmp.as_number().map(|x| x.is_nan()).unwrap_or(false),
 				"Expected NaN but got {info}: {tmp}"
 			);
+		} else {
+			assert_eq!(tmp, val, "{info} {tmp:#}");
 		}
-		assert_eq!(tmp, val, "{info} {tmp:#}");
 		//
 		Ok(self)
 	}

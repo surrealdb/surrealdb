@@ -1,6 +1,6 @@
 use crate::api::conn::Connection;
 use crate::api::conn::Router;
-#[allow(unused_imports)] // used by the DB engines
+#[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::engine;
 use crate::api::engine::any::Any;
 use crate::api::err::Error;
@@ -19,7 +19,12 @@ use wasm_bindgen_futures::spawn_local;
 impl crate::api::Connection for Any {}
 
 impl Connection for Any {
-	#[allow(unused_variables, unreachable_code, unused_mut)] // these are all used depending on feature
+	#[allow(
+		unused_variables,
+		unreachable_code,
+		unused_mut,
+		reason = "Thse are all used depending on the enabled features."
+	)]
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {

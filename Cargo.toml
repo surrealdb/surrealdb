@@ -108,6 +108,7 @@ rustls = { version = "0.23.12", default-features = false }
 # Defined so we can enable features on this dependency.
 rust_decimal = "1.36.0"
 rustls-pki-types = "1.7.0"
+rust-s3 = "0.35.1"
 # TODO: Look at dependency, 5 years old seems unmaintained.
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
@@ -177,6 +178,7 @@ storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 # Deprecated features
 # Doesn't do anything. Use a version specific `storage-fdb-*` feature instead.
 storage-fdb = ["surrealdb/kv-fdb"]
+enterprise = ["surrealdb-core/enterprise"]
 
 [profile.release]
 codegen-units = 1
@@ -353,13 +355,21 @@ priority = "optional"
 section = "utility"
 systemd-units = { enable = true }
 
-[lints.rust]
+[workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(docker)',
     'cfg(storage)',
 ] }
 
-[lints.clippy]
+[workspace.lints.clippy]
+
+# Checks for usage of `#[allow]` attribute and suggests replacing it with `#[expect]`.
+# `#[expect]` attributes suppress the lint emission, but emit a warning if the expectation is unfulfilled.
+# This is useful to be notified when the lint is no longer triggered.
+# https://rust-lang.github.io/rust-clippy/master/#allow_attributes
+# TODO(stu): We should try to replace all of these with `#[expect]` instead. Setting to `allow` for now to avoid
+# more changes.
+allow_attributes = "allow"
 
 # Checks for code like `foo = bar.clone();`.
 # Custom `Clone::clone_from()` or `ToOwned::clone_into` implementations allow the objects to share resources and
@@ -377,6 +387,11 @@ cloned_instead_of_copied = "warn"
 # `debug_assert!` macro results in different behavior between a release and debug build.
 # https://rust-lang.github.io/rust-clippy/master/#debug_assert_with_mut_call
 debug_assert_with_mut_call = "warn"
+
+# Denies the configured methods and functions in `clippy.toml`.
+# Some methods are undesirable in certain contexts, and it’s beneficial to lint for them as needed.
+# https://rust-lang.github.io/rust-clippy/master/#disallowed_methods
+disallowed_methods = "warn"
 
 # Checks for impls of `From<..>` that contain `panic!()` or `unwrap()`
 # TryFrom should be used if there’s a possibility of failure.
@@ -407,4 +422,7 @@ lossy_float_literal = "warn"
 # Checks for functions that are declared `async` but have no `.await`s inside of them.
 # Async functions with no async code create overhead, both mentally and computationally.
 # https://rust-lang.github.io/rust-clippy/master/#unused_async
-unused_async = "warn"
+#
+# SurrealDB relies on async functions in the AST parser and executor to avoid stack overflows.
+# Warning or denying this lint can cause unexpected errors.
+unused_async = "allow"

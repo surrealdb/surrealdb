@@ -1,3 +1,8 @@
+#![allow(
+	unexpected_cfgs,
+	reason = "This test is only enabled when the `docker` feature is enabled which is an internal feature."
+)]
+
 mod common;
 
 #[cfg(all(docker, feature = "storage-rocksdb"))]

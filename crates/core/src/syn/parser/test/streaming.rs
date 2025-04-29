@@ -5,6 +5,7 @@ use crate::{
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
+		graph::{GraphSubject, GraphSubjects},
 		index::{Distance, MTreeParams, SearchParams, VectorType},
 		language::Language,
 		order::{OrderList, Ordering},
@@ -431,7 +432,7 @@ fn statements() -> Vec<Statement> {
 						tb: "a".to_owned(),
 						id: Id::from("b"),
 					},
-					what: Tables::default(),
+					what: GraphSubjects::default(),
 				}))),
 				Part::Last,
 				Part::Where(Value::Bool(true)),
@@ -678,7 +679,7 @@ fn statements() -> Vec<Statement> {
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
 						dir: Dir::Out,
-						what: Tables(vec![Table("b".to_string())]),
+						what: GraphSubjects(vec![GraphSubject::Table(Table("b".to_string()))]),
 						..Default::default()
 					}),
 				])),
@@ -691,7 +692,7 @@ fn statements() -> Vec<Statement> {
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
 						dir: Dir::Out,
-						what: Tables(vec![Table("b".to_string())]),
+						what: GraphSubjects(vec![GraphSubject::Table(Table("b".to_string()))]),
 						..Default::default()
 					}),
 				]),
@@ -712,7 +713,7 @@ fn statements() -> Vec<Statement> {
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
 						dir: Dir::Out,
-						what: Tables(vec![Table("b".to_string())]),
+						what: GraphSubjects(vec![GraphSubject::Table(Table("b".to_string()))]),
 						..Default::default()
 					}),
 				])),
@@ -725,7 +726,7 @@ fn statements() -> Vec<Statement> {
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
 						dir: Dir::Out,
-						what: Tables(vec![Table("b".to_string())]),
+						what: GraphSubjects(vec![GraphSubject::Table(Table("b".to_string()))]),
 						..Default::default()
 					}),
 				]),

@@ -399,7 +399,7 @@ impl MTree {
 	}
 
 	/// Was marked recursive
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn insert_at_node(
 		&mut self,
 		stk: &mut Stk,
@@ -435,7 +435,7 @@ impl MTree {
 		}
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn insert_node_internal(
 		&mut self,
 		stk: &mut Stk,
@@ -552,7 +552,7 @@ impl MTree {
 		}
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn insert_node_leaf(
 		&mut self,
 		store: &mut MTreeStore,
@@ -788,7 +788,7 @@ impl MTree {
 	}
 
 	/// Was marked recursive
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn delete_at_node(
 		&mut self,
 		stk: &mut Stk,
@@ -837,7 +837,7 @@ impl MTree {
 		}
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn delete_node_internal(
 		&mut self,
 		stk: &mut Stk,
@@ -969,7 +969,7 @@ impl MTree {
 		Ok(())
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn deletion_underflown(
 		&mut self,
 		tx: &Transaction,
@@ -1024,7 +1024,7 @@ impl MTree {
 		Ok(false)
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn delete_underflown_fit_into_child(
 		&mut self,
 		store: &mut MTreeStore,
@@ -1089,7 +1089,7 @@ impl MTree {
 		Ok(())
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn delete_underflown_redistribute(
 		&mut self,
 		store: &mut MTreeStore,
@@ -1126,7 +1126,7 @@ impl MTree {
 		Ok(())
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn delete_node_leaf(
 		&mut self,
 		store: &mut MTreeStore,
@@ -1271,7 +1271,7 @@ impl Display for MTreeNode {
 }
 
 trait NodeVectors: Sized {
-	#[allow(dead_code)]
+	#[expect(dead_code)]
 	fn len(&self) -> usize;
 
 	fn get_objects(&self) -> Vec<SharedVector>;
@@ -1712,7 +1712,7 @@ mod tests {
 			// We check that the results are sorted by ascending distance
 			let mut dist = 0.0;
 			for (doc, d) in res.docs {
-				let o = map.get(&doc).unwrap();
+				let o = &map[&doc];
 				debug!("doc: {doc} - d: {d} - {obj:?} - {o:?}");
 				assert!(d >= dist, "d: {d} - dist: {dist}");
 				dist = d;
@@ -1721,7 +1721,7 @@ mod tests {
 		Ok(())
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn test_mtree_collection(
 		stk: &mut Stk,
 		capacities: &[u16],

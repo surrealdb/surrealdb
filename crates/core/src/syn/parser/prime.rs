@@ -95,9 +95,8 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE")
-			| t!("REBUILD") => {
-				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))
-			}
+			| t!("REBUILD")
+			| t!("INFO") => self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x))),
 			t!("fn") => {
 				self.pop_peek();
 				let value =
@@ -325,7 +324,8 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE")
-			| t!("REBUILD") => {
+			| t!("REBUILD")
+			| t!("INFO") => {
 				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))?
 			}
 			t!("fn") => {
@@ -571,6 +571,11 @@ impl Parser<'_> {
 				let stmt = self.parse_rebuild_stmt()?;
 				Value::Subquery(Box::new(Subquery::Rebuild(stmt)))
 			}
+			t!("INFO") => {
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_info_stmt(ctx)).await?;
+				Subquery::Info(stmt)
+			}
 			TokenKind::Digits | TokenKind::Glued(Glued::Number) | t!("+") | t!("-") => {
 				if self.glue_and_peek1()?.kind == t!(",") {
 					let number_span = self.peek().span;
@@ -680,6 +685,11 @@ impl Parser<'_> {
 				self.pop_peek();
 				let stmt = self.parse_rebuild_stmt()?;
 				Subquery::Rebuild(stmt)
+			}
+			t!("INFO") => {
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_info_stmt(ctx)).await?;
+				Subquery::Info(stmt)
 			}
 			_ => {
 				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;

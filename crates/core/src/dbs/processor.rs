@@ -322,8 +322,10 @@ impl Collected {
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed, Error> {
 		let key = thing::Thing::decode(&key)?;
-		let val: Value = revision::from_slice(&val)?;
+		let mut val: Value = revision::from_slice(&val)?;
 		let rid = Thing::from((key.tb, key.id));
+		// Inject the id field into the document
+		val.def(&rid);
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
@@ -823,45 +825,19 @@ pub(super) trait Collector {
 			},
 			_ => match e.dir {
 				// /ns/db/tb/id/IN/TB
-				Dir::In => e
-					.what
-					.iter()
-					.map(|v| v.0.to_owned())
-					.map(|v| {
-						(
-							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
-							graph::ftsuffix(ns, db, tb, id, &e.dir, &v),
-						)
-					})
-					.collect::<Vec<_>>(),
+				Dir::In => {
+					e.what.iter().map(|v| v.presuf(ns, db, tb, id, &e.dir)).collect::<Vec<_>>()
+				}
 				// /ns/db/tb/id/OUT/TB
-				Dir::Out => e
-					.what
-					.iter()
-					.map(|v| v.0.to_owned())
-					.map(|v| {
-						(
-							graph::ftprefix(ns, db, tb, id, &e.dir, &v),
-							graph::ftsuffix(ns, db, tb, id, &e.dir, &v),
-						)
-					})
-					.collect::<Vec<_>>(),
+				Dir::Out => {
+					e.what.iter().map(|v| v.presuf(ns, db, tb, id, &e.dir)).collect::<Vec<_>>()
+				}
 				// /ns/db/tb/id/IN/TB, /ns/db/tb/id/OUT/TB
 				Dir::Both => e
 					.what
 					.iter()
-					.map(|v| v.0.to_owned())
 					.flat_map(|v| {
-						[
-							(
-								graph::ftprefix(ns, db, tb, id, &Dir::In, &v),
-								graph::ftsuffix(ns, db, tb, id, &Dir::In, &v),
-							),
-							(
-								graph::ftprefix(ns, db, tb, id, &Dir::Out, &v),
-								graph::ftsuffix(ns, db, tb, id, &Dir::Out, &v),
-							),
-						]
+						[v.presuf(ns, db, tb, id, &Dir::In), v.presuf(ns, db, tb, id, &Dir::Out)]
 					})
 					.collect::<Vec<_>>(),
 			},

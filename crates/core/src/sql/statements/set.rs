@@ -52,7 +52,7 @@ impl SetStatement {
 			}
 			// The user tried to set a protected variable
 			true => Err(ControlFlow::from(Error::InvalidParam {
-				name: self.name.to_owned(),
+				name: self.name.clone(),
 			})),
 		}
 	}

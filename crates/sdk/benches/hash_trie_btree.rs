@@ -28,7 +28,7 @@ fn bench_hash_trie_btree_ix_key(c: &mut Criterion) {
 	for i in 0..N {
 		let mut key = b"/*test\0*test\0*test\0!ixtest".to_vec();
 		key.append(&mut i.to_be_bytes().to_vec());
-		samples.push((key.to_vec(), i));
+		samples.push((key.clone(), i));
 	}
 
 	let mut g = new_group(c, "bench_hash_trie_btree_ix_key", N);
