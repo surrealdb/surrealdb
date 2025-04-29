@@ -611,8 +611,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: ${{ inputs.publish && inputs.create-release }}
         with:
-          name: "Release ${{ needs.prepare-vars.outputs.version }}"
           tag_name: v${{ needs.prepare-vars.outputs.version }}
+          name: "Release ${{ needs.prepare-vars.outputs.version }}"
+          body: "Release ${{ needs.prepare-vars.outputs.version }}"
+          target_commitish: ${{ needs.prepare-vars.outputs.release-branch }}
           prerelease: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
           fail_on_unmatched_files: true
           files: |
