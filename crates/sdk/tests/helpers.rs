@@ -119,7 +119,7 @@ pub async fn iam_check_cases(
 		let expected_result = if *should_succeed {
 			check_results.first().unwrap()
 		} else {
-			check_results.get(1).unwrap()
+			&check_results[1]
 		};
 		// Auth enabled
 		{
@@ -151,7 +151,7 @@ pub async fn iam_check_cases(
 			);
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 			let expected_result = if auth_enabled {
-				check_results.get(1).unwrap()
+				&check_results[1]
 			} else {
 				check_results.first().unwrap()
 			};
@@ -294,7 +294,7 @@ impl Test {
 	/// The panic message will include the last position in the responses list before it was emptied.
 	#[track_caller]
 	#[allow(dead_code)]
-	#[expect(clippy::should_implement_trait)]
+	#[allow(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Result<Response, Error> {
 		assert!(!self.responses.is_empty(), "No response left - last position: {}", self.pos);
 		self.pos += 1;
@@ -345,8 +345,9 @@ impl Test {
 				tmp.as_number().map(|x| x.is_nan()).unwrap_or(false),
 				"Expected NaN but got {info}: {tmp}"
 			);
+		} else {
+			assert_eq!(tmp, val, "{info} {tmp:#}");
 		}
-		assert_eq!(tmp, val, "{info} {tmp:#}");
 		//
 		Ok(self)
 	}

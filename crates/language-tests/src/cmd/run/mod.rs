@@ -74,7 +74,7 @@ fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> Test
 
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let path: &String = matches.get_one("path").unwrap();
-	let (testset, load_errors) = TestSet::collect_directory(&path).await?;
+	let (testset, load_errors) = TestSet::collect_directory(path).await?;
 	let backend = *matches.get_one::<Backend>("backend").unwrap();
 
 	// Check if the backend is supported by the enabled features.
@@ -261,7 +261,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	}
 
 	if reports.iter().any(|x| x.grade() == TestGrade::Failed) {
-		bail!("Not all tests were successfull")
+		bail!("Not all tests were successful")
 	}
 
 	if !load_errors.is_empty() {
@@ -334,6 +334,8 @@ async fn run_test_with_dbs(
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
 
+	eprintln!("\n\nRunning test `{}`: ({timeout_duration:?})\n\n", set[id].path);
+
 	let mut import_session = Session::owner();
 	if let Some(ns) = session.ns.as_ref() {
 		import_session = import_session.with_ns(ns)
@@ -346,14 +348,14 @@ async fn run_test_with_dbs(
 		let Some(test) = set.find_all(import) else {
 			return Ok(TestTaskResult::Import(
 				import.to_string(),
-				format!("Could not find import."),
+				"Could not find import.".to_string(),
 			));
 		};
 
 		let Ok(source) = str::from_utf8(&set[test].source) else {
 			return Ok(TestTaskResult::Import(
 				import.to_string(),
-				format!("Import file was not valid utf-8."),
+				"Import file was not valid utf-8.".to_string(),
 			));
 		};
 

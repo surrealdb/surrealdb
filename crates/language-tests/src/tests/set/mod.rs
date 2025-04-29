@@ -120,7 +120,7 @@ impl TestSet {
 		if !name.starts_with(path::MAIN_SEPARATOR) {
 			name = Cow::Owned(format!("{}{name}", path::MAIN_SEPARATOR));
 		}
-		self.all_map.get(name.as_ref()).cloned()
+		self.all_map.get(name.as_ref()).copied()
 	}
 
 	pub async fn collect_directory(path: &str) -> Result<(Self, Vec<TestLoadError>)> {

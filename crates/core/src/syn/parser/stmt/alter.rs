@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::sql::statements::alter::AlterSequenceStatement;
 use crate::{
 	sql::{
 		statements::{AlterStatement, AlterTableStatement},
@@ -19,6 +20,7 @@ impl Parser<'_> {
 		let next = self.next();
 		match next.kind {
 			t!("TABLE") => self.parse_alter_table(ctx).await.map(AlterStatement::Table),
+			t!("SEQUENCE") => self.parse_alter_sequence().await.map(AlterStatement::Sequence),
 			_ => unexpected!(self, next, "a alter statement keyword"),
 		}
 	}
@@ -99,6 +101,27 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
+		}
+
+		Ok(res)
+	}
+
+	pub(crate) async fn parse_alter_sequence(&mut self) -> ParseResult<AlterSequenceStatement> {
+		let if_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
+		let name = self.next_token_value()?;
+		let mut res = AlterSequenceStatement {
+			name,
+			if_exists,
+			..Default::default()
+		};
+
+		if let Some(to) = self.try_parse_timeout()? {
+			res.timeout = Some(to);
 		}
 
 		Ok(res)

@@ -25,6 +25,7 @@ use crate::kvs::clock::SizedClock;
 use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
+use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::FlowResultExt as _;
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
@@ -93,6 +94,8 @@ pub struct Datastore {
 	temporary_directory: Option<Arc<PathBuf>>,
 	// Map of bucket connections
 	buckets: Arc<BucketConnections>,
+	// The sequences
+	sequences: Sequences,
 }
 
 #[derive(Clone)]
@@ -262,7 +265,7 @@ impl Datastore {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
-					// Innitialise the storage engine
+					// Initialise the storage engine
 					info!(target: TARGET, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
@@ -278,7 +281,7 @@ impl Datastore {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Innitialise the storage engine
+					// Initialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
 					let s = s.trim_start_matches("file://");
@@ -297,7 +300,7 @@ impl Datastore {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Innitialise the storage engine
+					// Initialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
@@ -315,7 +318,7 @@ impl Datastore {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Innitialise the storage engine
+					// Initialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", s);
 					let (path, enable_versions) =
 						super::surrealkv::Datastore::parse_start_string(s)?;
@@ -397,13 +400,14 @@ impl Datastore {
 				capabilities: Arc::new(Capabilities::default()),
 				index_stores: IndexStores::default(),
 				#[cfg(not(target_family = "wasm"))]
-				index_builder: IndexBuilder::new(tf),
+				index_builder: IndexBuilder::new(tf.clone()),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 				#[cfg(storage)]
 				temporary_directory: None,
 				cache: Arc::new(DatastoreCache::new()),
 				buckets: Arc::new(DashMap::new()),
+				sequences: Sequences::new(tf),
 			}
 		})
 	}
@@ -426,9 +430,10 @@ impl Datastore {
 			jwks_cache: Arc::new(Default::default()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
-			transaction_factory: self.transaction_factory,
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
+			sequences: Sequences::new(self.transaction_factory.clone()),
+			transaction_factory: self.transaction_factory,
 		}
 	}
 
@@ -1210,9 +1215,10 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
-			self.cache.clone(),
 			#[cfg(not(target_family = "wasm"))]
 			self.index_builder.clone(),
+			self.sequences.clone(),
+			self.cache.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),

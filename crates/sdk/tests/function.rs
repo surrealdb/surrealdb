@@ -2380,6 +2380,31 @@ async fn function_time_from_unix() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_time_from_unix_limit_and_beyond() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN time::year(time::from::unix(-8334601228800));
+		RETURN time::year(time::from::unix(8210266876799));
+		"#,
+		&["-262143", "262142"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r#"
+		RETURN time::from::unix(-8334601228801);
+		RETURN time::from::unix(8210266876800);
+	"#,
+		&[
+			"Incorrect arguments for function time::from::unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+			"Incorrect arguments for function time::from::unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."
+		],
+	).await?;
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_time_from_uuid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::from::uuid(u'01922074-2295-7cf6-906f-bcd0810639b0');
@@ -2438,10 +2463,15 @@ async fn function_type_datetime() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_decimal() -> Result<(), Error> {
 	let sql = r#"
+		RETURN type::decimal("0.0");
 		RETURN type::decimal("13.1043784018");
 		RETURN type::decimal("13.5719384719384719385639856394139476937756394756");
 	"#;
 	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Number(Number::Decimal("0".parse().unwrap()));
+	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
 	let val = Value::Number(Number::Decimal("13.1043784018".parse().unwrap()));
