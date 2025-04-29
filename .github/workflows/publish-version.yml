@@ -529,7 +529,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.git-ref }}
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -646,25 +646,6 @@ jobs:
           for file in artifacts/**/*.{tgz,txt,exe}; do
             aws s3 cp --cache-control 'no-store' $file s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
           done
-
-  tag-release:
-    name: Tag release
-    needs: [publish, prepare-vars]
-    environment: ${{ needs.prepare-vars.outputs.environment }}
-    if: ${{ inputs.publish }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-vars.outputs.release-branch }}
-
-      - name: Tag the release
-        if: ${{ inputs.suffix != 'nightly' }}
-        run: |
-          set -x
-          git tag -a v${{ needs.prepare-vars.outputs.version }} -m "Release ${{ needs.prepare-vars.outputs.version }}"
-          git push --tags
 
   docker:
     name: Docker images
