@@ -19,19 +19,19 @@ Makefile.* @surrealdb/ci
 # Configuration for Rust dependencies
 Cargo.lock @surrealdb/security
 Cargo.toml @surrealdb/security
-core/Cargo.toml @surrealdb/security
-sdk/Cargo.toml @surrealdb/security
+crates/core/Cargo.toml @surrealdb/security
+crates/sdk/Cargo.toml @surrealdb/security
 cackle.toml @surrealdb/security
 supply-chain/* @surrealdb/security
 deny.toml @surrealdb/security
 
 # Code for fuzzing configuration
-/sdk/fuzz/ @surrealdb/security
+/crates/fuzz/ @surrealdb/security
 SECURITY.md @surrealdb/security
 
 # Code and tests for indexing
-/core/src/idx/ @surrealdb/ix
+/crates/core/src/idx/ @surrealdb/ix
 
 # Tests related to the storage
-/core/src/key/ @surrealdb/kv
-/core/src/kvs/ @surrealdb/kv
+/crates/core/src/key/ @surrealdb/kv
+/crates/core/src/kvs/ @surrealdb/kv

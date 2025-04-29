@@ -1,0 +1,32 @@
+# Add the `sdk-issue` label if the issue is concerning the 'SurrealDB Rust SDK'
+sdk-issue:
+  - "SurrealDB Rust SDK"
+
+# Add the `topic:rust` label if the issue is concerning the 'SurrealDB Rust SDK' or if the content contains 'rust'
+topic:rust:
+  - "SurrealDB Rust SDK"
+  - "/(rust)/i"
+
+# Add the `topic:security` label if the issue content contains 'security' or 'secure'
+topic:security:
+  - "/(security)/i"
+  - "/(secure)/i"
+
+# Add the `topic:surrealkv` label if the issue content contains 'surrealkv'
+topic:surrealkv:
+  - "/(surrealkv)/i"
+
+# Add the `topic:wasm` label if the issue content contains 'webassembly' or 'wasm'
+topic:wasm:
+  - "/(webassembly)/i"
+  - "/(wasm)/i"
+
+# Add the `topic:stability` label if the issue content contains 'crash' or 'panic'
+topic:stability:
+  - "/(crash)/i"
+  - "/(panic)/i"
+
+# Add the `nix` label if the issue content contains 'nix' or 'flake'
+nix:
+  - "/(nix)/i"
+  - "/(flake)/i"

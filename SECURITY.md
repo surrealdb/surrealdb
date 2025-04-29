@@ -4,8 +4,8 @@
 
 | Version    | Supported                                       |
 | ---------- | ----------------------------------------------- |
-| < 1.0      | -                                               |
-| >= 1.0.0   | <img width="20" src="/img/tick.svg">            |
+| < 2.0      | -                                               |
+| >= 2.0.0   | <img width="20" src="/img/tick.svg">            |
 
 ## Reporting a Vulnerability
 
@@ -62,15 +62,15 @@ dependency tree.
 As with any other update, security updates to SurrealDB are released following [Semantic Versioning (AKA
 SemVer)](https://semver.org).
 
-Urgent security patches will be released for the latest SurrealDB minor release (e.g. `1.999.0`) using a patch release
-(e.g. `1.999.1`). We commit not to break API backward compatibility in patch releases to ensure that SurrealDB users
+Urgent security patches will be released for the latest SurrealDB minor release (e.g. `2.999.0`) using a patch release
+(e.g. `2.999.1`). We commit not to break API backward compatibility in patch releases to ensure that SurrealDB users
 have no reservations that may cause delays when applying security patches.
 
-Regular security updates can be released as part of a minor release (e.g.  `1.999.0` to `1.1000.0`). Minor releases
+Regular security updates can be released as part of a minor release (e.g.  `2.999.0` to `2.1000.0`). Minor releases
 should not break backward compatibility either and we encourage updating whenever possible. However, there are a few
 security-sensitive dependencies (e.g. `rustls` or `native_tls`) that are part of the public API of SurrealDB but are
 still in an unstable version, meaning that they can break backward compatibility. We do not consider these types (e.g.
-the [TLS enumeration](https://docs.rs/surrealdb/1.0.0/surrealdb/opt/enum.Tls.html)) part of the SurrealDB stable API and
+the [TLS enumeration](https://docs.rs/surrealdb/2.0.0/surrealdb/opt/enum.Tls.html)) part of the SurrealDB stable API and
 as such their backward compatibility may be broken in a minor release. These breaking changes should be rare and will
 always be clearly stated in the changelog. Even if not considered part of the stable API, these types of breaking
 changes will only be included in major and minor releases; never in patch releases as stated in the previous paragraph.

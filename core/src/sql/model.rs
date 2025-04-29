@@ -24,6 +24,7 @@ use futures::future::try_join_all;
 #[cfg(feature = "ml")]
 use std::collections::HashMap;
 
+
 #[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 

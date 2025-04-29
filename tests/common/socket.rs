@@ -158,23 +158,6 @@ impl Socket {
 				// THen output the message.
 				Ok(Message::Binary(output))
 			}
-			Format::Pack => {
-				use surrealdb::rpc::format::msgpack::Pack;
-				// For tests we need to convert the serde_json::Value
-				// to a SurrealQL value, so that record ids, uuids,
-				// datetimes, and durations are stored properly.
-				// First of all we convert the JSON type to a string.
-				let json = message.to_string();
-				// Then we parse the JSON in to SurrealQL.
-				let surrealql = surrealdb::syn::value_legacy_strand(&json)?;
-				// Then we convert the SurrealQL in to MessagePack.
-				let pack = Pack::try_from(surrealql)?;
-				// Then serialize the MessagePack as binary data.
-				let mut output = Vec::new();
-				rmpv::encode::write_value(&mut output, &pack.0).unwrap();
-				// THen output the message.
-				Ok(Message::Binary(output))
-			}
 		}
 	}
 
@@ -202,20 +185,6 @@ impl Socket {
 						let msg: ciborium::Value = ciborium::from_reader(&mut msg.as_slice())?;
 						// Then we convert it to a SurrealQL Value.
 						let msg: Value = Cbor(msg).try_into()?;
-						// Then we convert the SurrealQL to JSON.
-						let msg = msg.into_json();
-						// Then output the response.
-						debug!("Received message: {msg:?}");
-						Ok(Some(msg))
-					}
-					Format::Pack => {
-						use surrealdb::rpc::format::msgpack::Pack;
-						// For tests we need to convert the binary data to
-						// a serde_json::Value so that test assertions work.
-						// First of all we deserialize the MessagePack data.
-						let msg: rmpv::Value = rmpv::decode::read_value(&mut msg.as_slice())?;
-						// Then we convert it to a SurrealQL Value.
-						let msg: Value = Pack(msg).try_into()?;
 						// Then we convert the SurrealQL to JSON.
 						let msg = msg.into_json();
 						// Then output the response.

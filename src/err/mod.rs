@@ -2,9 +2,9 @@ use crate::cli::abstraction::auth::Error as SurrealAuthError;
 use axum::response::{IntoResponse, Response};
 use axum::Error as AxumError;
 use axum::Json;
-use axum_extra::typed_header::TypedHeaderRejection;
 use base64::DecodeError as Base64Error;
 use http::{HeaderName, StatusCode};
+use opentelemetry::global::Error as OpentelemetryError;
 use reqwest::Error as ReqwestError;
 use serde::Serialize;
 use std::io::Error as IoError;
@@ -12,10 +12,14 @@ use std::string::FromUtf8Error as Utf8Error;
 use surrealdb::error::Db as SurrealDbError;
 use surrealdb::iam::Error as SurrealIamError;
 use surrealdb::Error as SurrealError;
+use surrealdb_core::api::err::ApiError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
+	#[error("The server is unable to handle the request")]
+	ServerOverloaded,
+
 	#[error("The request body contains invalid data")]
 	Request,
 
@@ -38,7 +42,7 @@ pub enum Error {
 	OperationUnsupported,
 
 	#[error("There was a problem parsing the header {0}: {1}")]
-	InvalidHeader(HeaderName, TypedHeaderRejection),
+	InvalidHeader(HeaderName, String),
 
 	#[error("There was a problem with the database: {0}")]
 	Db(#[from] SurrealError),
@@ -55,21 +59,27 @@ pub enum Error {
 	#[error("There was an error with CBOR serialization: {0}")]
 	Cbor(String),
 
-	#[error("There was an error with MessagePack serialization: {0}")]
-	Pack(String),
-
 	#[error("There was an error with the remote request: {0}")]
 	Remote(#[from] ReqwestError),
 
 	#[error("There was an error with auth: {0}")]
 	Auth(#[from] SurrealAuthError),
 
-	#[error("There was an error with the node agent")]
-	NodeAgent,
+	#[error("There was an error with opentelemetry: {0}")]
+	Otel(#[from] OpentelemetryError),
 
 	/// Statement has been deprecated
 	#[error("{0}")]
 	Other(String),
+
+	#[error("The HTTP route '{0}' is forbidden")]
+	ForbiddenRoute(String),
+
+	#[error("The HTTP route '{0}' is not found")]
+	NotFound(String),
+
+	#[error("An API error occurred: {0}")]
+	Api(ApiError),
 }
 
 impl From<Error> for String {
@@ -96,21 +106,27 @@ impl From<serde_json::Error> for Error {
 	}
 }
 
-impl From<serde_pack::encode::Error> for Error {
-	fn from(e: serde_pack::encode::Error) -> Error {
-		Error::Pack(e.to_string())
-	}
-}
-
-impl From<serde_pack::decode::Error> for Error {
-	fn from(e: serde_pack::decode::Error) -> Error {
-		Error::Pack(e.to_string())
-	}
-}
-
 impl From<ciborium::value::Error> for Error {
 	fn from(e: ciborium::value::Error) -> Error {
 		Error::Cbor(format!("{e}"))
+	}
+}
+
+impl From<opentelemetry::logs::LogError> for Error {
+	fn from(e: opentelemetry::logs::LogError) -> Error {
+		Error::Otel(OpentelemetryError::Log(e))
+	}
+}
+
+impl From<opentelemetry::trace::TraceError> for Error {
+	fn from(e: opentelemetry::trace::TraceError) -> Error {
+		Error::Otel(OpentelemetryError::Trace(e))
+	}
+}
+
+impl From<opentelemetry::metrics::MetricsError> for Error {
+	fn from(e: opentelemetry::metrics::MetricsError) -> Error {
+		Error::Otel(OpentelemetryError::Metric(e))
 	}
 }
 
@@ -128,10 +144,11 @@ impl<T: std::fmt::Debug> From<ciborium::ser::Error<T>> for Error {
 
 impl From<surrealdb::error::Db> for Error {
 	fn from(error: surrealdb::error::Db) -> Error {
-		if matches!(error, surrealdb::error::Db::InvalidAuth) {
-			return Error::InvalidAuth;
+		match error {
+			surrealdb::error::Db::InvalidAuth => Error::InvalidAuth,
+			surrealdb::error::Db::ApiError(e) => Error::Api(e),
+			e => Error::Db(e.into()),
 		}
-		Error::Db(error.into())
 	}
 }
 
@@ -177,7 +194,7 @@ impl IntoResponse for Error {
 					information: Some(err.to_string()),
 				})
 			),
-			err @ Error::Db(SurrealError::Db(SurrealDbError::IamError(SurrealIamError::NotAllowed { .. }))) => (
+			err @ Error::ForbiddenRoute(_) | err @ Error::Db(SurrealError::Db(SurrealDbError::IamError(SurrealIamError::NotAllowed { .. }))) => (
 				StatusCode::FORBIDDEN,
 				Json(Message {
 					code: StatusCode::FORBIDDEN.as_u16(),
@@ -185,6 +202,15 @@ impl IntoResponse for Error {
 					description: Some("Not allowed to do this.".to_string()),
 					information: Some(err.to_string()),
 				})
+			),
+			Error::NotFound(_) => (
+				StatusCode::NOT_FOUND,
+				Json(Message {
+					code: StatusCode::NOT_FOUND.as_u16(),
+					details: Some("Not found".to_string()),
+					description: Some("The request was made to an endpoint which does not exist.".to_string()),
+					information: None,
+				}),
 			),
 			Error::InvalidType => (
 				StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -202,6 +228,15 @@ impl IntoResponse for Error {
 					details: Some("Health check failed".to_string()),
 					description: Some("The database health check for this instance failed. There was an issue with the underlying storage engine.".to_string()),
 					information: Some(self.to_string()),
+				}),
+			),
+			Error::Api(e) => (
+				e.status_code(),
+				Json(Message {
+					code: e.status_code().as_u16(),
+					details: Some("An error occured while processing this API request".to_string()),
+					description: Some(e.into()),
+					information: None,
 				}),
 			),
 			_ => (

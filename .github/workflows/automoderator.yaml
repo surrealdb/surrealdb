@@ -28,7 +28,7 @@ jobs:
           const regexReplacements = [
             // File Sharing
             {
-              pattern: /(www\.)?(box|dropbox|mediafire|sugarsync|tresorit|hightail|opentext|sharefile|citrixsharefile|icloud|onedrive|1drv)\.com\/[^\s\)]+/g,
+              pattern: /(www\.)?(box|dropbox|mediafire|sugarsync|tresorit|hightail|opentext|sharefile|citrixsharefile|icloud|onedrive|1drv|mega)(\.com|\.co\.nz)\/[^\s\)]+/g,
               replacement: '[REDACTED]'
             },
             // Google Drive

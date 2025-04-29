@@ -10,14 +10,11 @@ pub struct DockerContainer {
 	running: bool,
 }
 
-pub const DOCKER_EXPOSED_PORT: usize = 8000;
-
 impl DockerContainer {
-	pub fn start(version: &str, file_path: &str, user: &str, pass: &str) -> Self {
+	pub fn start(version: &str, file_path: &str, user: &str, pass: &str, port: u16) -> Self {
 		let docker_image = format!("surrealdb/surrealdb:{version}");
 		info!("Start Docker image {docker_image} with file {file_path}");
-		let mut args =
-			Arguments::new(["run", "-p", &format!("127.0.0.1:8000:{DOCKER_EXPOSED_PORT}"), "-d"]);
+		let mut args = Arguments::new(["run", "-p", &format!("127.0.0.1:{port}:8000"), "-d"]);
 		args.add([docker_image]);
 		args.add(["start", "--user", user, "--pass", pass]);
 		args.add([format!("file:{file_path}")]);
@@ -52,7 +49,13 @@ impl DockerContainer {
 		let output = command.args(args.0).output().unwrap();
 		let std_out = String::from_utf8(output.stdout).unwrap().trim().to_string();
 		if !output.stderr.is_empty() {
-			error!("{}", String::from_utf8(output.stderr).unwrap());
+			let message = String::from_utf8(output.stderr).unwrap();
+			let first_line = message.lines().next().unwrap().trim();
+			if first_line.starts_with("Unable to find image") && first_line.ends_with("locally") {
+				info!("{message}");
+			} else {
+				error!("{message}");
+			}
 		}
 		assert_eq!(output.status.code(), Some(0), "Docker command failure: {command:?}");
 		std_out

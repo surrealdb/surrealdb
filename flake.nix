@@ -3,11 +3,10 @@
     "A scalable, distributed, collaborative, document-graph database, for the realtime web";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11-small";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11-small";
     flake-utils.url = "github:numtide/flake-utils/v1.0.0";
     crane = {
-      url = "github:ipetkov/crane/v0.16.3";
-      inputs.nixpkgs.follows = "nixpkgs";
+      url = "github:ipetkov/crane/v0.20.0";
     };
     fenix = {
       url = "github:nix-community/fenix";
@@ -53,6 +52,7 @@
             stable.rustc
             stable.cargo
             targets.${target}.stable.rust-std
+            stable.clippy
           ] ++ extraComponents);
 
         buildPlatform = pkgs.stdenv.buildPlatform.config;
@@ -108,7 +108,7 @@
             spec = (import ./pkg/nix/spec/${target}.nix) {
               inherit pkgs target util;
             };
-            extraComponents = with fenix.packages.${system}; [ targets.${target}.stable.rust-src rust-analyzer targets.${target}.stable.rustfmt ];
+            extraComponents = with fenix.packages.${system}; [ targets.${target}.stable.rust-src stable.rust-analyzer targets.${target}.stable.rustfmt ];
             rustToolchain = mkRustToolchain { inherit target extraComponents; };
             buildSpec = spec.buildSpec;
           in pkgs.mkShell (buildSpec // {
