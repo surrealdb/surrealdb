@@ -62,7 +62,7 @@ impl Target for FuncTarget {
 			return false;
 		}
 
-		if self.0 != self.0 {
+		if self.0 != elem.0 {
 			return false;
 		}
 
