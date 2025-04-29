@@ -1,9 +1,11 @@
-use crate::sql::{Expression, Number, Thing};
-use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use tokio::sync::Mutex;
+
+use crate::sql::{Expression, Number, Thing};
 
 pub(super) struct KnnPriorityList(Arc<Mutex<Inner>>);
 

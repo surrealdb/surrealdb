@@ -1,9 +1,11 @@
-use crate::{
-	err::Error,
-	sql::{Datetime, File, Object, Value},
-};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
 use bytes::Bytes;
-use std::{future::Future, pin::Pin, sync::Arc};
+
+use crate::err::Error;
+use crate::sql::{Datetime, File, Object, Value};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod file;
@@ -40,6 +42,7 @@ pub(crate) struct ListOptions {
 
 impl TryFrom<Object> for ListOptions {
 	type Error = Error;
+
 	fn try_from(mut obj: Object) -> Result<Self, Self::Error> {
 		let mut opts = ListOptions::default();
 

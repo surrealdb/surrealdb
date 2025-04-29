@@ -27,6 +27,7 @@ impl FakeAlloc {
 	pub fn current_usage(&self) -> (usize, usize) {
 		(0, 0)
 	}
+
 	/// Checks whether the allocator is above the memory limit threshold
 	pub fn is_beyond_threshold(&self) -> bool {
 		false

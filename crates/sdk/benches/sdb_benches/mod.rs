@@ -1,6 +1,6 @@
+use std::sync::{LazyLock, OnceLock};
+
 use criterion::Criterion;
-use std::sync::LazyLock;
-use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
 mod lib;

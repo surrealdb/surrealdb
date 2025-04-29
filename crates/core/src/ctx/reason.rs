@@ -1,6 +1,6 @@
+use std::{fmt, io};
+
 use crate::err::Error;
-use std::fmt;
-use std::io;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 #[non_exhaustive]

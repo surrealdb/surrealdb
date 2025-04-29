@@ -1,19 +1,18 @@
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::method::OnceLockExt;
-use crate::sql::Value;
-use crate::Surreal;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use serde_content::Serializer;
-use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::to_value;
-use surrealdb_core::sql::Array;
+
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use serde_content::{Serializer, Value as Content};
+use surrealdb_core::sql::{to_value, Array};
+
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
+use crate::api::{Connection, Result};
+use crate::method::OnceLockExt;
+use crate::sql::Value;
+use crate::Surreal;
 
 /// A run future
 #[derive(Debug)]
@@ -28,7 +27,8 @@ impl<C, R> Run<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Run<'static, C, R> {
 		Run {
 			client: Cow::Owned(self.client.into_owned()),
@@ -42,8 +42,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<R>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<R>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		let Run {

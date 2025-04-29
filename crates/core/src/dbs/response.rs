@@ -1,11 +1,11 @@
+use std::time::Duration;
+
+use revision::{revisioned, Revisioned};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::sql::Value as CoreValue;
-use revision::revisioned;
-use revision::Revisioned;
-use serde::ser::SerializeStruct;
-use serde::Deserialize;
-use serde::Serialize;
-use std::time::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
@@ -26,7 +26,8 @@ pub enum QueryType {
 pub struct Response {
 	pub time: Duration,
 	pub result: Result<CoreValue, Error>,
-	// Record the query type in case processing the response is necessary (such as tracking live queries).
+	// Record the query type in case processing the response is necessary (such as tracking live
+	// queries).
 	pub query_type: QueryType,
 }
 

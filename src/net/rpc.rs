@@ -1,26 +1,11 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use super::headers::Accept;
-use super::headers::ContentType;
-use super::headers::SurrealId;
-use super::AppState;
-use crate::cnf;
-use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
-use crate::err::Error;
-use crate::rpc::format::HttpFormat;
-use crate::rpc::http::Http;
-use crate::rpc::response::IntoRpcResponse;
-use crate::rpc::websocket::Websocket;
-use crate::rpc::RpcState;
-use axum::extract::DefaultBodyLimit;
-use axum::extract::State;
+use axum::extract::ws::{WebSocket, WebSocketUpgrade};
+use axum::extract::{DefaultBodyLimit, State};
+use axum::response::IntoResponse;
 use axum::routing::options;
-use axum::{
-	extract::ws::{WebSocket, WebSocketUpgrade},
-	response::IntoResponse,
-	Extension, Router,
-};
+use axum::{Extension, Router};
 use axum_extra::headers::Header;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
@@ -30,12 +15,22 @@ use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
-use surrealdb::rpc::format::Format;
-use surrealdb::rpc::format::PROTOCOLS;
+use surrealdb::rpc::format::{Format, PROTOCOLS};
 use surrealdb::rpc::RpcContext;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
+
+use super::headers::{Accept, ContentType, SurrealId};
+use super::AppState;
+use crate::cnf;
+use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
+use crate::err::Error;
+use crate::rpc::format::HttpFormat;
+use crate::rpc::http::Http;
+use crate::rpc::response::IntoRpcResponse;
+use crate::rpc::websocket::Websocket;
+use crate::rpc::RpcState;
 
 pub(super) fn router() -> Router<Arc<RpcState>> {
 	Router::new()

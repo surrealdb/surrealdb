@@ -1,12 +1,11 @@
+use std::borrow::Cow;
+
+use serde::de::DeserializeOwned;
+use serde_content::{Deserializer, Number, Serializer, Value as Content};
+
 use crate::err::Error;
 use crate::sql;
 use crate::sql::Value;
-use serde::de::DeserializeOwned;
-use serde_content::Deserializer;
-use serde_content::Number;
-use serde_content::Serializer;
-use serde_content::Value as Content;
-use std::borrow::Cow;
 
 impl Value {
 	fn into_content(self) -> Result<Content<'static>, Error> {

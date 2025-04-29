@@ -2,10 +2,14 @@
 mod common;
 
 mod cli_integration {
-	use crate::remove_debug_info;
+	use std::fs::File;
+	use std::io::Write;
+	#[cfg(unix)]
+	use std::time;
+	use std::time::Duration;
+
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
-	use chrono::Duration as ChronoDuration;
-	use chrono::Utc;
+	use chrono::{Duration as ChronoDuration, Utc};
 	#[cfg(unix)]
 	use common::Format;
 	#[cfg(unix)]
@@ -14,17 +18,13 @@ mod cli_integration {
 	use serde::{Deserialize, Serialize};
 	#[cfg(unix)]
 	use serde_json::json;
-	use std::fs::File;
-	use std::io::Write;
-	#[cfg(unix)]
-	use std::time;
-	use std::time::Duration;
 	use test_log::test;
 	use tokio::time::sleep;
 	use tracing::info;
 	use ulid::Ulid;
 
 	use super::common::{self, StartServerArguments, PASS, USER};
+	use crate::remove_debug_info;
 
 	#[test]
 	fn version_command() {
@@ -1271,7 +1271,8 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
-		// Deny all, denies all users to execute functions and access any network address
+		// Deny all, denies all users to execute functions and access any network
+		// address
 		info!("* When all capabilities are denied");
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
@@ -1303,7 +1304,8 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
-		// When all capabilities are allowed, anyone (including non-authenticated users) can execute functions and access any network address
+		// When all capabilities are allowed, anyone (including non-authenticated users)
+		// can execute functions and access any network address
 		info!("* When all capabilities are allowed");
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {

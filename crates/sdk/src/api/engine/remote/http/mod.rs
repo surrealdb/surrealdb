@@ -1,46 +1,40 @@
 //! HTTP engine
-use crate::api::conn::Command;
-use crate::api::conn::DbResponse;
-use crate::api::conn::RequestData;
-use crate::api::conn::RouterRequest;
-use crate::api::engine::remote::{deserialize, serialize};
-use crate::api::err::Error;
-use crate::api::Connect;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::engine::remote::Response;
-use crate::headers::AUTH_DB;
-use crate::headers::AUTH_NS;
-use crate::headers::DB;
-use crate::headers::NS;
-use crate::opt::IntoEndpoint;
-use crate::Value;
-use futures::TryStreamExt;
-use indexmap::IndexMap;
-use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
-use reqwest::header::ACCEPT;
-use reqwest::header::CONTENT_TYPE;
-use reqwest::RequestBuilder;
-use serde::Deserialize;
-use serde::Serialize;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{
-	from_value as from_core_value, statements::OutputStatement, Object as CoreObject, Param, Query,
-	Statement, Value as CoreValue,
-};
-use url::Url;
-
 #[cfg(not(target_family = "wasm"))]
 use std::path::PathBuf;
+
+use futures::TryStreamExt;
+use indexmap::IndexMap;
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE};
+use reqwest::RequestBuilder;
+use serde::{Deserialize, Serialize};
+use surrealdb_core::sql::statements::OutputStatement;
+use surrealdb_core::sql::{
+	from_value as from_core_value,
+	Object as CoreObject,
+	Param,
+	Query,
+	Statement,
+	Value as CoreValue,
+};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_family = "wasm"))]
 use tokio::io;
 #[cfg(not(target_family = "wasm"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
+use url::Url;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local;
+
+use crate::api::conn::{Command, DbResponse, RequestData, RouterRequest};
+use crate::api::engine::remote::{deserialize, serialize};
+use crate::api::err::Error;
+use crate::api::{Connect, Result, Surreal};
+use crate::engine::remote::Response;
+use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
+use crate::opt::IntoEndpoint;
+use crate::Value;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -63,7 +57,8 @@ pub struct Https;
 pub struct Client(());
 
 impl Surreal<Client> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
+	/// Connects to a specific database endpoint, saving the connection on the
+	/// static client
 	///
 	/// # Examples
 	///

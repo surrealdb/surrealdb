@@ -1,4 +1,7 @@
-//! Executes functions from SQL. If there is an SQL function it will be defined in this module.
+//! Executes functions from SQL. If there is an SQL function it will be defined
+//! in this module.
+
+use reblessive::tree::Stk;
 
 use crate::ctx::Context;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -8,7 +11,6 @@ use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
 use crate::sql::Thing;
-use reblessive::tree::Stk;
 pub mod api;
 pub mod args;
 pub mod array;
@@ -94,10 +96,11 @@ pub async fn run(
 	}
 }
 
-/// Each function is specified by its name (a string literal) followed by its path. The path
-/// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
-/// before the remainder of the arguments. The path may be followed by `.await` to signify that
-/// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
+/// Each function is specified by its name (a string literal) followed by its
+/// path. The path may be followed by one parenthesized argument, e.g. ctx,
+/// which is passed to the function before the remainder of the arguments. The
+/// path may be followed by `.await` to signify that it is `async`. Finally, the
+/// path may be prefixed by a parenthesized wrapper function e.g.
 /// `cpu_intensive`.
 macro_rules! dispatch {
     ($ctx: ident, $name: ident, $args: expr, $message: expr,
@@ -502,8 +505,8 @@ pub async fn asynchronous(
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
-	// Wrappers return a function as opposed to a value so that the dispatch! method can always
-	// perform a function call.
+	// Wrappers return a function as opposed to a value so that the dispatch! method
+	// can always perform a function call.
 	#[cfg(not(target_family = "wasm"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
@@ -997,15 +1000,15 @@ fn get_execution_context<'a>(
 mod tests {
 	use regex::Regex;
 
+	use crate::dbs::capabilities::ExperimentalTarget;
 	use crate::dbs::Capabilities;
-	use crate::{
-		dbs::capabilities::ExperimentalTarget,
-		sql::{statements::OutputStatement, Function, Query, Statement, Value},
-	};
+	use crate::sql::statements::OutputStatement;
+	use crate::sql::{Function, Query, Statement, Value};
 
 	#[tokio::test]
 	async fn implementations_are_present() {
-		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
+		// Accumulate and display all problems at once to avoid a test -> fix -> test ->
+		// fix cycle.
 		let mut problems = Vec::new();
 
 		// Read the source code of this file
@@ -1077,7 +1080,8 @@ mod tests {
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
 				if tmp == Value::from("object") {
-					// Assume this function is superseded by a module of the same name.
+					// Assume this function is superseded by a module of the
+					// same name.
 				} else if tmp != Value::from("function") {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}

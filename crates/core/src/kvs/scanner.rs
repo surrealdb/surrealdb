@@ -1,15 +1,15 @@
-use super::tx::Transaction;
-use super::Key;
-use super::Val;
-use crate::err::Error;
-use crate::idx::planner::ScanDirection;
-use futures::stream::Stream;
-use futures::Future;
-use futures::FutureExt;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+use futures::stream::Stream;
+use futures::{Future, FutureExt};
+
+use super::tx::Transaction;
+use super::{Key, Val};
+use crate::err::Error;
+use crate::idx::planner::ScanDirection;
 
 #[cfg(not(target_family = "wasm"))]
 type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a + Send>>;
@@ -151,6 +151,7 @@ impl<'a, I> Scanner<'a, I> {
 
 impl Stream for Scanner<'_, (Key, Val)> {
 	type Item = Result<(Key, Val), Error>;
+
 	fn poll_next(
 		mut self: Pin<&mut Self>,
 		cx: &mut Context,
@@ -174,6 +175,7 @@ impl Stream for Scanner<'_, (Key, Val)> {
 
 impl Stream for Scanner<'_, Key> {
 	type Item = Result<Key, Error>;
+
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<Key, Error>>> {
 		let (store, version) = (self.store, self.version);
 		match self.sc {

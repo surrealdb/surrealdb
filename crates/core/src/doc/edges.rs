@@ -1,16 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Workable;
+use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::paths::EDGE;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
+use crate::sql::paths::{EDGE, IN, OUT};
 use crate::sql::value::Value;
-use crate::sql::Dir;
-use crate::sql::Relation;
-use crate::sql::TableType;
+use crate::sql::{Dir, Relation, TableType};
 
 impl Document {
 	pub(super) async fn store_edges_data(

@@ -1,8 +1,9 @@
 pub(super) mod tower_layer;
 
+use std::sync::LazyLock;
+
 use opentelemetry::global;
 use opentelemetry::metrics::{Histogram, Meter, MetricsError, UpDownCounter};
-use std::sync::LazyLock;
 
 use self::tower_layer::HttpCallMetricTracker;
 

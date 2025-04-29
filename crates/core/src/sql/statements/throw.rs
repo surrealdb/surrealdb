@@ -1,13 +1,14 @@
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::{ControlFlow, Value};
-use crate::{ctx::Context, sql::FlowResult};
+use std::fmt;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::sql::{ControlFlow, FlowResult, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -22,6 +23,7 @@ impl ThrowStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		false
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

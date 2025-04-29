@@ -1,3 +1,6 @@
+use reblessive::tree::Stk;
+
+use super::args::Optional;
 use crate::ctx::Context;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
@@ -7,9 +10,6 @@ use crate::sql::paths::ID;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{Array, FlowResultExt as _, Idiom, Kind, Literal, Part, Table};
-use reblessive::tree::Stk;
-
-use super::args::Optional;
 
 pub async fn exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
@@ -56,7 +56,8 @@ pub async fn refs(
 		return Ok(Value::Array(Array::default()));
 	}
 
-	// If both a table and a field are provided, attempt to correct the field if needed
+	// If both a table and a field are provided, attempt to correct the field if
+	// needed
 	let ff = match (&ft, ff) {
 		(Some(ft), Some(ff)) => Some(correct_refs_field(ctx, opt, ft, ff).await?),
 		(_, ff) => ff,

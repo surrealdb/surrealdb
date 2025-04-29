@@ -1,15 +1,13 @@
-use super::{ParseResult, Parser};
-use crate::{
-	sql::{Constant, Function, Value},
-	syn::{
-		error::{bail, MessageKind},
-		parser::{mac::expected, unexpected, SyntaxError},
-		token::{t, Span},
-	},
-};
 use phf::phf_map;
 use reblessive::Stk;
 use unicase::UniCase;
+
+use super::{ParseResult, Parser};
+use crate::sql::{Constant, Function, Value};
+use crate::syn::error::{bail, MessageKind};
+use crate::syn::parser::mac::expected;
+use crate::syn::parser::{unexpected, SyntaxError};
+use crate::syn::token::{t, Span};
 
 /// The kind of a parsed path.
 #[non_exhaustive]
@@ -456,19 +454,21 @@ const LEVENSTHEIN_ARRAY_SIZE: usize = 1 + MAX_FUNCTION_NAME_LEN + MAX_LEVENSTHEI
 
 /// simple function calculating levenshtein distance with a cut-off.
 ///
-/// levenshtein distance seems fast enough for searching possible functions to suggest as the list
-/// isn't that long and the function names aren't that long. Additionally this function also uses a
-/// cut off for quick rejection of strings which won't lower the minimum searched distance.
+/// levenshtein distance seems fast enough for searching possible functions to
+/// suggest as the list isn't that long and the function names aren't that long.
+/// Additionally this function also uses a cut off for quick rejection of
+/// strings which won't lower the minimum searched distance.
 ///
-/// Function uses stack allocated array's of size LEVENSTHEIN_ARRAY_SIZE. LEVENSTHEIN_ARRAY_SIZE should the largest size in the haystack +
+/// Function uses stack allocated array's of size LEVENSTHEIN_ARRAY_SIZE.
+/// LEVENSTHEIN_ARRAY_SIZE should the largest size in the haystack +
 /// maximum cut_off + 1 for the additional value required during calculation
 fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 	debug_assert!(LEVENSTHEIN_ARRAY_SIZE < u8::MAX as usize);
 	let mut distance_array = [[0u8; LEVENSTHEIN_ARRAY_SIZE]; 2];
 
 	if a.len().abs_diff(b.len()) > cut_off as usize {
-		// moving from a to b requires atleast more then cut off insertions or deletions so don't
-		// even bother.
+		// moving from a to b requires atleast more then cut off insertions or deletions
+		// so don't even bother.
 		return cut_off + 1;
 	}
 
@@ -500,9 +500,9 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 			lowest = res.min(lowest)
 		}
 
-		// The lowest value in the next calculated row will always be equal or larger then the
-		// lowest value of the current row. So we can cut off search early if the score can't equal
-		// the cut_off.
+		// The lowest value in the next calculated row will always be equal or larger
+		// then the lowest value of the current row. So we can cut off search early if
+		// the score can't equal the cut_off.
 		if lowest > cut_off {
 			return cut_off + 1;
 		}
@@ -605,8 +605,8 @@ mod test {
 	#[test]
 	fn function_name_constant_up_to_date() {
 		let max = PATHS.keys().map(|x| x.len()).max().unwrap();
-		// These two need to be the same but the constant needs to manually be updated if PATHS
-		// ever changes so that these two values are not the same.
+		// These two need to be the same but the constant needs to manually be updated
+		// if PATHS ever changes so that these two values are not the same.
 		assert_eq!(
 			MAX_FUNCTION_NAME_LEN, max,
 			"the constant MAX_FUNCTION_NAME_LEN should be {} but is {}, please update the constant",

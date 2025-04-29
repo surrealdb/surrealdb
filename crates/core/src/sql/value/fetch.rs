@@ -1,15 +1,15 @@
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
-use crate::sql::part::Next;
-use crate::sql::part::Part;
+use crate::sql::part::{Next, Part};
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::value::{Value, Values};
 use crate::sql::FlowResultExt as _;
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
 
 impl Value {
 	pub(crate) async fn fetch(
@@ -24,11 +24,11 @@ impl Value {
 		let mut prev = path;
 
 		// Loop over the path.
-		// If the we just need to select a sub section of a value we update this to point to the
-		// new subsection of the value. Otherwise we call into fetch again and then immediately
-		// return.
-		// If we encounter a idiom application which does not make sense, like `(1).foo` just
-		// return Ok(())
+		// If the we just need to select a sub section of a value we update this to
+		// point to the new subsection of the value. Otherwise we call into fetch
+		// again and then immediately return.
+		// If we encounter a idiom application which does not make sense, like `(1).foo`
+		// just return Ok(())
 		while let Some(p) = iter.next() {
 			match p {
 				Part::Graph(g) => match this {

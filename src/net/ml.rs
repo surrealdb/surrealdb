@@ -1,17 +1,12 @@
-//! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
-use super::AppState;
-use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
-use crate::err::Error;
-#[cfg(feature = "ml")]
-use crate::net::output;
+//! This file defines the endpoints for the ML API for importing and exporting
+//! SurrealML models.
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
 #[cfg(feature = "ml")]
 use axum::response::Response;
 use axum::routing::{get, post};
-use axum::Extension;
-use axum::Router;
+use axum::{Extension, Router};
 #[cfg(feature = "ml")]
 use bytes::Bytes;
 #[cfg(feature = "ml")]
@@ -33,6 +28,12 @@ use surrealdb::ml::storage::surml_file::SurMlFile;
 #[cfg(feature = "ml")]
 use surrealdb::sql::statements::{DefineModelStatement, DefineStatement};
 use tower_http::limit::RequestBodyLimitLayer;
+
+use super::AppState;
+use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
+use crate::err::Error;
+#[cfg(feature = "ml")]
+use crate::net::output;
 
 /// The router definition for the ML API endpoints.
 pub(super) fn router<S>() -> Router<S>

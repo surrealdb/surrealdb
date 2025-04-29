@@ -1,9 +1,10 @@
+use std::collections::HashMap;
+
 use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
 use crate::idx::planner::RecordStrategy;
 use crate::sql::{Object, Value};
-use std::collections::HashMap;
 
 pub(super) struct Plan {
 	pub(super) do_iterate: bool,
@@ -75,6 +76,7 @@ impl Explanation {
 	) {
 		self.0.push(ExplainItem::new_start_limit(start_skip, cancel_on_limit));
 	}
+
 	pub(super) fn output(self) -> Vec<Value> {
 		self.0.into_iter().map(|e| e.into()).collect()
 	}
@@ -198,6 +200,7 @@ impl ExplainItem {
 			details,
 		}
 	}
+
 	pub(super) fn new_record_strategy(rs: RecordStrategy) -> Self {
 		Self {
 			name: "RecordStrategy".into(),

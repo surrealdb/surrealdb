@@ -1,7 +1,8 @@
 //! Stores Vector of an HNSW index
+use serde::{Deserialize, Serialize};
+
 use crate::idx::trees::hnsw::ElementId;
 use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]

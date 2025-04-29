@@ -1,3 +1,10 @@
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use filter::Filter;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -9,13 +16,7 @@ use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::store::IndexStores;
 use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::{FlowResultExt as _, Value};
-use crate::sql::{Function, Strand};
-use filter::Filter;
-use reblessive::tree::Stk;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use crate::sql::{FlowResultExt as _, Function, Strand, Value};
 
 mod filter;
 pub(in crate::idx) mod mapper;
@@ -182,7 +183,8 @@ impl Analyzer {
 		// We need to store them because everything after is zero-copy
 		let mut inputs = Vec::with_capacity(content.len());
 		self.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing, &mut inputs).await?;
-		// We then collect every unique terms and count the frequency and extract the offsets
+		// We then collect every unique terms and count the frequency and extract the
+		// offsets
 		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
 		for (i, tks) in inputs.iter().enumerate() {
 			for tk in tks.list() {
@@ -306,17 +308,17 @@ impl Analyzer {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+
 	use super::Analyzer;
 	use crate::ctx::MutableContext;
 	use crate::dbs::Options;
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::{
-		sql::{statements::DefineStatement, Statement},
-		syn,
-	};
-	use std::sync::Arc;
+	use crate::sql::statements::DefineStatement;
+	use crate::sql::Statement;
+	use crate::syn;
 
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
 		let ds = Datastore::new("memory").await.unwrap();

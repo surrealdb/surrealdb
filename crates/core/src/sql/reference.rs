@@ -1,15 +1,16 @@
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::{
-	ctx::Context,
-	dbs::{capabilities::ExperimentalTarget, Options},
-	doc::CursorDoc,
-	err::Error,
-};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 
-use super::{array::Uniq, statements::info::InfoStructure, Array, Idiom, Table, Thing, Value};
+use super::array::Uniq;
+use super::statements::info::InfoStructure;
+use super::{Array, Idiom, Table, Thing, Value};
+use crate::ctx::Context;
+use crate::dbs::capabilities::ExperimentalTarget;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]

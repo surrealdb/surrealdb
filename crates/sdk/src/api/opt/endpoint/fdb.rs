@@ -1,12 +1,10 @@
-use crate::api::engine::local::Db;
-use crate::api::engine::local::FDb;
-use crate::api::opt::Config;
-use crate::api::opt::Endpoint;
-use crate::api::opt::IntoEndpoint;
-use crate::api::Result;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
 use url::Url;
+
+use crate::api::engine::local::{Db, FDb};
+use crate::api::opt::{Config, Endpoint, IntoEndpoint};
+use crate::api::Result;
 
 macro_rules! endpoints {
 	($($name:ty),*) => {

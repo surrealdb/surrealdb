@@ -1,26 +1,20 @@
-use std::{
-	convert::Infallible,
-	sync::Arc,
-	task::{Context, Poll},
-	time::Duration,
-};
+use std::convert::Infallible;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::time::Duration;
 
-use async_graphql::{
-	http::{create_multipart_mixed_stream, is_accept_multipart_mixed},
-	Executor, ParseRequestError,
-};
-use async_graphql_axum::{
-	rejection::GraphQLRejection, GraphQLBatchRequest, GraphQLRequest, GraphQLResponse,
-};
-use axum::{
-	body::{Body, HttpBody},
-	extract::FromRequest,
-	http::{Request as HttpRequest, Response as HttpResponse},
-	response::IntoResponse,
-	BoxError,
-};
+use async_graphql::http::{create_multipart_mixed_stream, is_accept_multipart_mixed};
+use async_graphql::{Executor, ParseRequestError};
+use async_graphql_axum::rejection::GraphQLRejection;
+use async_graphql_axum::{GraphQLBatchRequest, GraphQLRequest, GraphQLResponse};
+use axum::body::{Body, HttpBody};
+use axum::extract::FromRequest;
+use axum::http::{Request as HttpRequest, Response as HttpResponse};
+use axum::response::IntoResponse;
+use axum::BoxError;
 use bytes::Bytes;
-use futures_util::{future::BoxFuture, StreamExt};
+use futures_util::future::BoxFuture;
+use futures_util::StreamExt;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
 use surrealdb::gql::cache::{Invalidator, SchemaCache};
@@ -55,9 +49,9 @@ where
 	B::Error: Into<BoxError>,
 	I: Invalidator,
 {
-	type Response = HttpResponse<Body>;
 	type Error = Infallible;
 	type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+	type Response = HttpResponse<Body>;
 
 	fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
 		Poll::Ready(Ok(()))

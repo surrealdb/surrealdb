@@ -1,8 +1,8 @@
 mod helpers;
-use helpers::*;
-
-use regex::Regex;
 use std::collections::HashMap;
+
+use helpers::*;
+use regex::Regex;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::{Capabilities, Session};
 use surrealdb::iam::Role;
@@ -148,7 +148,6 @@ async fn info_for_user() {
 	);
 }
 
-//
 // Permissions
 //
 
@@ -157,7 +156,8 @@ async fn permissions_checks_info_root() {
 	let scenario =
 		HashMap::from([("prepare", ""), ("test", "INFO FOR ROOT"), ("check", "INFO FOR ROOT")]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
 	let check_results = [vec![check], vec![check]];
 
@@ -194,7 +194,8 @@ async fn permissions_checks_info_ns() {
 	let scenario =
 		HashMap::from([("prepare", ""), ("test", "INFO FOR NS"), ("check", "INFO FOR NS")]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
@@ -233,7 +234,8 @@ async fn permissions_checks_info_db() {
 	let scenario =
 		HashMap::from([("prepare", ""), ("test", "INFO FOR DB"), ("check", "INFO FOR DB")]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
         vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
         vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
@@ -275,7 +277,8 @@ async fn permissions_checks_info_table() {
 		("check", "INFO FOR TABLE tb"),
 	]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
@@ -317,7 +320,8 @@ async fn permissions_checks_info_user_root() {
         ("check", "INFO FOR USER user ON ROOT"),
     ]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
         vec!["\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
         vec!["\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
@@ -359,7 +363,8 @@ async fn permissions_checks_info_user_ns() {
         ("check", "INFO FOR USER user ON NS"),
     ]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
         vec!["\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
         vec!["\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
@@ -401,7 +406,8 @@ async fn permissions_checks_info_user_db() {
         ("check", "INFO FOR USER user ON DB"),
     ]);
 
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
+	// Define the expected results for the check statement when the test statement
+	// succeeded and when it failed
 	let check_results = [
         vec!["\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
         vec!["\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],

@@ -88,15 +88,17 @@ async fn future_disabled() -> Result<(), Error> {
 #[tokio::test]
 #[ignore]
 async fn concurrency() -> Result<(), Error> {
-	// cargo test --package surrealdb --test future --features kv-mem --release -- concurrency --nocapture
+	// cargo test --package surrealdb --test future --features kv-mem --release --
+	// concurrency --nocapture
 
 	const MILLIS: usize = 50;
 
-	// If all futures complete in less than double `MILLIS`, then they must have executed
-	// concurrently. Otherwise, some executed sequentially.
+	// If all futures complete in less than double `MILLIS`, then they must have
+	// executed concurrently. Otherwise, some executed sequentially.
 	const TIMEOUT: usize = MILLIS * 19 / 10;
 
-	/// Returns a query that will execute `count` futures that each wait for `millis`
+	/// Returns a query that will execute `count` futures that each wait for
+	/// `millis`
 	fn query(count: usize, millis: usize) -> String {
 		// TODO: Find a simpler way to trigger the concurrent future case.
 		format!(
@@ -130,11 +132,9 @@ async fn concurrency() -> Result<(), Error> {
 	}
 
 	// Diagnostics.
-	/*
-	for i in (1..=80).step_by(8) {
-		println!("{i} futures => {}", test_limit(i).await?);
-	}
-	*/
+	// for i in (1..=80).step_by(8) {
+	// println!("{i} futures => {}", test_limit(i).await?);
+	// }
 
 	assert!(test_limit(3).await?);
 

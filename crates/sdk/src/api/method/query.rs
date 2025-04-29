@@ -1,31 +1,31 @@
-use super::{live, Stream};
-use crate::api::conn::Command;
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
-use crate::api::opt;
-use crate::api::Connection;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::method::OnceLockExt;
-use crate::method::Stats;
-use crate::method::WithStats;
-use crate::value::Notification;
-use crate::{Surreal, Value};
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::future::IntoFuture;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use futures::future::Either;
 use futures::stream::SelectAll;
 use futures::StreamExt;
 use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::future::IntoFuture;
-use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
 use surrealdb_core::sql::{
-	self, to_value as to_core_value, Object as CoreObject, Statement, Value as CoreValue,
+	self,
+	to_value as to_core_value,
+	Object as CoreObject,
+	Statement,
+	Value as CoreValue,
 };
+
+use super::{live, Stream};
+use crate::api::conn::Command;
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::{opt, Connection, ExtraFeatures, Result};
+use crate::method::{OnceLockExt, Stats, WithStats};
+use crate::value::Notification;
+use crate::{Surreal, Value};
 
 /// A query future
 #[derive(Debug)]
@@ -84,7 +84,8 @@ where
 		}
 	}
 
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Query<'static, C> {
 		Query {
 			client: Cow::Owned(self.client.into_owned()),
@@ -97,8 +98,8 @@ impl<'r, Client> IntoFuture for Query<'r, Client>
 where
 	Client: Connection,
 {
-	type Output = Result<Response>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Response>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -196,8 +197,8 @@ impl<'r, Client> IntoFuture for WithStats<Query<'r, Client>>
 where
 	Client: Connection,
 {
-	type Output = Result<WithStats<Response>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<WithStats<Response>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -483,20 +484,22 @@ impl Response {
 	/// # }
 	/// ```
 	///
-	/// Consume the stream the same way you would any other type that implements `futures::Stream`.
+	/// Consume the stream the same way you would any other type that implements
+	/// `futures::Stream`.
 	pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> Result<QueryStream<R>> {
 		index.query_stream(self)
 	}
 
 	/// Take all errors from the query response
 	///
-	/// The errors are keyed by the corresponding index of the statement that failed.
-	/// Afterwards the response is left with only statements that did not produce any errors.
+	/// The errors are keyed by the corresponding index of the statement that
+	/// failed. Afterwards the response is left with only statements that did
+	/// not produce any errors.
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -521,12 +524,13 @@ impl Response {
 		errors
 	}
 
-	/// Check query response for errors and return the first error, if any, or the response
+	/// Check query response for errors and return the first error, if any, or
+	/// the response
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -556,7 +560,7 @@ impl Response {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -645,13 +649,14 @@ impl WithStats<Response> {
 
 	/// Take all errors from the query response
 	///
-	/// The errors are keyed by the corresponding index of the statement that failed.
-	/// Afterwards the response is left with only statements that did not produce any errors.
+	/// The errors are keyed by the corresponding index of the statement that
+	/// failed. Afterwards the response is left with only statements that did
+	/// not produce any errors.
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -676,12 +681,13 @@ impl WithStats<Response> {
 		errors
 	}
 
-	/// Check query response for errors and return the first error, if any, or the response
+	/// Check query response for errors and return the first error, if any, or
+	/// the response
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -700,7 +706,7 @@ impl WithStats<Response> {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -722,10 +728,12 @@ impl WithStats<Response> {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::{value::to_value, Error::Api};
 	use serde::Deserialize;
 	use surrealdb_core::sql::Value as CoreValue;
+
+	use super::*;
+	use crate::value::to_value;
+	use crate::Error::Api;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {

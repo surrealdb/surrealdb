@@ -1,3 +1,9 @@
+use std::sync::Arc;
+
+use revision::revisioned;
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
@@ -7,10 +13,6 @@ use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Id, Thing};
-use revision::revisioned;
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 pub(in crate::idx) struct HnswDocs {
 	tb: String,

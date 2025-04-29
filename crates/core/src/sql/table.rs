@@ -1,9 +1,14 @@
-use crate::sql::{escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes, Id, Ident, Thing};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::sql::escape::EscapeIdent;
+use crate::sql::fmt::Fmt;
+use crate::sql::strand::no_nul_bytes;
+use crate::sql::{Id, Ident, Thing};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Table";
 
@@ -21,6 +26,7 @@ impl From<Table> for Tables {
 
 impl Deref for Tables {
 	type Target = Vec<Table>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -59,6 +65,7 @@ impl From<Ident> for Table {
 
 impl Deref for Table {
 	type Target = String;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

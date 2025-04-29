@@ -1,16 +1,10 @@
-use crate::{
-	sql::{
-		language::Language, Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table,
-		Uuid,
-	},
-	syn::{
-		lexer::compound,
-		parser::{mac::unexpected, ParseResult, Parser},
-		token::{self, t, TokenKind},
-	},
-};
-
 use super::mac::pop_glued;
+use crate::sql::language::Language;
+use crate::sql::{Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table, Uuid};
+use crate::syn::lexer::compound;
+use crate::syn::parser::mac::unexpected;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::{self, t, TokenKind};
 
 mod number;
 
@@ -237,8 +231,9 @@ mod test {
 		use crate::sql;
 
 		fn assert_ident_parses_correctly(ident: &str) {
-			use crate::syn::Parser;
 			use reblessive::Stack;
+
+			use crate::syn::Parser;
 
 			let mut parser = Parser::new(ident.as_bytes());
 			let mut stack = Stack::new();

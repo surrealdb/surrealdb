@@ -18,7 +18,8 @@ impl Arity {
 		}
 	}
 
-	/// Combine the arity from multiple arugments to calculate the combined arity.
+	/// Combine the arity from multiple arugments to calculate the combined
+	/// arity.
 	pub fn combine(self, other: Self) -> Arity {
 		Arity {
 			lower: self.lower + other.lower,
@@ -67,8 +68,9 @@ impl Args {
 pub trait FromArg: Sized {
 	// returns the number of arguments the type takes.
 	fn arity() -> Arity;
-	/// Convert a collection of argument values into a certain argument format, failing if there are
-	/// too many or too few arguments, or if one of the arguments could not be converted.
+	/// Convert a collection of argument values into a certain argument format,
+	/// failing if there are too many or too few arguments, or if one of the
+	/// arguments could not be converted.
 	fn from_arg(name: &str, args: &mut Args) -> Result<Self, Error>;
 }
 
@@ -76,8 +78,8 @@ pub trait FromArgs: Sized {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error>;
 }
 
-/// A wrapper type for optional arguments, as opposed to Option which might also indicate None being a
-/// proper value.
+/// A wrapper type for optional arguments, as opposed to Option which might also
+/// indicate None being a proper value.
 #[repr(transparent)]
 pub struct Optional<T>(pub Option<T>);
 
@@ -104,7 +106,8 @@ impl<T: FromArg> FromArg for Optional<T> {
 	}
 }
 
-/// A wrapper type for remaining arguments, will collect all arguments which remain.
+/// A wrapper type for remaining arguments, will collect all arguments which
+/// remain.
 #[repr(transparent)]
 pub struct Rest<T>(pub Vec<T>);
 
@@ -138,8 +141,8 @@ impl<T: Coerce> FromArg for T {
 	}
 
 	fn from_arg(name: &str, iter: &mut Args) -> Result<Self, Error> {
-		// The error should not happen when called with the FromArgs traits as the arity is already
-		// checked.
+		// The error should not happen when called with the FromArgs traits as the arity
+		// is already checked.
 		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidArguments {
 			name: name.to_owned(),
 			message: "Missing an argument".to_string(),
@@ -153,7 +156,8 @@ impl<T: Coerce> FromArg for T {
 	}
 }
 
-/// Wrapper type for arguments which use coercing rules instead of coercing rules.
+/// Wrapper type for arguments which use coercing rules instead of coercing
+/// rules.
 pub struct Cast<T>(pub T);
 
 impl<T: CastTrait> FromArg for Cast<T> {
@@ -165,8 +169,8 @@ impl<T: CastTrait> FromArg for Cast<T> {
 	}
 
 	fn from_arg(name: &str, iter: &mut Args) -> Result<Self, Error> {
-		// The error should not happen when called with the FromArgs traits as the arity is already
-		// checked.
+		// The error should not happen when called with the FromArgs traits as the arity
+		// is already checked.
 		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidArguments {
 			name: name.to_owned(),
 			message: "Missing an argument".to_string(),
@@ -215,13 +219,13 @@ impl<T: FromArg> FromArgs for T {
 }
 
 /// A wrapper type for functions which do their own typechecking of arguments.
-/// Take ownership of the raw arguments collection, and assume responsibility of validating the
-/// number of arguments and converting them as necessary.
+/// Take ownership of the raw arguments collection, and assume responsibility of
+/// validating the number of arguments and converting them as necessary.
 #[repr(transparent)]
 pub struct Any(pub Vec<Value>);
 
-// Take ownership of the raw arguments collection, and assume responsibility of validating the
-// number of arguments and converting them as necessary.
+// Take ownership of the raw arguments collection, and assume responsibility of
+// validating the number of arguments and converting them as necessary.
 impl FromArgs for Any {
 	fn from_args(_name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		Ok(Any(args))
@@ -252,7 +256,8 @@ macro_rules! impl_tuple {
 	}
 }
 
-// It is possible to add larger sequences to support higher quantities of fixed arguments.
+// It is possible to add larger sequences to support higher quantities of fixed
+// arguments.
 impl_tuple!();
 impl_tuple!(A);
 impl_tuple!(A, B);

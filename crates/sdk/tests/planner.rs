@@ -2,12 +2,13 @@ mod parse;
 
 use parse::Parse;
 mod helpers;
-use crate::helpers::Test;
 use helpers::{new_ds, skip_ok};
 use surrealdb::dbs::{Response, Session};
 use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
@@ -2708,7 +2709,6 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"[
@@ -3382,8 +3382,9 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 		let a = get_array()?;
 		assert!(a.windows(2).any(|w| w[0] <= w[1]), "Values are not random: {a:?}");
 	}
-	// With an array of 1500, there is a probability of factorial 1500! that `ORDER BY RAND()` returns a sorted array
-	// At a rate of one test per minute, we're SURE that approximately 10^4,104.8 years from now a test WILL fail.
+	// With an array of 1500, there is a probability of factorial 1500! that `ORDER
+	// BY RAND()` returns a sorted array At a rate of one test per minute, we're
+	// SURE that approximately 10^4,104.8 years from now a test WILL fail.
 	// For perspective, this time frame is far longer than the age of the universe,
 	// but well, my apologies if that even happen ¯\_(ツ)_/¯
 	Ok(())

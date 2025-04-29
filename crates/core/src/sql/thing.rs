@@ -1,3 +1,12 @@
+use std::fmt;
+use std::ops::Bound;
+use std::str::FromStr;
+
+use futures::StreamExt;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::id::range::IdRange;
 use super::{Cond, Expression, Ident, Idiom, Operator, Part, Table};
 use crate::ctx::Context;
@@ -7,15 +16,10 @@ use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode as _;
-use crate::sql::{escape::EscapeRid, id::Id, Strand, Value};
+use crate::sql::escape::EscapeRid;
+use crate::sql::id::Id;
+use crate::sql::{Strand, Value};
 use crate::syn;
-use futures::StreamExt;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::ops::Bound;
-use std::str::FromStr;
 
 const ID: &str = "id";
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
@@ -236,6 +240,7 @@ impl From<(&str, &str)> for Thing {
 
 impl FromStr for Thing {
 	type Err = ();
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		Self::try_from(s)
 	}
@@ -243,6 +248,7 @@ impl FromStr for Thing {
 
 impl TryFrom<String> for Thing {
 	type Error = ();
+
 	fn try_from(v: String) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
@@ -250,6 +256,7 @@ impl TryFrom<String> for Thing {
 
 impl TryFrom<Strand> for Thing {
 	type Error = ();
+
 	fn try_from(v: Strand) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
@@ -257,6 +264,7 @@ impl TryFrom<Strand> for Thing {
 
 impl TryFrom<&str> for Thing {
 	type Error = ();
+
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		match syn::thing_with_range(v) {
 			Ok(v) => Ok(v),
@@ -270,10 +278,12 @@ impl Thing {
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}
+
 	/// Check if this Thing is a range
 	pub fn is_range(&self) -> bool {
 		matches!(self.id, Id::Range(_))
 	}
+
 	/// Check if this Thing is of a certain table type
 	pub fn is_record_type(&self, types: &[Table]) -> bool {
 		types.is_empty() || types.iter().any(|tb| tb.0 == self.tb)
@@ -304,11 +314,11 @@ impl Thing {
 
 #[cfg(test)]
 mod test {
-	use std::{ops::Bound, str::FromStr};
-
-	use crate::sql::{Array, Id, IdRange, Object, Value};
+	use std::ops::Bound;
+	use std::str::FromStr;
 
 	use super::Thing;
+	use crate::sql::{Array, Id, IdRange, Object, Value};
 
 	#[test]
 	fn from() {

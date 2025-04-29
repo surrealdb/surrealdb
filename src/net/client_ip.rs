@@ -1,16 +1,12 @@
-use axum::async_trait;
-use axum::extract::ConnectInfo;
-use axum::extract::FromRef;
-use axum::extract::FromRequestParts;
-use axum::extract::Request;
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, FromRef, FromRequestParts, Request};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::Extension;
-use axum::RequestPartsExt;
+use axum::{async_trait, Extension, RequestPartsExt};
 use clap::ValueEnum;
 use http::request::Parts;
 use http::StatusCode;
-use std::net::SocketAddr;
 
 use super::AppState;
 

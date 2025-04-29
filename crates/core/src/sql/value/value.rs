@@ -1,36 +1,64 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::fnc::util::string::fuzzy::Fuzzy;
-use crate::sql::id::range::IdRange;
-use crate::sql::range::OldRange;
-use crate::sql::reference::Refs;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{
-	fmt::{Fmt, Pretty},
-	id::{Gen, Id},
-	model::Model,
-	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, File, Function,
-	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Tables, Thing, Uuid,
-};
-use crate::sql::{Closure, ControlFlow, FlowResult};
-use chrono::{DateTime, Utc};
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::{Bound, Deref};
 
+use chrono::{DateTime, Utc};
 use geo::Point;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter, Write};
-use std::ops::{Bound, Deref};
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::fnc::util::string::fuzzy::Fuzzy;
+use crate::sql::fmt::{Fmt, Pretty};
+use crate::sql::id::range::IdRange;
+use crate::sql::id::{Gen, Id};
+use crate::sql::model::Model;
+use crate::sql::range::OldRange;
+use crate::sql::reference::Refs;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{
+	Array,
+	Block,
+	Bytes,
+	Cast,
+	Closure,
+	Constant,
+	ControlFlow,
+	Datetime,
+	Duration,
+	Edges,
+	Expression,
+	File,
+	FlowResult,
+	Function,
+	Future,
+	Geometry,
+	Idiom,
+	Mock,
+	Number,
+	Object,
+	Operation,
+	Param,
+	Part,
+	Query,
+	Range,
+	Regex,
+	Strand,
+	Subquery,
+	Table,
+	Tables,
+	Thing,
+	Uuid,
+};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
@@ -51,14 +79,16 @@ where
 
 impl Deref for Values {
 	type Target = Vec<Value>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Values {
-	type Item = Value;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Value;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -480,11 +510,12 @@ impl Value {
 	/// Returns the surql representation of the kind of the value as a string.
 	///
 	/// # Warning
-	/// This function is not fully implement for all variants, make sure you don't accidentally use
-	/// it where it can return an invalid value.
+	/// This function is not fully implement for all variants, make sure you
+	/// don't accidentally use it where it can return an invalid value.
 	pub fn kindof(&self) -> &'static str {
-		// TODO: Look at this function, there are a whole bunch of options for which this returns
-		// "incorrect type" which might sneak into the results where it shouldn.t
+		// TODO: Look at this function, there are a whole bunch of options for which
+		// this returns "incorrect type" which might sneak into the results where it
+		// shouldn.t
 		match self {
 			Self::None => "none",
 			Self::Null => "null",
@@ -813,7 +844,8 @@ impl Value {
 		}
 	}
 
-	/// Compare this Value to another Value lexicographically and using natural numerical comparison
+	/// Compare this Value to another Value lexicographically and using natural
+	/// numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
@@ -870,6 +902,7 @@ impl Value {
 			_ => false,
 		}
 	}
+
 	/// Process this type returning a computed simple Value.
 	pub(crate) async fn compute(
 		&self,
@@ -960,6 +993,7 @@ pub(crate) trait TryAdd<Rhs = Self> {
 
 impl TryAdd for Value {
 	type Output = Self;
+
 	fn try_add(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
@@ -981,6 +1015,7 @@ pub(crate) trait TrySub<Rhs = Self> {
 
 impl TrySub for Value {
 	type Output = Self;
+
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
@@ -1002,6 +1037,7 @@ pub(crate) trait TryMul<Rhs = Self> {
 
 impl TryMul for Value {
 	type Output = Self;
+
 	fn try_mul(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_mul(w)?),
@@ -1019,6 +1055,7 @@ pub(crate) trait TryDiv<Rhs = Self> {
 
 impl TryDiv for Value {
 	type Output = Self;
+
 	fn try_div(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_div(w)?),
@@ -1036,6 +1073,7 @@ pub(crate) trait TryFloatDiv<Rhs = Self> {
 
 impl TryFloatDiv for Value {
 	type Output = Self;
+
 	fn try_float_div(self, other: Self) -> Result<Self::Output, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_float_div(w)?),
@@ -1053,6 +1091,7 @@ pub(crate) trait TryRem<Rhs = Self> {
 
 impl TryRem for Value {
 	type Output = Self;
+
 	fn try_rem(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_rem(w)?),
@@ -1070,6 +1109,7 @@ pub(crate) trait TryPow<Rhs = Self> {
 
 impl TryPow for Value {
 	type Output = Self;
+
 	fn try_pow(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Value::Number(v), Value::Number(w)) => Self::Number(v.try_pow(w)?),
@@ -1087,6 +1127,7 @@ pub(crate) trait TryNeg<Rhs = Self> {
 
 impl TryNeg for Value {
 	type Output = Self;
+
 	fn try_neg(self) -> Result<Self, Error> {
 		Ok(match self {
 			Self::Number(n) => Self::Number(n.try_neg()?),

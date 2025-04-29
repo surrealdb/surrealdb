@@ -1,47 +1,34 @@
-use super::{HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH};
-use crate::api::conn::DbResponse;
-use crate::api::conn::Route;
-use crate::api::conn::Router;
-use crate::api::conn::{Command, Connection, RequestData};
-use crate::api::engine::remote::ws::Client;
-use crate::api::engine::remote::ws::PING_INTERVAL;
-use crate::api::engine::remote::Response;
-use crate::api::engine::remote::{deserialize, serialize};
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
-use crate::api::opt::Endpoint;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::engine::remote::Data;
-use crate::engine::IntervalStream;
-use crate::opt::WaitFor;
-use crate::{Action, Notification};
-use async_channel::{Receiver, Sender};
-use futures::stream::{SplitSink, SplitStream};
-use futures::FutureExt;
-use futures::SinkExt;
-use futures::StreamExt;
-use pharos::Channel;
-use pharos::Events;
-use pharos::Observable;
-use pharos::ObserveConfig;
-use revision::revisioned;
-use serde::Deserialize;
 use std::collections::hash_map::Entry;
-use std::collections::BTreeMap;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::AtomicI64;
 use std::time::Duration;
+
+use async_channel::{Receiver, Sender};
+use futures::stream::{SplitSink, SplitStream};
+use futures::{FutureExt, SinkExt, StreamExt};
+use pharos::{Channel, Events, Observable, ObserveConfig};
+use revision::revisioned;
+use serde::Deserialize;
 use surrealdb_core::sql::Value as CoreValue;
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
 use wasmtimer::tokio as time;
 use wasmtimer::tokio::MissedTickBehavior;
-use ws_stream_wasm::WsMessage as Message;
-use ws_stream_wasm::WsMeta;
-use ws_stream_wasm::{WsEvent, WsStream};
+use ws_stream_wasm::{WsEvent, WsMessage as Message, WsMeta, WsStream};
+
+use super::{HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH};
+use crate::api::conn::{Command, Connection, DbResponse, RequestData, Route, Router};
+use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
+use crate::api::engine::remote::{deserialize, serialize, Response};
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::opt::Endpoint;
+use crate::api::{ExtraFeatures, Result, Surreal};
+use crate::engine::remote::Data;
+use crate::engine::IntervalStream;
+use crate::opt::WaitFor;
+use crate::{Action, Notification};
 
 type MessageStream = SplitStream<WsStream>;
 type MessageSink = SplitSink<WsStream, Message>;
@@ -228,7 +215,8 @@ async fn router_handle_response(
 								match pending.effect {
 									RequestEffect::None => {}
 									RequestEffect::Insert => {
-										// For insert, we need to flatten single responses in an array
+										// For insert, we need to flatten single responses in an
+										// array
 										if let Ok(Data::Other(CoreValue::Array(value))) =
 											response.result
 										{
@@ -279,7 +267,8 @@ async fn router_handle_response(
 							let live_query_id = notification.id;
 							// Check if this live query is registered
 							if let Some(sender) = state.live_queries.get(&live_query_id) {
-								// Send the notification back to the caller or kill live query if the receiver is already dropped
+								// Send the notification back to the caller or kill live query if
+								// the receiver is already dropped
 								let notification = Notification {
 									query_id: notification.id.0,
 									action: Action::from_core(notification.action),

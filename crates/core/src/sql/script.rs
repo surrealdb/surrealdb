@@ -1,9 +1,11 @@
-use crate::sql::strand::no_nul_bytes;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::sql::strand::no_nul_bytes;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -25,6 +27,7 @@ impl From<&str> for Script {
 
 impl Deref for Script {
 	type Target = String;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

@@ -1,15 +1,16 @@
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::range::TypedRange;
-use crate::sql::{block::Entry, Block, Param, Value};
-use crate::sql::{ControlFlow, FlowResult};
+use std::fmt::{self, Display};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::sql::block::Entry;
+use crate::sql::range::TypedRange;
+use crate::sql::{Block, ControlFlow, FlowResult, Param, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -42,6 +43,7 @@ impl ForeachStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		self.range.writeable() || self.block.writeable()
 	}
+
 	/// Process this type returning a computed simple Value
 	///
 	/// Was marked recursive

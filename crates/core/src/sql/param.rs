@@ -1,17 +1,19 @@
-use crate::{
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	iam::Action,
-	sql::{ident::Ident, value::Value, Permission},
-};
+use std::ops::Deref;
+use std::{fmt, str};
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::{fmt, ops::Deref, str};
 
 use super::FlowResultExt as _;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::iam::Action;
+use crate::sql::ident::Ident;
+use crate::sql::value::Value;
+use crate::sql::Permission;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 
@@ -42,6 +44,7 @@ impl From<&str> for Param {
 
 impl Deref for Param {
 	type Target = Ident;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}

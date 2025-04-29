@@ -1,7 +1,8 @@
+use std::cmp::min;
+
 use crate::sql::idiom::Idiom;
 use crate::sql::operation::Operation;
 use crate::sql::value::Value;
-use std::cmp::min;
 
 impl Value {
 	pub(crate) fn diff(&self, val: &Value, path: Idiom) -> Vec<Operation> {

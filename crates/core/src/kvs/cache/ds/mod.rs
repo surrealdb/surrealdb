@@ -3,10 +3,11 @@ mod key;
 mod lookup;
 mod weight;
 
-use crate::err::Error;
 pub(crate) use entry::Entry;
 pub(crate) use lookup::Lookup;
 use uuid::Uuid;
+
+use crate::err::Error;
 
 pub(crate) type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
 

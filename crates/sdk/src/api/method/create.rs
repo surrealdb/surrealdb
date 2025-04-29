@@ -1,20 +1,18 @@
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::api::opt::Resource;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::method::OnceLockExt;
-use crate::Surreal;
-use crate::Value;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 
-use super::validate_data;
-use super::Content;
+use super::{validate_data, Content};
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
+use crate::api::opt::Resource;
+use crate::api::{Connection, Result};
+use crate::method::OnceLockExt;
+use crate::{Surreal, Value};
 
 /// A record create future
 #[derive(Debug)]
@@ -29,7 +27,8 @@ impl<C, R> Create<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Create<'static, C, R> {
 		Create {
 			client: Cow::Owned(self.client.into_owned()),
@@ -62,8 +61,8 @@ impl<'r, Client> IntoFuture for Create<'r, Client, Value>
 where
 	Client: Connection,
 {
-	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Value>;
 
 	into_future! {execute_value}
 }
@@ -73,8 +72,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Option<R>>;
 
 	into_future! {execute_opt}
 }

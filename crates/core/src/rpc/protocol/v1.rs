@@ -1,26 +1,28 @@
-#[cfg(not(target_family = "wasm"))]
-use async_graphql::BatchRequest;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[cfg(not(target_family = "wasm"))]
+use async_graphql::BatchRequest;
+
+#[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
+use crate::dbs::capabilities::MethodTarget;
+use crate::dbs::{QueryType, Response};
 use crate::err::Error;
-use crate::rpc::Data;
-use crate::rpc::Method;
-use crate::rpc::RpcContext;
-use crate::rpc::RpcError;
-use crate::{
-	dbs::{capabilities::MethodTarget, QueryType, Response},
-	rpc::args::Take,
-	sql::{
-		statements::{
-			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
-			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
-		},
-		Array, Fields, Function, Model, Output, Query, Strand, Value,
-	},
+use crate::rpc::args::Take;
+use crate::rpc::{Data, Method, RpcContext, RpcError};
+use crate::sql::statements::{
+	CreateStatement,
+	DeleteStatement,
+	InsertStatement,
+	KillStatement,
+	LiveStatement,
+	RelateStatement,
+	SelectStatement,
+	UpdateStatement,
+	UpsertStatement,
 };
+use crate::sql::{Array, Fields, Function, Model, Output, Query, Strand, Value};
 
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocolV1: RpcContext {
@@ -80,7 +82,8 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
-		// To be able to select a namespace, and then list resources in that namespace, as an example
+		// To be able to select a namespace, and then list resources in that namespace,
+		// as an example
 		let (ns, db) = params.needs_two()?;
 		// Get the context lock
 		let mutex = self.lock().clone();
@@ -118,8 +121,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(Value::None.into())
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
-	// This will allow returning refresh tokens as well as any additional credential resulting from signing up.
+	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
+	// a string. This will allow returning refresh tokens as well as any additional
+	// credential resulting from signing up.
 	async fn signup(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
@@ -142,8 +146,9 @@ pub trait RpcProtocolV1: RpcContext {
 		out.map(Into::into).map_err(Into::into)
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
-	// This will allow returning refresh tokens as well as any additional credential resulting from signing in.
+	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
+	// a string. This will allow returning refresh tokens as well as any additional
+	// credential resulting from signing in.
 	async fn signin(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Ok(Value::Object(v)) = params.needs_one() else {
@@ -992,7 +997,8 @@ pub trait RpcProtocolV1: RpcContext {
 
 		// Post-process hooks for web layer
 		for response in &res {
-			// This error should be unreachable because we shouldn't proceed if there's no handler
+			// This error should be unreachable because we shouldn't proceed if there's no
+			// handler
 			self.handle_live_query_results(response).await;
 		}
 		// Return the result to the client

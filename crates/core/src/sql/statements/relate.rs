@@ -1,14 +1,15 @@
+use std::fmt;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
 use crate::sql::{Data, FlowResultExt as _, Output, Timeout, Value};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -32,6 +33,7 @@ impl RelateStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

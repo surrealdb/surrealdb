@@ -1,11 +1,13 @@
-use crate::sql::regex::regex_new;
-use crate::sql::{
-	changefeed::ChangeFeed, datetime::Datetime, duration::Duration, regex::Regex,
-	statements::SleepStatement,
-};
+use std::time;
+
 use arbitrary::{Arbitrary, Result, Unstructured};
 use regex_syntax::ast::Ast;
-use std::time;
+
+use crate::sql::changefeed::ChangeFeed;
+use crate::sql::datetime::Datetime;
+use crate::sql::duration::Duration;
+use crate::sql::regex::{regex_new, Regex};
+use crate::sql::statements::SleepStatement;
 
 impl<'a> Arbitrary<'a> for Duration {
 	fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {

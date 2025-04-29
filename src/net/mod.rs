@@ -20,22 +20,17 @@ mod sync;
 mod tracer;
 mod version;
 
-use crate::cli::CF;
-use crate::cnf;
-use crate::err::Error;
-use crate::net::signals::graceful_shutdown;
-use crate::rpc::{notifications, RpcState};
-use crate::telemetry::metrics::HttpMetricsLayer;
+use std::io;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
 use axum::response::Redirect;
 use axum::routing::get;
 use axum::{middleware, Router};
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use http::header;
-use std::io;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb::kvs::Datastore;
@@ -43,23 +38,29 @@ use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::request_id::MakeRequestUuid;
-use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
-use tower_http::sensitive_headers::SetSensitiveResponseHeadersLayer;
-use tower_http::trace::TraceLayer;
-use tower_http::ServiceBuilderExt;
-
 #[cfg(feature = "http-compression")]
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
 #[cfg(feature = "http-compression")]
 use tower_http::compression::CompressionLayer;
+use tower_http::cors::{Any, CorsLayer};
+use tower_http::request_id::MakeRequestUuid;
+use tower_http::sensitive_headers::{
+	SetSensitiveRequestHeadersLayer,
+	SetSensitiveResponseHeadersLayer,
+};
+use tower_http::trace::TraceLayer;
+use tower_http::ServiceBuilderExt;
+
+use crate::cli::CF;
+use crate::cnf;
+use crate::err::Error;
+use crate::net::signals::graceful_shutdown;
+use crate::rpc::{notifications, RpcState};
+use crate::telemetry::metrics::HttpMetricsLayer;
 
 const LOG: &str = "surrealdb::net";
 
-///
 /// AppState is used to share data between routes.
-///
 #[derive(Clone)]
 pub struct AppState {
 	pub client_ip: client_ip::ClientIp,

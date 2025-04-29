@@ -1,15 +1,10 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::{Function, Ident, Model, Value},
-	syn::{
-		error::syntax_error,
-		parser::mac::{expected, expected_whitespace, unexpected},
-		token::{t, TokenKind},
-	},
-};
-
 use super::{ParseResult, Parser};
+use crate::sql::{Function, Ident, Model, Value};
+use crate::syn::error::syntax_error;
+use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
+use crate::syn::token::{t, TokenKind};
 
 impl Parser<'_> {
 	/// Parse a custom function function call
@@ -116,12 +111,9 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
-	use crate::{
-		sql::{Script, Value},
-		syn::{self, Parse},
-	};
-
 	use super::*;
+	use crate::sql::{Script, Value};
+	use crate::syn::{self, Parse};
 
 	#[test]
 	fn function_single() {

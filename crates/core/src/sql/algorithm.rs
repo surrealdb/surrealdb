@@ -1,8 +1,10 @@
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::Value;
+use std::fmt;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

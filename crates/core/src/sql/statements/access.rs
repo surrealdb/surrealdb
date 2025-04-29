@@ -1,3 +1,13 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use md5::Digest;
+use rand::Rng;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -5,25 +15,29 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::access_type::BearerAccessSubject;
 use crate::sql::{
-	AccessType, Array, Base, Cond, Datetime, Duration, FlowResultExt as _, Ident, Object, Strand,
-	Thing, Uuid, Value,
+	AccessType,
+	Array,
+	Base,
+	Cond,
+	Datetime,
+	Duration,
+	FlowResultExt as _,
+	Ident,
+	Object,
+	Strand,
+	Thing,
+	Uuid,
+	Value,
 };
-use md5::Digest;
-use rand::Rng;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use sha2::Sha256;
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 // Keys and their identifiers are generated randomly from a 62-character pool.
 pub static GRANT_BEARER_CHARACTER_POOL: &[u8] =
 	b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 // The key identifier should not have collisions to prevent confusion.
 // However, collisions should be handled gracefully when issuing grants.
-// The first character of the key identifier will not be a digit to prevent parsing issues.
-// With 12 characters from the pool, one alphabetic, the key identifier part has ~68 bits of entropy.
+// The first character of the key identifier will not be a digit to prevent
+// parsing issues. With 12 characters from the pool, one alphabetic, the key
+// identifier part has ~68 bits of entropy.
 pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 // With 24 characters from the pool, the key part has ~140 bits of entropy.
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
@@ -99,8 +113,9 @@ pub struct AccessGrant {
 
 impl AccessGrant {
 	/// Returns a version of the statement where potential secrets are redacted.
-	/// This function should be used when displaying the statement to datastore users.
-	/// This function should NOT be used when displaying the statement for export purposes.
+	/// This function should be used when displaying the statement to datastore
+	/// users. This function should NOT be used when displaying the statement
+	/// for export purposes.
 	pub fn redacted(&self) -> AccessGrant {
 		let mut ags = self.clone();
 		ags.grant = match ags.grant {
@@ -271,10 +286,11 @@ impl GrantBearer {
 	}
 
 	pub fn hashed(self) -> Self {
-		// The hash of the bearer key is stored to mitigate the impact of a read-only compromise.
-		// We use SHA-256 as the key needs to be verified performantly for every operation.
-		// Unlike with passwords, brute force and rainbow tables are infeasable due to the key length.
-		// When hashing the bearer keys, the prefix and key identifier are kept as salt.
+		// The hash of the bearer key is stored to mitigate the impact of a read-only
+		// compromise. We use SHA-256 as the key needs to be verified performantly for
+		// every operation. Unlike with passwords, brute force and rainbow tables are
+		// infeasable due to the key length. When hashing the bearer keys, the prefix
+		// and key identifier are kept as salt.
 		let mut hasher = Sha256::new();
 		hasher.update(self.key.as_string());
 		let hash = hasher.finalize();
@@ -385,8 +401,9 @@ pub async fn create_grant(
 				_ => return Err(Error::AccessLevelMismatch),
 			};
 
-			// Check if a collision was found in order to log a specific error on the server.
-			// For an access method with a billion grants, this chance is of only one in 295 billion.
+			// Check if a collision was found in order to log a specific error on the
+			// server. For an access method with a billion grants, this chance is of only
+			// one in 295 billion.
 			if let Err(Error::TxKeyAlreadyExists) = res {
 				error!("A collision was found when attempting to create a new grant. Purging inactive grants is advised")
 			}
@@ -434,7 +451,8 @@ pub async fn create_grant(
 					if !matches!(&at.subject, BearerAccessSubject::Record) {
 						return Err(Error::AccessGrantInvalidSubject);
 					}
-					// A grant can be created for a record that does not exist yet.
+					// A grant can be created for a record that does not exist
+					// yet.
 				}
 			};
 			// Create a new bearer key.
@@ -485,8 +503,9 @@ pub async fn create_grant(
 					)),
 				};
 
-			// Check if a collision was found in order to log a specific error on the server.
-			// For an access method with a billion grants, this chance is of only one in 295 billion.
+			// Check if a collision was found in order to log a specific error on the
+			// server. For an access method with a billion grants, this chance is of only
+			// one in 295 billion.
 			if let Err(Error::TxKeyAlreadyExists) = res {
 				error!("A collision was found when attempting to create a new grant. Purging inactive grants is advised")
 			}

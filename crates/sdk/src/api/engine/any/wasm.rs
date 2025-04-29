@@ -1,20 +1,19 @@
-use crate::api::conn::Connection;
-use crate::api::conn::Router;
+use std::collections::HashSet;
+use std::sync::atomic::AtomicI64;
+
+use tokio::sync::watch;
+use wasm_bindgen_futures::spawn_local;
+
+use crate::api::conn::{Connection, Router};
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::engine;
 use crate::api::engine::any::Any;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
+use crate::api::{ExtraFeatures, Result, Surreal};
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
-use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
-use tokio::sync::watch;
-use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Any {}
 

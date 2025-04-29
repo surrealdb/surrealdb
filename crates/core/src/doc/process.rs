@@ -1,13 +1,12 @@
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
-use crate::dbs::Operable;
-use crate::dbs::Statement;
-use crate::dbs::Workable;
-use crate::dbs::{Options, Processed};
+use crate::dbs::{Operable, Options, Processed, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
-use reblessive::tree::Stk;
-use std::sync::Arc;
 
 impl Document {
 	pub(crate) async fn process(

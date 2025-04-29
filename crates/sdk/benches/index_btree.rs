@@ -1,13 +1,16 @@
+use std::fmt::Debug;
+use std::time::Duration;
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
-use std::fmt::Debug;
-use std::time::Duration;
 use surrealdb::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 use surrealdb::idx::trees::btree::{BState, BTree, Payload};
 use surrealdb::idx::trees::store::cache::TreeCache;
 use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
-use surrealdb::kvs::{Datastore, Key, LockType::*, TransactionType::*};
+use surrealdb::kvs::LockType::*;
+use surrealdb::kvs::TransactionType::*;
+use surrealdb::kvs::{Datastore, Key};
 use tokio::runtime::Runtime;
 macro_rules! get_key_value {
 	($idx:expr) => {{

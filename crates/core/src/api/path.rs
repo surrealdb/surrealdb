@@ -1,20 +1,14 @@
-use std::{
-	fmt::{self, Display, Formatter},
-	ops::Deref,
-	str::FromStr,
-};
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+use std::str::FromStr;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-	err::Error,
-	sql::{
-		fmt::{fmt_separated_by, Fmt},
-		Kind, Object, Value,
-	},
-	syn,
-};
+use crate::err::Error;
+use crate::sql::fmt::{fmt_separated_by, Fmt};
+use crate::sql::{Kind, Object, Value};
+use crate::syn;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -56,14 +50,16 @@ impl From<Vec<Segment>> for Path {
 
 impl Deref for Path {
 	type Target = Vec<Segment>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Path {
-	type Item = Segment;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Segment;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -78,6 +74,7 @@ impl Display for Path {
 
 impl FromStr for Path {
 	type Err = Error;
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		if s.is_empty() {
 			return Err(Error::InvalidPath("Path cannot be empty".into()));
@@ -101,7 +98,8 @@ impl FromStr for Path {
 						continue 'segment;
 					}
 
-					// We allow the first character to be an escape character to ignore potential otherwise instruction characters
+					// We allow the first character to be an escape character to ignore potential
+					// otherwise instruction characters
 					'\\' if scratch.is_empty() => {
 						chars.next();
 						if let Some(x @ ':' | x @ '*') = chars.next() {

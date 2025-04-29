@@ -1,3 +1,15 @@
+use axum::extract::ws::{Message, WebSocket};
+use axum::extract::{DefaultBodyLimit, Query, WebSocketUpgrade};
+use axum::response::IntoResponse;
+use axum::routing::options;
+use axum::{Extension, Router};
+use axum_extra::TypedHeader;
+use bytes::Bytes;
+use futures::{SinkExt, StreamExt};
+use surrealdb::dbs::capabilities::RouteTarget;
+use surrealdb::dbs::Session;
+use tower_http::limit::RequestBodyLimitLayer;
+
 use super::headers::Accept;
 use super::AppState;
 use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
@@ -5,21 +17,6 @@ use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::params::Params;
-use axum::extract::ws::Message;
-use axum::extract::ws::WebSocket;
-use axum::extract::DefaultBodyLimit;
-use axum::extract::Query;
-use axum::extract::WebSocketUpgrade;
-use axum::response::IntoResponse;
-use axum::routing::options;
-use axum::Extension;
-use axum::Router;
-use axum_extra::TypedHeader;
-use bytes::Bytes;
-use futures::{SinkExt, StreamExt};
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::dbs::Session;
-use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
 where

@@ -1,3 +1,14 @@
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use dashmap::mapref::entry::Entry;
+use dashmap::DashMap;
+use rand::{thread_rng, Rng};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use tokio::time::sleep;
+use uuid::Uuid;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -7,15 +18,6 @@ use crate::key::sequence::Prefix;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KeyEncode, LockType, Transaction, TransactionType};
 use crate::sql::statements::define::DefineSequenceStatement;
-use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
-use rand::{thread_rng, Rng};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::time::sleep;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub(crate) struct Sequences {
@@ -62,12 +64,14 @@ impl Sequences {
 			sequences: Arc::new(Default::default()),
 		}
 	}
+
 	pub(crate) async fn namespace_removed(&self, tx: &Transaction, ns: &str) -> Result<(), Error> {
 		for db in tx.all_ns().await?.iter() {
 			self.database_removed(tx, ns, &db.name).await?;
 		}
 		Ok(())
 	}
+
 	pub(crate) async fn database_removed(
 		&self,
 		tx: &Transaction,

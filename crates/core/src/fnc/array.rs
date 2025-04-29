@@ -1,31 +1,31 @@
+use std::cmp::Ordering;
+use std::mem::size_of_val;
+
+use rand::prelude::SliceRandom;
+use reblessive::tree::Stk;
+
+use super::args::{Optional, Rest};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::array::Array;
-use crate::sql::array::Clump;
-use crate::sql::array::Combine;
-use crate::sql::array::Complement;
-use crate::sql::array::Difference;
-use crate::sql::array::Flatten;
-use crate::sql::array::Intersect;
-use crate::sql::array::Matches;
-use crate::sql::array::Transpose;
-use crate::sql::array::Union;
-use crate::sql::array::Uniq;
-use crate::sql::array::Windows;
+use crate::sql::array::{
+	Array,
+	Clump,
+	Combine,
+	Complement,
+	Difference,
+	Flatten,
+	Intersect,
+	Matches,
+	Transpose,
+	Union,
+	Uniq,
+	Windows,
+};
 use crate::sql::value::Value;
-use crate::sql::Closure;
-use crate::sql::FlowResultExt as _;
-use crate::sql::Function;
-use rand::prelude::SliceRandom;
-use reblessive::tree::Stk;
-use std::cmp::Ordering;
-use std::mem::size_of_val;
-
-use super::args::Optional;
-use super::args::Rest;
+use crate::sql::{Closure, FlowResultExt as _, Function};
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -781,10 +781,8 @@ pub mod sort {
 #[cfg(test)]
 mod tests {
 	use super::{at, first, join, last, slice};
-	use crate::{
-		fnc::args::Optional,
-		sql::{Array, Value},
-	};
+	use crate::fnc::args::Optional;
+	use crate::sql::{Array, Value};
 
 	#[test]
 	fn array_slice() {

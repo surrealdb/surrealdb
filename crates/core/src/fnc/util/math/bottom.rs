@@ -1,5 +1,6 @@
-use crate::sql::number::Number;
 use std::collections::BinaryHeap;
+
+use crate::sql::number::Number;
 
 pub trait Bottom {
 	/// Find the lowest `k` records from the collection in arbetrary order

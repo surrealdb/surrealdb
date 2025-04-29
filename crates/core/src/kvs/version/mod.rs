@@ -1,6 +1,7 @@
+use std::sync::Arc;
+
 use super::{Datastore, LockType, TransactionType};
 use crate::err::Error;
-use std::sync::Arc;
 
 mod fixes;
 
@@ -33,6 +34,7 @@ impl From<Version> for Vec<u8> {
 
 impl TryFrom<Vec<u8>> for Version {
 	type Error = Error;
+
 	fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
 		let bin = v.try_into().map_err(|_| Error::InvalidStorageVersion)?;
 		let val = u16::from_be_bytes(bin).into();
@@ -43,22 +45,27 @@ impl TryFrom<Vec<u8>> for Version {
 impl Version {
 	/// The latest version
 	pub const LATEST: u16 = 2;
+
 	/// The latest version
 	pub fn latest() -> Self {
 		Self(2)
 	}
+
 	/// SurrealDB version 1
 	pub fn v1() -> Self {
 		Self(1)
 	}
+
 	/// SurrealDB version 2
 	pub fn v2() -> Self {
 		Self(2)
 	}
+
 	/// Check if we are running the latest version
 	pub fn is_latest(&self) -> bool {
 		self.0 == Self::LATEST
 	}
+
 	/// Fix
 	pub async fn fix(&self, ds: Arc<Datastore>) -> Result<(), Error> {
 		// We iterate through each version from the current to the latest

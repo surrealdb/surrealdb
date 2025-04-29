@@ -1,15 +1,12 @@
-#[cfg(not(target_family = "wasm"))]
-use crate::gql::SchemaCache;
 use std::sync::Arc;
+
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-use super::Data;
-use super::Method;
-use super::RpcError;
-use super::RpcProtocolV1;
-use super::RpcProtocolV2;
+use super::{Data, Method, RpcError, RpcProtocolV1, RpcProtocolV2};
 use crate::dbs::Session;
+#[cfg(not(target_family = "wasm"))]
+use crate::gql::SchemaCache;
 use crate::kvs::Datastore;
 use crate::sql::Array;
 

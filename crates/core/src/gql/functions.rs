@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, Type};
+
 use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
 use super::utils::field_val_erase_owned;
 use super::GqlError;
@@ -9,11 +11,6 @@ use crate::gql::utils::GQLTx;
 use crate::kvs::Datastore;
 use crate::sql::statements::DefineFunctionStatement;
 use crate::sql::{Kind, Value as SqlValue};
-use async_graphql::dynamic::FieldFuture;
-use async_graphql::dynamic::InputValue;
-use async_graphql::dynamic::Object;
-use async_graphql::dynamic::Type;
-use async_graphql::dynamic::{Field, FieldValue};
 
 pub async fn process_fns(
 	fns: Arc<[DefineFunctionStatement]>,

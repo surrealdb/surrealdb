@@ -1,12 +1,11 @@
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::api::method::OnceLockExt;
-use crate::api::opt::auth::Jwt;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::Surreal;
 use std::borrow::Cow;
 use std::future::IntoFuture;
+
+use crate::api::conn::Command;
+use crate::api::method::{BoxFuture, OnceLockExt};
+use crate::api::opt::auth::Jwt;
+use crate::api::{Connection, Result};
+use crate::Surreal;
 
 /// An authentication future
 #[derive(Debug)]
@@ -20,8 +19,8 @@ impl<'r, Client> IntoFuture for Authenticate<'r, Client>
 where
 	Client: Connection,
 {
-	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<()>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

@@ -1,16 +1,24 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::fnc::util::math::vector::{
-	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
-	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
+	ChebyshevDistance,
+	CosineDistance,
+	EuclideanDistance,
+	HammingDistance,
+	JaccardSimilarity,
+	ManhattanDistance,
+	MinkowskiDistance,
+	PearsonSimilarity,
 };
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Number, Value};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

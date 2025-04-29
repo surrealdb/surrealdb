@@ -1,8 +1,8 @@
-use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::{is_allowed, Action, Actor, Error, Level, Resource, Role};
+use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
 
 /// Specifies the current authentication for the datastore execution context.
 #[revisioned(revision = 1)]
@@ -59,15 +59,16 @@ impl Auth {
 		matches!(self.level(), Level::Namespace(n) if n.eq(ns))
 	}
 
-	/// Check if the current level is Database, and the namespace and database match
+	/// Check if the current level is Database, and the namespace and database
+	/// match
 	pub fn is_db_check(&self, ns: &str, db: &str) -> bool {
 		matches!(self.level(), Level::Database(n, d) if n.eq(ns) && d.eq(db))
 	}
 
 	/// System Auth helpers
 	///
-	/// These are not stored in the database and are used for internal operations
-	/// Do not use for authentication
+	/// These are not stored in the database and are used for internal
+	/// operations Do not use for authentication
 	pub fn for_root(role: Role) -> Self {
 		Self::new(Actor::new("system_auth".into(), vec![role], Level::Root))
 	}
@@ -84,11 +85,11 @@ impl Auth {
 		Self::new(Actor::new(rid.to_string(), vec![], (ns, db, ac).into()))
 	}
 
-	//
 	// Permission checks
 	//
 
-	/// Checks if the current auth is allowed to perform an action on a given resource
+	/// Checks if the current auth is allowed to perform an action on a given
+	/// resource
 	pub fn is_allowed(&self, action: Action, res: &Resource) -> Result<(), Error> {
 		is_allowed(&self.actor, &action, res, None)
 	}
@@ -116,6 +117,7 @@ impl Auth {
 
 impl std::convert::TryFrom<(&DefineUserStatement, Level)> for Auth {
 	type Error = Error;
+
 	fn try_from(val: (&DefineUserStatement, Level)) -> Result<Self, Self::Error> {
 		Ok(Self::new((val.0, val.1).try_into()?))
 	}

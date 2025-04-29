@@ -7,6 +7,16 @@ pub(super) mod scorer;
 pub(super) mod termdocs;
 pub(crate) mod terms;
 
+use std::ops::BitAnd;
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use roaring::treemap::IntoIter;
+use roaring::RoaringTreemap;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -22,20 +32,11 @@ use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::Transaction;
-use crate::kvs::{Key, TransactionType};
+use crate::kvs::{Key, Transaction, TransactionType};
 use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::{Idiom, Object, Thing, Value};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use roaring::treemap::IntoIter;
-use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
-use std::ops::BitAnd;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(crate) type MatchRef = u8;
 
@@ -112,6 +113,7 @@ impl FtIndex {
 		ixs.mappers().check(&az).await?;
 		Self::with_analyzer(ixs, &tx, az, index_key_base, p, tt).await
 	}
+
 	async fn with_analyzer(
 		ixs: &IndexStores,
 		txn: &Transaction,
@@ -325,7 +327,8 @@ impl FtIndex {
 					}
 				}
 			}
-			// In case of an update, w remove the offset for the terms that does not exist anymore
+			// In case of an update, w remove the offset for the terms that does not exist
+			// anymore
 			if let Some(old_term_ids) = old_term_ids {
 				for old_term_id in old_term_ids {
 					self.offsets.remove_offsets(&tx, doc_id, old_term_id).await?;
@@ -510,6 +513,7 @@ impl HitsIterator {
 	pub(crate) fn len(&self) -> usize {
 		self.iter.len()
 	}
+
 	#[cfg(not(target_pointer_width = "64"))]
 	pub(crate) fn len(&self) -> usize {
 		self.iter.size_hint().0
@@ -530,20 +534,23 @@ impl HitsIterator {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashMap;
+	use std::sync::Arc;
+
+	use reblessive::tree::Stk;
+	use test_log::test;
+
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, LockType::*, TransactionType};
+	use crate::kvs::LockType::*;
+	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::index::SearchParams;
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
 	use crate::sql::{Array, Statement, Thing, Value};
 	use crate::syn;
-	use reblessive::tree::Stk;
-	use std::collections::HashMap;
-	use std::sync::Arc;
-	use test_log::test;
 
 	async fn check_hits(
 		ctx: &Context,
@@ -765,8 +772,8 @@ mod tests {
 	async fn test_ft_index_bm_25(hl: bool) {
 		// The function `extract_sorted_terms_with_frequencies` is non-deterministic.
 		// the inner structures (BTrees) are built with the same terms and frequencies,
-		// but the insertion order is different, ending up in different BTree structures.
-		// Therefore it makes sense to do multiple runs.
+		// but the insertion order is different, ending up in different BTree
+		// structures. Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();

@@ -1,13 +1,24 @@
-//! Module containing the implementation of the surrealql tokens, lexer, and parser.
+//! Module containing the implementation of the surrealql tokens, lexer, and
+//! parser.
 
-use crate::{
-	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
-	dbs::{capabilities::ExperimentalTarget, Capabilities},
-	err::Error,
-	sql::{
-		Block, Cond, Datetime, Duration, Fields, Idiom, Kind, Output, Query, Range, Subquery,
-		Thing, Value,
-	},
+use crate::cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH};
+use crate::dbs::capabilities::ExperimentalTarget;
+use crate::dbs::Capabilities;
+use crate::err::Error;
+use crate::sql::{
+	Block,
+	Cond,
+	Datetime,
+	Duration,
+	Fields,
+	Idiom,
+	Kind,
+	Output,
+	Query,
+	Range,
+	Subquery,
+	Thing,
+	Value,
 };
 
 pub mod error;
@@ -31,18 +42,19 @@ use token::t;
 
 const TARGET: &str = "surrealdb::core::syn";
 
-/// Takes a string and returns if it could be a reserved keyword in certain contexts.
+/// Takes a string and returns if it could be a reserved keyword in certain
+/// contexts.
 pub fn could_be_reserved_keyword(s: &str) -> bool {
 	lexer::keywords::could_be_reserved(s)
 }
 
 /// Parses a SurrealQL [`Query`]
 ///
-/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
-/// functions, objects, sub-queries), Javascript values, and geometry collections count against
-/// a computation depth limit. If the limit is reached, parsing will return
-/// [`Error::ComputationDepthExceeded`], as opposed to spending more time and potentially
-/// overflowing the call stack.
+/// During query parsing, the total depth of calls to parse values (including
+/// arrays, expressions, functions, objects, sub-queries), Javascript values,
+/// and geometry collections count against a computation depth limit. If the
+/// limit is reached, parsing will return [`Error::ComputationDepthExceeded`],
+/// as opposed to spending more time and potentially overflowing the call stack.
 ///
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
@@ -54,11 +66,11 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 
 /// Parses a SurrealQL [`Query`]
 ///
-/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
-/// functions, objects, sub-queries), Javascript values, and geometry collections count against
-/// a computation depth limit. If the limit is reached, parsing will return
-/// [`Error::ComputationDepthExceeded`], as opposed to spending more time and potentially
-/// overflowing the call stack.
+/// During query parsing, the total depth of calls to parse values (including
+/// arrays, expressions, functions, objects, sub-queries), Javascript values,
+/// and geometry collections count against a computation depth limit. If the
+/// limit is reached, parsing will return [`Error::ComputationDepthExceeded`],
+/// as opposed to spending more time and potentially overflowing the call stack.
 ///
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
@@ -500,7 +512,8 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
-/// Parses JSON into an inert SurrealQL [`Value`] and parses values within strings.
+/// Parses JSON into an inert SurrealQL [`Value`] and parses values within
+/// strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");

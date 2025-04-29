@@ -1,11 +1,12 @@
 mod parse;
 use parse::Parse;
 mod helpers;
-use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::{self, Number, Value};
+
+use crate::helpers::Test;
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
 	Test::new(sql).await?.expect_vals(desired_responses)?;
@@ -3755,10 +3756,8 @@ async fn function_vector_distance_chebyshev() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_head() -> Result<(), Error> {
-	use wiremock::{
-		matchers::{header, method, path},
-		Mock, ResponseTemplate,
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("HEAD"))
@@ -3779,10 +3778,8 @@ pub async fn function_http_head() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_get() -> Result<(), Error> {
-	use wiremock::{
-		matchers::{header, method, path},
-		Mock, ResponseTemplate,
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("GET"))
@@ -3808,10 +3805,8 @@ pub async fn function_http_get() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_put() -> Result<(), Error> {
-	use wiremock::{
-		matchers::{header, method, path},
-		Mock, ResponseTemplate,
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("PUT"))
@@ -3836,10 +3831,8 @@ pub async fn function_http_put() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_post() -> Result<(), Error> {
-	use wiremock::{
-		matchers::{header, method, path},
-		Mock, ResponseTemplate,
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("POST"))
@@ -3866,10 +3859,8 @@ pub async fn function_http_post() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_patch() -> Result<(), Error> {
-	use wiremock::{
-		matchers::{header, method, path},
-		Mock, ResponseTemplate,
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("PATCH"))
@@ -3896,10 +3887,8 @@ pub async fn function_http_patch() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_delete() -> Result<(), Error> {
-	use wiremock::{
-		matchers::{header, method, path},
-		Mock, ResponseTemplate,
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("DELETE"))
@@ -3925,10 +3914,8 @@ pub async fn function_http_delete() -> Result<(), Error> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_error() -> Result<(), Error> {
-	use wiremock::{
-		matchers::{header, method, path},
-		Mock, ResponseTemplate,
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("GET"))
@@ -3957,10 +3944,8 @@ pub async fn function_http_error() -> Result<(), Error> {
 #[cfg(all(feature = "http", feature = "scripting"))]
 #[tokio::test]
 pub async fn function_http_get_from_script() -> Result<(), Error> {
-	use wiremock::{
-		matchers::{header, method, path},
-		Mock, ResponseTemplate,
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("GET"))

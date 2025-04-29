@@ -1,7 +1,8 @@
 mod helpers;
 mod parse;
-use crate::helpers::Test;
 use surrealdb::err::Error;
+
+use crate::helpers::Test;
 
 #[tokio::test]
 async fn select_start_limit_fetch() -> Result<(), Error> {

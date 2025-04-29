@@ -1,12 +1,12 @@
 use crate::sql::idiom::Idiom;
-use crate::sql::part::Next;
-use crate::sql::part::Part;
+use crate::sql::part::{Next, Part};
 use crate::sql::value::Value;
 
 impl Value {
 	pub(crate) fn each(&self, path: &[Part]) -> Vec<Idiom> {
 		self._each(path, Idiom::default())
 	}
+
 	fn _each(&self, path: &[Part], prev: Idiom) -> Vec<Idiom> {
 		match path.first() {
 			// Get the current path part

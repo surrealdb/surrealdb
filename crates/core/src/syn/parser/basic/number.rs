@@ -1,19 +1,17 @@
-use std::{mem, num::ParseIntError, str::FromStr};
+use std::mem;
+use std::num::ParseIntError;
+use std::str::FromStr;
 
 use rust_decimal::Decimal;
 
-use crate::sql::number::decimal::DecimalExt;
-use crate::{
-	sql::Number,
-	syn::{
-		error::{bail, syntax_error},
-		lexer::compound::{self, NumberKind},
-		parser::{mac::unexpected, GluedValue, ParseResult, Parser},
-		token::{self, t, TokenKind},
-	},
-};
-
 use super::TokenValue;
+use crate::sql::number::decimal::DecimalExt;
+use crate::sql::Number;
+use crate::syn::error::{bail, syntax_error};
+use crate::syn::lexer::compound::{self, NumberKind};
+use crate::syn::parser::mac::unexpected;
+use crate::syn::parser::{GluedValue, ParseResult, Parser};
+use crate::syn::token::{self, t, TokenKind};
 
 /// Generic integer parsing method,
 /// works for all unsigned integers.

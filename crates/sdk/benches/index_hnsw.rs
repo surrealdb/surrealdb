@@ -1,10 +1,11 @@
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::time::Duration;
+
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use flate2::read::GzDecoder;
 use reblessive::TreeStack;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::time::Duration;
 use surrealdb::sql::index::Distance;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};

@@ -1,23 +1,18 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::dbs::Session;
-use crate::gql::functions::process_fns;
-use crate::gql::tables::process_tbs;
-use crate::kvs::Datastore;
-use crate::sql;
-use crate::sql::kind::Literal;
-use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
-use crate::sql::Geometry;
-use crate::sql::Kind;
-use async_graphql::dynamic::Interface;
-use async_graphql::dynamic::InterfaceField;
-use async_graphql::dynamic::Object;
-use async_graphql::dynamic::Schema;
-use async_graphql::dynamic::{Enum, Type, Union};
-use async_graphql::dynamic::{Scalar, TypeRef};
-use async_graphql::Name;
-use async_graphql::Value as GqlValue;
+use async_graphql::dynamic::{
+	Enum,
+	Interface,
+	InterfaceField,
+	Object,
+	Scalar,
+	Schema,
+	Type,
+	TypeRef,
+	Union,
+};
+use async_graphql::{Name, Value as GqlValue};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serde_json::Number;
@@ -25,11 +20,16 @@ use serde_json::Number;
 use super::error::{resolver_error, GqlError};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
+use crate::dbs::Session;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::NamedContainer;
-use crate::kvs::LockType;
-use crate::kvs::TransactionType;
-use crate::sql::Value as SqlValue;
+use crate::gql::functions::process_fns;
+use crate::gql::tables::process_tbs;
+use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::sql;
+use crate::sql::kind::Literal;
+use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
+use crate::sql::{Geometry, Kind, Value as SqlValue};
 
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
@@ -171,7 +171,8 @@ pub async fn generate_schema(
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
 	schema = schema.register(id_interface);
 
-	// TODO: when used get: `Result::unwrap()` on an `Err` value: SchemaError("Field \"like.in\" is not sub-type of \"relation.in\"")
+	// TODO: when used get: `Result::unwrap()` on an `Err` value: SchemaError("Field
+	// \"like.in\" is not sub-type of \"relation.in\"")
 	let relation_interface = Interface::new("relation")
 		.field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)))
 		.field(InterfaceField::new("in", TypeRef::named_nn("record")))

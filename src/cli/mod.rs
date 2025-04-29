@@ -15,13 +15,10 @@ pub(crate) mod validator;
 mod version;
 mod version_client;
 
-use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
-use crate::cli::version_client::VersionClient;
-#[cfg(debug_assertions)]
-use crate::cnf::DEBUG_BUILD_WARNING;
-use crate::cnf::{LOGO, PKG_VERSION};
-use crate::env::RELEASE;
+use std::ops::Deref;
+use std::process::ExitCode;
+use std::time::Duration;
+
 use clap::{Parser, Subcommand};
 pub use config::CF;
 use export::ExportCommandArguments;
@@ -32,12 +29,16 @@ use ml::MlCommand;
 use semver::Version;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
-use std::ops::Deref;
-use std::process::ExitCode;
-use std::time::Duration;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
 use version::VersionCommandArguments;
+
+use crate::cli::validator::parser::env_filter::{CustomEnvFilter, CustomEnvFilterParser};
+use crate::cli::version_client::VersionClient;
+#[cfg(debug_assertions)]
+use crate::cnf::DEBUG_BUILD_WARNING;
+use crate::cnf::{LOGO, PKG_VERSION};
+use crate::env::RELEASE;
 
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
@@ -76,10 +77,9 @@ struct Cli {
 enum Commands {
 	#[command(about = "Start the database server")]
 	Start(StartCommandArguments),
-	/* Not implemented yet
-	#[command(about = "Backup data to or from an existing database")]
-	Backup(BackupCommandArguments),
-	*/
+	// Not implemented yet
+	// #[command(about = "Backup data to or from an existing database")]
+	// Backup(BackupCommandArguments),
 	#[command(about = "Import a SurrealQL script into an existing database")]
 	Import(ImportCommandArguments),
 	#[command(about = "Export an existing database as a SurrealQL script")]
@@ -158,8 +158,9 @@ pub async fn init() -> ExitCode {
 	#[cfg(feature = "performance-profiler")]
 	if let Ok(report) = guard.report().build() {
 		// Import necessary traits
-		use pprof::protos::Message;
 		use std::io::Write;
+
+		use pprof::protos::Message;
 		// Output a flamegraph
 		let file = std::fs::File::create("flamegraph.svg").unwrap();
 		report.flamegraph(file).unwrap();

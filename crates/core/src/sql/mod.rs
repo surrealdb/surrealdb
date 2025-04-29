@@ -80,16 +80,12 @@ pub mod index;
 pub mod serde;
 pub mod statements;
 
-use crate::err::Error;
-
-pub use self::access::Access;
-pub use self::access::Accesses;
+pub use self::access::{Access, Accesses};
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;
 pub use self::array::Array;
 pub use self::base::Base;
-pub use self::block::Block;
-pub use self::block::Entry;
+pub use self::block::{Block, Entry};
 pub use self::bytes::Bytes;
 pub use self::bytesize::Bytesize;
 pub use self::cast::Cast;
@@ -104,31 +100,25 @@ pub use self::duration::Duration;
 pub use self::edges::Edges;
 pub use self::explain::Explain;
 pub use self::expression::Expression;
-pub use self::fetch::Fetch;
-pub use self::fetch::Fetchs;
-pub use self::field::Field;
-pub use self::field::Fields;
+pub use self::fetch::{Fetch, Fetchs};
+pub use self::field::{Field, Fields};
 pub use self::file::File;
 pub use self::filter::Filter;
 pub use self::function::Function;
 pub use self::future::Future;
 pub use self::geometry::Geometry;
 pub use self::graph::Graph;
-pub use self::group::Group;
-pub use self::group::Groups;
+pub use self::group::{Group, Groups};
 pub use self::id::range::IdRange;
 pub use self::id::Id;
 pub use self::ident::Ident;
-pub use self::idiom::Idiom;
-pub use self::idiom::Idioms;
+pub use self::idiom::{Idiom, Idioms};
 pub use self::index::Index;
-pub use self::kind::Kind;
-pub use self::kind::Literal;
+pub use self::kind::{Kind, Literal};
 pub use self::limit::Limit;
 pub use self::mock::Mock;
 pub use self::model::Model;
-pub use self::number::DecimalExt;
-pub use self::number::Number;
+pub use self::number::{DecimalExt, Number};
 pub use self::object::Object;
 pub use self::operation::Operation;
 pub use self::operator::Operator;
@@ -136,34 +126,29 @@ pub use self::order::Order;
 pub use self::output::Output;
 pub use self::param::Param;
 pub use self::part::Part;
-pub use self::permission::Permission;
-pub use self::permission::Permissions;
+pub use self::permission::{Permission, Permissions};
 pub use self::query::Query;
 pub use self::range::Range;
 pub use self::regex::Regex;
 pub use self::scoring::Scoring;
 pub use self::script::Script;
-pub use self::split::Split;
-pub use self::split::Splits;
+pub use self::split::{Split, Splits};
 pub use self::start::Start;
-pub use self::statement::Statement;
-pub use self::statement::Statements;
+pub use self::statement::{Statement, Statements};
 pub use self::strand::Strand;
 pub use self::subquery::Subquery;
-pub use self::table::Table;
-pub use self::table::Tables;
+pub use self::table::{Table, Tables};
 pub use self::table_type::{Relation, TableType};
 pub use self::thing::Thing;
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::uuid::Uuid;
-pub use self::value::serde::from_value;
-pub use self::value::serde::to_value;
-pub use self::value::Value;
-pub use self::value::Values;
+pub use self::value::serde::{from_value, to_value};
+pub use self::value::{Value, Values};
 pub use self::version::Version;
 pub use self::view::View;
 pub use self::with::With;
+use crate::err::Error;
 
 // module reexporting parsing function to prevent a breaking change.
 mod parser {
@@ -194,10 +179,12 @@ impl From<Error> for ControlFlow {
 
 /// Helper trait to catch controlflow return unwinding.
 pub trait FlowResultExt {
-	/// Function which catches `ControlFlow::Return(x)` and turns it into `Ok(x)`.
+	/// Function which catches `ControlFlow::Return(x)` and turns it into
+	/// `Ok(x)`.
 	///
-	/// If the error value is either `ControlFlow::Break` or `ControlFlow::Continue` it will
-	/// instead create an error that break/continue was used within an invalid location.
+	/// If the error value is either `ControlFlow::Break` or
+	/// `ControlFlow::Continue` it will instead create an error that
+	/// break/continue was used within an invalid location.
 	fn catch_return(self) -> Result<Value, Error>;
 }
 

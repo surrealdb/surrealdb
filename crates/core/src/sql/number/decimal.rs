@@ -8,9 +8,10 @@ use rust_decimal::Decimal;
 pub trait DecimalExt {
 	/// Converts a string to a Decimal, normalizing it in the process.
 	///
-	/// This method is a convenience wrapper around `rust_decimal::Decimal::from_str`
-	/// which can parse a string into a Decimal and normalize it. If the value has
-	/// higher precision than the Decimal type can handle, it will be rounded to the
+	/// This method is a convenience wrapper around
+	/// `rust_decimal::Decimal::from_str` which can parse a string into a
+	/// Decimal and normalize it. If the value has higher precision than the
+	/// Decimal type can handle, it will be rounded to the
 	/// nearest representable value.
 	fn from_str_normalized(s: &str) -> Result<Self, rust_decimal::Error>
 	where
@@ -18,9 +19,10 @@ pub trait DecimalExt {
 
 	/// Converts a string to a Decimal, normalizing it in the process.
 	///
-	/// This method is a convenience wrapper around `rust_decimal::Decimal::from_str_exact`
-	/// which can parse a string into a Decimal and normalize it. If the value has
-	/// higher precision than the Decimal type can handle an Underflow error will be returned.
+	/// This method is a convenience wrapper around
+	/// `rust_decimal::Decimal::from_str_exact` which can parse a string into a
+	/// Decimal and normalize it. If the value has higher precision than the
+	/// Decimal type can handle an Underflow error will be returned.
 	fn from_str_exact_normalized(s: &str) -> Result<Self, rust_decimal::Error>
 	where
 		Self: Sized;
@@ -40,8 +42,9 @@ impl DecimalExt for Decimal {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use rust_decimal::prelude::ToPrimitive;
+
+	use super::*;
 
 	#[test]
 	fn test_decimal_ext_from_str_normalized() {

@@ -1,3 +1,8 @@
+use std::fmt;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -5,10 +10,6 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Datetime, Table, Value};
 use crate::vs::VersionStamp;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

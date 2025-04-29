@@ -1,6 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use std::collections::BTreeMap;
 use std::time::Duration;
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb_core::dbs::capabilities::{FuncTarget, Targets};

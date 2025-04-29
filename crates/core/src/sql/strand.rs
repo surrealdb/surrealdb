@@ -1,13 +1,16 @@
-use crate::err::Error;
+use std::fmt::{self, Display, Formatter};
+use std::ops::{
+	Deref,
+	{self},
+};
+use std::str;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
-use std::ops::{self};
-use std::str;
 
 use super::escape::QuoteStr;
 use super::value::TryAdd;
+use crate::err::Error;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 
@@ -32,7 +35,8 @@ impl Strand {
 	/// Create a new strand, without checking the string.
 	///
 	/// # Safety
-	/// Caller must ensure that string handed as an argument does not contain any null bytes.
+	/// Caller must ensure that string handed as an argument does not contain
+	/// any null bytes.
 	pub unsafe fn new_unchecked(s: String) -> Strand {
 		// Check in debug mode if the variants
 		debug_assert!(!s.contains('\0'));
@@ -56,6 +60,7 @@ impl From<&str> for Strand {
 
 impl Deref for Strand {
 	type Target = String;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -72,10 +77,12 @@ impl Strand {
 	pub fn as_str(&self) -> &str {
 		self.0.as_str()
 	}
+
 	/// Returns the underlying String
 	pub fn as_string(self) -> String {
 		self.0
 	}
+
 	/// Convert the Strand to a raw String
 	pub fn to_raw(self) -> String {
 		self.0
@@ -90,6 +97,7 @@ impl Display for Strand {
 
 impl ops::Add for Strand {
 	type Output = Self;
+
 	fn add(mut self, other: Self) -> Self {
 		self.0.push_str(other.as_str());
 		self
@@ -98,6 +106,7 @@ impl ops::Add for Strand {
 
 impl TryAdd for Strand {
 	type Output = Self;
+
 	fn try_add(mut self, other: Self) -> Result<Self, Error> {
 		if self.0.try_reserve(other.len()).is_ok() {
 			self.0.push_str(other.as_str());
@@ -113,11 +122,10 @@ impl TryAdd for Strand {
 
 // serde(with = no_nul_bytes) will (de)serialize with no NUL bytes.
 pub(crate) mod no_nul_bytes {
-	use serde::{
-		de::{self, Visitor},
-		Deserializer, Serializer,
-	};
 	use std::fmt;
+
+	use serde::de::{self, Visitor};
+	use serde::{Deserializer, Serializer};
 
 	pub(crate) fn serialize<S>(s: &str, serializer: S) -> Result<S::Ok, S::Error>
 	where

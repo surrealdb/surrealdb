@@ -1,3 +1,10 @@
+use std::mem;
+
+use ahash::HashSet;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
@@ -9,11 +16,6 @@ use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
 use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
-use ahash::HashSet;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::mem;
 
 #[revisioned(revision = 1)]
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -37,6 +39,10 @@ impl<S> HnswLayer<S>
 where
 	S: DynamicSet,
 {
+	// Base on FoundationDB max value size (100K)
+	// https://apple.github.io/foundationdb/known-limitations.html#large-keys-and-values
+	const CHUNK_SIZE: usize = 100_000;
+
 	pub(super) fn new(ikb: IndexKeyBase, level: usize, m_max: usize) -> Self {
 		Self {
 			ikb,
@@ -66,6 +72,7 @@ where
 		self.save(tx, st).await?;
 		Ok(true)
 	}
+
 	pub(super) async fn search_single(
 		&self,
 		tx: &Transaction,
@@ -361,9 +368,6 @@ where
 		}
 	}
 
-	// Base on FoundationDB max value size (100K)
-	// https://apple.github.io/foundationdb/known-limitations.html#large-keys-and-values
-	const CHUNK_SIZE: usize = 100_000;
 	async fn save(&mut self, tx: &Transaction, st: &mut LayerState) -> Result<(), Error> {
 		// Serialise the graph
 		let val = self.graph.to_val()?;

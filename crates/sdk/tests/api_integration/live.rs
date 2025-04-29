@@ -14,26 +14,19 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::Stream;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use surrealdb::method::QueryStream;
 use surrealdb::opt::Resource;
-use surrealdb::Action;
-use surrealdb::Error;
-use surrealdb::Notification;
-use surrealdb::RecordId;
-use surrealdb::Value;
+use surrealdb::{Action, Error, Notification, RecordId, Value};
 use surrealdb_core::sql::Value as CoreValue;
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
 
+use super::{CreateDb, NS};
 use crate::api_integration::ApiRecordId;
-
-use super::CreateDb;
-use super::NS;
 
 const LQ_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_NOTIFICATIONS: usize = 100;

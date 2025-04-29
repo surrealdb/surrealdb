@@ -1,17 +1,13 @@
-use crate::{
-	cnf::IDIOM_RECURSION_LIMIT,
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	sql::{
-		part::{RecurseInstruction, RecursionPlan},
-		Array, FlowResultExt as _, Part,
-	},
-};
+use reblessive::tree::Stk;
 
 use super::Value;
-use reblessive::tree::Stk;
+use crate::cnf::IDIOM_RECURSION_LIMIT;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::sql::part::{RecurseInstruction, RecursionPlan};
+use crate::sql::{Array, FlowResultExt as _, Part};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Recursion<'a> {

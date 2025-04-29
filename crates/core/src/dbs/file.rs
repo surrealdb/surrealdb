@@ -1,19 +1,21 @@
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
+use std::path::{Path, PathBuf};
+use std::{fs, io, mem};
+
+use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
+use rand::seq::SliceRandom as _;
+use rand::Rng as _;
+use revision::Revisioned;
+use tempfile::{Builder, TempDir};
+#[cfg(not(target_family = "wasm"))]
+use tokio::task::spawn_blocking;
+
 use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 use crate::dbs::plan::Explanation;
 use crate::err::Error;
 use crate::sql::order::Ordering;
 use crate::sql::Value;
-use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
-use rand::seq::SliceRandom as _;
-use rand::Rng as _;
-use revision::Revisioned;
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
-use std::path::{Path, PathBuf};
-use std::{fs, io, mem};
-use tempfile::{Builder, TempDir};
-#[cfg(not(target_family = "wasm"))]
-use tokio::task::spawn_blocking;
 
 pub(super) struct FileCollector {
 	dir: TempDir,
@@ -27,9 +29,7 @@ pub(super) struct FileCollector {
 impl FileCollector {
 	const INDEX_FILE_NAME: &'static str = "ix";
 	const RECORDS_FILE_NAME: &'static str = "re";
-
 	const SORT_DIRECTORY_NAME: &'static str = "so";
-
 	const USIZE_SIZE: usize = mem::size_of::<usize>();
 
 	pub(super) fn new(temp_dir: &Path) -> Result<Self, Error> {
@@ -43,6 +43,7 @@ impl FileCollector {
 			dir,
 		})
 	}
+
 	pub(super) async fn push(&mut self, value: Value) -> Result<(), Error> {
 		if let Some(mut writer) = self.writer.take() {
 			#[cfg(not(target_family = "wasm"))]
@@ -71,6 +72,7 @@ impl FileCollector {
 		}
 		Ok(())
 	}
+
 	pub(super) fn sort(&mut self, orders: &Ordering) {
 		self.orders = Some(orders.clone());
 	}
@@ -119,8 +121,8 @@ impl FileCollector {
 					// sampling.
 					// This implementation is taken from the IteratorRandom::choose_multiple. It is
 					// emperically tested to produce n values uniformly sampled from the iterator.
-					// TODO (DelSkayn): Figure exactly out why this is guarenteed to produce a uniform
-					// sampling.
+					// TODO (DelSkayn): Figure exactly out why this is guarenteed to produce a
+					// uniform sampling.
 					for (i, v) in iter.enumerate() {
 						let v = v?;
 						// pick an index to insert the value in, swapping existing values if it is
@@ -269,7 +271,8 @@ impl FileReader {
 	fn read_usize<R: Read>(reader: &mut R) -> Result<usize, io::Error> {
 		let mut buf = vec![0u8; FileCollector::USIZE_SIZE];
 		reader.read_exact(&mut buf)?;
-		// Safe to call unwrap because we know the slice length matches the expected length
+		// Safe to call unwrap because we know the slice length matches the expected
+		// length
 		let u = usize::from_be_bytes(buf.try_into().unwrap());
 		Ok(u)
 	}
@@ -301,8 +304,8 @@ impl FileReader {
 }
 
 impl IntoIterator for FileReader {
-	type Item = Result<Value, Error>;
 	type IntoIter = FileRecordsIterator;
+	type Item = Result<Value, Error>;
 
 	fn into_iter(self) -> Self::IntoIter {
 		FileRecordsIterator::new(self.records.clone(), self.len)
@@ -405,8 +408,8 @@ struct ValueExternalChunk {
 }
 
 impl ExternalChunk<Value> for ValueExternalChunk {
-	type SerializationError = Error;
 	type DeserializationError = Error;
+	type SerializationError = Error;
 
 	fn new(reader: Take<BufReader<File>>) -> Self {
 		Self {

@@ -1,5 +1,6 @@
-use crate::sql::number::Number;
 use std::collections::BTreeMap;
+
+use crate::sql::number::Number;
 
 pub trait Mode {
 	/// Find the most frequent number in collection

@@ -1,21 +1,19 @@
+use std::collections::HashSet;
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops;
+use std::ops::{Deref, DerefMut};
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::FlowResult;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{
-	fmt::{pretty_indent, Fmt, Pretty},
-	Value,
-};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::fmt::{self, Display, Formatter, Write};
-use std::ops;
-use std::ops::Deref;
-use std::ops::DerefMut;
-
-use super::FlowResult;
+use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
+use crate::sql::Value;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
@@ -55,6 +53,7 @@ impl FromIterator<Value> for Array {
 
 impl Deref for Array {
 	type Target = Vec<Value>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -67,8 +66,9 @@ impl DerefMut for Array {
 }
 
 impl IntoIterator for Array {
-	type Item = Value;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Value;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -79,14 +79,17 @@ impl Array {
 	pub fn new() -> Self {
 		Self::default()
 	}
+
 	// Create a new array with capacity
 	pub fn with_capacity(len: usize) -> Self {
 		Self(Vec::with_capacity(len))
 	}
+
 	// Get the length of the array
 	pub fn len(&self) -> usize {
 		self.0.len()
 	}
+
 	// Check if there array is empty
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()
@@ -142,6 +145,7 @@ impl Display for Array {
 
 impl ops::Add<Value> for Array {
 	type Output = Self;
+
 	fn add(mut self, other: Value) -> Self {
 		self.0.push(other);
 		self
@@ -150,6 +154,7 @@ impl ops::Add<Value> for Array {
 
 impl ops::Add for Array {
 	type Output = Self;
+
 	fn add(mut self, mut other: Self) -> Self {
 		self.0.append(&mut other.0);
 		self
@@ -160,6 +165,7 @@ impl ops::Add for Array {
 
 impl ops::Sub<Value> for Array {
 	type Output = Self;
+
 	fn sub(mut self, other: Value) -> Self {
 		if let Some(p) = self.0.iter().position(|x| *x == other) {
 			self.0.remove(p);
@@ -170,6 +176,7 @@ impl ops::Sub<Value> for Array {
 
 impl ops::Sub for Array {
 	type Output = Self;
+
 	fn sub(mut self, other: Self) -> Self {
 		for v in other.0 {
 			if let Some(p) = self.0.iter().position(|x| *x == v) {
@@ -327,12 +334,12 @@ impl Intersect<Self> for Array {
 
 // Documented with the assumption that it is just for arrays.
 pub(crate) trait Matches<T> {
-	/// Returns an array complimenting the original where each value is true or false
-	/// depending on whether it is == to the compared value.
+	/// Returns an array complimenting the original where each value is true or
+	/// false depending on whether it is == to the compared value.
 	///
-	/// Admittedly, this is most often going to be used in `count(array::matches($arr, $val))`
-	/// to count the number of times an element appears in an array but it's nice to have
-	/// this in addition.
+	/// Admittedly, this is most often going to be used in
+	/// `count(array::matches($arr, $val))` to count the number of times an
+	/// element appears in an array but it's nice to have this in addition.
 	fn matches(self, compare_val: Value) -> T;
 }
 
@@ -346,14 +353,16 @@ impl Matches<Array> for Array {
 
 // Documented with the assumption that it is just for arrays.
 pub(crate) trait Transpose<T> {
-	/// Stacks arrays on top of each other. This can serve as 2d array transposition.
+	/// Stacks arrays on top of each other. This can serve as 2d array
+	/// transposition.
 	///
-	/// The input array can contain regular values which are treated as arrays with
-	/// a single element.
+	/// The input array can contain regular values which are treated as arrays
+	/// with a single element.
 	///
-	/// It's best to think of the function as creating a layered structure of the arrays
-	/// rather than transposing them when the input is not a 2d array. See the examples
-	/// for what happense when the input arrays are not all the same size.
+	/// It's best to think of the function as creating a layered structure of
+	/// the arrays rather than transposing them when the input is not a 2d
+	/// array. See the examples for what happense when the input arrays are not
+	/// all the same size.
 	///
 	/// Here's a diagram:
 	/// [0, 1, 2, 3], [4, 5, 6]
@@ -399,8 +408,8 @@ impl Transpose<Array> for Array {
 				}
 			})
 			.collect::<Vec<_>>();
-		// We know there is at least one element in the array therefore iters is not empty.
-		// This is safe.
+		// We know there is at least one element in the array therefore iters is not
+		// empty. This is safe.
 		let longest_length = iters.iter().map(|i| i.len()).max().unwrap();
 		for _ in 0..longest_length {
 			transposed_vec.push(

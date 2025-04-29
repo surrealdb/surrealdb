@@ -1,16 +1,18 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Strand, Value};
+use std::fmt::{self, Display};
 
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
+use crate::sql::access::AccessDuration;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{AccessType, Base, Ident, Strand, Value};
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -38,8 +40,9 @@ impl DefineAccessStatement {
 	}
 
 	/// Returns a version of the statement where potential secrets are redacted
-	/// This function should be used when displaying the statement to datastore users
-	/// This function should NOT be used when displaying the statement for export purposes
+	/// This function should be used when displaying the statement to datastore
+	/// users This function should NOT be used when displaying the statement
+	/// for export purposes
 	pub fn redacted(&self) -> DefineAccessStatement {
 		let mut das = self.clone();
 		das.kind = match das.kind {

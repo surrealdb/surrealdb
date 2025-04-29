@@ -1,3 +1,6 @@
+use reblessive::tree::Stk;
+
+use super::args::Optional;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,9 +9,6 @@ use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::sql::Value;
-use reblessive::tree::Stk;
-
-use super::args::Optional;
 
 pub async fn analyze(
 	(stk, ctx, opt): (&mut Stk, &Context, Option<&Options>),

@@ -1,30 +1,30 @@
-use crate::ctx::Context;
-use crate::ctx::MutableContext;
-use crate::dbs::Options;
-use crate::dbs::Workable;
-use crate::err::Error;
-use crate::iam::Action;
-use crate::iam::ResourceKind;
-use crate::idx::planner::iterators::IteratorRecord;
-use crate::idx::planner::RecordStrategy;
-use crate::kvs::cache;
-use crate::sql::permission::Permission;
-use crate::sql::statements::define::DefineDatabaseStatement;
-use crate::sql::statements::define::DefineEventStatement;
-use crate::sql::statements::define::DefineFieldStatement;
-use crate::sql::statements::define::DefineIndexStatement;
-use crate::sql::statements::define::DefineTableStatement;
-use crate::sql::statements::live::LiveStatement;
-use crate::sql::table::Table;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::Base;
-use crate::sql::FlowResultExt as _;
-use reblessive::tree::Stk;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::Deref;
 use std::sync::Arc;
+
+use reblessive::tree::Stk;
+
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::{Options, Workable};
+use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
+use crate::idx::planner::iterators::IteratorRecord;
+use crate::idx::planner::RecordStrategy;
+use crate::kvs::cache;
+use crate::sql::permission::Permission;
+use crate::sql::statements::define::{
+	DefineDatabaseStatement,
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineIndexStatement,
+	DefineTableStatement,
+};
+use crate::sql::statements::live::LiveStatement;
+use crate::sql::table::Table;
+use crate::sql::thing::Thing;
+use crate::sql::value::Value;
+use crate::sql::{Base, FlowResultExt as _};
 
 pub(crate) struct Document {
 	/// The record id of this document
@@ -94,6 +94,7 @@ impl CursorValue {
 
 impl Deref for CursorValue {
 	type Target = Value;
+
 	fn deref(&self) -> &Self::Target {
 		self.as_ref()
 	}
@@ -251,7 +252,8 @@ impl Document {
 		}
 	}
 
-	/// Retur true if the document has been extracted by an iterator that already matcheed the condition.
+	/// Retur true if the document has been extracted by an iterator that
+	/// already matcheed the condition.
 	pub(crate) fn is_condition_checked(&self) -> bool {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
 	}

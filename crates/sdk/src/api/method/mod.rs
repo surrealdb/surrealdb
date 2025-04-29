@@ -1,27 +1,20 @@
 //! Methods to use when interacting with a SurrealDB instance
-use self::query::ValidQuery;
-use crate::api::opt;
-use crate::api::opt::auth;
-use crate::api::opt::auth::Credentials;
-use crate::api::opt::auth::Jwt;
-use crate::api::opt::IntoEndpoint;
-use crate::api::Connect;
-use crate::api::Connection;
-use crate::api::OnceLockExt;
-use crate::api::Surreal;
-use crate::opt::IntoExportDestination;
-use crate::opt::WaitFor;
-use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use surrealdb_core::sql::to_value as to_core_value;
-use surrealdb_core::sql::Value as CoreValue;
+
+use serde::Serialize;
+use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
 use surrealdb_core::syn;
+
+use self::query::ValidQuery;
+use crate::api::opt::auth::{Credentials, Jwt};
+use crate::api::opt::{auth, IntoEndpoint};
+use crate::api::{opt, Connect, Connection, OnceLockExt, Surreal};
+use crate::opt::{IntoExportDestination, WaitFor};
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -81,10 +74,8 @@ pub use invalidate::Invalidate;
 pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
-pub use query::Query;
-pub use query::QueryStream;
-pub use run::IntoFn;
-pub use run::Run;
+pub use query::{Query, QueryStream};
+pub use run::{IntoFn, Run};
 pub use select::Select;
 use serde_content::Serializer;
 pub use set::Set;
@@ -98,10 +89,10 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
-use super::opt::CreateResource;
-use super::opt::IntoResource;
+use super::opt::{CreateResource, IntoResource};
 
-/// A alias for an often used type of future returned by async methods in this library.
+/// A alias for an often used type of future returned by async methods in this
+/// library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 /// Query statistics
@@ -131,10 +122,11 @@ where
 {
 	/// Initialises a new unconnected instance of the client
 	///
-	/// This makes it easy to create a static singleton of the client. The static singleton
-	/// pattern in the example below ensures that a single database instance is available
-	/// across very large or complicated applications. With the singleton, only one connection
-	/// to the database is instantiated, and the database connection does not have to be shared
+	/// This makes it easy to create a static singleton of the client. The
+	/// static singleton pattern in the example below ensures that a single
+	/// database instance is available across very large or complicated
+	/// applications. With the singleton, only one connection to the database
+	/// is instantiated, and the database connection does not have to be shared
 	/// across components or controllers.
 	///
 	/// # Examples
@@ -1304,7 +1296,6 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	///
 	pub fn run<R>(&self, function: impl IntoFn) -> Run<C, R> {
 		Run {
 			client: Cow::Borrowed(self),
@@ -1351,7 +1342,8 @@ where
 	///
 	/// # Support
 	///
-	/// Currently only supported by HTTP and the local engines. *Not* supported on WebAssembly.
+	/// Currently only supported by HTTP and the local engines. *Not* supported
+	/// on WebAssembly.
 	///
 	/// # Examples
 	///
@@ -1396,7 +1388,8 @@ where
 	///
 	/// # Support
 	///
-	/// Currently only supported by HTTP and the local engines. *Not* supported on WebAssembly.
+	/// Currently only supported by HTTP and the local engines. *Not* supported
+	/// on WebAssembly.
 	///
 	/// # Examples
 	///

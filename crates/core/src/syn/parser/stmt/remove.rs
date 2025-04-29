@@ -1,24 +1,26 @@
 use reblessive::Stk;
 
-use crate::sql::statements::remove::RemoveSequenceStatement;
-use crate::{
-	sql::{
-		statements::{
-			remove::{RemoveAnalyzerStatement, RemoveBucketStatement},
-			RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
-			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
-			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveUserStatement,
-		},
-		Param,
-	},
-	syn::{
-		parser::{
-			mac::{expected, unexpected},
-			ParseResult, Parser,
-		},
-		token::t,
-	},
+use crate::sql::statements::remove::{
+	RemoveAnalyzerStatement,
+	RemoveBucketStatement,
+	RemoveSequenceStatement,
 };
+use crate::sql::statements::{
+	RemoveAccessStatement,
+	RemoveDatabaseStatement,
+	RemoveEventStatement,
+	RemoveFieldStatement,
+	RemoveFunctionStatement,
+	RemoveIndexStatement,
+	RemoveNamespaceStatement,
+	RemoveParamStatement,
+	RemoveStatement,
+	RemoveUserStatement,
+};
+use crate::sql::Param;
+use crate::syn::parser::mac::{expected, unexpected};
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::t;
 
 impl Parser<'_> {
 	pub async fn parse_remove_stmt(&mut self, ctx: &mut Stk) -> ParseResult<RemoveStatement> {

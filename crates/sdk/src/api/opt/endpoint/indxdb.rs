@@ -1,10 +1,8 @@
-use crate::api::engine::local::Db;
-use crate::api::engine::local::IndxDb;
-use crate::api::opt::Config;
-use crate::api::opt::Endpoint;
-use crate::api::opt::IntoEndpoint;
-use crate::api::Result;
 use url::Url;
+
+use crate::api::engine::local::{Db, IndxDb};
+use crate::api::opt::{Config, Endpoint, IntoEndpoint};
+use crate::api::Result;
 
 macro_rules! endpoints {
 	($($name:ty),*) => {

@@ -1,17 +1,11 @@
 use std::sync::Arc;
 
-use crate::{
-	err::Error,
-	kvs::{KeyEncode as _, Transaction},
-	sql::{
-		access_type::{JwtAccessVerify, JwtAccessVerifyKey},
-		statements::{
-			define::{DefineScopeStatement, DefineTokenStatement},
-			DefineAccessStatement,
-		},
-		AccessType, Ident,
-	},
-};
+use crate::err::Error;
+use crate::kvs::{KeyEncode as _, Transaction};
+use crate::sql::access_type::{JwtAccessVerify, JwtAccessVerifyKey};
+use crate::sql::statements::define::{DefineScopeStatement, DefineTokenStatement};
+use crate::sql::statements::DefineAccessStatement;
+use crate::sql::{AccessType, Ident};
 
 pub async fn v1_to_2_migrate_to_access(tx: Arc<Transaction>) -> Result<(), Error> {
 	for ns in tx.all_ns().await?.iter() {
@@ -49,7 +43,8 @@ async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<(), Error> 
 			break 'scan;
 		}
 
-		// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
+		// We suffix the last id with a null byte, to prevent scanning it twice (which
+		// would result in an infinite loop)
 		beg.clone_from(keys.last().unwrap());
 		beg.extend_from_slice(b"\0");
 
@@ -59,7 +54,8 @@ async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<(), Error> 
 
 	// Migrate the tokens to accesses
 	for key in queue.iter() {
-		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
+		// Get the value for the old key. We can unwrap the option, as we know that the
+		// key exists in the KV store
 		let tk: DefineTokenStatement =
 			revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
 		// Convert into access
@@ -94,7 +90,8 @@ async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(
 			break 'scan;
 		}
 
-		// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
+		// We suffix the last id with a null byte, to prevent scanning it twice (which
+		// would result in an infinite loop)
 		beg.clone_from(keys.last().unwrap());
 		beg.extend_from_slice(b"\0");
 
@@ -104,7 +101,8 @@ async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(
 
 	// Migrate the tokens to accesses
 	for key in queue.iter() {
-		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
+		// Get the value for the old key. We can unwrap the option, as we know that the
+		// key exists in the KV store
 		let tk: DefineTokenStatement =
 			revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
 		// Convert into access
@@ -143,7 +141,8 @@ async fn collect_db_scope_keys(
 			break 'scan;
 		}
 
-		// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
+		// We suffix the last id with a null byte, to prevent scanning it twice (which
+		// would result in an infinite loop)
 		beg.clone_from(keys.last().unwrap());
 		beg.extend_from_slice(b"\0");
 
@@ -160,7 +159,8 @@ async fn migrate_db_scope_key(
 	db: &str,
 	key: Vec<u8>,
 ) -> Result<DefineAccessStatement, Error> {
-	// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
+	// Get the value for the old key. We can unwrap the option, as we know that the
+	// key exists in the KV store
 	let sc: DefineScopeStatement =
 		revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
 	// Convert into access
@@ -188,8 +188,9 @@ async fn migrate_sc_tokens(
 	let name = ac.name.clone();
 	// Find all tokens on the namespace level
 	// 0xb1 = ±
-	// Inserting the string manually does not add a null byte at the end of the string.
-	// Hence, in the third `extend_from_slice`, we add the null byte manually, followed by the token key prefix
+	// Inserting the string manually does not add a null byte at the end of the
+	// string. Hence, in the third `extend_from_slice`, we add the null byte
+	// manually, followed by the token key prefix
 	let mut beg = crate::key::database::all::new(ns, db).encode()?;
 	beg.extend_from_slice(&[0xb1]);
 	beg.extend_from_slice(name.as_bytes());
@@ -209,7 +210,8 @@ async fn migrate_sc_tokens(
 			break 'scan;
 		}
 
-		// We suffix the last id with a null byte, to prevent scanning it twice (which would result in an infinite loop)
+		// We suffix the last id with a null byte, to prevent scanning it twice (which
+		// would result in an infinite loop)
 		beg.clone_from(keys.last().unwrap());
 		beg.extend_from_slice(b"\0");
 
@@ -226,7 +228,8 @@ async fn migrate_sc_tokens(
 
 	// Log example merged accesses
 	for key in queue.iter() {
-		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
+		// Get the value for the old key. We can unwrap the option, as we know that the
+		// key exists in the KV store
 		let tk: DefineTokenStatement =
 			revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
 

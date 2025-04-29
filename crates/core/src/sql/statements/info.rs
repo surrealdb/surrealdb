@@ -1,17 +1,17 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::Action;
-use crate::iam::ResourceKind;
-use crate::sql::{Base, Ident, Object, Value, Version};
-use crate::sys::INFORMATION;
+use std::fmt;
+use std::sync::Arc;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::sync::Arc;
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, Ident, Object, Value, Version};
+use crate::sys::INFORMATION;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -45,6 +45,7 @@ impl InfoStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		false
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

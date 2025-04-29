@@ -1,23 +1,23 @@
 #![cfg(feature = "ml")]
 
 //! This module defines the operations for object storage using the [object_store](https://docs.rs/object_store/latest/object_store/)
-//! crate. This will enable the user to store objects using local file storage, memory, or cloud storage such as S3 or GCS.
-use crate::err::Error;
+//! crate. This will enable the user to store objects using local file storage,
+//! memory, or cloud storage such as S3 or GCS.
+use std::sync::{Arc, LazyLock};
+use std::{env, fs};
+
 use bytes::Bytes;
 use futures::stream::BoxStream;
 #[cfg(not(target_family = "wasm"))]
 use object_store::local::LocalFileSystem;
 #[cfg(target_family = "wasm")]
 use object_store::memory::InMemory;
-use object_store::parse_url;
 use object_store::path::Path;
-use object_store::ObjectStore;
+use object_store::{parse_url, ObjectStore};
 use sha1::{Digest, Sha1};
-use std::env;
-use std::fs;
-use std::sync::Arc;
-use std::sync::LazyLock;
 use url::Url;
+
+use crate::err::Error;
 
 fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 	match std::env::var(env_var) {
@@ -115,8 +115,9 @@ pub fn hash(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use std::env;
+
+	use super::*;
 	#[test]
 	fn test_initialize_store_env_var() {
 		let url = "file:///tmp/test_store";

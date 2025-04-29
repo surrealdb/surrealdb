@@ -1,18 +1,18 @@
+use std::cmp::Ordering;
+use std::f64::consts::PI;
+use std::fmt::{self, Debug, Display, Formatter};
+use std::hash;
+use std::iter::{Product, Sum};
+use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
+
+use revision::revisioned;
+use rust_decimal::prelude::*;
+use serde::{Deserialize, Serialize};
+
 use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
-use revision::revisioned;
-use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::f64::consts::PI;
-use std::fmt::Debug;
-use std::fmt::{self, Display, Formatter};
-use std::hash;
-use std::iter::Product;
-use std::iter::Sum;
-use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 
 pub mod decimal;
 
@@ -72,6 +72,7 @@ impl From<Decimal> for Number {
 
 impl FromStr for Number {
 	type Err = ();
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		Self::try_from(s)
 	}
@@ -79,6 +80,7 @@ impl FromStr for Number {
 
 impl TryFrom<String> for Number {
 	type Error = ();
+
 	fn try_from(v: String) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
@@ -86,6 +88,7 @@ impl TryFrom<String> for Number {
 
 impl TryFrom<Strand> for Number {
 	type Error = ();
+
 	fn try_from(v: Strand) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
@@ -93,6 +96,7 @@ impl TryFrom<Strand> for Number {
 
 impl TryFrom<&str> for Number {
 	type Error = ();
+
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		// Attempt to parse as i64
 		match v.parse::<i64>() {
@@ -144,6 +148,7 @@ try_into_prim!(
 
 impl TryFrom<Number> for Decimal {
 	type Error = Error;
+
 	fn try_from(value: Number) -> Result<Self, Self::Error> {
 		match value {
 			Number::Int(v) => match Decimal::from_i64(v) {
@@ -647,8 +652,8 @@ impl Ord for Number {
 							// less than 1 so we know this will always be less than SAFE_MULTIPLIER.
 							match r.to_i64() {
 								Some(ref right) => match (l as i64).cmp(right) {
-									// If the integer parts are equal, we need to check the remaining
-									// fractional parts.
+									// If the integer parts are equal, we need to check the
+									// remaining fractional parts.
 									Ordering::Equal => {
 										// Drop the integer parts we already compared.
 										l = l.fract();
@@ -658,24 +663,25 @@ impl Ord for Number {
 										compare_fractions!(l, r);
 									}
 									ordering => {
-										// If the integer parts are not equal then we already know the
-										// correct ordering.
+										// If the integer parts are not equal then we already know
+										// the correct ordering.
 										return ordering;
 									}
 								},
-								// This is technically unreachable. Reaching this part likely indicates
-								// a bug in `rust-decimal`'s `to_f64`'s implementation.
+								// This is technically unreachable. Reaching this part likely
+								// indicates a bug in `rust-decimal`'s `to_f64`'s
+								// implementation.
 								None => {
-									// We will assume the decimal is bigger or smaller depending on its
-									// sign.
+									// We will assume the decimal is bigger or smaller depending on
+									// its sign.
 									return greater!(w).reverse();
 								}
 							}
 						}
-						// After our iterations, if we still haven't exhausted both fractions we will
-						// just treat them as equal. It should be impossible to reach this point after
-						// at least 6 iterations. We could use an infinite loop instead but this way
-						// we make sure the loop always exits.
+						// After our iterations, if we still haven't exhausted both fractions we
+						// will just treat them as equal. It should be impossible to reach
+						// this point after at least 6 iterations. We could use an infinite
+						// loop instead but this way we make sure the loop always exits.
 						Ordering::Equal
 					}
 					// If the integer parts are not equal then we already know the correct ordering.
@@ -732,6 +738,7 @@ macro_rules! impl_simple_try_op {
 	($trt:ident, $fn:ident, $unchecked:ident, $checked:ident) => {
 		impl $trt for Number {
 			type Output = Self;
+
 			fn $fn(self, other: Self) -> Result<Self, Error> {
 				Ok(match (self, other) {
 					(Number::Int(v), Number::Int(w)) => Number::Int(
@@ -762,6 +769,7 @@ impl_simple_try_op!(TryRem, try_rem, rem, checked_rem);
 
 impl TryPow for Number {
 	type Output = Self;
+
 	fn try_pow(self, power: Self) -> Result<Self, Error> {
 		Ok(match (self, power) {
 			(Self::Int(v), Self::Int(p)) => Self::Int(match v {
@@ -821,6 +829,7 @@ impl TryNeg for Number {
 
 impl TryFloatDiv for Number {
 	type Output = Self;
+
 	fn try_float_div(self, other: Self) -> Result<Self, Error> {
 		Ok(match (self, other) {
 			(Number::Int(v), Number::Int(w)) => {
@@ -839,6 +848,7 @@ impl TryFloatDiv for Number {
 
 impl ops::Add for Number {
 	type Output = Self;
+
 	fn add(self, other: Self) -> Self {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v + w),
@@ -853,6 +863,7 @@ impl ops::Add for Number {
 
 impl<'b> ops::Add<&'b Number> for &Number {
 	type Output = Number;
+
 	fn add(self, other: &'b Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v + w),
@@ -867,6 +878,7 @@ impl<'b> ops::Add<&'b Number> for &Number {
 
 impl ops::Sub for Number {
 	type Output = Self;
+
 	fn sub(self, other: Self) -> Self {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v - w),
@@ -881,6 +893,7 @@ impl ops::Sub for Number {
 
 impl<'b> ops::Sub<&'b Number> for &Number {
 	type Output = Number;
+
 	fn sub(self, other: &'b Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v - w),
@@ -895,6 +908,7 @@ impl<'b> ops::Sub<&'b Number> for &Number {
 
 impl ops::Mul for Number {
 	type Output = Self;
+
 	fn mul(self, other: Self) -> Self {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
@@ -909,6 +923,7 @@ impl ops::Mul for Number {
 
 impl<'b> ops::Mul<&'b Number> for &Number {
 	type Output = Number;
+
 	fn mul(self, other: &'b Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
@@ -923,6 +938,7 @@ impl<'b> ops::Mul<&'b Number> for &Number {
 
 impl ops::Div for Number {
 	type Output = Self;
+
 	fn div(self, other: Self) -> Self {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),
@@ -937,6 +953,7 @@ impl ops::Div for Number {
 
 impl<'b> ops::Div<&'b Number> for &Number {
 	type Output = Number;
+
 	fn div(self, other: &'b Number) -> Number {
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),
@@ -1026,8 +1043,7 @@ mod tests {
 	use std::cmp::Ordering;
 
 	use rand::seq::SliceRandom;
-	use rand::thread_rng;
-	use rand::Rng;
+	use rand::{thread_rng, Rng};
 	use rust_decimal::Decimal;
 
 	use super::*;

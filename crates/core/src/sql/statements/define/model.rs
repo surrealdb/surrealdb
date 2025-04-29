@@ -1,3 +1,8 @@
+use std::fmt::{self, Write};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,10 +11,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Permission, Strand, Value};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Write};
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

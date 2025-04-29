@@ -1,12 +1,10 @@
-use crate::api::method::BoxFuture;
-use crate::api::method::Cancel;
-use crate::api::method::Commit;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::api::Surreal;
 use std::future::IntoFuture;
 use std::ops::Deref;
+
 use surrealdb_core::sql::statements::BeginStatement;
+
+use crate::api::method::{BoxFuture, Cancel, Commit};
+use crate::api::{Connection, Result, Surreal};
 
 /// A beginning of a transaction
 #[derive(Debug)]
@@ -19,8 +17,8 @@ impl<C> IntoFuture for Begin<C>
 where
 	C: Connection,
 {
-	type Output = Result<Transaction<C>>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
+	type Output = Result<Transaction<C>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {

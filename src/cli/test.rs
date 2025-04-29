@@ -1,7 +1,8 @@
+use std::collections::BTreeMap;
+
 use crate::cli::check_upgrade;
 use crate::cli::version_client::MapVersionClient;
 use crate::err::Error;
-use std::collections::BTreeMap;
 
 #[test_log::test(tokio::test)]
 pub async fn test_version_upgrade() {

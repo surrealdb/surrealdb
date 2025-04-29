@@ -1,12 +1,12 @@
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::value::TryRem;
-use crate::sql::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
+use crate::sql::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub, Value};
 use crate::sql::{Expression, Thing};
-use reblessive::tree::Stk;
 
 pub fn neg(a: Value) -> Result<Value, Error> {
 	a.try_neg()

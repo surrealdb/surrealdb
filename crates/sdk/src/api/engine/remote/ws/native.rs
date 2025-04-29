@@ -1,33 +1,12 @@
-use super::{HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH};
-use crate::api::conn::Route;
-use crate::api::conn::Router;
-use crate::api::conn::{Command, DbResponse};
-use crate::api::conn::{Connection, RequestData};
-use crate::api::engine::remote::ws::Client;
-use crate::api::engine::remote::ws::PING_INTERVAL;
-use crate::api::engine::remote::Response;
-use crate::api::engine::remote::{deserialize, serialize};
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
-use crate::api::opt::Endpoint;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-use crate::api::opt::Tls;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::engine::remote::Data;
-use crate::engine::IntervalStream;
-use crate::opt::WaitFor;
-use crate::{Action, Notification};
-use async_channel::Receiver;
-use futures::stream::{SplitSink, SplitStream};
-use futures::SinkExt;
-use futures::StreamExt;
-use revision::revisioned;
-use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
+
+use async_channel::Receiver;
+use futures::stream::{SplitSink, SplitStream};
+use futures::{SinkExt, StreamExt};
+use revision::revisioned;
+use serde::Deserialize;
 use surrealdb_core::sql::Value as CoreValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
@@ -39,10 +18,23 @@ use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::Connector;
-use tokio_tungstenite::MaybeTlsStream;
-use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
+
+use super::{HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH};
+use crate::api::conn::{Command, Connection, DbResponse, RequestData, Route, Router};
+use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
+use crate::api::engine::remote::{deserialize, serialize, Response};
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::opt::Endpoint;
+#[cfg(any(feature = "native-tls", feature = "rustls"))]
+use crate::api::opt::Tls;
+use crate::api::{ExtraFeatures, Result, Surreal};
+use crate::engine::remote::Data;
+use crate::engine::IntervalStream;
+use crate::opt::WaitFor;
+use crate::{Action, Notification};
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
@@ -291,7 +283,8 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 								match pending.effect {
 									RequestEffect::None => {}
 									RequestEffect::Insert => {
-										// For insert, we need to flatten single responses in an array
+										// For insert, we need to flatten single responses in an
+										// array
 										if let DbResponse::Other(CoreValue::Array(array)) = resp {
 											if array.len() == 1 {
 												let _ = pending
@@ -336,7 +329,8 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 								let live_query_id = notification.id;
 								// Check if this live query is registered
 								if let Some(sender) = state.live_queries.get(&live_query_id) {
-									// Send the notification back to the caller or kill live query if the receiver is already dropped
+									// Send the notification back to the caller or kill live query
+									// if the receiver is already dropped
 
 									let notification = Notification {
 										query_id: *notification.id,
@@ -476,8 +470,8 @@ pub(crate) async fn run_router(
 
 		let mut pinger = IntervalStream::new(interval);
 		// Turn into a stream instead of calling recv_async
-		// The stream seems to be able to keep some state which would otherwise need to be
-		// recreated with each next.
+		// The stream seems to be able to keep some state which would otherwise need to
+		// be recreated with each next.
 
 		state.last_activity = Instant::now();
 		state.live_queries.clear();
@@ -625,15 +619,17 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
-	use super::serialize;
+	use std::io::Write;
+	use std::time::SystemTime;
+
 	use bincode::Options;
 	use flate2::write::GzEncoder;
 	use flate2::Compression;
 	use rand::{thread_rng, Rng};
-	use std::io::Write;
-	use std::time::SystemTime;
 	use surrealdb_core::rpc::format::cbor::Cbor;
 	use surrealdb_core::sql::{Array, Value};
+
+	use super::serialize;
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {
@@ -660,7 +656,7 @@ mod tests {
 		for _ in 0..vector_size {
 			vector.push(rng.gen());
 		}
-		//	Store the results
+		// 	Store the results
 		let mut results = vec![];
 		// Calculate the reference
 		let ref_payload;

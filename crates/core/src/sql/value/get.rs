@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
 use std::ops::Deref;
 
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+
+use super::idiom_recursion::{compute_idiom_recursion, Recursion};
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -11,16 +15,11 @@ use crate::fnc::idiom;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
-use crate::sql::part::{FindRecursionPlan, Next, NextMethod, SplitByRepeatRecurse};
-use crate::sql::part::{Part, Skip};
+use crate::sql::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitByRepeatRecurse};
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use crate::sql::{ControlFlow, FlowResult, FlowResultExt as _, Function};
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
-
-use super::idiom_recursion::{compute_idiom_recursion, Recursion};
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -41,7 +40,8 @@ impl Value {
 		match path.first() {
 			// The knowledge of the current value is not relevant to Part::Recurse
 			Some(Part::Recurse(recurse, inner_path, instruction)) => {
-				// Find the path to recurse and what path to process after the recursion is finished
+				// Find the path to recurse and what path to process after the recursion is
+				// finished
 				let (path, after) = match inner_path {
 					Some(p) => (p.0.as_slice(), path.next().to_vec()),
 					_ => (path.next(), vec![]),
@@ -408,7 +408,8 @@ impl Value {
 							.await
 							.map(Value::from)?;
 
-						// If we are chaining graph parts, we need to make sure to flatten the result
+						// If we are chaining graph parts, we need to make sure to flatten the
+						// result
 						let mapped = match (path.first(), path.get(1)) {
 							(Some(Part::Graph(_)), Some(Part::Graph(_))) => mapped.flatten(),
 							(Some(Part::Graph(_)), Some(Part::Where(_))) => mapped.flatten(),
@@ -569,7 +570,8 @@ impl Value {
 								.await?;
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
-						// Only continue processing the path from the point that it contains a method
+						// Only continue processing the path from the point that it contains a
+						// method
 						_ => {
 							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next_method()))
 								.await

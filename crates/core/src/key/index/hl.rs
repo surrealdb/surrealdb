@@ -1,7 +1,9 @@
 //! Store and chunked layers of an HNSW index
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+
+use serde::{Deserialize, Serialize};
+
+use crate::kvs::impl_key;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]

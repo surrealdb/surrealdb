@@ -1,5 +1,16 @@
-use crate::api::conn::Connection;
-use crate::api::conn::Router;
+use std::collections::HashSet;
+use std::sync::atomic::AtomicI64;
+
+#[cfg(feature = "protocol-http")]
+use reqwest::ClientBuilder;
+use tokio::sync::watch;
+#[cfg(feature = "protocol-ws")]
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+#[cfg(feature = "protocol-ws")]
+#[cfg(any(feature = "native-tls", feature = "rustls"))]
+use tokio_tungstenite::Connector;
+
+use crate::api::conn::{Connection, Router};
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::engine;
 use crate::api::engine::any::Any;
@@ -13,21 +24,10 @@ use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
+use crate::api::{Result, Surreal};
 #[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
-#[cfg(feature = "protocol-http")]
-use reqwest::ClientBuilder;
-use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
-use tokio::sync::watch;
-#[cfg(feature = "protocol-ws")]
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-#[cfg(feature = "protocol-ws")]
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-use tokio_tungstenite::Connector;
 
 impl crate::api::Connection for Any {}
 

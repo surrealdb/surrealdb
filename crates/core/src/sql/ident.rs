@@ -1,10 +1,14 @@
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{escape::EscapeIdent, strand::no_nul_bytes, Value};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::sql::escape::EscapeIdent;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::strand::no_nul_bytes;
+use crate::sql::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -26,6 +30,7 @@ impl From<&str> for Ident {
 
 impl Deref for Ident {
 	type Target = String;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -36,22 +41,27 @@ impl Ident {
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
 	}
+
 	/// Checks if this field is the `id` field
 	pub(crate) fn is_dash(&self) -> bool {
 		self.0.as_str() == "-"
 	}
+
 	/// Checks if this field is the `id` field
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.as_str() == "id"
 	}
+
 	/// Checks if this field is the `type` field
 	pub(crate) fn is_type(&self) -> bool {
 		self.0.as_str() == "type"
 	}
+
 	/// Checks if this field is the `coordinates` field
 	pub(crate) fn is_coordinates(&self) -> bool {
 		self.0.as_str() == "coordinates"
 	}
+
 	/// Checks if this field is the `geometries` field
 	pub(crate) fn is_geometries(&self) -> bool {
 		self.0.as_str() == "geometries"

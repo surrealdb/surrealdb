@@ -1,12 +1,13 @@
-use crate::dbs::node::Timestamp;
-use crate::sql;
-use sql::Duration;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use sql::Duration;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
+use crate::dbs::node::Timestamp;
+use crate::sql;
 
 // Traits cannot have async and we need sized structs for Clone + Send + Sync
 #[derive(Clone)]
@@ -71,10 +72,11 @@ impl FakeClock {
 	}
 }
 
-/// IncFakeClock increments a local clock every time the clock is accessed, similar to a real clock.
-/// This is useful when you need unique and partially deterministic timestamps for tests.
-/// Partially deterministic, because you do not have direct control over how many times a clock
-/// is accessed, and due to the nature of async - you neither have order guarantee.
+/// IncFakeClock increments a local clock every time the clock is accessed,
+/// similar to a real clock. This is useful when you need unique and partially
+/// deterministic timestamps for tests. Partially deterministic, because you do
+/// not have direct control over how many times a clock is accessed, and due to
+/// the nature of async - you neither have order guarantee.
 #[non_exhaustive]
 pub struct IncFakeClock {
 	now: AtomicU64,
@@ -117,6 +119,7 @@ impl SystemClock {
 	pub fn new() -> Self {
 		SystemClock
 	}
+
 	pub fn now(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		let now: u128 = match SystemTime::now().duration_since(UNIX_EPOCH) {

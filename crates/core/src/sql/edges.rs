@@ -1,16 +1,18 @@
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::table::Tables;
-use crate::sql::thing::Thing;
-use crate::{ctx::Context, sql::dir::Dir};
+use std::fmt;
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 use super::graph::GraphSubjects;
 use super::Value;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::sql::dir::Dir;
+use crate::sql::table::Tables;
+use crate::sql::thing::Thing;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Edges";
 

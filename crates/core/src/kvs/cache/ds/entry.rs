@@ -1,12 +1,16 @@
-use crate::err::Error;
-use crate::sql::statements::DefineEventStatement;
-use crate::sql::statements::DefineFieldStatement;
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::statements::LiveStatement;
 use std::any::Any;
 use std::sync::Arc;
+
 use uuid::Uuid;
+
+use crate::err::Error;
+use crate::sql::statements::{
+	DefineEventStatement,
+	DefineFieldStatement,
+	DefineIndexStatement,
+	DefineTableStatement,
+	LiveStatement,
+};
 
 #[derive(Clone)]
 #[non_exhaustive]
@@ -38,6 +42,7 @@ impl Entry {
 			_ => Err(fail!("Unable to convert type into Entry::Any")),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineEventStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Evs`].
 	pub(crate) fn try_into_evs(self) -> Result<Arc<[DefineEventStatement]>, Error> {
@@ -46,6 +51,7 @@ impl Entry {
 			_ => Err(fail!("Unable to convert type into Entry::Evs")),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineFieldStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fds`].
 	pub(crate) fn try_into_fds(self) -> Result<Arc<[DefineFieldStatement]>, Error> {
@@ -54,6 +60,7 @@ impl Entry {
 			_ => Err(fail!("Unable to convert type into Entry::Fds")),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineIndexStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Ixs`].
 	pub(crate) fn try_into_ixs(self) -> Result<Arc<[DefineIndexStatement]>, Error> {
@@ -62,6 +69,7 @@ impl Entry {
 			_ => Err(fail!("Unable to convert type into Entry::Ixs")),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineTableStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fts`].
 	pub(crate) fn try_into_fts(self) -> Result<Arc<[DefineTableStatement]>, Error> {
@@ -70,6 +78,7 @@ impl Entry {
 			_ => Err(fail!("Unable to convert type into Entry::Fts")),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`LiveStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Lvs`].
 	pub(crate) fn try_into_lvs(self) -> Result<Arc<[LiveStatement]>, Error> {

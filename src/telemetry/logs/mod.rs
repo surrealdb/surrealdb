@@ -1,11 +1,11 @@
-use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::err::Error;
-use tracing::Level;
-use tracing::Subscriber;
+use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::NonBlocking;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::Layer;
+
+use crate::cli::validator::parser::env_filter::CustomEnvFilter;
+use crate::err::Error;
 
 pub fn new<S>(
 	filter: CustomEnvFilter,

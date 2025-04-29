@@ -1,11 +1,12 @@
 //! Stores change feeds
+use std::str;
+
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::{impl_key, KeyEncode};
 use crate::vs::VersionStamp;
-use serde::{Deserialize, Serialize};
-use std::str;
 
 // Cf stands for change feeds
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -92,9 +93,10 @@ impl<'a> Cf<'a> {
 
 #[cfg(test)]
 mod tests {
+	use std::ascii::escape_default;
+
 	use crate::kvs::KeyDecode;
 	use crate::vs::*;
-	use std::ascii::escape_default;
 
 	#[test]
 	fn key() {

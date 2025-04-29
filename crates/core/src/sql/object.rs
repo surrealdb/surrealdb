@@ -1,23 +1,20 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::{
-	escape::EscapeKey,
-	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
-	Operation, Thing, Value,
-};
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::{Deref, DerefMut};
+
 use http::{HeaderMap, HeaderName, HeaderValue};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
-use std::ops::DerefMut;
 
 use super::FlowResult;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::sql::escape::EscapeKey;
+use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
+use crate::sql::{Operation, Thing, Value};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 
@@ -55,6 +52,7 @@ impl From<BTreeMap<String, String>> for Object {
 
 impl TryFrom<HeaderMap> for Object {
 	type Error = Error;
+
 	fn try_from(v: HeaderMap) -> Result<Self, Error> {
 		Ok(Self(
 			v.into_iter()
@@ -151,6 +149,7 @@ impl From<Operation> for Object {
 
 impl Deref for Object {
 	type Target = BTreeMap<String, Value>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -163,8 +162,9 @@ impl DerefMut for Object {
 }
 
 impl IntoIterator for Object {
-	type Item = (String, Value);
 	type IntoIter = std::collections::btree_map::IntoIter<String, Value>;
+	type Item = (String, Value);
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -172,6 +172,7 @@ impl IntoIterator for Object {
 
 impl TryInto<BTreeMap<String, String>> for Object {
 	type Error = Error;
+
 	fn try_into(self) -> Result<BTreeMap<String, String>, Self::Error> {
 		self.into_iter().map(|(k, v)| Ok((k, v.coerce_to()?))).collect()
 	}
@@ -179,6 +180,7 @@ impl TryInto<BTreeMap<String, String>> for Object {
 
 impl TryInto<HeaderMap> for Object {
 	type Error = Error;
+
 	fn try_into(self) -> Result<HeaderMap, Self::Error> {
 		let mut headermap = HeaderMap::new();
 		for (k, v) in self.into_iter() {
@@ -199,6 +201,7 @@ impl Object {
 			_ => None,
 		}
 	}
+
 	/// Convert this object to a diff-match-patch operation
 	pub fn to_operation(&self) -> Result<Operation, Error> {
 		match self.get("op") {
@@ -327,12 +330,12 @@ impl Display for Object {
 }
 
 mod no_nul_bytes_in_keys {
-	use serde::{
-		de::{self, Visitor},
-		ser::SerializeMap,
-		Deserializer, Serializer,
-	};
-	use std::{collections::BTreeMap, fmt};
+	use std::collections::BTreeMap;
+	use std::fmt;
+
+	use serde::de::{self, Visitor};
+	use serde::ser::SerializeMap;
+	use serde::{Deserializer, Serializer};
 
 	use crate::sql::Value;
 

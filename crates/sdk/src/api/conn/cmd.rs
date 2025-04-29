@@ -1,18 +1,22 @@
-use super::MlExportConfig;
-use crate::{opt::Resource, value::Notification, Result};
-use async_channel::Sender;
-use bincode::Options;
-use revision::Revisioned;
-use serde::{ser::SerializeMap as _, Serialize};
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
+
+use async_channel::Sender;
+use bincode::Options;
+use revision::Revisioned;
+use serde::ser::SerializeMap as _;
+use serde::Serialize;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+use surrealdb_core::sql::Table as CoreTable;
 use surrealdb_core::sql::{Array as CoreArray, Object as CoreObject, Query, Value as CoreValue};
 use uuid::Uuid;
 
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::sql::Table as CoreTable;
+use super::MlExportConfig;
+use crate::opt::Resource;
+use crate::value::Notification;
+use crate::Result;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -124,11 +128,10 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
+		use surrealdb_core::sql::statements::{UpdateStatement, UpsertStatement};
+		use surrealdb_core::sql::{Data, Output};
+
 		use crate::api::engine::resource_to_values;
-		use surrealdb_core::sql::{
-			statements::{UpdateStatement, UpsertStatement},
-			Data, Output,
-		};
 
 		let res = match self {
 			Command::Use {
@@ -453,7 +456,8 @@ impl Command {
 	}
 }
 
-/// A struct which will be serialized as a map to behave like the previously used BTreeMap.
+/// A struct which will be serialized as a map to behave like the previously
+/// used BTreeMap.
 ///
 /// This struct serializes as if it is a surrealdb_core::sql::Value::Object.
 #[derive(Debug)]

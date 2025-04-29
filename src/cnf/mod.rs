@@ -29,7 +29,8 @@ pub const PKG_NAME: &str = "surrealdb";
 /// The public endpoint for the administration interface
 pub const APP_ENDPOINT: &str = "https://surrealdb.com/surrealist";
 
-/// How many concurrent network requests can be handled at once (default: 1,048,576)
+/// How many concurrent network requests can be handled at once (default:
+/// 1,048,576)
 pub static NET_MAX_CONCURRENT_REQUESTS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_NET_MAX_CONCURRENT_REQUESTS", usize, 1 << 20);
 
@@ -76,19 +77,23 @@ pub static WEBSOCKET_MAX_FRAME_SIZE: LazyLock<usize> =
 pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", usize, 128 << 20);
 
-/// How many messages can be queued for sending down the WebSocket (default: 100)
+/// How many messages can be queued for sending down the WebSocket (default:
+/// 100)
 pub static WEBSOCKET_RESPONSE_CHANNEL_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_CHANNEL_SIZE", usize, 100);
 
-/// How many responses can be buffered when delivering to the client (default: 0)
+/// How many responses can be buffered when delivering to the client (default:
+/// 0)
 pub static WEBSOCKET_RESPONSE_BUFFER_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_BUFFER_SIZE", usize, 0);
 
-/// How often are any buffered responses flushed to the WebSocket client (default: 3 ms)
+/// How often are any buffered responses flushed to the WebSocket client
+/// (default: 3 ms)
 pub static WEBSOCKET_RESPONSE_FLUSH_PERIOD: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_FLUSH_PERIOD", u64, 3);
 
-/// The number of runtime worker threads to start (default: the number of CPU cores, minimum 4)
+/// The number of runtime worker threads to start (default: the number of CPU
+/// cores, minimum 4)
 pub static RUNTIME_WORKER_THREADS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_RUNTIME_WORKER_THREADS", usize, || {
 		std::cmp::max(4, num_cpus::get())
@@ -117,11 +122,13 @@ pub static TELEMETRY_PROVIDER: LazyLock<String> =
 pub static TELEMETRY_NAMESPACE: LazyLock<Option<String>> =
 	lazy_env_parse!("SURREAL_TELEMETRY_NAMESPACE", Option<String>);
 
-/// Whether to disable sending traces to the OpenTelemetry collector (default: false)
+/// Whether to disable sending traces to the OpenTelemetry collector (default:
+/// false)
 pub static TELEMETRY_DISABLE_TRACING: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_TRACING", bool);
 
-/// Whether to disable sending metrics to the OpenTelemetry collector (default: false)
+/// Whether to disable sending metrics to the OpenTelemetry collector (default:
+/// false)
 pub static TELEMETRY_DISABLE_METRICS: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_METRICS", bool);
 

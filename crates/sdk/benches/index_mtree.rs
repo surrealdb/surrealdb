@@ -1,11 +1,12 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use futures::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use reblessive::TreeStack;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::{Read, Write};

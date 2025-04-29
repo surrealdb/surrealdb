@@ -1,12 +1,9 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::{statements::UpdateStatement, Values},
-	syn::{
-		parser::{ParseResult, Parser},
-		token::t,
-	},
-};
+use crate::sql::statements::UpdateStatement;
+use crate::sql::Values;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::t;
 
 impl Parser<'_> {
 	pub async fn parse_update_stmt(&mut self, stk: &mut Stk) -> ParseResult<UpdateStatement> {

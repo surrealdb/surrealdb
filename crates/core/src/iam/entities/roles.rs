@@ -1,11 +1,14 @@
-use crate::iam::Error;
-use crate::sql::Ident;
+use std::str::FromStr;
+
 use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
-// In the future, we will allow for custom roles. For now, provide predefined roles.
+use crate::iam::Error;
+use crate::sql::Ident;
+
+// In the future, we will allow for custom roles. For now, provide predefined
+// roles.
 #[revisioned(revision = 1)]
 #[derive(Hash, Copy, Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -29,6 +32,7 @@ impl std::fmt::Display for Role {
 
 impl FromStr for Role {
 	type Err = Error;
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.to_ascii_lowercase().as_str() {
 			"viewer" => Ok(Self::Viewer),
@@ -41,6 +45,7 @@ impl FromStr for Role {
 
 impl std::convert::TryFrom<&Ident> for Role {
 	type Error = Error;
+
 	fn try_from(id: &Ident) -> Result<Self, Self::Error> {
 		Role::from_str(id)
 	}

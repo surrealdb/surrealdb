@@ -1,17 +1,19 @@
+use std::collections::VecDeque;
+use std::fmt::{Debug, Display, Formatter};
+use std::io::Cursor;
+use std::marker::PhantomData;
+
+#[cfg(debug_assertions)]
+use ahash::HashSet;
+use revision::{revisioned, Revisioned};
+use serde::{Deserialize, Serialize};
+
 use crate::err::Error;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
 use crate::idx::VersionedStore;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
-#[cfg(debug_assertions)]
-use ahash::HashSet;
-use revision::{revisioned, Revisioned};
-use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
-use std::fmt::{Debug, Display, Formatter};
-use std::io::Cursor;
-use std::marker::PhantomData;
 
 pub type Payload = u64;
 
@@ -237,6 +239,7 @@ where
 			}
 		}
 	}
+
 	#[cfg(debug_assertions)]
 	fn check(&self) {
 		match self {
@@ -651,7 +654,8 @@ where
 
 		// CLRS: 2c
 		// Merge children
-		// The payload is set to 0. The payload does not matter, as the key will be deleted after anyway.
+		// The payload is set to 0. The payload does not matter, as the key will be
+		// deleted after anyway.
 		#[cfg(debug_assertions)]
 		{
 			left_node.n.check();
@@ -994,21 +998,30 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::err::Error;
-	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::trees::btree::{
-		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
-	};
-	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
-	use crate::idx::VersionedStore;
-	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
-	use rand::prelude::SliceRandom;
-	use rand::thread_rng;
 	use std::cmp::Ordering;
 	use std::collections::{BTreeMap, VecDeque};
 	use std::fmt::Debug;
 	use std::sync::Arc;
+
+	use rand::prelude::SliceRandom;
+	use rand::thread_rng;
 	use test_log::test;
+
+	use crate::err::Error;
+	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
+	use crate::idx::trees::btree::{
+		BState,
+		BStatistics,
+		BStoredNode,
+		BTree,
+		BTreeNode,
+		BTreeStore,
+		Payload,
+	};
+	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
+	use crate::idx::VersionedStore;
+	use crate::kvs::LockType::*;
+	use crate::kvs::{Datastore, Key, Transaction, TransactionType};
 
 	#[test]
 	fn test_btree_state_serde() {

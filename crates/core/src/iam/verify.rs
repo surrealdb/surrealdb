@@ -1,19 +1,25 @@
-use crate::dbs::Session;
-use crate::err::Error;
-use crate::iam::access::{authenticate_generic, authenticate_record};
-#[cfg(feature = "jwks")]
-use crate::iam::jwks;
-use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::access_type::{AccessType, Jwt, JwtAccessVerify};
-use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
-use crate::syn;
+use std::str::{self, FromStr};
+use std::sync::{Arc, LazyLock};
+
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
-use std::str::{self, FromStr};
-use std::sync::Arc;
-use std::sync::LazyLock;
+
+use crate::dbs::Session;
+use crate::err::Error;
+use crate::iam::access::{authenticate_generic, authenticate_record};
+use crate::iam::issue::expiration;
+#[cfg(feature = "jwks")]
+use crate::iam::jwks;
+use crate::iam::token::Claims;
+use crate::iam::{Actor, Auth, Level, Role};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::sql::access_type::{AccessType, Jwt, JwtAccessVerify};
+use crate::sql::statements::DefineUserStatement;
+use crate::sql::{Algorithm, Value};
+use crate::syn;
 
 fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error> {
 	let (dec, mut val) = match alg {
@@ -58,10 +64,11 @@ fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error
 		}
 	};
 
-	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
-	// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
-	// Now that the audience claim is validated by default, we could allow users to leverage this.
-	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB
+	// 2.0.0-alpha.9. Up to that point, a fork of the "jsonwebtoken" crate in
+	// version 8.3.0 was being used. Now that the audience claim is validated by
+	// default, we could allow users to leverage this. This will most likely
+	// involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
 	val.validate_aud = false;
 
 	Ok((dec, val))
@@ -287,8 +294,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					)));
 				}
 				// If the access type is Record, this is record access
-				// Record access without an "id" claim is only possible if there is an AUTHENTICATE clause
-				// The clause can make up for the missing "id" claim by resolving other claims to a specific record
+				// Record access without an "id" claim is only possible if there is an AUTHENTICATE
+				// clause The clause can make up for the missing "id" claim by resolving other
+				// claims to a specific record
 				AccessType::Record(at) => match &de.authenticate {
 					Some(au) => {
 						trace!("Access method `{}` is record access with AUTHENTICATE clause", ac);
@@ -669,11 +677,12 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::iam::token::{Audience, HEADER};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{encode, EncodingKey};
+
+	use super::*;
+	use crate::iam::token::{Audience, HEADER};
 
 	struct TestLevel {
 		level: &'static str,
@@ -823,11 +832,10 @@ mod tests {
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::{
-			statements::{define::DefineStatement, DefineUserStatement},
-			user::UserDuration,
-			Base, Statement,
-		};
+		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::statements::DefineUserStatement;
+		use crate::sql::user::UserDuration;
+		use crate::sql::{Base, Statement};
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -871,7 +879,8 @@ mod tests {
 				overwrite: false,
 			};
 
-			// Use pre-parsed definition, which bypasses the existent role check during parsing.
+			// Use pre-parsed definition, which bypasses the existent role check during
+			// parsing.
 			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, None)
 				.await
 				.unwrap();
@@ -1223,7 +1232,6 @@ mod tests {
 		.await
 		.unwrap();
 
-		//
 		// Token with valid custom claims of different types
 		//
 		let now = Utc::now().timestamp();
@@ -1282,7 +1290,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration has been set explicitly
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1317,12 +1326,15 @@ mod tests {
 	#[cfg(feature = "jwks")]
 	#[tokio::test]
 	async fn test_token_record_jwks() {
-		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
-		use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+		use base64::engine::general_purpose::STANDARD_NO_PAD;
+		use base64::Engine;
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
-		use rand::{distributions::Alphanumeric, Rng};
+		use rand::distributions::Alphanumeric;
+		use rand::Rng;
 		use wiremock::matchers::{method, path};
 		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 
 		// Use unique path to prevent accidental cache reuse
 		fn random_path() -> String {
@@ -1414,7 +1426,6 @@ mod tests {
 			..Claims::default()
 		};
 
-		//
 		// Test without roles defined
 		// Roles should be ignored in record access
 		//
@@ -1442,7 +1453,6 @@ mod tests {
 			assert_eq!(sess.exp, None, "Default session expiration is expected to be None");
 		}
 
-		//
 		// Test with invalid signature
 		//
 		{
@@ -1827,7 +1837,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -1908,7 +1919,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(

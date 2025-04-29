@@ -1,8 +1,9 @@
+use clap::Args;
+use surrealdb::engine::any::connect;
+
 use crate::cli::abstraction::OptionalDatabaseConnectionArguments;
 use crate::env::RELEASE;
 use crate::err::Error;
-use clap::Args;
-use surrealdb::engine::any::connect;
 
 #[derive(Args, Debug)]
 pub struct VersionCommandArguments {

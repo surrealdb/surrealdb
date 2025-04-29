@@ -1,38 +1,40 @@
-use crate::api::conn::Command;
-use crate::api::conn::Router;
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
-use crate::api::Connection;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::engine::any::Any;
-use crate::method::Live;
-use crate::method::OnceLockExt;
-use crate::method::Query;
-use crate::method::Select;
-use crate::opt::Resource;
-use crate::value::Notification;
-use crate::Surreal;
-use crate::Value;
-use async_channel::Receiver;
-use futures::StreamExt;
-use serde::de::DeserializeOwned;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
-use surrealdb_core::sql::{
-	statements::LiveStatement, Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part,
-	Statement, Table, Value as CoreValue,
-};
-use uuid::Uuid;
+use std::task::{Context, Poll};
 
+use async_channel::Receiver;
+use futures::StreamExt;
+use serde::de::DeserializeOwned;
+use surrealdb_core::sql::statements::LiveStatement;
+use surrealdb_core::sql::{
+	Cond,
+	Expression,
+	Field,
+	Fields,
+	Ident,
+	Idiom,
+	Operator,
+	Part,
+	Statement,
+	Table,
+	Value as CoreValue,
+};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-
+use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
+
+use crate::api::conn::{Command, Router};
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::{Connection, ExtraFeatures, Result};
+use crate::engine::any::Any;
+use crate::method::{Live, OnceLockExt, Query, Select};
+use crate::opt::Resource;
+use crate::value::Notification;
+use crate::{Surreal, Value};
 
 const ID: &str = "id";
 
@@ -118,8 +120,8 @@ impl<'r, Client> IntoFuture for Select<'r, Client, Value, Live>
 where
 	Client: Connection,
 {
-	type Output = Result<Stream<Value>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Stream<Value>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		into_future(self)
@@ -131,8 +133,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Stream<Option<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Stream<Option<R>>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		into_future(self)
@@ -144,8 +146,8 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Stream<Vec<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type Output = Result<Stream<Vec<R>>>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		into_future(self)

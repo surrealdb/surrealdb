@@ -1,3 +1,17 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::fmt::{self, Debug};
+#[cfg(storage)]
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_channel::Sender;
+use trice::Instant;
+#[cfg(feature = "http")]
+use url::Url;
+
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
@@ -17,18 +31,6 @@ use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::mem::ALLOC;
 use crate::sql::value::Value;
-use async_channel::Sender;
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::fmt::{self, Debug};
-#[cfg(storage)]
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
-use trice::Instant;
-#[cfg(feature = "http")]
-use url::Url;
 
 pub type Context = Arc<MutableContext>;
 
@@ -412,8 +414,8 @@ impl MutableContext {
 
 	/// Check if there is some reason to stop processing the current query.
 	///
-	/// Returns true when the query is canceled or if check_deadline is true when the query
-	/// deadline is met.
+	/// Returns true when the query is canceled or if check_deadline is true
+	/// when the query deadline is met.
 	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool, Error> {
 		if deep_check {
 			yield_now!();
@@ -457,7 +459,6 @@ impl MutableContext {
 		)
 	}
 
-	//
 	// Capabilities
 	//
 

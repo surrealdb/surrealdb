@@ -1,10 +1,11 @@
 mod helpers;
 mod parse;
-use crate::helpers::{new_ds, skip_ok, Test};
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
+
+use crate::helpers::{new_ds, skip_ok, Test};
 
 #[tokio::test]
 async fn select_where_mtree_knn() -> Result<(), Error> {

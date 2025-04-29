@@ -1,14 +1,14 @@
-use crate::net::headers::{Accept, ContentType};
-use crate::rpc::failure::Failure;
-use crate::rpc::response::Response;
 use axum::extract::ws::Message;
-use axum::response::IntoResponse;
-use axum::response::Response as AxumResponse;
+use axum::response::{IntoResponse, Response as AxumResponse};
 use bytes::Bytes;
 use http::header::{HeaderValue, CONTENT_TYPE};
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::request::Request;
 use surrealdb::rpc::RpcError;
+
+use crate::net::headers::{Accept, ContentType};
+use crate::rpc::failure::Failure;
+use crate::rpc::response::Response;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {
@@ -59,6 +59,7 @@ impl WsFormat for Format {
 		let val = msg.into_data();
 		self.req(val).map_err(Into::into)
 	}
+
 	/// Process a WebSocket RPC response
 	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
 		let res = self.res(res).map_err(Failure::from)?;
@@ -86,6 +87,7 @@ impl HttpFormat for Format {
 	fn req_http(&self, body: Bytes) -> Result<Request, RpcError> {
 		self.req(body)
 	}
+
 	/// Process a HTTP RPC response
 	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
 		let res = self.res(res)?;

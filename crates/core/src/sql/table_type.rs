@@ -1,9 +1,11 @@
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Kind, Value};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Kind, Value};
 
 /// The type of records stored by a table
 #[revisioned(revision = 1)]

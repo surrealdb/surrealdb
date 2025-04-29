@@ -1,13 +1,13 @@
 //! Embedded database instance
 //!
-//! `SurrealDB` itself can be embedded in this library, allowing you to query it using the same
-//! crate and API that you would use when connecting to it remotely via WebSockets or HTTP.
-//! All storage engines are supported but you have to activate their feature
-//! flags first.
+//! `SurrealDB` itself can be embedded in this library, allowing you to query it
+//! using the same crate and API that you would use when connecting to it
+//! remotely via WebSockets or HTTP. All storage engines are supported but you
+//! have to activate their feature flags first.
 //!
-//! **NB**: Some storage engines like `TiKV` and `RocksDB` depend on non-Rust libraries so you need
-//! to install those libraries before you can build this crate when you activate their feature
-//! flags. Please refer to [these instructions](https://github.com/surrealdb/surrealdb/blob/main/doc/BUILDING.md)
+//! **NB**: Some storage engines like `TiKV` and `RocksDB` depend on non-Rust
+//! libraries so you need to install those libraries before you can build this
+//! crate when you activate their feature flags. Please refer to [these instructions](https://github.com/surrealdb/surrealdb/blob/main/doc/BUILDING.md)
 //! for more details on how to install them. If you are on Linux and you use
 //! [the Nix package manager](https://github.com/surrealdb/surrealdb/tree/main/pkg/nix#installing-nix)
 //! you can just run
@@ -16,71 +16,47 @@
 //! nix develop github:surrealdb/surrealdb
 //! ```
 //!
-//! which will drop you into a shell with all the dependencies available. One tip you may find
-//! useful is to only enable the in-memory engine (`kv-mem`) during development. Besides letting you not
-//! worry about those dependencies on your dev machine, it allows you to keep compile times low
+//! which will drop you into a shell with all the dependencies available. One
+//! tip you may find useful is to only enable the in-memory engine (`kv-mem`)
+//! during development. Besides letting you not worry about those dependencies
+//! on your dev machine, it allows you to keep compile times low
 //! during development while allowing you to test your code fully.
-use crate::api::err::Error;
-use crate::{
-	api::{
-		conn::{Command, DbResponse, RequestData},
-		Connect, Response as QueryResponse, Result, Surreal,
-	},
-	method::Stats,
-	opt::{IntoEndpoint, Table},
-	value::Notification,
-};
+use std::collections::{BTreeMap, HashMap};
+use std::marker::PhantomData;
+use std::mem;
+#[cfg(not(target_family = "wasm"))]
+use std::pin::pin;
+use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
+use std::task::{ready, Poll};
+#[cfg(not(target_family = "wasm"))]
+use std::{future::Future, path::PathBuf};
+
 use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
-use indexmap::IndexMap;
-#[cfg(not(target_family = "wasm"))]
-use std::pin::pin;
-#[cfg(not(target_family = "wasm"))]
-use std::task::{ready, Poll};
-use std::{
-	collections::{BTreeMap, HashMap},
-	marker::PhantomData,
-	mem,
-	sync::Arc,
-};
-#[cfg(not(target_family = "wasm"))]
-use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::sql::Function;
-use surrealdb_core::{
-	dbs::{Response, Session},
-	iam,
-	kvs::Datastore,
-	sql::{
-		statements::{
-			CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
-			UpdateStatement, UpsertStatement,
-		},
-		Data, Field, Output, Query, Statement, Value as CoreValue,
-	},
-};
-use tokio::sync::RwLock;
-#[cfg(not(target_family = "wasm"))]
-use tokio_util::bytes::BytesMut;
-use uuid::Uuid;
-
-#[cfg(not(target_family = "wasm"))]
-use std::{future::Future, path::PathBuf};
-#[cfg(not(target_family = "wasm"))]
-use surrealdb_core::err::Error as CoreError;
-#[cfg(not(target_family = "wasm"))]
-use tokio::{
-	fs::OpenOptions,
-	io::{self, AsyncReadExt, AsyncWriteExt},
-};
-
-#[cfg(feature = "ml")]
-use surrealdb_core::sql::Model;
-
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use crate::api::conn::MlExportConfig;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use futures::StreamExt;
+use indexmap::IndexMap;
+use surrealdb_core::dbs::{Response, Session};
+#[cfg(not(target_family = "wasm"))]
+use surrealdb_core::err::Error as CoreError;
+use surrealdb_core::iam;
+#[cfg(not(target_family = "wasm"))]
+use surrealdb_core::kvs::export::Config as DbExportConfig;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::sql::statements::{
+	CreateStatement,
+	DeleteStatement,
+	InsertStatement,
+	KillStatement,
+	SelectStatement,
+	UpdateStatement,
+	UpsertStatement,
+};
+#[cfg(feature = "ml")]
+use surrealdb_core::sql::Model;
+use surrealdb_core::sql::{Data, Field, Function, Output, Query, Statement, Value as CoreValue};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
 	iam::{check::check_ns_db, Action, ResourceKind},
@@ -88,8 +64,25 @@ use surrealdb_core::{
 	ml::storage::surml_file::SurMlFile,
 	sql::statements::{DefineModelStatement, DefineStatement},
 };
+use tokio::sync::RwLock;
+#[cfg(not(target_family = "wasm"))]
+use tokio::{
+	fs::OpenOptions,
+	io::{self, AsyncReadExt, AsyncWriteExt},
+};
+#[cfg(not(target_family = "wasm"))]
+use tokio_util::bytes::BytesMut;
+use uuid::Uuid;
 
 use super::resource_to_values;
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use crate::api::conn::MlExportConfig;
+use crate::api::conn::{Command, DbResponse, RequestData};
+use crate::api::err::Error;
+use crate::api::{Connect, Response as QueryResponse, Result, Surreal};
+use crate::method::Stats;
+use crate::opt::{IntoEndpoint, Table};
+use crate::value::Notification;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -374,7 +367,8 @@ pub struct SurrealKv;
 pub struct Db(());
 
 impl Surreal<Db> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
+	/// Connects to a specific database endpoint, saving the connection on the
+	/// static client
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
@@ -956,8 +950,8 @@ async fn router(
 
 			let stream = poll_fn(|ctx| {
 				// Doing it this way optimizes allocation.
-				// It is highly likely that the buffer we return from this stream will be dropped
-				// between calls to this function.
+				// It is highly likely that the buffer we return from this stream will be
+				// dropped between calls to this function.
 				// If this is the case than instead of allocating new memory the call to reserve
 				// will instead reclaim the existing used memory.
 				if buffer.capacity() == 0 {
@@ -1061,8 +1055,8 @@ async fn router(
 			let mut tmp_vars = vars.read().await.clone();
 			tmp_vars.insert(key.clone(), value.clone());
 
-			// Need to compute because certain keys might not be allowed to be set and those should
-			// be rejected by an error.
+			// Need to compute because certain keys might not be allowed to be set and those
+			// should be rejected by an error.
 			match kvs.compute(value, &*session.read().await, Some(tmp_vars)).await? {
 				CoreValue::None => vars.write().await.remove(&key),
 				v => vars.write().await.insert(key, v),

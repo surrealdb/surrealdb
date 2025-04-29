@@ -1,17 +1,25 @@
-use crate::cli::CF;
-use crate::err::Error;
-use clap::Args;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+
+use clap::Args;
 use surrealdb::dbs::capabilities::{
-	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
-	RouteTarget, Targets,
+	ArbitraryQueryTarget,
+	Capabilities,
+	ExperimentalTarget,
+	FuncTarget,
+	MethodTarget,
+	NetTarget,
+	RouteTarget,
+	Targets,
 };
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
+
+use crate::cli::CF;
+use crate::err::Error;
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
@@ -46,9 +54,7 @@ pub struct StartCommandDbsOptions {
 
 #[derive(Args, Debug)]
 pub struct DbsCapabilities {
-	//
 	// Allow
-	//
 	#[arg(help = "Allow all capabilities except for those more specifically denied")]
 	#[arg(env = "SURREAL_CAPS_ALLOW_ALL", short = 'A', long, conflicts_with = "deny_all")]
 	allow_all: bool,
@@ -72,14 +78,16 @@ Function names must be in the form <family>[::<name>]. For example:
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_FUNC", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	allow_funcs: Option<Targets<FuncTarget>>,
 
 	#[arg(hide = true)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_EXPERIMENTAL", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::experimental_targets)]
 	allow_experimental: Option<Targets<ExperimentalTarget>>,
@@ -92,7 +100,8 @@ User groups must be one of "guest", "record" or "system".
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_ARBITRARY_QUERY", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::query_arbitrary_targets)]
 	allow_arbitrary_query: Option<Targets<ArbitraryQueryTarget>>,
@@ -108,7 +117,8 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_NET", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::net_targets)]
 	allow_net: Option<Targets<NetTarget>>,
@@ -117,7 +127,8 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 		help = "Allow all RPC methods to be called except for routes that are specifically denied. Alternatively, you can provide a comma-separated list of RPC methods to allow."
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_RPC", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(default_value_os = "")] // Allow all RPC methods by default
 	#[arg(value_parser = super::cli::validator::method_targets)]
@@ -127,15 +138,14 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 		help = "Allow all HTTP routes to be requested except for routes that are specifically denied. Alternatively, you can provide a comma-separated list of HTTP routes to allow."
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_HTTP", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(default_value_os = "")] // Allow all HTTP routes by default
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	allow_http: Option<Targets<RouteTarget>>,
 
-	//
 	// Deny
-	//
 	#[arg(help = "Deny all capabilities except for those more specifically allowed")]
 	#[arg(env = "SURREAL_CAPS_DENY_ALL", short = 'D', long, conflicts_with = "allow_all")]
 	deny_all: bool,
@@ -159,14 +169,16 @@ Function names must be in the form <family>[::<name>]. For example:
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_FUNC", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::func_targets)]
 	deny_funcs: Option<Targets<FuncTarget>>,
 
 	#[arg(hide = true)]
 	#[arg(env = "SURREAL_CAPS_DENY_EXPERIMENTAL", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::experimental_targets)]
 	deny_experimental: Option<Targets<ExperimentalTarget>>,
@@ -179,7 +191,8 @@ User groups must be one of "guest", "record" or "system".
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_ARBITRARY_QUERY", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::query_arbitrary_targets)]
 	deny_arbitrary_query: Option<Targets<ArbitraryQueryTarget>>,
@@ -195,7 +208,8 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_NET", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::net_targets)]
 	deny_net: Option<Targets<NetTarget>>,
@@ -204,7 +218,8 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 		help = "Deny all RPC methods from being called except for methods that are specifically allowed. Alternatively, you can provide a comma-separated list of RPC methods to deny."
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_RPC", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::method_targets)]
 	deny_rpc: Option<Targets<MethodTarget>>,
@@ -213,7 +228,8 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 		help = "Deny all HTTP routes from being requested except for routes that are specifically allowed. Alternatively, you can provide a comma-separated list of HTTP routes to deny."
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_HTTP", long)]
-	// If the arg is provided without value, then assume it's "", which gets parsed into Targets::All
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	deny_http: Option<Targets<RouteTarget>>,
@@ -222,8 +238,9 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 impl DbsCapabilities {
 	#[cfg(feature = "scripting")]
 	fn get_scripting(&self) -> bool {
-		// Even if there was a global deny, we allow if there is a specific allow for scripting
-		// Even if there is a global allow, we deny if there is a specific deny for scripting
+		// Even if there was a global deny, we allow if there is a specific allow for
+		// scripting Even if there is a global allow, we deny if there is a specific
+		// deny for scripting
 		self.allow_scripting || (self.allow_all && !self.deny_scripting)
 	}
 
@@ -233,62 +250,74 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_guests(&self) -> bool {
-		// Even if there was a global deny, we allow if there is a specific allow for guests
-		// Even if there is a global allow, we deny if there is a specific deny for guests
+		// Even if there was a global deny, we allow if there is a specific allow for
+		// guests Even if there is a global allow, we deny if there is a specific deny
+		// for guests
 		self.allow_guests || (self.allow_all && !self.deny_guests)
 	}
 
 	fn get_allow_funcs(&self) -> Targets<FuncTarget> {
-		// If there was a global deny, we allow if there is a general allow or some specific allows for functions
+		// If there was a global deny, we allow if there is a general allow or some
+		// specific allows for functions
 		if self.deny_all {
 			match &self.allow_funcs {
-				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap(), // We already checked for Some
+				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap(), /* We already checked for Some */
 				Some(Targets::All) => return Targets::All,
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
 		}
 
-		// If there was a general deny for functions, we allow if there are specific allows for functions
+		// If there was a general deny for functions, we allow if there are specific
+		// allows for functions
 		if let Some(Targets::All) = self.deny_funcs {
 			match &self.allow_funcs {
-				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap(), // We already checked for Some
+				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap(), /* We already checked for Some */
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
 		}
 
-		// If there are no high level denies but there is a global allow, we allow functions
+		// If there are no high level denies but there is a global allow, we allow
+		// functions
 		if self.allow_all {
 			return Targets::All;
 		}
 
 		// If there are no high level, we allow the provided functions
 		// If nothing was provided, we allow functions by default (Targets::All)
-		self.allow_funcs.clone().unwrap_or(Targets::All) // Functions are enabled by default for the server
+		self.allow_funcs.clone().unwrap_or(Targets::All) // Functions are enabled by
+		                                           // default for the server
 	}
 
 	fn get_allow_net(&self) -> Targets<NetTarget> {
-		// If there was a global deny, we allow if there is a general allow or some specific allows for networks
+		// If there was a global deny, we allow if there is a general allow or some
+		// specific allows for networks
 		if self.deny_all {
 			match &self.allow_net {
-				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), // We already checked for Some
+				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), /* We already
+				                                                                    * checked for
+				                                                                    * Some */
 				Some(Targets::All) => return Targets::All,
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
 		}
 
-		// If there was a general deny for networks, we allow if there are specific allows for networks
+		// If there was a general deny for networks, we allow if there are specific
+		// allows for networks
 		if let Some(Targets::All) = self.deny_net {
 			match &self.allow_net {
-				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), // We already checked for Some
+				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), /* We already
+				                                                                    * checked for
+				                                                                    * Some */
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
 		}
 
-		// If there are no high level denies but there is a global allow, we allow networks
+		// If there are no high level denies but there is a global allow, we allow
+		// networks
 		if self.allow_all {
 			return Targets::All;
 		}
@@ -299,20 +328,26 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_rpc(&self) -> Targets<MethodTarget> {
-		// If there was a global deny, we allow if there is a general allow or some specific allows for RPC
+		// If there was a global deny, we allow if there is a general allow or some
+		// specific allows for RPC
 		if self.deny_all {
 			match &self.allow_rpc {
-				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), // We already checked for Some
+				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), /* We already
+				                                                                    * checked for
+				                                                                    * Some */
 				Some(Targets::All) => return Targets::All,
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
 		}
 
-		// If there was a general deny for RPC, we allow if there are specific allows for RPC methods
+		// If there was a general deny for RPC, we allow if there are specific allows
+		// for RPC methods
 		if let Some(Targets::All) = self.deny_rpc {
 			match &self.allow_rpc {
-				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), // We already checked for Some
+				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), /* We already
+				                                                                    * checked for
+				                                                                    * Some */
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
@@ -325,24 +360,31 @@ impl DbsCapabilities {
 
 		// If there are no high level denies, we allow the provided RPC methods
 		// If nothing was provided, we allow RPC by default (Targets::All)
-		self.allow_rpc.clone().unwrap_or(Targets::All) // RPC is enabled by default for the server
+		self.allow_rpc.clone().unwrap_or(Targets::All) // RPC is enabled by default
+		                                         // for the server
 	}
 
 	fn get_allow_http(&self) -> Targets<RouteTarget> {
-		// If there was a global deny, we allow if there is a general allow or some specific allows for HTTP
+		// If there was a global deny, we allow if there is a general allow or some
+		// specific allows for HTTP
 		if self.deny_all {
 			match &self.allow_http {
-				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), // We already checked for Some
+				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), /* We already
+				                                                                     * checked for
+				                                                                     * Some */
 				Some(Targets::All) => return Targets::All,
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
 		}
 
-		// If there was a general deny for HTTP, we allow if there are specific allows for HTTP routes
+		// If there was a general deny for HTTP, we allow if there are specific allows
+		// for HTTP routes
 		if let Some(Targets::All) = self.deny_http {
 			match &self.allow_http {
-				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), // We already checked for Some
+				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), /* We already
+				                                                                     * checked for
+				                                                                     * Some */
 				Some(_) => return Targets::None,
 				None => return Targets::None,
 			}
@@ -355,24 +397,29 @@ impl DbsCapabilities {
 
 		// If there are no high level denies, we allow the provided HTTP routes
 		// If nothing was provided, we allow HTTP by default (Targets::All)
-		self.allow_http.clone().unwrap_or(Targets::All) // HTTP is enabled by default for the server
+		self.allow_http.clone().unwrap_or(Targets::All) // HTTP is enabled by default
+		                                          // for the server
 	}
 
 	fn get_deny_funcs(&self) -> Targets<FuncTarget> {
-		// Allowed functions already consider a global deny and a general deny for functions
-		// On top of what is explicitly allowed, we deny what is specifically denied
+		// Allowed functions already consider a global deny and a general deny for
+		// functions On top of what is explicitly allowed, we deny what is
+		// specifically denied
 		match &self.deny_funcs {
-			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap(), // We already checked for Some
+			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap(), /* We already checked
+			                                                              * for Some */
 			Some(_) => Targets::None,
 			None => Targets::None,
 		}
 	}
 
 	fn get_deny_net(&self) -> Targets<NetTarget> {
-		// Allowed networks already consider a global deny and a general deny for networks
-		// On top of what is explicitly allowed, we deny what is specifically denied
+		// Allowed networks already consider a global deny and a general deny for
+		// networks On top of what is explicitly allowed, we deny what is specifically
+		// denied
 		match &self.deny_net {
-			Some(Targets::Some(_)) => self.deny_net.clone().unwrap(), // We already checked for Some
+			Some(Targets::Some(_)) => self.deny_net.clone().unwrap(), /* We already checked for
+			                                                            * Some */
 			Some(_) => Targets::None,
 			None => Targets::None,
 		}
@@ -386,17 +433,20 @@ impl DbsCapabilities {
 		// Allowed RPC methods already consider a global deny and a general deny for RPC
 		// On top of what is explicitly allowed, we deny what is specifically denied
 		match &self.deny_rpc {
-			Some(Targets::Some(_)) => self.deny_rpc.clone().unwrap(), // We already checked for Some
+			Some(Targets::Some(_)) => self.deny_rpc.clone().unwrap(), /* We already checked for
+			                                                            * Some */
 			Some(_) => Targets::None,
 			None => Targets::None,
 		}
 	}
 
 	fn get_deny_http(&self) -> Targets<RouteTarget> {
-		// Allowed HTTP routes already consider a global deny and a general deny for HTTP
-		// On top of what is explicitly allowed, we deny what is specifically denied
+		// Allowed HTTP routes already consider a global deny and a general deny for
+		// HTTP On top of what is explicitly allowed, we deny what is specifically
+		// denied
 		match &self.deny_http {
-			Some(Targets::Some(_)) => self.deny_http.clone().unwrap(), // We already checked for Some
+			Some(Targets::Some(_)) => self.deny_http.clone().unwrap(), /* We already checked for
+			                                                             * Some */
 			Some(_) => Targets::None,
 			None => Targets::None,
 		}
@@ -544,13 +594,14 @@ mod tests {
 	use std::str::FromStr;
 
 	use surrealdb::iam::verify::verify_root_creds;
-	use surrealdb::kvs::{LockType::*, TransactionType::*};
+	use surrealdb::kvs::LockType::*;
+	use surrealdb::kvs::TransactionType::*;
+	use surrealdb::opt::auth::Root;
 	use test_log::test;
-	use wiremock::matchers::path;
-	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+	use wiremock::matchers::{method, path};
+	use wiremock::{Mock, MockServer, ResponseTemplate};
 
 	use super::*;
-	use surrealdb::opt::auth::Root;
 
 	#[test(tokio::test)]
 	async fn test_setup_superuser() {

@@ -1,30 +1,29 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::value::Value;
-use crate::sql::ControlFlow;
-use crate::sql::FlowResult;
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+#[cfg(feature = "ml")]
+use std::collections::HashMap;
 use std::fmt;
 
 #[cfg(feature = "ml")]
-use crate::iam::Action;
-#[cfg(feature = "ml")]
-use crate::sql::Permission;
-#[cfg(feature = "ml")]
 use futures::future::try_join_all;
-#[cfg(feature = "ml")]
-use std::collections::HashMap;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "ml")]
 use surrealml::errors::error::SurrealError;
 #[cfg(feature = "ml")]
 use surrealml::execution::compute::ModelComputation;
 #[cfg(feature = "ml")]
 use surrealml::storage::surml_file::SurMlFile;
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+#[cfg(feature = "ml")]
+use crate::iam::Action;
+use crate::sql::value::Value;
+#[cfg(feature = "ml")]
+use crate::sql::Permission;
+use crate::sql::{ControlFlow, FlowResult};
 
 #[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";

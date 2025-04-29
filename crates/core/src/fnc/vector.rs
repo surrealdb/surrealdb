@@ -1,6 +1,15 @@
 use crate::err::Error;
 use crate::fnc::util::math::vector::{
-	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Scale,
+	Add,
+	Angle,
+	CrossProduct,
+	Divide,
+	DotProduct,
+	Magnitude,
+	Multiply,
+	Normalize,
+	Project,
+	Scale,
 	Subtract,
 };
 use crate::sql::{Number, Value};
@@ -56,7 +65,11 @@ pub mod distance {
 	use crate::fnc::args::Optional;
 	use crate::fnc::get_execution_context;
 	use crate::fnc::util::math::vector::{
-		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
+		ChebyshevDistance,
+		EuclideanDistance,
+		HammingDistance,
+		ManhattanDistance,
+		MinkowskiDistance,
 	};
 	use crate::idx::planner::IterationStage;
 	use crate::sql::{Number, Value};
@@ -139,9 +152,10 @@ pub mod similarity {
 
 #[cfg(test)]
 mod tests {
+	use rust_decimal::Decimal;
+
 	use super::*;
 	use crate::sql::Number;
-	use rust_decimal::Decimal;
 
 	#[test]
 	fn vector_scale_int() {

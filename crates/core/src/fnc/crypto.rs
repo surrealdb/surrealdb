@@ -1,10 +1,9 @@
+use md5::{Digest, Md5};
+use sha1::Sha1;
+use sha2::{Sha256, Sha512};
+
 use crate::err::Error;
 use crate::sql::value::Value;
-use md5::Digest;
-use md5::Md5;
-use sha1::Sha1;
-use sha2::Sha256;
-use sha2::Sha512;
 
 pub fn blake3((arg,): (String,)) -> Result<Value, Error> {
 	Ok(blake3::hash(arg.as_bytes()).to_string().into())
@@ -45,8 +44,8 @@ pub fn sha512((arg,): (String,)) -> Result<Value, Error> {
 /// Allowed to cost this much more than default setting for each hash function.
 const COST_ALLOWANCE: u32 = 4;
 
-/// Like verify_password, but takes a closure to determine whether the cost of performing the
-/// operation is not too high.
+/// Like verify_password, but takes a closure to determine whether the cost of
+/// performing the operation is not too high.
 macro_rules! bounded_verify_password {
 	($algo: ident, $instance: expr, $password: expr, $hash: expr, $bound: expr) => {
 		if let (Some(salt), Some(expected_output)) = (&$hash.salt, &$hash.hash) {
@@ -83,14 +82,13 @@ macro_rules! bounded_verify_password {
 
 pub mod argon2 {
 
+	use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString};
+	use argon2::Argon2;
+	use rand::rngs::OsRng;
+
 	use super::COST_ALLOWANCE;
 	use crate::err::Error;
 	use crate::sql::value::Value;
-	use argon2::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
-		Argon2,
-	};
-	use rand::rngs::OsRng;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
 		type Params<'a> = <Argon2<'a> as PasswordHasher>::Params;
@@ -117,24 +115,27 @@ pub mod argon2 {
 
 pub mod bcrypt {
 
+	use std::str::FromStr;
+
+	use bcrypt::HashParts;
+
 	use crate::err::Error;
 	use crate::fnc::crypto::COST_ALLOWANCE;
 	use crate::sql::value::Value;
-	use bcrypt::HashParts;
-	use std::str::FromStr;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
 		let parts = match HashParts::from_str(&hash) {
 			Ok(parts) => parts,
 			Err(_) => return Ok(Value::Bool(false)),
 		};
-		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to multiplying.
+		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to
+		// multiplying.
 		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
 			// Too expensive to compute.
 			Value::Bool(false)
 		} else {
-			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice, once
-			// above and once in verity, by using bcrypt::bcrypt.
+			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice,
+			// once above and once in verity, by using bcrypt::bcrypt.
 			bcrypt::verify(pass, &hash).unwrap_or(false).into()
 		})
 	}
@@ -147,14 +148,13 @@ pub mod bcrypt {
 
 pub mod pbkdf2 {
 
+	use pbkdf2::password_hash::{PasswordHash, PasswordHasher, SaltString};
+	use pbkdf2::Pbkdf2;
+	use rand::rngs::OsRng;
+
 	use super::COST_ALLOWANCE;
 	use crate::err::Error;
 	use crate::sql::value::Value;
-	use pbkdf2::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
-		Pbkdf2,
-	};
-	use rand::rngs::OsRng;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
 		type Params = <Pbkdf2 as PasswordHasher>::Params;
@@ -182,13 +182,12 @@ pub mod pbkdf2 {
 
 pub mod scrypt {
 
+	use rand::rngs::OsRng;
+	use scrypt::password_hash::{PasswordHash, PasswordHasher, SaltString};
+	use scrypt::Scrypt;
+
 	use crate::err::Error;
 	use crate::sql::value::Value;
-	use rand::rngs::OsRng;
-	use scrypt::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
-		Scrypt,
-	};
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
 		type Params = <Scrypt as PasswordHasher>::Params;

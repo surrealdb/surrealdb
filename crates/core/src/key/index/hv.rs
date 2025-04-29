@@ -1,9 +1,11 @@
 //! Stores Things of an HNSW index
-use crate::idx::trees::vector::SerializedVector;
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
+use crate::idx::trees::vector::SerializedVector;
+use crate::kvs::impl_key;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]

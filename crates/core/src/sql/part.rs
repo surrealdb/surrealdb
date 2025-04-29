@@ -1,26 +1,26 @@
-use crate::{
-	cnf::IDIOM_RECURSION_LIMIT,
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	exe::try_join_all_buffered,
-	sql::{
-		fmt::Fmt, strand::no_nul_bytes, FlowResultExt as _, Graph, Ident, Idiom, Number, Thing,
-		Value,
-	},
-};
+use std::fmt::Write;
+use std::{fmt, str};
+
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::Write;
-use std::str;
 
-use super::{
-	fmt::{is_pretty, pretty_indent},
-	value::idiom_recursion::{clean_iteration, compute_idiom_recursion, is_final, Recursion},
+use super::fmt::{is_pretty, pretty_indent};
+use super::value::idiom_recursion::{
+	clean_iteration,
+	compute_idiom_recursion,
+	is_final,
+	Recursion,
 };
+use crate::cnf::IDIOM_RECURSION_LIMIT;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::exe::try_join_all_buffered;
+use crate::sql::fmt::Fmt;
+use crate::sql::strand::no_nul_bytes;
+use crate::sql::{FlowResultExt as _, Graph, Ident, Idiom, Number, Thing, Value};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -127,6 +127,7 @@ impl Part {
 			_ => false,
 		}
 	}
+
 	/// Returns a yield if an alias is specified
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {
@@ -506,6 +507,7 @@ pub enum Recurse {
 
 impl TryInto<(u32, Option<u32>)> for Recurse {
 	type Error = Error;
+
 	fn try_into(self) -> Result<(u32, Option<u32>), Error> {
 		let v = match self {
 			Recurse::Fixed(v) => (v, Some(v)),
@@ -616,10 +618,10 @@ macro_rules! walk_paths {
 			)?;
 
 			// If we encounter a final value, we add it to the finished collection.
-			// - If expects is some, we are seeking for the shortest path, in which
-			//   case we eliminate the path.
-			// - In case this is the first iteration, and paths are not inclusive of
-			//   the starting point, we eliminate the it.
+			// - If expects is some, we are seeking for the shortest path, in which case we
+			//   eliminate the path.
+			// - In case this is the first iteration, and paths are not inclusive of the
+			//   starting point, we eliminate the it.
 			// - If we have not yet reached minimum depth, the path is eliminated aswell.
 			if is_final(&res) || &res == last {
 				if $expects.is_none()

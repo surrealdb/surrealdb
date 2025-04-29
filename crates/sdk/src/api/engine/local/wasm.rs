@@ -1,12 +1,20 @@
-use crate::api::conn::Connection;
-use crate::api::conn::Route;
-use crate::api::conn::Router;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::atomic::AtomicI64;
+use std::sync::Arc;
+use std::task::Poll;
+
+use async_channel::{Receiver, Sender};
+use futures::stream::poll_fn;
+use futures::{FutureExt, StreamExt};
+use tokio::sync::{watch, RwLock};
+use tokio_util::sync::CancellationToken;
+use wasm_bindgen_futures::spawn_local;
+
+use crate::api::conn::{Connection, Route, Router};
 use crate::api::engine::local::Db;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
+use crate::api::{ExtraFeatures, Result, Surreal};
 use crate::dbs::Session;
 use crate::engine::tasks;
 use crate::iam::Level;
@@ -15,20 +23,6 @@ use crate::opt::auth::Root;
 use crate::opt::WaitFor;
 use crate::options::EngineOptions;
 use crate::{Action, Notification};
-use async_channel::{Receiver, Sender};
-use futures::stream::poll_fn;
-use futures::FutureExt;
-use futures::StreamExt;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
-use std::task::Poll;
-use tokio::sync::watch;
-use tokio::sync::RwLock;
-use tokio_util::sync::CancellationToken;
-use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Db {}
 

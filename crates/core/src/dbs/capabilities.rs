@@ -3,10 +3,11 @@ use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 
-use crate::iam::{Auth, Level};
-use crate::rpc::Method;
 use ipnet::IpNet;
 use url::Url;
+
+use crate::iam::{Auth, Level};
+use crate::rpc::Method;
 
 pub trait Target<Item: ?Sized = Self> {
 	fn matches(&self, elem: &Item) -> bool;
@@ -210,7 +211,8 @@ impl Target for NetTarget {
 				Self::Host(_host, _) => host == _host,
 				_ => false,
 			},
-			// If self is an IPNet, it can match both an IPNet or a Host elem that contains an IPAddr
+			// If self is an IPNet, it can match both an IPNet or a Host elem that contains an
+			// IPAddr
 			Self::IPNet(ipnet) => match elem {
 				Self::IPNet(_ipnet) => ipnet.contains(_ipnet),
 				Self::Host(host, _) => match host {
@@ -247,10 +249,12 @@ impl std::str::FromStr for NetTarget {
 			return Ok(NetTarget::IPNet(IpNet::from(ipnet)));
 		}
 
-		// Parse the host and port parts from a string in the form of 'host' or 'host:port'
+		// Parse the host and port parts from a string in the form of 'host' or
+		// 'host:port'
 		if let Ok(url) = Url::parse(format!("http://{s}").as_str()) {
 			if let Some(host) = url.host() {
-				// Url::parse will return port=None if the provided port was 80 (given we are using the http scheme). Get the original port from the string.
+				// Url::parse will return port=None if the provided port was 80 (given we are
+				// using the http scheme). Get the original port from the string.
 				if let Some(Ok(port)) = s.split(':').next_back().map(|p| p.parse::<u16>()) {
 					return Ok(NetTarget::Host(host.to_owned(), Some(port)));
 				} else {
@@ -757,6 +761,7 @@ impl Capabilities {
 #[cfg(test)]
 mod tests {
 	use std::str::FromStr;
+
 	use test_log::test;
 
 	use super::*;
@@ -1017,7 +1022,8 @@ mod tests {
 			assert!(!caps.allows_network_target(&NetTarget::from_str("example.com:80").unwrap()));
 		}
 
-		// When some nets are allowed and some are denied, deny overrides the allow rules
+		// When some nets are allowed and some are denied, deny overrides the allow
+		// rules
 		{
 			let caps = Capabilities::default()
 				.with_network_targets(Targets::<NetTarget>::Some(
@@ -1049,7 +1055,8 @@ mod tests {
 			assert!(!caps.allows_function_name("http::post"));
 		}
 
-		// When some funcs are allowed and some are denied, deny overrides the allow rules
+		// When some funcs are allowed and some are denied, deny overrides the allow
+		// rules
 		{
 			let caps = Capabilities::default()
 				.with_functions(Targets::<FuncTarget>::Some(
@@ -1083,7 +1090,8 @@ mod tests {
 			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
 		}
 
-		// When some RPC methods are allowed and some are denied, deny overrides the allow rules
+		// When some RPC methods are allowed and some are denied, deny overrides the
+		// allow rules
 		{
 			let caps = Capabilities::default()
 				.with_rpc_methods(Targets::<MethodTarget>::Some(
@@ -1133,7 +1141,8 @@ mod tests {
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
 		}
 
-		// When some HTTP rotues are allowed and some are denied, deny overrides the allow rules
+		// When some HTTP rotues are allowed and some are denied, deny overrides the
+		// allow rules
 		{
 			let caps = Capabilities::default()
 				.with_http_routes(Targets::<RouteTarget>::Some(

@@ -2,31 +2,35 @@ mod logs;
 pub mod metrics;
 pub mod traces;
 
-use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::err::Error;
-use opentelemetry::global;
-use opentelemetry::KeyValue;
-use opentelemetry_sdk::resource::{
-	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
-};
-use opentelemetry_sdk::Resource;
 use std::sync::LazyLock;
 use std::time::Duration;
+
+use opentelemetry::{global, KeyValue};
+use opentelemetry_sdk::resource::{
+	EnvResourceDetector,
+	SdkProvidedResourceDetector,
+	TelemetryResourceDetector,
+};
+use opentelemetry_sdk::Resource;
 use tracing::{Level, Subscriber};
-use tracing_appender::non_blocking::NonBlockingBuilder;
-use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::filter::ParseError;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
+
+use crate::cli::validator::parser::env_filter::CustomEnvFilter;
+use crate::err::Error;
 
 pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 	// Set the default otel metadata if available
 	let res = Resource::from_detectors(
 		Duration::from_secs(5),
 		vec![
-			// set service.name from env OTEL_SERVICE_NAME > env OTEL_RESOURCE_ATTRIBUTES > option_env! CARGO_BIN_NAME > unknown_service
+			// set service.name from env OTEL_SERVICE_NAME > env OTEL_RESOURCE_ATTRIBUTES >
+			// option_env! CARGO_BIN_NAME > unknown_service
 			Box::new(SdkProvidedResourceDetector),
-			// detect res from env OTEL_RESOURCE_ATTRIBUTES (resources string like key1=value1,key2=value2,...)
+			// detect res from env OTEL_RESOURCE_ATTRIBUTES (resources string like
+			// key1=value1,key2=value2,...)
 			Box::new(EnvResourceDetector::new()),
 			// set telemetry.sdk.{name, language, version}
 			Box::new(TelemetryResourceDetector),
@@ -124,7 +128,8 @@ pub fn shutdown() -> Result<(), Error> {
 	Ok(())
 }
 
-/// Create an EnvFilter from the given value. If the value is not a valid log level, it will be treated as EnvFilter directives.
+/// Create an EnvFilter from the given value. If the value is not a valid log
+/// level, it will be treated as EnvFilter directives.
 pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 	match v {
 		// Don't show any logs at all
@@ -153,7 +158,8 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 
 #[cfg(test)]
 mod tests {
-	use std::{ffi::OsString, sync::Mutex};
+	use std::ffi::OsString;
+	use std::sync::Mutex;
 
 	use opentelemetry::global::shutdown_tracer_provider;
 	use tracing::{span, Level};

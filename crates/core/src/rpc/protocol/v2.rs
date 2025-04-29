@@ -1,27 +1,29 @@
-#[cfg(not(target_family = "wasm"))]
-use async_graphql::BatchRequest;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[cfg(not(target_family = "wasm"))]
+use async_graphql::BatchRequest;
+
+#[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
+use crate::dbs::capabilities::MethodTarget;
+use crate::dbs::{QueryType, Response};
 use crate::err::Error;
+use crate::rpc::args::Take;
 use crate::rpc::statement_options::StatementOptions;
-use crate::rpc::Data;
-use crate::rpc::Method;
-use crate::rpc::RpcContext;
-use crate::rpc::RpcError;
-use crate::{
-	dbs::{capabilities::MethodTarget, QueryType, Response},
-	rpc::args::Take,
-	sql::{
-		statements::{
-			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
-			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
-		},
-		Array, Fields, Function, Model, Output, Query, Strand, Value,
-	},
+use crate::rpc::{Data, Method, RpcContext, RpcError};
+use crate::sql::statements::{
+	CreateStatement,
+	DeleteStatement,
+	InsertStatement,
+	KillStatement,
+	LiveStatement,
+	RelateStatement,
+	SelectStatement,
+	UpdateStatement,
+	UpsertStatement,
 };
+use crate::sql::{Array, Fields, Function, Model, Output, Query, Strand, Value};
 
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocolV2: RpcContext {
@@ -78,7 +80,8 @@ pub trait RpcProtocolV2: RpcContext {
 		}
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
-		// To be able to select a namespace, and then list resources in that namespace, as an example
+		// To be able to select a namespace, and then list resources in that namespace,
+		// as an example
 		let (ns, db) = params.needs_two()?;
 		// Get the context lock
 		let mutex = self.lock().clone();
@@ -952,7 +955,8 @@ pub trait RpcProtocolV2: RpcContext {
 
 		// Post-process hooks for web layer
 		for response in &res {
-			// This error should be unreachable because we shouldn't proceed if there's no handler
+			// This error should be unreachable because we shouldn't proceed if there's no
+			// handler
 			self.handle_live_query_results(response).await;
 		}
 		// Return the result to the client

@@ -858,7 +858,6 @@ async fn select_with_function_field() -> Result<(), Error> {
 	Ok(())
 }
 
-//
 // Permissions
 //
 
@@ -946,13 +945,11 @@ async fn common_permissions_checks(auth_enabled: bool) {
 #[tokio::test]
 async fn check_permissions_auth_enabled() {
 	let auth_enabled = true;
-	//
 	// Test common scenarios
 	//
 
 	common_permissions_checks(auth_enabled).await;
 
-	//
 	// Test Anonymous user
 	//
 
@@ -1016,13 +1013,11 @@ async fn check_permissions_auth_enabled() {
 #[tokio::test]
 async fn check_permissions_auth_disabled() {
 	let auth_enabled = false;
-	//
 	// Test common scenarios
 	//
 
 	common_permissions_checks(auth_enabled).await;
 
-	//
 	// Test Anonymous user
 	//
 
@@ -1438,9 +1433,9 @@ async fn select_order_by_rand_large() -> Result<(), Error> {
 		})
 		.collect();
 
-	// It is technically possible that the array was shuffeled in such a way that it ends up
-	// with the original order but, if properly shuffeled, that chance should be so small the it
-	// will effectively never happens.
+	// It is technically possible that the array was shuffeled in such a way that it
+	// ends up with the original order but, if properly shuffeled, that chance
+	// should be so small the it will effectively never happens.
 	assert!(
 		!x.iter().enumerate().all(|(idx, v)| idx as i64 == *v),
 		"array was still in original order"

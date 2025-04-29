@@ -8,6 +8,5 @@ pub mod schema;
 mod tables;
 mod utils;
 
-pub use error::GqlError;
-
 pub use cache::*;
+pub use error::GqlError;

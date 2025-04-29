@@ -1,4 +1,5 @@
-use std::{backtrace, fmt::Debug};
+use std::backtrace;
+use std::fmt::Debug;
 
 use async_graphql::{InputType, InputValueError};
 use thiserror::Error;

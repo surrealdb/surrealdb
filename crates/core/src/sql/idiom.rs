@@ -1,22 +1,21 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{
-	fmt::{fmt_separated_by, Fmt},
-	part::{Next, NextMethod},
-	paths::{ID, IN, META, OUT},
-	Part, Value,
-};
-use md5::{Digest, Md5};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
+use md5::{Digest, Md5};
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use super::FlowResult;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::sql::fmt::{fmt_separated_by, Fmt};
+use crate::sql::part::{Next, NextMethod};
+use crate::sql::paths::{ID, IN, META, OUT};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Part, Value};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
@@ -28,14 +27,16 @@ pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
 	type Target = Vec<Idiom>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Idioms {
-	type Item = Idiom;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
+	type Item = Idiom;
+
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
@@ -62,6 +63,7 @@ pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {
 	type Target = [Part];
+
 	fn deref(&self) -> &Self::Target {
 		self.0.as_slice()
 	}
@@ -103,16 +105,19 @@ impl Idiom {
 		self.0.push(n);
 		self
 	}
+
 	/// Convert this Idiom to a unique hash
 	pub(crate) fn to_hash(&self) -> String {
 		let mut hasher = Md5::new();
 		hasher.update(self.to_string().as_str());
 		format!("{:x}", hasher.finalize())
 	}
+
 	/// Convert this Idiom to a JSON Path string
 	pub(crate) fn to_path(&self) -> String {
 		format!("/{self}").replace(']', "").replace(&['.', '['][..], "/")
 	}
+
 	/// Simplifies this Idiom for use in object keys
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
@@ -122,32 +127,39 @@ impl Idiom {
 			.collect::<Vec<_>>()
 			.into()
 	}
+
 	/// Check if this Idiom is an 'id' field
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&ID[0])
 	}
+
 	/// Check if this Idiom is a special field
 	pub(crate) fn is_special(&self) -> bool {
 		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0], &META[0]].iter().any(|f| self.0[0].eq(f))
 	}
+
 	/// Check if this Idiom is an specific field
 	pub(crate) fn is_field(&self, other: &[Part]) -> bool {
 		self.as_ref().eq(other)
 	}
+
 	/// Check if this is an expression with multiple yields
 	pub(crate) fn is_multi_yield(&self) -> bool {
 		self.iter().any(Self::split_multi_yield)
 	}
+
 	/// Check if the path part is a yield in a multi-yield expression
 	pub(crate) fn split_multi_yield(v: &Part) -> bool {
 		matches!(v, Part::Graph(g) if g.alias.is_some())
 	}
+
 	/// Check if the path part is a yield in a multi-yield expression
 	pub(crate) fn remove_trailing_all(&mut self) {
 		if self.ends_with(&[Part::All]) {
 			self.0.truncate(self.len() - 1);
 		}
 	}
+
 	/// Check if this Idiom starts with a specific path part
 	pub(crate) fn starts_with(&self, other: &[Part]) -> bool {
 		self.0.starts_with(other)
@@ -159,6 +171,7 @@ impl Idiom {
 	pub(crate) fn writeable(&self) -> bool {
 		self.0.iter().any(|v| v.writeable())
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

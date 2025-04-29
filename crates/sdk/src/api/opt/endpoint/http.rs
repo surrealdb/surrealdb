@@ -1,13 +1,12 @@
-use crate::api::engine::remote::http::Client;
-use crate::api::engine::remote::http::Http;
-use crate::api::engine::remote::http::Https;
+use std::net::SocketAddr;
+
+use url::Url;
+
+use crate::api::engine::remote::http::{Client, Http, Https};
 use crate::api::err::Error;
 use crate::api::opt::IntoEndpoint;
-use crate::api::Endpoint;
-use crate::api::Result;
+use crate::api::{Endpoint, Result};
 use crate::opt::Config;
-use std::net::SocketAddr;
-use url::Url;
 
 macro_rules! endpoints {
 	($($name:ty),*) => {

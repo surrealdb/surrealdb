@@ -5,19 +5,17 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::mac::{expected_whitespace, unexpected};
-use crate::sql::Range;
-use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
+use crate::sql::value::TryNeg;
+use crate::sql::{Cast, Expression, Number, Operator, Range, Value};
 use crate::syn::error::bail;
-use crate::syn::token::{self, Token};
-use crate::syn::{
-	parser::{mac::expected, ParseResult, Parser},
-	token::{t, TokenKind},
-};
+use crate::syn::parser::mac::expected;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::{self, t, Token, TokenKind};
 
 /// An enum which defines how strong a operator binds it's operands.
 ///
-/// If a binding power is higher the operator is more likely to directly operate on it's
-/// neighbours.
+/// If a binding power is higher the operator is more likely to directly operate
+/// on it's neighbours.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub enum BindingPower {
 	Base,
@@ -37,9 +35,10 @@ pub enum BindingPower {
 impl Parser<'_> {
 	/// Parsers a generic value.
 	///
-	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
-	/// depending on context: a table or a field the current document. This function parses loose
-	/// idents as a table, see [`parse_value_field`] for parsing loose idents as fields
+	/// A generic loose ident like `foo` in for example `foo.bar` can be two
+	/// different values depending on context: a table or a field the current
+	/// document. This function parses loose idents as a table, see
+	/// [`parse_value_field`] for parsing loose idents as fields
 	pub async fn parse_value_table(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
@@ -50,9 +49,10 @@ impl Parser<'_> {
 
 	/// Parsers a generic value.
 	///
-	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
-	/// depending on context: a table or a field the current document. This function parses loose
-	/// idents as a field, see [`parse_value`] for parsing loose idents as table
+	/// A generic loose ident like `foo` in for example `foo.bar` can be two
+	/// different values depending on context: a table or a field the current
+	/// document. This function parses loose idents as a field, see
+	/// [`parse_value`] for parsing loose idents as table
 	pub(crate) async fn parse_value_field(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
@@ -82,17 +82,18 @@ impl Parser<'_> {
 
 	/// Returns the binding power of an infix operator.
 	///
-	/// Binding power is the opposite of precendence: a higher binding power means that a token is
-	/// more like to operate directly on it's neighbours. Example `*` has a higher binding power
-	/// than `-` resulting in 1 - 2 * 3 being parsed as 1 - (2 * 3).
+	/// Binding power is the opposite of precendence: a higher binding power
+	/// means that a token is more like to operate directly on it's neighbours.
+	/// Example `*` has a higher binding power than `-` resulting in 1 - 2 * 3
+	/// being parsed as 1 - (2 * 3).
 	///
-	/// All operators in SurrealQL which are parsed by the functions in this module are left
-	/// associative or have no defined associativity.
+	/// All operators in SurrealQL which are parsed by the functions in this
+	/// module are left associative or have no defined associativity.
 	fn infix_binding_power(&mut self, token: TokenKind) -> Option<BindingPower> {
 		// TODO: Look at ordering of operators.
 		match token {
 			// assigment operators have the lowest binding power.
-			//t!("+=") | t!("-=") | t!("+?=") => Some((2, 1)),
+			// t!("+=") | t!("-=") | t!("+?=") => Some((2, 1)),
 			t!("||") | t!("OR") => Some(BindingPower::Or),
 			t!("&&") | t!("AND") => Some(BindingPower::And),
 
@@ -241,11 +242,11 @@ impl Parser<'_> {
 
 		let v = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
-		// HACK: For compatiblity with the old parser apply + and - operator immediately if the
-		// left value is a number.
+		// HACK: For compatiblity with the old parser apply + and - operator immediately
+		// if the left value is a number.
 		if let Value::Number(number) = v {
-			// If the number was already negative we already did apply a - so just return a unary
-			// in this case.
+			// If the number was already negative we already did apply a - so just return a
+			// unary in this case.
 			if number.is_positive() {
 				if let Operator::Neg = operator {
 					// this can only panic if `number` is i64::MIN which currently can't be parsed.

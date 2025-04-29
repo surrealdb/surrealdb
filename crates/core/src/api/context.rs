@@ -1,11 +1,9 @@
 use http::HeaderMap;
 
-use crate::{
-	err::Error,
-	sql::{Bytesize, Duration},
-};
-
-use super::middleware::{invoke::InvokeMiddleware, CollectedMiddleware};
+use super::middleware::invoke::InvokeMiddleware;
+use super::middleware::CollectedMiddleware;
+use crate::err::Error;
+use crate::sql::{Bytesize, Duration};
 
 #[derive(Default, Debug)]
 pub struct InvocationContext {

@@ -1,12 +1,13 @@
 //! Stores cluster membership information
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::key::category::{Categorise, Category};
+use crate::kvs::impl_key;
+
 // Represents cluster information.
-// In the future, this could also include broadcast addresses and other information.
+// In the future, this could also include broadcast addresses and other
+// information.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Nd {

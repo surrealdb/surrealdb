@@ -1,27 +1,39 @@
 use geo::Point;
 use reblessive::Stk;
 
-use super::{mac::pop_glued, ParseResult, Parser};
-use crate::{
-	sql::{
-		Array, Closure, Dir, Duration, Function, Geometry, Ident, Idiom, Kind, Mock, Number, Param,
-		Part, Script, Strand, Subquery, Table, Value,
-	},
-	syn::{
-		error::bail,
-		lexer::compound,
-		parser::{
-			enter_object_recursion, enter_query_recursion,
-			mac::{expected, unexpected},
-		},
-		token::{t, Glued, Span, TokenKind},
-	},
+use super::mac::pop_glued;
+use super::{ParseResult, Parser};
+use crate::sql::{
+	Array,
+	Closure,
+	Dir,
+	Duration,
+	Function,
+	Geometry,
+	Ident,
+	Idiom,
+	Kind,
+	Mock,
+	Number,
+	Param,
+	Part,
+	Script,
+	Strand,
+	Subquery,
+	Table,
+	Value,
 };
+use crate::syn::error::bail;
+use crate::syn::lexer::compound;
+use crate::syn::parser::mac::{expected, unexpected};
+use crate::syn::parser::{enter_object_recursion, enter_query_recursion};
+use crate::syn::token::{t, Glued, Span, TokenKind};
 
 impl Parser<'_> {
 	/// Parse a what primary.
 	///
-	/// What's are values which are more restricted in what expressions they can contain.
+	/// What's are values which are more restricted in what expressions they can
+	/// contain.
 	pub(super) async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
 		match token.kind {
@@ -381,7 +393,8 @@ impl Parser<'_> {
 	/// Parses an array production
 	///
 	/// # Parser state
-	/// Expects the starting `[` to already be eaten and its span passed as an argument.
+	/// Expects the starting `[` to already be eaten and its span passed as an
+	/// argument.
 	pub(crate) async fn parse_array(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Array> {
 		let mut values = Vec::new();
 		enter_object_recursion!(this = self => {
@@ -406,7 +419,8 @@ impl Parser<'_> {
 	/// Parse a mock `|foo:1..3|`
 	///
 	/// # Parser State
-	/// Expects the starting `|` already be eaten and its span passed as an argument.
+	/// Expects the starting `|` already be eaten and its span passed as an
+	/// argument.
 	pub(super) fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
 		let name = self.next_token_value::<Ident>()?.0;
 		expected!(self, t!(":"));
@@ -707,8 +721,8 @@ impl Parser<'_> {
 			if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
 				if let Subquery::Value(Value::Idiom(Idiom(ref idiom))) = res {
 					if idiom.len() == 1 {
-						// we parsed a single idiom and the next token was a dissallowed statement so
-						// it is likely that the used meant to use an invalid statement.
+						// we parsed a single idiom and the next token was a dissallowed statement
+						// so it is likely that the used meant to use an invalid statement.
 						bail!("Unexpected token `{}` expected `)`",peek.kind,
 							@token.span,
 							@peek.span => "This is a reserved keyword here and can't be an identifier");
@@ -721,8 +735,8 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string
-	/// matches.
+	/// Parses a strand with legacy rules, parsing to a record id, datetime or
+	/// uuid if the string matches.
 	pub(super) async fn reparse_legacy_strand(
 		&mut self,
 		ctx: &mut Stk,

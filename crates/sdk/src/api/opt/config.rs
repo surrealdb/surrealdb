@@ -1,10 +1,14 @@
-use crate::opt::capabilities::Capabilities;
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::time::Duration;
-use surrealdb_core::{dbs::Capabilities as CoreCapabilities, iam::Level};
 
-/// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
+use surrealdb_core::dbs::Capabilities as CoreCapabilities;
+use surrealdb_core::iam::Level;
+
+use crate::opt::capabilities::Capabilities;
+
+/// Configuration for server connection, including: strictness, notifications,
+/// query_timeout, transaction_timeout
 #[derive(Debug, Clone, Default)]
 pub struct Config {
 	pub(crate) strict: bool,
@@ -79,8 +83,9 @@ impl Config {
 
 	/// Use Rustls to configure TLS connections
 	///
-	/// WARNING: `rustls` is not stable yet. As we may need to upgrade this dependency from time to time
-	/// to keep up with its security fixes, this method is excluded from our stability guarantee.
+	/// WARNING: `rustls` is not stable yet. As we may need to upgrade this
+	/// dependency from time to time to keep up with its security fixes, this
+	/// method is excluded from our stability guarantee.
 	#[cfg(feature = "rustls")]
 	#[cfg_attr(docsrs, doc(cfg(feature = "rustls")))]
 	pub fn rustls(mut self, config: rustls::ClientConfig) -> Self {
@@ -90,8 +95,9 @@ impl Config {
 
 	/// Use native TLS to configure TLS connections
 	///
-	/// WARNING: `native-tls` is not stable yet. As we may need to upgrade this dependency from time to time
-	/// to keep up with its security fixes, this method is excluded from our stability guarantee.
+	/// WARNING: `native-tls` is not stable yet. As we may need to upgrade this
+	/// dependency from time to time to keep up with its security fixes, this
+	/// method is excluded from our stability guarantee.
 	#[cfg(feature = "native-tls")]
 	#[cfg_attr(docsrs, doc(cfg(feature = "native-tls")))]
 	pub fn native_tls(mut self, config: native_tls::TlsConnector) -> Self {

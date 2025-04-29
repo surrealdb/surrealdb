@@ -1,3 +1,11 @@
+use std::borrow::Cow;
+use std::ops::{Bound, Range};
+use std::sync::Arc;
+use std::vec;
+
+use futures::StreamExt;
+use reblessive::tree::Stk;
+
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
@@ -10,12 +18,6 @@ use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
 use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
 use crate::sql::{Edges, Table, Thing, Value};
-use futures::StreamExt;
-use reblessive::tree::Stk;
-use std::borrow::Cow;
-use std::ops::{Bound, Range};
-use std::sync::Arc;
-use std::vec;
 
 impl Iterable {
 	pub(super) async fn iterate(
@@ -367,7 +369,8 @@ impl Collected {
 	) -> Result<Processed, Error> {
 		let (t, v, ir) = i.consume();
 		let v = if let Some(v) = v {
-			// The value may already be fetched by the KNN iterator to evaluate the condition
+			// The value may already be fetched by the KNN iterator to evaluate the
+			// condition
 			v
 		} else if rid_only {
 			// if it is skippable we only need the record id
@@ -969,7 +972,8 @@ pub(super) trait Collector {
 }
 
 impl Iterable {
-	/// Returns the value from the store, or Value::None it the value does not exist.
+	/// Returns the value from the store, or Value::None it the value does not
+	/// exist.
 	pub(crate) async fn fetch_thing(
 		txn: &Transaction,
 		opt: &Options,

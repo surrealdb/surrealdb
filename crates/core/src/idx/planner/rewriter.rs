@@ -1,17 +1,30 @@
+use std::collections::BTreeMap;
+use std::ops::Bound;
+
 use crate::idx::planner::executor::KnnExpressions;
 use crate::sql::id::range::IdRange;
 use crate::sql::part::DestructurePart;
 use crate::sql::{
-	Array, Cast, Cond, Expression, Function, Id, Idiom, Model, Object, Part, Range, Thing, Value,
+	Array,
+	Cast,
+	Cond,
+	Expression,
+	Function,
+	Id,
+	Idiom,
+	Model,
+	Object,
+	Part,
+	Range,
+	Thing,
+	Value,
 };
-
-use std::collections::BTreeMap;
-use std::ops::Bound;
 
 pub(super) struct KnnConditionRewriter<'a>(&'a KnnExpressions);
 
 impl<'a> KnnConditionRewriter<'a> {
-	// This function rebuild the same condition, but replaces any KnnExpression by a `true` value
+	// This function rebuild the same condition, but replaces any KnnExpression by a
+	// `true` value
 	#[expect(clippy::mutable_key_type)]
 	pub(super) fn build(expressions: &'a KnnExpressions, cond: &Cond) -> Option<Cond> {
 		let b = Self(expressions);
@@ -102,6 +115,7 @@ impl<'a> KnnConditionRewriter<'a> {
 	fn eval_value_object(&self, o: &Object) -> Option<Value> {
 		self.eval_object(o).map(|o| o.into())
 	}
+
 	fn eval_object(&self, o: &Object) -> Option<Object> {
 		let mut new_o = BTreeMap::new();
 		for (k, v) in &o.0 {
@@ -149,6 +163,7 @@ impl<'a> KnnConditionRewriter<'a> {
 		}
 		Some(new_i.into())
 	}
+
 	fn eval_part(&self, p: &Part) -> Option<Part> {
 		match p {
 			Part::All

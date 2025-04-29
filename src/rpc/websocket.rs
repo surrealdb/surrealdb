@@ -1,9 +1,38 @@
+use core::fmt;
+use std::sync::Arc;
+use std::time::Duration;
+
+use arc_swap::ArcSwap;
+use axum::extract::ws::close_code::AGAIN;
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use futures::stream::FuturesUnordered;
+use futures::{Sink, SinkExt, StreamExt};
+use opentelemetry::trace::FutureExt;
+use opentelemetry::Context as TelemetryContext;
+use surrealdb::dbs::Session;
+use surrealdb::gql::{Pessimistic, SchemaCache};
+use surrealdb::kvs::Datastore;
+use surrealdb::mem::ALLOC;
+use surrealdb::rpc::format::Format;
+use surrealdb::rpc::{Data, Method, RpcContext};
+use surrealdb::sql::{Array, Value};
+use surrealdb_core::rpc::{RpcProtocolV1, RpcProtocolV2};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
+use tracing::{Instrument, Span};
+use uuid::Uuid;
+
 use super::RpcState;
-use crate::cnf::WEBSOCKET_PING_FREQUENCY;
-use crate::cnf::WEBSOCKET_RESPONSE_BUFFER_SIZE;
-use crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_SIZE;
-use crate::cnf::WEBSOCKET_RESPONSE_FLUSH_PERIOD;
-use crate::cnf::{PKG_NAME, PKG_VERSION};
+use crate::cnf::{
+	PKG_NAME,
+	PKG_VERSION,
+	WEBSOCKET_PING_FREQUENCY,
+	WEBSOCKET_RESPONSE_BUFFER_SIZE,
+	WEBSOCKET_RESPONSE_CHANNEL_SIZE,
+	WEBSOCKET_RESPONSE_FLUSH_PERIOD,
+};
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
 use crate::rpc::response::{failure, IntoRpcResponse};
@@ -11,34 +40,6 @@ use crate::rpc::CONN_CLOSED_ERR;
 use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
-use arc_swap::ArcSwap;
-use axum::extract::ws::{close_code::AGAIN, CloseFrame, Message, WebSocket};
-use core::fmt;
-use futures::stream::FuturesUnordered;
-use futures::{Sink, SinkExt, StreamExt};
-use opentelemetry::trace::FutureExt;
-use opentelemetry::Context as TelemetryContext;
-use std::sync::Arc;
-use std::time::Duration;
-use surrealdb::dbs::Session;
-use surrealdb::gql::{Pessimistic, SchemaCache};
-use surrealdb::kvs::Datastore;
-use surrealdb::mem::ALLOC;
-use surrealdb::rpc::format::Format;
-use surrealdb::rpc::Data;
-use surrealdb::rpc::Method;
-use surrealdb::rpc::RpcContext;
-use surrealdb::sql::Array;
-use surrealdb::sql::Value;
-use surrealdb_core::rpc::RpcProtocolV1;
-use surrealdb_core::rpc::RpcProtocolV2;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
-use tokio_util::sync::CancellationToken;
-use tracing::Instrument;
-use tracing::Span;
-use uuid::Uuid;
 
 /// An error string sent when the server is out of memory
 const SERVER_OVERLOADED: &str = "The server is unable to handle the request";
@@ -445,33 +446,43 @@ impl RpcProtocolV1 for Websocket {}
 impl RpcProtocolV2 for Websocket {}
 
 impl RpcContext for Websocket {
-	/// The datastore for this RPC interface
-	fn kvs(&self) -> &Datastore {
-		&self.datastore
-	}
-	/// Retrieves the modification lock for this RPC context
-	fn lock(&self) -> Arc<Semaphore> {
-		self.lock.clone()
-	}
-	/// The current session for this RPC context
-	fn session(&self) -> Arc<Session> {
-		self.session.load_full()
-	}
-	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, session: Arc<Session>) {
-		self.session.store(session);
-	}
-	/// The version information for this RPC context
-	fn version_data(&self) -> Data {
-		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
-	}
+	// ------------------------------
+	// GraphQL
+	// ------------------------------
 
+	/// GraphQL queries are enabled on WebSockets
+	const GQL_SUPPORT: bool = true;
 	// ------------------------------
 	// Realtime
 	// ------------------------------
 
 	/// Live queries are enabled on WebSockets
 	const LQ_SUPPORT: bool = true;
+
+	/// The datastore for this RPC interface
+	fn kvs(&self) -> &Datastore {
+		&self.datastore
+	}
+
+	/// Retrieves the modification lock for this RPC context
+	fn lock(&self) -> Arc<Semaphore> {
+		self.lock.clone()
+	}
+
+	/// The current session for this RPC context
+	fn session(&self) -> Arc<Session> {
+		self.session.load_full()
+	}
+
+	/// Mutable access to the current session for this RPC context
+	fn set_session(&self, session: Arc<Session>) {
+		self.session.store(session);
+	}
+
+	/// The version information for this RPC context
+	fn version_data(&self) -> Data {
+		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
+	}
 
 	/// Handles the execution of a LIVE statement
 	async fn handle_live(&self, lqid: &Uuid) {
@@ -503,13 +514,6 @@ impl RpcContext for Websocket {
 			error!("Error handling RPC connection: {err}");
 		}
 	}
-
-	// ------------------------------
-	// GraphQL
-	// ------------------------------
-
-	/// GraphQL queries are enabled on WebSockets
-	const GQL_SUPPORT: bool = true;
 
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema

@@ -1,3 +1,12 @@
+use std::cmp::Ordering;
+use std::fmt;
+
+use futures::future::try_join_all;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -9,14 +18,6 @@ use crate::sql::idiom::Idiom;
 use crate::sql::script::Script;
 use crate::sql::value::Value;
 use crate::sql::Permission;
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt;
-
-use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
@@ -77,6 +78,7 @@ impl Function {
 			_ => None,
 		}
 	}
+
 	/// Get function arguments if applicable
 	pub fn args(&self) -> &[Value] {
 		match self {
@@ -85,6 +87,7 @@ impl Function {
 			_ => &[],
 		}
 	}
+
 	/// Convert function call to a field name
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
@@ -94,6 +97,7 @@ impl Function {
 			Self::Custom(f, _) => format!("fn::{f}").into(),
 		}
 	}
+
 	/// Checks if this function invocation is writable
 	pub fn writeable(&self) -> bool {
 		match self {
@@ -103,6 +107,7 @@ impl Function {
 			_ => self.args().iter().any(Value::writeable),
 		}
 	}
+
 	/// Convert this function to an aggregate
 	pub fn aggregate(&self, val: Value) -> Result<Self, Error> {
 		match self {
@@ -120,6 +125,7 @@ impl Function {
 			_ => Err(fail!("Encountered a non-aggregate function: {self:?}")),
 		}
 	}
+
 	/// Check if this function is a custom function
 	pub fn is_custom(&self) -> bool {
 		matches!(self, Self::Custom(_, _))
@@ -156,6 +162,7 @@ impl Function {
 			_ => false,
 		}
 	}
+
 	/// Check if this function is a grouping function
 	pub fn is_aggregate(&self) -> bool {
 		match self {
@@ -187,6 +194,7 @@ impl Function {
 			_ => false,
 		}
 	}
+
 	pub(crate) fn get_optimised_aggregate(&self) -> OptimisedAggregate {
 		match self {
 			Self::Normal(f, v) if f == "count" => {

@@ -1,11 +1,12 @@
 #![cfg(feature = "kv-indxdb")]
 
+use std::fmt::Debug;
+use std::ops::Range;
+
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SavePointImpl, SavePoints};
 use crate::kvs::{Check, Key, KeyEncode, Val};
-use std::fmt::Debug;
-use std::ops::Range;
 
 pub struct Datastore {
 	db: indxdb::Db,
@@ -52,11 +53,13 @@ impl Datastore {
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
+
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
 		// Nothing to do here
 		Ok(())
 	}
+
 	/// Start a new transaction
 	pub async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Specify the check level

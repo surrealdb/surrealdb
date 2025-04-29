@@ -1,11 +1,12 @@
 mod parse;
 use parse::Parse;
 mod helpers;
-use crate::helpers::skip_ok;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
+
+use crate::helpers::skip_ok;
 
 #[tokio::test]
 async fn define_foreign_table() -> Result<(), Error> {

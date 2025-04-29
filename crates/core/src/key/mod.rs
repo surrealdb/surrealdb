@@ -1,5 +1,4 @@
 //! How the keys are structured in the key value store
-///
 /// crate::key::version                  !v
 ///
 /// crate::key::root::all                /
@@ -73,7 +72,6 @@
 ///
 /// crate::key::sequence::st             /*{ns}*{db}*{tb}*{sq}!st{id}
 /// crate::key::sequence::ba             /*{ns}*{db}*{tb}*{sq}!ba{start}
-///
 pub(crate) mod category;
 pub(crate) mod change;
 pub(crate) mod database;

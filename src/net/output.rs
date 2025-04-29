@@ -1,11 +1,12 @@
-use super::headers::Accept;
-use crate::err::Error;
 use axum::response::{IntoResponse, Response};
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
 use serde::Serialize;
 use serde_json::Value as Json;
 use surrealdb::sql;
+
+use super::headers::Accept;
+use crate::err::Error;
 
 pub enum Output {
 	None,

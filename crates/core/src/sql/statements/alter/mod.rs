@@ -1,7 +1,12 @@
 mod sequence;
 mod table;
 
+use std::fmt::{self, Display};
+
+use reblessive::tree::Stk;
+use revision::revisioned;
 pub use sequence::AlterSequenceStatement;
+use serde::{Deserialize, Serialize};
 pub use table::AlterTableStatement;
 
 use crate::ctx::Context;
@@ -9,11 +14,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -30,6 +30,7 @@ impl AlterStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

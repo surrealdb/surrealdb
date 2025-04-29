@@ -1,18 +1,49 @@
+use std::fmt;
+#[cfg(storage)]
+use std::path::PathBuf;
+use std::pin::pin;
+use std::sync::Arc;
+use std::task::{ready, Poll};
+use std::time::Duration;
+#[cfg(not(target_family = "wasm"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use async_channel::{Receiver, Sender};
+use bytes::{Bytes, BytesMut};
+use dashmap::DashMap;
+use futures::{Future, Stream};
+use reblessive::TreeStack;
+#[cfg(feature = "jwks")]
+use tokio::sync::RwLock;
+use tracing::{instrument, trace};
+use uuid::Uuid;
+#[cfg(target_family = "wasm")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
 use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
 use crate::buc::BucketConnections;
-use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
-	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
+	ArbitraryQueryTarget,
+	ExperimentalTarget,
+	MethodTarget,
+	RouteTarget,
 };
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
-	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
+	Attach,
+	Capabilities,
+	Executor,
+	Notification,
+	Options,
+	Response,
+	Session,
+	Variables,
 };
 use crate::err::Error;
 #[cfg(feature = "jwks")]
@@ -26,39 +57,22 @@ use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::FlowResultExt as _;
-use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
-use crate::syn;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::kvs::{LockType, TransactionType};
+use crate::sql::statements::DefineUserStatement;
+use crate::sql::{Base, FlowResultExt as _, Query, Value};
 use crate::syn::parser::{ParserSettings, StatementStream};
-use async_channel::{Receiver, Sender};
-use bytes::{Bytes, BytesMut};
-use dashmap::DashMap;
-use futures::{Future, Stream};
-use reblessive::TreeStack;
-use std::fmt;
-#[cfg(storage)]
-use std::path::PathBuf;
-use std::pin::pin;
-use std::sync::Arc;
-use std::task::{ready, Poll};
-use std::time::Duration;
-#[cfg(not(target_family = "wasm"))]
-use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(feature = "jwks")]
-use tokio::sync::RwLock;
-use tracing::instrument;
-use tracing::trace;
-use uuid::Uuid;
-#[cfg(target_family = "wasm")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+use crate::{cf, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
-// If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
+// If there are an infinite number of heartbeats, then we want to go
+// batch-by-batch spread over several checks
 const LQ_CHANNEL_SIZE: usize = 15_000;
 
-// The role assigned to the initial user created when starting the server with credentials for the first time
+// The role assigned to the initial user created when starting the server with
+// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
 
 /// The underlying datastore instance which stores the dataset.
@@ -73,7 +87,8 @@ pub struct Datastore {
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
 	query_timeout: Option<Duration>,
-	/// The maximum duration timeout for running multiple statements in a transaction.
+	/// The maximum duration timeout for running multiple statements in a
+	/// transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
@@ -100,7 +115,8 @@ pub struct Datastore {
 
 #[derive(Clone)]
 pub(super) struct TransactionFactory {
-	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
+	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a
+	// mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The inner datastore type
 	flavor: Arc<DatastoreFlavor>,
@@ -412,8 +428,8 @@ impl Datastore {
 		})
 	}
 
-	/// Create a new datastore with the same persistent data (inner), with flushed cache.
-	/// Simulating a server restart
+	/// Create a new datastore with the same persistent data (inner), with
+	/// flushed cache. Simulating a server restart
 	pub fn restart(self) -> Self {
 		Self {
 			id: self.id,
@@ -868,8 +884,8 @@ impl Datastore {
 				filling = buffer.len() < parse_size
 			}
 
-			// if we finished streaming we can parse with complete so that the parser can be sure
-			// of it's results.
+			// if we finished streaming we can parse with complete so that the parser can be
+			// sure of it's results.
 			if complete {
 				return match statements_stream.parse_complete(&mut buffer) {
 					Err(e) => Poll::Ready(Some(Err(Error::InvalidQuery(e)))),
@@ -1210,6 +1226,7 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled)
 	}
+
 	pub fn setup_ctx(&self) -> Result<MutableContext, Error> {
 		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,
@@ -1246,15 +1263,15 @@ impl Datastore {
 
 #[cfg(test)]
 mod test {
-	use crate::sql::FlowResultExt as _;
-
 	use super::*;
+	use crate::sql::FlowResultExt as _;
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<(), Error> {
+		use reblessive::{Stack, Stk};
+
 		use crate::kvs::Datastore;
 		use crate::sql::{Expression, Future, Number, Operator, Value};
-		use reblessive::{Stack, Stk};
 
 		// build query manually to bypass query limits.
 		let mut stack = Stack::new();

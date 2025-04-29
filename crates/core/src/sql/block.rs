@@ -1,3 +1,13 @@
+use std::cmp::Ordering;
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::Deref;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::statements::InfoStatement;
+use super::FlowResult;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -5,21 +15,25 @@ use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
-	AlterStatement, BreakStatement, ContinueStatement, CreateStatement, DefineStatement,
-	DeleteStatement, ForeachStatement, IfelseStatement, InsertStatement, OutputStatement,
-	RelateStatement, RemoveStatement, SelectStatement, SetStatement, ThrowStatement,
-	UpdateStatement, UpsertStatement,
+	AlterStatement,
+	BreakStatement,
+	ContinueStatement,
+	CreateStatement,
+	DefineStatement,
+	DeleteStatement,
+	ForeachStatement,
+	IfelseStatement,
+	InsertStatement,
+	OutputStatement,
+	RelateStatement,
+	RemoveStatement,
+	SelectStatement,
+	SetStatement,
+	ThrowStatement,
+	UpdateStatement,
+	UpsertStatement,
 };
 use crate::sql::value::Value;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
-
-use super::statements::InfoStatement;
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 
@@ -32,6 +46,7 @@ pub struct Block(pub Vec<Entry>);
 
 impl Deref for Block {
 	type Target = Vec<Entry>;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -48,6 +63,7 @@ impl Block {
 	pub(crate) fn writeable(&self) -> bool {
 		self.iter().any(Entry::writeable)
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

@@ -1,21 +1,23 @@
+use std::fmt::{self, Display};
+
+use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::Argon2;
+use rand::distributions::Alphanumeric;
+use rand::rngs::OsRng;
+use rand::Rng;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::escape::QuoteStr;
+use crate::sql::fmt::Fmt;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{
-	escape::QuoteStr, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Strand, Value,
-};
-use argon2::{
-	password_hash::{PasswordHasher, SaltString},
-	Argon2,
-};
-
-use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use crate::sql::user::UserDuration;
+use crate::sql::{Base, Duration, Ident, Strand, Value};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

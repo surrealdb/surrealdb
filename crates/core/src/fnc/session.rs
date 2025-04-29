@@ -1,13 +1,6 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::sql::paths::AC;
-use crate::sql::paths::DB;
-use crate::sql::paths::ID;
-use crate::sql::paths::IP;
-use crate::sql::paths::NS;
-use crate::sql::paths::OR;
-use crate::sql::paths::RD;
-use crate::sql::paths::TK;
+use crate::sql::paths::{AC, DB, ID, IP, NS, OR, RD, TK};
 use crate::sql::value::Value;
 
 pub fn ac(ctx: &Context, _: ()) -> Result<Value, Error> {

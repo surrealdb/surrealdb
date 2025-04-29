@@ -1,15 +1,16 @@
+use std::cmp::Ordering;
+use std::fmt;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+use super::{ControlFlow, FlowResult};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Idiom, Kind, Value};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt;
-
-use super::{ControlFlow, FlowResult};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
 
@@ -39,10 +40,12 @@ impl Cast {
 	pub(crate) fn writeable(&self) -> bool {
 		self.1.writeable()
 	}
+
 	/// Checks whether all array values are static values
 	pub(crate) fn is_static(&self) -> bool {
 		self.1.is_static()
 	}
+
 	/// Was marked recursively
 	pub(crate) async fn compute(
 		&self,

@@ -3,10 +3,9 @@ use std::fmt::{self, Display};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-	err::Error,
-	sql::{statements::info::InfoStructure, Value},
-};
+use crate::err::Error;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -23,6 +22,7 @@ pub enum Method {
 
 impl TryFrom<&Value> for Method {
 	type Error = Error;
+
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Strand(s) => match s.to_ascii_lowercase().as_str() {

@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
+use uuid::Uuid;
+
 use crate::dbs::node::Timestamp;
 use crate::dbs::{Response, Session};
 use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::CreateDs;
-use std::sync::Arc;
-use uuid::Uuid;
 
 async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 	// Create a new datastore
@@ -163,7 +165,7 @@ pub async fn range(new_ds: impl CreateDs) {
 		SELECT * FROM t:[500]..=[550] ORDER BY id DESC LIMIT 3 EXPLAIN;
 	";
 	let mut r = ds.execute(sql, &Session::owner(), None).await.unwrap();
-	//Check the result
+	// Check the result
 	for _ in 0..3 {
 		check(&mut r, "NONE");
 	}
@@ -214,6 +216,7 @@ macro_rules! define_tests {
 		}
 	};
 }
+pub(crate) use define_tests;
+
 use crate::sql::Value;
 use crate::syn::Parse;
-pub(crate) use define_tests;

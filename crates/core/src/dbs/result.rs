@@ -1,3 +1,5 @@
+use reblessive::tree::Stk;
+
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::Context;
 #[cfg(storage)]
@@ -10,7 +12,6 @@ use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
 use crate::sql::order::Ordering;
 use crate::sql::Value;
-use reblessive::tree::Stk;
 
 pub(super) enum Results {
 	None,

@@ -1,11 +1,7 @@
-use crate::syn::{
-	error::{bail, syntax_error, SyntaxError},
-	lexer::{
-		unicode::{byte, chars},
-		Lexer,
-	},
-	token::{t, Token, TokenKind},
-};
+use crate::syn::error::{bail, syntax_error, SyntaxError};
+use crate::syn::lexer::unicode::{byte, chars};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{t, Token, TokenKind};
 
 impl Lexer<'_> {
 	/// Eats a single line comment.
@@ -400,7 +396,7 @@ impl Lexer<'_> {
 			b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
 				return self.lex_ident_from_next_byte(byte);
 			}
-			//b'0'..=b'9' => return self.lex_number(byte),
+			// b'0'..=b'9' => return self.lex_number(byte),
 			x => {
 				let err = syntax_error!("Invalid token `{}`", x as char, @self.current_span());
 				return self.invalid_token(err);

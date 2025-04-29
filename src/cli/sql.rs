@@ -1,10 +1,3 @@
-use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
-use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
-};
-use crate::cnf::PKG_VERSION;
-use crate::dbs::DbsCapabilities;
-use crate::err::Error;
 use clap::Args;
 use futures::StreamExt;
 use rustyline::error::ReadlineError;
@@ -18,6 +11,16 @@ use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::sql::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::{Notification, Response, Value};
+
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
+use crate::cli::abstraction::{
+	AuthArguments,
+	DatabaseConnectionArguments,
+	LevelSelectionArguments,
+};
+use crate::cnf::PKG_VERSION;
+use crate::dbs::DbsCapabilities;
+use crate::err::Error;
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -70,8 +73,11 @@ pub async fn init(
 	// Capabilities configuration for local engines
 	let capabilities = capabilities.into_cli_capabilities();
 	let config = Config::new().capabilities(capabilities.clone().into());
-	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If username and password are specified, and we are connecting to a remote
+	// SurrealDB server, then we need to authenticate. If we are connecting
+	// directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we
+	// don't need to authenticate because we use an embedded (local) SurrealDB
+	// instance with auth disabled.
 	let client = if username.is_some()
 		&& password.is_some()
 		&& !endpoint.clone().into_endpoint()?.parse_kind()?.is_local()
@@ -244,9 +250,11 @@ pub async fn init(
 
 				// Process the last `use` statements, if any
 				if namespace.is_some() || database.is_some() {
-					// Use the namespace provided in the query if any, otherwise use the one in the prompt
+					// Use the namespace provided in the query if any, otherwise use the one in the
+					// prompt
 					let namespace = namespace.as_deref().unwrap_or(prompt_ns);
-					// Use the database provided in the query if any, otherwise use the one in the prompt
+					// Use the database provided in the query if any, otherwise use the one in the
+					// prompt
 					let database = database.as_deref().unwrap_or(prompt_db);
 					// If the database is empty we should only use the namespace
 					if database.is_empty() {

@@ -1,18 +1,21 @@
 pub mod http;
 pub mod ws;
 
-use crate::cnf::{TELEMETRY_DISABLE_METRICS, TELEMETRY_PROVIDER};
 use opentelemetry::metrics::MetricsError;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_sdk::metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector};
 use opentelemetry_sdk::metrics::{
-	Aggregation, Instrument, PeriodicReader, SdkMeterProvider, Stream,
+	Aggregation,
+	Instrument,
+	PeriodicReader,
+	SdkMeterProvider,
+	Stream,
 };
 use opentelemetry_sdk::runtime;
 
 pub use self::http::tower_layer::HttpMetricsLayer;
-
 use super::OTEL_DEFAULT_RESOURCE;
+use crate::cnf::{TELEMETRY_DISABLE_METRICS, TELEMETRY_PROVIDER};
 
 // Histogram buckets in milliseconds
 static HISTOGRAM_BUCKETS_MS: &[f64] = &[
@@ -39,7 +42,8 @@ const HISTOGRAM_BUCKETS_BYTES: &[f64] = &[
 	100.0 * MB,
 ];
 
-// Returns a metrics configuration based on the SURREAL_TELEMETRY_PROVIDER environment variable
+// Returns a metrics configuration based on the SURREAL_TELEMETRY_PROVIDER
+// environment variable
 pub fn init() -> Result<Option<SdkMeterProvider>, MetricsError> {
 	match TELEMETRY_PROVIDER.trim() {
 		// The OTLP telemetry provider has been specified

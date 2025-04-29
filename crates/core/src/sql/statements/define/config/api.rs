@@ -1,11 +1,12 @@
 use std::fmt::{self, Display};
 
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::api::middleware::RequestMiddleware;
 use crate::sql::fmt::Fmt;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Permission, Value};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

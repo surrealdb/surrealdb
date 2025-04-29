@@ -2,7 +2,8 @@ use std::time::Duration;
 
 /// Configuration for the engine behaviour
 ///
-/// The defaults are optimal so please only modify these if you know deliberately why you are modifying them.
+/// The defaults are optimal so please only modify these if you know
+/// deliberately why you are modifying them.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct EngineOptions {
@@ -28,14 +29,17 @@ impl EngineOptions {
 		self.node_membership_refresh_interval = interval;
 		self
 	}
+
 	pub fn with_node_membership_check_interval(mut self, interval: Duration) -> Self {
 		self.node_membership_check_interval = interval;
 		self
 	}
+
 	pub fn with_node_membership_cleanup_interval(mut self, interval: Duration) -> Self {
 		self.node_membership_cleanup_interval = interval;
 		self
 	}
+
 	pub fn with_changefeed_gc_interval(mut self, interval: Duration) -> Self {
 		self.changefeed_gc_interval = interval;
 		self

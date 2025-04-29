@@ -1,19 +1,17 @@
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Workable;
+use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::sql::data::Data;
 use crate::sql::operator::Operator;
-use crate::sql::paths::EDGE;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
+use crate::sql::paths::{EDGE, IN, OUT};
 use crate::sql::value::Value;
 use crate::sql::FlowResultExt;
-use reblessive::tree::Stk;
-use std::sync::Arc;
 
 impl Document {
 	/// Generates a new record id for this document.
@@ -55,16 +53,19 @@ impl Document {
 			}
 			// This is a INSERT statement
 			else if let Workable::Insert(_) = &self.extras {
-				// TODO(tobiemh): implement last-step id generation for INSERT statements
+				// TODO(tobiemh): implement last-step id generation for INSERT
+				// statements
 			}
 			// This is a RELATE statement
 			else if let Workable::Relate(_, _, _) = &self.extras {
-				// TODO(tobiemh): implement last-step id generation for RELATE statements
+				// TODO(tobiemh): implement last-step id generation for RELATE
+				// statements
 			}
 		}
 		//
 		Ok(())
 	}
+
 	/// Clears all of the content of this document.
 	/// This is used to empty the current content
 	/// of the document within a `DELETE` statement.
@@ -78,6 +79,7 @@ impl Document {
 	) -> Result<(), Error> {
 		self.current.doc.to_mut().clear()
 	}
+
 	/// Sets the default field data that should be
 	/// present on this document. For normal records
 	/// the `id` field is always specified, and for
@@ -143,6 +145,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Updates the current document using the data
 	/// passed in to each document. This is relevant
 	/// for INSERT and RELATE queries where each
@@ -199,6 +202,7 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+
 	/// Updates the current document using the data
 	/// clause present on the statement. This can be
 	/// one of CONTENT, REPLACE, MERGE, PATCH, SET,

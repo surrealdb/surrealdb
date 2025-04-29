@@ -1,9 +1,10 @@
 #![cfg_attr(target_family = "wasm", expect(dead_code, reason = "Not used in WASM."))]
 
+use std::collections::{HashMap, VecDeque};
+
 use crate::err::Error;
 use crate::kvs::api::Transaction;
 use crate::kvs::{Key, Val};
-use std::collections::{HashMap, VecDeque};
 
 type SavePoint = HashMap<Key, SavedValue>;
 
@@ -76,7 +77,8 @@ impl SavePoints {
 			match prep {
 				SavePrepare::AlreadyPresent(key, op) => {
 					if let Some(sv) = current.get_mut(&key) {
-						// We keep the last operation executed in the transaction so we can do the appropriate rollback action (SET or PUT)
+						// We keep the last operation executed in the transaction so we can do the
+						// appropriate rollback action (SET or PUT)
 						sv.last_operation = op;
 					}
 				}

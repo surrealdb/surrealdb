@@ -2,13 +2,11 @@ use std::mem;
 
 use unicase::UniCase;
 
-use crate::syn::{
-	error::{syntax_error, SyntaxError},
-	lexer::{keywords::KEYWORDS, Lexer},
-	token::{Token, TokenKind},
-};
-
 use super::unicode::{chars, is_identifier_continue};
+use crate::syn::error::{syntax_error, SyntaxError};
+use crate::syn::lexer::keywords::KEYWORDS;
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, TokenKind};
 
 impl Lexer<'_> {
 	/// Lex a parameter in the form of `$[a-zA-Z0-9_]*`
@@ -45,8 +43,8 @@ impl Lexer<'_> {
 	///
 	/// The start byte should already a valid byte of the identifier.
 	///
-	/// When calling the caller should already know that the token can't be any other token covered
-	/// by `[a-zA-Z0-9_]*`.
+	/// When calling the caller should already know that the token can't be any
+	/// other token covered by `[a-zA-Z0-9_]*`.
 	pub(super) fn lex_ident_from_next_byte(&mut self, start: u8) -> Token {
 		debug_assert!(matches!(start, b'a'..=b'z' | b'A'..=b'Z' | b'_'));
 		self.scratch.push(start as char);
@@ -66,8 +64,8 @@ impl Lexer<'_> {
 				}
 			}
 			// When finished parsing the identifier, try to match it to an keyword.
-			// If there is one, return it as the keyword. Original identifier can be reconstructed
-			// from the token.
+			// If there is one, return it as the keyword. Original identifier can be
+			// reconstructed from the token.
 			if let Some(x) = KEYWORDS.get(&UniCase::ascii(&self.scratch)).copied() {
 				if x != TokenKind::Identifier {
 					self.scratch.clear();

@@ -1,15 +1,16 @@
+use std::fmt::{self, Display};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Timeout, Value};
-
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Base, Ident, Timeout, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

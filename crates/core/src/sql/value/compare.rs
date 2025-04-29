@@ -1,7 +1,7 @@
-use crate::sql::part::Next;
-use crate::sql::part::Part;
-use crate::sql::value::Value;
 use std::cmp::Ordering;
+
+use crate::sql::part::{Next, Part};
+use crate::sql::value::Value;
 
 impl Value {
 	pub(crate) fn compare(

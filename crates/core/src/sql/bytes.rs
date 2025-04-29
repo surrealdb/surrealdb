@@ -1,12 +1,10 @@
-use hex;
-use revision::revisioned;
-use serde::de::SeqAccess;
-use serde::{
-	de::{self, Visitor},
-	Deserialize, Serialize,
-};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
+
+use hex;
+use revision::revisioned;
+use serde::de::{self, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]

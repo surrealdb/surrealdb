@@ -1,18 +1,12 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::{
-		order::{OrderList, Ordering},
-		statements::SelectStatement,
-		Field, Fields, Idioms, Limit, Order, Split, Splits, Start, Values, Version,
-	},
-	syn::{
-		parser::{mac::expected, ParseResult, Parser},
-		token::{t, Span},
-	},
-};
-
 use super::parts::MissingKind;
+use crate::sql::order::{OrderList, Ordering};
+use crate::sql::statements::SelectStatement;
+use crate::sql::{Field, Fields, Idioms, Limit, Order, Split, Splits, Start, Values, Version};
+use crate::syn::parser::mac::expected;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::{t, Span};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_select_stmt(

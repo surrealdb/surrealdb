@@ -1,27 +1,29 @@
+use std::collections::BTreeMap;
+use std::iter::once;
+use std::ops::{Bound, Deref};
+
 use ciborium::Value as Data;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use rust_decimal::Decimal;
-use std::collections::BTreeMap;
-use std::iter::once;
-use std::ops::Bound;
-use std::ops::Deref;
 
 use crate::sql::id::range::IdRange;
-use crate::sql::Array;
-use crate::sql::Datetime;
-use crate::sql::DecimalExt;
-use crate::sql::Duration;
-use crate::sql::File;
-use crate::sql::Future;
-use crate::sql::Geometry;
-use crate::sql::Id;
-use crate::sql::Number;
-use crate::sql::Object;
-use crate::sql::Range;
-use crate::sql::Thing;
-use crate::sql::Uuid;
-use crate::sql::Value;
+use crate::sql::{
+	Array,
+	Datetime,
+	DecimalExt,
+	Duration,
+	File,
+	Future,
+	Geometry,
+	Id,
+	Number,
+	Object,
+	Range,
+	Thing,
+	Uuid,
+	Value,
+};
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 const TAG_SPEC_DATETIME: u64 = 0;
@@ -61,6 +63,7 @@ pub struct Cbor(pub Data);
 
 impl TryFrom<Cbor> for Value {
 	type Error = &'static str;
+
 	fn try_from(val: Cbor) -> Result<Self, &'static str> {
 		match val.0 {
 			Data::Null => Ok(Value::Null),
@@ -340,6 +343,7 @@ impl TryFrom<Cbor> for Value {
 
 impl TryFrom<Value> for Cbor {
 	type Error = &'static str;
+
 	fn try_from(val: Value) -> Result<Self, &'static str> {
 		match val {
 			Value::None => Ok(Cbor(Data::Tag(TAG_NONE, Box::new(Data::Null)))),
@@ -497,6 +501,7 @@ fn encode_geometry(v: Geometry) -> Result<Data, &'static str> {
 
 impl TryFrom<Data> for Range {
 	type Error = &'static str;
+
 	fn try_from(val: Data) -> Result<Self, &'static str> {
 		fn decode_bound(v: Data) -> Result<Bound<Value>, &'static str> {
 			match v {
@@ -521,6 +526,7 @@ impl TryFrom<Data> for Range {
 
 impl TryFrom<Range> for Data {
 	type Error = &'static str;
+
 	fn try_from(r: Range) -> Result<Data, &'static str> {
 		fn encode(b: Bound<Value>) -> Result<Data, &'static str> {
 			match b {
@@ -540,6 +546,7 @@ impl TryFrom<Range> for Data {
 
 impl TryFrom<Data> for IdRange {
 	type Error = &'static str;
+
 	fn try_from(val: Data) -> Result<Self, &'static str> {
 		fn decode_bound(v: Data) -> Result<Bound<Id>, &'static str> {
 			match v {
@@ -565,6 +572,7 @@ impl TryFrom<Data> for IdRange {
 
 impl TryFrom<IdRange> for Data {
 	type Error = &'static str;
+
 	fn try_from(r: IdRange) -> Result<Data, &'static str> {
 		fn encode(b: Bound<Id>) -> Result<Data, &'static str> {
 			match b {
@@ -580,6 +588,7 @@ impl TryFrom<IdRange> for Data {
 
 impl TryFrom<Data> for Id {
 	type Error = &'static str;
+
 	fn try_from(val: Data) -> Result<Self, &'static str> {
 		match val {
 			Data::Integer(v) => Ok(Id::Number(i128::from(v) as i64)),
@@ -596,6 +605,7 @@ impl TryFrom<Data> for Id {
 
 impl TryFrom<Id> for Data {
 	type Error = &'static str;
+
 	fn try_from(v: Id) -> Result<Data, &'static str> {
 		match v {
 			Id::Number(v) => Ok(Data::Integer(v.into())),
@@ -613,6 +623,7 @@ impl TryFrom<Id> for Data {
 
 impl TryFrom<Vec<Data>> for Array {
 	type Error = &'static str;
+
 	fn try_from(val: Vec<Data>) -> Result<Self, &'static str> {
 		val.into_iter().map(|v| Value::try_from(Cbor(v))).collect::<Result<Array, &str>>()
 	}
@@ -620,6 +631,7 @@ impl TryFrom<Vec<Data>> for Array {
 
 impl TryFrom<Vec<(Data, Data)>> for Object {
 	type Error = &'static str;
+
 	fn try_from(val: Vec<(Data, Data)>) -> Result<Self, &'static str> {
 		Ok(Object(
 			val.into_iter()
@@ -635,6 +647,7 @@ impl TryFrom<Vec<(Data, Data)>> for Object {
 
 impl TryFrom<Data> for Uuid {
 	type Error = &'static str;
+
 	fn try_from(val: Data) -> Result<Self, &'static str> {
 		match val {
 			Data::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {

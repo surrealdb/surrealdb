@@ -1,5 +1,7 @@
 #![cfg(not(target_family = "wasm"))]
 
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -11,7 +13,6 @@ use crate::kvs::TransactionType;
 use crate::sql::index::{HnswParams, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Index, Part, Thing, Value};
-use reblessive::tree::Stk;
 
 pub(crate) struct IndexOperation<'a> {
 	ctx: &'a Context,
@@ -189,10 +190,10 @@ impl<'a> IndexOperation<'a> {
 	}
 }
 
-/// Extract from the given document, the values required by the index and put then in an array.
-/// Eg. IF the index is composed of the columns `name` and `instrument`
-/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
-/// It will return: ["Tobie", "piano"]
+/// Extract from the given document, the values required by the index and put
+/// then in an array. Eg. IF the index is composed of the columns `name` and
+/// `instrument` Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie"
+/// } It will return: ["Tobie", "piano"]
 struct Indexable(Vec<(Value, bool)>);
 
 impl Indexable {
@@ -207,8 +208,8 @@ impl Indexable {
 }
 
 impl IntoIterator for Indexable {
-	type Item = Array;
 	type IntoIter = Combinator;
+	type Item = Array;
 
 	fn into_iter(self) -> Self::IntoIter {
 		Combinator::new(self.0)

@@ -1,11 +1,12 @@
 mod parse;
 use parse::Parse;
 mod helpers;
-use crate::helpers::{skip_ok, Test};
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
+
+use crate::helpers::{skip_ok, Test};
 
 #[tokio::test]
 async fn select_where_matches_using_index() -> Result<(), Error> {
@@ -537,7 +538,8 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
-	// This result should be empty, as we are looking for non-existing terms (dummy1 and dummy2).
+	// This result should be empty, as we are looking for non-existing terms (dummy1
+	// and dummy2).
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));

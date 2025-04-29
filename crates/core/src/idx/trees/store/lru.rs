@@ -1,7 +1,8 @@
-use ahash::{HashMap, HashMapExt};
-use futures::future::join_all;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
+
+use ahash::{HashMap, HashMapExt};
+use futures::future::join_all;
 use tokio::sync::Mutex;
 
 pub(super) type CacheKey = u64;
@@ -43,6 +44,7 @@ where
 			capacity,
 		}
 	}
+
 	pub(super) async fn get<K: Into<CacheKey>>(&self, key: K) -> Option<V> {
 		let key = key.into();
 		// Locate the shard
@@ -208,7 +210,8 @@ where
 		self.map.len()
 	}
 
-	/// Make a copy of this cache containing every entry for which the specified filter returns true.
+	/// Make a copy of this cache containing every entry for which the specified
+	/// filter returns true.
 	fn duplicate<F>(&self, filter: F) -> Self
 	where
 		F: Fn(&CacheKey) -> bool,
@@ -228,9 +231,10 @@ where
 }
 #[cfg(test)]
 mod tests {
-	use super::ConcurrentLru;
 	use futures::future::join_all;
 	use test_log::test;
+
+	use super::ConcurrentLru;
 
 	#[test(tokio::test)]
 	async fn test_minimal_tree_lru() {

@@ -1,5 +1,6 @@
-use cedar_policy::Schema;
 use std::sync::LazyLock;
+
+use cedar_policy::Schema;
 
 pub static DEFAULT_CEDAR_SCHEMA: LazyLock<serde_json::Value> = LazyLock::new(|| {
 	serde_json::json!(

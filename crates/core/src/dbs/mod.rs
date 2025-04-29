@@ -1,7 +1,8 @@
 //! Datastore module which is the core of the database node.
-//! In this module we essentially manage the entire lifecycle of a database request acting as the
-//! glue between the API and the response. In this module we use channels as a transport layer
-//! and executors to process the operations. This module also gives a `context` to the transaction.
+//! In this module we essentially manage the entire lifecycle of a database
+//! request acting as the glue between the API and the response. In this module
+//! we use channels as a transport layer and executors to process the
+//! operations. This module also gives a `context` to the transaction.
 
 mod distinct;
 mod executor;

@@ -1,15 +1,9 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::statements::IfelseStatement,
-	syn::{
-		parser::{
-			mac::{expected, unexpected},
-			ParseResult, Parser,
-		},
-		token::t,
-	},
-};
+use crate::sql::statements::IfelseStatement;
+use crate::syn::parser::mac::{expected, unexpected};
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::t;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_if_stmt(&mut self, ctx: &mut Stk) -> ParseResult<IfelseStatement> {

@@ -1,15 +1,10 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::{statements::RelateStatement, Subquery, Value},
-	syn::{
-		parser::{
-			mac::{expected, expected_whitespace, unexpected},
-			ParseResult, Parser,
-		},
-		token::t,
-	},
-};
+use crate::sql::statements::RelateStatement;
+use crate::sql::{Subquery, Value};
+use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::t;
 
 impl Parser<'_> {
 	pub async fn parse_relate_stmt(&mut self, stk: &mut Stk) -> ParseResult<RelateStatement> {
@@ -74,6 +69,7 @@ impl Parser<'_> {
 			_ => self.parse_thing_or_table(ctx).await,
 		}
 	}
+
 	pub async fn parse_relate_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = true;

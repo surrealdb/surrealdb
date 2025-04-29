@@ -1,3 +1,11 @@
+use std::sync::Arc;
+
+use chrono::Utc;
+use jsonwebtoken::{encode, Header};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -5,18 +13,11 @@ use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
-use crate::iam::Auth;
-use crate::iam::{Actor, Level};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::AccessType;
-use crate::sql::Object;
-use crate::sql::Value;
-use chrono::Utc;
-use jsonwebtoken::{encode, Header};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use uuid::Uuid;
+use crate::iam::{Actor, Auth, Level};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::sql::{AccessType, Object, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -125,7 +126,8 @@ pub async fn db_access(
 											};
 											// AUTHENTICATE clause
 											if let Some(au) = &av.authenticate {
-												// Setup the system session for finding the signin record
+												// Setup the system session for finding the signin
+												// record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
@@ -134,10 +136,12 @@ pub async fn db_access(
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
 											}
-											// Create refresh token if defined for the record access method
+											// Create refresh token if defined for the record access
+											// method
 											let refresh = match &at.bearer {
 												Some(_) => {
-													// TODO(gguillemas): Remove this once bearer access is no longer experimental
+													// TODO(gguillemas): Remove this once bearer
+													// access is no longer experimental
 													if !kvs.get_capabilities().allows_experimental(
 														&ExperimentalTarget::BearerAccess,
 													) {
@@ -189,15 +193,18 @@ pub async fn db_access(
 									}
 								}
 								Err(e) => match e {
-									// If the SIGNUP clause throws a specific error, authentication fails with that error
+									// If the SIGNUP clause throws a specific error, authentication
+									// fails with that error
 									Error::Thrown(_) => Err(e),
-									// If the SIGNUP clause failed due to an unexpected error, be more specific
-									// This allows clients to handle these errors, which may be retryable
+									// If the SIGNUP clause failed due to an unexpected error, be
+									// more specific This allows clients to handle these
+									// errors, which may be retryable
 									Error::Tx(_) | Error::TxFailure | Error::TxRetryable => {
 										debug!("Unexpected error found while executing a SIGNUP clause: {e}");
 										Err(Error::UnexpectedAuth)
 									}
-									// Otherwise, return a generic error unless it should be forwarded
+									// Otherwise, return a generic error unless it should be
+									// forwarded
 									e => {
 										debug!("Record user signup query failed: {e}");
 										if *INSECURE_FORWARD_ACCESS_ERRORS {
@@ -221,10 +228,13 @@ pub async fn db_access(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::{dbs::Capabilities, iam::Role};
-	use chrono::Duration;
 	use std::collections::HashMap;
+
+	use chrono::Duration;
+
+	use super::*;
+	use crate::dbs::Capabilities;
+	use crate::iam::Role;
 
 	#[tokio::test]
 	async fn test_record_signup() {
@@ -285,7 +295,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -468,7 +479,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -510,7 +522,8 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -643,7 +656,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Session expiration should always be set for tokens issued by SurrealDB
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_sess_exp =
 				(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_sess_exp =
@@ -755,7 +769,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
@@ -850,7 +865,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
-			// Expiration should match the current time plus session duration with some margin
+			// Expiration should match the current time plus session duration with some
+			// margin
 			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(

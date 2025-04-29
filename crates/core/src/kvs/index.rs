@@ -1,3 +1,17 @@
+use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use dashmap::mapref::entry::Entry;
+use dashmap::DashMap;
+use futures::channel::oneshot::{channel, Receiver, Sender};
+use reblessive::TreeStack;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+use tokio::task;
+use tokio::task::JoinHandle;
+
 use super::KeyDecode;
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
@@ -14,18 +28,6 @@ use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::mem::ALLOC;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Object, Thing, Value};
-use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
-use futures::channel::oneshot::{channel, Receiver, Sender};
-use reblessive::TreeStack;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::ops::Range;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tokio::task;
-use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
@@ -352,7 +354,8 @@ impl Building {
 		rid: &Thing,
 	) -> Result<ConsumeResult, Error> {
 		let mut queue = self.queue.write().await;
-		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
+		// Now that the queue is locked, we have the possibility to assess if the
+		// asynchronous build is done.
 		if queue.is_empty() {
 			// If the appending queue is empty and the index is built...
 			if self.status.read().await.is_ready() {
@@ -455,7 +458,8 @@ impl Building {
 				tx.commit().await?;
 			}
 		}
-		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
+		// Second iteration, we index/remove any records that has been added or removed
+		// since the initial indexing
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
 			pending: Some(self.queue.read().await.pending() as usize),
@@ -476,7 +480,8 @@ impl Building {
 				}
 				if queue.is_empty() {
 					// If the batch is empty, we are done.
-					// Due to the lock on self.queue, we know that no external process can add an item to the queue.
+					// Due to the lock on self.queue, we know that no external process can add an
+					// item to the queue.
 					self.set_status(BuildingStatus::Ready {
 						initial: Some(initial_count),
 						pending: Some(queue.pending() as usize),
@@ -532,7 +537,8 @@ impl Building {
 			// Do we already have an appended value?
 			let ip = self.new_ip_key(rid.id.clone())?;
 			if let Some(v) = tx.get(ip, None).await? {
-				// Then we take the old value of the appending value as the initial indexing value
+				// Then we take the old value of the appending value as the initial indexing
+				// value
 				let pa: PrimaryAppending = revision::from_slice(&v)?;
 				let ia = self.new_ia_key(pa.0)?;
 				let v = tx
@@ -615,8 +621,9 @@ impl Building {
 
 	/// Check if the indexing process is aborting.
 	async fn is_aborted(&self) -> bool {
-		// We use `Ordering::Relaxed` as there are no shared data that would require any synchronization.
-		// This method is only called by the single thread building the index.
+		// We use `Ordering::Relaxed` as there are no shared data that would require any
+		// synchronization. This method is only called by the single thread building
+		// the index.
 		if self.aborted.load(Ordering::Relaxed) {
 			self.set_status(BuildingStatus::Aborted).await;
 			true

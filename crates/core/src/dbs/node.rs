@@ -1,12 +1,13 @@
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::Value;
-use revision::revisioned;
-use revision::Error;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::ops::{Add, Sub};
 use std::time::Duration;
+
+use revision::{revisioned, Error};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Value;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -34,6 +35,7 @@ impl Node {
 			..Default::default()
 		}
 	}
+
 	/// Mark this node as archived
 	pub fn archive(&self) -> Self {
 		Node {
@@ -41,18 +43,22 @@ impl Node {
 			..self.to_owned()
 		}
 	}
+
 	/// Check if this node is active
 	pub fn id(&self) -> Uuid {
 		self.id
 	}
+
 	/// Check if this node is active
 	pub fn is_active(&self) -> bool {
 		!self.gc
 	}
+
 	/// Check if this node is archived
 	pub fn is_archived(&self) -> bool {
 		self.gc
 	}
+
 	// Return the node id if archived
 	pub fn archived(&self) -> Option<Uuid> {
 		match self.is_archived() {
@@ -60,23 +66,28 @@ impl Node {
 			false => None,
 		}
 	}
+
 	// Sets the default gc value for old nodes
 	fn default_id(_revision: u16) -> Result<Uuid, Error> {
 		Ok(Uuid::default())
 	}
+
 	// Sets the default gc value for old nodes
 	fn default_hb(_revision: u16) -> Result<Timestamp, Error> {
 		Ok(Timestamp::default())
 	}
+
 	// Sets the default gc value for old nodes
 	fn default_gc(_revision: u16) -> Result<bool, Error> {
 		Ok(true)
 	}
+
 	// Sets the default gc value for old nodes
 	fn convert_name(&mut self, _revision: u16, value: String) -> Result<(), Error> {
 		self.id = Uuid::parse_str(&value).unwrap();
 		Ok(())
 	}
+
 	// Sets the default gc value for old nodes
 	fn convert_heartbeat(&mut self, _revision: u16, value: Timestamp) -> Result<(), Error> {
 		self.hb = value;
@@ -105,9 +116,9 @@ impl InfoStructure for Node {
 	}
 }
 
-// This struct is meant to represent a timestamp that can be used to partially order
-// events in a cluster. It should be derived from a timestamp oracle, such as the
-// one available in TiKV via the client `TimestampExt` implementation.
+// This struct is meant to represent a timestamp that can be used to partially
+// order events in a cluster. It should be derived from a timestamp oracle, such
+// as the one available in TiKV via the client `TimestampExt` implementation.
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
 #[non_exhaustive]
@@ -125,6 +136,7 @@ impl From<u64> for Timestamp {
 
 impl Add<Duration> for Timestamp {
 	type Output = Timestamp;
+
 	fn add(self, rhs: Duration) -> Self::Output {
 		Timestamp {
 			value: self.value.wrapping_add(rhs.as_millis() as u64),
@@ -134,6 +146,7 @@ impl Add<Duration> for Timestamp {
 
 impl Sub<Duration> for Timestamp {
 	type Output = Timestamp;
+
 	fn sub(self, rhs: Duration) -> Self::Output {
 		Timestamp {
 			value: self.value.wrapping_sub(rhs.as_millis() as u64),
@@ -155,10 +168,12 @@ impl InfoStructure for Timestamp {
 
 #[cfg(test)]
 mod test {
-	use crate::dbs::node::Timestamp;
+	use std::time::Duration;
+
 	use chrono::prelude::Utc;
 	use chrono::TimeZone;
-	use std::time::Duration;
+
+	use crate::dbs::node::Timestamp;
 
 	#[test]
 	fn timestamps_can_be_added_duration() {

@@ -1,6 +1,8 @@
-use crate::sql::{id::Gen, id::Id as NewId, Array, IdRange, Object};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+use crate::sql::id::{Gen, Id as NewId};
+use crate::sql::{Array, IdRange, Object};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
@@ -55,12 +57,10 @@ impl From<Id> for NewId {
 pub mod key {
 	use serde::{Deserialize, Serialize};
 
-	use crate::{
-		kvs::impl_key,
-		sql::{id::Id as NewId, Dir},
-	};
-
 	use super::Id;
+	use crate::kvs::impl_key;
+	use crate::sql::id::Id as NewId;
+	use crate::sql::Dir;
 
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 	#[non_exhaustive]
@@ -81,32 +81,30 @@ pub mod key {
 	impl_key!(Graph<'a>);
 
 	impl Graph<'_> {
-		/*
-		pub fn new(
-			ns: &'a str,
-			db: &'a str,
-			tb: &'a str,
-			id: Id,
-			eg: Dir,
-			ft: &'a str,
-			fk: &'a Id,
-		) -> Self {
-			Self {
-				__: b'/',
-				_a: b'*',
-				ns,
-				_b: b'*',
-				db,
-				_c: b'*',
-				tb,
-				_d: b'~',
-				id,
-				eg,
-				ft,
-				fk: fk.to_owned(),
-			}
-		}
-		*/
+		// pub fn new(
+		// ns: &'a str,
+		// db: &'a str,
+		// tb: &'a str,
+		// id: Id,
+		// eg: Dir,
+		// ft: &'a str,
+		// fk: &'a Id,
+		// ) -> Self {
+		// Self {
+		// __: b'/',
+		// _a: b'*',
+		// ns,
+		// _b: b'*',
+		// db,
+		// _c: b'*',
+		// tb,
+		// _d: b'~',
+		// id,
+		// eg,
+		// ft,
+		// fk: fk.to_owned(),
+		// }
+		// }
 
 		pub fn fix(&self) -> Option<crate::key::graph::Graph> {
 			let fixed = match (self.id.fix(), self.fk.fix()) {
@@ -160,21 +158,19 @@ pub mod key {
 	impl_key!(Thing<'a>);
 
 	impl Thing<'_> {
-		/*
-		pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {
-			Self {
-				__: b'/',
-				_a: b'*',
-				ns,
-				_b: b'*',
-				db,
-				_c: b'*',
-				tb,
-				_d: b'*',
-				id,
-			}
-		}
-		*/
+		// pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {
+		// Self {
+		// __: b'/',
+		// _a: b'*',
+		// ns,
+		// _b: b'*',
+		// db,
+		// _c: b'*',
+		// tb,
+		// _d: b'*',
+		// id,
+		// }
+		// }
 
 		pub fn fix(&self) -> Option<crate::key::thing::Thing> {
 			self.id.fix().map(|id| crate::key::thing::new(self.ns, self.db, self.tb, &id))

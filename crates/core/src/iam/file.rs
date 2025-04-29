@@ -1,8 +1,10 @@
-use crate::cnf::FILE_ALLOWLIST;
-use crate::err::Error;
-use path_clean::PathClean;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use path_clean::PathClean;
+
+use crate::cnf::FILE_ALLOWLIST;
+use crate::err::Error;
 
 pub(crate) fn is_path_allowed(path: &Path) -> Result<PathBuf, Error> {
 	check_is_path_allowed(path, &FILE_ALLOWLIST)
@@ -66,8 +68,9 @@ pub(crate) fn extract_allowed_paths(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use tempfile::tempdir;
+
+	use super::*;
 
 	#[test]
 	fn test_empty_allow_list_allows_access() {

@@ -1,7 +1,9 @@
-use crate::sql::{Object, Uuid, Value};
+use std::fmt::{self, Debug, Display};
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Debug, Display};
+
+use crate::sql::{Object, Uuid, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

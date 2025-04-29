@@ -1,3 +1,12 @@
+use std::fmt::{self, Display};
+#[cfg(target_family = "wasm")]
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use crate::ctx::Context;
 #[cfg(target_family = "wasm")]
 use crate::dbs::Force;
@@ -12,13 +21,6 @@ use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::sql::{Base, Ident, Idioms, Index, Part, Strand, Value};
 #[cfg(target_family = "wasm")]
 use crate::sql::{Output, Values};
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-#[cfg(target_family = "wasm")]
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -99,7 +101,8 @@ impl DefineIndexStatement {
 		txn.set(
 			key,
 			revision::to_vec(&DefineIndexStatement {
-				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
+				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to
+				// schema
 				if_not_exists: false,
 				overwrite: false,
 				concurrently: false,

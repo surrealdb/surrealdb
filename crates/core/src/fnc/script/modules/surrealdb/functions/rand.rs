@@ -1,4 +1,5 @@
-use js::{prelude::Rest, Ctx};
+use js::prelude::Rest;
+use js::Ctx;
 
 use super::run;
 use crate::sql::value::Value;
@@ -23,6 +24,7 @@ impl js::module::ModuleDef for Package {
 		decls.declare("uuid")?;
 		Ok(())
 	}
+
 	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &js::module::Exports<'js>) -> js::Result<()> {
 		let default = js::Function::new(ctx.clone(), |ctx: Ctx<'js>, args: Rest<Value>| {
 			run(ctx, "rand", args.0)

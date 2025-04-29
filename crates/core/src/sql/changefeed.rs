@@ -1,11 +1,12 @@
+use std::fmt::{self, Display, Formatter};
+use std::{str, time};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::sql::duration::Duration;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use std::str;
-use std::time;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

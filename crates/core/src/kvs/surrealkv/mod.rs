@@ -2,16 +2,15 @@
 
 mod cnf;
 
+use std::fmt::Debug;
+use std::ops::Range;
+
+use surrealkv::{Durability, Mode, Options, Store, Transaction as Tx};
+
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::surrealkv::cnf::commit_pool;
 use crate::kvs::{Check, Key, KeyEncode, Val, Version};
-use std::fmt::Debug;
-use std::ops::Range;
-use surrealkv::Options;
-use surrealkv::Store;
-use surrealkv::Transaction as Tx;
-use surrealkv::{Durability, Mode};
 
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
@@ -78,6 +77,7 @@ impl Datastore {
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
+
 	pub(crate) fn parse_start_string(start: &str) -> Result<(&str, bool), Error> {
 		let (scheme, path) = start
 			// Support conventional paths like surrealkv:///absolute/path

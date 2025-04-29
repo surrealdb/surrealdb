@@ -1,3 +1,11 @@
+use std::fmt::{self, Display, Write};
+use std::sync::Arc;
+
+use reblessive::tree::Stk;
+use revision::{revisioned, Error as RevisionError};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
 use super::DefineFieldStatement;
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
@@ -5,22 +13,24 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
+use crate::sql::changefeed::ChangeFeed;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::paths::{IN, OUT};
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::statements::UpdateStatement;
 use crate::sql::{
-	changefeed::ChangeFeed, statements::UpdateStatement, Base, Ident, Output, Permissions, Strand,
-	Value, Values, View,
+	Base,
+	Ident,
+	Idiom,
+	Kind,
+	Output,
+	Permissions,
+	Strand,
+	TableType,
+	Value,
+	Values,
+	View,
 };
-use crate::sql::{Idiom, Kind, TableType};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use revision::Error as RevisionError;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 6)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -173,14 +183,17 @@ impl DefineTableStatement {
 	pub fn is_relation(&self) -> bool {
 		matches!(self.kind, TableType::Relation(_))
 	}
+
 	/// Checks if this table allows graph edges / relations
 	pub fn allows_relation(&self) -> bool {
 		matches!(self.kind, TableType::Relation(_) | TableType::Any)
 	}
+
 	/// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
 		matches!(self.kind, TableType::Normal | TableType::Any)
 	}
+
 	/// Used to add relational fields to existing table records
 	pub async fn add_in_out_fields(
 		txn: &Transaction,

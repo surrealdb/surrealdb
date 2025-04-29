@@ -1,19 +1,20 @@
-use crate::cli::abstraction::auth::Error as SurrealAuthError;
+use std::io::Error as IoError;
+use std::string::FromUtf8Error as Utf8Error;
+
 use axum::response::{IntoResponse, Response};
-use axum::Error as AxumError;
-use axum::Json;
+use axum::{Error as AxumError, Json};
 use base64::DecodeError as Base64Error;
 use http::{HeaderName, StatusCode};
 use opentelemetry::global::Error as OpentelemetryError;
 use reqwest::Error as ReqwestError;
 use serde::Serialize;
-use std::io::Error as IoError;
-use std::string::FromUtf8Error as Utf8Error;
 use surrealdb::error::Db as SurrealDbError;
 use surrealdb::iam::Error as SurrealIamError;
 use surrealdb::Error as SurrealError;
 use surrealdb_core::api::err::ApiError;
 use thiserror::Error;
+
+use crate::cli::abstraction::auth::Error as SurrealAuthError;
 
 #[derive(Error, Debug)]
 pub enum Error {

@@ -1,9 +1,10 @@
-use criterion::measurement::WallTime;
-use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
-use radix_trie::{Trie, TrieCommon, TrieKey};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::time::Duration;
+
+use criterion::measurement::WallTime;
+use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
+use radix_trie::{Trie, TrieCommon, TrieKey};
 use surrealdb::sql::{value, Array, Id, Thing};
 
 // Common use case: VectorSearch
