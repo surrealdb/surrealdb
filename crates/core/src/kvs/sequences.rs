@@ -6,12 +6,14 @@ use crate::key::sequence::st::St;
 use crate::key::sequence::Prefix;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KeyEncode, LockType, Transaction, TransactionType};
+use crate::sql::statements::define::DefineSequenceStatement;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use rand::{thread_rng, Rng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use uuid::Uuid;
 
@@ -95,7 +97,7 @@ impl Sequences {
 		match self.sequences.entry(key) {
 			Entry::Occupied(mut e) => e.get_mut().next(ctx, opt, sq, seq.batch).await,
 			Entry::Vacant(e) => {
-				let s = Sequence::load(self.tf.clone(), ctx, opt, sq, seq.batch, seq.start).await?;
+				let s = Sequence::load(self.tf.clone(), ctx, opt, sq, &seq).await?;
 				e.insert(s).next(ctx, opt, sq, seq.batch).await
 			}
 		}
@@ -105,6 +107,7 @@ impl Sequences {
 struct Sequence {
 	tf: TransactionFactory,
 	st: SequenceState,
+	timeout: Option<Duration>,
 	to: i64,
 	key: Vec<u8>,
 }
@@ -115,8 +118,7 @@ impl Sequence {
 		ctx: &Context,
 		opt: &Options,
 		sq: &str,
-		batch: u32,
-		start: i64,
+		seq: &DefineSequenceStatement,
 	) -> Result<Self, Error> {
 		let (ns, db) = opt.ns_db()?;
 		let nid = opt.id()?;
@@ -125,16 +127,18 @@ impl Sequence {
 			revision::from_slice(&v)?
 		} else {
 			SequenceState {
-				next: start,
+				next: seq.start,
 			}
 		};
-		let (from, to) = Self::check_batch_allocation(&tf, ns, db, sq, nid, st.next, batch).await?;
+		let (from, to) =
+			Self::check_batch_allocation(&tf, ns, db, sq, nid, st.next, seq.batch).await?;
 		st.next = from;
 		Ok(Self {
 			tf,
 			key,
 			to,
 			st,
+			timeout: seq.timeout.as_ref().map(|d| d.0 .0),
 		})
 	}
 
@@ -146,8 +150,16 @@ impl Sequence {
 		batch: u32,
 	) -> Result<i64, Error> {
 		if self.st.next >= self.to {
-			(self.st.next, self.to) =
-				Self::find_batch_allocation(&self.tf, ctx, opt, seq, self.st.next, batch).await?;
+			(self.st.next, self.to) = Self::find_batch_allocation(
+				&self.tf,
+				ctx,
+				opt,
+				seq,
+				self.st.next,
+				batch,
+				self.timeout,
+			)
+			.await?;
 		}
 		let v = self.st.next;
 		self.st.next += 1;
@@ -165,19 +177,37 @@ impl Sequence {
 		seq: &str,
 		next: i64,
 		batch: u32,
+		to: Option<Duration>,
 	) -> Result<(i64, i64), Error> {
 		let (ns, db) = opt.ns_db()?;
 		let nid = opt.id()?;
 		// Use for exponential backoff
-		let mut tempo = 5;
-		// Loop until we have a successful allocation
+		let mut rng = thread_rng();
+		let mut tempo = 4;
+		const MAX_BACKOFF: u64 = 32_768;
+		let start = if to.is_some() {
+			Some(Instant::now())
+		} else {
+			None
+		};
+		// Loop until we have a successful allocation.
+		// We check the timeout inherited from the context
 		while !ctx.is_timedout().await? {
+			if let (Some(ref start), Some(ref to)) = (start, to) {
+				// We check the time associated with the sequence
+				if start.elapsed().ge(to) {
+					break;
+				}
+			}
 			if let Ok(r) = Self::check_batch_allocation(tf, ns, db, seq, nid, next, batch).await {
 				return Ok(r);
 			}
-			// exponential backoff
-			sleep(Duration::from_millis(tempo)).await;
-			tempo *= 2;
+			// exponential backoff with full jitter
+			let sleep_ms = rng.gen_range(1..=tempo);
+			sleep(Duration::from_millis(sleep_ms)).await;
+			if tempo < MAX_BACKOFF {
+				tempo *= 2;
+			}
 		}
 		Err(Error::QueryTimedout)
 	}
