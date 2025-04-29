@@ -189,6 +189,7 @@ mod tests {
 	use crate::sql::Number;
 	use crate::sql::*;
 	use ::serde::Serialize;
+	use graph::{GraphSubject, GraphSubjects};
 	use std::ops::Bound;
 
 	#[test]
@@ -403,7 +404,7 @@ mod tests {
 		let edges = Box::new(Edges {
 			dir: Dir::In,
 			from: sql::thing("foo:bar").unwrap(),
-			what: Tables(vec!["foo".into()]),
+			what: GraphSubjects(vec![GraphSubject::Table(Table("foo".into()))]),
 		});
 		let value = to_value(edges.clone()).unwrap();
 		let expected = Value::Edges(edges);
