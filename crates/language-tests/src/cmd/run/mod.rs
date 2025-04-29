@@ -334,8 +334,6 @@ async fn run_test_with_dbs(
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
 
-	eprintln!("\n\nRunning test `{}`: ({timeout_duration:?})\n\n", set[id].path);
-
 	let mut import_session = Session::owner();
 	if let Some(ns) = session.ns.as_ref() {
 		import_session = import_session.with_ns(ns)
