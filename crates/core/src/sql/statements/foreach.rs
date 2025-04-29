@@ -68,7 +68,7 @@ impl ForeachStatement {
 					Value::Array(arr) => ForeachIter::Array(arr.into_iter()),
 					v => {
 						return Err(ControlFlow::from(Error::InvalidStatementTarget {
-							value: format!("Expected array, got {v}"),
+							value: v.to_string(),
 						}));
 					}
 				}
@@ -76,7 +76,7 @@ impl ForeachStatement {
 
 			v => {
 				return Err(ControlFlow::from(Error::InvalidStatementTarget {
-					value: format!("Expected array or range, got {v}"),
+					value: v.to_string(),
 				}))
 			}
 		};
