@@ -897,6 +897,7 @@ impl Value {
 			Value::Subquery(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Expression(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Refs(v) => v.compute(ctx, opt, doc).await,
+			Value::Edges(v) => v.compute(stk, ctx, opt, doc).await,
 			_ => Ok(self.to_owned()),
 		};
 
@@ -1099,13 +1100,13 @@ impl TryNeg for Value {
 /// Macro implementing conversion methods for the variants of the value enum.
 macro_rules! subtypes {
 	($($name:ident$( ( $($t:tt)* ) )? => ($is:ident,$as:ident,$into:ident)),*$(,)?) => {
-		pub enum Type{
+		pub enum Type {
 			$($name),*
 		}
 
 		impl Value {
 
-			pub fn type_of(&self) -> Type{
+			pub fn type_of(&self) -> Type {
 				match &self{
 					$(subtypes!{@pat $name $( ($($t)*) )?} => Type::$name),*
 				}

@@ -264,6 +264,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			functions: {},
 			models: {},
 			params: {},
+			sequences: {},
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",

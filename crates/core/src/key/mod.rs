@@ -32,6 +32,7 @@
 /// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 /// crate::key::database::ml             /*{ns}*{db}!ml{ml}{vn}
 /// crate::key::database::pa             /*{ns}*{db}!pa{pa}
+/// crate::key::database::sq             /*{ns}*{db}!sq{sq}
 /// crate::key::database::tb             /*{ns}*{db}!tb{tb}
 /// crate::key::database::ti             /+{ns id}*{db id}!ti
 /// crate::key::database::ts             /*{ns}*{db}!ts{ts}
@@ -70,6 +71,9 @@
 /// crate::key::graph                    /*{ns}*{db}*{tb}~{id}{eg}{ft}{fk}
 /// crate::key::ref                      /*{ns}*{db}*{tb}&{id}{ft}{ff}{fk}
 ///
+/// crate::key::sequence::st             /*{ns}*{db}*{tb}*{sq}!st{id}
+/// crate::key::sequence::ba             /*{ns}*{db}*{tb}*{sq}!ba{start}
+///
 pub(crate) mod category;
 pub(crate) mod change;
 pub(crate) mod database;
@@ -80,6 +84,7 @@ pub(crate) mod namespace;
 pub(crate) mod node;
 pub(crate) mod r#ref;
 pub(crate) mod root;
+pub(crate) mod sequence;
 pub(crate) mod table;
 pub(crate) mod thing;
 pub(crate) mod version;

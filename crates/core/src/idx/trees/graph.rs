@@ -124,7 +124,7 @@ where
 		for (n, e) in g {
 			let edges: HashSet<ElementId> = e.into_iter().collect();
 			let n_edges: Option<HashSet<ElementId>> =
-				self.get_edges(&n).map(|e| e.iter().cloned().collect());
+				self.get_edges(&n).map(|e| e.iter().copied().collect());
 			assert_eq!(n_edges, Some(edges), "{n:?}");
 		}
 	}
@@ -186,7 +186,7 @@ mod tests {
 		let res = g.remove_node_and_bidirectional_edges(&2);
 		assert_eq!(
 			res.map(|v| {
-				let mut v: Vec<ElementId> = v.iter().cloned().collect();
+				let mut v: Vec<ElementId> = v.iter().copied().collect();
 				v.sort();
 				v
 			}),

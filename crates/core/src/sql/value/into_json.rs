@@ -44,6 +44,7 @@ impl From<Value> for serde_json::Value {
 			Value::Constant(constant) => match constant.value() {
 				ConstantValue::Datetime(datetime) => json!(datetime.0),
 				ConstantValue::Float(float) => float.into(),
+				ConstantValue::Duration(duration) => duration.to_string().into(),
 			},
 			Value::Cast(cast) => json!(cast),
 			Value::Function(function) => json!(function),

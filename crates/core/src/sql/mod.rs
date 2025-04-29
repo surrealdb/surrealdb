@@ -127,6 +127,7 @@ pub use self::kind::Literal;
 pub use self::limit::Limit;
 pub use self::mock::Mock;
 pub use self::model::Model;
+pub use self::number::DecimalExt;
 pub use self::number::Number;
 pub use self::object::Object;
 pub use self::operation::Operation;
