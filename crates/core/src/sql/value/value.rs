@@ -819,27 +819,6 @@ impl Value {
 		}
 	}
 
-	pub fn can_be_range_bound(&self) -> bool {
-		matches!(
-			self,
-			Value::None
-				| Value::Null
-				| Value::Array(_)
-				| Value::Block(_)
-				| Value::Bool(_)
-				| Value::Datetime(_)
-				| Value::Duration(_)
-				| Value::Geometry(_)
-				| Value::Number(_)
-				| Value::Object(_)
-				| Value::Param(_)
-				| Value::Strand(_)
-				| Value::Subquery(_)
-				| Value::Table(_)
-				| Value::Uuid(_)
-		)
-	}
-
 	/// Validate that a Value is computed or contains only computed Values
 	pub fn validate_computed(&self) -> Result<(), Error> {
 		use Value::*;
