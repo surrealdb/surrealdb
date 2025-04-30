@@ -18,6 +18,7 @@ use super::Raw;
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery {
 	/// Converts an input into SQL statements
+	#[deprecated(since = "2.3.0")]
 	fn into_query(self) -> Result<Vec<Statement>>;
 
 	/// Not public API
@@ -213,9 +214,11 @@ where
 	Response: DeserializeOwned,
 {
 	/// Extracts and deserializes a query result from a query response
+	#[deprecated(since = "2.3.0")]
 	fn query_result(self, response: &mut QueryResponse) -> Result<Response>;
 
 	/// Extracts the statistics from a query response
+	#[deprecated(since = "2.3.0")]
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
 		response.results.get(&0).map(|x| x.0)
 	}
@@ -462,6 +465,7 @@ where
 /// A way to take a query stream future from a query response
 pub trait QueryStream<R> {
 	/// Retrieves the query stream future
+	#[deprecated(since = "2.3.0")]
 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<R>>;
 }
 

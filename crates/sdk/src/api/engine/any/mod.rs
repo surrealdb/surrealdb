@@ -146,6 +146,7 @@ use url::Url;
 /// A trait for converting inputs to a server address object
 pub trait IntoEndpoint {
 	/// Converts an input into a server address object
+	#[deprecated(since = "2.3.0")]
 	fn into_endpoint(self) -> Result<Endpoint>;
 }
 

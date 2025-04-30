@@ -14,6 +14,7 @@ pub(crate) struct Failure {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[non_exhaustive]
+#[deprecated(since = "2.3.0")]
 pub enum ResponseAction {
 	Create,
 	Update,
