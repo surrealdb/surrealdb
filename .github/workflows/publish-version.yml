@@ -573,8 +573,13 @@ jobs:
           sed -i "s/package = \"surrealdb-core\"/package = \"surrealdb-core-${environment}\"/" Cargo.toml
 
           # Patch the description
-          sed -i "s#^description = \".*\"#description = \"A ${environment} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
-          sed -i "s#^description = \".*\"#description = \"A ${environment} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
+          if [[ $environment == 'alpha' ]]; then
+            start="An"
+          else
+            start="A"
+          fi
+          sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
+          sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
 
           # Temporarily commit patches
           # These should not be pushed back to the repo
