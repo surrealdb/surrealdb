@@ -598,7 +598,7 @@ pub async fn idiom(
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value, Error> {
-	ctx.check_allowed_function(&format!("{}.{name}", value.kindof()))?;
+	ctx.check_allowed_function(&idiom_name_to_normal(value.kindof(), name))?;
 	let args = [vec![value.clone()], args].concat();
 	let specific = match value {
 		Value::Array(_) => {
@@ -992,6 +992,99 @@ fn get_execution_context<'a>(
 		}
 	}
 	None
+}
+
+fn idiom_name_to_normal(kind: &str, name: &str) -> String {
+	let (kind, name): (&str, &str) = match kind {
+		"array" => match name {
+			"vector_add" => return "vector::add".to_string(),
+			"vector_angle" => return "vector::angle".to_string(),
+			"vector_cross" => return "vector::cross".to_string(),
+			"vector_dot" => return "vector::dot".to_string(),
+			"vector_divide" => return "vector::divide".to_string(),
+			"vector_magnitude" => return "vector::magnitude".to_string(),
+			"vector_multiply" => return "vector::multiply".to_string(),
+			"vector_normalize" => return "vector::normalize".to_string(),
+			"vector_project" => return "vector::project".to_string(),
+			"vector_scale" => return "vector::scale".to_string(),
+			"vector_subtract" => return "vector::subtract".to_string(),
+			"vector_distance_chebyshev" => return "vector::distance::chebyshev".to_string(),
+			"vector_distance_euclidean" => return "vector::distance::euclidean".to_string(),
+			"vector_distance_hamming" => return "vector::distance::hamming".to_string(),
+			"vector_distance_knn" => return "vector::distance::knn".to_string(),
+			"vector_distance_mahalanobis" => return "vector::distance::mahalanobis".to_string(),
+			"vector_distance_manhattan" => return "vector::distance::manhattan".to_string(),
+			"vector_distance_minkowski" => return "vector::distance::minkowski".to_string(),
+			"vector_similarity_cosine" => return "vector::similarity::cosine".to_string(),
+			"vector_similarity_jaccard" => return "vector::similarity::jaccard".to_string(),
+			"vector_similarity_pearson" => return "vector::similarity::pearson".to_string(),
+			"vector_similarity_spearman" => return "vector::similarity::spearman".to_string(),
+			_ => (kind, name),
+		},
+		"geometry" => match name {
+			"hash_decode" => return "geo::hash::decode".to_string(),
+			"hash_encode" => return "geo::hash::encode".to_string(),
+			"is_valid" => return "geo::is::valid".to_string(),
+			_ => ("geo", name),
+		},
+		"number" => ("math", name),
+		"string" => match name {
+			"distance_damerau_levenshtein" => {
+				return "string::distance::damerau_levenshtein".to_string()
+			}
+			"distance_hamming" => return "string::distance::hamming".to_string(),
+			"distance_levenshtein" => return "string::distance::levenshtein".to_string(),
+			"distance_normalized_damerau_levenshtein" => {
+				return "string::distance::normalized_damerau_levenshtein".to_string()
+			}
+			"distance_normalized_levenshtein" => {
+				return "string::distance::normalized_levenshtein".to_string()
+			}
+			"html_encode" => return "string::html::encode".to_string(),
+			"html_sanitize" => return "string::html::sanitize".to_string(),
+			"is_alphanum" => return "string::is::alphanum".to_string(),
+			"is_alpha" => return "string::is::alpha".to_string(),
+			"is_ascii" => return "string::is::ascii".to_string(),
+			"is_datetime" => return "string::is::datetime".to_string(),
+			"is_domain" => return "string::is::domain".to_string(),
+			"is_email" => return "string::is::email".to_string(),
+			"is_hexadecimal" => return "string::is::hexadecimal".to_string(),
+			"is_ip" => return "string::is::ip".to_string(),
+			"is_ipv4" => return "string::is::ipv4".to_string(),
+			"is_ipv6" => return "string::is::ipv6".to_string(),
+			"is_latitude" => return "string::is::latitude".to_string(),
+			"is_longitude" => return "string::is::longitude".to_string(),
+			"is_numeric" => return "string::is::numeric".to_string(),
+			"is_semver" => return "string::is::semver".to_string(),
+			"is_url" => return "string::is::url".to_string(),
+			"is_ulid" => return "string::is::ulid".to_string(),
+			"is_uuid" => return "string::is::uuid".to_string(),
+			"is_record" => return "string::is::record".to_string(),
+			"similarity_fuzzy" => return "string::similarity::fuzzy".to_string(),
+			"similarity_jaro" => return "string::similarity::jaro".to_string(),
+			"similarity_jaro_winkler" => return "string::similarity::jaro_winkler".to_string(),
+			"similarity_smithwaterman" => return "string::similarity::smithwaterman".to_string(),
+			"similarity_sorensen_dice" => return "string::similarity::sorensen_dice".to_string(),
+			"semver_compare" => return "string::semver::compare".to_string(),
+			"semver_major" => return "string::semver::major".to_string(),
+			"semver_minor" => return "string::semver::minor".to_string(),
+			"semver_patch" => return "string::semver::patch".to_string(),
+			"semver_inc_major" => return "string::semver::inc::major".to_string(),
+			"semver_inc_minor" => return "string::semver::inc::minor".to_string(),
+			"semver_inc_patch" => return "string::semver::inc::patch".to_string(),
+			"semver_set_major" => return "string::semver::set::major".to_string(),
+			"semver_set_minor" => return "string::semver::set::minor".to_string(),
+			"semver_set_patch" => return "string::semver::set::patch".to_string(),
+			_ => (kind, name),
+		},
+		"datetime" => match name {
+			"is_leap_year" => return "time::is::leap_year".to_string(),
+			_ => ("time", name),
+		},
+		_ => (kind, name),
+	};
+
+	format!("{kind}::{name}")
 }
 
 #[cfg(test)]

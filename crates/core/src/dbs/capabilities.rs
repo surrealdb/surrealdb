@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
-use std::iter::Peekable;
 use std::net::IpAddr;
-use std::str::Chars;
 
 use crate::iam::{Auth, Level};
 use crate::rpc::Method;
@@ -16,93 +14,38 @@ pub trait Target<Item: ?Sized = Self> {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 #[non_exhaustive]
-pub struct FuncTarget(pub String, pub FuncTargetKind, Option<String>);
+pub struct FuncTarget(pub String, pub Option<String>);
 
 impl fmt::Display for FuncTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		if self.1.is_normal() {
-			write!(f, "{}", self.0)?;
-		} else {
-			write!(f, "<{}>", self.0)?;
-		}
-
-		write!(f, "{}", self.1)?;
-
-		if let Some(ref name) = self.2 {
-			write!(f, "{name}")
-		} else {
-			write!(f, "*")
-		}
-	}
-}
-
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum FuncTargetKind {
-	Normal,
-	Idiom,
-}
-
-impl FuncTargetKind {
-	pub fn is_idiom(&self) -> bool {
-		matches!(self, Self::Idiom)
-	}
-	pub fn is_normal(&self) -> bool {
-		matches!(self, Self::Normal)
-	}
-	pub fn eat_delimiter(&self, chars: &mut Peekable<Chars>) -> Result<(), ParseFuncTargetError> {
-		if self.is_idiom() && matches!(chars.next(), Some('.')) {
-		} else if matches!(chars.next(), Some(':')) && matches!(chars.next(), Some(':')) {
-			return Ok(());
-		}
-
-		Err(ParseFuncTargetError::InvalidDelimiter)
-	}
-}
-
-impl fmt::Display for FuncTargetKind {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}", self.as_ref())
-	}
-}
-
-impl AsRef<str> for FuncTargetKind {
-	fn as_ref(&self) -> &str {
-		match self {
-			Self::Normal => "::",
-			Self::Idiom => ".",
+		match &self.1 {
+			Some(name) => write!(f, "{}:{name}", self.0),
+			None => write!(f, "{}::*", self.0),
 		}
 	}
 }
 
 impl Target for FuncTarget {
 	fn matches(&self, elem: &FuncTarget) -> bool {
-		if self.1 != elem.1 {
-			return false;
-		}
-
-		if self.0 != elem.0 {
-			return false;
-		}
-
-		if let Some(name) = self.2.as_ref() {
-			elem.2.as_ref().is_some_and(|n| n == name)
-		} else {
-			true
+		match self {
+			Self(family, Some(name)) => {
+				family == &elem.0 && (elem.1.as_ref().is_some_and(|n| n == name))
+			}
+			Self(family, None) => family == &elem.0,
 		}
 	}
 }
 
 impl Target<str> for FuncTarget {
 	fn matches(&self, elem: &str) -> bool {
-		if let Some(x) = self.2.as_ref() {
-			let Some((f, r)) = elem.split_once(self.1.as_ref()) else {
+		if let Some(x) = self.1.as_ref() {
+			let Some((f, r)) = elem.split_once("::") else {
 				return false;
 			};
 
 			f == self.0 && r == x
 		} else {
-			let f = elem.split_once(self.1.as_ref()).map(|(f, _)| f).unwrap_or(elem);
+			let f = elem.split_once("::").map(|(f, _)| f).unwrap_or(elem);
 			f == self.0
 		}
 	}
@@ -112,10 +55,6 @@ impl Target<str> for FuncTarget {
 pub enum ParseFuncTargetError {
 	InvalidWildcardFamily,
 	InvalidName,
-	InvalidFamily,
-	InvalidDelimiter,
-	Unreachable,
-	ExpectedEof,
 }
 
 impl std::error::Error for ParseFuncTargetError {}
@@ -131,18 +70,6 @@ impl fmt::Display for ParseFuncTargetError {
 					"invalid function target wildcard family, only first part of function can be wildcarded"
 				)
 			}
-			ParseFuncTargetError::InvalidFamily => {
-				write!(f, "invalid function target family")
-			}
-			ParseFuncTargetError::InvalidDelimiter => {
-				write!(f, "invalid function target delimiter")
-			}
-			ParseFuncTargetError::Unreachable => {
-				write!(f, "reached an unreachable path")
-			}
-			ParseFuncTargetError::ExpectedEof => {
-				write!(f, "expected the end of the function target")
-			}
 		}
 	}
 }
@@ -152,82 +79,31 @@ impl std::str::FromStr for FuncTarget {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		let s = s.trim();
-		let mut chars: Peekable<Chars> = s.chars().peekable();
 
-		// What type of family is this?
-		let first = chars.next().ok_or(ParseFuncTargetError::InvalidFamily)?;
-		let mut family = String::new();
-		let kind = if first == '<' {
-			FuncTargetKind::Idiom
-		} else if first.is_ascii_alphanumeric() {
-			family.push(first);
-			FuncTargetKind::Normal
+		if s.is_empty() {
+			return Err(ParseFuncTargetError::InvalidName);
+		}
+
+		if let Some(family) = s.strip_suffix("::*") {
+			if family.contains("::") {
+				return Err(ParseFuncTargetError::InvalidWildcardFamily);
+			}
+
+			if !family.bytes().all(|x| x.is_ascii_alphanumeric()) {
+				return Err(ParseFuncTargetError::InvalidName);
+			}
+
+			return Ok(FuncTarget(family.to_string(), None));
+		}
+
+		if !s.bytes().all(|x| x.is_ascii_alphanumeric() || x == b':') {
+			return Err(ParseFuncTargetError::InvalidName);
+		}
+
+		if let Some((first, rest)) = s.split_once("::") {
+			Ok(FuncTarget(first.to_string(), Some(rest.to_string())))
 		} else {
-			// The input was empty, throw an error
-			return Err(ParseFuncTargetError::InvalidFamily);
-		};
-
-		// Try to eat the family's chars
-		while let Some(x) = chars.peek() {
-			if x.is_ascii_alphanumeric() {
-				family.push(chars.next().ok_or(ParseFuncTargetError::Unreachable)?)
-			} else {
-				break;
-			}
-		}
-
-		// Idiom families should be closed off with a `>` char again
-		if kind.is_idiom() && !matches!(chars.next(), Some('>')) {
-			return Err(ParseFuncTargetError::InvalidFamily);
-		}
-
-		// If this is the end, consider it a wildcard
-		if chars.peek().is_none() {
-			return Ok(FuncTarget(family, kind, None));
-		}
-
-		// Expect a delimiter
-		kind.eat_delimiter(&mut chars)?;
-		// Is this a wildcard?
-		if chars.peek() == Some(&'*') {
-			chars.next().ok_or(ParseFuncTargetError::Unreachable)?;
-			// We should have reached the end of the input now
-			if chars.peek().is_some() {
-				return Err(ParseFuncTargetError::ExpectedEof);
-			}
-
-			// Ok
-			return Ok(FuncTarget(family, kind, None));
-		}
-
-		// Try to parse the name
-		let mut name = String::new();
-		loop {
-			// Let's eat a segment
-			'segment: while let Some(x) = chars.peek() {
-				if x.is_ascii_alphanumeric() {
-					name.push(chars.next().ok_or(ParseFuncTargetError::Unreachable)?)
-				} else {
-					break 'segment;
-				}
-			}
-
-			// If this a normal function, and we are not yet done, eat another delimiter and continue to the next segment
-			if kind.is_normal() && chars.peek().is_some() {
-				kind.eat_delimiter(&mut chars)?;
-				name += kind.as_ref();
-				continue;
-			}
-
-			break;
-		}
-
-		if chars.peek().is_none() {
-			// Ok
-			Ok(FuncTarget(family, kind, Some(name)))
-		} else {
-			// We should have reached the end of the input now
-			Err(ParseFuncTargetError::ExpectedEof)
+			Ok(FuncTarget(s.to_string(), None))
 		}
 	}
 }
