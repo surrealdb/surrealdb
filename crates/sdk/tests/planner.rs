@@ -2439,13 +2439,13 @@ async fn select_from_standard_index() -> Result<(), Error> {
 		CREATE session:4 SET time = null;
 		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
 		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
-		SELECT * FROM session ORDER BY time ASC LIMIT 4 EXPLAIN;
+		SELECT * FROM session ORDER BY time ASC LIMIT 4 EXPLAIN FULL;
 		SELECT * FROM session ORDER BY time ASC LIMIT 4;
-		SELECT * FROM session ORDER BY time ASC EXPLAIN;
+		SELECT * FROM session ORDER BY time ASC EXPLAIN FULL;
 		SELECT * FROM session ORDER BY time ASC;
-		SELECT * FROM session ORDER BY time DESC LIMIT 4 EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC LIMIT 4 EXPLAIN FULL;
 		SELECT * FROM session ORDER BY time DESC LIMIT 4;
-		SELECT * FROM session ORDER BY time DESC EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC EXPLAIN FULL;
 		SELECT * FROM session ORDER BY time DESC;
 	";
 	let mut t = Test::new(sql).await?;
