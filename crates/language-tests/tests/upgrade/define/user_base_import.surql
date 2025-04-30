@@ -1,4 +1,7 @@
 /**
+[env]
+clean = true
+
 [test]
 
 [[test.results]]

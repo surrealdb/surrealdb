@@ -1,6 +1,7 @@
 /**
 [env]
 imports = ["upgrade/define/user_base_import.surql"]
+clean = true
 
 [test]
 upgrade = true
