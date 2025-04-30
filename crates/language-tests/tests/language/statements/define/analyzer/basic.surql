@@ -1,6 +1,6 @@
 /**
 # Extra timeout due to file reading.
-timeout = 2000
+timeout = 4000
 
 [test]
 
