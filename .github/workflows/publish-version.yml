@@ -148,7 +148,7 @@ jobs:
           git checkout -b ${{ steps.outputs.outputs.release-branch }}
 
       - name: Patch release version
-        if: ${{ inputs.suffix != 'none' }}
+        if: ${{ steps.outputs.outputs.environment != 'stable' }}
         run: |
           set -x
 
@@ -260,6 +260,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -549,10 +551,11 @@ jobs:
           version=${major}.${minor}.${{ needs.prepare-vars.outputs.patch }}
 
           # Update the version to a nightly one
-          sed -i "s#^version = \"${currentVersion}\"#version = \"${version}\"#" crates/sdk/Cargo.toml
-          sed -i "s#^version = \"${currentVersion}\"#version = \"${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
+          sed -i "s#surrealdb = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
@@ -725,10 +728,11 @@ jobs:
   cleanup:
     name: Cleanup
     needs: [publish, prepare-vars]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
 
       - name: Delete ${{ needs.prepare-vars.outputs.release-branch }}
-        run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }}
+        run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }} || true
