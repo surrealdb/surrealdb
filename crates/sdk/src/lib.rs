@@ -34,9 +34,12 @@
 //!
 //! When running SurrealDB within your Rust code, ensure that the asynchronous runtime is configured correctly, making use of multiple threads, an increased stack size, and an optimised number of threads:
 //!
-//! ```no_run
+//! ```toml
+//! [dependencies]
 //! tokio = { version = "1.41.1", features = ["sync", "rt-multi-thread"] }
-//! fn main() {
+//! ```
+//!
+//! ```no_run
 //!     tokio::runtime::Builder::new_multi_thread()
 //!     .enable_all()
 //!     .thread_stack_size(10 * 1024 * 1024) // 10MiB
@@ -45,8 +48,7 @@
 //!     .block_on(async {
 //!       // Your application code
 //!     })
-//! }
-//! ``````
+//! ```
 //!
 //! # Examples
 //!
