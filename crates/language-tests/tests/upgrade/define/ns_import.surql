@@ -2,7 +2,7 @@
 [env]
 namespace = false
 database = false
-clean = true;
+clean = true
 
 [test]
 
