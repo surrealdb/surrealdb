@@ -28,7 +28,7 @@ value = "[{ id: likes:loxurikpwrb2o242gsgu, in: person:euupzy7py15hmh1rbant, out
 skip-record-id-key = true
 
 [[test.results]]
-match = "$error = <regex> 'Couldn't coerce value for field `out` of `likes:[0-9a-z]+`: Expected `record<person\\|thing>` but found `other:[0-9a-z]+`'"
+match = "$error = <regex> 'Couldn\\'t coerce value for field `out` of `likes:[0-9a-z]+`: Expected `record<person|thing>` but found `other:[0-9a-z]+`'"
 error = true
 
 [[test.results]]
