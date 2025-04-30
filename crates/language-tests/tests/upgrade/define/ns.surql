@@ -1,6 +1,7 @@
 /**
 [env]
 imports = ["upgrade/define/ns_import.surql"]
+clean = true;
 
 [test]
 upgrade = true
