@@ -2,7 +2,6 @@ use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, 
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
-use crate::sql::Value;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -14,6 +13,10 @@ use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
+
+pub mod decimal;
+
+pub use decimal::DecimalExt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
@@ -153,54 +156,6 @@ impl TryFrom<Number> for Decimal {
 			},
 			Number::Decimal(x) => Ok(x),
 		}
-	}
-}
-
-impl TryFrom<&Number> for f64 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		Ok(n.to_float())
-	}
-}
-
-impl TryFrom<&Number> for f32 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		n.to_float().to_f32().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(*n),
-			into: "f32".to_string(),
-		})
-	}
-}
-
-impl TryFrom<&Number> for i64 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		Ok(n.to_int())
-	}
-}
-impl TryFrom<&Number> for i32 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		n.to_int().to_i32().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(*n),
-			into: "i32".to_string(),
-		})
-	}
-}
-
-impl TryFrom<&Number> for i16 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		n.to_int().to_i16().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(*n),
-			into: "i16".to_string(),
-		})
 	}
 }
 
@@ -1075,8 +1030,8 @@ mod tests {
 	use rand::Rng;
 	use rust_decimal::Decimal;
 
-	use super::Number;
-	use super::TryFloatDiv;
+	use super::*;
+
 	#[test]
 	fn test_try_float_div() {
 		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
@@ -1095,11 +1050,13 @@ mod tests {
 		let a = Number::Float(-f64::NAN);
 		let b = Number::Float(-f64::INFINITY);
 		let c = Number::Float(1f64);
-		let d = Number::Decimal(Decimal::from_str_exact("1.0000000000000000000000000002").unwrap());
-		let e = Number::Decimal(Decimal::from_str_exact("1.1").unwrap());
+		let d = Number::Decimal(
+			Decimal::from_str_exact_normalized("1.0000000000000000000000000002").unwrap(),
+		);
+		let e = Number::Decimal(Decimal::from_str_exact_normalized("1.1").unwrap());
 		let f = Number::Float(1.1f64);
 		let g = Number::Float(1.5f64);
-		let h = Number::Decimal(Decimal::from_str_exact("1.5").unwrap());
+		let h = Number::Decimal(Decimal::from_str_exact_normalized("1.5").unwrap());
 		let i = Number::Float(f64::INFINITY);
 		let j = Number::Float(f64::NAN);
 		let original = vec![a, b, c, d, e, f, g, h, i, j];

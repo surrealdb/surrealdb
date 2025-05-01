@@ -17,7 +17,7 @@
 //!
 //! In your project’s Cargo.toml file, ensure that the release profile uses the following configuration:
 //!
-//! ```no_run
+//! ```toml
 //! [profile.release]
 //! lto = true
 //! strip = true
@@ -28,15 +28,18 @@
 //!
 //! In your project’s Cargo.toml file, ensure that the allocator feature is among those enabled on the surrealdb dependency:
 //!
-//! ```no_run
+//! ```toml
 //! surrealdb = { version = "2", features = ["allocator", "storage-mem", "storage-surrealkv", "storage-rocksdb", "protocol-http", "protocol-ws", "rustls"] }
 //! ```
 //!
 //! When running SurrealDB within your Rust code, ensure that the asynchronous runtime is configured correctly, making use of multiple threads, an increased stack size, and an optimised number of threads:
 //!
-//! ```no_run
+//! ```toml
+//! [dependencies]
 //! tokio = { version = "1.41.1", features = ["sync", "rt-multi-thread"] }
-//! fn main() {
+//! ```
+//!
+//! ```no_run
 //!     tokio::runtime::Builder::new_multi_thread()
 //!     .enable_all()
 //!     .thread_stack_size(10 * 1024 * 1024) // 10MiB
@@ -45,8 +48,7 @@
 //!     .block_on(async {
 //!       // Your application code
 //!     })
-//! }
-//! ``````
+//! ```
 //!
 //! # Examples
 //!
@@ -157,7 +159,7 @@ pub use surrealdb_core::*;
 
 pub use uuid::Uuid;
 
-#[allow(hidden_glob_reexports)]
+#[expect(hidden_glob_reexports)]
 mod api;
 
 #[doc(hidden)]

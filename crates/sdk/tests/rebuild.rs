@@ -32,7 +32,7 @@ async fn rebuild_index_statement() -> Result<(), Error> {
 	assert_eq!(res.len(), 14);
 	for i in 0..3 {
 		let tmp = res.remove(0).result;
-		tmp.expect(i.to_string().as_str());
+		tmp.unwrap_or_else(|_| panic!("{i}"));
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;

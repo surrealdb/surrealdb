@@ -5,6 +5,8 @@ use crate::sql::value::Value;
 use chrono::offset::TimeZone;
 use chrono::{DateTime, Datelike, DurationRound, Local, Timelike, Utc};
 
+use super::args::Optional;
+
 pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 	match chrono::Duration::from_std(*duration) {
 		Ok(d) => {
@@ -39,7 +41,7 @@ pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 	}
 }
 
-pub fn day((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn day((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.day().into(),
 		None => Datetime::default().day().into(),
@@ -111,7 +113,7 @@ pub fn group((val, group): (Datetime, String)) -> Result<Value, Error> {
 	}
 }
 
-pub fn hour((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn hour((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.hour().into(),
 		None => Datetime::default().hour().into(),
@@ -132,35 +134,35 @@ pub fn min((array,): (Vec<Datetime>,)) -> Result<Value, Error> {
 	})
 }
 
-pub fn minute((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn minute((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.minute().into(),
 		None => Datetime::default().minute().into(),
 	})
 }
 
-pub fn month((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn month((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.month().into(),
 		None => Datetime::default().month().into(),
 	})
 }
 
-pub fn nano((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn nano((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.timestamp_nanos_opt().unwrap_or_default().into(),
 		None => Datetime::default().timestamp_nanos_opt().unwrap_or_default().into(),
 	})
 }
 
-pub fn millis((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn millis((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.timestamp_millis().into(),
 		None => Datetime::default().timestamp_millis().into(),
 	})
 }
 
-pub fn micros((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn micros((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.timestamp_micros().into(),
 		None => Datetime::default().timestamp_micros().into(),
@@ -193,7 +195,7 @@ pub fn round((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 	}
 }
 
-pub fn second((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn second((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.second().into(),
 		None => Datetime::default().second().into(),
@@ -204,35 +206,35 @@ pub fn timezone(_: ()) -> Result<Value, Error> {
 	Ok(Local::now().offset().to_string().into())
 }
 
-pub fn unix((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn unix((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.timestamp().into(),
 		None => Datetime::default().timestamp().into(),
 	})
 }
 
-pub fn wday((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn wday((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.weekday().number_from_monday().into(),
 		None => Datetime::default().weekday().number_from_monday().into(),
 	})
 }
 
-pub fn week((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn week((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.iso_week().week().into(),
 		None => Datetime::default().iso_week().week().into(),
 	})
 }
 
-pub fn yday((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn yday((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.ordinal().into(),
 		None => Datetime::default().ordinal().into(),
 	})
 }
 
-pub fn year((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+pub fn year((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.year().into(),
 		None => Datetime::default().year().into(),
@@ -241,9 +243,10 @@ pub fn year((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 
 pub mod is {
 	use crate::err::Error;
+	use crate::fnc::args::Optional;
 	use crate::sql::{Datetime, Value};
 
-	pub fn leap_year((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+	pub fn leap_year((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 		Ok(match val {
 			Some(v) => v.naive_utc().date().leap_year().into(),
 			None => Datetime::default().naive_utc().date().leap_year().into(),
@@ -269,7 +272,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::nanos"),
-				message: String::from("The first argument must be an in-bounds number of nanoseconds relative to January 1, 1970 0:00:00 UTC."),
+				message: String::from("The argument must be a number of nanoseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
 			}),
 		}
 	}
@@ -279,7 +282,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::micros"),
-				message: String::from("The first argument must be an in-bounds number of microseconds relative to January 1, 1970 0:00:00 UTC."),
+				message: String::from("The argument must be a number of microseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
 			}),
 		}
 	}
@@ -289,7 +292,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::millis"),
-				message: String::from("The first argument must be an in-bounds number of milliseconds relative to January 1, 1970 0:00:00 UTC."),
+				message: String::from("The argument must be a number of milliseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
 			}),
 		}
 	}
@@ -299,7 +302,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::secs"),
-				message: String::from("The first argument must be an in-bounds number of seconds relative to January 1, 1970 0:00:00 UTC."),
+				message: String::from("The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
 			}),
 		}
 	}
@@ -309,7 +312,7 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(Error::InvalidArguments {
 				name: String::from("time::from::unix"),
-				message: String::from("The first argument must be an in-bounds number of seconds relative to January 1, 1970 0:00:00 UTC."),
+				message: String::from("The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
 			}),
 		}
 	}

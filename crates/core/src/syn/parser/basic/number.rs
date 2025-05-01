@@ -2,6 +2,7 @@ use std::{mem, num::ParseIntError, str::FromStr};
 
 use rust_decimal::Decimal;
 
+use crate::sql::number::decimal::DecimalExt;
 use crate::{
 	sql::Number,
 	syn::{
@@ -33,9 +34,29 @@ where
 	}
 }
 
+fn parse_signed_integer<I>(parser: &mut Parser<'_>) -> ParseResult<I>
+where
+	I: FromStr<Err = ParseIntError>,
+{
+	let token = parser.peek();
+	match token.kind {
+		t!("+") | t!("-") | TokenKind::Digits => {
+			parser.pop_peek();
+			Ok(parser.lexer.lex_compound(token, compound::integer)?.value)
+		}
+		_ => unexpected!(parser, token, "an signed integer"),
+	}
+}
+
 impl TokenValue for u64 {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		parse_integer(parser)
+	}
+}
+
+impl TokenValue for i64 {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		parse_signed_integer(parser)
 	}
 }
 
@@ -110,7 +131,7 @@ impl TokenValue for Number {
 								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
 							)?
 						} else {
-							Decimal::from_str(number_str).map_err(
+							Decimal::from_str_normalized(number_str).map_err(
 								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
 							)?
 						};

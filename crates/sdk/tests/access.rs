@@ -400,7 +400,7 @@ async fn access_bearer_revoke() {
 		let re =
 			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: .*, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
-		let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
+		let kid = &re.captures(&tmp).unwrap()[1];
 		// Consume the results of the other three
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
@@ -542,7 +542,7 @@ async fn access_bearer_show() {
 		let re =
 			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: .*, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
-		let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
+		let kid = &re.captures(&tmp).unwrap()[1];
 		// Consume the results of the other three
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
@@ -703,7 +703,7 @@ async fn access_bearer_purge() {
 		let re =
 			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: d'.*?', grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
-		let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
+		let kid = &re.captures(&tmp).unwrap()[1];
 		// Consume the results of the other three
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();

@@ -3,7 +3,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::kvs::Live;
 use crate::sql::Value;
-use crate::{ctx::Context, sql::FlowResultExt as _};
+use crate::{ctx::Context, sql::FlowResultExt as _, sql::Uuid};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -34,7 +34,7 @@ impl KillStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Resolve live query id
-		let lid = match self.id.compute(stk, ctx, opt, None).await.catch_return()?.convert_to_uuid()
+		let lid = match self.id.compute(stk, ctx, opt, None).await.catch_return()?.cast_to::<Uuid>()
 		{
 			Err(_) => {
 				return Err(Error::KillStatement {

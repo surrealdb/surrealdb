@@ -87,7 +87,7 @@ impl Parser<'_> {
 				| t!("DEFINE")
 				| t!("REMOVE")
 				| t!("REBUILD")
-				| t!("IF")
+				| t!("IF") | t!("INFO")
 		)
 	}
 

@@ -29,6 +29,7 @@ pub mod rand;
 pub mod record;
 pub mod script;
 pub mod search;
+pub mod sequence;
 pub mod session;
 pub mod sleep;
 pub mod string;
@@ -79,6 +80,7 @@ pub async fn run(
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
 		|| name.eq("value::patch")
+		|| name.eq("sequence::nextval")
 		|| name.starts_with("http")
 		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
@@ -114,7 +116,6 @@ macro_rules! dispatch {
                                 });
                             }
                         )?
-
                         let args = args::FromArgs::from_args($name, $args)?;
                         #[allow(clippy::redundant_closure_call)]
                         $($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
@@ -304,6 +305,7 @@ pub fn synchronous(
 		//
 		"rand" => rand::rand,
 		"rand::bool" => rand::bool,
+		"rand::duration" => rand::duration,
 		"rand::enum" => rand::r#enum,
 		"rand::float" => rand::float,
 		"rand::guid" => rand::guid,
@@ -575,6 +577,8 @@ pub async fn asynchronous(
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
+		//
+		"sequence::nextval" => sequence::nextval((ctx, opt)).await,
 		//
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,

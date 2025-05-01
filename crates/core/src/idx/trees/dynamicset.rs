@@ -123,7 +123,7 @@ mod tests {
 		// Test insertions
 		for sample in 0..capacity {
 			assert_eq!(dyn_set.len(), control.len(), "{capacity} - {sample}");
-			let v: HashSet<ElementId> = dyn_set.iter().cloned().collect();
+			let v: HashSet<ElementId> = dyn_set.iter().copied().collect();
 			assert_eq!(v, control, "{capacity} - {sample}");
 			// We should not have the element yet
 			assert!(!dyn_set.contains(&sample), "{capacity} - {sample}");
@@ -148,7 +148,7 @@ mod tests {
 			control.remove(&sample);
 			// The control structure and the dyn_set should be identical
 			assert_eq!(dyn_set.len(), control.len(), "{capacity} - {sample}");
-			let v: HashSet<ElementId> = dyn_set.iter().cloned().collect();
+			let v: HashSet<ElementId> = dyn_set.iter().copied().collect();
 			assert_eq!(v, control, "{capacity} - {sample}");
 		}
 	}

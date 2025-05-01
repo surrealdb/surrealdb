@@ -34,7 +34,7 @@ pub fn add_version_header(enabled: bool) -> SetResponseHeaderLayer<Option<Header
 		None
 	};
 
-	SetResponseHeaderLayer::if_not_present(VERSION.to_owned(), header_value)
+	SetResponseHeaderLayer::if_not_present(VERSION.clone(), header_value)
 }
 
 pub fn add_server_header(enabled: bool) -> SetResponseHeaderLayer<Option<HeaderValue>> {

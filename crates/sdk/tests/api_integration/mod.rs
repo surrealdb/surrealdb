@@ -349,7 +349,7 @@ mod mem {
 }
 
 #[cfg(feature = "kv-rocksdb")]
-#[allow(deprecated)]
+#[expect(deprecated)]
 mod file {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::File;

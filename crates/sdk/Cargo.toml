@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "2.3.0"
+version = "3.0.0"
 rust-version = "1.82.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -166,11 +166,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 ulid = { workspace = true, features = ["serde"] }
 wiremock.workspace = true
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(kv_fdb)',
-    'cfg(storage)',
-] }
+[lints]
+workspace = true
 
 [lib]
 name = "surrealdb" # Needed for the nightly crate as we will be renaming it

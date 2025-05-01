@@ -25,6 +25,16 @@ impl Document {
 		let (ns, db) = opt.ns_db()?;
 		// Store the record data
 		let key = crate::key::thing::new(ns, db, &rid.tb, &rid.id);
+		// Remove the id field from the doc so that it's not duplicated,
+		// because it's always present as a key in the underlying key-value
+		// datastore. When the doc is read from the datastore, the key is set
+		// as its id field.
+		// The cloning of the doc is required because the resulting doc
+		// must be returned to the caller with the id present.
+		let mut doc_without_id = self.current.doc.clone();
+		if let crate::sql::Value::Object(obj) = doc_without_id.to_mut() {
+			obj.0.remove("id");
+		}
 		// Match the statement type
 		match stm {
 			// This is a INSERT statement so try to insert the key.
@@ -39,7 +49,7 @@ impl Document {
 			Statement::Insert(_) if self.is_iteration_initial() => {
 				match ctx
 					.tx()
-					.put(key, revision::to_vec(self.current.doc.as_ref())?, opt.version)
+					.put(key, revision::to_vec(doc_without_id.as_ref())?, opt.version)
 					.await
 				{
 					// The key already exists, so return an error
@@ -59,7 +69,7 @@ impl Document {
 			Statement::Upsert(_) if self.is_iteration_initial() => {
 				match ctx
 					.tx()
-					.put(key, revision::to_vec(self.current.doc.as_ref())?, opt.version)
+					.put(key, revision::to_vec(doc_without_id.as_ref())?, opt.version)
 					.await
 				{
 					// The key already exists, so return an error
@@ -79,7 +89,7 @@ impl Document {
 			Statement::Create(_) => {
 				match ctx
 					.tx()
-					.put(key, revision::to_vec(self.current.doc.as_ref())?, opt.version)
+					.put(key, revision::to_vec(doc_without_id.as_ref())?, opt.version)
 					.await
 				{
 					// The key already exists, so return an error
@@ -90,10 +100,10 @@ impl Document {
 				}
 			}
 			// Let's update the stored value for the specified key
-			_ => ctx.tx().set(key, revision::to_vec(self.current.doc.as_ref())?, opt.version).await,
+			_ => ctx.tx().set(key, revision::to_vec(doc_without_id.as_ref())?, opt.version).await,
 		}?;
 		// Update the cache
-		ctx.tx().set_record_cache(ns, db, &rid.tb, &rid.id, self.current.doc.as_arc())?;
+		ctx.tx().set_record_cache(ns, db, &rid.tb, &rid.id, doc_without_id.as_arc())?;
 		// Carry on
 		Ok(())
 	}

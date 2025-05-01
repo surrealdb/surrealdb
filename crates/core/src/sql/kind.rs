@@ -1,11 +1,16 @@
 use super::escape::EscapeKey;
-use super::{Duration, Ident, Idiom, Number, Part, Strand};
+use super::{
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Part,
+	Range, Regex, Strand, Thing, Uuid,
+};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
 	Table, Value,
 };
+use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
@@ -41,6 +46,8 @@ pub enum Kind {
 	Range,
 	Literal(Literal),
 	References(Option<Table>, Option<Idiom>),
+	/// If the kind was specified without a bucket the vec will be empty.
+	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<Ident>),
 }
 
@@ -51,6 +58,11 @@ impl Default for Kind {
 }
 
 impl Kind {
+	/// Returns the kind of a type.
+	pub(crate) fn of<T: HasKind>() -> Kind {
+		T::kind()
+	}
+
 	/// Returns true if this type is an `any`
 	pub(crate) fn is_any(&self) -> bool {
 		matches!(self, Kind::Any)
@@ -67,7 +79,7 @@ impl Kind {
 	}
 
 	/// Returns the kind in case of a literal, otherwise returns the kind itself
-	fn to_kind(&self) -> Self {
+	fn to_non_literal_kind(&self) -> Self {
 		match self {
 			Kind::Literal(l) => l.to_kind(),
 			k => k.to_owned(),
@@ -75,17 +87,17 @@ impl Kind {
 	}
 
 	/// Returns true if this type is a literal, or contains a literal
-	pub(crate) fn is_literal_nested(&self) -> bool {
+	pub(crate) fn contains_literal(&self) -> bool {
 		if matches!(self, Kind::Literal(_)) {
 			return true;
 		}
 
 		if let Kind::Option(x) = self {
-			return x.is_literal_nested();
+			return x.contains_literal();
 		}
 
 		if let Kind::Either(x) = self {
-			return x.iter().any(|x| x.is_literal_nested());
+			return x.iter().any(|x| x.contains_literal());
 		}
 
 		false
@@ -117,7 +129,10 @@ impl Kind {
 										{
 											continue 'key;
 										}
-										kind if kinds.iter().any(|k| *kind == k.to_kind()) => {
+										kind if kinds
+											.iter()
+											.any(|k| *kind == k.to_non_literal_kind()) =>
+										{
 											continue 'key;
 										}
 										kind => {
@@ -240,6 +255,129 @@ impl Kind {
 			_ => false,
 		}
 	}
+}
+
+/// Trait for retrieving the `kind` equivalent of a rust type.
+///
+/// Returns the most general kind for a type.
+/// For example Number could be either number or float or int or decimal but the most general is
+/// number.
+///
+/// This trait is only implemented for types which can only be retrieve from
+pub trait HasKind {
+	fn kind() -> Kind;
+}
+
+impl<T: HasKind> HasKind for Option<T> {
+	fn kind() -> Kind {
+		let kind = T::kind();
+		if matches!(kind, Kind::Option(_)) {
+			kind
+		} else {
+			Kind::Option(Box::new(kind))
+		}
+	}
+}
+
+impl<T: HasKind> HasKind for Vec<T> {
+	fn kind() -> Kind {
+		let kind = T::kind();
+		Kind::Array(Box::new(kind), None)
+	}
+}
+
+impl HasKind for Array {
+	fn kind() -> Kind {
+		Kind::Array(Box::new(Kind::Any), None)
+	}
+}
+
+impl<T: HasKind, const SIZE: usize> HasKind for [T; SIZE] {
+	fn kind() -> Kind {
+		let kind = T::kind();
+		Kind::Array(Box::new(kind), Some(SIZE as u64))
+	}
+}
+
+impl HasKind for Thing {
+	fn kind() -> Kind {
+		Kind::Record(Vec::new())
+	}
+}
+
+impl HasKind for Geometry {
+	fn kind() -> Kind {
+		Kind::Geometry(Vec::new())
+	}
+}
+
+impl HasKind for Closure {
+	fn kind() -> Kind {
+		// The inner values of function are currently completely unused.
+		Kind::Function(None, None)
+	}
+}
+
+impl HasKind for Regex {
+	fn kind() -> Kind {
+		Kind::Regex
+	}
+}
+
+impl HasKind for File {
+	fn kind() -> Kind {
+		Kind::File(Vec::new())
+	}
+}
+
+macro_rules! impl_basic_has_kind{
+	($($name:ident => $kind:ident),*$(,)?) => {
+		$(
+			impl HasKind for $name{
+				fn kind() -> Kind{
+					Kind::$kind
+				}
+			}
+		)*
+	}
+}
+
+impl_basic_has_kind! {
+	bool => Bool,
+
+	i64 => Int,
+	f64 => Float,
+	Decimal => Decimal,
+
+	String => String,
+	Strand => String,
+	Bytes => Bytes,
+	Number => Number,
+	Datetime => Datetime,
+	Duration => Duration,
+	Uuid => Uuid,
+	Object => Object,
+	Range => Range,
+}
+
+macro_rules! impl_geometry_has_kind{
+	($($name:ty => $kind:literal),*$(,)?) => {
+		$(
+			impl HasKind for $name{
+				fn kind() -> Kind{
+					Kind::Geometry(vec![$kind.to_string()])
+				}
+			}
+		)*
+	}
+}
+impl_geometry_has_kind! {
+	Point<f64> => "point",
+	LineString<f64> => "line",
+	MultiPoint<f64> => "multipoint",
+	Polygon<f64> => "polygon",
+	MultiLineString<f64> => "multiline",
+	MultiPolygon<f64> => "multipolygon",
 }
 
 impl From<&Kind> for Box<Kind> {
@@ -379,7 +517,7 @@ impl Literal {
 
 					for (i, inner) in a.iter().enumerate() {
 						if let Some(value) = x.get(i) {
-							if value.to_owned().coerce_to(inner).is_err() {
+							if value.to_owned().coerce_to_kind(inner).is_err() {
 								return false;
 							}
 						} else {
@@ -399,7 +537,7 @@ impl Literal {
 
 					for (k, v) in o.iter() {
 						if let Some(value) = x.get(k) {
-							if value.to_owned().coerce_to(v).is_err() {
+							if value.to_owned().coerce_to_kind(v).is_err() {
 								return false;
 							}
 						} else if !v.can_be_none() {
@@ -416,7 +554,7 @@ impl Literal {
 					let value = x.get(key).unwrap_or(&Value::None);
 					if let Some(o) = discriminants
 						.iter()
-						.find(|o| value.to_owned().coerce_to(o.get(key).unwrap()).is_ok())
+						.find(|o| value.to_owned().coerce_to_kind(&o[key]).is_ok())
 					{
 						if o.len() < x.len() {
 							return false;
@@ -424,7 +562,7 @@ impl Literal {
 
 						for (k, v) in o.iter() {
 							if let Some(value) = x.get(k) {
-								if value.to_owned().coerce_to(v).is_err() {
+								if value.to_owned().coerce_to_kind(v).is_err() {
 									return false;
 								}
 							} else if !v.can_be_none() {

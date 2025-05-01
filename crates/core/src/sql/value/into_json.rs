@@ -44,6 +44,7 @@ impl From<Value> for serde_json::Value {
 			Value::Constant(constant) => match constant.value() {
 				ConstantValue::Datetime(datetime) => json!(datetime.0),
 				ConstantValue::Float(float) => float.into(),
+				ConstantValue::Duration(duration) => duration.to_string().into(),
 			},
 			Value::Cast(cast) => json!(cast),
 			Value::Function(function) => json!(function),
@@ -78,7 +79,7 @@ impl From<sql::Object> for Object {
 	fn from(obj: sql::Object) -> Self {
 		let mut map = Map::with_capacity(obj.len());
 		for (key, value) in obj {
-			map.insert(key.to_owned(), value.into());
+			map.insert(key.clone(), value.into());
 		}
 		Self(map)
 	}

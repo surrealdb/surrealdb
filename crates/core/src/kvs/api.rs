@@ -9,7 +9,7 @@ use crate::vs::VersionStamp;
 use std::fmt::Debug;
 use std::ops::Range;
 
-#[allow(dead_code)] // not used when non of the storage backends are enabled.
+#[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
 pub trait Transaction {
 	/// Specify how we should handle unclosed transactions.
 	///

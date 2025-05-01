@@ -74,6 +74,7 @@ impl Parser<'_> {
 			_ => self.parse_thing_or_table(ctx).await,
 		}
 	}
+
 	pub async fn parse_relate_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
@@ -99,9 +100,8 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("ALTER")
 			| t!("REMOVE")
-			| t!("REBUILD") => {
-				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))
-			}
+			| t!("REBUILD")
+			| t!("INFO") => self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x))),
 			t!("IF") => {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_if_stmt(ctx))

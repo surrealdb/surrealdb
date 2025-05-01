@@ -21,10 +21,11 @@ use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
-#[allow(unused_imports)]
+#[expect(unused_imports)]
 use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
+use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::FlowResultExt as _;
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
@@ -61,7 +62,6 @@ const LQ_CHANNEL_SIZE: usize = 15_000;
 const INITIAL_USER_ROLE: &str = "owner";
 
 /// The underlying datastore instance which stores the dataset.
-#[allow(dead_code)]
 #[non_exhaustive]
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
@@ -94,6 +94,8 @@ pub struct Datastore {
 	temporary_directory: Option<Arc<PathBuf>>,
 	// Map of bucket connections
 	buckets: Arc<BucketConnections>,
+	// The sequences
+	sequences: Sequences,
 }
 
 #[derive(Clone)]
@@ -105,26 +107,28 @@ pub(super) struct TransactionFactory {
 }
 
 impl TransactionFactory {
-	#[allow(unreachable_code)]
+	#[allow(
+		unreachable_code,
+		unreachable_patterns,
+		unused_variables,
+		reason = "Some variables are unused when no backends are enabled."
+	)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
 		// Specify if the transaction is writeable
-		#[allow(unused_variables)]
 		let write = match write {
 			Read => false,
 			Write => true,
 		};
 		// Specify if the transaction is lockable
-		#[allow(unused_variables)]
 		let lock = match lock {
 			Pessimistic => true,
 			Optimistic => false,
 		};
 		// Create a new transaction on the datastore
-		#[allow(unused_variables)]
 		let (inner, local, reverse_scan) = match self.flavor.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
@@ -156,7 +160,6 @@ impl TransactionFactory {
 				let tx = v.transaction(write, lock).await?;
 				(super::tr::Inner::SurrealKV(tx), true, false)
 			}
-			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
 		Ok(Transaction::new(
@@ -172,7 +175,6 @@ impl TransactionFactory {
 	}
 }
 
-#[allow(clippy::large_enum_variant)]
 pub(super) enum DatastoreFlavor {
 	#[cfg(feature = "kv-mem")]
 	Mem(super::mem::Datastore),
@@ -263,7 +265,7 @@ impl Datastore {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
-					// Innitialise the storage engine
+					// Initialise the storage engine
 					info!(target: TARGET, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
@@ -279,7 +281,7 @@ impl Datastore {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Innitialise the storage engine
+					// Initialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
 					let s = s.trim_start_matches("file://");
@@ -298,7 +300,7 @@ impl Datastore {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Innitialise the storage engine
+					// Initialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
@@ -316,7 +318,7 @@ impl Datastore {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Innitialise the storage engine
+					// Initialise the storage engine
 					info!(target: TARGET, "Starting kvs store at {}", s);
 					let (path, enable_versions) =
 						super::surrealkv::Datastore::parse_start_string(s)?;
@@ -398,20 +400,20 @@ impl Datastore {
 				capabilities: Arc::new(Capabilities::default()),
 				index_stores: IndexStores::default(),
 				#[cfg(not(target_family = "wasm"))]
-				index_builder: IndexBuilder::new(tf),
+				index_builder: IndexBuilder::new(tf.clone()),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 				#[cfg(storage)]
 				temporary_directory: None,
 				cache: Arc::new(DatastoreCache::new()),
 				buckets: Arc::new(DashMap::new()),
+				sequences: Sequences::new(tf),
 			}
 		})
 	}
 
 	/// Create a new datastore with the same persistent data (inner), with flushed cache.
 	/// Simulating a server restart
-	#[allow(dead_code)]
 	pub fn restart(self) -> Self {
 		Self {
 			id: self.id,
@@ -428,9 +430,10 @@ impl Datastore {
 			jwks_cache: Arc::new(Default::default()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
-			transaction_factory: self.transaction_factory,
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
+			sequences: Sequences::new(self.transaction_factory.clone()),
+			transaction_factory: self.transaction_factory,
 		}
 	}
 
@@ -534,7 +537,6 @@ impl Datastore {
 	}
 
 	// Used for testing live queries
-	#[allow(dead_code)]
 	pub fn get_cache(&self) -> Arc<DatastoreCache> {
 		self.cache.clone()
 	}
@@ -757,7 +759,6 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[allow(unreachable_code)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
@@ -1214,9 +1215,10 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
-			self.cache.clone(),
 			#[cfg(not(target_family = "wasm"))]
 			self.index_builder.clone(),
+			self.sequences.clone(),
+			self.cache.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),

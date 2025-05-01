@@ -10,7 +10,7 @@ use std::{
 	time::SystemTime,
 };
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context, Result};
 use futures::FutureExt as _;
 use surrealdb_core::{dbs::Capabilities, kvs::Datastore};
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -29,7 +29,7 @@ fn xorshift(state: &mut u32) -> u32 {
 	x ^= x >> 17;
 	x ^= x << 5;
 	*state = x;
-	return x;
+	x
 }
 
 impl CreateInfo {

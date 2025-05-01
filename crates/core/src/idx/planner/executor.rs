@@ -98,7 +98,7 @@ impl IteratorEntry {
 			Self::Single(_, io) => io.explain(),
 			Self::Range(_, ir, from, to) => {
 				let mut e = HashMap::default();
-				e.insert("index", Value::from(ir.name.0.to_owned()));
+				e.insert("index", Value::from(ir.name.0.clone()));
 				e.insert("from", Value::from(from));
 				e.insert("to", Value::from(to));
 				Value::from(Object::from(e))
@@ -107,8 +107,8 @@ impl IteratorEntry {
 	}
 }
 impl InnerQueryExecutor {
-	#[allow(clippy::too_many_arguments)]
-	#[allow(clippy::mutable_key_type)]
+	#[expect(clippy::too_many_arguments)]
+	#[expect(clippy::mutable_key_type)]
 	pub(super) async fn new(
 		stk: &mut Stk,
 		ctx: &Context,
@@ -275,7 +275,7 @@ impl QueryExecutor {
 		} else {
 			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
 				let v = id.compute(stk, ctx, opt, doc).await.catch_return()?;
-				if let Ok(v) = v.try_into() {
+				if let Ok(v) = v.coerce_to() {
 					if let Ok(dist) = dist.compute(&v, val.as_ref()) {
 						p.add(dist, thg).await;
 						return Ok(Value::Bool(true));
@@ -537,7 +537,7 @@ impl QueryExecutor {
 			Number::Float(f) => {
 				oi = float_to_int(f);
 				of = Some(*f);
-				od = Decimal::from_f64(*f);
+				od = Decimal::from_f64(*f).map(|d| d.normalize());
 			}
 			Number::Decimal(d) => {
 				oi = d.to_i64();
@@ -968,7 +968,7 @@ impl QueryExecutor {
 		Ok(iterators)
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) async fn matches(
 		&self,
 		stk: &mut Stk,
@@ -1212,7 +1212,7 @@ pub(super) struct HnswEntry {
 }
 
 impl HnswEntry {
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn new(
 		stk: &mut Stk,
 		ctx: &Context,

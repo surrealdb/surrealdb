@@ -207,7 +207,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.rd = Some(Value::from(rid.to_owned()));
+			session.rd = Some(Value::from(rid.clone()));
 			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
@@ -322,7 +322,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						session.ns = Some(ns.to_owned());
 						session.db = Some(db.to_owned());
 						session.ac = Some(ac.to_owned());
-						session.rd = Some(Value::from(rid.to_owned()));
+						session.rd = Some(Value::from(rid.clone()));
 						session.exp = expiration(de.duration.session)?;
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_string(),
@@ -1151,7 +1151,7 @@ mod tests {
 			for id in &case.ids {
 				// Prepare the claims object
 				let mut claims = claims.clone();
-				claims.id = Some(id.to_string());
+				claims.id = Some((*id).to_string());
 				claims.roles =
 					case.roles.clone().map(|roles| roles.into_iter().map(String::from).collect());
 
