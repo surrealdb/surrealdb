@@ -299,7 +299,7 @@ impl Building {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,
 			tf,
-			tb: ix.what.to_string(),
+			tb: ix.what.to_raw(),
 			ix,
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
