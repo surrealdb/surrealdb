@@ -63,7 +63,7 @@ impl AlterFieldStatement {
 			df.flex = *flex;
 		}
 		if let Some(ref kind) = &self.kind {
-			df.kind = kind.clone();
+			df.kind.clone_from(kind);
 		}
 		if let Some(ref readonly) = &self.readonly {
 			df.readonly = *readonly;
