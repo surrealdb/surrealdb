@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 pub(crate) mod abstraction;
 mod config;
 mod export;
