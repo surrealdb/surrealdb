@@ -12,6 +12,7 @@ impl js::module::ModuleDef for Package {
 	fn declare(decls: &js::module::Declarations) -> js::Result<()> {
 		decls.declare("default")?;
 		decls.declare("bool")?;
+		decls.declare("duration")?;
 		decls.declare("enum")?;
 		decls.declare("float")?;
 		decls.declare("guid")?;
@@ -30,6 +31,9 @@ impl js::module::ModuleDef for Package {
 		let value = crate::fnc::script::modules::impl_module_def!(ctx, "rand", "bool", run,);
 		exports.export("bool", value.clone())?;
 		default.set("bool", value)?;
+		let value = crate::fnc::script::modules::impl_module_def!(ctx, "rand", "duration", run,);
+		exports.export("duration", value.clone())?;
+		default.set("duration", value)?;
 		let value = crate::fnc::script::modules::impl_module_def!(ctx, "rand", "enum", run,);
 		exports.export("enum", value.clone())?;
 		default.set("enum", value)?;

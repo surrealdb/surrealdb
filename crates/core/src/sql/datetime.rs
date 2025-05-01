@@ -108,6 +108,11 @@ impl Datetime {
 	pub fn to_i64(&self) -> Option<i64> {
 		self.0.timestamp_nanos_opt()
 	}
+
+	/// Convert to second timestamp.
+	pub fn to_secs(&self) -> i64 {
+		self.0.timestamp()
+	}
 }
 
 impl Display for Datetime {
