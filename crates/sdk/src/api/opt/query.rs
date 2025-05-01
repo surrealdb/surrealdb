@@ -440,6 +440,7 @@ where
 
 impl QueryResult<Value> for &str {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
+		#[expect(deprecated)]
 		(0, self).query_result(response)
 	}
 }
@@ -449,6 +450,7 @@ where
 	T: DeserializeOwned,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Option<T>> {
+		#[expect(deprecated)]
 		(0, self).query_result(response)
 	}
 }
@@ -458,6 +460,7 @@ where
 	T: DeserializeOwned,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
+		#[expect(deprecated)]
 		(0, self).query_result(response)
 	}
 }

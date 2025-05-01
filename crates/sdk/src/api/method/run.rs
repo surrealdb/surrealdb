@@ -128,6 +128,7 @@ impl IntoFn for &str {
 
 impl IntoFn for &String {
 	fn into_fn(self) -> Result<(String, Option<String>)> {
+		#[expect(deprecated)]
 		self.as_str().into_fn()
 	}
 }

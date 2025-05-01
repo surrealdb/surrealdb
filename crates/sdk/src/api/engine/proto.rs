@@ -1,3 +1,5 @@
+#![expect(deprecated)]
+
 use revision::revisioned;
 use serde::Deserialize;
 
