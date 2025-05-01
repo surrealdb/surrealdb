@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::reference::Reference;
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Base, Ident, Permissions, Strand, Value};
 use crate::sql::{Idiom, Kind};
 
@@ -12,6 +13,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::ops::Deref;
+use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -83,14 +85,46 @@ impl AlterFieldStatement {
 		}
 		if let Some(ref reference) = &self.reference {
 			df.reference.clone_from(reference);
+
+			// Validate reference options
+			if df.reference.is_some() {
+				df.validate_reference_options(ctx)?;
+			}
 		}
 		if let Some(ref default_always) = &self.default_always {
 			df.default_always = *default_always;
 		}
 
+		// Validate reference options
+		df.validate_reference_options(ctx)?;
+
+		// Correct reference type
+		if let Some(kind) = df.correct_reference_type(ctx, opt).await? {
+			df.kind = Some(kind);
+		}
+
+		// Disallow mismatched types
+		df.disallow_mismatched_types(ctx, opt).await?;
+
 		// Set the table definition
 		let key = crate::key::table::fd::new(ns, db, &self.what, &name);
 		txn.set(key, revision::to_vec(&df)?, None).await?;
+		// Refresh the table cache
+		let key = crate::key::database::tb::new(ns, db, &self.what);
+		let tb = txn.get_tb(ns, db, &self.what).await?;
+		txn.set(
+			key,
+			revision::to_vec(&DefineTableStatement {
+				cache_fields_ts: Uuid::now_v7(),
+				..tb.as_ref().clone()
+			})?,
+			None,
+		)
+		.await?;
+		// Clear the cache
+		txn.clear();
+		// Process possible recursive defitions
+		df.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

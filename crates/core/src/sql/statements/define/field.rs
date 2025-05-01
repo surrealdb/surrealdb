@@ -4,6 +4,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::Transaction;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::statements::info::InfoStructure;
@@ -15,6 +16,7 @@ use crate::sql::{Relation, TableType};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 6)]
@@ -114,62 +116,8 @@ impl DefineFieldStatement {
 		}
 		// Clear the cache
 		txn.clear();
-		// Find all existing field definitions
-		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
-		// Process possible recursive_definitions
-		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
-			let mut name = self.name.clone();
-			loop {
-				// Check if the subtype is an `any` type
-				if let Kind::Any = cur_kind {
-					// There is no need to add a subtype
-					// field definition if the type is
-					// just specified as an `array`. This
-					// is because the following query:
-					//  DEFINE FIELD foo ON bar TYPE array;
-					// already implies that the immediate
-					// subtype is an any:
-					//  DEFINE FIELD foo[*] ON bar TYPE any;
-					// so we skip the subtype field.
-					break;
-				}
-				// Get the kind of this sub field
-				let new_kind = cur_kind.inner_kind();
-				// Add a new subtype
-				name.0.push(Part::All);
-				// Get the field name
-				let fd = name.to_string();
-				// Set the subtype `DEFINE FIELD` definition
-				let key = crate::key::table::fd::new(ns, db, &self.what, &fd);
-				let val = if let Some(existing) =
-					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
-				{
-					DefineFieldStatement {
-						kind: Some(cur_kind),
-						reference: self.reference.clone(),
-						if_not_exists: false,
-						overwrite: false,
-						..existing.clone()
-					}
-				} else {
-					DefineFieldStatement {
-						name: name.clone(),
-						what: self.what.clone(),
-						flex: self.flex,
-						kind: Some(cur_kind),
-						reference: self.reference.clone(),
-						..Default::default()
-					}
-				};
-				txn.set(key, revision::to_vec(&val)?, None).await?;
-				// Process to any sub field
-				if let Some(new_kind) = new_kind {
-					cur_kind = new_kind;
-				} else {
-					break;
-				}
-			}
-		}
+		// Process possible recursive defitions
+		self.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// If this is an `in` field then check relation definitions
 		if fd.as_str() == "in" {
 			// Get the table definition that this field belongs to
@@ -248,7 +196,73 @@ impl DefineFieldStatement {
 		Ok(Value::None)
 	}
 
-	fn validate_reference_options(&self, ctx: &Context) -> Result<(), Error> {
+	pub(crate) async fn process_recursive_definitions(
+		&self,
+		ns: &str,
+		db: &str,
+		txn: Arc<Transaction>,
+	) -> Result<(), Error> {
+		// Find all existing field definitions
+		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
+		// Process possible recursive_definitions
+		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
+			let mut name = self.name.clone();
+			loop {
+				// Check if the subtype is an `any` type
+				if let Kind::Any = cur_kind {
+					// There is no need to add a subtype
+					// field definition if the type is
+					// just specified as an `array`. This
+					// is because the following query:
+					//  DEFINE FIELD foo ON bar TYPE array;
+					// already implies that the immediate
+					// subtype is an any:
+					//  DEFINE FIELD foo[*] ON bar TYPE any;
+					// so we skip the subtype field.
+					break;
+				}
+				// Get the kind of this sub field
+				let new_kind = cur_kind.inner_kind();
+				// Add a new subtype
+				name.0.push(Part::All);
+				// Get the field name
+				let fd = name.to_string();
+				// Set the subtype `DEFINE FIELD` definition
+				let key = crate::key::table::fd::new(ns, db, &self.what, &fd);
+				let val = if let Some(existing) =
+					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
+				{
+					DefineFieldStatement {
+						kind: Some(cur_kind),
+						reference: self.reference.clone(),
+						if_not_exists: false,
+						overwrite: false,
+						..existing.clone()
+					}
+				} else {
+					DefineFieldStatement {
+						name: name.clone(),
+						what: self.what.clone(),
+						flex: self.flex,
+						kind: Some(cur_kind),
+						reference: self.reference.clone(),
+						..Default::default()
+					}
+				};
+				txn.set(key, revision::to_vec(&val)?, None).await?;
+				// Process to any sub field
+				if let Some(new_kind) = new_kind {
+					cur_kind = new_kind;
+				} else {
+					break;
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	pub(crate) fn validate_reference_options(&self, ctx: &Context) -> Result<(), Error> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(());
 		}
@@ -319,7 +333,7 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	async fn correct_reference_type(
+	pub(crate) async fn correct_reference_type(
 		&self,
 		ctx: &Context,
 		opt: &Options,
@@ -360,7 +374,11 @@ impl DefineFieldStatement {
 		Ok(None)
 	}
 
-	async fn disallow_mismatched_types(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
+	pub(crate) async fn disallow_mismatched_types(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<(), Error> {
 		let (ns, db) = opt.ns_db()?;
 		let fds = ctx.tx().all_tb_fields(ns, db, &self.what, None).await?;
 
