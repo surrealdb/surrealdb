@@ -2439,6 +2439,8 @@ async fn select_from_standard_index() -> Result<(), Error> {
 		CREATE session:4 SET time = null;
 		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
 		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
+		SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 4 EXPLAIN FULL;
+		SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 4;
 		SELECT * FROM session ORDER BY time ASC LIMIT 4 EXPLAIN FULL;
 		SELECT * FROM session ORDER BY time ASC LIMIT 4;
 		SELECT * FROM session ORDER BY time ASC EXPLAIN FULL;
@@ -2449,7 +2451,7 @@ async fn select_from_standard_index() -> Result<(), Error> {
 		SELECT * FROM session ORDER BY time DESC;
 	";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(15)?;
+	t.expect_size(17)?;
 	t.skip_ok(7)?;
 	//
 	t.expect_vals(&[
@@ -2457,6 +2459,68 @@ async fn select_from_standard_index() -> Result<(), Error> {
 			{
 				detail: {
 					plan: {
+						from: {
+							inclusive: false,
+							value: d'2000-01-01T00:00:00Z'
+						},
+						index: 'time',
+						to: {
+							inclusive: false,
+							value: NONE
+						}
+					},
+					table: 'session'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					limit: 4,
+					type: 'MemoryOrderedLimit'
+				},
+				operation: 'Collector'
+			},
+			{
+				detail: {
+					type: 'KeysAndValues'
+				},
+				operation: 'RecordStrategy'
+			},
+			{
+				detail: {
+					CancelOnLimit: 4
+				},
+				operation: 'StartLimitStrategy'
+			},
+			{
+				detail: {
+					count: 0
+				},
+				operation: 'Fetch'
+			}
+		]",
+		"[
+			{
+				id: session:3,
+				other: 'test'
+			},
+			{
+				id: session:4,
+				time: NULL
+			},
+			{
+				id: session:2,
+				time: d'2024-06-30T23:00:00Z'
+			},
+			{
+				id: session:6,
+				time: d'2024-06-30T23:30:00Z'
+			}
+		]",
+		"[
+			{
+				detail: {
+					plan: {
 						index: 'time',
 						operator: 'Order'
 					},
@@ -2470,6 +2534,24 @@ async fn select_from_standard_index() -> Result<(), Error> {
 					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
+			},
+			{
+				detail: {
+					type: 'KeysAndValues'
+				},
+				operation: 'RecordStrategy'
+			},
+			{
+				detail: {
+					CancelOnLimit: 4
+				},
+				operation: 'StartLimitStrategy'
+			},
+			{
+				detail: {
+					count: 0
+				},
+				operation: 'Fetch'
 			}
 		]",
 		"[
@@ -2506,6 +2588,18 @@ async fn select_from_standard_index() -> Result<(), Error> {
 					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
+			},
+			{
+				detail: {
+					type: 'KeysAndValues'
+				},
+				operation: 'RecordStrategy'
+			},
+			{
+				detail: {
+					count: 6
+				},
+				operation: 'Fetch'
 			}
 		]",
 		"[
@@ -2548,6 +2642,18 @@ async fn select_from_standard_index() -> Result<(), Error> {
 					type: 'MemoryOrderedLimit'
 				},
 				operation: 'Collector'
+			},
+			{
+				detail: {
+					type: 'KeysAndValues'
+				},
+				operation: 'RecordStrategy'
+			},
+			{
+				detail: {
+					count: 0
+				},
+				operation: 'Fetch'
 			}
 		]",
 		"[
@@ -2581,6 +2687,18 @@ async fn select_from_standard_index() -> Result<(), Error> {
 					type: 'MemoryOrdered'
 				},
 				operation: 'Collector'
+			},
+			{
+				detail: {
+					type: 'KeysAndValues'
+				},
+				operation: 'RecordStrategy'
+			},
+			{
+				detail: {
+					count: 6
+				},
+				operation: 'Fetch'
 			}
 		]",
 		"[
@@ -2625,17 +2743,19 @@ async fn select_from_unique_index() -> Result<(), Error> {
 		CREATE session:4 SET time = null;
 		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
 		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
-		SELECT * FROM session ORDER BY time ASC LIMIT 3 EXPLAIN;
+		SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 3 EXPLAIN FULL;
+		SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 3;
+		SELECT * FROM session ORDER BY time ASC LIMIT 3 EXPLAIN FULL;
 		SELECT * FROM session ORDER BY time ASC LIMIT 3;
-		SELECT * FROM session ORDER BY time ASC EXPLAIN;
+		SELECT * FROM session ORDER BY time ASC EXPLAIN FULL;
 		SELECT * FROM session ORDER BY time ASC;
-		SELECT * FROM session ORDER BY time DESC LIMIT 3 EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC LIMIT 3 EXPLAIN FULL;
 		SELECT * FROM session ORDER BY time DESC LIMIT 3;
-		SELECT * FROM session ORDER BY time DESC EXPLAIN;
+		SELECT * FROM session ORDER BY time DESC EXPLAIN FULL;
 		SELECT * FROM session ORDER BY time DESC;
 	";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(15)?;
+	t.expect_size(17)?;
 	t.skip_ok(7)?;
 	//
 	t.expect_vals(&[
