@@ -48,8 +48,6 @@ impl Document {
 				}
 			}
 
-			eprintln!("Defined field names: {defined_field_names:?}");
-
 			// Loop over every field in the document
 			for current_doc_field_idiom in self.current.doc.every(None, true, true).iter() {
 				if current_doc_field_idiom.is_special() {
@@ -61,18 +59,15 @@ impl Document {
 				match defined_field_names.contains(current_doc_field_idiom) {
 					IdiomTrieContains::Exact(_) => {
 						// This field is defined in the schema, so we can skip it.
-						eprintln!("  exact: {current_doc_field_idiom}");
 						continue;
 					}
 					IdiomTrieContains::Ancestor(true) => {
 						// This field is not explicitly defined in the schema, but it is a child of a flex or literal field.
 						// If the field is a child of a flex field, then any nested fields are allowed.
 						// If the field is a child of a literal field, then allow any fields as they will be caught during coercion.
-						eprintln!("  flex ancestor: {current_doc_field_idiom}");
 						continue;
 					}
 					IdiomTrieContains::Ancestor(false) => {
-						eprintln!("  not flex anct: {current_doc_field_idiom}");
 						if let Some(part) = current_doc_field_idiom.last() {
 							// This field is an array index, so it is automatically allowed.
 							if part.is_index() {
@@ -95,7 +90,6 @@ impl Document {
 					}
 
 					IdiomTrieContains::None => {
-						eprintln!("  not defined: {current_doc_field_idiom}");
 						// This field is not explicitly defined in the schema or it is not a child of a flex field.
 						if opt.strict {
 							// If strict, then throw an error on an undefined field

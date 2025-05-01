@@ -228,6 +228,8 @@ impl InfoStructure for Idiom {
 /// A trie structure for storing idioms.
 ///
 /// This is used for efficient searching and retrieval of idioms based on their path parts.
+///
+/// Note: This is a simplified version of a trie and does not implement all the features of a full trie.
 #[derive(Debug)]
 pub(crate) struct IdiomTrie<T> {
 	/// The children of this node, indexed by their path part.
