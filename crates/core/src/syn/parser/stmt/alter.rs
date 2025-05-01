@@ -156,7 +156,7 @@ impl Parser<'_> {
 				}
 				t!("ASSERT") => {
 					self.pop_peek();
-					res.value = Some(if drop {
+					res.assert = Some(if drop {
 						None
 					} else {
 						Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
