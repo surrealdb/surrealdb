@@ -14,7 +14,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-match = "$error = /Couldn't coerce value for field `out` of `likes:[0-9a-z]+`: Expected `record<person>` but found `thing:[0-9a-z]+`"
+match = """$error = /Couldn't coerce value for field `out` of `likes:[0-9a-z]+`: Expected `record<person>` but found `thing:[0-9a-z]+`/"""
 error = true
 
 [[test.results]]
@@ -28,7 +28,7 @@ value = "[{ id: likes:60l77luoejr1s5th7d4r, in: person:15nrffr4aoneyjt6l2ft, out
 skip-record-id-key = true
 
 [[test.results]]
-match = "$error = <regex> 'Couldn't coerce value for field `out` of `likes:[0-9a-z]+`: Expected `record<person\\|thing>` but found `other:[0-9a-z]+`'"
+match = """$error = <regex> 'Couldn\\'t coerce value for field `out` of `likes:[0-9a-z]+`: Expected `record<person|thing>` but found `other:[0-9a-z]+`'"""
 error = true
 
 [[test.results]]
