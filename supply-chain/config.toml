@@ -867,6 +867,10 @@ criteria = "safe-to-deploy"
 version = "1.19.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.onnx-embedding]]
+version = "0.1.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.oorandom]]
 version = "11.1.5"
 criteria = "safe-to-deploy"
