@@ -1,10 +1,5 @@
 /**
 [test]
-reason = """
-Setting fields which have partially defined types didn't seem to work when the test was written
-
-This seems to be a problem in the cleanup_table_fields function being over-eager with deleting fields.
-"""
 
 [[test.results]]
 value = "'OK'"
