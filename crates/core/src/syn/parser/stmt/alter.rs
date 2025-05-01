@@ -45,24 +45,18 @@ impl Parser<'_> {
 		};
 
 		loop {
-			match self.peek_kind() {
+			let drop = self.eat(t!("DROP"));
+			let peek = self.peek();
+			match peek.kind {
 				t!("COMMENT") => {
 					self.pop_peek();
-					if self.eat(t!("NONE")) {
-						res.comment = Some(None);
+					res.comment = Some(if drop {
+						None
 					} else {
-						res.comment = Some(Some(self.next_token_value()?));
-					}
+						Some(self.next_token_value()?)
+					})
 				}
-				t!("DROP") => {
-					self.pop_peek();
-					if self.eat(t!("false")) {
-						res.drop = Some(false);
-					} else {
-						res.drop = Some(true);
-					}
-				}
-				t!("TYPE") => {
+				t!("TYPE") if !drop => {
 					self.pop_peek();
 					let peek = self.peek();
 					match peek.kind {
@@ -81,25 +75,28 @@ impl Parser<'_> {
 						_ => unexpected!(self, peek, "`NORMAL`, `RELATION`, or `ANY`"),
 					}
 				}
-				t!("SCHEMALESS") => {
+				t!("SCHEMALESS") if !drop => {
 					self.pop_peek();
 					res.full = Some(false);
 				}
-				t!("SCHEMAFULL") => {
+				t!("SCHEMAFULL") if !drop => {
 					self.pop_peek();
 					res.full = Some(true);
 				}
-				t!("PERMISSIONS") => {
+				t!("PERMISSIONS") if !drop => {
 					self.pop_peek();
 					res.permissions = Some(ctx.run(|ctx| self.parse_permission(ctx, false)).await?);
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
-					if self.eat(t!("NONE")) {
-						res.changefeed = Some(None);
+					res.changefeed = Some(if drop {
+						None
 					} else {
-						res.changefeed = Some(Some(self.parse_changefeed()?));
-					}
+						Some(self.parse_changefeed()?)
+					})
+				}
+				_ if drop => {
+					unexpected!(self, peek, "`COMMENT` or `CHANGEFEED`")
 				}
 				_ => break,
 			}
