@@ -4,6 +4,7 @@ mod bytes_hack;
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
+use semver::VersionReq;
 use serde::{de, Deserialize, Serialize};
 use surrealdb_core::{
 	dbs::capabilities::{
@@ -42,7 +43,7 @@ impl TestConfig {
 
 	/// Returns the imports for this file, empty if no imports are defined.
 	pub fn imports(&self) -> &[String] {
-		self.env.as_ref().and_then(|x| x.imports.as_ref()).map(|x| x.as_slice()).unwrap_or(&[])
+		self.env.as_ref().map(|x| x.imports.as_slice()).unwrap_or(&[])
 	}
 
 	/// Returns if this test must be run without other test running.
@@ -87,7 +88,8 @@ pub struct TestEnv {
 
 	pub login: Option<TestLogin>,
 
-	pub imports: Option<Vec<String>>,
+	#[serde(default)]
+	pub imports: Vec<String>,
 	pub timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
 
@@ -134,7 +136,7 @@ impl TestEnv {
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum TestExpectation {
 	// NOTE! Ordering of variants here is important.
@@ -149,6 +151,34 @@ pub enum TestExpectation {
 	Error(ErrorTestResult),
 	/// The result is a value but specified as a table.
 	Value(ValueTestResult),
+}
+
+fn to_deser_error<T: std::fmt::Display, D: serde::de::Error>(e: T) -> D {
+	D::custom(e)
+}
+
+impl<'de> Deserialize<'de> for TestExpectation {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: de::Deserializer<'de>,
+	{
+		let v = toml::Value::deserialize(deserializer)?;
+		if v.is_str() {
+			SurrealValue::deserialize(v).map_err(to_deser_error).map(TestExpectation::Plain)
+		} else if let Some(x) = v.as_table() {
+			if x.contains_key("match") {
+				MatchTestResult::deserialize(v).map_err(to_deser_error).map(TestExpectation::Match)
+			} else if x.contains_key("value") {
+				ValueTestResult::deserialize(v).map_err(to_deser_error).map(TestExpectation::Value)
+			} else if x.contains_key("error") {
+				ErrorTestResult::deserialize(v).map_err(to_deser_error).map(TestExpectation::Error)
+			} else {
+				Err(to_deser_error("Table does not match any the options, expected table to contain altleast one `match`, `value` or `error` field"))
+			}
+		} else {
+			Err(to_deser_error("Expected a string or a table"))
+		}
+	}
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -191,11 +221,25 @@ pub struct MatchTestResult {
 /// [env]
 /// timeout = 1000
 /// ```
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum BoolOr<T> {
 	Bool(bool),
 	Value(T),
+}
+
+impl<'d, T: Deserialize<'d>> Deserialize<'d> for BoolOr<T> {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: de::Deserializer<'d>,
+	{
+		let v = toml::Value::deserialize(deserializer)?;
+		if v.is_bool() {
+			bool::deserialize(v).map(BoolOr::Bool).map_err(to_deser_error)
+		} else {
+			T::deserialize(v).map(BoolOr::Value).map_err(to_deser_error)
+		}
+	}
 }
 
 impl<T> BoolOr<T> {
@@ -233,7 +277,7 @@ impl<'de> Deserialize<'de> for Version {
 		D: serde::Deserializer<'de>,
 	{
 		let str = String::deserialize(deserializer)?;
-		let version = semver::VersionReq::parse(&str).map_err(<D::Error as de::Error>::custom)?;
+		let version = semver::VersionReq::parse(&str).map_err(to_deser_error)?;
 		Ok(Version(version))
 	}
 }
@@ -251,7 +295,6 @@ impl Serialize for Version {
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TestDetails {
-	pub results: Option<TestDetailsResults>,
 	pub reason: Option<String>,
 	run: Option<bool>,
 	issue: Option<u64>,
@@ -259,9 +302,14 @@ pub struct TestDetails {
 	pub fuzzing_reproduction: Option<String>,
 
 	#[serde(default)]
-	pub is_upgrade: bool,
+	pub upgrade: bool,
 
-	pub version: Option<Version>,
+	#[serde(default)]
+	pub version: VersionReq,
+	#[serde(default)]
+	pub importing_version: VersionReq,
+
+	pub results: Option<TestDetailsResults>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
@@ -299,12 +347,32 @@ impl TestDetails {
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 #[serde(rename_all = "kebab-case")]
 pub enum TestDetailsResults {
 	QueryResult(Vec<TestExpectation>),
 	ParserError(ParsingTestResult),
+}
+
+impl<'de> Deserialize<'de> for TestDetailsResults {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: de::Deserializer<'de>,
+	{
+		let value = toml::Value::deserialize(deserializer)?;
+		if value.is_array() {
+			Deserialize::deserialize(value)
+				.map_err(to_deser_error)
+				.map(TestDetailsResults::QueryResult)
+		} else if value.is_table() {
+			Deserialize::deserialize(value)
+				.map_err(to_deser_error)
+				.map(TestDetailsResults::ParserError)
+		} else {
+			Err(to_deser_error("Expected table or array"))
+		}
+	}
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -375,12 +443,32 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 #[serde(rename_all = "kebab-case")]
 pub enum TestLogin {
 	Leveled(TestLeveledLogin),
 	Record(TestRecordLogin),
+}
+
+impl<'de> Deserialize<'de> for TestLogin {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: de::Deserializer<'de>,
+	{
+		let v = toml::Value::deserialize(deserializer)?;
+		if let Some(x) = v.as_table() {
+			if x.contains_key("level") {
+				TestLeveledLogin::deserialize(v).map_err(to_deser_error).map(TestLogin::Leveled)
+			} else if x.contains_key("rid") {
+				TestRecordLogin::deserialize(v).map_err(to_deser_error).map(TestLogin::Record)
+			} else {
+				Err(to_deser_error("Table does not match any the options, expected table to contain altleast one `level` or `rid` field"))
+			}
+		} else {
+			Err(to_deser_error("Expected a table"))
+		}
+	}
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
