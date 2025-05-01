@@ -251,12 +251,12 @@ jobs:
           set -x
 
           if [[ "${{ inputs.publish }}" == "true" ]]; then
-            extraArgs="--execute"
-          else
             extraArgs=""
+          else
+            extraArgs="--dry_run"
           fi
 
-          cargo release publish --workspace --exclude surreal --no-confirm $extraArgs
+          cargo publish --package surrealdb $extraArgs
 
   cleanup:
     name: Cleanup
