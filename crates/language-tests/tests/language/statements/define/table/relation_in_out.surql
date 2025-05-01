@@ -26,11 +26,11 @@ skip-record-id-key = true
 
 
 [[test.results]]
-match = "$error = <regex> 'Found record: `likes:[a-z0-9]+` which is a relation, but expected a  RELATION IN record<person> OUT record<person \\| thing>'"
+match = "$error = <regex> 'Found record: `likes:[a-z0-9]+` which is a relation, but expected a  RELATION IN record<person> OUT record<person | thing>'"
 error = true
 
 [[test.results]]
-match = "$error = <regex> 'Couldn't coerce value for field `out` of `likes:[a-z0-9]+`: Expected `record<person\\|thing>` but found `other:[0-9a-z]+`'"
+match = "$error = <regex> 'Couldn\\'t coerce value for field `out` of `likes:[a-z0-9]+`: Expected `record<person|thing>` but found `other:[0-9a-z]+`'"
 error = true
 
 [[test.results]]
