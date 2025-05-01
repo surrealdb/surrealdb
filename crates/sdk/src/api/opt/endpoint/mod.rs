@@ -56,6 +56,7 @@ pub trait IntoEndpoint<Scheme> {
 	/// The client implied by this scheme and address combination
 	type Client: Connection;
 	/// Converts an input into a server address object
+	#[deprecated(since = "2.3.0")]
 	fn into_endpoint(self) -> Result<Endpoint>;
 }
 
