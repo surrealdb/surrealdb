@@ -4,11 +4,12 @@ on:
   issue_comment:
     types: [created, edited]
 
-permissions:
-  issues: write
+permissions: read-all
 
 jobs:
   automoderator:
+    permissions:
+      issues: write
     runs-on: ["ubuntu-latest"]
     steps:
     - name: Redact Suspicious Links

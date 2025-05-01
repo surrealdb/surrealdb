@@ -45,6 +45,9 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  
 jobs:
   cargo-deny:
     name: Check dependencies for known issues

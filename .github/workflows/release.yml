@@ -38,12 +38,14 @@ defaults:
     shell: bash
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release:
     name: Prepare release
+    permissions:
+      contents: write
+      pull-requests: write
     uses: ./.github/workflows/publish-version.yml
     with:
       git-ref: ${{ inputs.branch }}

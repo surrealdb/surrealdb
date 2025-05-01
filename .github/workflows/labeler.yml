@@ -6,12 +6,13 @@ on:
     types: [opened, edited]
 
 permissions:
-  issues: write
   contents: read
-  pull-requests: write
 
 jobs:
   triage:
+    permissions:
+      issues: write
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - uses: github/issue-labeler@6bea9ed491bb74fce38775b3d863e64a59dbd9eb # v3.3

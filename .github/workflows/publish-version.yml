@@ -48,8 +48,15 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  # contents: write
+  # pull-requests: write
+
 jobs:
   prepare-vars:
+    permissions:
+      contents: write
     name: Prepare vars
     runs-on: ubuntu-latest
     outputs:
@@ -523,6 +530,8 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
+    permissions: 
+      contents: write
     needs: [prepare-vars, test, lint, build]
     runs-on: [runner-amd64-2xlarge]
     steps:
@@ -608,7 +617,7 @@ jobs:
           path: artifacts
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         if: ${{ inputs.publish && inputs.create-release }}
         with:
           name: "Release ${{ needs.prepare-vars.outputs.version }}"
@@ -649,6 +658,8 @@ jobs:
 
   tag-release:
     name: Tag release
+    permissions:
+      contents: write
     needs: [publish, prepare-vars]
     environment: ${{ needs.prepare-vars.outputs.environment }}
     if: ${{ inputs.publish }}
@@ -741,6 +752,8 @@ jobs:
 
   cleanup:
     name: Cleanup
+    permissions:
+      contents: write
     needs: [publish, prepare-vars]
     runs-on: ubuntu-latest
     steps:
