@@ -67,10 +67,6 @@ criteria = "safe-to-deploy"
 version = "4.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.android-tzdata]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.anstream]]
 version = "0.6.18"
 criteria = "safe-to-deploy"
@@ -477,10 +473,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fail]]
 version = "0.4.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.fastrand]]
-version = "2.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.filetime]]
@@ -1669,10 +1661,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.winapi-x86_64-pc-windows-gnu]]
 version = "0.4.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-link]]
-version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]

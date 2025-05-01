@@ -142,6 +142,7 @@ env_logger = "0.11.7"
 flate2 = "1.0.28"
 hashbrown = "0.14.5"
 pprof = "0.14.0"
+rstest = "0.25.0"
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
 test-log = "0.2.13"
@@ -328,6 +329,7 @@ serial_test.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 ulid.workspace = true
 wiremock.workspace = true
+rstest.workspace = true
 
 [build-dependencies]
 semver.workspace = true

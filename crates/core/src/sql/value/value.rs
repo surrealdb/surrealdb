@@ -17,7 +17,7 @@ use crate::sql::{
 	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
 	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
-use crate::sql::{Closure, ControlFlow, FlowResult};
+use crate::sql::{Closure, ControlFlow, FlowResult, Ident, Kind};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
@@ -476,6 +476,49 @@ impl Value {
 	// -----------------------------------
 	// Simple output of value type
 	// -----------------------------------
+
+	pub fn kind(&self) -> Option<Kind> {
+		match self {
+			Value::None => None,
+			Value::Null => Some(Kind::Null),
+			Value::Bool(_) => Some(Kind::Bool),
+			Value::Number(_) => Some(Kind::Number),
+			Value::Strand(_) => Some(Kind::String),
+			Value::Duration(_) => Some(Kind::Duration),
+			Value::Datetime(_) => Some(Kind::Datetime),
+			Value::Uuid(_) => Some(Kind::Uuid),
+			Value::Array(arr) => Some(Kind::Array(
+				Box::new(arr.first().and_then(|v| v.kind()).unwrap_or_default()),
+				None,
+			)),
+			Value::Object(_) => Some(Kind::Object),
+			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
+			Value::Bytes(_) => Some(Kind::Bytes),
+			Value::Thing(_) => None, // TODO: Should this have a kind?
+			Value::Param(_) => None,
+			Value::Idiom(_) => None,
+			Value::Table(_) => None,
+			Value::Mock(_) => None,
+			Value::Regex(_) => None,
+			Value::Cast(_) => None,
+			Value::Block(_) => None,
+			Value::Range(_) => None,
+			Value::Edges(_) => None,
+			Value::Future(_) => None,
+			Value::Constant(_) => None,
+			Value::Function(_) => Some(Kind::Function(None, None)),
+			Value::Subquery(_) => None,
+			Value::Query(_) => None,
+			Value::Model(_) => None,
+			Value::Closure(_) => None,
+			Value::Refs(_) => None,
+			Value::Expression(_) => None,
+			Value::File(file) => Some(Kind::File(vec![
+				Ident::from(file.bucket.as_str()),
+				Ident::from(file.key.as_str()),
+			])),
+		}
+	}
 
 	/// Returns the surql representation of the kind of the value as a string.
 	///

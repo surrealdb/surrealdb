@@ -24,6 +24,8 @@ use uuid::Uuid;
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
+	/// Whether the field is marked as flexible.
+	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
 	pub flex: bool,
 	pub kind: Option<Kind>,
 	#[revision(start = 2)]
@@ -56,15 +58,18 @@ impl DefineFieldStatement {
 		// Validate reference options
 		self.validate_reference_options(ctx)?;
 		// Correct reference type
-		let kind = if let Some(kind) = self.correct_reference_type(ctx, opt).await? {
+		let kind = if let Some(kind) = self.get_reference_kind(ctx, opt).await? {
 			Some(kind)
 		} else {
 			self.kind.clone()
 		};
-		// Disallow mismatched types
-		self.disallow_mismatched_types(ctx, opt).await?;
+
 		// Get the NS and DB
 		let (ns, db) = opt.ns_db()?;
+
+		// Disallow mismatched types
+		self.disallow_mismatched_types(ctx, ns, db).await?;
+
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the name of the field
@@ -114,6 +119,7 @@ impl DefineFieldStatement {
 		}
 		// Clear the cache
 		txn.clear();
+
 		// Find all existing field definitions
 		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
 		// Process possible recursive_definitions
@@ -297,7 +303,7 @@ impl DefineFieldStatement {
 
 			// If a reference is defined, the field must be a record
 			if self.reference.is_some() {
-				let kinds = match kind.non_optional() {
+				let kinds = match kind.get_optional_inner_kind() {
 					Kind::Either(kinds) => kinds,
 					Kind::Array(kind, _) | Kind::Set(kind, _) => match kind.as_ref() {
 						Kind::Either(kinds) => kinds,
@@ -319,7 +325,8 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	async fn correct_reference_type(
+	/// Get the correct reference type if needed.
+	async fn get_reference_kind(
 		&self,
 		ctx: &Context,
 		opt: &Options,
@@ -341,17 +348,14 @@ impl DefineFieldStatement {
 			};
 
 			// Check if the field is an array-like value and thus "containing" references
-			let is_contained = if let Some(kind) = &fd.kind {
-				matches!(
-					kind.non_optional(),
-					Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_))
-				)
-			} else {
-				false
-			};
+			let is_array_like = fd
+				.kind
+				.as_ref()
+				.map(|kind| kind.get_optional_inner_kind().is_array_like())
+				.unwrap_or_default();
 
 			// If the field is an array-like value, add the `.*` part
-			if is_contained {
+			if is_array_like {
 				let ff = ff.clone().push(Part::All);
 				return Ok(Some(Kind::References(Some(ft.clone()), Some(ff))));
 			}
@@ -360,8 +364,12 @@ impl DefineFieldStatement {
 		Ok(None)
 	}
 
-	async fn disallow_mismatched_types(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
-		let (ns, db) = opt.ns_db()?;
+	async fn disallow_mismatched_types(
+		&self,
+		ctx: &Context,
+		ns: &str,
+		db: &str,
+	) -> Result<(), Error> {
 		let fds = ctx.tx().all_tb_fields(ns, db, &self.what, None).await?;
 
 		if let Some(self_kind) = &self.kind {

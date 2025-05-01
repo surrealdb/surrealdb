@@ -2,20 +2,12 @@
 # cargo-vet imports lock
 
 [[unpublished.surrealdb]]
-version = "2.3.0"
-audited_as = "2.2.2"
-
-[[unpublished.surrealdb]]
 version = "3.0.0"
 audited_as = "2.2.2"
 
 [[unpublished.surrealdb-core]]
-version = "2.3.0"
-audited_as = "2.2.2"
-
-[[unpublished.surrealdb-core]]
 version = "3.0.0"
-audited_as = "2.2.2"
+audited_as = "2.3.0"
 
 [[publisher.addr]]
 version = "0.15.6"
@@ -402,6 +394,20 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
+[[publisher.rstest]]
+version = "0.25.0"
+when = "2025-03-02"
+user-id = 30606
+user-login = "la10736"
+user-name = "Michele d'Amico"
+
+[[publisher.rstest_macros]]
+version = "0.25.0"
+when = "2025-03-02"
+user-id = 30606
+user-login = "la10736"
+user-name = "Michele d'Amico"
+
 [[publisher.ryu]]
 version = "1.0.20"
 when = "2025-03-04"
@@ -480,8 +486,8 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "2.2.2"
-when = "2025-04-10"
+version = "2.3.0"
+when = "2025-05-01"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -619,6 +625,257 @@ user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
+[[publisher.winapi-util]]
+version = "0.1.9"
+when = "2024-08-02"
+user-id = 189
+user-login = "BurntSushi"
+user-name = "Andrew Gallant"
+
+[[publisher.windows]]
+version = "0.57.0"
+when = "2024-06-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-core]]
+version = "0.57.0"
+when = "2024-06-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-implement]]
+version = "0.57.0"
+when = "2024-06-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-interface]]
+version = "0.57.0"
+when = "2024-06-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-registry]]
+version = "0.4.0"
+when = "2025-01-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-result]]
+version = "0.1.2"
+when = "2024-06-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-result]]
+version = "0.3.2"
+when = "2025-03-18"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-strings]]
+version = "0.3.1"
+when = "2025-02-21"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-targets]]
+version = "0.48.5"
+when = "2023-08-18"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-targets]]
+version = "0.52.6"
+when = "2024-07-03"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-targets]]
+version = "0.53.0"
+when = "2025-01-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_aarch64_gnullvm]]
+version = "0.48.5"
+when = "2023-08-18"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_aarch64_gnullvm]]
+version = "0.52.6"
+when = "2024-07-03"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_aarch64_gnullvm]]
+version = "0.53.0"
+when = "2025-01-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_aarch64_msvc]]
+version = "0.48.5"
+when = "2023-08-18"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_aarch64_msvc]]
+version = "0.52.6"
+when = "2024-07-03"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_aarch64_msvc]]
+version = "0.53.0"
+when = "2025-01-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_i686_gnu]]
+version = "0.48.5"
+when = "2023-08-18"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_i686_gnu]]
+version = "0.52.6"
+when = "2024-07-03"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_i686_gnu]]
+version = "0.53.0"
+when = "2025-01-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_i686_gnullvm]]
+version = "0.52.6"
+when = "2024-07-03"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_i686_gnullvm]]
+version = "0.53.0"
+when = "2025-01-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_i686_msvc]]
+version = "0.48.5"
+when = "2023-08-18"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_i686_msvc]]
+version = "0.52.6"
+when = "2024-07-03"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_i686_msvc]]
+version = "0.53.0"
+when = "2025-01-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_gnu]]
+version = "0.48.5"
+when = "2023-08-18"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_gnu]]
+version = "0.52.6"
+when = "2024-07-03"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_gnu]]
+version = "0.53.0"
+when = "2025-01-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_gnullvm]]
+version = "0.48.5"
+when = "2023-08-18"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_gnullvm]]
+version = "0.52.6"
+when = "2024-07-03"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_gnullvm]]
+version = "0.53.0"
+when = "2025-01-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_msvc]]
+version = "0.48.5"
+when = "2023-08-18"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_msvc]]
+version = "0.52.6"
+when = "2024-07-03"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows_x86_64_msvc]]
+version = "0.53.0"
+when = "2025-01-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.wit-bindgen-rt]]
+version = "0.39.0"
+when = "2025-02-05"
+user-id = 73222
+user-login = "wasmtime-publish"
+
 [[audits.bytecode-alliance.wildcard-audits.bumpalo]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
@@ -629,7 +886,7 @@ end = "2025-07-30"
 [[audits.bytecode-alliance.wildcard-audits.wit-bindgen-rt]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
-user-id = 73222
+user-id = 73222 # wasmtime-publish
 start = "2023-01-01"
 end = "2025-05-08"
 notes = """
@@ -781,6 +1038,21 @@ notes = "Just a dependency version bump and a bug fix for redox"
 who = "Dan Gohman <dev@sunfishcode.online>"
 criteria = "safe-to-deploy"
 delta = "0.3.9 -> 0.3.10"
+
+[[audits.bytecode-alliance.audits.fastrand]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "2.0.0 -> 2.0.1"
+notes = """
+This update had a few doc updates but no otherwise-substantial source code
+updates.
+"""
+
+[[audits.bytecode-alliance.audits.fastrand]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "2.1.1 -> 2.3.0"
+notes = "Minor refactoring, nothing new."
 
 [[audits.bytecode-alliance.audits.fd-lock]]
 who = "Pat Hickey <phickey@fastly.com>"
@@ -1384,6 +1656,16 @@ criteria = "safe-to-deploy"
 delta = "1.0.1 -> 1.0.2"
 notes = "No changes to any .rs files or Rust code."
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
+[[audits.google.audits.fastrand]]
+who = "George Burgess IV <gbiv@google.com>"
+criteria = "safe-to-deploy"
+version = "1.9.0"
+notes = """
+`does-not-implement-crypto` is certified because this crate explicitly says
+that the RNG here is not cryptographically secure.
+"""
+aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
 
 [[audits.google.audits.flate2]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
@@ -2086,6 +2368,13 @@ criteria = "safe-to-deploy"
 version = "0.2.4"
 aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
 
+[[audits.google.audits.windows-core]]
+who = "Manish Goregaokar <manishearth@google.com>"
+criteria = "safe-to-deploy"
+version = "0.52.0"
+notes = "Implements Windows system APIs"
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
 [[audits.google.audits.zerofrom]]
 who = "Manish Goregaokar <manishearth@google.com>"
 criteria = "safe-to-deploy"
@@ -2293,6 +2582,13 @@ end = "2024-06-16"
 notes = "Maintained by Henri Sivonen who works at Mozilla."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.android-tzdata]]
+who = "Mark Hammond <mhammond@skippinet.com.au>"
+criteria = "safe-to-deploy"
+version = "0.1.1"
+notes = "Small crate parsing a file. No unsafe code"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.android_system_properties]]
 who = "Nicolas Silva <nical@fastmail.com>"
 criteria = "safe-to-deploy"
@@ -2473,6 +2769,25 @@ aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supp
 who = "Mike Hommey <mh+mozilla@glandium.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.1 -> 0.3.3"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.fastrand]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "1.9.0 -> 2.0.0"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.fastrand]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "2.0.1 -> 2.1.0"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.fastrand]]
+who = "Chris Martin <cmartin@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "2.1.0 -> 2.1.1"
+notes = "Fairly trivial changes, no chance of security regression."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.fd-lock]]
@@ -3036,6 +3351,13 @@ who = "Henri Sivonen <hsivonen@hsivonen.fi>"
 criteria = "safe-to-deploy"
 version = "1.0.5"
 notes = "I, Henri Sivonen, wrote this crate."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.windows-link]]
+who = "Mark Hammond <mhammond@skippinet.com.au>"
+criteria = "safe-to-deploy"
+version = "0.1.1"
+notes = "A microsoft crate allowing unsafe calls to windows apis."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.write16]]

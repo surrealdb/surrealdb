@@ -15,37 +15,71 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
+/// The kind, or data type, of a value or field.
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Kind {
+	/// The most generic type, can be anything.
 	Any,
+	/// Null type.
 	Null,
+	/// Boolean type.
 	Bool,
+	/// Bytes type.
 	Bytes,
+	/// Datetime type.
 	Datetime,
+	/// Decimal type.
 	Decimal,
+	/// Duration type.
 	Duration,
+	/// 64-bit floating point type.
 	Float,
+	/// 64-bit signed integer type.
 	Int,
+	/// Number type, can be either a float, int or decimal.
+	/// This is the most generic type for numbers.
 	Number,
+	/// Object type.
 	Object,
+	/// Geometric 2D point type with x and y coordinates.
 	Point,
+	/// String type.
 	String,
+	/// UUID type.
 	Uuid,
+	/// Regular expression type.
 	#[revision(start = 2)]
 	Regex,
+	/// A record type.
 	Record(Vec<Table>),
+	/// A geometry type.
+	/// The vec contains the geometry types as strings, for example `"point"` or `"polygon"`.
 	Geometry(Vec<String>),
+	/// An optional type.
 	Option(Box<Kind>),
+	/// An either type.
+	/// Can be any of the kinds in the vec.
 	Either(Vec<Kind>),
+	/// A set type.
 	Set(Box<Kind>, Option<u64>),
+	/// An array type.
 	Array(Box<Kind>, Option<u64>),
+	/// A function type.
+	/// The first option is the argument types, the second is the optional return type.
 	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
+	/// A range type.
 	Range,
+	/// A literal type.
+	/// The literal type is used to represent a type that can only be a single value.
+	/// For example, `"a"` is a literal type which can only ever be `"a"`.
+	/// This can be used in the `Kind::Either` type to represent an enum.
 	Literal(Literal),
+	/// A references type representing a link to another table or field.
 	References(Option<Table>, Option<Idiom>),
+	/// A file type.
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<Ident>),
@@ -86,21 +120,9 @@ impl Kind {
 		}
 	}
 
-	/// Returns true if this type is a literal, or contains a literal
-	pub(crate) fn contains_literal(&self) -> bool {
-		if matches!(self, Kind::Literal(_)) {
-			return true;
-		}
-
-		if let Kind::Option(x) = self {
-			return x.contains_literal();
-		}
-
-		if let Kind::Either(x) = self {
-			return x.iter().any(|x| x.contains_literal());
-		}
-
-		false
+	/// Returns true if this type is a set or array.
+	pub(crate) fn is_array_like(&self) -> bool {
+		matches!(self, Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_)))
 	}
 
 	/// Returns Some if this type can be converted into a discriminated object, None otherwise
@@ -210,9 +232,10 @@ impl Kind {
 		}
 	}
 
-	pub(crate) fn non_optional(&self) -> &Kind {
+	/// Get the inner kind of a [`Kind::Option`] or return the original [`Kind`] if it is not the Option variant.
+	pub(crate) fn get_optional_inner_kind(&self) -> &Kind {
 		match self {
-			Kind::Option(k) => k.as_ref().non_optional(),
+			Kind::Option(k) => k.as_ref().get_optional_inner_kind(),
 			_ => self,
 		}
 	}
@@ -713,5 +736,74 @@ impl Display for Literal {
 				Ok(())
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	use rstest::rstest;
+
+	#[rstest]
+	#[case::any(Kind::Any, false)]
+	#[case::null(Kind::Null, false)]
+	#[case::bool(Kind::Bool, false)]
+	#[case::bytes(Kind::Bytes, false)]
+	#[case::datetime(Kind::Datetime, false)]
+	#[case::decimal(Kind::Decimal, false)]
+	#[case::duration(Kind::Duration, false)]
+	#[case::float(Kind::Float, false)]
+	#[case::int(Kind::Int, false)]
+	#[case::number(Kind::Number, false)]
+	#[case::object(Kind::Object, false)]
+	#[case::point(Kind::Point, false)]
+	#[case::string(Kind::String, false)]
+	#[case::uuid(Kind::Uuid, false)]
+	#[case::regex(Kind::Regex, false)]
+	#[case::function(Kind::Function(None, None), false)]
+	#[case::function(Kind::Function(Some(vec![]), None), false)]
+	#[case::function(Kind::Function(Some(vec![Kind::Literal(Literal::String("a".into()))]), None), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Any)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Null)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Bool)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Bytes)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Datetime)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Decimal)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Duration)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Float)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Int)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Number)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Object)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Point)), false)]
+	#[case::option(Kind::Option(Box::new(Kind::Literal(Literal::Bool(true)))), false)]
+	#[case::literal(Kind::Literal(Literal::String("a".into())), false)]
+	#[case::literal(Kind::Literal(Literal::Number(1.into())), false)]
+	#[case::literal(Kind::Literal(Literal::Duration(Duration::new(1, 0))), false)]
+	#[case::literal(Kind::Literal(Literal::Bool(true)), false)]
+	#[case::literal(Kind::Literal(Literal::Array(vec![])), true)]
+	#[case::array(Kind::Array(Box::new(Kind::Bool), None), true)]
+	#[case::array(Kind::Array(Box::new(Kind::Literal(Literal::String("a".into()))), None), true)]
+	#[case::object(Kind::Object, false)]
+	#[case::geometry(Kind::Geometry(vec![]), false)]
+	#[case::geometry(Kind::Geometry(vec!["point".to_string()]), false)]
+	#[case::set(Kind::Set(Box::new(Kind::Bool), None), true)]
+	#[case::set(Kind::Set(Box::new(Kind::Literal(Literal::String("a".into()))), None), true)]
+	#[case::either(Kind::Either(vec![]), false)]
+	#[case::either(Kind::Either(vec![Kind::Bool]), false)]
+	#[case::either(Kind::Either(vec![Kind::Literal(Literal::String("a".into()))]), true)]
+	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Number(1.into()))]), true)]
+	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Duration(Duration::new(1, 0)))]), true)]
+	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Bool(true))]), true)]
+	#[case::range(Kind::Range, false)]
+	#[case::references(Kind::References(None, None), false)]
+	#[case::references(Kind::References(Some(Table("table".to_string())), None), false)]
+	#[case::references(Kind::References(Some(Table("table".to_string())), Some(Idiom(vec!["idiom".into()]))), false)]
+	#[case::file(Kind::File(vec![]), false)]
+	#[case::file(Kind::File(vec![Ident("bucket".to_string())]), false)]
+	#[case::file(Kind::File(vec![Ident("bucket".to_string()), Ident("key".to_string())]), false)]
+
+	fn is_array_like(#[case] kind: Kind, #[case] expected: bool) {
+		assert_eq!(kind.is_array_like(), expected);
 	}
 }
