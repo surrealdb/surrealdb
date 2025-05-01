@@ -534,7 +534,10 @@ jobs:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable
+
+      - name: Install Cargo release
+        run: cargo install --force --locked --version 0.25.18 cargo-release
 
       - name: Create a temporary branch
         run: git checkout -b crate
@@ -598,16 +601,12 @@ jobs:
           set -x
 
           if [[ "${{ inputs.publish }}" == "true" ]]; then
-            extraArgs=""
+            extraArgs="--execute"
           else
-            extraArgs="--dry-run"
+            extraArgs=""
           fi
 
-          if ! cargo -Z package-workspace publish --workspace --exclude surreal $extraArgs; then
-            if [[ "${{ needs.prepare-vars.outputs.environment }}" != "nightly" ]]; then
-              exit 101
-            fi
-          fi
+          cargo release publish --workspace --exclude surreal --no-confirm $extraArgs
 
       - name: Download artifacts
         if: ${{ inputs.publish }}
@@ -733,7 +732,6 @@ jobs:
   cleanup:
     name: Cleanup
     needs: [publish, prepare-vars]
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
