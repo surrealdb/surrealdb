@@ -312,11 +312,13 @@ impl From<ops::RangeFull> for KeyRange {
 
 /// A trait for types which can be used as a resource selection for a query.
 pub trait IntoResource<Output> {
+	#[deprecated(since = "2.3.0")]
 	fn into_resource(self) -> Result<Resource>;
 }
 
 /// A trait for types which can be used as a resource selection for a query that returns an `Option`.
 pub trait CreateResource<Output> {
+	#[deprecated(since = "2.3.0")]
 	fn into_resource(self) -> Result<Resource>;
 }
 

@@ -30,6 +30,7 @@ macro_rules! endpoints {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
+		#[expect(deprecated)]
 					let mut endpoint = IntoEndpoint::<RocksDb>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
@@ -55,6 +56,7 @@ macro_rules! endpoints {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
+		#[expect(deprecated)]
 					let mut endpoint = IntoEndpoint::<File>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)

@@ -118,6 +118,7 @@ extern crate tracing;
 #[doc(hidden)]
 pub use surrealdb_core::*;
 
+#[deprecated(since = "2.3.0")]
 pub use uuid::Uuid;
 
 #[macro_use]
