@@ -120,6 +120,23 @@ impl Kind {
 		}
 	}
 
+	/// Returns true if this type is a literal, or contains a literal
+	pub(crate) fn contains_literal(&self) -> bool {
+		if matches!(self, Kind::Literal(_)) {
+			return true;
+		}
+
+		if let Kind::Option(x) = self {
+			return x.contains_literal();
+		}
+
+		if let Kind::Either(x) = self {
+			return x.iter().any(|x| x.contains_literal());
+		}
+
+		false
+	}
+
 	/// Returns true if this type is a set or array.
 	pub(crate) fn is_array_like(&self) -> bool {
 		matches!(self, Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_)))
