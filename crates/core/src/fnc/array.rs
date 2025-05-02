@@ -43,14 +43,14 @@ pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	match value {
 		Value::Array(value) => {
 			for v in value.0 {
-				if !array.0.iter().any(|x| *x == v) {
+				if !array.0.contains(&v) {
 					array.0.push(v)
 				}
 			}
 			Ok(array.into())
 		}
 		value => {
-			if !array.0.iter().any(|x| *x == value) {
+			if !array.0.contains(&value) {
 				array.0.push(value)
 			}
 			Ok(array.into())
