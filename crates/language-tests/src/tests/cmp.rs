@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, ops::Bound};
 
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, dec};
 use surrealdb_core::sql::{
 	Array, Block, Bytes, Cast, Closure, Constant, Datetime, Duration, Edges, Expression, File,
 	Function, Future, Geometry, Id, IdRange, Idiom, Mock, Model, Number, Object, Param, Query,
@@ -189,8 +189,39 @@ impl RoughlyEq for Uuid {
 	}
 }
 
+/// Tolerance for floating point comparisons.
+const EPSILON: f64 = 1e-15;
+/// Tolerance for decimal comparisons.
+const EPSILON_DECIMAL: Decimal = dec!(1e-15);
+
+impl RoughlyEq for f64 {
+	fn roughly_equal(&self, other: &Self, _: &RoughlyEqConfig) -> bool {
+		(self - other).abs() < EPSILON
+	}
+}
+
+impl RoughlyEq for Decimal {
+	fn roughly_equal(&self, other: &Self, _: &RoughlyEqConfig) -> bool {
+		(self - other).abs() < EPSILON_DECIMAL
+	}
+}
+
+impl RoughlyEq for Number {
+	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
+		if self.is_nan() && other.is_nan() {
+			return true;
+		}
+
+		match (self, other) {
+			(Number::Float(a), Number::Float(b)) => a.roughly_equal(b, config),
+			(Number::Decimal(a), Number::Decimal(b)) => a.roughly_equal(b, config),
+			(a, b) => a == b,
+		}
+	}
+}
+
 impl_roughly_eq_delegate!(
-	i64, f64, Decimal, Query, bool, String, Closure, Expression, Number, Geometry, Bytes, Param,
+	i64, Query, bool, String, Closure, Expression, Geometry, Bytes, Param,
 	Model, Subquery, Function, Constant, Future, Edges, Range, Block, Cast, Regex, Mock, Idiom,
 	Duration, File
 );
