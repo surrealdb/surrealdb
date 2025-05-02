@@ -148,6 +148,12 @@ user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2021-02-25"
 end = "2025-01-24"
 
+[[trusted.aes]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-05"
+end = "2026-05-02"
+
 [[trusted.affinitypool]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -166,11 +172,53 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-10-05"
 end = "2025-08-06"
 
+[[trusted.argon2]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2021-01-29"
+end = "2026-05-02"
+
+[[trusted.async-channel]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2022-08-08"
+end = "2026-05-02"
+
+[[trusted.async-executor]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2021-04-24"
+end = "2026-05-02"
+
+[[trusted.async-lock]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2021-04-16"
+end = "2026-05-02"
+
+[[trusted.async-task]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2022-01-26"
+end = "2026-05-02"
+
 [[trusted.async-trait]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-07-23"
 end = "2025-08-06"
+
+[[trusted.atomic-waker]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2023-01-15"
+end = "2026-05-02"
+
+[[trusted.base64ct]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2021-01-21"
+end = "2026-05-02"
 
 [[trusted.bitcode]]
 criteria = "safe-to-deploy"
@@ -183,6 +231,18 @@ criteria = "safe-to-deploy"
 user-id = 132446
 start = "2023-04-27"
 end = "2025-09-03"
+
+[[trusted.blake2]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-10"
+end = "2026-05-02"
+
+[[trusted.blowfish]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-08"
+end = "2026-05-02"
 
 [[trusted.bstr]]
 criteria = "safe-to-deploy"
@@ -208,6 +268,84 @@ user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2021-01-11"
 end = "2025-09-03"
 
+[[trusted.bzip2]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2020-07-06"
+end = "2026-05-02"
+
+[[trusted.bzip2]]
+criteria = "safe-to-deploy"
+user-id = 256011 # Folkert de Vries (folkertdev)
+start = "2024-12-11"
+end = "2026-05-02"
+
+[[trusted.bzip2-sys]]
+criteria = "safe-to-deploy"
+user-id = 256011 # Folkert de Vries (folkertdev)
+start = "2025-02-11"
+end = "2026-05-02"
+
+[[trusted.concurrent-queue]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2022-07-17"
+end = "2026-05-02"
+
+[[trusted.cpufeatures]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2021-04-26"
+end = "2026-05-02"
+
+[[trusted.crc]]
+criteria = "safe-to-deploy"
+user-id = 64482 # Akhil Velagapudi (akhilles)
+start = "2021-10-28"
+end = "2026-05-02"
+
+[[trusted.crc-catalog]]
+criteria = "safe-to-deploy"
+user-id = 64482 # Akhil Velagapudi (akhilles)
+start = "2019-12-14"
+end = "2026-05-01"
+
+[[trusted.crossbeam-channel]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2020-09-06"
+end = "2026-05-02"
+
+[[trusted.crossbeam-deque]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2020-10-12"
+end = "2026-05-02"
+
+[[trusted.crossbeam-epoch]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2020-10-12"
+end = "2026-05-02"
+
+[[trusted.crossbeam-utils]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2020-10-12"
+end = "2026-05-02"
+
+[[trusted.deflate64]]
+criteria = "safe-to-deploy"
+user-id = 131098 # anatawa12 (anatawa12)
+start = "2023-07-29"
+end = "2026-05-02"
+
+[[trusted.digest]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-10"
+end = "2026-05-02"
+
 [[trusted.dmp]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -226,11 +364,59 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-01-27"
 end = "2025-01-24"
 
+[[trusted.event-listener]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2022-01-22"
+end = "2026-05-02"
+
+[[trusted.event-listener-strategy]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2025-03-27"
+end = "2026-05-02"
+
+[[trusted.filetime]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-04-23"
+end = "2026-05-02"
+
+[[trusted.fixedbitset]]
+criteria = "safe-to-deploy"
+user-id = 356 # bluss (bluss)
+start = "2019-10-06"
+end = "2026-05-02"
+
+[[trusted.fslock]]
+criteria = "safe-to-deploy"
+user-id = 23043 # brunoczim
+start = "2020-01-01"
+end = "2026-05-02"
+
 [[trusted.fst]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-07-20"
 end = "2025-08-31"
+
+[[trusted.futures-lite]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2021-06-03"
+end = "2026-05-02"
+
+[[trusted.futures-task]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2019-07-29"
+end = "2026-05-02"
+
+[[trusted.futures-util]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2020-10-05"
+end = "2026-05-02"
 
 [[trusted.globset]]
 criteria = "safe-to-deploy"
@@ -310,6 +496,12 @@ user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-04-15"
 end = "2025-08-31"
 
+[[trusted.indexmap]]
+criteria = "safe-to-deploy"
+user-id = 356 # bluss (bluss)
+start = "2019-08-20"
+end = "2026-05-02"
+
 [[trusted.indxdb]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -340,6 +532,36 @@ user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2021-04-12"
 end = "2025-09-03"
 
+[[trusted.lzma-rs]]
+criteria = "safe-to-deploy"
+user-id = 14564 # Guillaume E (gendx)
+start = "2019-02-24"
+end = "2026-05-02"
+
+[[trusted.lzma-sys]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-06"
+end = "2026-05-02"
+
+[[trusted.maplit]]
+criteria = "safe-to-deploy"
+user-id = 356 # bluss (bluss)
+start = "2019-08-24"
+end = "2026-05-02"
+
+[[trusted.matrixmultiply]]
+criteria = "safe-to-deploy"
+user-id = 356 # bluss (bluss)
+start = "2019-09-20"
+end = "2026-05-02"
+
+[[trusted.md-5]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-10"
+end = "2026-05-02"
+
 [[trusted.memchr]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
@@ -364,6 +586,24 @@ user-id = 262632 # Maxwell Flitton (maxwellflitton)
 start = "2024-03-30"
 end = "2025-09-03"
 
+[[trusted.native-tls]]
+criteria = "safe-to-deploy"
+user-id = 5 # Steven Fackler (sfackler)
+start = "2019-04-27"
+end = "2026-05-02"
+
+[[trusted.ndarray]]
+criteria = "safe-to-deploy"
+user-id = 356 # bluss (bluss)
+start = "2019-09-23"
+end = "2026-05-02"
+
+[[trusted.ndarray-stats]]
+criteria = "safe-to-deploy"
+user-id = 356 # bluss (bluss)
+start = "2024-08-24"
+end = "2026-05-02"
+
 [[trusted.num_cpus]]
 criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
@@ -376,17 +616,83 @@ user-id = 262632 # Maxwell Flitton (maxwellflitton)
 start = "2025-04-17"
 end = "2026-05-01"
 
+[[trusted.openssl-probe]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2020-08-04"
+end = "2026-05-02"
+
+[[trusted.ort]]
+criteria = "safe-to-deploy"
+user-id = 152041 # decahedron1
+start = "2022-11-26"
+end = "2026-05-02"
+
+[[trusted.ort-sys]]
+criteria = "safe-to-deploy"
+user-id = 152041 # decahedron1
+start = "2023-11-12"
+end = "2026-05-02"
+
 [[trusted.parking_lot]]
 criteria = "safe-to-deploy"
 user-id = 2915 # Amanieu d'Antras (Amanieu)
 start = "2019-05-04"
 end = "2025-12-19"
 
+[[trusted.password-hash]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2021-01-29"
+end = "2026-05-02"
+
 [[trusted.paste]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-03-19"
 end = "2025-08-06"
+
+[[trusted.pathdiff]]
+criteria = "safe-to-deploy"
+user-id = 1139 # Manish Goregaokar (Manishearth)
+start = "2020-04-20"
+end = "2026-05-02"
+
+[[trusted.pbkdf2]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-06-10"
+end = "2026-05-02"
+
+[[trusted.pin-project]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2019-03-02"
+end = "2026-05-02"
+
+[[trusted.pin-project-internal]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2019-08-11"
+end = "2026-05-02"
+
+[[trusted.pin-project-lite]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2019-10-22"
+end = "2026-05-02"
+
+[[trusted.portable-atomic]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2022-02-24"
+end = "2026-05-02"
+
+[[trusted.portable-atomic-util]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2023-01-15"
+end = "2026-05-02"
 
 [[trusted.prettyplease]]
 criteria = "safe-to-deploy"
@@ -399,6 +705,12 @@ criteria = "safe-to-deploy"
 user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2021-03-12"
 end = "2025-01-24"
+
+[[trusted.rawpointer]]
+criteria = "safe-to-deploy"
+user-id = 356 # bluss (bluss)
+start = "2019-09-08"
+end = "2026-05-02"
 
 [[trusted.ref-cast]]
 criteria = "safe-to-deploy"
@@ -460,11 +772,23 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-05-02"
 end = "2025-08-06"
 
+[[trusted.salsa20]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2019-06-24"
+end = "2026-05-02"
+
 [[trusted.same-file]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-07-16"
 end = "2025-08-31"
+
+[[trusted.scrypt]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2020-08-18"
+end = "2026-05-02"
 
 [[trusted.serde]]
 criteria = "safe-to-deploy"
@@ -507,6 +831,12 @@ criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2020-02-14"
 end = "2025-08-31"
+
+[[trusted.socks]]
+criteria = "safe-to-deploy"
+user-id = 5 # Steven Fackler (sfackler)
+start = "2020-11-22"
+end = "2026-05-02"
 
 [[trusted.storekey]]
 criteria = "safe-to-deploy"
@@ -568,6 +898,24 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-03-01"
 end = "2025-08-06"
 
+[[trusted.system-configuration]]
+criteria = "safe-to-deploy"
+user-id = 1459 # Linus Färnstrand (faern)
+start = "2019-10-16"
+end = "2026-05-02"
+
+[[trusted.system-configuration-sys]]
+criteria = "safe-to-deploy"
+user-id = 1459 # Linus Färnstrand (faern)
+start = "2019-10-16"
+end = "2026-05-02"
+
+[[trusted.tar]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2026-05-02"
+
 [[trusted.tokio]]
 criteria = "safe-to-deploy"
 user-id = 10 # Carl Lerche (carllerche)
@@ -579,6 +927,12 @@ criteria = "safe-to-deploy"
 user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2020-12-25"
 end = "2025-09-03"
+
+[[trusted.tokio-io-timeout]]
+criteria = "safe-to-deploy"
+user-id = 5 # Steven Fackler (sfackler)
+start = "2019-09-07"
+end = "2026-05-02"
 
 [[trusted.tokio-macros]]
 criteria = "safe-to-deploy"
@@ -633,6 +987,18 @@ criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-03-05"
 end = "2025-08-06"
+
+[[trusted.unicode-security]]
+criteria = "safe-to-deploy"
+user-id = 1139 # Manish Goregaokar (Manishearth)
+start = "2020-01-01"
+end = "2026-05-02"
+
+[[trusted.valuable]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2025-01-17"
+end = "2026-05-02"
 
 [[trusted.vart]]
 criteria = "safe-to-deploy"
@@ -747,3 +1113,21 @@ criteria = "safe-to-deploy"
 user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-10-27"
 end = "2025-09-03"
+
+[[trusted.xz2]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2022-06-06"
+end = "2026-05-02"
+
+[[trusted.zip]]
+criteria = "safe-to-deploy"
+user-id = 209322 # Chris Hennick (Pr0methean)
+start = "2024-04-20"
+end = "2026-05-02"
+
+[[trusted.zopfli]]
+criteria = "safe-to-deploy"
+user-id = 111932 # Alejandro González (AlexTMjugador)
+start = "2022-08-19"
+end = "2026-05-02"
