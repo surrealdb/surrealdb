@@ -25,6 +25,7 @@ const NANOS_PER_SEC: i64 = 1_000_000_000;
 const NANOS_PER_MILLI: i64 = 1_000_000;
 const NANOS_PER_MICRO: i64 = 1_000;
 
+#[deprecated(since = "2.3.0")]
 pub struct WsNotification {}
 
 // Converts a debug representation of `std::time::Duration` back

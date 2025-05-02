@@ -10,7 +10,7 @@ use std::{
 	time::SystemTime,
 };
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context, Result};
 use futures::FutureExt as _;
 use surrealdb_core::{dbs::Capabilities, kvs::Datastore};
 use tokio::sync::mpsc::{self, Receiver, Sender};
