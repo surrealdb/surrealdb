@@ -44,7 +44,8 @@ pub enum Kind {
 	Number,
 	/// Object type.
 	Object,
-	/// Geometric 2D point type with x and y coordinates.
+	/// Geometric 2D point type with longitude *then* latitude coordinates.
+	/// This follows the GeoJSON spec.
 	Point,
 	/// String type.
 	String,

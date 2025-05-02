@@ -494,7 +494,7 @@ impl Value {
 			Value::Object(_) => Some(Kind::Object),
 			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
 			Value::Bytes(_) => Some(Kind::Bytes),
-			Value::Thing(_) => None, // TODO: Should this have a kind?
+			Value::Thing(thing) => Some(Kind::Record(vec![thing.tb.clone().into()])),
 			Value::Param(_) => None,
 			Value::Idiom(_) => None,
 			Value::Table(_) => None,
@@ -506,17 +506,14 @@ impl Value {
 			Value::Edges(_) => None,
 			Value::Future(_) => None,
 			Value::Constant(_) => None,
-			Value::Function(_) => Some(Kind::Function(None, None)),
+			Value::Function(_) => None,
 			Value::Subquery(_) => None,
 			Value::Query(_) => None,
 			Value::Model(_) => None,
-			Value::Closure(_) => None,
+			Value::Closure(_) => Some(Kind::Function(None, None)),
 			Value::Refs(_) => None,
 			Value::Expression(_) => None,
-			Value::File(file) => Some(Kind::File(vec![
-				Ident::from(file.bucket.as_str()),
-				Ident::from(file.key.as_str()),
-			])),
+			Value::File(file) => Some(Kind::File(vec![Ident::from(file.bucket.as_str())])),
 		}
 	}
 
