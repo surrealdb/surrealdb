@@ -278,43 +278,49 @@ impl Parser<'_> {
 		// match the type and then match the coordinates field to a value of that type.
 		match type_value.as_str() {
 			"Point" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_point(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::Point(point)));
 					}
 				}
 			}
 			"LineString" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_line(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::Line(point)));
 					}
 				}
 			}
 			"Polygon" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_polygon(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::Polygon(point)));
 					}
 				}
 			}
 			"MultiPoint" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_multipolygon(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
 					}
 				}
 			}
 			"MultiLineString" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_multiline(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::MultiLine(point)));
 					}
 				}
 			}
 			"MultiPolygon" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_multipolygon(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
 					}
 				}
