@@ -3,7 +3,6 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
-	/// Get every Idiom from the given parts.
 	pub(crate) fn every(
 		&self,
 		path: Option<&[Part]>,
@@ -258,9 +257,10 @@ mod tests {
 		);
 
 		let res = vec![
-			Idiom::parse("test.*.color[0]"),
-			Idiom::parse("test.*.color[1]"),
+			Idiom::parse("test.*.color"),
 			Idiom::parse("test.*.color[2]"),
+			Idiom::parse("test.*.color[1]"),
+			Idiom::parse("test.*.color[0]"),
 		];
 
 		assert_eq!(res, val.every(Some(&Idiom::parse("test.*.color")), true, true));
