@@ -1354,6 +1354,12 @@ pub enum Error {
 
 	#[error("Failed to connect to bucket: {0}")]
 	BucketConnectionFailed(String),
+
+	#[error("The stream is already consumed")]
+	StreamConsumed,
+
+	#[error("No streams are available in this context")]
+	StreamsUnavailable,
 }
 
 impl From<Error> for String {

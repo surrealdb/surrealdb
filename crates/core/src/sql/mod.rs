@@ -62,6 +62,7 @@ pub(crate) mod split;
 pub(crate) mod start;
 pub(crate) mod statement;
 pub(crate) mod strand;
+pub(crate) mod stream;
 pub(crate) mod subquery;
 pub(crate) mod table;
 pub(crate) mod table_type;

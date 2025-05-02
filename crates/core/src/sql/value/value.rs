@@ -9,6 +9,7 @@ use crate::sql::id::range::IdRange;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::stream::Stream;
 use crate::sql::{
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
@@ -146,6 +147,7 @@ pub enum Value {
 	Closure(Box<Closure>),
 	Refs(Refs),
 	File(File),
+	Stream(Stream),
 	// Add new variants here
 }
 
@@ -918,6 +920,7 @@ impl fmt::Display for Value {
 			Value::Closure(v) => write!(f, "{v}"),
 			Value::Refs(v) => write!(f, "{v}"),
 			Value::File(v) => write!(f, "{v}"),
+			Value::Stream(v) => write!(f, "{v}"),
 		}
 	}
 }
@@ -1202,6 +1205,7 @@ subtypes! {
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
 	Refs(Refs) => (is_refs,as_refs,into_refs),
 	File(File) => (is_file,as_file,into_file),
+	Stream(Stream) => (is_stream,as_stream,into_stream),
 }
 
 macro_rules! impl_from_number {
