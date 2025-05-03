@@ -5,19 +5,38 @@ use revision::Revisioned;
 use serde::ser::SerializeStruct;
 use serde::Deserialize;
 use serde::Serialize;
+use std::fmt::Display;
 use std::time::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
-#[derive(Debug)]
+#[revisioned(revision = 1)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum QueryType {
 	// Any kind of query
+	#[default]
 	Other,
 	// Indicates that the response live query id must be tracked
 	Live,
 	// Indicates that the live query should be removed from tracking
 	Kill,
+}
+
+impl QueryType {
+	fn is_other(&self) -> bool {
+		matches!(self, Self::Other)
+	}
+}
+
+impl Display for QueryType {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Other => write!(f, "other"),
+			Self::Live => write!(f, "live"),
+			Self::Kill => write!(f, "kill"),
+		}
+	}
 }
 
 /// The return value when running a query set on the database.
@@ -58,6 +77,9 @@ impl Serialize for Response {
 	{
 		let mut val = serializer.serialize_struct(TOKEN, 3)?;
 		val.serialize_field("time", self.speed().as_str())?;
+		if !self.query_type.is_other() {
+			val.serialize_field("type", &CoreValue::from(self.query_type.to_string()))?;
+		}
 		match &self.result {
 			Ok(v) => {
 				val.serialize_field("status", &Status::Ok)?;
@@ -72,13 +94,15 @@ impl Serialize for Response {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct QueryMethodResponse {
 	pub time: String,
 	pub status: Status,
 	pub result: CoreValue,
+	#[revision(start = 2)]
+	pub query_type: QueryType,
 }
 
 impl From<&Response> for QueryMethodResponse {
@@ -92,6 +116,7 @@ impl From<&Response> for QueryMethodResponse {
 			status,
 			result,
 			time,
+			query_type: res.query_type,
 		}
 	}
 }
