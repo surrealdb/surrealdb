@@ -1,7 +1,7 @@
 use super::escape::EscapeKey;
 use super::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Part,
-	Range, Regex, Strand, Thing, Uuid,
+	stream::Stream, Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom,
+	Number, Object, Part, Range, Regex, Strand, Thing, Uuid,
 };
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
@@ -49,6 +49,7 @@ pub enum Kind {
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<Ident>),
+	Stream,
 }
 
 impl Default for Kind {
@@ -192,7 +193,8 @@ impl Kind {
 				| Kind::Range
 				| Kind::Literal(_)
 				| Kind::References(_, _)
-				| Kind::File(_) => return None,
+				| Kind::File(_)
+				| Kind::Stream => return None,
 				Kind::Option(x) => {
 					this = x;
 				}
@@ -358,6 +360,7 @@ impl_basic_has_kind! {
 	Uuid => Uuid,
 	Object => Object,
 	Range => Range,
+	Stream => Stream,
 }
 
 macro_rules! impl_geometry_has_kind{
@@ -446,6 +449,7 @@ impl Display for Kind {
 					write!(f, "file<{}>", Fmt::verbar_separated(k))
 				}
 			}
+			Kind::Stream => f.write_str("stream"),
 		}
 	}
 }

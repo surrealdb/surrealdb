@@ -32,6 +32,7 @@ pub mod search;
 pub mod sequence;
 pub mod session;
 pub mod sleep;
+pub mod stream;
 pub mod string;
 pub mod time;
 pub mod r#type;
@@ -699,6 +700,17 @@ pub async fn idiom(
 				"no such method found for the bytes type",
 				//
 				"len" => bytes::len,
+				"stream" => bytes::stream(ctx),
+			)
+		}
+		Value::Stream(_) => {
+			dispatch!(
+				ctx,
+				name,
+				args.clone(),
+				"no such method found for the stream type",
+				//
+				"bytes" => stream::bytes(ctx).await,
 			)
 		}
 		Value::Duration(_) => {

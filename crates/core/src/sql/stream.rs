@@ -1,7 +1,6 @@
 use crate::{ctx::Context, err::Error};
 
 use super::Uuid;
-use bytes::Bytes;
 use futures::StreamExt;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -17,7 +16,7 @@ use std::{
 pub struct Stream(pub(crate) Uuid);
 
 impl Stream {
-	fn consume(&self, ctx: &Context) -> Result<StreamVal, Error> {
+	pub fn consume(&self, ctx: &Context) -> Result<StreamVal, Error> {
 		let Some(streams) = ctx.get_streams() else {
 			return Err(Error::StreamsUnavailable);
 		};
@@ -29,7 +28,7 @@ impl Stream {
 		}
 	}
 
-	async fn bytes(&self, ctx: &Context) -> Result<Vec<u8>, Error> {
+	pub async fn consume_bytes(&self, ctx: &Context) -> Result<Vec<u8>, Error> {
 		let mut stream = self.consume(ctx)?;
 		let mut bytes: Vec<u8> = Vec::new();
 
@@ -40,6 +39,37 @@ impl Stream {
 		}
 
 		Ok(bytes)
+	}
+
+	pub async fn next_n(&self, ctx: &Context, n: usize) -> Result<Vec<u8>, Error> {
+		let Some(streams) = ctx.get_streams() else {
+			return Err(Error::StreamsUnavailable);
+		};
+
+		if let Some(x) = streams.get(&self.0) {
+			let stream = x.deref_mut();
+			let mut bytes = Vec::with_capacity(n);
+			let mut remaining = n;
+
+			while remaining > 0 {
+				if let Some(chunk) = stream.next().await {
+					let chunk =
+						chunk.map_err(|_| Error::Unreachable("Invalid stream".to_string()))?;
+
+					let bytes_to_take = std::cmp::min(chunk.len(), remaining);
+
+					bytes.extend_from_slice(&chunk[..bytes_to_take]);
+
+					remaining -= bytes_to_take;
+				} else {
+					break;
+				}
+			}
+
+			Ok(bytes)
+		} else {
+			Err(Error::StreamConsumed)
+		}
 	}
 }
 

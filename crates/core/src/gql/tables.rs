@@ -496,6 +496,7 @@ fn filter_from_type(
 		Kind::Literal(_) => {}
 		Kind::References(_, _) => {}
 		Kind::File(_) => {}
+		Kind::Stream => {}
 	};
 	Ok(filter)
 }
