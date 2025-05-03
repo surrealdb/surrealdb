@@ -143,8 +143,7 @@ impl Model {
 						Error::ModelComputation(err.message.to_string())
 					})
 				})
-				.await
-				.unwrap()
+				.await?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into())
@@ -172,8 +171,7 @@ impl Model {
 						Error::ModelComputation(err.message.to_string())
 					})
 				})
-				.await
-				.unwrap()
+				.await?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into())
@@ -206,8 +204,7 @@ impl Model {
 						Error::ModelComputation(err.message.to_string())
 					})
 				})
-				.await
-				.unwrap()
+				.await?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into())
