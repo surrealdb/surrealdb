@@ -17,13 +17,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Found NULL for field `primary`, with record `product:test`, but expected a number"
+error = "Couldn't coerce value for field `primary` of `product:test`: Expected `number` but found `NULL`"
 
 [[test.results]]
-error = "Found 'oops' for field `secondary`, with record `product:test`, but expected a bool"
+error = "Couldn't coerce value for field `secondary` of `product:test`: Expected `bool` but found `'oops'`"
 
 [[test.results]]
-error = "Found 123 for field `tertiary`, with record `product:test`, but expected a string"
+error = "Couldn't coerce value for field `tertiary` of `product:test`: Expected `string` but found `123`"
 
 [[test.results]]
 value = "[{ id: product:test, primary: 123.456f, quaternary: true, secondary: true, tertiary: 'tester' }]"

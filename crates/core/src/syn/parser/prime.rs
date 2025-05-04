@@ -51,14 +51,13 @@ impl Parser<'_> {
 			}
 			t!("$param") => {
 				let value = Value::Param(self.next_token_value()?);
-				let value = self.try_parse_inline(ctx, &value).await?.unwrap_or(value);
-				Ok(value)
+				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("FUNCTION") => {
 				self.pop_peek();
 				let func = self.parse_script(ctx).await?;
 				let value = Value::Function(Box::new(func));
-				Ok(self.try_parse_inline(ctx, &value).await?.unwrap_or(value))
+				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("IF") => {
 				let stmt = ctx.run(|ctx| self.parse_if_stmt(ctx)).await?;
@@ -70,7 +69,7 @@ impl Parser<'_> {
 					.parse_inner_subquery(ctx, Some(token.span))
 					.await
 					.map(|x| Value::Subquery(Box::new(x)))?;
-				Ok(self.try_parse_inline(ctx, &value).await?.unwrap_or(value))
+				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("<") => {
 				self.pop_peek();
@@ -96,19 +95,18 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE")
-			| t!("REBUILD") => {
-				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))
-			}
+			| t!("REBUILD")
+			| t!("INFO") => self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x))),
 			t!("fn") => {
 				self.pop_peek();
 				let value =
 					self.parse_custom_function(ctx).await.map(|x| Value::Function(Box::new(x)))?;
-				Ok(self.try_parse_inline(ctx, &value).await?.unwrap_or(value))
+				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("ml") => {
 				self.pop_peek();
 				let value = self.parse_model(ctx).await.map(|x| Value::Model(Box::new(x)))?;
-				Ok(self.try_parse_inline(ctx, &value).await?.unwrap_or(value))
+				self.continue_parse_inline_call(ctx, value).await
 			}
 			x if Self::kind_is_identifier(x) => {
 				let peek = self.peek1();
@@ -128,11 +126,12 @@ impl Parser<'_> {
 		}
 	}
 
-	pub(super) async fn try_parse_inline(
+	pub(super) async fn continue_parse_inline_call(
 		&mut self,
 		ctx: &mut Stk,
-		subject: &Value,
-	) -> ParseResult<Option<Value>> {
+		lhs: Value,
+	) -> ParseResult<Value> {
+		// TODO: Figure out why this is whitespace sensitive.
 		if self.eat_whitespace(t!("(")) {
 			let start = self.last_span();
 			let mut args = Vec::new();
@@ -150,12 +149,10 @@ impl Parser<'_> {
 				}
 			}
 
-			let value =
-				Value::Function(Box::new(Function::Anonymous(subject.clone(), args, false)));
-			let value = ctx.run(|ctx| self.try_parse_inline(ctx, &value)).await?.unwrap_or(value);
-			Ok(Some(value))
+			let value = Value::Function(Box::new(Function::Anonymous(lhs, args, false)));
+			ctx.run(|ctx| self.continue_parse_inline_call(ctx, value)).await
 		} else {
-			Ok(None)
+			Ok(lhs)
 		}
 	}
 
@@ -275,7 +272,7 @@ impl Parser<'_> {
 			}
 			t!("$param") => {
 				let value = Value::Param(self.next_token_value()?);
-				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+				self.continue_parse_inline_call(ctx, value).await?
 			}
 			t!("FUNCTION") => {
 				self.pop_peek();
@@ -294,7 +291,7 @@ impl Parser<'_> {
 			t!("{") => {
 				self.pop_peek();
 				let value = self.parse_object_like(ctx, token.span).await?;
-				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+				self.continue_parse_inline_call(ctx, value).await?
 			}
 			t!("|") => {
 				self.pop_peek();
@@ -314,7 +311,7 @@ impl Parser<'_> {
 			t!("(") => {
 				self.pop_peek();
 				let value = self.parse_inner_subquery_or_coordinate(ctx, token.span).await?;
-				self.try_parse_inline(ctx, &value).await?.unwrap_or(value)
+				self.continue_parse_inline_call(ctx, value).await?
 			}
 			t!("/") => self.next_token_value().map(Value::Regex)?,
 			t!("RETURN")
@@ -327,7 +324,8 @@ impl Parser<'_> {
 			| t!("RELATE")
 			| t!("DEFINE")
 			| t!("REMOVE")
-			| t!("REBUILD") => {
+			| t!("REBUILD")
+			| t!("INFO") => {
 				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))?
 			}
 			t!("fn") => {
@@ -372,7 +370,7 @@ impl Parser<'_> {
 				}
 				x => self.parse_remaining_value_idiom(ctx, vec![Part::Start(x)]).await,
 			}?;
-			Ok(self.try_parse_inline(ctx, &value).await?.unwrap_or(value))
+			self.continue_parse_inline_call(ctx, value).await
 		} else {
 			Ok(value)
 		}
@@ -521,57 +519,62 @@ impl Parser<'_> {
 			t!("RETURN") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_return_stmt(ctx)).await?;
-				Subquery::Output(stmt)
+				Value::Subquery(Box::new(Subquery::Output(stmt)))
 			}
 			t!("SELECT") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_select_stmt(ctx)).await?;
-				Subquery::Select(stmt)
+				Value::Subquery(Box::new(Subquery::Select(stmt)))
 			}
 			t!("CREATE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
-				Subquery::Create(stmt)
+				Value::Subquery(Box::new(Subquery::Create(stmt)))
 			}
 			t!("INSERT") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_insert_stmt(ctx)).await?;
-				Subquery::Insert(stmt)
+				Value::Subquery(Box::new(Subquery::Insert(stmt)))
 			}
 			t!("UPSERT") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await?;
-				Subquery::Upsert(stmt)
+				Value::Subquery(Box::new(Subquery::Upsert(stmt)))
 			}
 			t!("UPDATE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_update_stmt(ctx)).await?;
-				Subquery::Update(stmt)
+				Value::Subquery(Box::new(Subquery::Update(stmt)))
 			}
 			t!("DELETE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_delete_stmt(ctx)).await?;
-				Subquery::Delete(stmt)
+				Value::Subquery(Box::new(Subquery::Delete(stmt)))
 			}
 			t!("RELATE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_relate_stmt(ctx)).await?;
-				Subquery::Relate(stmt)
+				Value::Subquery(Box::new(Subquery::Relate(stmt)))
 			}
 			t!("DEFINE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_define_stmt(ctx)).await?;
-				Subquery::Define(stmt)
+				Value::Subquery(Box::new(Subquery::Define(stmt)))
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
 				let stmt = self.parse_remove_stmt(ctx).await?;
-				Subquery::Remove(stmt)
+				Value::Subquery(Box::new(Subquery::Remove(stmt)))
 			}
 			t!("REBUILD") => {
 				self.pop_peek();
 				let stmt = self.parse_rebuild_stmt()?;
-				Subquery::Rebuild(stmt)
+				Value::Subquery(Box::new(Subquery::Rebuild(stmt)))
+			}
+			t!("INFO") => {
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_info_stmt(ctx)).await?;
+				Value::Subquery(Box::new(Subquery::Info(stmt)))
 			}
 			TokenKind::Digits | TokenKind::Glued(Glued::Number) | t!("+") | t!("-") => {
 				if self.glue_and_peek1()?.kind == t!(",") {
@@ -592,18 +595,14 @@ impl Parser<'_> {
 					self.expect_closing_delimiter(t!(")"), start)?;
 					return Ok(Value::Geometry(Geometry::Point(Point::from((x, y)))));
 				} else {
-					let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-					Subquery::Value(value)
+					ctx.run(|ctx| self.parse_value_inherit(ctx)).await?
 				}
 			}
-			_ => {
-				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-				Subquery::Value(value)
-			}
+			_ => ctx.run(|ctx| self.parse_value_inherit(ctx)).await?,
 		};
 		let token = self.peek();
 		if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
-			if let Subquery::Value(Value::Idiom(Idiom(ref idiom))) = res {
+			if let Value::Idiom(Idiom(ref idiom)) = res {
 				if idiom.len() == 1 {
 					bail!("Unexpected token `{}` expected `)`",peek.kind,
 						@token.span,
@@ -612,7 +611,7 @@ impl Parser<'_> {
 			}
 		}
 		self.expect_closing_delimiter(t!(")"), start)?;
-		Ok(Value::Subquery(Box::new(res)))
+		Ok(res)
 	}
 
 	pub(super) async fn parse_inner_subquery(
@@ -686,6 +685,11 @@ impl Parser<'_> {
 				self.pop_peek();
 				let stmt = self.parse_rebuild_stmt()?;
 				Subquery::Rebuild(stmt)
+			}
+			t!("INFO") => {
+				self.pop_peek();
+				let stmt = ctx.run(|ctx| self.parse_info_stmt(ctx)).await?;
+				Subquery::Info(stmt)
 			}
 			_ => {
 				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
@@ -765,7 +769,7 @@ mod tests {
 	fn subquery_expression_statement() {
 		let sql = "(1 + 2 + 3)";
 		let out = Value::parse(sql);
-		assert_eq!("(1 + 2 + 3)", format!("{}", out))
+		assert_eq!("1 + 2 + 3", format!("{}", out))
 	}
 
 	#[test]

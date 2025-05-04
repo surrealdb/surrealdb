@@ -23,6 +23,7 @@ pub struct Config {
 	pub tables: TableConfig,
 	pub versions: bool,
 	pub records: bool,
+	pub sequences: bool,
 }
 
 impl Default for Config {
@@ -36,6 +37,7 @@ impl Default for Config {
 			tables: TableConfig::default(),
 			versions: false,
 			records: true,
+			sequences: true,
 		}
 	}
 }
@@ -50,11 +52,12 @@ impl From<Config> for Value {
 			"analyzers" => config.analyzers.into(),
 			"versions" => config.versions.into(),
 			"records" => config.records.into(),
+			"sequences" => config.sequences.into(),
 			"tables" => match config.tables {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
 				TableConfig::Some(v) => v.into()
-			}
+			},
 		);
 
 		obj.into()
@@ -147,7 +150,7 @@ impl TryFrom<&Value> for TableConfig {
 				.cloned()
 				.map(|v| match v {
 					Value::Strand(str) => Ok(str.0),
-					v => Err(Error::InvalidExportConfig(v.to_owned(), "a string".into())),
+					v => Err(Error::InvalidExportConfig(v.clone(), "a string".into())),
 				})
 				.collect::<Result<Vec<String>, Error>>()
 				.map(TableConfig::Some),
@@ -259,6 +262,12 @@ impl Transaction {
 		if cfg.analyzers {
 			let analyzers = self.all_db_analyzers(ns, db).await?;
 			self.export_section("ANALYZERS", analyzers.to_vec(), chn).await?;
+		}
+
+		// Output SEQUENCES
+		if cfg.sequences {
+			let sequences = self.all_db_sequences(ns, db).await?;
+			self.export_section("SEQUENCES", sequences.to_vec(), chn).await?;
 		}
 
 		Ok(())
@@ -413,12 +422,15 @@ impl Transaction {
 	/// * `String` - Returns the generated SQL command as a string. If no command is generated, returns an empty string.
 	fn process_value(
 		k: thing::Thing,
-		v: Value,
+		mut v: Value,
 		records_relate: &mut Vec<String>,
 		records_normal: &mut Vec<String>,
 		is_tombstone: Option<bool>,
 		version: Option<u64>,
 	) -> String {
+		// Inject the id field into the document before processing.
+		let rid = crate::sql::Thing::from((k.tb, k.id.clone()));
+		v.def(&rid);
 		// Match on the value to determine if it is a graph edge record or a normal record.
 		match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):

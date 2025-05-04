@@ -6,6 +6,7 @@ use crate::fnc;
 use crate::iam::Action;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
+use crate::sql::operator::BindingPower;
 use crate::sql::script::Script;
 use crate::sql::value::Value;
 use crate::sql::Permission;
@@ -336,7 +337,10 @@ impl Function {
 				let mut ctx = MutableContext::new_isolated(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
-					ctx.add_value(name.to_raw(), val.coerce_to(kind)?.into());
+					ctx.add_value(
+						name.to_raw(),
+						val.coerce_to_kind(kind).map_err(Error::from)?.into(),
+					);
 				}
 				let ctx = ctx.freeze();
 				// Run the custom function
@@ -345,14 +349,17 @@ impl Function {
 
 				if let Some(ref returns) = val.returns {
 					result
-						.coerce_to(returns)
-						.map_err(|e| e.function_check_from_coerce(val.name.to_string()))
+						.coerce_to_kind(returns)
+						.map_err(|e| Error::ReturnCoerce {
+							name: val.name.to_string(),
+							error: Box::new(e),
+						})
 						.map_err(ControlFlow::from)
 				} else {
 					Ok(result)
 				}
 			}
-			#[allow(unused_variables)]
+			#[cfg_attr(not(feature = "scripting"), expect(unused_variables))]
 			Self::Script(s, x) => {
 				#[cfg(feature = "scripting")]
 				{
@@ -386,7 +393,14 @@ impl fmt::Display for Function {
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
-			Self::Anonymous(p, e, _) => write!(f, "{p}({})", Fmt::comma_separated(e)),
+			Self::Anonymous(p, e, _) => {
+				if BindingPower::for_value(p) < BindingPower::Postfix {
+					write!(f, "({p})")?;
+				} else {
+					write!(f, "{p}")?;
+				}
+				write!(f, "({})", Fmt::comma_separated(e))
+			}
 		}
 	}
 }

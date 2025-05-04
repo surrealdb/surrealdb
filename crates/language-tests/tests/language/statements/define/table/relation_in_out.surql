@@ -17,23 +17,24 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: likes:7qt6148b3e2jargx90lw, in: person:a6cld8fhzwbrwhlfnbju, out: thing:d6dblop2vdsmlytue5dm }]"
+value = "[{ id: likes:06jb1s1givlhh18tygxo, in: person:89o00cip2xw07f2w2upq, out: thing:m05avew5bzxn1fprfv48 }]"
 skip-record-id-key = true
 
 [[test.results]]
-value = "[{ id: likes:qvwx0qdpo7b0mkjnqeq1, in: person:a6cld8fhzwbrwhlfnbju, out: person:vxh1w4c8355aj88owv73 }]"
+value = "[{ id: likes:i1mv1jai8ir01d3ih7qd, in: person:89o00cip2xw07f2w2upq, out: person:oieqdx61ygylnxi00qaw }]"
 skip-record-id-key = true
 
+
 [[test.results]]
-match = '''string::matches($error,"Found record: `likes:[a-zA-Z0-9]*` which is a relation, but expected a  RELATION IN record<person> OUT record<person \\| thing>")'''
+match = "$error = <regex> 'Found record: `likes:[a-z0-9]+` which is a relation, but expected a  RELATION IN record<person> OUT record<person | thing>'"
 error = true
 
 [[test.results]]
-match = '''string::matches($error,'Found other:[a-zA-Z0-9]* for field `out`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person \\| thing>')'''
+match = "$error = <regex> 'Couldn\\'t coerce value for field `out` of `likes:[a-z0-9]+`: Expected `record<person|thing>` but found `other:[0-9a-z]+`'"
 error = true
 
 [[test.results]]
-match = '''string::matches($error,'Found thing:[a-zA-Z0-9]* for field `in`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person>')'''
+match = "$error = /Couldn't coerce value for field `in` of `likes:[a-z0-9]+`: Expected `record<person>` but found `thing:[0-9a-z]+`/"
 error = true
 
 */

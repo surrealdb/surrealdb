@@ -87,6 +87,7 @@ impl Surreal<Client> {
 	) -> Connect<Client, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
+			#[expect(deprecated)]
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
@@ -101,7 +102,6 @@ pub(crate) fn default_headers() -> HeaderMap {
 	headers
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 enum Auth {
 	Basic {
@@ -154,7 +154,7 @@ struct Credentials {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 struct AuthResponse {
 	code: u16,
 	details: String,
@@ -170,7 +170,7 @@ async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		.await?
 		.error_for_status()?
 		.bytes_stream()
-		.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+		.map_err(futures::io::Error::other)
 		.into_async_read()
 		.compat();
 	let mut file =
@@ -328,12 +328,12 @@ async fn router(
 			let out = send_request(req, base_url, client, headers, auth).await?;
 			if let Some(ns) = namespace {
 				let value =
-					HeaderValue::try_from(&ns).map_err(|_| Error::InvalidNsName(ns.to_owned()))?;
+					HeaderValue::try_from(&ns).map_err(|_| Error::InvalidNsName(ns.clone()))?;
 				headers.insert(&NS, value);
 			};
 			if let Some(db) = database {
 				let value =
-					HeaderValue::try_from(&db).map_err(|_| Error::InvalidDbName(db.to_owned()))?;
+					HeaderValue::try_from(&db).map_err(|_| Error::InvalidDbName(db.clone()))?;
 				headers.insert(&DB, value);
 			};
 

@@ -8,13 +8,13 @@ error = "Incorrect arguments for function array::concat(). Expected at least one
 value = "[]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected a array but found 3"
+error = "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected `array` but found `3`"
 
 [[test.results]]
-error = "Incorrect arguments for function array::concat(). Argument 2 was the wrong type. Expected a array but found 4"
+error = "Incorrect arguments for function array::concat(). Argument 2 was the wrong type. Expected `array` but found `4`"
 
 [[test.results]]
-error = "Incorrect arguments for function array::concat(). Argument 2 was the wrong type. Expected a array but found 'a'"
+error = "Incorrect arguments for function array::concat(). Argument 2 was the wrong type. Expected `array` but found `'a'`"
 
 [[test.results]]
 value = "[1, 2, 3, 4, 3, 4, 5, 6]"

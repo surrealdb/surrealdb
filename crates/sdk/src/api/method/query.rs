@@ -386,7 +386,6 @@ impl Response {
 	/// use surrealdb::RecordId;
 	///
 	/// #[derive(Debug, Deserialize)]
-	/// # #[allow(dead_code)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -439,6 +438,7 @@ impl Response {
 	where
 		R: DeserializeOwned,
 	{
+		#[expect(deprecated)]
 		index.query_result(self)
 	}
 
@@ -456,7 +456,6 @@ impl Response {
 	/// use surrealdb::Value;
 	///
 	/// #[derive(Debug, Deserialize)]
-	/// # #[allow(dead_code)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -487,6 +486,7 @@ impl Response {
 	///
 	/// Consume the stream the same way you would any other type that implements `futures::Stream`.
 	pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> Result<QueryStream<R>> {
+		#[expect(deprecated)]
 		index.query_stream(self)
 	}
 
@@ -587,7 +587,6 @@ impl WithStats<Response> {
 	/// use surrealdb::RecordId;
 	///
 	/// #[derive(Debug, Deserialize)]
-	/// # #[allow(dead_code)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -641,7 +640,9 @@ impl WithStats<Response> {
 	where
 		R: DeserializeOwned,
 	{
+		#[expect(deprecated)]
 		let stats = index.stats(&self.0)?;
+		#[expect(deprecated)]
 		let result = index.query_result(&mut self.0);
 		Some((stats, result))
 	}
@@ -1048,13 +1049,13 @@ mod tests {
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		let crate::Error::Api(Error::DuplicateRequestId(0)) = errors.get(&10).unwrap() else {
+		let crate::Error::Api(Error::DuplicateRequestId(0)) = errors[&10] else {
 			panic!("index `10` is not `DuplicateRequestId`");
 		};
-		let crate::Error::Api(Error::BackupsNotSupported) = errors.get(&7).unwrap() else {
+		let crate::Error::Api(Error::BackupsNotSupported) = errors[&7] else {
 			panic!("index `7` is not `BackupsNotSupported`");
 		};
-		let crate::Error::Api(Error::ConnectionUninitialised) = errors.get(&3).unwrap() else {
+		let crate::Error::Api(Error::ConnectionUninitialised) = errors[&3] else {
 			panic!("index `3` is not `ConnectionUninitialised`");
 		};
 		let Some(value): Option<i32> = response.take(2).unwrap() else {

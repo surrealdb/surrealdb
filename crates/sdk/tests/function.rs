@@ -1197,19 +1197,19 @@ async fn function_string_distance_normalized_damerau_levenshtein() -> Result<(),
 	"#;
 	let mut test = Test::new(sql).await?;
 	// normalized_damerau_levenshtein_diff_short
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.27272);
 	// normalized_damerau_levenshtein_for_empty_strings
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 1.0);
 	// normalized_damerau_levenshtein_first_empty
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.0);
 	// normalized_damerau_levenshtein_second_empty
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.0);
 	// normalized_damerau_levenshtein_identical_strings
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 1.0);
 	//
 	Ok(())
@@ -1275,19 +1275,19 @@ async fn function_string_distance_normalized_levenshtein() -> Result<(), Error> 
 	"#;
 	let mut test = Test::new(sql).await?;
 	// normalized_levenshtein_diff_short
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.57142);
 	// normalized_levenshtein_for_empty_strings
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 1.0);
 	// normalized_levenshtein_first_empty
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.0);
 	// normalized_levenshtein_second_empty
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.0);
 	// normalized_levenshtein_identical_strings
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 1.0);
 	//
 	Ok(())
@@ -1474,29 +1474,29 @@ async fn function_string_similarity_jaro() -> Result<(), Error> {
 	assert_eq!(tmp, Value::from(1.0));
 
 	// jaro_multibyte
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.818, 0.001);
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.818, 0.001);
 	// jaro_diff_short
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.767, 0.001);
 	// jaro_diff_one_and_two
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.83, 0.01);
 	// jaro_diff_two_and_one
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.83, 0.01);
 	// jaro_diff_no_transposition
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.822, 0.001);
 	// jaro_diff_with_transposition
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.944, 0.001);
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.6, 0.001);
 	// jaro_names
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.392, 0.001);
 	//
 	Ok(())
@@ -1547,37 +1547,37 @@ async fn function_string_similarity_jaro_winkler() -> Result<(), Error> {
 	assert_eq!(tmp, Value::from(1.0));
 
 	// jaro_winkler_multibyte
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.89, 0.001);
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.89, 0.001);
 	// jaro_winkler_diff_short
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.813, 0.001);
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.813, 0.001);
 	// jaro_winkler_diff_no_transposition
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.84, 0.001);
 	// jaro_winkler_diff_with_transposition
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.961, 0.001);
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.6, 0.001);
 	// jaro_winkler_names
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.452, 0.001);
 	// jaro_winkler_long_prefix
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.866, 0.001);
 	// jaro_winkler_more_names
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.868, 0.001);
 	// jaro_winkler_length_of_one
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.738, 0.001);
 	// jaro_winkler_very_long_prefix
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.98519);
 	//
 	Ok(())
@@ -1616,55 +1616,55 @@ async fn function_string_similarity_sorensen_dice() -> Result<(), Error> {
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 1.0);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.0);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 1.0);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.0);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.0);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 1.0);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.90909);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.0);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 1.0);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.2);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.8);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.78788);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.92);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.60606);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.25581);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.14118);
 	//
-	let tmp: f64 = test.next()?.result?.try_into()?;
+	let tmp: f64 = test.next()?.result?.into_float().unwrap();
 	assert_delta!(tmp, 0.77419);
 	//
 	Ok(())
@@ -2380,6 +2380,31 @@ async fn function_time_from_unix() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_time_from_unix_limit_and_beyond() -> Result<(), Error> {
+	test_queries(
+		r#"
+		RETURN time::year(time::from::unix(-8334601228800));
+		RETURN time::year(time::from::unix(8210266876799));
+		"#,
+		&["-262143", "262142"],
+	)
+	.await?;
+
+	check_test_is_error(
+		r#"
+		RETURN time::from::unix(-8334601228801);
+		RETURN time::from::unix(8210266876800);
+	"#,
+		&[
+			"Incorrect arguments for function time::from::unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+			"Incorrect arguments for function time::from::unix(). The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."
+		],
+	).await?;
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_time_from_uuid() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::from::uuid(u'01922074-2295-7cf6-906f-bcd0810639b0');
@@ -2438,10 +2463,15 @@ async fn function_type_datetime() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_decimal() -> Result<(), Error> {
 	let sql = r#"
+		RETURN type::decimal("0.0");
 		RETURN type::decimal("13.1043784018");
 		RETURN type::decimal("13.5719384719384719385639856394139476937756394756");
 	"#;
 	let mut test = Test::new(sql).await?;
+	//
+	let tmp = test.next()?.result?;
+	let val = Value::Number(Number::Decimal("0".parse().unwrap()));
+	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
 	let val = Value::Number(Number::Decimal("13.1043784018".parse().unwrap()));
@@ -4149,7 +4179,7 @@ async fn function_custom_typed_returns() -> Result<(), Error> {
 		RETURN fn::two();
 		RETURN fn::two_bad_type();
 	"#;
-	let error = "There was a problem running the two_bad_type function. Expected this function to return a value of type string, but found 2";
+	let error = "Couldn't coerce return value from function `two_bad_type`: Expected `string` but found `2`";
 	Test::new(sql)
 		.await?
 		.expect_val("None")?

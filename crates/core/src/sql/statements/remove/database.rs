@@ -28,23 +28,28 @@ impl RemoveDatabaseStatement {
 			opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 			// Get the transaction
 			let txn = ctx.tx();
+			let ns = opt.ns()?;
 			// Remove the index stores
 			#[cfg(not(target_family = "wasm"))]
 			ctx.get_index_stores()
-				.database_removed(ctx.get_index_builder(), &txn, opt.ns()?, &self.name)
+				.database_removed(ctx.get_index_builder(), &txn, ns, &self.name)
 				.await?;
 			#[cfg(target_family = "wasm")]
 			ctx.get_index_stores().database_removed(&txn, opt.ns()?, &self.name).await?;
+			// Remove the sequences
+			if let Some(seq) = ctx.get_sequences() {
+				seq.database_removed(&txn, ns, &self.name).await?;
+			}
 			// Get the definition
-			let db = txn.get_db(opt.ns()?, &self.name).await?;
+			let db = txn.get_db(ns, &self.name).await?;
 			// Delete the definition
-			let key = crate::key::namespace::db::new(opt.ns()?, &db.name);
+			let key = crate::key::namespace::db::new(ns, &db.name);
 			match self.expunge {
 				true => txn.clr(key).await?,
 				false => txn.del(key).await?,
 			};
 			// Delete the resource data
-			let key = crate::key::database::all::new(opt.ns()?, &db.name);
+			let key = crate::key::database::all::new(ns, &db.name);
 			match self.expunge {
 				true => txn.clrp(key).await?,
 				false => txn.delp(key).await?,

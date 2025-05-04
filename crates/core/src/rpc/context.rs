@@ -13,7 +13,7 @@ use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::Array;
 
-#[allow(async_fn_in_trait)]
+#[expect(async_fn_in_trait)]
 pub trait RpcContext {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore;

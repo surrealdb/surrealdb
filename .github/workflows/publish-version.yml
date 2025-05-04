@@ -7,8 +7,8 @@ on:
         description: "The git ref of this release version. All 'actions/checkout' steps will use it"
       suffix:
         type: string
-        default: metadata
-        description: "The suffix of the version, e.g. none, metadata, alpha.1 or beta.1"
+        default: nightly
+        description: "The suffix of the version, e.g. none, nightly, alpha.1 or beta.1"
       latest:
         required: false
         type: boolean
@@ -37,7 +37,6 @@ on:
       extra-features:
         required: false
         type: string
-        default: "ml"
         description: "Extra features enabled in the binary"
     secrets:
       AWS_CI_ACCESS_KEY_ID:
@@ -54,9 +53,9 @@ jobs:
     name: Prepare vars
     runs-on: ubuntu-latest
     outputs:
-      git-ref: ${{ steps.outputs.outputs.git-ref }}
       environment: ${{ steps.outputs.outputs.environment }}
       version: ${{ steps.outputs.outputs.version }}
+      patch: ${{ steps.outputs.outputs.patch }}
       current-version: ${{ steps.outputs.outputs.current-version }}
       name: ${{ steps.outputs.outputs.name }}
       build-metadata: ${{ steps.outputs.outputs.build-metadata }}
@@ -78,42 +77,56 @@ jobs:
           set -x
 
           suffix=$(echo ${{ inputs.suffix }} | tr "." "\n" | sed -n 1p)
+          patch=$(echo ${{ inputs.suffix }} | tr "." "\n" | sed -n 2p)
           version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           echo "current-version=${version}" >> $GITHUB_OUTPUT
 
-          if [[ $suffix != "none" && $suffix != "metadata" && $suffix != "alpha" && $suffix != "beta" && $suffix != "rc" ]]; then
+          if [[ $version == *"-"* ]]; then
+            echo "Found an unexpected pre-release version, '${version}', in ${{ inputs.git-ref }}"
+            exit 400
+          fi
+
+          if [[ $suffix != "none" && $suffix != "nightly" && $suffix != "alpha" && $suffix != "beta" && $suffix != "rc" ]]; then
             echo "'${suffix}' is not a supported suffix"
-            exit 404
+            exit 400
+          fi
+
+          if [[ $suffix == "alpha" || $suffix == "beta" || $suffix == "rc" ]]; then
+            if [[ -z $patch ]]; then
+              echo "Pre-releases require a patch number, e.g. beta.3"
+              exit 400
+            elif ! [[ $patch =~ ^[0-9]+$ ]]; then
+              echo "The patch number should be an integer, found ${patch}"
+              exit 400
+            fi
           fi
 
           if [[ $suffix == "none" ]]; then
+            patch=$(echo ${version} | tr "." "\n" | sed -n 3p)
             environment=stable
-            buildMetadata=""
-          elif [[ $suffix == "metadata" ]]; then
+          elif [[ $suffix == "nightly" ]]; then
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+            # This sets the nightly version to something like `1.3.20250224221932`
+            patch=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
             rev=$(git rev-parse --short HEAD)
             buildMetadata=${date}.${rev}
-            environment=nightly
+            version=${version}-${{ inputs.suffix }}
+            environment=${{ inputs.suffix }}
           elif [[  $suffix == "rc" ]]; then
             version=${version}-${{ inputs.suffix }}
+            patch=$(($patch - 1))
             environment=release-candidate
-            buildMetadata=""
           else
             version=${version}-${{ inputs.suffix }}
+            patch=$(($patch - 1))
             environment=${suffix}
-            buildMetadata=""
           fi
 
           echo "version=${version}" >> $GITHUB_OUTPUT
+          echo "patch=${patch}" >> $GITHUB_OUTPUT
           echo "environment=${environment}" >> $GITHUB_OUTPUT
           echo "build-metadata=${buildMetadata}" >> $GITHUB_OUTPUT
           echo "release-branch=releases/${version}" >> $GITHUB_OUTPUT
-
-          if [[ "${{ inputs.publish }}" == "true" && "${{ inputs.suffix }}" != "metadata"  ]]; then
-            echo "git-ref=v${version}" >> $GITHUB_OUTPUT
-          else
-            echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
-          fi
 
           if [[ "${environment}" == "nightly" ]]; then
             echo "name=${environment}" >> $GITHUB_OUTPUT
@@ -127,15 +140,20 @@ jobs:
           git config user.name "github-actions[bot]"
           git config --add --bool push.autoSetupRemote true
 
+      - name: Create release branch
+        run: |
+          set -x
+
+          git push origin --delete ${{ steps.outputs.outputs.release-branch }} || true
+          git checkout -b ${{ steps.outputs.outputs.release-branch }}
+
       - name: Patch release version
-        if: ${{ inputs.suffix != 'none' && inputs.suffix != 'metadata' }}
+        if: ${{ steps.outputs.outputs.environment != 'stable' }}
         run: |
           set -x
 
           version=${{ steps.outputs.outputs.version }}
           currentVersion=${{ steps.outputs.outputs.current-version }}
-
-          git checkout -b ${{ steps.outputs.outputs.release-branch }}
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
@@ -152,16 +170,8 @@ jobs:
           # Commit changes
           git commit -am "Prepare v${version} release"
 
-      - name: Push version bump
-        if: ${{ inputs.publish && (inputs.suffix != 'none' && inputs.suffix != 'metadata') }}
+      - name: Push the release branch
         run: git push
-
-      - name: Tag the release
-        if: ${{ inputs.publish && inputs.suffix != 'metadata'}}
-        run: |
-          set -x
-          git tag -a v${{ steps.outputs.outputs.version }} -m "Release ${{ steps.outputs.outputs.version }}" || true
-          git push --tags || true
 
   test:
     name: Test
@@ -176,12 +186,12 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ needs.prepare-vars.outputs.git-ref == 'main' }}
+          save-if: ${{ inputs.git-ref == 'main' }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -216,7 +226,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -250,6 +260,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -311,7 +323,9 @@ jobs:
               brew install protobuf
 
               # Build
-              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
+              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                extraFeatures="--features ${{ inputs.extra-features }}"
+              fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               mkdir /tmp/onnxruntime
@@ -319,7 +333,7 @@ jobs:
                 tar -xz -C /tmp/onnxruntime/
               export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
-              cargo build --features $features --release --locked --target x86_64-apple-darwin
+              cargo build $extraFeatures --release --locked --target x86_64-apple-darwin
 
               # Package
               cp target/x86_64-apple-darwin/release/surreal surreal
@@ -338,7 +352,9 @@ jobs:
               brew install protobuf
 
               # Build
-              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
+              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                extraFeatures="--features ${{ inputs.extra-features }}"
+              fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               mkdir /tmp/onnxruntime
@@ -346,7 +362,7 @@ jobs:
                 tar -xz -C /tmp/onnxruntime/
               export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
-              cargo build --features $features --release --locked --target aarch64-apple-darwin
+              cargo build $extraFeatures --release --locked --target aarch64-apple-darwin
 
               # Package
               cp target/aarch64-apple-darwin/release/surreal surreal
@@ -360,7 +376,9 @@ jobs:
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
               # Build
-              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
+              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                extraFeatures="--features ${{ inputs.extra-features }}"
+              fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               tmpdir=$(mktemp -d)
@@ -378,7 +396,7 @@ jobs:
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
                 ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
-                  --target x86_64-unknown-linux-gnu --features ${features} --release --locked
+                  --target x86_64-unknown-linux-gnu ${extraFeatures} --release --locked
 
               # Package
               cp target/x86_64-unknown-linux-gnu/release/surreal surreal
@@ -398,7 +416,9 @@ jobs:
               set -x
 
               # Build
-              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
+              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                extraFeatures="--features ${{ inputs.extra-features }}"
+              fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               tmpdir=$(mktemp -d)
@@ -416,7 +436,7 @@ jobs:
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
                 ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
-                  --target aarch64-unknown-linux-gnu --features ${features} --release --locked
+                  --target aarch64-unknown-linux-gnu ${extraFeatures} --release --locked
 
               # Package
               cp target/aarch64-unknown-linux-gnu/release/surreal surreal
@@ -439,7 +459,9 @@ jobs:
               vcpkg integrate install
 
               # Build
-              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
+              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                extraFeatures="--features ${{ inputs.extra-features }}"
+              fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               tmp_dir=$(mktemp -d)
@@ -447,7 +469,7 @@ jobs:
               unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
 
-              cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
+              cargo build $extraFeatures --release --locked --target x86_64-pc-windows-msvc
 
               # Package
               ./target/x86_64-pc-windows-msvc/release/surreal.exe version
@@ -459,10 +481,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Create a temporary branch
-        run: git checkout -b binary
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -507,42 +526,36 @@ jobs:
   publish:
     name: Publish crate and artifacts binaries
     needs: [prepare-vars, test, lint, build]
-    environment: ${{ needs.prepare-vars.outputs.environment }}
     runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ inputs.rust_version }}
+        uses: dtolnay/rust-toolchain@nightly
 
       - name: Create a temporary branch
         run: git checkout -b crate
 
-      - name: Patch nightly crate version
-        if: ${{ needs.prepare-vars.outputs.environment == 'nightly' }}
+      - name: Patch crate version
+        if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
         run: |
           set -x
-
-          # Get the date of the last commit
-          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
 
           # Derive crate version
           currentVersion=${{ needs.prepare-vars.outputs.current-version }}
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-          # This sets the nightly version to something like `1.3.20250224221932`
-          version=${major}.${minor}.${date}
+          version=${major}.${minor}.${{ needs.prepare-vars.outputs.patch }}
 
           # Update the version to a nightly one
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#surrealdb = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
@@ -560,8 +573,13 @@ jobs:
           sed -i "s/package = \"surrealdb-core\"/package = \"surrealdb-core-${environment}\"/" Cargo.toml
 
           # Patch the description
-          sed -i "s#^description = \".*\"#description = \"A ${environment} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
-          sed -i "s#^description = \".*\"#description = \"A ${environment} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
+          if [[ $environment == 'alpha' ]]; then
+            start="An"
+          else
+            start="A"
+          fi
+          sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
+          sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
 
           # Temporarily commit patches
           # These should not be pushed back to the repo
@@ -574,21 +592,22 @@ jobs:
       - run: cat crates/core/Cargo.toml
 
       - name: Publish the crate
-        if: ${{ inputs.publish }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -x
 
-          for crate in crates/{core,sdk}; do
-            cd $crate
-            if ! cargo publish; then
-              if [[ "${{ needs.prepare-vars.outputs.environment }}" != "nightly" ]]; then
-                exit 101
-              fi
+          if [[ "${{ inputs.publish }}" == "true" ]]; then
+            extraArgs=""
+          else
+            extraArgs="--dry-run"
+          fi
+
+          if ! cargo -Z package-workspace publish --workspace --exclude surreal $extraArgs; then
+            if [[ "${{ needs.prepare-vars.outputs.environment }}" != "nightly" ]]; then
+              exit 101
             fi
-            cd -
-          done
+          fi
 
       - name: Download artifacts
         if: ${{ inputs.publish }}
@@ -600,14 +619,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: ${{ inputs.publish && inputs.create-release }}
         with:
-          name: "Release ${{ needs.prepare-vars.outputs.git-ref }}"
-          tag_name: ${{ needs.prepare-vars.outputs.git-ref }}
+          tag_name: v${{ needs.prepare-vars.outputs.version }}
+          name: "Release ${{ needs.prepare-vars.outputs.version }}"
+          body: "Release ${{ needs.prepare-vars.outputs.version }}"
+          target_commitish: ${{ needs.prepare-vars.outputs.release-branch }}
           prerelease: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
           fail_on_unmatched_files: true
           files: |
             LICENSE
-            artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.tgz
-            artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.exe
+            artifacts/surreal-${{ needs.prepare-vars.outputs.name }}.*/*.tgz
+            artifacts/surreal-${{ needs.prepare-vars.outputs.name }}.*/*.exe
 
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -620,13 +641,13 @@ jobs:
       - name: Set latest release version
         if: ${{ inputs.publish && inputs.create-release && inputs.latest }}
         run: |
-          echo ${{ needs.prepare-vars.outputs.git-ref }} > latest.txt
+          echo v${{ needs.prepare-vars.outputs.version }} > latest.txt
           aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
 
       - name: Set latest alpha or beta version
         if: ${{ inputs.publish && (needs.prepare-vars.outputs.environment == 'alpha' || needs.prepare-vars.outputs.environment == 'beta') }}
         run: |
-          echo ${{ needs.prepare-vars.outputs.git-ref }} > ${{ needs.prepare-vars.outputs.environment }}.txt
+          echo v${{ needs.prepare-vars.outputs.version }} > ${{ needs.prepare-vars.outputs.environment }}.txt
           aws s3 cp --cache-control 'no-store' ${{ needs.prepare-vars.outputs.environment }}.txt s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.environment }}.txt
 
       - name: Publish binaries
@@ -643,7 +664,7 @@ jobs:
     uses: ./.github/workflows/docker.yml
     with:
       environment: ${{ needs.prepare-vars.outputs.environment }}
-      git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
+      git-ref: ${{ needs.prepare-vars.outputs.name }}
       tag-prefix: ${{ needs.prepare-vars.outputs.name }}
       latest: ${{ inputs.latest }}
       build: true
@@ -710,13 +731,13 @@ jobs:
           done
 
   cleanup:
-    name: Delete release branch
-    if: ${{ inputs.publish }}
+    name: Cleanup
     needs: [publish, prepare-vars]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
 
       - name: Delete ${{ needs.prepare-vars.outputs.release-branch }}
-        run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }}
+        run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }} || true

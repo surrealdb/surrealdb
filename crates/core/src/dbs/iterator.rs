@@ -5,7 +5,7 @@ use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::doc::Document;
+use crate::doc::{Document, IgnoreError};
 use crate::err::Error;
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
@@ -674,7 +674,7 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
-	) -> Result<Value, Error> {
+	) -> Result<Value, IgnoreError> {
 		// Check if this is a count all
 		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
 		if count_all {
@@ -697,17 +697,17 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
-		res: Result<Value, Error>,
+		res: Result<Value, IgnoreError>,
 	) {
 		// yield
 		yield_now!();
 		// Process the result
 		match res {
-			Err(Error::Ignore) => {
+			Err(IgnoreError::Ignore) => {
 				return;
 			}
-			Err(e) => {
-				self.error = Some(e);
+			Err(IgnoreError::Error(e)) => {
+				self.error = Some(*e);
 				self.run.cancel();
 				return;
 			}

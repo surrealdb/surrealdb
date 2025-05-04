@@ -423,7 +423,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE user:amos
-	let a = array.get(1).unwrap();
+	let a = &array[1];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -446,7 +446,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE user:jane
-	let a = array.get(2).unwrap();
+	let a = &array[2];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -470,7 +470,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE user:amos
-	let a = array.get(3).unwrap();
+	let a = &array[3];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -494,7 +494,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE table
-	let a = array.get(4).unwrap();
+	let a = &array[4];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};

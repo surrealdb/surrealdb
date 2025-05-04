@@ -13,7 +13,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 use super::paths::ID;
-use super::FlowResultExt as _;
+use super::{Array, FlowResultExt as _};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -226,9 +226,9 @@ impl Fields {
 										v => v.to_owned(),
 									};
 									// This value is always an array, so we can convert it
-									let expr: Vec<Value> = expr.try_into()?;
+									let Array(expr) = expr.coerce_to()?;
 									// This value is always an array, so we can convert it
-									let args: Vec<Value> = args.try_into()?;
+									let Array(args) = args.coerce_to()?;
 									// This value is always an array, so we can convert it
 									for (name, expr) in args.into_iter().zip(expr) {
 										// This value is always a string, so we can convert it

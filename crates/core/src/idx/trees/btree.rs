@@ -918,7 +918,7 @@ where
 		Ok((true, is_main_key, key_to_delete, child_id))
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn merge_nodes(
 		store: &mut BTreeStore<BK>,
 		keys: &mut BK,

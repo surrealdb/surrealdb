@@ -59,7 +59,7 @@ impl DefineApiStatement {
 			.await
 			// Might be correct to not catch here.
 			.catch_return()?
-			.coerce_to_string()?
+			.coerce_to::<String>()?
 			.parse()?;
 		let name = path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);

@@ -33,6 +33,10 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
 #[non_exhaustive]
 pub struct Duration(pub time::Duration);
 
+impl Duration {
+	pub const MAX: Duration = Duration(time::Duration::MAX);
+}
+
 impl From<time::Duration> for Duration {
 	fn from(v: time::Duration) -> Self {
 		Self(v)

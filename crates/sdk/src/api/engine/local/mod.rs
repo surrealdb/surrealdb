@@ -328,7 +328,7 @@ pub struct TiKv;
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(kv_fdb)]
+#[cfg(feature = "kv-fdb")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb-7_3")))]
 #[derive(Debug)]
 pub struct FDb;
@@ -378,6 +378,7 @@ impl Surreal<Db> {
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
+			#[expect(deprecated)]
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
@@ -471,7 +472,7 @@ async fn export_ml(
 	// Attempt to get the model definition
 	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
 	// Export the file data in to the store
-	let mut data = crate::obs::stream(info.hash.to_owned()).await?;
+	let mut data = crate::obs::stream(info.hash.clone()).await?;
 	// Process all stream values
 	while let Some(Ok(bytes)) = data.next().await {
 		if chn.send(bytes.to_vec()).await.is_err() {
@@ -1104,7 +1105,7 @@ async fn router(
 					#[cfg(feature = "ml")]
 					Some(name) => {
 						let mut tmp = Model::default();
-						tmp.name = name.to_owned();
+						name.clone_into(&mut tmp.name);
 						tmp.args = args.0;
 						tmp.version = _version
 							.ok_or(Error::Query("ML functions must have a version".to_string()))?;

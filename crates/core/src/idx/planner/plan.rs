@@ -37,7 +37,6 @@ pub(super) struct PlanBuilderParameters {
 }
 
 impl PlanBuilder {
-	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn build(
 		ctx: &StatementContext<'_>,
 		p: PlanBuilderParameters,
@@ -78,7 +77,8 @@ impl PlanBuilder {
 			}
 			if let Some((_, io)) = compound_index {
 				// Evaluate if we can use keys only
-				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+				let record_strategy =
+					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
@@ -87,7 +87,8 @@ impl PlanBuilder {
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
-					let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+					let record_strategy =
+						ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 					// Return the plan
 					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy));
 				}
@@ -96,14 +97,16 @@ impl PlanBuilder {
 			// Otherwise, we try to find the most interesting (todo: TBD) single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+				let record_strategy =
+					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
 			}
 			// If there is an order option
 			if let Some(o) = p.order_limit {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+				let record_strategy =
+					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Check it is compatible with the reverse scan capability
 				if Self::check_order_scan(p.reverse_scan, o.op()) {
 					// Return the plan
@@ -122,7 +125,7 @@ impl PlanBuilder {
 				}
 			}
 			// Evaluate the record strategy
-			let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+			let record_strategy = ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
@@ -372,7 +375,7 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self) -> Value {
 		let mut e = HashMap::new();
-		e.insert("index", Value::from(self.ix_ref().name.0.to_owned()));
+		e.insert("index", Value::from(self.ix_ref().name.0.clone()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
@@ -491,7 +494,7 @@ impl RangeValue {
 impl From<&RangeValue> for Value {
 	fn from(rv: &RangeValue) -> Self {
 		Value::from(Object::from(HashMap::from([
-			("value", rv.value.to_owned()),
+			("value", rv.value.clone()),
 			("inclusive", Value::from(rv.inclusive)),
 		])))
 	}
@@ -582,7 +585,7 @@ mod tests {
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
-	#[allow(clippy::mutable_key_type)]
+	#[expect(clippy::mutable_key_type)]
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();

@@ -44,15 +44,16 @@ impl TryFrom<Object> for ListOptions {
 		let mut opts = ListOptions::default();
 
 		if let Some(start) = obj.remove("start") {
-			opts.start = Some(start.coerce_to_string()?.into());
+			opts.start = Some(start.coerce_to::<String>()?.into());
 		}
 
 		if let Some(prefix) = obj.remove("prefix") {
-			opts.prefix = Some(prefix.coerce_to_string()?.into());
+			opts.prefix = Some(prefix.coerce_to::<String>()?.into());
 		}
 
 		if let Some(limit) = obj.remove("limit") {
-			opts.limit = Some(limit.coerce_to_u64()? as usize);
+			// TODO: Fix negative truncation.
+			opts.limit = Some(limit.coerce_to::<i64>()? as usize);
 		}
 
 		Ok(opts)

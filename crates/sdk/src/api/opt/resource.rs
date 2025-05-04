@@ -47,13 +47,13 @@ where
 
 transparent_wrapper!(
 	/// A table range.
-	#[derive( Clone, PartialEq)]
+	#[derive(Clone, PartialEq)]
 	pub struct QueryRange(CoreThing)
 );
 
 transparent_wrapper!(
 	/// A query edge
-	#[derive( Clone, PartialEq)]
+	#[derive(Clone, PartialEq)]
 	pub struct Edge(CoreEdges)
 );
 
@@ -312,11 +312,13 @@ impl From<ops::RangeFull> for KeyRange {
 
 /// A trait for types which can be used as a resource selection for a query.
 pub trait IntoResource<Output> {
+	#[deprecated(since = "2.3.0")]
 	fn into_resource(self) -> Result<Resource>;
 }
 
 /// A trait for types which can be used as a resource selection for a query that returns an `Option`.
 pub trait CreateResource<Output> {
+	#[deprecated(since = "2.3.0")]
 	fn into_resource(self) -> Result<Resource>;
 }
 

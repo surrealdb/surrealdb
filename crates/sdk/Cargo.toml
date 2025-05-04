@@ -166,11 +166,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 ulid = { workspace = true, features = ["serde"] }
 wiremock.workspace = true
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(kv_fdb)',
-    'cfg(storage)',
-] }
+[lints]
+workspace = true
 
 [lib]
 name = "surrealdb" # Needed for the nightly crate as we will be renaming it

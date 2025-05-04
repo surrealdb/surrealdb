@@ -2,9 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
-use crate::err::Error;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
+
+use super::IgnoreError;
 
 impl Document {
 	pub(super) async fn create(
@@ -13,7 +14,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, Error> {
+	) -> Result<Value, IgnoreError> {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
