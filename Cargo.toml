@@ -1,10 +1,12 @@
 [workspace]
+# Workspace members (targeted when running with `--workspace`).
 members = [
     ".",
     "crates/core",
     "crates/sdk",
     "crates/language-tests",
 ]
+# Default members (targeted by default without any additional flags).
 default-members = [
     ".",
     "crates/core",
