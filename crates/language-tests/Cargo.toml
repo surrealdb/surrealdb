@@ -1,6 +1,6 @@
 [package]
 name = "language-tests"
-version = "0.1.0"
+version.workspace = true
 publish = false
 edition = "2021"
 
