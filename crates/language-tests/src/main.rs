@@ -8,8 +8,8 @@ mod tests;
 use std::path::Path;
 
 use anyhow::{self, Result};
-use cli::Commands;
 use clap::Parser;
+use cli::Commands;
 
 #[cfg(all(feature = "backend-foundation-7_1", feature = "backend-foundation-7_3"))]
 compile_error!(

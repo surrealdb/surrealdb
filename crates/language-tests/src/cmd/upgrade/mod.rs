@@ -142,7 +142,12 @@ pub fn generate_tasks(
 	tasks
 }
 
-pub fn filter_tests(testset: TestSet, filter: &Option<String>, no_wip: bool, no_results: bool) -> TestSet {
+pub fn filter_tests(
+	testset: TestSet,
+	filter: &Option<String>,
+	no_wip: bool,
+	no_results: bool,
+) -> TestSet {
 	let subset =
 		testset.filter_map(|_, test| test.config.test.as_ref().map(|x| x.upgrade).unwrap_or(false));
 
@@ -403,13 +408,13 @@ async fn run_imports(
 				match connection.query(source).await {
 					Ok(TestTaskResult::RunningError(e)) => {
 						return Ok(Some(TestTaskResult::Import(
-							import.path.clone().to_owned(),
+							import.path.clone(),
 							format!("Failed to run import: {e:?}"),
 						)))
 					}
 					Err(e) => {
 						return Ok(Some(TestTaskResult::Import(
-							import.path.clone().to_owned(),
+							import.path.clone(),
 							format!("Failed to run import: {e:?}."),
 						)));
 					}

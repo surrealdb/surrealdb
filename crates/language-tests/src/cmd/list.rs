@@ -2,10 +2,12 @@ use anyhow::Result;
 
 use crate::{cli::ListCommand, tests::TestSet};
 
-pub async fn run(ListCommand {
-	filter,
-	path,
-}: ListCommand) -> Result<()> {
+pub async fn run(
+	ListCommand {
+		filter,
+		path,
+	}: ListCommand,
+) -> Result<()> {
 	let (testset, errors) = TestSet::collect_directory(&path).await?;
 	if !errors.is_empty() {
 		println!(" Failed to load some of the tests");

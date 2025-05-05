@@ -49,7 +49,12 @@ fn try_collect_reports<W: io::Write>(
 	}
 }
 
-fn filter_testset_from_arguments(testset: TestSet, filter: &Option<String>, no_wip: bool, no_results: bool) -> TestSet {
+fn filter_testset_from_arguments(
+	testset: TestSet,
+	filter: &Option<String>,
+	no_wip: bool,
+	no_results: bool,
+) -> TestSet {
 	let subset = if let Some(x) = filter {
 		testset.filter_map(|name, _| name.contains(x))
 	} else {
@@ -71,15 +76,18 @@ fn filter_testset_from_arguments(testset: TestSet, filter: &Option<String>, no_w
 	}
 }
 
-pub async fn run(color: ColorMode, TestCommand {
-	filter,
-	path,
-	jobs: num_jobs,
-	results: failure_mode,
-	backend,
-	no_wip,
-	no_results,
-}: TestCommand) -> Result<()> {
+pub async fn run(
+	color: ColorMode,
+	TestCommand {
+		filter,
+		path,
+		jobs: num_jobs,
+		results: failure_mode,
+		backend,
+		no_wip,
+		no_results,
+	}: TestCommand,
+) -> Result<()> {
 	let (testset, load_errors) = TestSet::collect_directory(&path).await?;
 
 	// Check if the backend is supported by the enabled features.
