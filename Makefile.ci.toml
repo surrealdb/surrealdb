@@ -33,7 +33,6 @@ command = "cargo"
 args = [
     "check",
     "--locked",
-    "--workspace",
     "--all-targets",
     "--features",
     "${ALL_FEATURES}",
@@ -46,7 +45,6 @@ args = [
     "check",
     "--release",
     "--locked",
-    "--workspace",
     "--all-targets",
     "--features",
     "${ALL_FEATURES}",

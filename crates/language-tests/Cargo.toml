@@ -3,6 +3,7 @@ name = "language-tests"
 version.workspace = true
 publish = false
 edition = "2021"
+rust-version = "1.86.0"
 
 [features]
 default = ["upgrade"]

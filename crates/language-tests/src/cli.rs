@@ -30,6 +30,7 @@ pub enum Backend {
 	/// RocksDB backend.
 	RocksDb,
 	/// SurrealKV backend.
+	#[value(alias = "file")]
 	SurrealKv,
 	/// FoundationDB backend.
 	Foundation,
@@ -41,6 +42,7 @@ pub enum UpgradeBackend {
 	/// RocksDB backend.
 	RocksDb,
 	/// SurrealKV backend.
+	#[value(alias = "file")]
 	SurrealKv,
 	/// FoundationDB backend.
 	Foundation,
