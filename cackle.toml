@@ -9,7 +9,7 @@ features = ["default"]
 build_flags = ["--tests"]
 
 [sandbox]
-kind = "Bubblewrap"
+kind = "Disabled"
 
 [api.fs]
 include = ["rustix::fs", "tokio::fs"]
@@ -1030,6 +1030,7 @@ allow_apis = ["net"]
 allow_apis = ["net"]
 
 [pkg.cpp_demangle]
+allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.memmap2]
@@ -1063,6 +1064,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.object]
+allow_apis = ["process"]
 allow_unsafe = true
 
 [pkg.findshlibs]
@@ -1221,8 +1223,12 @@ allow_unsafe = true
 [pkg.revision]
 allow_apis = ["fs"]
 
+[pkg.equator]
+allow_unsafe = true
+
 [pkg.equator-macro]
 allow_proc_macro = true
+allow_unsafe = true
 
 [pkg.zerovec-derive]
 allow_proc_macro = true
@@ -1356,3 +1362,6 @@ allow_unsafe = true
 [pkg.surrealdb-tikv-client]
 allow_unsafe = true
 allow_apis = ["fs", "net"]
+
+[pkg.aligned-vec]
+allow_unsafe = true

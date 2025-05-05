@@ -96,35 +96,13 @@ jobs:
     name: Check dependencies for unauthorized access
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install cargo-acl
-        run: |
-          cargo install --debug --locked cargo-acl
-          sudo apt-get install -y bubblewrap
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      # See https://etbe.coker.com.au/2024/04/24/ubuntu-24-04-bubblewrap/
-      - name: Configure bubblewrap
-        run: |
-          cat << EOF > bwrap
-          abi <abi/4.0>,
-          include <tunables/global>
-
-          profile bwrap /usr/bin/bwrap flags=(unconfined) {
-            userns,
-
-            # Site-specific additions and overrides. See local/README for details.
-            include if exists <local/bwrap>
-          }
-          EOF
-          sudo mv bwrap /etc/apparmor.d/
-          sudo systemctl reload apparmor
+      - uses: cackle-rs/cackle-action@latest
 
       - name: Check dependencies for unauthorized access
         run: cargo acl -n

@@ -1471,14 +1471,6 @@ criteria = "safe-to-deploy"
 version = "0.24.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.toml_datetime]]
-version = "0.6.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.toml_edit]]
-version = "0.22.24"
-criteria = "safe-to-deploy"
-
 [[exemptions.tonic]]
 version = "0.10.2"
 criteria = "safe-to-deploy"
@@ -1685,10 +1677,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]
 version = "0.59.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.winnow]]
-version = "0.7.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.wiremock]]

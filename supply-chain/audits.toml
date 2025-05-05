@@ -490,6 +490,18 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-08-20"
 end = "2025-08-06"
 
+[[trusted.serde_spanned]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2023-01-20"
+end = "2026-05-05"
+
+[[trusted.similar]]
+criteria = "safe-to-deploy"
+user-id = 39 # Armin Ronacher (mitsuhiko)
+start = "2021-01-24"
+end = "2026-05-05"
+
 [[trusted.slab]]
 criteria = "safe-to-deploy"
 user-id = 6741 # Alice Ryhl (Darksonn)
@@ -598,6 +610,36 @@ user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2021-01-12"
 end = "2025-09-03"
 
+[[trusted.toml]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2022-12-14"
+end = "2026-05-05"
+
+[[trusted.toml_datetime]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2022-10-21"
+end = "2026-05-05"
+
+[[trusted.toml_datetime]]
+criteria = "safe-to-run"
+user-id = 6743 # Ed Page (epage)
+start = "2022-10-21"
+end = "2026-05-05"
+
+[[trusted.toml_edit]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2021-09-13"
+end = "2026-05-05"
+
+[[trusted.toml_write]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2025-04-25"
+end = "2026-05-05"
+
 [[trusted.tower]]
 criteria = "safe-to-deploy"
 user-id = 10 # Carl Lerche (carllerche)
@@ -648,96 +690,102 @@ end = "2025-08-31"
 
 [[trusted.windows]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-01-15"
 end = "2025-12-16"
 
 [[trusted.windows-core]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-11-15"
 end = "2025-09-03"
 
 [[trusted.windows-implement]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2022-01-27"
 end = "2025-12-16"
 
 [[trusted.windows-interface]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2022-02-18"
 end = "2025-12-16"
 
 [[trusted.windows-registry]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2024-02-15"
 end = "2025-09-03"
 
 [[trusted.windows-result]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2024-02-02"
 end = "2025-09-03"
 
 [[trusted.windows-strings]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2024-02-02"
 end = "2025-09-03"
 
 [[trusted.windows-targets]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2022-09-09"
 end = "2025-09-03"
 
 [[trusted.windows_aarch64_gnullvm]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2022-09-01"
 end = "2025-09-03"
 
 [[trusted.windows_aarch64_msvc]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-11-05"
 end = "2025-09-03"
 
 [[trusted.windows_i686_gnu]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-10-28"
 end = "2025-09-03"
 
 [[trusted.windows_i686_gnullvm]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2024-04-02"
 end = "2025-09-03"
 
 [[trusted.windows_i686_msvc]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-10-27"
 end = "2025-09-03"
 
 [[trusted.windows_x86_64_gnu]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-10-28"
 end = "2025-09-03"
 
 [[trusted.windows_x86_64_gnullvm]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2022-09-01"
 end = "2025-09-03"
 
 [[trusted.windows_x86_64_msvc]]
 criteria = "safe-to-deploy"
-user-id = 64539
+user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-10-27"
 end = "2025-09-03"
+
+[[trusted.winnow]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2023-02-22"
+end = "2026-05-05"
