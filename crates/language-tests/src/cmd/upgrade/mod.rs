@@ -5,13 +5,11 @@ mod protocol;
 use std::{
 	collections::HashMap,
 	net::{Ipv4Addr, SocketAddr},
-	path::Path,
+	path::{Path, PathBuf},
 	sync::Arc,
-	thread,
 };
 
 use anyhow::{bail, Context, Result};
-use clap::ArgMatches;
 use process::SurrealProcess;
 use protocol::{ProxyObject, ProxyValue};
 use semver::Version;
@@ -19,7 +17,7 @@ use surrealdb_core::kvs::Datastore;
 use tokio::task::JoinSet;
 
 use crate::{
-	cli::{ColorMode, DsVersion, ResultsMode, UpgradeBackend},
+	cli::{ColorMode, DsVersion, ResultsMode, UpgradeBackend, UpgradeCommand},
 	format::Progress,
 	temp_dir::TempDir,
 	tests::{
@@ -48,28 +46,26 @@ pub struct Task {
 
 impl Task {
 	pub fn name(&self, set: &TestSet) -> String {
-		format!("{} {} => {}", &set[self.test].path, self.from, self.to)
+		format!("{:?} {} => {}", &set[self.test].path, self.from, self.to)
 	}
 }
 
 pub struct Config {
-	test_path: String,
+	test_path: PathBuf,
 	jobs: u32,
 	download_permission: bool,
 	backend: UpgradeBackend,
 	keep_files: bool,
 }
 
-impl Config {
-	pub fn from_matches(matches: &ArgMatches) -> Self {
+impl From<&UpgradeCommand> for Config {
+	fn from(cmd: &UpgradeCommand) -> Self {
 		Config {
-			backend: *matches.get_one::<UpgradeBackend>("backend").unwrap(),
-			test_path: matches.get_one::<String>("path").unwrap().clone(),
-			download_permission: matches.get_one("allow-download").copied().unwrap_or(false),
-			jobs: matches.get_one::<u32>("jobs").copied().unwrap_or_else(|| {
-				thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(1)
-			}),
-			keep_files: matches.get_one::<bool>("keep-files").copied().unwrap_or(false),
+			test_path: cmd.path.clone(),
+			jobs: cmd.jobs,
+			download_permission: cmd.allow_download,
+			backend: cmd.backend,
+			keep_files: cmd.keep_files,
 		}
 	}
 }
@@ -146,23 +142,23 @@ pub fn generate_tasks(
 	tasks
 }
 
-pub fn filter_tests(testset: TestSet, matches: &ArgMatches) -> TestSet {
+pub fn filter_tests(testset: TestSet, filter: &Option<String>, no_wip: bool, no_results: bool) -> TestSet {
 	let subset =
 		testset.filter_map(|_, test| test.config.test.as_ref().map(|x| x.upgrade).unwrap_or(false));
 
-	let subset = if let Some(x) = matches.get_one::<String>("filter") {
+	let subset = if let Some(x) = filter {
 		subset.filter_map(|name, _| name.contains(x))
 	} else {
 		subset
 	};
 
-	let subset = if matches.get_flag("no-wip") {
+	let subset = if no_wip {
 		subset.filter_map(|_, set| !set.config.is_wip())
 	} else {
 		subset
 	};
 
-	if matches.get_flag("no-results") {
+	if no_results {
 		subset.filter_map(|_, set| {
 			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
 		})
@@ -172,16 +168,16 @@ pub fn filter_tests(testset: TestSet, matches: &ArgMatches) -> TestSet {
 }
 
 /// Main subcommand function, runs the actual subcommand.
-pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
-	let config = Config::from_matches(matches);
+pub async fn run(color: ColorMode, args: UpgradeCommand) -> Result<()> {
+	let config = Config::from(&args);
 	let config = Arc::new(config);
 
 	let (testset, load_errors) = TestSet::collect_directory(&config.test_path).await?;
 
-	let results_mode = matches.get_one::<ResultsMode>("results").unwrap();
+	let results_mode = args.results;
 
-	let from_versions = matches.get_many::<DsVersion>("from").unwrap().cloned().collect::<Vec<_>>();
-	let to_versions = matches.get_many::<DsVersion>("to").unwrap().cloned().collect::<Vec<_>>();
+	let from_versions = args.from;
+	let to_versions = args.to;
 	let mut all_versions: Vec<_> =
 		from_versions.iter().cloned().chain(to_versions.iter().cloned()).collect();
 	all_versions.sort_unstable();
@@ -211,7 +207,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		}
 	}
 
-	let subset = filter_tests(testset, matches);
+	let subset = filter_tests(testset, &args.filter, args.no_wip, args.no_results);
 
 	let mut actual_version = HashMap::new();
 	println!("Preparing used versions of surrealdb");
@@ -311,7 +307,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		e.display(color)
 	}
 
-	match *results_mode {
+	match results_mode {
 		ResultsMode::Default => {}
 		ResultsMode::Accept => {
 			for report in reports.iter().filter(|x| x.is_unspecified_test() && !x.is_wip()) {

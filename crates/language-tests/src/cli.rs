@@ -1,80 +1,51 @@
-use std::fmt;
+use std::{fmt, path::{Path, PathBuf}, str::FromStr};
 
-use clap::{
-	arg,
-	builder::{EnumValueParser, PossibleValue},
-	command, value_parser, ArgMatches, Command, ValueEnum,
-};
+use clap::{error::{ContextKind, ContextValue, ErrorKind}, ValueEnum};
 use semver::Version;
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+/// The mode to use for the results of the tests.
+#[derive(Clone, Copy, Eq, PartialEq, ValueEnum, Debug)]
 pub enum ResultsMode {
+	/// Do not change any tests.
 	Default,
+	/// Write the results of tests which do not have results specified as the expected results.
 	Accept,
+	/// Overwrite the results of tests which do not have results and those that failed.
 	Overwrite,
 }
 
-impl ValueEnum for ResultsMode {
-	fn value_variants<'a>() -> &'a [Self] {
-		&[ResultsMode::Default, ResultsMode::Accept, ResultsMode::Overwrite]
-	}
-
-	fn to_possible_value(&self) -> Option<PossibleValue> {
-		match self {
-			ResultsMode::Default => Some(PossibleValue::new("default").help("Do not change any tests")),
-			ResultsMode::Accept => Some(PossibleValue::new("accept").help("Write the results of tests which do not have results specified as the expected results")),
-			ResultsMode::Overwrite => Some(PossibleValue::new("overwrite").help("Overwrite the results of tests which do not have results and those that failed")),
-		}
-	}
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
+/// The backend to use for the tests.
+#[derive(Clone, Copy, Eq, PartialEq, ValueEnum, Debug)]
 pub enum Backend {
+	/// In-memory backend.
+	#[value(alias = "mem")]
 	Memory,
+	/// RocksDB backend.
 	RocksDb,
+	/// SurrealKV backend.
 	SurrealKv,
+	/// FoundationDB backend.
 	Foundation,
 }
 
-impl ValueEnum for Backend {
-	fn value_variants<'a>() -> &'a [Self] {
-		&[Backend::Memory, Backend::RocksDb, Backend::SurrealKv, Backend::Foundation]
-	}
-
-	fn to_possible_value(&self) -> Option<PossibleValue> {
-		match self {
-			Backend::Memory => Some(PossibleValue::new("memory").alias("mem")),
-			Backend::RocksDb => Some(PossibleValue::new("rocksdb")),
-			Backend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
-			Backend::Foundation => Some(PossibleValue::new("foundation")),
-		}
-	}
-}
-
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+/// The backend to use for the upgrade tests.
+#[derive(Clone, Copy, Eq, PartialEq, ValueEnum, Debug)]
 pub enum UpgradeBackend {
+	/// RocksDB backend.
 	RocksDb,
+	/// SurrealKV backend.
 	SurrealKv,
+	/// FoundationDB backend.
 	Foundation,
 }
 
-impl ValueEnum for UpgradeBackend {
-	fn value_variants<'a>() -> &'a [Self] {
-		&[UpgradeBackend::RocksDb, UpgradeBackend::SurrealKv, UpgradeBackend::Foundation]
-	}
-
-	fn to_possible_value(&self) -> Option<PossibleValue> {
-		match self {
-			UpgradeBackend::RocksDb => Some(PossibleValue::new("rocksdb")),
-			UpgradeBackend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
-			UpgradeBackend::Foundation => Some(PossibleValue::new("foundationdb")),
-		}
-	}
-}
-
+/// The Datastore version to use for the tests.
 #[derive(Clone, Eq, PartialEq, Debug, PartialOrd, Ord, Hash)]
 pub enum DsVersion {
+	/// A specific version of the Datastore.
 	Version(Version),
+	/// A path to the codebase of the Datastore.
+	/// The binary will be extracted from this path under `target/debug/surreal`.
 	Path(String),
 }
 
@@ -87,8 +58,10 @@ impl fmt::Display for DsVersion {
 	}
 }
 
-impl DsVersion {
-	fn from_str(s: &str) -> Result<Self, semver::Error> {
+impl FromStr for DsVersion {
+	type Err = semver::Error;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		if let Ok(x) = Version::parse(s) {
 			return Ok(DsVersion::Version(x));
 		}
@@ -96,121 +69,155 @@ impl DsVersion {
 	}
 }
 
-/*
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum LogLevel {
-	Trace,
-	Debug,
-	Info,
-	Warn,
-	Error,
-}
-
-impl ValueEnum for LogLevel {
-	fn value_variants<'a>() -> &'a [Self] {
-		&[LogLevel::Trace, LogLevel::Debug, LogLevel::Info, LogLevel::Warn, LogLevel::Error]
-	}
-
-	fn to_possible_value(&self) -> Option<PossibleValue> {
-		match self {
-			LogLevel::Trace => Some(PossibleValue::new("trace")),
-			LogLevel::Debug => Some(PossibleValue::new("debug")),
-			LogLevel::Info => Some(PossibleValue::new("info")),
-			LogLevel::Warn => Some(PossibleValue::new("warn")),
-			LogLevel::Error => Some(PossibleValue::new("error")),
-		}
-	}
-}*/
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
 pub enum ColorMode {
 	Always,
 	Never,
 	Auto,
 }
 
-impl ValueEnum for ColorMode {
-	fn value_variants<'a>() -> &'a [Self] {
-		&[ColorMode::Always, ColorMode::Never, ColorMode::Auto]
-	}
+/// Language tests CLI arguments.
+#[derive(clap::Parser, Debug)]
+#[command(version, about)]
+pub struct Args {
+	#[arg(long, value_enum, default_value = "auto", help = "Set the color mode for the output")]
+	pub color: ColorMode,
 
-	fn to_possible_value(&self) -> Option<PossibleValue> {
-		match self {
-			ColorMode::Always => Some(PossibleValue::new("always")),
-			ColorMode::Never => Some(PossibleValue::new("never")),
-			ColorMode::Auto => Some(PossibleValue::new("auto")),
+	#[command(subcommand)]
+	pub command: Commands,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum Commands {
+	/// Run surrealdb tests
+	#[command(alias = "run")]
+	Test(TestCommand),
+	/// Run surrealdb upgrade tests
+	#[cfg(feature = "upgrade")]
+	Upgrade(UpgradeCommand),
+	/// List surrealdb tests
+	List(ListCommand),
+}
+
+/// Run surrealdb tests
+#[derive(clap::Args, Debug)]
+pub struct TestCommand {
+	#[arg(help = "Filter the tests by their path")]
+	pub filter: Option<String>,
+
+	#[arg(long, default_value = "./tests", value_parser = TestsPathParser, help = "The path to tests directory")]
+	pub path: PathBuf,
+
+	#[arg(short, long, default_value_t = default_parallelism(), help = "The number of test running in parallel, defaults to available parallelism")]
+	pub jobs: u32,
+
+	#[arg(long, default_value = "default", help = "How to handle results of tests")]
+	pub results: ResultsMode,
+
+	#[arg(long, default_value = "mem", help = "Specify the storage backend to use for the tests")]
+	pub backend: Backend,
+
+	#[arg(long, default_value_t = false, help = "Skips tests marked work-in-progress")]
+	pub no_wip: bool,
+
+	#[arg(long, default_value_t = false, help = "Skips tests that have defined results, useful when adding new tests.")]
+	pub no_results: bool,
+}
+
+/// Run surrealdb upgrade tests
+#[derive(clap::Args, Debug)]
+#[cfg(feature = "upgrade")]
+pub struct UpgradeCommand {
+	#[arg(help = "Filter the tests by their path")]
+	pub filter: Option<String>,
+
+	#[arg(long, default_value = "./tests", value_parser = TestsPathParser, help = "The path to the tests directory")]
+	pub path: PathBuf,
+
+	#[arg(short, long, default_value_t = default_parallelism(), help = "The number of test running in parallel, defaults to available parallelism")]
+	pub jobs: u32,
+
+	#[arg(long, default_value = "default", help = "How to handle results of tests")]
+	pub results: ResultsMode,
+
+	#[arg(long, default_value = "surrealkv", help = "Specify the storage backend to use for the upgrade test")]
+	pub backend: UpgradeBackend,
+
+	#[arg(short, long, required = true, value_delimiter = ',', help = "The version to upgrade from. This can be either a version number or a path to the surrealdb codebase.")]
+	pub from: Vec<DsVersion>,
+
+	#[arg(short, long, required = true, value_delimiter = ',', help = "The version to upgrade to. This can be either a version number or a path to the surrealdb codebase.")]
+	pub to: Vec<DsVersion>,
+
+	#[arg(long, default_value_t = false, help = "Skip the confirmation for downloading binaries from github")]
+	pub allow_download: bool,
+
+	#[arg(long, default_value_t = false, help = "Don't cleanup the files generated by the tests")]
+	pub keep_files: bool,
+
+	#[arg(long, default_value_t = false, help = "Skips tests marked work-in-progress")]
+	pub no_wip: bool,
+
+	#[arg(long, default_value_t = false, help = "Skips tests that have defined results, useful when adding new tests.")]
+	pub no_results: bool,
+}
+
+/// List surrealdb tests
+#[derive(clap::Args, Debug)]
+pub struct ListCommand {
+	#[arg(help = "Filter the test by their path")]
+	pub filter: Option<String>,
+
+	#[arg(long, default_value = "./tests", value_parser = TestsPathParser, help = "Set the path to tests directory")]
+	pub path: PathBuf,
+}
+
+#[derive(Clone)]
+struct TestsPathParser;
+
+impl clap::builder::TypedValueParser for TestsPathParser {
+	type Value = PathBuf;
+
+	fn parse_ref(
+		&self,
+		cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+	) -> Result<Self::Value, clap::Error> {
+		let path = PathBuf::from(value);
+		
+		if path.is_absolute() && path.exists() {
+			return Ok(path);
 		}
+
+		// Relative paths are relative to the CARGO_MANIFEST_DIR
+		let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| {
+			std::env::current_dir()
+				.expect("Failed to get current directory")
+				.to_string_lossy()
+				.to_string()
+		});
+
+		let path = Path::new(&manifest_dir).join(value);
+		if !path.exists() {
+			let mut err = clap::Error::new(ErrorKind::ValueValidation)
+				.with_cmd(cmd);
+
+			if let Some(arg) = arg {
+				err.insert(ContextKind::InvalidArg, ContextValue::String(arg.to_string()));
+			}
+
+			err.insert(ContextKind::InvalidValue, ContextValue::String(format!("Path {path:?} does not exist")));
+			return Err(err);
+		}
+
+		Ok(path)
 	}
 }
 
-pub fn parse() -> ArgMatches {
-	let cmd = command!()
-		.arg(arg!(--color <COLOR> "Set if the output should be colored").value_parser(EnumValueParser::<ColorMode>::new()).default_value("auto"))
-        .subcommand(
-            Command::new("test").alias("run")
-                .about("Run surrealdb tests")
-                .arg(arg!([filter] "Filter the tests by their path"))
-                .arg(arg!(--path <PATH> "The path to tests directory").default_value("./tests"))
-                .arg(
-                    arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")
-                        .value_parser(value_parser!(u32).range(1..))
-                ).arg(
-                    arg!(--results <RESULT_MODE> "How to handle results of tests").value_parser(EnumValueParser::<ResultsMode>::new()).default_value("default").alias("failure")
-                )
-				.arg(
-					arg!(--backend <BACKEND> "Specify the storage backend to use for the tests")
-						.value_parser(EnumValueParser::<Backend>::new()).default_value("mem")
-				)
-				.arg(
-					arg!(--"no-wip" "Skips tests marked work-in-progress")
-				)
-				.arg(
-					arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
-				),
-        )
-		.subcommand(
-			Command::new("upgrade")
-			.about("Run surrealdb upgrade tests")
-			.arg(arg!([filter] "Filter the tests by their path"))
-			.arg(arg!(--path <PATH> "The path to the tests directory").default_value("./tests"))
-			.arg(
-				arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")
-				.value_parser(value_parser!(u32).range(1..))
-			)
-			.arg(
-				arg!(--results <RESULT_MODE> "How to handle results of tests").value_parser(EnumValueParser::<ResultsMode>::new()).default_value("default")
-			)
-			.arg(
-				arg!(--backend <BACKEND> "Specify the storage backend to use for the upgrade test")
-					.value_parser(EnumValueParser::<UpgradeBackend>::new()).default_value("surrealkv")
-			)
-			.arg(
-				arg!(-f --from <VERSIONS> "The version to upgrade from. This can be either a version number or a path to the surrealdb codebase.").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
-			)
-			.arg(
-				arg!(-t --to <VERSIONS> "The version to upgrade to. This can be either a version number or a path to the surrealdb codebase.").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
-			)
-			.arg(
-				arg!(--"allow-download" "Skip the confirmation for downloading binaries from github")
-			)
-			.arg(
-				arg!(--"keep-files" "Don't cleanup the files generated by the tests")
-			)
-			.arg(
-				arg!(--"no-wip" "Skips tests marked work-in-progress")
-			)
-			.arg(
-				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
-			)
-		)
-		.subcommand(
-			Command::new("list")
-			.about("List surrealdb tests")
-			.arg(arg!([filter] "Filter the test by their path"))
-			.arg(
-				arg!(--path <PATH> "Set the path to tests directory").default_value("./tests"),
-			),
-		);
-
-	cmd.subcommand_required(true).get_matches()
+/// Returns the default parallelism for the current system.
+fn default_parallelism() -> u32 {
+    std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(8) as u32
 }

@@ -1,11 +1,8 @@
 [package]
-name = "surrealql-test"
+name = "language-tests"
 version = "0.1.0"
 publish = false
 edition = "2021"
-
-[workspace]
-members = []
 
 [features]
 default = ["upgrade"]
@@ -17,7 +14,7 @@ upgrade = ["backend-surrealkv","tokio-tungstenite","revision"] # Upgrade test su
 
 [dependencies]
 # Crates for running surrealdb.
-surrealdb-core = { path = "../core/", default-features=false, features = ["scripting","kv-mem"] }
+surrealdb-core = { workspace = true, default-features=false, features = ["scripting","kv-mem"] }
 reblessive = { version = "0.4.3" }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 
@@ -33,7 +30,7 @@ tokio = { version = "1.44.2", features = ["full"] }
 futures = "0.3.30"
 
 # Config and cli parsing
-clap = { version = "4.4.11", features = ["cargo"] }
+clap.workspace = true
 serde = { version = "1.0.209", features = ["derive"] }
 toml = "0.8.19"
 toml_edit = { version = "0.22", features = ["serde"] }
@@ -48,3 +45,6 @@ tokio-tungstenite = { version = "0.23.1", optional = true }
 revision = { version = "0.11.0", optional = true }
 cfg-if = "1.0.0"
 serde_json = "1.0.140"
+
+[lints]
+workspace = true

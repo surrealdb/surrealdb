@@ -7,7 +7,15 @@ publish = false
 version = "3.0.0"
 
 [workspace]
-members = ["crates/core", "crates/sdk"]
+members = [
+    "crates/core",
+    "crates/sdk",
+    "crates/language-tests",
+]
+default-members = [
+    "crates/core",
+    "crates/sdk",
+]
 
 [workspace.dependencies]
 # workspace internal dependencies
@@ -61,6 +69,12 @@ castaway = "0.2.3"
 cedar-policy = "2.4.2"
 chrono = "0.4.38"
 ciborium = "0.2.1"
+clap = { version = "4.4.11", features = [
+    "env",
+    "derive",
+    "wrap_help",
+    "unicode",
+] }
 dashmap = "5.5.3"
 deunicode = "1.6.1"
 ext-sort = "^0.1.4"
@@ -226,12 +240,7 @@ axum-extra = { version = "0.9.3", features = [
     "typed-header",
 ] }
 axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
-clap = { version = "4.4.11", features = [
-    "env",
-    "derive",
-    "wrap_help",
-    "unicode",
-] }
+clap.workspace = true
 glob = "0.3.1"
 http-body = "1.0.0"
 http-body-util = "0.1.1"

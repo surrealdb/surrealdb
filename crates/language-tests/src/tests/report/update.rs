@@ -11,12 +11,12 @@ use super::TestReport;
 impl TestReport {
 	pub async fn update_config_results(&self, set: &TestSet) -> Result<()> {
 		let Some(values) = self.outputs.as_ref() else {
-			println!("tried to update test {} without results", set[self.id].path);
+			println!("tried to update test {:?} without results", set[self.id].path);
 			return Ok(());
 		};
 
 		let mut doc = set[self.id].toml.clone();
-		println!("Updating test `{}`", set[self.id].path);
+		println!("Updating test `{:?}`", set[self.id].path);
 
 		match values {
 			TestOutputs::Values(values) => apply_results(&mut doc, values),

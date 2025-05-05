@@ -2,7 +2,7 @@
 
 mod bytes_hack;
 
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, path::PathBuf, str::FromStr};
 
 use semver::VersionReq;
 use serde::{de, Deserialize, Serialize};
@@ -42,7 +42,7 @@ impl TestConfig {
 	}
 
 	/// Returns the imports for this file, empty if no imports are defined.
-	pub fn imports(&self) -> &[String] {
+	pub fn imports(&self) -> &[PathBuf] {
 		self.env.as_ref().map(|x| x.imports.as_slice()).unwrap_or(&[])
 	}
 
@@ -89,7 +89,7 @@ pub struct TestEnv {
 	pub login: Option<TestLogin>,
 
 	#[serde(default)]
-	pub imports: Vec<String>,
+	pub imports: Vec<PathBuf>,
 	pub timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
 

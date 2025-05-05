@@ -1,13 +1,12 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use std::{
-	borrow::Cow,
 	collections::{hash_map::Values, HashMap},
 	fmt::Write,
 	hash::Hash,
 	io::{self, IsTerminal as _},
 	mem,
 	ops::Index,
-	path::{self, Path},
+	path::{Path, PathBuf},
 	sync::Arc,
 };
 use tokio::fs;
@@ -25,7 +24,7 @@ pub struct TestId(usize);
 /// An error that happened during loading of a test case.
 #[derive(Debug)]
 pub struct TestLoadError {
-	path: String,
+	path: PathBuf,
 	error: anyhow::Error,
 }
 
@@ -52,14 +51,14 @@ impl TestLoadError {
 						reset_format,
 						" loading ",
 						bold,
-						"{}",
+						"{:?}",
 						reset_format,
 						":"
 					),
 					self.path
 				)?
 			} else {
-				writeln!(f, " ==> Error Loading {}:", self.path)?
+				writeln!(f, " ==> Error Loading {:?}:", self.path)?
 			}
 
 			f.indent(|f| writeln!(f, "{:?}", self.error))
@@ -72,9 +71,9 @@ impl TestLoadError {
 
 #[derive(Clone)]
 pub struct TestSet {
-	root: String,
-	map: Arc<HashMap<String, TestId>>,
-	all_map: Arc<HashMap<String, TestId>>,
+	root: PathBuf,
+	map: Arc<HashMap<PathBuf, TestId>>,
+	all_map: Arc<HashMap<PathBuf, TestId>>,
 	all: Arc<Vec<TestCase>>,
 }
 
@@ -98,7 +97,7 @@ impl TestSet {
 		let map = self
 			.map
 			.iter()
-			.filter(|x| f(x.0.as_str(), &self.all[x.1 .0]))
+			.filter(|x| f(&x.0.to_string_lossy(), &self.all[x.1 .0]))
 			.map(|(a, b)| (a.clone(), *b))
 			.collect();
 
@@ -114,16 +113,16 @@ impl TestSet {
 
 	pub fn find_all<S>(&self, name: &S) -> Option<TestId>
 	where
-		S: AsRef<str>,
+		S: AsRef<Path>,
 	{
-		let mut name = Cow::Borrowed(name.as_ref());
-		if !name.starts_with(path::MAIN_SEPARATOR) {
-			name = Cow::Owned(format!("{}{name}", path::MAIN_SEPARATOR));
-		}
+		// let mut name = Cow::Borrowed(name.as_ref());
+		// if !name.starts_with(path::MAIN_SEPARATOR.to_string()) {
+		// 	name = Cow::Owned(format!("{}{name}", path::MAIN_SEPARATOR));
+		// }
 		self.all_map.get(name.as_ref()).copied()
 	}
 
-	pub async fn collect_directory(path: &str) -> Result<(Self, Vec<TestLoadError>)> {
+	pub async fn collect_directory(path: &Path) -> Result<(Self, Vec<TestLoadError>)> {
 		let mut all = Vec::new();
 		let mut map = HashMap::new();
 		let mut errors = Vec::new();
@@ -132,7 +131,7 @@ impl TestSet {
 		let map = Arc::new(map);
 		Ok((
 			Self {
-				root: path.to_string(),
+				root: path.to_path_buf(),
 				all_map: map.clone(),
 				map,
 				all: Arc::new(all),
@@ -143,18 +142,18 @@ impl TestSet {
 
 	fn resolve_imports(
 		all: &mut [TestCase],
-		map: &HashMap<String, TestId>,
+		map: &HashMap<PathBuf, TestId>,
 		errors: &mut Vec<TestLoadError>,
 	) {
 		// resolve all import paths.
 		for t in all.iter_mut() {
 			for import_path in t.config.imports() {
-				let mut import_name = Cow::Borrowed(import_path);
-				if !import_name.starts_with(path::MAIN_SEPARATOR) {
-					import_name = Cow::Owned(format!("{}{import_name}", path::MAIN_SEPARATOR));
-				}
+				// let mut import_name = Cow::Borrowed(import_path);
+				// if !import_name.starts_with(path::MAIN_SEPARATOR) {
+				// 	import_name = Cow::Owned(format!("{}{import_name}", path::MAIN_SEPARATOR));
+				// }
 
-				if let Some(resolved) = map.get(import_name.as_ref()) {
+				if let Some(resolved) = map.get(import_path) {
 					t.imports.push(ResolvedImport {
 						id: *resolved,
 						path: t.path.clone(),
@@ -163,7 +162,7 @@ impl TestSet {
 					errors.push(TestLoadError {
 						path: t.path.clone(),
 						error: anyhow::anyhow!(
-							"Could not find import `{}` for test `{}`",
+							"Could not find import `{:?}` for test `{:?}`",
 							import_path,
 							t.path
 						),
@@ -182,7 +181,7 @@ impl TestSet {
 					errors.push(TestLoadError {
 						path: all[test_index].path.clone(),
 						error: anyhow::anyhow!(
-								"Importing test `{}` for test `{}` which contains imports itself is not supported.",
+								"Importing test `{:?}` for test `{:?}` which contains imports itself is not supported.",
 								import.path,
 								all[test_index].path
 							),
@@ -194,54 +193,50 @@ impl TestSet {
 	}
 
 	async fn collect_recursive(
-		dir: &str,
-		root: &str,
-		map: &mut HashMap<String, TestId>,
+		dir: &Path,
+		root: &Path,
+		map: &mut HashMap<PathBuf, TestId>,
 		all: &mut Vec<TestCase>,
 		errors: &mut Vec<TestLoadError>,
 	) -> Result<()> {
 		let mut dir_entries = fs::read_dir(dir)
 			.await
-			.with_context(|| format!("Failed to read test directory '{dir}'"))?;
+			.with_context(|| format!("Failed to read test directory '{dir:?}'"))?;
 
 		while let Some(entry) = dir_entries.next_entry().await.transpose() {
 			let entry =
-				entry.with_context(|| format!("Failed to read entry in directory '{dir}'"))?;
+				entry.with_context(|| format!("Failed to read entry in directory '{dir:?}'"))?;
 
-			let p: String = entry
-				.path()
-				.to_str()
-				.ok_or_else(|| anyhow!("Failed to parse entry to utf-8 string"))?
-				.to_owned();
+			let path = entry.path();
 
 			let ft = entry
 				.file_type()
 				.await
-				.with_context(|| format!("Failed to get filetype for path '{p}'"))?;
+				.with_context(|| format!("Failed to get filetype for path '{path:?}'"))?;
 
 			// explicitly drop the entry to close the file, preventing hiting file open limits.
 			mem::drop(entry);
 
 			if ft.is_dir() {
-				Box::pin(Self::collect_recursive(&p, root, map, all, errors)).await?;
+				Box::pin(Self::collect_recursive(&path, root, map, all, errors)).await?;
 				continue;
 			};
 
 			if ft.is_file() {
-				let Some("surql") = Path::new(&p).extension().map(|x| x.to_str().unwrap_or(""))
+				let Some("surql") = Path::new(&path).extension().map(|x| x.to_str().unwrap_or(""))
 				else {
 					continue;
 				};
 
-				let text = fs::read(&p)
+				let text = fs::read(&path)
 					.await
-					.with_context(|| format!("Failed to read test case file `{p}`"))?;
+					.with_context(|| format!("Failed to read test case file `{path:?}`"))?;
 
-				let case = match TestCase::from_source_path(p.clone(), text) {
+				let case = match TestCase::from_source_path(path.clone(), text) {
 					Ok(x) => x,
 					Err(e) => {
 						errors.push(TestLoadError {
-							path: p,
+							path,
 							error: e,
 						});
 						continue;
@@ -251,7 +246,7 @@ impl TestSet {
 				let idx = all.len();
 				all.push(case);
 				map.insert(
-					p.strip_prefix(root).expect("Path should start with dir").to_string(),
+					path.strip_prefix(root).expect("Path should start with dir").to_path_buf(),
 					TestId(idx),
 				);
 			}
@@ -275,7 +270,7 @@ impl TestSet {
 }
 
 pub struct Iter<'a> {
-	map_iter: Values<'a, String, TestId>,
+	map_iter: Values<'a, PathBuf, TestId>,
 	slice: &'a [TestCase],
 }
 
@@ -300,7 +295,7 @@ impl<'a> Iterator for Iter<'a> {
 }
 
 pub struct IterIds<'a> {
-	map_iter: Values<'a, String, TestId>,
+	map_iter: Values<'a, PathBuf, TestId>,
 	slice: &'a [TestCase],
 }
 

@@ -4,6 +4,7 @@ use serde::{de::IntoDeserializer, Deserialize};
 use set::TestId;
 pub use set::TestSet;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::Arc;
 use toml_edit::DocumentMut;
 
@@ -62,11 +63,11 @@ pub enum ConfigKind {
 
 pub struct ResolvedImport {
 	pub id: TestId,
-	pub path: String,
+	pub path: PathBuf,
 }
 
 pub struct TestCase {
-	pub path: String,
+	pub path: PathBuf,
 	pub toml: DocumentMut,
 	pub config: Arc<TestConfig>,
 	pub source: Vec<u8>,
@@ -77,7 +78,7 @@ pub struct TestCase {
 }
 
 impl TestCase {
-	pub fn from_source_path(path: String, source: Vec<u8>) -> Result<Self> {
+	pub fn from_source_path(path: PathBuf, source: Vec<u8>) -> Result<Self> {
 		let (range, config_kind, config_source) = Self::extract_config_text(&source)?;
 
 		let config_source =

@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
 use crate::tests::schema::{self, TestConfig};
@@ -20,7 +21,7 @@ mod update;
 pub enum TestTaskResult {
 	ParserError(RenderedError),
 	RunningError(anyhow::Error),
-	Import(String, String),
+	Import(PathBuf, String),
 	Timeout,
 	Results(Vec<Result<SurValue, String>>),
 	Paniced(Box<dyn Any + Send + 'static>),
@@ -42,7 +43,7 @@ pub enum TestError {
 	Timeout,
 	Running(String),
 	Paniced(String),
-	Import(String, String),
+	Import(PathBuf, String),
 }
 
 pub enum TestOutputs {

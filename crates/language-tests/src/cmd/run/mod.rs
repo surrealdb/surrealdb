@@ -1,5 +1,5 @@
 use crate::{
-	cli::{Backend, ColorMode, ResultsMode},
+	cli::{Backend, ColorMode, ResultsMode, TestCommand},
 	format::Progress,
 	runner::Schedular,
 	tests::{
@@ -10,10 +10,9 @@ use crate::{
 };
 
 use anyhow::{bail, Context, Result};
-use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
 use semver::Version;
-use std::{io, mem, str, thread, time::Duration};
+use std::{io, mem, str, time::Duration};
 use surrealdb_core::{
 	dbs::{capabilities::ExperimentalTarget, Session},
 	env::VERSION,
@@ -50,20 +49,20 @@ fn try_collect_reports<W: io::Write>(
 	}
 }
 
-fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> TestSet {
-	let subset = if let Some(x) = matches.get_one::<String>("filter") {
+fn filter_testset_from_arguments(testset: TestSet, filter: &Option<String>, no_wip: bool, no_results: bool) -> TestSet {
+	let subset = if let Some(x) = filter {
 		testset.filter_map(|name, _| name.contains(x))
 	} else {
 		testset
 	};
 
-	let subset = if matches.get_flag("no-wip") {
+	let subset = if no_wip {
 		subset.filter_map(|_, set| !set.config.is_wip())
 	} else {
 		subset
 	};
 
-	if matches.get_flag("no-results") {
+	if no_results {
 		subset.filter_map(|_, set| {
 			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
 		})
@@ -72,10 +71,16 @@ fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> Test
 	}
 }
 
-pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
-	let path: &String = matches.get_one("path").unwrap();
-	let (testset, load_errors) = TestSet::collect_directory(path).await?;
-	let backend = *matches.get_one::<Backend>("backend").unwrap();
+pub async fn run(color: ColorMode, TestCommand {
+	filter,
+	path,
+	jobs: num_jobs,
+	results: failure_mode,
+	backend,
+	no_wip,
+	no_results,
+}: TestCommand) -> Result<()> {
+	let (testset, load_errors) = TestSet::collect_directory(&path).await?;
 
 	// Check if the backend is supported by the enabled features.
 	match backend {
@@ -95,21 +100,14 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
-	let subset = filter_testset_from_arguments(testset, matches);
+	let subset = filter_testset_from_arguments(testset, &filter, no_wip, no_results);
 
 	// check for unused keys in tests
 	for t in subset.iter() {
 		for k in t.config.unused_keys() {
-			println!("Test `{}` contained unused key `{k}` in config", t.path);
+			println!("Test `{:?}` contained unused key `{k}` in config", t.path);
 		}
 	}
-
-	let num_jobs = matches
-		.get_one::<u32>("jobs")
-		.copied()
-		.unwrap_or_else(|| thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(8));
-
-	let failure_mode = matches.get_one::<ResultsMode>("results").unwrap();
 
 	let core_version = Version::parse(VERSION).unwrap();
 
@@ -177,7 +175,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	// spawn all tests.
 	for id in tasks {
 		let config = subset[id].config.as_ref();
-		progress.start_item(id, subset[id].path.as_str()).unwrap();
+		progress.start_item(id, &subset[id].path.to_string_lossy()).unwrap();
 
 		let ds = if config.can_use_reusable_ds() {
 			provisioner.obtain().await
@@ -192,7 +190,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			ds,
 		};
 		let future = async move {
-			let name = context.testset[context.id].path.as_str().to_owned();
+			let name = context.testset[context.id].path.to_string_lossy().to_string();
 			let future = test_task(context);
 
 			if let Err(e) = future.await {
@@ -345,21 +343,21 @@ async fn run_test_with_dbs(
 	for import in set[id].config.imports() {
 		let Some(test) = set.find_all(import) else {
 			return Ok(TestTaskResult::Import(
-				import.to_string(),
+				import.clone(),
 				"Could not find import.".to_string(),
 			));
 		};
 
 		let Ok(source) = str::from_utf8(&set[test].source) else {
 			return Ok(TestTaskResult::Import(
-				import.to_string(),
+				import.clone(),
 				"Import file was not valid utf-8.".to_string(),
 			));
 		};
 
 		if let Err(e) = dbs.execute(source, &import_session, None).await {
 			return Ok(TestTaskResult::Import(
-				import.to_string(),
+				import.clone(),
 				format!("Failed to run import: `{e}`"),
 			));
 		}

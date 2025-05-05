@@ -69,9 +69,9 @@ impl TestReport {
 
 	fn display_grade_header(&self, tests: &TestSet, use_color: bool, f: &mut Fmt) -> fmt::Result {
 		let name = if let Some(x) = self.extra_name.as_ref() {
-			format!("{} {}", tests[self.id].path, x)
+			format!("{:?} {}", tests[self.id].path, x)
 		} else {
-			tests[self.id].path.clone()
+			tests[self.id].path.to_string_lossy().to_string()
 		};
 
 		match self.grade() {
@@ -183,7 +183,7 @@ impl TestReport {
 				f.indent(|f| writeln!(f, "- Panic payload: {e}"))
 			}
 			TestError::Import(import, error) => {
-				writeln!(f, "> Test failed, running import `{import}` caused an error:")?;
+				writeln!(f, "> Test failed, running import `{import:?}` caused an error:")?;
 				f.indent(|f| writeln!(f, "- {error}"))
 			}
 		}
