@@ -5,13 +5,13 @@ use revision::Revisioned;
 use serde::ser::SerializeStruct;
 use serde::Deserialize;
 use serde::Serialize;
-use std::fmt::Display;
 use std::time::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum QueryType {
 	// Any kind of query
@@ -26,16 +26,6 @@ pub enum QueryType {
 impl QueryType {
 	fn is_other(&self) -> bool {
 		matches!(self, Self::Other)
-	}
-}
-
-impl Display for QueryType {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Self::Other => write!(f, "other"),
-			Self::Live => write!(f, "live"),
-			Self::Kill => write!(f, "kill"),
-		}
 	}
 }
 
@@ -87,7 +77,7 @@ impl Serialize for Response {
 
 		val.serialize_field("time", self.speed().as_str())?;
 		if includes_type {
-			val.serialize_field("type", &CoreValue::from(self.query_type.to_string()))?;
+			val.serialize_field("type", &self.query_type)?;
 		}
 
 		match &self.result {
