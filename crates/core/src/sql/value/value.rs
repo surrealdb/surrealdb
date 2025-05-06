@@ -865,27 +865,6 @@ impl Value {
 		}
 	}
 
-	pub fn can_be_range_bound(&self) -> bool {
-		matches!(
-			self,
-			Value::None
-				| Value::Null
-				| Value::Array(_)
-				| Value::Block(_)
-				| Value::Bool(_)
-				| Value::Datetime(_)
-				| Value::Duration(_)
-				| Value::Geometry(_)
-				| Value::Number(_)
-				| Value::Object(_)
-				| Value::Param(_)
-				| Value::Strand(_)
-				| Value::Subquery(_)
-				| Value::Table(_)
-				| Value::Uuid(_)
-		)
-	}
-
 	/// Validate that a Value is computed or contains only computed Values
 	pub fn validate_computed(&self) -> Result<(), Error> {
 		use Value::*;
@@ -1002,6 +981,8 @@ pub(crate) trait TryAdd<Rhs = Self> {
 	fn try_add(self, rhs: Rhs) -> Result<Self::Output, Error>;
 }
 
+use std::ops::Add;
+
 impl TryAdd for Value {
 	type Output = Self;
 	fn try_add(self, other: Self) -> Result<Self, Error> {
@@ -1011,6 +992,8 @@ impl TryAdd for Value {
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
+			(Self::Array(v), Self::Array(w)) => Self::Array(v.add(w)),
+			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
 			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
 	}

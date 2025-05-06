@@ -2,9 +2,10 @@ mod cli;
 mod cmd;
 mod format;
 mod runner;
+mod temp_dir;
 mod tests;
 
-use anyhow::Result;
+use anyhow::{self, Result};
 use cli::ColorMode;
 
 #[cfg(all(feature = "backend-foundation-7_1", feature = "backend-foundation-7_3"))]
@@ -23,11 +24,11 @@ async fn main() -> Result<()> {
 	//log::init(Level::INFO);
 
 	match sub {
-		"run" => cmd::run::run(color, args).await,
+		"test" => cmd::run::run(color, args).await,
 		#[cfg(not(feature = "upgrade"))]
 		"upgrade" => {
 			anyhow::bail!(
-				"Upgrade subcommand is only implemented when the fuzzing feature is enabled"
+				"Upgrade subcommand is only implemented when the 'upgrade' feature is enabled"
 			)
 		}
 		#[cfg(feature = "upgrade")]

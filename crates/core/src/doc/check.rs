@@ -14,6 +14,8 @@ use crate::sql::value::Value;
 use crate::sql::FlowResultExt as _;
 use reblessive::tree::Stk;
 
+use super::IgnoreError;
+
 impl Document {
 	/// Checks whether this operation is allowed on
 	/// the table for this document. When inserting
@@ -93,10 +95,10 @@ impl Document {
 		_ctx: &Context,
 		_opt: &Options,
 		_stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() && self.current.doc.is_none() {
-			return Err(Error::Ignore);
+			return Err(IgnoreError::Ignore);
 		}
 		// Carry on
 		Ok(())
@@ -318,7 +320,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check if we have already processed a condition
 		if !self.is_condition_checked() {
 			// Check if a WHERE condition is specified
@@ -331,7 +333,7 @@ impl Document {
 				// Check if the expression is truthy
 				if !cond.compute(stk, ctx, opt, Some(current)).await.catch_return()?.is_truthy() {
 					// Ignore this document
-					return Err(Error::Ignore);
+					return Err(IgnoreError::Ignore);
 				}
 			}
 		}
@@ -352,7 +354,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// Should we run permissions checks?
@@ -366,14 +368,14 @@ impl Document {
 				};
 				// Process the table permissions
 				match &table.permissions.select {
-					Permission::None => return Err(Error::Ignore),
+					Permission::None => return Err(IgnoreError::Ignore),
 					Permission::Full => (),
 					Permission::Specific(e) => {
 						// Disable permissions
 						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
 						if !e.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
-							return Err(Error::Ignore);
+							return Err(IgnoreError::Ignore);
 						}
 					}
 				}
@@ -393,7 +395,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// Should we run permissions checks?
@@ -404,7 +406,7 @@ impl Document {
 				let perms = stm.permissions(&table, self.is_new());
 				// Exit early if permissions are NONE
 				if perms.is_none() {
-					return Err(Error::Ignore);
+					return Err(IgnoreError::Ignore);
 				}
 			}
 		}
@@ -422,7 +424,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// Should we run permissions checks?
@@ -431,15 +433,15 @@ impl Document {
 				if opt.auth.is_record() {
 					let ns = opt.ns()?;
 					if opt.auth.level().ns() != Some(ns) {
-						return Err(Error::NsNotAllowed {
+						return Err(IgnoreError::from(Error::NsNotAllowed {
 							ns: ns.into(),
-						});
+						}));
 					}
 					let db = opt.db()?;
 					if opt.auth.level().db() != Some(db) {
-						return Err(Error::DbNotAllowed {
+						return Err(IgnoreError::from(Error::DbNotAllowed {
 							db: db.into(),
-						});
+						}));
 					}
 				}
 				// Get the table
@@ -448,7 +450,7 @@ impl Document {
 				let perms = stm.permissions(&table, self.is_new());
 				// Process the table permissions
 				match perms {
-					Permission::None => return Err(Error::Ignore),
+					Permission::None => return Err(IgnoreError::Ignore),
 					Permission::Full => return Ok(()),
 					Permission::Specific(e) => {
 						// Disable permissions
@@ -468,7 +470,7 @@ impl Document {
 							.catch_return()?
 							.is_truthy()
 						{
-							return Err(Error::Ignore);
+							return Err(IgnoreError::Ignore);
 						}
 					}
 				}

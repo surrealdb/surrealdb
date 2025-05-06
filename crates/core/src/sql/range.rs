@@ -6,7 +6,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Subquery, Value};
+use crate::sql::operator::BindingPower;
+use crate::sql::Value;
 use crate::syn;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -354,23 +355,43 @@ impl Ord for Range {
 
 impl fmt::Display for Range {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		fn bound_value(v: &Value) -> Value {
-			if v.can_be_range_bound() {
-				v.to_owned()
-			} else {
-				Value::Subquery(Box::new(Subquery::Value(v.to_owned())))
-			}
-		}
-
 		match &self.beg {
 			Bound::Unbounded => write!(f, ""),
-			Bound::Included(v) => write!(f, "{}", bound_value(v)),
-			Bound::Excluded(v) => write!(f, "{}>", bound_value(v)),
+			Bound::Included(v) => {
+				// We also () if the binding power is equal. This is because range has no defined
+				// associativity. a..b..c is ambigous and could either be (a..b)..c or a..(b..c).
+				// The syntax explicitly left this undefined and thus a..b..c without params is a
+				// syntax error so we have to () any child range expression.
+				if BindingPower::for_value(v) <= BindingPower::Range {
+					write!(f, "({})", v)
+				} else {
+					write!(f, "{}", v)
+				}
+			}
+			Bound::Excluded(v) => {
+				if BindingPower::for_value(v) <= BindingPower::Range {
+					write!(f, "({})>", v)
+				} else {
+					write!(f, "{}>", v)
+				}
+			}
 		}?;
 		match &self.end {
 			Bound::Unbounded => write!(f, ".."),
-			Bound::Excluded(v) => write!(f, "..{}", bound_value(v)),
-			Bound::Included(v) => write!(f, "..={}", bound_value(v)),
+			Bound::Excluded(v) => {
+				if BindingPower::for_value(v) <= BindingPower::Range {
+					write!(f, "..({})", v)
+				} else {
+					write!(f, "..{}", v)
+				}
+			}
+			Bound::Included(v) => {
+				if BindingPower::for_value(v) <= BindingPower::Range {
+					write!(f, "..=({})", v)
+				} else {
+					write!(f, "..={}", v)
+				}
+			}
 		}?;
 		Ok(())
 	}

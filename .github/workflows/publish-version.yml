@@ -148,7 +148,7 @@ jobs:
           git checkout -b ${{ steps.outputs.outputs.release-branch }}
 
       - name: Patch release version
-        if: ${{ inputs.suffix != 'none' }}
+        if: ${{ steps.outputs.outputs.environment != 'stable' }}
         run: |
           set -x
 
@@ -260,6 +260,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -529,13 +531,28 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.git-ref }}
+          ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable
+
+      - name: Install release-plz
+        run: |
+          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
+          sudo chmod +x /usr/bin/release-plz
 
       - name: Create a temporary branch
         run: git checkout -b crate
+
+      - name: Configure release-plz
+        run: |
+          cat << EOF > /tmp/release-plz.toml
+          [workspace]
+          changelog_update = false
+          git_release_enable = false
+          semver_check = false
+          git_tag_enable = false
+          EOF
 
       - name: Patch crate version
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
@@ -549,10 +566,11 @@ jobs:
           version=${major}.${minor}.${{ needs.prepare-vars.outputs.patch }}
 
           # Update the version to a nightly one
-          sed -i "s#^version = \"${currentVersion}\"#version = \"${version}\"#" crates/sdk/Cargo.toml
-          sed -i "s#^version = \"${currentVersion}\"#version = \"${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
+          sed -i "s#surrealdb = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
@@ -570,8 +588,13 @@ jobs:
           sed -i "s/package = \"surrealdb-core\"/package = \"surrealdb-core-${environment}\"/" Cargo.toml
 
           # Patch the description
-          sed -i "s#^description = \".*\"#description = \"A ${environment} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
-          sed -i "s#^description = \".*\"#description = \"A ${environment} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
+          if [[ $environment == 'alpha' ]]; then
+            start="An"
+          else
+            start="A"
+          fi
+          sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
+          sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
 
           # Temporarily commit patches
           # These should not be pushed back to the repo
@@ -584,22 +607,10 @@ jobs:
       - run: cat crates/core/Cargo.toml
 
       - name: Publish the crate
+        if: ${{ inputs.publish }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          set -x
-
-          if [[ "${{ inputs.publish }}" == "true" ]]; then
-            extraArgs=""
-          else
-            extraArgs="--dry-run"
-          fi
-
-          if ! cargo -Z package-workspace publish --workspace --exclude surreal $extraArgs; then
-            if [[ "${{ needs.prepare-vars.outputs.environment }}" != "nightly" ]]; then
-              exit 101
-            fi
-          fi
+        run: release-plz release --config /tmp/release-plz.toml
 
       - name: Download artifacts
         if: ${{ inputs.publish }}
@@ -611,8 +622,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: ${{ inputs.publish && inputs.create-release }}
         with:
-          name: "Release ${{ needs.prepare-vars.outputs.version }}"
           tag_name: v${{ needs.prepare-vars.outputs.version }}
+          name: "Release ${{ needs.prepare-vars.outputs.version }}"
+          body: "Release ${{ needs.prepare-vars.outputs.version }}"
+          target_commitish: ${{ needs.prepare-vars.outputs.release-branch }}
           prerelease: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
           fail_on_unmatched_files: true
           files: |
@@ -646,25 +659,6 @@ jobs:
           for file in artifacts/**/*.{tgz,txt,exe}; do
             aws s3 cp --cache-control 'no-store' $file s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
           done
-
-  tag-release:
-    name: Tag release
-    needs: [publish, prepare-vars]
-    environment: ${{ needs.prepare-vars.outputs.environment }}
-    if: ${{ inputs.publish }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-vars.outputs.release-branch }}
-
-      - name: Tag the release
-        if: ${{ inputs.suffix != 'nightly' }}
-        run: |
-          set -x
-          git tag -a v${{ needs.prepare-vars.outputs.version }} -m "Release ${{ needs.prepare-vars.outputs.version }}"
-          git push --tags
 
   docker:
     name: Docker images
@@ -722,7 +716,8 @@ jobs:
   propagate:
     name: Propagate binaries to all regions
     if: ${{ inputs.publish }}
-    needs: [publish, package-macos]
+    environment: ${{ needs.prepare-vars.outputs.environment }}
+    needs: [publish, package-macos, prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
@@ -748,4 +743,4 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Delete ${{ needs.prepare-vars.outputs.release-branch }}
-        run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }}
+        run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }} || true
