@@ -15,6 +15,9 @@ use surrealdb::engine::tasks;
 use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
+#[cfg(feature = "ml")]
+use surrealdb_core::ml::execution::session::set_environment;
+
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
 	#[arg(help = "Database path used for storing data")]
@@ -203,6 +206,11 @@ pub async fn init(
 	let _ = CF.set(config);
 	// Initiate environment
 	env::init()?;
+
+	// if ML feature is enabled load the ONNX runtime lib that is embedded
+	#[cfg(feature = "ml")]
+	set_environment().map_err(|e| Error::MlInit(e.to_string()))?;
+
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore

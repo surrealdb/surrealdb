@@ -116,11 +116,15 @@ impl Parser<'_> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
+		Ok(Some(self.parse_fetchs(ctx).await?))
+	}
+
+	pub async fn parse_fetchs(&mut self, ctx: &mut Stk) -> ParseResult<Fetchs> {
 		let mut fetchs = self.try_parse_param_or_idiom_or_fields(ctx).await?;
 		while self.eat(t!(",")) {
 			fetchs.append(&mut self.try_parse_param_or_idiom_or_fields(ctx).await?);
 		}
-		Ok(Some(Fetchs(fetchs)))
+		Ok(Fetchs(fetchs))
 	}
 
 	pub async fn try_parse_param_or_idiom_or_fields(

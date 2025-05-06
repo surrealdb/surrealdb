@@ -25,6 +25,9 @@ value = "[1, 2, 3]"
 [[test.results]]
 error = "Cannot negate the value '[1, 2, 3]'"
 
+[[test.results]]
+value = "[1, 2, 3, 4]"
+
 */
 [1,2,3] + 1;
 [1,2,3] - 1;
@@ -36,3 +39,4 @@ error = "Cannot negate the value '[1, 2, 3]'"
 +[1,2,3];
 -[1,2,3];
 
+[1,2] + [3,4]

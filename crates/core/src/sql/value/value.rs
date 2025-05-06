@@ -935,6 +935,8 @@ pub(crate) trait TryAdd<Rhs = Self> {
 	fn try_add(self, rhs: Rhs) -> Result<Self::Output, Error>;
 }
 
+use std::ops::Add;
+
 impl TryAdd for Value {
 	type Output = Self;
 	fn try_add(self, other: Self) -> Result<Self, Error> {
@@ -944,6 +946,8 @@ impl TryAdd for Value {
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
+			(Self::Array(v), Self::Array(w)) => Self::Array(v.add(w)),
+			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
 			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
