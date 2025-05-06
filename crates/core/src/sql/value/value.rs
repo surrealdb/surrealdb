@@ -510,7 +510,13 @@ impl Value {
 			Value::Subquery(_) => None,
 			Value::Query(_) => None,
 			Value::Model(_) => None,
-			Value::Closure(_) => Some(Kind::Function(None, None)),
+			Value::Closure(closure) => {
+				let args_kinds =
+					closure.args.iter().map(|(_, kind)| kind.clone()).collect::<Vec<_>>();
+				let returns_kind = closure.returns.clone().map(Box::new);
+
+				Some(Kind::Function(Some(args_kinds), returns_kind))
+			}
 			Value::Refs(_) => None,
 			Value::Expression(_) => None,
 			Value::File(file) => Some(Kind::File(vec![Ident::from(file.bucket.as_str())])),
