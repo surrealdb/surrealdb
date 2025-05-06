@@ -259,7 +259,16 @@ jobs:
       - name: Publish the crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: release-plz release --config /tmp/release-plz.toml
+        run: |
+          set -x
+
+          if [[ "${{ inputs.publish }}" == "true" ]]; then
+            extraArgs=""
+          else
+            extraArgs="--dry-run"
+          fi
+
+          release-plz release $extraArgs --config /tmp/release-plz.toml
 
   cleanup:
     name: Cleanup
