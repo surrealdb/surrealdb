@@ -89,8 +89,13 @@ impl PlanBuilder {
 					// Evaluate the record strategy
 					let record_strategy =
 						ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
+					let is_order = if let Some(io) = p.order_limit {
+						io.ixr == ir
+					} else {
+						false
+					};
 					// Return the plan
-					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy));
+					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy, is_order));
 				}
 			}
 
@@ -301,7 +306,8 @@ pub(super) enum Plan {
 	/// 1. The reference to index
 	/// 2. The index range
 	/// 3. A record strategy
-	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy),
+	/// 4. True if it matches an order option
+	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, bool),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
@@ -346,6 +352,10 @@ impl IndexOption {
 
 	pub(super) fn require_distinct(&self) -> bool {
 		matches!(self.op.as_ref(), IndexOperator::Union(_))
+	}
+
+	pub(super) fn is_order(&self) -> bool {
+		matches!(self.op.as_ref(), IndexOperator::Order(_))
 	}
 
 	pub(super) fn ix_ref(&self) -> &IndexReference {
