@@ -40,37 +40,6 @@ impl Stream {
 
 		Ok(bytes)
 	}
-
-	pub async fn next_n(&self, ctx: &Context, n: usize) -> Result<Vec<u8>, Error> {
-		let Some(streams) = ctx.get_streams() else {
-			return Err(Error::StreamsUnavailable);
-		};
-
-		if let Some(x) = streams.get(&self.0) {
-			let stream = x.deref_mut();
-			let mut bytes = Vec::with_capacity(n);
-			let mut remaining = n;
-
-			while remaining > 0 {
-				if let Some(chunk) = stream.next().await {
-					let chunk =
-						chunk.map_err(|_| Error::Unreachable("Invalid stream".to_string()))?;
-
-					let bytes_to_take = std::cmp::min(chunk.len(), remaining);
-
-					bytes.extend_from_slice(&chunk[..bytes_to_take]);
-
-					remaining -= bytes_to_take;
-				} else {
-					break;
-				}
-			}
-
-			Ok(bytes)
-		} else {
-			Err(Error::StreamConsumed)
-		}
-	}
 }
 
 impl Display for Stream {
