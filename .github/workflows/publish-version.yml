@@ -716,7 +716,8 @@ jobs:
   propagate:
     name: Propagate binaries to all regions
     if: ${{ inputs.publish }}
-    needs: [publish, package-macos]
+    environment: ${{ needs.prepare-vars.outputs.environment }}
+    needs: [publish, package-macos, prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
