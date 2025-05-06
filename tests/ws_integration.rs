@@ -763,12 +763,14 @@ pub async fn live_rpc(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
+	assert!(res["type"].is_string(), "type: {res:?}");
 	let live1 = res["result"].as_str().unwrap();
 
 	// Send LIVE command
 	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
+	assert!(res["type"].is_string(), "type: {res:?}");
 	let live2 = res["result"].as_str().unwrap();
 
 	// Create a new test record
@@ -832,6 +834,7 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
+	assert!(res["type"].is_string(), "type: {res:?}");
 	let live1 = res["result"].as_str().unwrap();
 	// Send QUERY command
 	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
@@ -880,6 +883,7 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = socket.send_request("kill", json!([live1])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_null(), "result: {res:?}");
+	assert!(res["type"].is_string(), "type: {res:?}");
 	// Create a new test record
 	let res =
 		socket.send_request("query", json!(["CREATE tester:two SET name = 'two'"])).await.unwrap();
@@ -936,6 +940,7 @@ pub async fn live_second_connection(cfg_server: Option<Format>, cfg_format: Form
 	let res = socket1.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
+	assert!(res["type"].is_string(), "type: {res:?}");
 	let liveid = res["result"].as_str().unwrap();
 	// Connect to WebSocket
 	let mut socket2 = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
@@ -1018,6 +1023,7 @@ pub async fn variable_auth_live_query(cfg_server: Option<Format>, cfg_format: Fo
 	let res = socket_expiring_auth.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_string(), "result: {res:?}");
+	assert!(res["type"].is_string(), "type: {res:?}");
 	// Wait 2 seconds for auth to expire
 	tokio::time::sleep(Duration::from_secs(1)).await;
 	// Create a new test record
