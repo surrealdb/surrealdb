@@ -45,18 +45,29 @@ impl Parser<'_> {
 		};
 
 		loop {
-			let drop = self.eat(t!("DROP"));
-			let peek = self.peek();
-			match peek.kind {
+			match self.peek_kind() {
+				t!("DROP") => {
+					self.pop_peek();
+					let peek = self.peek();
+					match peek.kind {
+						t!("COMMENT") => {
+							self.pop_peek();
+							res.comment = Some(None);
+						}
+						t!("CHANGEFEED") => {
+							self.pop_peek();
+							res.changefeed = Some(None);
+						}
+						_ => {
+							unexpected!(self, peek, "`COMMENT` or `CHANGEFEED`")
+						}
+					}
+				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(if drop {
-						None
-					} else {
-						Some(self.next_token_value()?)
-					})
+					res.comment = Some(Some(self.next_token_value()?))
 				}
-				t!("TYPE") if !drop => {
+				t!("TYPE") => {
 					self.pop_peek();
 					let peek = self.peek();
 					match peek.kind {
@@ -75,28 +86,21 @@ impl Parser<'_> {
 						_ => unexpected!(self, peek, "`NORMAL`, `RELATION`, or `ANY`"),
 					}
 				}
-				t!("SCHEMALESS") if !drop => {
+				t!("SCHEMALESS") => {
 					self.pop_peek();
 					res.full = Some(false);
 				}
-				t!("SCHEMAFULL") if !drop => {
+				t!("SCHEMAFULL") => {
 					self.pop_peek();
 					res.full = Some(true);
 				}
-				t!("PERMISSIONS") if !drop => {
+				t!("PERMISSIONS") => {
 					self.pop_peek();
 					res.permissions = Some(ctx.run(|ctx| self.parse_permission(ctx, false)).await?);
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
-					res.changefeed = Some(if drop {
-						None
-					} else {
-						Some(self.parse_changefeed()?)
-					})
-				}
-				_ if drop => {
-					unexpected!(self, peek, "`COMMENT` or `CHANGEFEED`")
+					res.changefeed = Some(Some(self.parse_changefeed()?))
 				}
 				_ => break,
 			}
@@ -127,62 +131,88 @@ impl Parser<'_> {
 		};
 
 		loop {
-			let drop = self.eat(t!("DROP"));
-			let peek = self.peek();
-			match peek.kind {
+			match self.peek_kind() {
+				t!("DROP") => {
+					self.pop_peek();
+					let peek = self.peek();
+					match peek.kind {
+						t!("FLEXIBLE") => {
+							self.pop_peek();
+							res.flex = Some(false);
+						}
+						t!("TYPE") => {
+							self.pop_peek();
+							res.kind = Some(None);
+						}
+						t!("READONLY") => {
+							self.pop_peek();
+							res.readonly = Some(false);
+						}
+						t!("VALUE") => {
+							self.pop_peek();
+							res.value = Some(None);
+						}
+						t!("ASSERT") => {
+							self.pop_peek();
+							res.assert = Some(None);
+						}
+						t!("DEFAULT") => {
+							self.pop_peek();
+							res.default = Some(None);
+							res.default_always = Some(false);
+						}
+						t!("COMMENT") => {
+							self.pop_peek();
+							res.comment = Some(None);
+						}
+						t!("REFERENCE") => {
+							if !self.settings.references_enabled {
+								bail!(
+									"Experimental capability `record_references` is not enabled",
+									@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
+								)
+							}
+
+							self.pop_peek();
+							res.reference = Some(None);
+						}
+						_ => {
+							unexpected!(self, peek, "`FLEXIBLE`, `TYPE`, `READONLY`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`")
+						}
+					}
+				}
 				t!("FLEXIBLE") => {
 					self.pop_peek();
-					res.flex = Some(!drop)
+					res.flex = Some(true)
 				}
 				t!("TYPE") => {
 					self.pop_peek();
-					res.kind = Some(if drop {
-						None
-					} else {
-						Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?)
-					});
+					res.kind = Some(Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?));
 				}
 				t!("READONLY") => {
 					self.pop_peek();
-					res.flex = Some(!drop)
+					res.flex = Some(true)
 				}
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = Some(if drop {
-						None
-					} else {
-						Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
-					});
+					res.value = Some(Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?));
 				}
 				t!("ASSERT") => {
 					self.pop_peek();
-					res.assert = Some(if drop {
-						None
-					} else {
-						Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
-					});
+					res.assert = Some(Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?));
 				}
 				t!("DEFAULT") => {
 					self.pop_peek();
-
-					if drop {
-						res.default = Some(None);
-					} else {
-						res.default_always = Some(self.eat(t!("ALWAYS")));
-						res.default = Some(Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?));
-					}
+					res.default_always = Some(self.eat(t!("ALWAYS")));
+					res.default = Some(Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?));
 				}
-				t!("PERMISSIONS") if !drop => {
+				t!("PERMISSIONS") => {
 					self.pop_peek();
 					res.permissions = Some(ctx.run(|ctx| self.parse_permission(ctx, false)).await?);
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(if drop {
-						None
-					} else {
-						Some(self.next_token_value()?)
-					})
+					res.comment = Some(Some(self.next_token_value()?))
 				}
 				t!("REFERENCE") => {
 					if !self.settings.references_enabled {
@@ -193,14 +223,7 @@ impl Parser<'_> {
 					}
 
 					self.pop_peek();
-					res.reference = Some(if drop {
-						None
-					} else {
-						Some(self.parse_reference(ctx).await?)
-					});
-				}
-				_ if drop => {
-					unexpected!(self, peek, "`FLEXIBLE`, `TYPE`, `READONLY`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`")
+					res.reference = Some(Some(self.parse_reference(ctx).await?));
 				}
 				_ => break,
 			}
