@@ -186,11 +186,23 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable
 
-      - name: Install Cargo release
-        run: cargo install --force --locked --version 0.25.18 cargo-release
+      - name: Install release-plz
+        run: |
+          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
+          sudo chmod +x /usr/bin/release-plz
 
       - name: Create a temporary branch
         run: git checkout -b crate
+
+      - name: Configure release-plz
+        run: |
+          cat << EOF > /tmp/release-plz.toml
+          [workspace]
+          changelog_update = false
+          git_release_enable = false
+          semver_check = false
+          git_tag_enable = false
+          EOF
 
       - name: Patch crate version
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
@@ -247,16 +259,7 @@ jobs:
       - name: Publish the crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          set -x
-
-          if [[ "${{ inputs.publish }}" == "true" ]]; then
-            extraArgs=""
-          else
-            extraArgs="--dry_run"
-          fi
-
-          cargo publish --package surrealdb $extraArgs
+        run: release-plz release --config /tmp/release-plz.toml
 
   cleanup:
     name: Cleanup
