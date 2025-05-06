@@ -757,7 +757,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: crates/language-tests
 
       - name: Run SurrealQL test suite
         run: |
@@ -777,20 +776,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: |
-            crates/language-tests
-            ./
-          cache-directories: crates/language-tests/.binary-cache
 
-      - name: Build SurrealQL test tool
+      - name: Run SurrealQL upgrade tests
         run: |
-          cd crates/language-tests
-          cargo build --features upgrade
-
-      - name: Run SurrealQL test suite
-        run: |
-          cd crates/language-tests
-          ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
+          cargo run -p language-tests --features upgrade -- --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------
   # Other SDK tests

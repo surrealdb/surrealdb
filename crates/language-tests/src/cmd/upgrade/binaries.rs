@@ -14,20 +14,28 @@ pub async fn actual_version(version: DsVersion) -> anyhow::Result<Version> {
 	}
 }
 
-pub async fn prepare(version: DsVersion, download_permission: bool) -> anyhow::Result<()> {
+pub async fn prepare(
+	version: DsVersion,
+	download_permission: bool,
+	binary_cache: &Path,
+) -> anyhow::Result<()> {
 	match version {
-		DsVersion::Version(x) => prepare_version(x, download_permission).await,
+		DsVersion::Version(x) => prepare_version(x, download_permission, binary_cache).await,
 		DsVersion::Path(ref x) => prepare_path(x).await,
 	}
 }
 
-pub async fn prepare_version(version: Version, download_permission: bool) -> anyhow::Result<()> {
-	if Path::new(".binary_cache").join(format!("surreal-v{version}")).exists() {
+pub async fn prepare_version(
+	version: Version,
+	download_permission: bool,
+	binary_cache: &Path,
+) -> anyhow::Result<()> {
+	if binary_cache.join(format!("surreal-v{version}")).exists() {
 		return Ok(());
 	}
 
-	if !Path::new(".binary_cache").exists() {
-		tokio::fs::create_dir(".binary_cache")
+	if !binary_cache.exists() {
+		tokio::fs::create_dir_all(binary_cache)
 			.await
 			.context("Failed to create binary cache directory")?;
 	}
@@ -52,7 +60,7 @@ pub async fn prepare_version(version: Version, download_permission: bool) -> any
 		.await
 		.is_err()
 	{
-		return prepare_curl(version.clone(), download_permission).await;
+		return prepare_curl(version.clone(), download_permission, binary_cache).await;
 	}
 
 	if Command::new("wget")
@@ -63,7 +71,7 @@ pub async fn prepare_version(version: Version, download_permission: bool) -> any
 		.await
 		.is_ok()
 	{
-		return prepare_wget(version.clone(), download_permission).await;
+		return prepare_wget(version.clone(), download_permission, binary_cache).await;
 	}
 
 	bail!("Could not run wget or curl, please install either curl or wget to facilitate downloading surrealdb binaries")
@@ -97,14 +105,12 @@ cfg_if::cfg_if! {
 	}
 }
 
-cfg_if::cfg_if! {
-	if #[cfg(target_os = "windows")] {
-		fn download_path(version: &Version) -> String{
-			format!(".binary_cache/surreal-v{version}.exe")
-		}
-	}else{
-		fn download_path(version: &Version) -> String{
-			format!(".binary_cache/surreal-v{version}.tgz")
+fn download_path(version: &Version, binary_cache: &Path) -> String {
+	cfg_if::cfg_if! {
+		if #[cfg(target_os = "windows")] {
+			binary_cache.join(format!("surreal-v{version}.exe")).to_string_lossy().to_string()
+		} else {
+			binary_cache.join(format!("surreal-v{version}.tgz")).to_string_lossy().to_string()
 		}
 	}
 }
@@ -137,15 +143,21 @@ fn ask_download_permission(url: &str) -> anyhow::Result<()> {
 	}
 }
 
-pub async fn prepare_curl(version: Version, permission: bool) -> anyhow::Result<()> {
+pub async fn prepare_curl(
+	version: Version,
+	permission: bool,
+	binary_cache: &Path,
+) -> anyhow::Result<()> {
 	let url = binary_url(&version);
 
 	if !permission {
 		ask_download_permission(&url)?;
 	}
 
+	let path = download_path(&version, binary_cache);
+
 	let mut curl = Command::new("curl")
-		.args(["--fail", "--location", "--output", &download_path(&version), &url])
+		.args(["--fail", "--location", "--output", &path, &url])
 		.stdout(Stdio::inherit())
 		.stderr(Stdio::inherit())
 		.spawn()
@@ -158,19 +170,25 @@ pub async fn prepare_curl(version: Version, permission: bool) -> anyhow::Result<
 	}
 
 	#[cfg(not(target_os = "windows"))]
-	unzip(version).await?;
+	unzip(version, binary_cache).await?;
 
 	Ok(())
 }
 
-pub async fn prepare_wget(version: Version, permission: bool) -> anyhow::Result<()> {
+pub async fn prepare_wget(
+	version: Version,
+	permission: bool,
+	binary_cache: &Path,
+) -> anyhow::Result<()> {
 	let url = binary_url(&version);
 	if !permission {
 		ask_download_permission(&url)?;
 	}
 
+	let path = download_path(&version, binary_cache);
+
 	let mut wget = Command::new("wget")
-		.args(["--output-document", &download_path(&version), &url])
+		.args(["--output-document", &path, &url])
 		.stdout(Stdio::inherit())
 		.stderr(Stdio::inherit())
 		.spawn()
@@ -183,18 +201,20 @@ pub async fn prepare_wget(version: Version, permission: bool) -> anyhow::Result<
 	}
 
 	#[cfg(not(target_os = "windows"))]
-	unzip(version).await?;
+	unzip(version, binary_cache).await?;
 
 	Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]
-async fn unzip(version: Version) -> anyhow::Result<()> {
+async fn unzip(version: Version, binary_cache: &Path) -> anyhow::Result<()> {
+	let path = download_path(&version, binary_cache);
+
 	let mut command = Command::new("tar")
-		.args(["--directory", ".binary_cache"])
+		.args(["--directory", binary_cache.to_string_lossy().as_ref()])
 		.args(["--transform", &format!("s/surreal/surreal-v{version}/g")])
 		.arg("-xvf")
-		.arg(download_path(&version))
+		.arg(&path)
 		.arg("surreal")
 		.stdout(Stdio::inherit())
 		.stderr(Stdio::inherit())
@@ -205,7 +225,7 @@ async fn unzip(version: Version) -> anyhow::Result<()> {
 	if !out.success() {
 		bail!("Unzip command was not successfull");
 	}
-	tokio::fs::remove_file(download_path(&version))
+	tokio::fs::remove_file(path)
 		.await
 		.context("Failed to remove downloaded archive after unzipping")?;
 	Ok(())

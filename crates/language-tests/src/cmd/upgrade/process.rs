@@ -86,7 +86,7 @@ impl SurrealProcess {
 				Command::new(path)
 			}
 			DsVersion::Version(x) => {
-				let path = Path::new(".binary_cache").join(format!("surreal-v{x}"));
+				let path = config.binary_cache.join(format!("surreal-v{x}"));
 				Command::new(path)
 			}
 		};

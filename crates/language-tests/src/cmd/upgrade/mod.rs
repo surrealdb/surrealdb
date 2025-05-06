@@ -54,6 +54,7 @@ pub struct Config {
 	test_path: PathBuf,
 	jobs: u32,
 	download_permission: bool,
+	binary_cache: PathBuf,
 	backend: UpgradeBackend,
 	keep_files: bool,
 }
@@ -64,6 +65,7 @@ impl From<&UpgradeCommand> for Config {
 			test_path: cmd.path.clone(),
 			jobs: cmd.jobs,
 			download_permission: cmd.allow_download,
+			binary_cache: cmd.binary_cache.clone(),
 			backend: cmd.backend,
 			keep_files: cmd.keep_files,
 		}
@@ -218,7 +220,7 @@ pub async fn run(color: ColorMode, args: UpgradeCommand) -> Result<()> {
 	println!("Preparing used versions of surrealdb");
 	for v in all_versions {
 		let actual = binaries::actual_version(v.clone()).await?;
-		binaries::prepare(v.clone(), config.download_permission).await?;
+		binaries::prepare(v.clone(), config.download_permission, &config.binary_cache).await?;
 		actual_version.insert(v, actual);
 	}
 
