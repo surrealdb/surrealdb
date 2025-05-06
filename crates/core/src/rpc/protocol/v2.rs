@@ -11,6 +11,7 @@ use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
+use crate::sql::Uuid;
 use crate::{
 	dbs::{capabilities::MethodTarget, QueryType, Response},
 	rpc::args::Take,
@@ -347,18 +348,30 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, diff) = params.needs_one_or_two()?;
-		// Specify the SQL query string
-		let sql = LiveStatement::new_from_what_expr(
-			match diff.is_true() {
-				true => Fields::default(),
-				false => Fields::all(),
-			},
-			what.could_be_table(),
-		)
-		.into();
+		let (what, opts_value) = params.needs_one_or_two()?;
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Apply user options
+		if !opts_value.is_none_or_null() {
+			opts.process_options(opts_value, self.kvs().get_capabilities())?;
+		}
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(opts.merge_vars(&self.session().parameters));
+		// Specify the SQL query string
+		let sql = LiveStatement {
+			id: Uuid::new_v4(),
+			node: Uuid::new_v4(),
+			what: what.could_be_table(),
+			expr: if opts.diff {
+				Fields::default()
+			} else {
+				Fields::all()
+			},
+			cond: opts.cond,
+			fetch: opts.fetch,
+			..Default::default()
+		}
+		.into();
 		// Execute the query on the database
 		let mut res = self.query_inner(Value::Query(sql), var).await?;
 		// Extract the first query result
@@ -396,6 +409,7 @@ pub trait RpcProtocolV2: RpcContext {
 			cond: opts.cond,
 			timeout: opts.timeout,
 			version: opts.version,
+			fetch: opts.fetch,
 			..Default::default()
 		}
 		.into();
