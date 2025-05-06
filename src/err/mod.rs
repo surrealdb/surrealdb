@@ -82,7 +82,7 @@ pub enum Error {
 	Api(ApiError),
 
 	#[error("failed to init ML lib: {0}")]
-	MlInitError(String),
+	MlInit(String),
 }
 
 impl From<Error> for String {
