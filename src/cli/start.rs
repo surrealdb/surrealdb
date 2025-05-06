@@ -209,7 +209,7 @@ pub async fn init(
 
 	// if ML feature is enabled load the ONNX runtime lib that is embedded
 	#[cfg(feature = "ml")]
-	set_environment().map_err(|e| Error::MlInitError(e.to_string()))?;
+	set_environment().map_err(|e| Error::MlInit(e.to_string()))?;
 
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
