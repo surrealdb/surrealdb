@@ -287,6 +287,8 @@ pub fn synchronous(
 		"not" => not::not,
 		//
 		"object::entries" => object::entries,
+		"object::extend" => object::extend,
+		"object::remove" => object::remove,
 		"object::from_entries" => object::from_entries,
 		"object::is_empty" => object::is_empty,
 		"object::keys" => object::keys,
@@ -757,9 +759,11 @@ pub async fn idiom(
 				"no such method found for the object type",
 				//
 				"entries" => object::entries,
+				"extend" => object::extend,
 				"is_empty" => object::is_empty,
 				"keys" => object::keys,
 				"len" => object::len,
+				"remove" => object::remove,
 				"values" => object::values,
 			)
 		}
