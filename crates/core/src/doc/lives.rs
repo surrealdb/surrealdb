@@ -15,6 +15,8 @@ use crate::sql::{FlowResultExt as _, Value};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
+use super::IgnoreError;
+
 impl Document {
 	/// Processes any LIVE SELECT statements which
 	/// have been defined for the table which this
@@ -59,9 +61,11 @@ impl Document {
 				Value::from("UPDATE")
 			};
 			// Get the record if of this docunent
-			let rid = self.id.clone().ok_or(Error::Unreachable(
-				"Processing live query for record without a Record ID".into(),
-			))?;
+			let rid = self.id.clone().ok_or_else(|| {
+				Error::Unreachable(
+					"Processing live query for record without a Record ID".to_owned(),
+				)
+			})?;
 			// Get the current and initial docs
 			let current = self.current.doc.as_arc();
 			let initial = self.initial.doc.as_arc();
@@ -113,8 +117,8 @@ impl Document {
 			// document. If it is then we can continue.
 			let lqctx = lqctx.freeze();
 			match self.lq_check(stk, &lqctx, &lqopt, &lq, doc).await {
-				Err(Error::Ignore) => continue,
-				Err(e) => return Err(e),
+				Err(IgnoreError::Ignore) => continue,
+				Err(IgnoreError::Error(e)) => return Err(*e),
 				Ok(_) => (),
 			}
 			// Secondly, let's check to see if any PERMISSIONS
@@ -122,8 +126,8 @@ impl Document {
 			// be viewed by the user who created this LIVE
 			// query. If it does, then we can continue.
 			match self.lq_allow(stk, &lqctx, &lqopt, &lq, doc).await {
-				Err(Error::Ignore) => continue,
-				Err(e) => return Err(e),
+				Err(IgnoreError::Ignore) => continue,
+				Err(IgnoreError::Error(e)) => return Err(*e),
 				Ok(_) => (),
 			}
 			// Let's check what type of statement
@@ -151,7 +155,14 @@ impl Document {
 			} else if self.is_new() {
 				// Prepare a CREATE notification
 				if opt.id()? == lv.node.0 {
-					let result = self.pluck(stk, &lqctx, &lqopt, &lq).await?;
+					// An error ignore here is about livequery not the query which invoked the
+					// livequery trigger. So we should catch the ignore and skip this entry in this
+					// case.
+					let result = match self.pluck(stk, &lqctx, &lqopt, &lq).await {
+						Err(IgnoreError::Ignore) => continue,
+						Err(IgnoreError::Error(e)) => return Err(*e),
+						Ok(x) => x,
+					};
 					(Action::Create, result)
 				} else {
 					// TODO: Send to message broker
@@ -160,7 +171,14 @@ impl Document {
 			} else {
 				// Prepare a UPDATE notification
 				if opt.id()? == lv.node.0 {
-					let result = self.pluck(stk, &lqctx, &lqopt, &lq).await?;
+					// An error ignore here is about livequery not the query which invoked the
+					// livequery trigger. So we should catch the ignore and skip this entry in this
+					// case.
+					let result = match self.pluck(stk, &lqctx, &lqopt, &lq).await {
+						Err(IgnoreError::Ignore) => continue,
+						Err(IgnoreError::Error(e)) => return Err(*e),
+						Ok(x) => x,
+					};
 					(Action::Update, result)
 				} else {
 					// TODO: Send to message broker
@@ -206,13 +224,13 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 		doc: &CursorDoc,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check where condition
 		if let Some(cond) = stm.cond() {
 			// Check if the expression is truthy
 			if !cond.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
 				// Ignore this document
-				return Err(Error::Ignore);
+				return Err(IgnoreError::Ignore);
 			}
 		}
 		// Carry on
@@ -226,21 +244,21 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 		doc: &CursorDoc,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Should we run permissions checks?
 		if opt.check_perms(stm.into())? {
 			// Get the table
 			let tb = self.tb(ctx, opt).await?;
 			// Process the table permissions
 			match &tb.permissions.select {
-				Permission::None => return Err(Error::Ignore),
+				Permission::None => return Err(IgnoreError::Ignore),
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
 					if !e.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
-						return Err(Error::Ignore);
+						return Err(IgnoreError::Ignore);
 					}
 				}
 			}
