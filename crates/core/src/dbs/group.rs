@@ -11,13 +11,14 @@ use reblessive::tree::Stk;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 
+#[derive(Debug)]
 pub(super) struct GroupsCollector {
 	base: Vec<Aggregator>,
 	idioms: Vec<Idiom>,
 	grp: BTreeMap<Array, Vec<Aggregator>>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Aggregator {
 	array: Option<Array>,
 	first_val: Option<Value>,
@@ -84,6 +85,7 @@ impl GroupsCollector {
 				.grp
 				.entry(arr)
 				.or_insert_with(|| self.base.iter().map(|a| a.new_instance()).collect());
+
 			Self::pushes(stk, ctx, opt, agr, &self.idioms, rs, obj).await?
 		}
 		Ok(())

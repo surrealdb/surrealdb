@@ -50,6 +50,7 @@ impl Function {
 	}
 }
 
+#[derive(Debug)]
 pub(crate) enum OptimisedAggregate {
 	None,
 	Count,

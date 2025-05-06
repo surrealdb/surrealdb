@@ -162,9 +162,10 @@ impl Fields {
 									.catch_return()?,
 							};
 							// Check if this is a single VALUE field expression
-							match self.single().is_some() {
-								false => out.set(stk, ctx, opt, name.as_ref(), x).await?,
-								true => out = x,
+							if self.single().is_some() {
+								out = x
+							} else {
+								out.set(stk, ctx, opt, name.as_ref(), x).await?
 							}
 						}
 						// This expression is a multi-output graph traversal
