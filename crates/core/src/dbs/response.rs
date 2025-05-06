@@ -75,11 +75,21 @@ impl Serialize for Response {
 	where
 		S: serde::Serializer,
 	{
-		let mut val = serializer.serialize_struct(TOKEN, 3)?;
+		let includes_type = !self.query_type.is_other();
+		let mut val = serializer.serialize_struct(
+			TOKEN,
+			if includes_type {
+				3
+			} else {
+				4
+			},
+		)?;
+
 		val.serialize_field("time", self.speed().as_str())?;
-		if !self.query_type.is_other() {
+		if includes_type {
 			val.serialize_field("type", &CoreValue::from(self.query_type.to_string()))?;
 		}
+
 		match &self.result {
 			Ok(v) => {
 				val.serialize_field("status", &Status::Ok)?;
@@ -94,15 +104,13 @@ impl Serialize for Response {
 	}
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct QueryMethodResponse {
 	pub time: String,
 	pub status: Status,
 	pub result: CoreValue,
-	#[revision(start = 2)]
-	pub query_type: QueryType,
 }
 
 impl From<&Response> for QueryMethodResponse {
@@ -116,7 +124,6 @@ impl From<&Response> for QueryMethodResponse {
 			status,
 			result,
 			time,
-			query_type: res.query_type,
 		}
 	}
 }
