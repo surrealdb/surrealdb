@@ -104,9 +104,9 @@ reqwest = { version = "0.12.7", default-features = false }
 ring = "0.17.13"
 roaring = "0.10.6"
 rustls = { version = "0.23.12", default-features = false }
+rust_decimal = { version = "1.37.1", features = ["macros"] }
 # Sub dependency of the rustls dependency, should be updated whenever rustls is.
 # Defined so we can enable features on this dependency.
-rust_decimal = "1.36.0"
 rustls-pki-types = "1.7.0"
 rust-s3 = "0.35.1"
 # TODO: Look at dependency, 5 years old seems unmaintained.
