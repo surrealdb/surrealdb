@@ -880,6 +880,18 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = socket.send_request("kill", json!([live1])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_null(), "result: {res:?}");
+	// Wait some time for all messages to arrive, and then search for the notification message
+	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
+	// Check for second live query notifcation
+	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live1));
+	assert!(res.is_some(), "Expected to find a notification for LQ id {live1}: {msgs:?}");
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	let res = res.as_object().unwrap();
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["action"], "KILLED", "result: {res:?}");
 	// Create a new test record
 	let res =
 		socket.send_request("query", json!(["CREATE tester:two SET name = 'two'"])).await.unwrap();
@@ -909,6 +921,18 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_null(), "result: {res:?}");
+	// Wait some time for all messages to arrive, and then search for the notification message
+	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
+	// Check for second live query notifcation
+	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live2));
+	assert!(res.is_some(), "Expected to find a notification for LQ id {live2}: {msgs:?}");
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	let res = res.as_object().unwrap();
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["action"], "KILLED", "result: {res:?}");
 	// Create a new test record
 	let res =
 		socket.send_request("query", json!(["CREATE tester:tre SET name = 'two'"])).await.unwrap();
