@@ -23,6 +23,7 @@ impl IntoEndpoint<Mem> for Config {
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
+		#[expect(deprecated)]
 		let mut endpoint = IntoEndpoint::<Mem>::into_endpoint(())?;
 		endpoint.config = self;
 		Ok(endpoint)

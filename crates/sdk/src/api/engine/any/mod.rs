@@ -146,6 +146,7 @@ use url::Url;
 /// A trait for converting inputs to a server address object
 pub trait IntoEndpoint {
 	/// Converts an input into a server address object
+	#[deprecated(since = "2.3.0")]
 	fn into_endpoint(self) -> Result<Endpoint>;
 }
 
@@ -184,12 +185,14 @@ impl IntoEndpoint for &str {
 
 impl IntoEndpoint for &String {
 	fn into_endpoint(self) -> Result<Endpoint> {
+		#[expect(deprecated)]
 		self.as_str().into_endpoint()
 	}
 }
 
 impl IntoEndpoint for String {
 	fn into_endpoint(self) -> Result<Endpoint> {
+		#[expect(deprecated)]
 		self.as_str().into_endpoint()
 	}
 }
@@ -199,6 +202,7 @@ where
 	T: Into<String>,
 {
 	fn into_endpoint(self) -> Result<Endpoint> {
+		#[expect(deprecated)]
 		let mut endpoint = IntoEndpoint::into_endpoint(self.0.into())?;
 		endpoint.config = self.1;
 		Ok(endpoint)
@@ -230,6 +234,7 @@ impl Surreal<Any> {
 	pub fn connect(&self, address: impl IntoEndpoint) -> Connect<Any, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
+			#[expect(deprecated)]
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
@@ -284,6 +289,7 @@ impl Surreal<Any> {
 pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 	Connect {
 		surreal: Surreal::init(),
+		#[expect(deprecated)]
 		address: address.into_endpoint(),
 		capacity: 0,
 		response_type: PhantomData,

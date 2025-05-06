@@ -13,6 +13,7 @@ pub enum ExportDestination {
 #[cfg_attr(docsrs, doc(cfg(not(target_family = "wasm"))))]
 pub trait IntoExportDestination<R> {
 	/// Converts an input into a database export location
+	#[deprecated(since = "2.3.0")]
 	fn into_export_destination(self) -> R;
 }
 

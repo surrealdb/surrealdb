@@ -1,6 +1,7 @@
 /**
+[env]
 # Extra timeout due to file reading.
-timeout = 2000
+timeout = 8000
 
 [test]
 

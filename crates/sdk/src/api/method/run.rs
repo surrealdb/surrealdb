@@ -90,6 +90,7 @@ where
 /// Converts a function into name and version parts
 pub trait IntoFn {
 	/// Handles the conversion of the function string
+	#[deprecated(since = "2.3.0")]
 	fn into_fn(self) -> Result<(String, Option<String>)>;
 }
 
@@ -127,6 +128,7 @@ impl IntoFn for &str {
 
 impl IntoFn for &String {
 	fn into_fn(self) -> Result<(String, Option<String>)> {
+		#[expect(deprecated)]
 		self.as_str().into_fn()
 	}
 }
