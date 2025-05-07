@@ -6,9 +6,12 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::{batch::Batch, Key, KeyEncode, Val, Version};
 use crate::vs::VersionStamp;
-use std::fmt::Debug;
 use std::ops::Range;
 
+/// This trait defines the API for a transaction in a key-value store.
+///
+/// All keys and values are represented as byte arrays, encoding is expected to be handled
+/// by the implementer of this trait.
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
 pub trait Transaction {
 	/// Specify how we should handle unclosed transactions.
@@ -49,127 +52,87 @@ pub trait Transaction {
 	async fn commit(&mut self) -> Result<(), Error>;
 
 	/// Check if a key exists in the datastore.
-	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
-	where
-		K: KeyEncode + Sprintable + Debug;
+	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool, Error>;
 
 	/// Fetch a key from the datastore.
-	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug;
+	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>, Error>;
 
 	/// Insert or update a key in the datastore.
-	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug;
+	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<(), Error>;
 
 	/// Insert a key if it doesn't exist in the datastore.
-	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug;
+	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<(), Error>;
 
 	/// Update a key in the datastore if the current value matches a condition.
-	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug;
+	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<(), Error>;
 
 	/// Delete a key from the datastore.
-	async fn del<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug;
+	async fn del(&mut self, key: Key) -> Result<(), Error>;
 
 	/// Delete a key from the datastore if the current value matches a condition.
-	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug;
+	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<(), Error>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
-	async fn keys<K>(
+	async fn keys(
 		&mut self,
-		rng: Range<K>,
+		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
-	) -> Result<Vec<Key>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug;
+	) -> Result<Vec<Key>, Error>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
-	async fn keysr<K>(
+	async fn keysr(
 		&mut self,
-		_rng: Range<K>,
+		_rng: Range<Key>,
 		_limit: u32,
 		_version: Option<u64>,
-	) -> Result<Vec<Key>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	) -> Result<Vec<Key>, Error> {
 		Err(Error::UnsupportedReversedScans)
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
-	async fn scan<K>(
+	async fn scan(
 		&mut self,
-		_rng: Range<K>,
+		_rng: Range<Key>,
 		_limit: u32,
 		_version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	) -> Result<Vec<(Key, Val)>, Error> {
 		Err(Error::UnsupportedVersionedQueries)
 	}
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
-	async fn scanr<K>(
+	async fn scanr(
 		&mut self,
-		_rng: Range<K>,
+		_rng: Range<Key>,
 		_limit: u32,
 		_version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	) -> Result<Vec<(Key, Val)>, Error> {
 		Err(Error::UnsupportedReversedScans)
 	}
 
 	/// Insert or replace a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
-	{
+	async fn replace(&mut self, key: Key, val: Val) -> Result<(), Error> {
 		self.set(key, val, None).await
 	}
 
 	/// Delete all versions of a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn clr<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	async fn clr(&mut self, key: Key) -> Result<(), Error> {
 		self.del(key).await
 	}
 
 	/// Delete all versions of a key from the datastore if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn clrc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
-	{
+	async fn clrc(&mut self, key: Key, chk: Option<Val>) -> Result<(), Error> {
 		self.delc(key, chk).await
 	}
 
@@ -177,10 +140,7 @@ pub trait Transaction {
 	///
 	/// This function fetches all matching keys pairs from the underlying datastore concurrently.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
-	async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Option<Val>>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	async fn getm(&mut self, keys: Vec<Key>) -> Result<Vec<Option<Val>>, Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -201,10 +161,7 @@ pub trait Transaction {
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn getp<K>(&mut self, key: K) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	async fn getp(&mut self, key: Key) -> Result<Vec<(Key, Val)>, Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -218,14 +175,11 @@ pub trait Transaction {
 	///
 	/// This function fetches all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn getr<K>(
+	async fn getr(
 		&mut self,
-		rng: Range<K>,
+		rng: Range<Key>,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	) -> Result<Vec<(Key, Val)>, Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -249,10 +203,7 @@ pub trait Transaction {
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delp<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	async fn delp(&mut self, key: Key) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -270,10 +221,7 @@ pub trait Transaction {
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	async fn delr(&mut self, rng: Range<Key>) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -300,10 +248,7 @@ pub trait Transaction {
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn clrp<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	async fn clrp(&mut self, key: Key) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -321,10 +266,7 @@ pub trait Transaction {
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn clrr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	async fn clrr(&mut self, rng: Range<Key>) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -351,10 +293,7 @@ pub trait Transaction {
 	///
 	/// This function fetches the total key count from the underlying datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn count<K>(&mut self, rng: Range<K>) -> Result<usize, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	async fn count(&mut self, rng: Range<Key>) -> Result<usize, Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -376,14 +315,11 @@ pub trait Transaction {
 	///
 	/// This function fetches all the versions for the full range of key-value pairs, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scan_all_versions<K>(
+	async fn scan_all_versions(
 		&mut self,
-		rng: Range<K>,
+		rng: Range<Key>,
 		limit: u32,
-	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error> {
 		Err(Error::UnsupportedVersionedQueries)
 	}
 
@@ -391,15 +327,12 @@ pub trait Transaction {
 	///
 	/// This function fetches keys, in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch_keys<K>(
+	async fn batch_keys(
 		&mut self,
-		rng: Range<K>,
+		rng: Range<Key>,
 		batch: u32,
 		version: Option<u64>,
-	) -> Result<Batch<Key>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	) -> Result<Batch<Key>, Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -437,15 +370,12 @@ pub trait Transaction {
 	///
 	/// This function fetches key-value pairs, in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch_keys_vals<K>(
+	async fn batch_keys_vals(
 		&mut self,
-		rng: Range<K>,
+		rng: Range<Key>,
 		batch: u32,
 		version: Option<u64>,
-	) -> Result<Batch<(Key, Val)>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	) -> Result<Batch<(Key, Val)>, Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -484,14 +414,11 @@ pub trait Transaction {
 	///
 	/// This function fetches key-value-version pairs, in batches, with multiple requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch_keys_vals_versions<K>(
+	async fn batch_keys_vals_versions(
 		&mut self,
-		rng: Range<K>,
+		rng: Range<Key>,
 		batch: u32,
-	) -> Result<Batch<(Key, Val, Version, bool)>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	) -> Result<Batch<(Key, Val, Version, bool)>, Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -531,10 +458,7 @@ pub trait Transaction {
 	/// which should be done immediately before the transaction commit.
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
+	async fn get_timestamp(&mut self, key: Key) -> Result<VersionStamp, Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);
@@ -549,24 +473,20 @@ pub trait Transaction {
 			None => VersionStamp::from_u64(1),
 		};
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key, &ver.as_bytes(), None).await?;
+		self.set(key, ver.as_bytes().to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(ver)
 	}
 
 	/// Insert the versionstamped key into the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(ts_key = ts_key.sprint()))]
-	async fn set_versionstamp<K, V>(
+	async fn set_versionstamp(
 		&mut self,
-		ts_key: K,
-		prefix: K,
-		suffix: K,
-		val: V,
-	) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
-	{
+		ts_key: Key,
+		prefix: Key,
+		suffix: Key,
+		val: Val,
+	) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TxFinished);

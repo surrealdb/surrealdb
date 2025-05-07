@@ -272,7 +272,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Set");
-		expand_inner!(&mut self.inner, v => { v.set(key, val, version).await })
+		expand_inner!(&mut self.inner, v => { v.set(key, val.into(), version).await })
 	}
 
 	/// Insert or replace a key in the datastore.
@@ -284,7 +284,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "Replace");
-		expand_inner!(&mut self.inner, v => { v.replace(key, val).await })
+		expand_inner!(&mut self.inner, v => { v.replace(key, val.into()).await })
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -296,7 +296,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Put");
-		expand_inner!(&mut self.inner, v => { v.put(key, val, version).await })
+		expand_inner!(&mut self.inner, v => { v.put(key, val.into(), version).await })
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -308,7 +308,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "PutC");
-		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
+		expand_inner!(&mut self.inner, v => { v.putc(key, val.into(), chk.map(Into::into)).await })
 	}
 
 	/// Delete a key from the datastore.
@@ -331,7 +331,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "DelC");
-		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
+		expand_inner!(&mut self.inner, v => { v.delc(key, chk.map(Into::into)).await })
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -382,7 +382,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "ClrC");
-		expand_inner!(&mut self.inner, v => { v.clrc(key, chk).await })
+		expand_inner!(&mut self.inner, v => { v.clrc(key, chk.map(Into::into)).await })
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
@@ -604,7 +604,7 @@ impl Transactor {
 		let ts_key = ts_key.encode_owned()?;
 		let prefix = prefix.encode_owned()?;
 		let suffix = suffix.encode_owned()?;
-		expand_inner!(&mut self.inner, v => { v.set_versionstamp(ts_key, prefix, suffix, val).await })
+		expand_inner!(&mut self.inner, v => { v.set_versionstamp(ts_key, prefix, suffix, val.into()).await })
 	}
 
 	// --------------------------------------------------
