@@ -1,3 +1,6 @@
+//! This module defines the API for a transaction in a key-value store.
+#![warn(clippy::missing_docs_in_private_items)]
+
 use super::tr::Check;
 use super::util;
 use crate::cnf::COUNT_BATCH_SIZE;
@@ -15,7 +18,7 @@ use std::ops::Range;
 /// This trait defines the API for a transaction in a key-value store.
 ///
 /// All keys and values are represented as byte arrays, encoding is handled
-/// by the [`Transactor`]
+/// by [`super::tr::Transactor`].
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
 #[async_trait::async_trait]
 pub trait Transaction: Send {
@@ -511,12 +514,15 @@ pub trait Transaction: Send {
 		self.set(k, val, None).await
 	}
 
+	/// Get the save points for this transaction.
 	fn get_save_points(&mut self) -> &mut SavePoints;
 
+	/// Set a new current save point for this transaction.
 	fn new_save_point(&mut self) {
 		self.get_save_points().new_save_point()
 	}
 
+	/// Rollback to the last save point.
 	async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
 		let sp = self.get_save_points().pop()?;
 
@@ -545,11 +551,13 @@ pub trait Transaction: Send {
 		Ok(())
 	}
 
+	/// Release the last save point.
 	fn release_last_save_point(&mut self) -> Result<(), Error> {
 		self.get_save_points().pop()?;
 		Ok(())
 	}
 
+	/// Prepare a save point for a key.
 	async fn save_point_prepare(
 		&mut self,
 		key: &Key,

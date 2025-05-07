@@ -1,4 +1,7 @@
-#![cfg_attr(not(any(feature = "kv-fdb", feature = "kv-tikv")), expect(dead_code, reason = "This is only used in FoundationDB and TiKV"))]
+#![cfg_attr(
+	not(any(feature = "kv-fdb", feature = "kv-tikv")),
+	expect(dead_code, reason = "This is only used in FoundationDB and TiKV")
+)]
 
 use crate::err::Error;
 use crate::kvs::{Key, Val};
