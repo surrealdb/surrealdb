@@ -182,7 +182,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.inner.set(key, val.into()).await?;
+		self.inner.set(key, val).await?;
 		// Return result
 		Ok(())
 	}
@@ -203,7 +203,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.inner.put(key, val.into()).await?;
+		self.inner.put(key, val).await?;
 		// Return result
 		Ok(())
 	}
@@ -220,7 +220,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.inner.putc(key, val.into(), chk.map(Into::into)).await?;
+		self.inner.putc(key, val, chk.map(Into::into)).await?;
 		// Return result
 		Ok(())
 	}

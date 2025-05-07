@@ -511,7 +511,7 @@ impl super::api::Transaction for Transaction {
 		// Convert the timestamp to a versionstamp
 		let ver = VersionStamp::from_u64(ver);
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key, ver.as_bytes().to_vec(), None).await?;
+		self.set(key, ver.to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(ver)
 	}

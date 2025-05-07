@@ -484,7 +484,7 @@ pub trait Transaction: Send {
 			None => VersionStamp::from_u64(1),
 		};
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key, ver.as_bytes().to_vec(), None).await?;
+		self.set(key, ver.to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(ver)
 	}

@@ -1,4 +1,4 @@
-//! Debugging utilities for the `key` crate.
+//! Debugging utilities for the `key` module.
 
 use std::ops::Range;
 
