@@ -12,11 +12,10 @@ on:
         type: string
         default: main
         description: "The github branch of this release"
-      suffix:
-        required: true
+      release-type:
         type: string
         default: nightly
-        description: "The suffix of the version, e.g. none, nightly, alpha.1 or beta.1"
+        description: "The type of release, e.g. release, patch, nightly, alpha.1 or beta.1"
       latest:
         required: false
         type: boolean
@@ -48,7 +47,7 @@ jobs:
     with:
       git-ref: ${{ inputs.branch }}
       latest: ${{ inputs.latest }}
-      suffix: ${{ inputs.suffix }}
+      release-type: ${{ inputs.release-type }}
       publish: ${{ inputs.publish }}
       extra-features: ${{ inputs.extra-features }}
       create-release: ${{ inputs.publish }}

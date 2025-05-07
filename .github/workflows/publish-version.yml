@@ -5,10 +5,10 @@ on:
         required: true
         type: string
         description: "The git ref of this release version. All 'actions/checkout' steps will use it"
-      suffix:
+      release-type:
         type: string
         default: nightly
-        description: "The suffix of the version, e.g. none, nightly, alpha.1 or beta.1"
+        description: "The type of release, e.g. release, patch, nightly, alpha.1 or beta.1"
       latest:
         required: false
         type: boolean
@@ -76,8 +76,8 @@ jobs:
         run: |
           set -x
 
-          suffix=$(echo ${{ inputs.suffix }} | tr "." "\n" | sed -n 1p)
-          patch=$(echo ${{ inputs.suffix }} | tr "." "\n" | sed -n 2p)
+          suffix=$(echo ${{ inputs.release-type }} | tr "." "\n" | sed -n 1p)
+          patch=$(echo ${{ inputs.release-type }} | tr "." "\n" | sed -n 2p)
           version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           echo "current-version=${version}" >> $GITHUB_OUTPUT
 
@@ -86,8 +86,8 @@ jobs:
             exit 400
           fi
 
-          if [[ $suffix != "none" && $suffix != "nightly" && $suffix != "alpha" && $suffix != "beta" && $suffix != "rc" ]]; then
-            echo "'${suffix}' is not a supported suffix"
+          if [[ "${{ inputs.release-type }}" != "release" && "${{ inputs.release-type }}" != "patch" && "${{ inputs.release-type }}" != "nightly" && $suffix != "alpha" && $suffix != "beta" && $suffix != "rc" ]]; then
+            echo "'${{ inputs.release-type }}' is not a supported release type"
             exit 400
           fi
 
@@ -101,8 +101,12 @@ jobs:
             fi
           fi
 
-          if [[ $suffix == "none" ]]; then
+          if [[ $suffix == "release" ]]; then
             patch=$(echo ${version} | tr "." "\n" | sed -n 3p)
+            environment=stable
+          elif [[ $suffix == "patch" ]]; then
+            currentPatch=$(echo ${version} | tr "." "\n" | sed -n 3p)
+            patch=$(($currentPatch + 1))
             environment=stable
           elif [[ $suffix == "nightly" ]]; then
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
@@ -110,14 +114,14 @@ jobs:
             patch=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
             rev=$(git rev-parse --short HEAD)
             buildMetadata=${date}.${rev}
-            version=${version}-${{ inputs.suffix }}
-            environment=${{ inputs.suffix }}
+            version=${version}-${{ inputs.release-type }}
+            environment=${{ inputs.release-type }}
           elif [[  $suffix == "rc" ]]; then
-            version=${version}-${{ inputs.suffix }}
+            version=${version}-${{ inputs.release-type }}
             patch=$(($patch - 1))
             environment=release-candidate
           else
-            version=${version}-${{ inputs.suffix }}
+            version=${version}-${{ inputs.release-type }}
             patch=$(($patch - 1))
             environment=${suffix}
           fi
