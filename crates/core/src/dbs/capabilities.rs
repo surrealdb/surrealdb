@@ -737,10 +737,6 @@ impl Capabilities {
 		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
 	}
 
-	pub fn allows_query_name(&self, target: &str) -> bool {
-		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
-	}
-
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
 	}
@@ -1133,7 +1129,7 @@ mod tests {
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
 		}
 
-		// When some HTTP rotues are allowed and some are denied, deny overrides the allow rules
+		// When some HTTP routes are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
 				.with_http_routes(Targets::<RouteTarget>::Some(
@@ -1158,6 +1154,49 @@ mod tests {
 			assert!(caps.allows_http_route(&RouteTarget::from_str("key").unwrap()));
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("rpc").unwrap()));
+		}
+
+		// When all arbitrary query targets are allowed
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::All)
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::None);
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When all arbitrary query targets are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::All)
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::All);
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When some arbitrary query targets are allowed and some are denied, deny overrides the allow rules
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::Some(
+					[
+						ArbitraryQueryTarget::from_str("guest").unwrap(),
+						ArbitraryQueryTarget::from_str("record").unwrap(),
+					]
+					.into(),
+				))
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::Some(
+					[
+						ArbitraryQueryTarget::from_str("record").unwrap(),
+						ArbitraryQueryTarget::from_str("system").unwrap(),
+					]
+					.into(),
+				));
+
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
 		}
 	}
 }

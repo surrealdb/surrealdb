@@ -291,8 +291,8 @@ mod tests {
 			Targets::<ArbitraryQueryTarget>::Some(
 				vec![
 					ArbitraryQueryTarget::Guest,
-					ArbitraryQueryTarget::System,
-					ArbitraryQueryTarget::Record
+					ArbitraryQueryTarget::Record,
+					ArbitraryQueryTarget::System
 				]
 				.into_iter()
 				.collect()
