@@ -415,7 +415,7 @@ impl DbsCapabilities {
 	}
 
 	fn get_deny_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
-		self.allow_arbitrary_query.clone().unwrap_or(Targets::None)
+		self.deny_arbitrary_query.clone().unwrap_or(Targets::None)
 	}
 
 	pub fn into_cli_capabilities(self) -> Capabilities {
