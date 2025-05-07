@@ -692,6 +692,7 @@ pub async fn live_query(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_string(), "result: {res:?}");
+	assert!(res[0]["type"].is_string(), "type: {res:?}");
 	let live1 = res[0]["result"].as_str().unwrap();
 	// Send LIVE command
 	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
@@ -700,6 +701,7 @@ pub async fn live_query(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_string(), "result: {res:?}");
+	assert!(res[0]["type"].is_string(), "type: {res:?}");
 	let live2 = res[0]["result"].as_str().unwrap();
 	// Create a new test record
 	let res =
@@ -840,6 +842,7 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_string(), "result: {res:?}");
+	assert!(res[0]["type"].is_string(), "type: {res:?}");
 	let live2 = res[0]["result"].as_str().unwrap();
 	// Create a new test record
 	let res =
@@ -921,6 +924,7 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_null(), "result: {res:?}");
+	assert!(res[0]["type"].is_string(), "type: {res:?}");
 	// Wait some time for all messages to arrive, and then search for the notification message
 	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
