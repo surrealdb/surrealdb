@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::sql::Statement;
 use crate::sql::Value as CoreValue;
 use revision::revisioned;
 use revision::Revisioned;
@@ -26,6 +27,16 @@ pub enum QueryType {
 impl QueryType {
 	fn is_other(&self) -> bool {
 		matches!(self, Self::Other)
+	}
+}
+
+impl From<&Statement> for QueryType {
+	fn from(stmt: &Statement) -> Self {
+		match stmt {
+			Statement::Live(_) => QueryType::Live,
+			Statement::Kill(_) => QueryType::Kill,
+			_ => QueryType::Other,
+		}
 	}
 }
 
