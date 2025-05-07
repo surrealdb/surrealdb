@@ -658,6 +658,18 @@ user-id = 2751
 start = "2025-02-22"
 end = "2026-02-26"
 
+[[trusted.rstest]]
+criteria = "safe-to-run"
+user-id = 30606 # Michele d'Amico (la10736)
+start = "2019-06-28"
+end = "2026-05-01"
+
+[[trusted.rstest_macros]]
+criteria = "safe-to-run"
+user-id = 30606 # Michele d'Amico (la10736)
+start = "2022-05-15"
+end = "2026-05-01"
+
 [[trusted.ryu]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)

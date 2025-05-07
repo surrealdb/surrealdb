@@ -580,11 +580,7 @@ impl Executor {
 					}
 				}
 				stmt => {
-					let query_type = match stmt {
-						Statement::Live(_) => QueryType::Live,
-						Statement::Kill(_) => QueryType::Kill,
-						_ => QueryType::Other,
-					};
+					let query_type: QueryType = (&stmt).into();
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, stmt).await;
