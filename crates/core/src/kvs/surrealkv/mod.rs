@@ -555,7 +555,7 @@ impl super::api::Transaction for Transaction {
 	}
 
 	fn get_save_points(&mut self) -> &mut SavePoints {
-		todo!("Implement get_save_points");
+		unimplemented!("Get save points not implemented for the SurrealKV backend")
 	}
 
 	fn new_save_point(&mut self) {

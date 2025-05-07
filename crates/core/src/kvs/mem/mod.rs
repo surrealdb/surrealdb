@@ -514,7 +514,7 @@ impl super::api::Transaction for Transaction {
 	}
 
 	fn get_save_points(&mut self) -> &mut SavePoints {
-		todo!("DO NOT MERGE THIS YET");
+		unimplemented!("Get save points not implemented for the memory backend");
 	}
 
 	fn new_save_point(&mut self) {
