@@ -404,20 +404,10 @@ impl DbsCapabilities {
 
 	fn get_allow_experimental(&self) -> Targets<ExperimentalTarget> {
 		self.allow_experimental.clone().unwrap_or(Targets::None)
-		// match &self.allow_experimental {
-		// 	Some(t @ Targets::Some(_)) => t.clone(),
-		// 	Some(Targets::All) => Targets::All,
-		// 	Some(_) => Targets::None,
-		// 	None => Targets::None,
-		// }
 	}
 
 	fn get_deny_experimental(&self) -> Targets<ExperimentalTarget> {
-		match &self.deny_experimental {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(_) => Targets::None,
-			None => Targets::None,
-		}
+		self.allow_experimental.clone().unwrap_or(Targets::None)
 	}
 
 	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
