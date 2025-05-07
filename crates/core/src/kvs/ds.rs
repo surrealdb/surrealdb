@@ -169,7 +169,6 @@ impl TransactionFactory {
 				inner,
 				stash: super::stash::Stash::default(),
 				cf: cf::Writer::new(),
-				clock: self.clock.clone(),
 			},
 		))
 	}

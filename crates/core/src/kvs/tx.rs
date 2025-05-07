@@ -101,7 +101,7 @@ impl Transaction {
 	/// calls to functions on this transaction will result
 	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
-		self.lock().await.closed().await
+		self.lock().await.closed()
 	}
 
 	/// Cancel a transaction.
@@ -144,7 +144,11 @@ impl Transaction {
 	where
 		K: KeyEncode + Debug,
 	{
-		self.lock().await.getm(keys).await
+		let mut keys_encoded = Vec::new();
+		for k in keys {
+			keys_encoded.push(k.encode_owned()?);
+		}
+		self.lock().await.getm(keys_encoded).await
 	}
 
 	/// Retrieve a specific prefix of keys from the datastore.
@@ -155,7 +159,7 @@ impl Transaction {
 	where
 		K: KeyEncode + Debug,
 	{
-		self.lock().await.getp(key).await
+		self.lock().await.getp(key.encode_owned()?).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -170,6 +174,9 @@ impl Transaction {
 	where
 		K: KeyEncode + Debug,
 	{
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
+		let rng = beg.as_slice()..end.as_slice();
 		self.lock().await.getr(rng, version).await
 	}
 

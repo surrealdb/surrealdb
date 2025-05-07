@@ -13,15 +13,47 @@ use crate::kvs::savepoint::SavePrepare;
 use crate::kvs::savepoint::SavedValue;
 use crate::kvs::{batch::Batch, Key, KeyEncode, Val, Version};
 use crate::vs::VersionStamp;
+use async_trait::async_trait;
 use std::ops::Range;
+
+mod requirements {
+	//! This module defines the trait requirements for a transaction.
+	//!
+	//! The reason this exists is to allow for swapping out the `Send` requirement for WASM
+	//! targets, where we don't want to require `Send` for transactions. But for non-WASM targets,
+	//! we do want to require `Send` for transactions.
+	//!
+	//! There is no `cfg` / `cfg_attr` support for trait requirements, so we use this dependent
+	//! trait to conditionally require `Send` based on the target family.
+	//!
+	//! Without this, we would have had to duplicate the entire `Transaction` trait for WASM and
+	//! non-WASM targets, which would have been a pain to maintain.
+
+	/// This trait defines WASM requirements for a transaction.
+	#[cfg(target_family = "wasm")]
+	pub trait TransactionRequirements {}
+
+	/// Implements the `TransactionRequirements` trait for all types.
+	#[cfg(target_family = "wasm")]
+	impl<T> TransactionRequirements for T {}
+
+	/// This trait defines non-WASM requirements for a transaction.
+	#[cfg(not(target_family = "wasm"))]
+	pub trait TransactionRequirements: Send {}
+
+	/// Implements the `TransactionRequirements` trait for all types that are `Send`.
+	#[cfg(not(target_family = "wasm"))]
+	impl<T: Send> TransactionRequirements for T {}
+}
 
 /// This trait defines the API for a transaction in a key-value store.
 ///
 /// All keys and values are represented as byte arrays, encoding is handled
 /// by [`super::tr::Transactor`].
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
-#[async_trait::async_trait]
-pub trait Transaction: Send {
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
+pub trait Transaction: requirements::TransactionRequirements {
 	/// Get the name of the transaction type.
 	fn kind(&self) -> &'static str;
 

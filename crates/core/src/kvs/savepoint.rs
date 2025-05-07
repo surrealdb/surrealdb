@@ -10,20 +10,20 @@ use std::collections::{HashMap, VecDeque};
 type SavePoint = HashMap<Key, SavedValue>;
 
 #[derive(Debug)]
-pub(super) enum SaveOperation {
+pub(crate) enum SaveOperation {
 	Set,
 	Put,
 	Del,
 }
 
-pub(super) struct SavedValue {
-	pub(super) saved_val: Option<Val>,
-	pub(super) saved_version: Option<u64>,
-	pub(super) last_operation: SaveOperation,
+pub(crate) struct SavedValue {
+	pub(crate) saved_val: Option<Val>,
+	pub(crate) saved_version: Option<u64>,
+	pub(crate) last_operation: SaveOperation,
 }
 
 impl SavedValue {
-	pub(super) fn new(val: Option<Val>, version: Option<u64>, op: SaveOperation) -> Self {
+	pub(crate) fn new(val: Option<Val>, version: Option<u64>, op: SaveOperation) -> Self {
 		Self {
 			saved_val: val,
 			saved_version: version,
@@ -31,12 +31,12 @@ impl SavedValue {
 		}
 	}
 
-	pub(super) fn get_val(&self) -> Option<&Val> {
+	pub(crate) fn get_val(&self) -> Option<&Val> {
 		self.saved_val.as_ref()
 	}
 }
 
-pub(super) enum SavePrepare {
+pub(crate) enum SavePrepare {
 	AlreadyPresent(Key, SaveOperation),
 	NewKey(Key, SavedValue),
 }

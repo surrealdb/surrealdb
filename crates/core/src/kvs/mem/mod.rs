@@ -106,7 +106,8 @@ impl Datastore {
 	}
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 impl super::api::Transaction for Transaction {
 	fn kind(&self) -> &'static str {
 		"memory"

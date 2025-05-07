@@ -15,7 +15,7 @@
 
 pub mod export;
 
-mod api;
+pub(crate) mod api;
 mod batch;
 mod cf;
 mod clock;
