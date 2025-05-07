@@ -4,7 +4,7 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
+use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::kvs::{Check, Key, Val};
 use crate::vs::VersionStamp;
 use foundationdb::options::DatabaseOption;
@@ -159,7 +159,12 @@ impl Transaction {
 	}
 }
 
+#[async_trait::async_trait]
 impl super::api::Transaction for Transaction {
+	fn kind(&self) -> &'static str {
+		"fdb"
+	}
+
 	/// Behaviour if unclosed
 	fn check_level(&mut self, check: Check) {
 		self.check = check;
@@ -525,8 +530,8 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Obtain a new change timestamp for a key
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get_timestamp(&mut self, key: Key) -> Result<VersionStamp, Error> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = _key.sprint()))]
+	async fn get_timestamp(&mut self, _key: Key) -> Result<VersionStamp, Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -540,10 +545,10 @@ impl super::api::Transaction for Transaction {
 	}
 
 	// Sets the value for a versionstamped key prefixed with the user-supplied key.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(ts_key = ts_key.sprint()))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(ts_key = _ts_key.sprint()))]
 	async fn set_versionstamp(
 		&mut self,
-		ts_key: Key,
+		_ts_key: Key,
 		prefix: Key,
 		suffix: Key,
 		val: Val,
@@ -571,9 +576,7 @@ impl super::api::Transaction for Transaction {
 		// Return result
 		Ok(())
 	}
-}
 
-impl SavePointImpl for Transaction {
 	fn get_save_points(&mut self) -> &mut SavePoints {
 		&mut self.save_points
 	}

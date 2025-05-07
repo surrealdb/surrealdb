@@ -52,6 +52,7 @@ async-channel = "2.3.1"
 async-executor = "1.13.1"
 async-graphql = { version = "7.0.9", default-features = false }
 async-graphql-axum = "=7.0.13"
+async-trait = "0.1.88"
 base64 = "0.21.5"
 bcrypt = "0.15.0"
 bincode = "1.3.3"
@@ -169,6 +170,7 @@ ml = ["surrealdb/ml"]
 performance-profiler = ["dep:pprof"]
 scripting = ["surrealdb/scripting"]
 storage-mem = ["surrealdb/kv-mem"]
+storage-indxdb = ["surrealdb/kv-indxdb"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv"]
 storage-tikv = ["surrealdb/kv-tikv"]

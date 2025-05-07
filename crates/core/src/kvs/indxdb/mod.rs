@@ -2,9 +2,8 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SavePointImpl, SavePoints};
-use crate::kvs::{Check, Key, KeyEncode, Val};
-use std::fmt::Debug;
+use crate::kvs::savepoint::SavePoints;
+use crate::kvs::{Check, Key, Val};
 use std::ops::Range;
 
 pub struct Datastore {
@@ -78,7 +77,12 @@ impl Datastore {
 	}
 }
 
+#[async_trait::async_trait]
 impl super::api::Transaction for Transaction {
+	fn kind(&self) -> &'static str {
+		"indxdb"
+	}
+
 	/// Behaviour if unclosed
 	fn check_level(&mut self, check: Check) {
 		self.check = check;
@@ -148,8 +152,6 @@ impl super::api::Transaction for Transaction {
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
 	{
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
@@ -168,9 +170,6 @@ impl super::api::Transaction for Transaction {
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
 	{
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
@@ -193,9 +192,6 @@ impl super::api::Transaction for Transaction {
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
 	{
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
@@ -217,10 +213,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc(&mut self, key: Key, val: Val, chk: Option<V>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
+	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<(), Error>
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -239,8 +232,6 @@ impl super::api::Transaction for Transaction {
 	/// Delete a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del(&mut self, key: Key) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -258,10 +249,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delc(&mut self, key: Key, chk: Option<V>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
+	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<(), Error>
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -281,12 +269,10 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn keys(
 		&mut self,
-		rng: Range<K>,
+		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
 	{
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
@@ -306,12 +292,10 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan(
 		&mut self,
-		rng: Range<K>,
+		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
 	{
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
@@ -326,9 +310,7 @@ impl super::api::Transaction for Transaction {
 		// Return result
 		Ok(res)
 	}
-}
 
-impl SavePointImpl for Transaction {
 	fn get_save_points(&mut self) -> &mut SavePoints {
 		&mut self.save_points
 	}

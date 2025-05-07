@@ -15,6 +15,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use super::savepoint::SavePoints;
+
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
 pub struct Datastore {
@@ -296,7 +298,12 @@ impl Datastore {
 	}
 }
 
+#[async_trait::async_trait]
 impl super::api::Transaction for Transaction {
+	fn kind(&self) -> &'static str {
+		"rocksdb"
+	}
+
 	/// Behaviour if unclosed
 	fn check_level(&mut self, check: Check) {
 		self.check = check;
@@ -693,6 +700,30 @@ impl super::api::Transaction for Transaction {
 		// Return result
 		Ok(res)
 	}
+
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		todo!("Implement get_save_points");
+	}
+
+	fn new_save_point(&mut self) {
+		// Get the transaction
+		let inner = self.inner.as_ref().unwrap();
+		// Set the save point
+		inner.set_savepoint();
+	}
+
+	async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+		// Get the transaction
+		let inner = self.inner.as_ref().unwrap();
+		// Rollback
+		inner.rollback_to_savepoint()?;
+		//
+		Ok(())
+	}
+
+	fn release_last_save_point(&mut self) -> Result<(), Error> {
+		Ok(())
+	}
 }
 
 impl Transaction {
@@ -711,25 +742,5 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		Ok(rng)
-	}
-
-	pub(crate) fn new_save_point(&mut self) {
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
-		// Set the save point
-		inner.set_savepoint();
-	}
-
-	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
-		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
-		// Rollback
-		inner.rollback_to_savepoint()?;
-		//
-		Ok(())
-	}
-
-	pub(crate) fn release_last_save_point(&mut self) -> Result<(), Error> {
-		Ok(())
 	}
 }

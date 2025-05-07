@@ -12,6 +12,8 @@ use surrealkv::Store;
 use surrealkv::Transaction as Tx;
 use surrealkv::{Durability, Mode};
 
+use super::savepoint::SavePoints;
+
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
 pub struct Datastore {
@@ -128,7 +130,12 @@ impl Datastore {
 	}
 }
 
+#[async_trait::async_trait]
 impl super::api::Transaction for Transaction {
+	fn kind(&self) -> &'static str {
+		"surrealkv"
+	}
+
 	/// Behaviour if unclosed
 	fn check_level(&mut self, check: Check) {
 		self.check = check;
@@ -541,23 +548,25 @@ impl super::api::Transaction for Transaction {
 		// Return result
 		Ok(res)
 	}
-}
 
-impl Transaction {
-	pub(crate) fn new_save_point(&mut self) {
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		todo!("Implement get_save_points");
+	}
+
+	fn new_save_point(&mut self) {
 		if let Some(inner) = &mut self.inner {
 			let _ = inner.set_savepoint();
 		}
 	}
 
-	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+	async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
 		if let Some(inner) = &mut self.inner {
 			inner.rollback_to_savepoint()?;
 		}
 		Ok(())
 	}
 
-	pub(crate) fn release_last_save_point(&mut self) -> Result<(), Error> {
+	fn release_last_save_point(&mut self) -> Result<(), Error> {
 		Ok(())
 	}
 }

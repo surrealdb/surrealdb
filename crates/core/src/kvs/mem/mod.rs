@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use surrealkv::Options;
 use surrealkv::Store;
 use surrealkv::Transaction as Tx;
+use crate::kvs::savepoint::SavePoints;
 
 use super::{Check, KeyEncode};
 
@@ -101,7 +102,12 @@ impl Datastore {
 	}
 }
 
+#[async_trait::async_trait]
 impl super::api::Transaction for Transaction {
+	fn kind(&self) -> &'static str {
+		"memory"
+	}
+
 	/// Behaviour if unclosed
 	fn check_level(&mut self, check: Check) {
 		self.check = check;
@@ -501,23 +507,25 @@ impl super::api::Transaction for Transaction {
 		// Return result
 		Ok(res)
 	}
-}
 
-impl Transaction {
-	pub(crate) fn new_save_point(&mut self) {
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		todo!("DO NOT MERGE THIS YET");
+	}
+
+	fn new_save_point(&mut self) {
 		if let Some(inner) = &mut self.inner {
 			let _ = inner.set_savepoint();
 		}
 	}
 
-	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+	async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
 		if let Some(inner) = &mut self.inner {
 			inner.rollback_to_savepoint()?;
 		}
 		Ok(())
 	}
 
-	pub(crate) fn release_last_save_point(&mut self) -> Result<(), Error> {
+	fn release_last_save_point(&mut self) -> Result<(), Error> {
 		Ok(())
 	}
 }

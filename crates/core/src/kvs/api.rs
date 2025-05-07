@@ -4,16 +4,24 @@ use crate::cnf::COUNT_BATCH_SIZE;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::savepoint::SaveOperation;
+use crate::kvs::savepoint::SavePoints;
+use crate::kvs::savepoint::SavePrepare;
+use crate::kvs::savepoint::SavedValue;
 use crate::kvs::{batch::Batch, Key, KeyEncode, Val, Version};
 use crate::vs::VersionStamp;
 use std::ops::Range;
 
 /// This trait defines the API for a transaction in a key-value store.
 ///
-/// All keys and values are represented as byte arrays, encoding is expected to be handled
-/// by the implementer of this trait.
+/// All keys and values are represented as byte arrays, encoding is handled
+/// by the [`Transactor`]
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
-pub trait Transaction {
+#[async_trait::async_trait]
+pub trait Transaction: Send {
+	/// Get the name of the transaction type.
+	fn kind(&self) -> &'static str;
+
 	/// Specify how we should handle unclosed transactions.
 	///
 	/// If a transaction is not cancelled or rolled back then
@@ -314,11 +322,11 @@ pub trait Transaction {
 	/// Retrieve all the versions for a specific range of keys from the datastore.
 	///
 	/// This function fetches all the versions for the full range of key-value pairs, in a single request to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = _rng.sprint()))]
 	async fn scan_all_versions(
 		&mut self,
-		rng: Range<Key>,
-		limit: u32,
+		_rng: Range<Key>,
+		_limit: u32,
 	) -> Result<Vec<(Key, Val, Version, bool)>, Error> {
 		Err(Error::UnsupportedVersionedQueries)
 	}
@@ -501,5 +509,62 @@ pub trait Transaction {
 		k.extend_from_slice(&ts.as_bytes());
 		suffix.encode_into(&mut k)?;
 		self.set(k, val, None).await
+	}
+
+	fn get_save_points(&mut self) -> &mut SavePoints;
+
+	fn new_save_point(&mut self) {
+		self.get_save_points().new_save_point()
+	}
+
+	async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+		let sp = self.get_save_points().pop()?;
+
+		for (key, saved_value) in sp {
+			match saved_value.last_operation {
+				SaveOperation::Set | SaveOperation::Put => {
+					if let Some(initial_value) = saved_value.saved_val {
+						// If the last operation was a SET or PUT
+						// then we just have set back the key to its initial value
+						self.set(key, initial_value, saved_value.saved_version).await?;
+					} else {
+						// If the last operation on this key was not a DEL operation,
+						// then we have to delete the key
+						self.del(key).await?;
+					}
+				}
+				SaveOperation::Del => {
+					if let Some(initial_value) = saved_value.saved_val {
+						// If the last operation was a DEL,
+						// then we have to put back the initial value
+						self.put(key, initial_value, saved_value.saved_version).await?;
+					}
+				}
+			}
+		}
+		Ok(())
+	}
+
+	fn release_last_save_point(&mut self) -> Result<(), Error> {
+		self.get_save_points().pop()?;
+		Ok(())
+	}
+
+	async fn save_point_prepare(
+		&mut self,
+		key: &Key,
+		version: Option<u64>,
+		op: SaveOperation,
+	) -> Result<Option<SavePrepare>, Error> {
+		let is_saved_key = self.get_save_points().is_saved_key(key);
+		let r = match is_saved_key {
+			None => None,
+			Some(true) => Some(SavePrepare::AlreadyPresent(key.clone(), op)),
+			Some(false) => {
+				let val = self.get(key.clone(), version).await?;
+				Some(SavePrepare::NewKey(key.clone(), SavedValue::new(val, version, op)))
+			}
+		};
+		Ok(r)
 	}
 }

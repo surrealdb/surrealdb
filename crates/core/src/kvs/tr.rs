@@ -12,8 +12,6 @@ use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::clock::SizedClock;
-#[cfg(any(feature = "kv-tikv", feature = "kv-fdb", feature = "kv-indxdb",))]
-use crate::kvs::savepoint::SavePointImpl;
 use crate::kvs::stash::Stash;
 use crate::kvs::KeyDecode as _;
 use crate::sql;
@@ -71,68 +69,16 @@ impl From<bool> for LockType {
 /// A set of undoable updates and requests against a dataset.
 #[non_exhaustive]
 pub struct Transactor {
-	pub(super) inner: Inner,
+	pub(super) inner: Box<dyn super::api::Transaction>,
 	pub(super) stash: Stash,
 	pub(super) cf: cf::Writer,
 	pub(super) clock: Arc<SizedClock>,
 }
 
-pub(super) enum Inner {
-	#[cfg(feature = "kv-mem")]
-	Mem(super::mem::Transaction),
-	#[cfg(feature = "kv-rocksdb")]
-	RocksDB(super::rocksdb::Transaction),
-	#[cfg(feature = "kv-indxdb")]
-	IndxDB(super::indxdb::Transaction),
-	#[cfg(feature = "kv-tikv")]
-	TiKV(super::tikv::Transaction),
-	#[cfg(feature = "kv-fdb")]
-	FoundationDB(super::fdb::Transaction),
-	#[cfg(feature = "kv-surrealkv")]
-	SurrealKV(super::surrealkv::Transaction),
-}
-
 impl fmt::Display for Transactor {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		#![allow(unused_variables)]
-		match &self.inner {
-			#[cfg(feature = "kv-mem")]
-			Inner::Mem(_) => write!(f, "memory"),
-			#[cfg(feature = "kv-rocksdb")]
-			Inner::RocksDB(_) => write!(f, "rocksdb"),
-			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(_) => write!(f, "indxdb"),
-			#[cfg(feature = "kv-tikv")]
-			Inner::TiKV(_) => write!(f, "tikv"),
-			#[cfg(feature = "kv-fdb")]
-			Inner::FoundationDB(_) => write!(f, "fdb"),
-			#[cfg(feature = "kv-surrealkv")]
-			Inner::SurrealKV(_) => write!(f, "surrealkv"),
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		write!(f, "{}", self.inner.kind())
 	}
-}
-
-macro_rules! expand_inner {
-	( $v:expr, $arm:pat_param => $b:block ) => {
-		match $v {
-			#[cfg(feature = "kv-mem")]
-			Inner::Mem($arm) => $b,
-			#[cfg(feature = "kv-rocksdb")]
-			Inner::RocksDB($arm) => $b,
-			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB($arm) => $b,
-			#[cfg(feature = "kv-tikv")]
-			Inner::TiKV($arm) => $b,
-			#[cfg(feature = "kv-fdb")]
-			Inner::FoundationDB($arm) => $b,
-			#[cfg(feature = "kv-surrealkv")]
-			Inner::SurrealKV($arm) => $b,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
-	};
 }
 
 impl Transactor {
@@ -162,7 +108,7 @@ impl Transactor {
 	/// production we should only log a warning.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub(crate) fn check_level(&mut self, check: Check) {
-		expand_inner!(&mut self.inner, v => { v.check_level(check) })
+		self.inner.check_level(check)
 	}
 
 	/// Check if transaction is finished.
@@ -174,7 +120,7 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn closed(&self) -> bool {
 		trace!(target: TARGET, "Closed");
-		expand_inner!(&self.inner, v => { v.closed() })
+		self.inner.closed()
 	}
 
 	/// Cancel a transaction.
@@ -183,7 +129,7 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		trace!(target: TARGET, "Cancel");
-		expand_inner!(&mut self.inner, v => { v.cancel().await })
+		self.inner.cancel().await
 	}
 
 	/// Commit a transaction.
@@ -192,7 +138,7 @@ impl Transactor {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		trace!(target: TARGET, "Commit");
-		expand_inner!(&mut self.inner, v => { v.commit().await })
+		self.inner.commit().await
 	}
 
 	/// Check if a key exists in the datastore.
@@ -203,7 +149,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Exists");
-		expand_inner!(&mut self.inner, v => { v.exists(key, version).await })
+		self.inner.exists(key, version).await
 	}
 
 	/// Fetch a key from the datastore.
@@ -214,7 +160,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Get");
-		expand_inner!(&mut self.inner, v => { v.get(key, version).await })
+		self.inner.get(key, version).await
 	}
 
 	/// Fetch many keys from the datastore.
@@ -228,7 +174,7 @@ impl Transactor {
 			keys_encoded.push(k.encode_owned()?);
 		}
 		trace!(target: TARGET, keys = keys_encoded.sprint(), "GetM");
-		expand_inner!(&mut self.inner, v => { v.getm(keys_encoded).await })
+		self.inner.getm(keys_encoded).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -247,7 +193,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "GetR");
-		expand_inner!(&mut self.inner, v => { v.getr(beg..end, version).await })
+		self.inner.getr(beg..end, version).await
 	}
 
 	/// Retrieve a specific prefixed range of keys from the datastore.
@@ -260,7 +206,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "GetP");
-		expand_inner!(&mut self.inner, v => { v.getp(key).await })
+		self.inner.getp(key).await
 	}
 
 	/// Insert or update a key in the datastore.
@@ -272,7 +218,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Set");
-		expand_inner!(&mut self.inner, v => { v.set(key, val.into(), version).await })
+		self.inner.set(key, val.into(), version).await
 	}
 
 	/// Insert or replace a key in the datastore.
@@ -284,7 +230,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "Replace");
-		expand_inner!(&mut self.inner, v => { v.replace(key, val.into()).await })
+		self.inner.replace(key, val.into()).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -296,7 +242,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Put");
-		expand_inner!(&mut self.inner, v => { v.put(key, val.into(), version).await })
+		self.inner.put(key, val.into(), version).await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -308,7 +254,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "PutC");
-		expand_inner!(&mut self.inner, v => { v.putc(key, val.into(), chk.map(Into::into)).await })
+		self.inner.putc(key, val.into(), chk.map(Into::into)).await
 	}
 
 	/// Delete a key from the datastore.
@@ -319,7 +265,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "Del");
-		expand_inner!(&mut self.inner, v => { v.del(key).await })
+		self.inner.del(key).await
 	}
 
 	/// Delete a key from the datastore if the current value matches a condition.
@@ -331,7 +277,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "DelC");
-		expand_inner!(&mut self.inner, v => { v.delc(key, chk.map(Into::into)).await })
+		self.inner.delc(key, chk.map(Into::into)).await
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -346,7 +292,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), "DelR");
-		expand_inner!(&mut self.inner, v => { v.delr(beg..end).await })
+		self.inner.delr(beg..end).await
 	}
 
 	/// Delete a prefixed range of keys from the datastore.
@@ -359,7 +305,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "DelP");
-		expand_inner!(&mut self.inner, v => { v.delp(key).await })
+		self.inner.delp(key).await
 	}
 
 	/// Delete all versions of a key from the datastore.
@@ -370,7 +316,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "Clr");
-		expand_inner!(&mut self.inner, v => { v.clr(key).await })
+		self.inner.clr(key).await
 	}
 
 	/// Delete all versions of a key from the datastore if the current value matches a condition.
@@ -382,7 +328,7 @@ impl Transactor {
 	{
 		let key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "ClrC");
-		expand_inner!(&mut self.inner, v => { v.clrc(key, chk.map(Into::into)).await })
+		self.inner.clrc(key, chk.map(Into::into)).await
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
@@ -397,7 +343,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), "ClrR");
-		expand_inner!(&mut self.inner, v => { v.clrr(beg..end).await })
+		self.inner.clrr(beg..end).await
 	}
 
 	/// Delete all versions of a prefixed range of keys from the datastore.
@@ -410,7 +356,7 @@ impl Transactor {
 	{
 		let key: Key = key.encode_owned()?;
 		trace!(target: TARGET, key = key.sprint(), "ClrP");
-		expand_inner!(&mut self.inner, v => { v.clrp(key).await })
+		self.inner.clrp(key).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -433,7 +379,7 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit, version).await })
+		self.inner.keys(beg..end, limit, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -456,7 +402,7 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		expand_inner!(&mut self.inner, v => { v.keysr(beg..end, limit, version).await })
+		self.inner.keysr(beg..end, limit, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -479,7 +425,7 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		expand_inner!(&mut self.inner, v => { v.scan(beg..end, limit, version).await })
+		self.inner.scan(beg..end, limit, version).await
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
@@ -499,7 +445,7 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		expand_inner!(&mut self.inner, v => { v.scanr(beg..end, limit, version).await })
+		self.inner.scanr(beg..end, limit, version).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -519,7 +465,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
-		expand_inner!(&mut self.inner, v => { v.batch_keys(beg..end, batch, version).await })
+		self.inner.batch_keys(beg..end, batch, version).await
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -534,7 +480,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), "Count");
-		expand_inner!(&mut self.inner, v => { v.count(beg..end).await })
+		self.inner.count(beg..end).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -554,7 +500,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
-		expand_inner!(&mut self.inner, v => { v.batch_keys_vals(beg..end, batch, version).await })
+		self.inner.batch_keys_vals(beg..end, batch, version).await
 	}
 
 	/// Retrieve a batched scan of all versions over a specific range of keys in the datastore.
@@ -573,7 +519,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_owned()?;
 		let rng = beg.as_slice()..end.as_slice();
 		trace!(target: TARGET, rng = rng.sprint(), "BatchVersions");
-		expand_inner!(&mut self.inner, v => { v.batch_keys_vals_versions(beg..end, batch).await })
+		self.inner.batch_keys_vals_versions(beg..end, batch).await
 	}
 
 	/// Obtain a new change timestamp for a key
@@ -586,7 +532,7 @@ impl Transactor {
 		K: KeyEncode + Debug,
 	{
 		let key = key.encode_owned()?;
-		expand_inner!(&mut self.inner, v => { v.get_timestamp(key).await })
+		self.inner.get_timestamp(key).await
 	}
 
 	/// Insert or update a key in the datastore.
@@ -604,7 +550,7 @@ impl Transactor {
 		let ts_key = ts_key.encode_owned()?;
 		let prefix = prefix.encode_owned()?;
 		let suffix = suffix.encode_owned()?;
-		expand_inner!(&mut self.inner, v => { v.set_versionstamp(ts_key, prefix, suffix, val.into()).await })
+		self.inner.set_versionstamp(ts_key, prefix, suffix, val.into()).await
 	}
 
 	// --------------------------------------------------
@@ -823,14 +769,14 @@ impl Transactor {
 	}
 
 	pub(crate) async fn new_save_point(&mut self) {
-		expand_inner!(&mut self.inner, v => { v.new_save_point() })
+		self.inner.new_save_point()
 	}
 
 	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
-		expand_inner!(&mut self.inner, v => { v.rollback_to_save_point().await })
+		self.inner.rollback_to_save_point().await
 	}
 
 	pub(crate) async fn release_last_save_point(&mut self) -> Result<(), Error> {
-		expand_inner!(&mut self.inner, v => { v.release_last_save_point() })
+		self.inner.release_last_save_point()
 	}
 }

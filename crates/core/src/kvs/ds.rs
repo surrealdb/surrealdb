@@ -133,32 +133,32 @@ impl TransactionFactory {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::Mem(tx), true, false)
+				(Box::new(tx) as Box<dyn super::api::Transaction>, true, false)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::RocksDB(tx), true, true)
+				(Box::new(tx) as Box<dyn super::api::Transaction>, true, true)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			DatastoreFlavor::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::IndxDB(tx), true, false)
+				(Box::new(tx) as Box<dyn super::api::Transaction>, true, false)
 			}
 			#[cfg(feature = "kv-tikv")]
 			DatastoreFlavor::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::TiKV(tx), false, true)
+				(Box::new(tx) as Box<dyn super::api::Transaction>, false, true)
 			}
 			#[cfg(feature = "kv-fdb")]
 			DatastoreFlavor::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::FoundationDB(tx), false, false)
+				(Box::new(tx) as Box<dyn super::api::Transaction>, false, false)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::SurrealKV(tx), true, false)
+				(Box::new(tx) as Box<dyn super::api::Transaction>, true, false)
 			}
 			_ => unreachable!(),
 		};

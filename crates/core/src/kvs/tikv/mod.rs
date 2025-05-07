@@ -4,7 +4,7 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SaveOperation, SavePointImpl, SavePoints, SavePrepare};
+use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -143,7 +143,12 @@ impl Datastore {
 	}
 }
 
+#[async_trait::async_trait]
 impl super::api::Transaction for Transaction {
+	fn kind(&self) -> &'static str {
+		"tikv"
+	}
+
 	/// Behaviour if unclosed
 	fn check_level(&mut self, check: Check) {
 		self.check = check;
@@ -510,9 +515,7 @@ impl super::api::Transaction for Transaction {
 		// Return the uint64 representation of the timestamp as the result
 		Ok(ver)
 	}
-}
 
-impl SavePointImpl for Transaction {
 	fn get_save_points(&mut self) -> &mut SavePoints {
 		&mut self.save_points
 	}
