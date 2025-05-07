@@ -403,12 +403,13 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_experimental(&self) -> Targets<ExperimentalTarget> {
-		match &self.allow_experimental {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(Targets::All) => Targets::All,
-			Some(_) => Targets::None,
-			None => Targets::None,
-		}
+		self.allow_experimental.clone().unwrap_or(Targets::None)
+		// match &self.allow_experimental {
+		// 	Some(t @ Targets::Some(_)) => t.clone(),
+		// 	Some(Targets::All) => Targets::All,
+		// 	Some(_) => Targets::None,
+		// 	None => Targets::None,
+		// }
 	}
 
 	fn get_deny_experimental(&self) -> Targets<ExperimentalTarget> {
@@ -420,20 +421,11 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
-		match &self.allow_arbitrary_query {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(Targets::All) => Targets::All,
-			Some(_) => Targets::None,
-			None => Targets::All,
-		}
+		self.allow_arbitrary_query.clone().unwrap_or(Targets::All)
 	}
 
 	fn get_deny_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
-		match &self.deny_arbitrary_query {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(_) => Targets::None,
-			None => Targets::None,
-		}
+		self.allow_arbitrary_query.clone().unwrap_or(Targets::None)
 	}
 
 	pub fn into_cli_capabilities(self) -> Capabilities {
