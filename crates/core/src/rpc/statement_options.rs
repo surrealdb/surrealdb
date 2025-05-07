@@ -238,6 +238,11 @@ impl StatementOptions {
 
 			// Process "diff" option
 			if let Some(v) = obj.remove("diff") {
+				if self.fields.is_some() {
+					// diff and fields cannot co-exist, as diff overwrites the fields
+					return Err(RpcError::InvalidParams);
+				}
+
 				if let Value::Bool(v) = v {
 					self.diff = v;
 				} else {

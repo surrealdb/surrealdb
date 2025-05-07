@@ -365,7 +365,7 @@ pub trait RpcProtocolV2: RpcContext {
 			expr: if opts.diff {
 				Fields::default()
 			} else {
-				Fields::all()
+				opts.fields.unwrap_or(Fields::all())
 			},
 			cond: opts.cond,
 			fetch: opts.fetch,
