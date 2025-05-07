@@ -19,7 +19,7 @@ pub struct FuncTarget(pub String, pub Option<String>);
 impl fmt::Display for FuncTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self.1 {
-			Some(name) => write!(f, "{}:{}", self.0, name),
+			Some(name) => write!(f, "{}:{name}", self.0),
 			None => write!(f, "{}::*", self.0),
 		}
 	}
