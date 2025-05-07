@@ -100,7 +100,11 @@ impl Datastore {
 	}
 
 	/// Start a new transaction
-	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+	pub(crate) async fn transaction(
+		&self,
+		write: bool,
+		lock: bool,
+	) -> Result<Box<dyn crate::kvs::api::Transaction>, Error> {
 		// Set whether this should be an optimistic or pessimistic transaction
 		let mut opt = if lock {
 			TransactionOptions::new_pessimistic()
@@ -130,14 +134,14 @@ impl Datastore {
 		let check = Check::Error;
 		// Create a new transaction
 		match self.db.begin_with_options(opt).await {
-			Ok(inner) => Ok(Transaction {
+			Ok(inner) => Ok(Box::new(Transaction {
 				done: false,
 				check,
 				write,
 				inner,
 				db: self.db.clone(),
 				save_points: Default::default(),
-			}),
+			})),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}

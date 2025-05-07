@@ -104,7 +104,11 @@ impl Datastore {
 	}
 
 	/// Start a new transaction
-	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+	pub(crate) async fn transaction(
+		&self,
+		write: bool,
+		_: bool,
+	) -> Result<Box<dyn crate::kvs::api::Transaction>, Error> {
 		// Specify the check level
 		#[cfg(not(debug_assertions))]
 		let check = Check::Warn;
@@ -121,12 +125,12 @@ impl Datastore {
 			false => txn.set_durability(Durability::Eventual),
 		};
 		// Return the new transaction
-		Ok(Transaction {
+		Ok(Box::new(Transaction {
 			done: false,
 			check,
 			write,
 			inner: Some(txn),
-		})
+		}))
 	}
 }
 

@@ -122,7 +122,11 @@ impl Datastore {
 	}
 
 	/// Start a new transaction
-	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+	pub(crate) async fn transaction(
+		&self,
+		write: bool,
+		lock: bool,
+	) -> Result<Box<dyn crate::kvs::api::Transaction>, Error> {
 		// Specify the check level
 		#[cfg(not(debug_assertions))]
 		let check = Check::Warn;
@@ -130,14 +134,14 @@ impl Datastore {
 		let check = Check::Error;
 		// Create a new transaction
 		match self.db.create_trx() {
-			Ok(inner) => Ok(Transaction {
+			Ok(inner) => Ok(Box::new(Transaction {
 				done: false,
 				lock,
 				check,
 				write,
 				inner: Some(inner),
 				save_points: Default::default(),
-			}),
+			})),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}

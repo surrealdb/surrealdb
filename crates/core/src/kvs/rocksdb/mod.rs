@@ -255,7 +255,11 @@ impl Datastore {
 	}
 
 	/// Start a new transaction
-	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+	pub(crate) async fn transaction(
+		&self,
+		write: bool,
+		_: bool,
+	) -> Result<Box<dyn crate::kvs::api::Transaction>, Error> {
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);
@@ -287,14 +291,14 @@ impl Datastore {
 		#[cfg(debug_assertions)]
 		let check = Check::Error;
 		// Create a new transaction
-		Ok(Transaction {
+		Ok(Box::new(Transaction {
 			done: false,
 			write,
 			check,
 			inner: Some(inner),
 			ro,
 			_db: self.db.clone(),
-		})
+		}))
 	}
 }
 
