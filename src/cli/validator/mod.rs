@@ -269,4 +269,36 @@ mod tests {
 			)
 		);
 	}
+
+	#[test]
+	fn test_arbitrary_query_targets() {
+		assert_eq!(query_arbitrary_targets("*").unwrap(), Targets::<ArbitraryQueryTarget>::All);
+		assert_eq!(query_arbitrary_targets("").unwrap(), Targets::<ArbitraryQueryTarget>::All);
+		assert_eq!(
+			query_arbitrary_targets("guest").unwrap(),
+			Targets::<ArbitraryQueryTarget>::Some(
+				vec![ArbitraryQueryTarget::Guest].into_iter().collect()
+			)
+		);
+		assert_eq!(
+			query_arbitrary_targets("guest,system").unwrap(),
+			Targets::<ArbitraryQueryTarget>::Some(
+				vec![ArbitraryQueryTarget::Guest, ArbitraryQueryTarget::System]
+					.into_iter()
+					.collect()
+			)
+		);
+		assert_eq!(
+			query_arbitrary_targets("guest,record,system").unwrap(),
+			Targets::<ArbitraryQueryTarget>::Some(
+				vec![
+					ArbitraryQueryTarget::Guest,
+					ArbitraryQueryTarget::Record,
+					ArbitraryQueryTarget::System
+				]
+				.into_iter()
+				.collect()
+			)
+		);
+	}
 }

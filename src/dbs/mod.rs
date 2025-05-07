@@ -403,35 +403,19 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_experimental(&self) -> Targets<ExperimentalTarget> {
-		match &self.allow_experimental {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(_) => Targets::None,
-			None => Targets::None,
-		}
+		self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None)
 	}
 
 	fn get_deny_experimental(&self) -> Targets<ExperimentalTarget> {
-		match &self.deny_experimental {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(_) => Targets::None,
-			None => Targets::None,
-		}
+		self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None)
 	}
 
 	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
-		match &self.allow_arbitrary_query {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(_) => Targets::None,
-			None => Targets::All,
-		}
+		self.allow_arbitrary_query.as_ref().cloned().unwrap_or(Targets::All)
 	}
 
 	fn get_deny_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
-		match &self.deny_arbitrary_query {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(_) => Targets::None,
-			None => Targets::None,
-		}
+		self.deny_arbitrary_query.as_ref().cloned().unwrap_or(Targets::None)
 	}
 
 	pub fn into_cli_capabilities(self) -> Capabilities {
@@ -866,7 +850,7 @@ mod tests {
 				format!("RETURN http::get('{}/redirect')", server3.uri()),
 				false,
 				format!("here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",server3.uri()),
-			),
+			)
 		];
 
 		for (idx, (ds, sess, query, succeeds, contains)) in cases.into_iter().enumerate() {
@@ -902,5 +886,31 @@ mod tests {
 		server1.verify().await;
 		server2.verify().await;
 		server3.verify().await;
+	}
+
+	#[test]
+	fn test_dbs_capabilities_target_all() {
+		let caps = DbsCapabilities {
+			allow_all: false,
+			allow_scripting: false,
+			allow_guests: false,
+			allow_funcs: None,
+			allow_experimental: Some(Targets::All),
+			allow_arbitrary_query: Some(Targets::All),
+			allow_net: None,
+			allow_rpc: None,
+			allow_http: None,
+			deny_all: false,
+			deny_scripting: false,
+			deny_guests: false,
+			deny_funcs: None,
+			deny_experimental: None,
+			deny_arbitrary_query: None,
+			deny_net: None,
+			deny_rpc: None,
+			deny_http: None,
+		};
+		assert_eq!(caps.get_allow_experimental(), Targets::All);
+		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
 	}
 }

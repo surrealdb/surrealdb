@@ -525,8 +525,7 @@ impl Datastore {
 		self.capabilities.allows_http_route(route_target)
 	}
 
-	/// Does the datastore allow requesting an HTTP route?
-	/// This function needs to be public to allow access from the CLI crate.
+	/// Is the user allowed to query?
 	pub fn allows_query_by_subject(&self, subject: impl Into<ArbitraryQueryTarget>) -> bool {
 		self.capabilities.allows_query(&subject.into())
 	}
