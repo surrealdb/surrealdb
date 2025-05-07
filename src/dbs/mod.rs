@@ -403,19 +403,19 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_experimental(&self) -> Targets<ExperimentalTarget> {
-		self.allow_experimental.clone().unwrap_or(Targets::None)
+		self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None)
 	}
 
 	fn get_deny_experimental(&self) -> Targets<ExperimentalTarget> {
-		self.allow_experimental.clone().unwrap_or(Targets::None)
+		self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None)
 	}
 
 	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
-		self.allow_arbitrary_query.clone().unwrap_or(Targets::All)
+		self.allow_arbitrary_query.as_ref().cloned().unwrap_or(Targets::All)
 	}
 
 	fn get_deny_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
-		self.deny_arbitrary_query.clone().unwrap_or(Targets::None)
+		self.deny_arbitrary_query.as_ref().cloned().unwrap_or(Targets::None)
 	}
 
 	pub fn into_cli_capabilities(self) -> Capabilities {
