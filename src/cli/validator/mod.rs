@@ -269,7 +269,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_abritrary_query_targets() {
+	fn test_arbitrary_query_targets() {
 		assert_eq!(query_arbitrary_targets("*").unwrap(), Targets::<ArbitraryQueryTarget>::All);
 		assert_eq!(query_arbitrary_targets("").unwrap(), Targets::<ArbitraryQueryTarget>::All);
 		assert_eq!(
