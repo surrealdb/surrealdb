@@ -1079,6 +1079,14 @@ mod tests {
 			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
 		}
 
+		// When all RPC methods are denied
+		{
+			let caps = Capabilities::default().without_rpc_methods(Targets::<MethodTarget>::All);
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("ping").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+		}
+
 		// When some RPC methods are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
@@ -1129,6 +1137,14 @@ mod tests {
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
 		}
 
+		// When all HTTP routes are denied at the same time
+		{
+			let caps = Capabilities::default().without_http_routes(Targets::<RouteTarget>::All);
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+		}
+
 		// When some HTTP routes are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
@@ -1170,6 +1186,15 @@ mod tests {
 		{
 			let caps = Capabilities::default()
 				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::All)
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::All);
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When all arbitrary query targets are denied
+		{
+			let caps = Capabilities::default()
 				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::All);
 			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
 			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
