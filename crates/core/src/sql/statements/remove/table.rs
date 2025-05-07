@@ -100,7 +100,7 @@ impl RemoveTableStatement {
 			if let Some(chn) = opt.sender.as_ref() {
 				for lv in lvs.iter() {
 					chn.send(Notification {
-						id: lv.id.into(),
+						id: lv.id,
 						action: dbs::Action::Killed,
 						record: Value::None,
 						result: Value::None,
