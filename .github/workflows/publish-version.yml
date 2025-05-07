@@ -155,7 +155,7 @@ jobs:
           git checkout -b ${{ steps.outputs.outputs.release-branch }}
 
       - name: Patch release version
-        if: ${{ steps.outputs.outputs.environment != 'stable' }}
+        if: ${{ inputs.release-type != 'release' }}
         run: |
           set -x
 
@@ -561,6 +561,11 @@ jobs:
           git_tag_enable = false
           EOF
 
+      - name: Configure git
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
       - name: Patch crate version
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
         run: |
@@ -578,6 +583,9 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
           sed -i "s#surrealdb = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
           sed -i "s#surrealdb-core = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
+
+          # Temporarily commit patch
+          git commit -am "Patch crate version"
 
       - name: Patch crate name and description
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
@@ -603,11 +611,8 @@ jobs:
           sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
           sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
 
-          # Temporarily commit patches
-          # These should not be pushed back to the repo
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git commit -am "Name and version patches"
+          # Temporarily commit patch
+          git commit -am "Patch crate names"
 
       - run: cat Cargo.toml
       - run: cat crates/sdk/Cargo.toml
