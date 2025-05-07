@@ -174,7 +174,6 @@ wiremock.workspace = true
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(kv_fdb)',
     'cfg(storage)',
-    'cfg(surrealdb_unstable)',
 ] }
 
 [lib]

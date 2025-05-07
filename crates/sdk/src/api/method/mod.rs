@@ -260,16 +260,6 @@ where
 		}
 	}
 
-	/// Not supported yet
-	#[doc(hidden)]
-	#[cfg(surrealdb_unstable)] // Mark this API as unstable
-	pub fn transaction(self) -> Begin<C> {
-		warn!("Client side transactions are not yet supported. This API doesn't do anything yet.");
-		Begin {
-			client: self,
-		}
-	}
-
 	/// Switch to a specific namespace
 	///
 	/// # Examples

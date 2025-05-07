@@ -59,9 +59,6 @@ defaults:
   run:
     shell: bash
 
-env:
-  RUSTFLAGS: "--cfg surrealdb_unstable"
-
 jobs:
   prepare-vars:
     name: Prepare vars
