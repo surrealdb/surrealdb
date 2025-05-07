@@ -2,16 +2,16 @@
 
 name: Release
 
-run-name: "Release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
+run-name: "Release '${{ inputs.git-ref }}' (release type: ${{ inputs.release-type }}, publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
 
 on:
   workflow_dispatch:
     inputs:
-      branch:
+      git-ref:
         required: true
         type: string
         default: main
-        description: "The github branch of this release"
+        description: "The git ref of this release"
       release-type:
         type: string
         default: nightly
@@ -45,7 +45,7 @@ jobs:
     name: Prepare release
     uses: ./.github/workflows/publish-version.yml
     with:
-      git-ref: ${{ inputs.branch }}
+      git-ref: ${{ inputs.git-ref }}
       latest: ${{ inputs.latest }}
       release-type: ${{ inputs.release-type }}
       publish: ${{ inputs.publish }}
