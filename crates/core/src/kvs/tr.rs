@@ -174,9 +174,9 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "GetR");
-		self.inner.getr(beg..end, version).await
+		self.inner.getr(rng, version).await
 	}
 
 	/// Retrieve a specific prefixed range of keys from the datastore.
@@ -273,9 +273,9 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), "DelR");
-		self.inner.delr(beg..end).await
+		self.inner.delr(rng).await
 	}
 
 	/// Delete a prefixed range of keys from the datastore.
@@ -324,9 +324,9 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), "ClrR");
-		self.inner.clrr(beg..end).await
+		self.inner.clrr(rng).await
 	}
 
 	/// Delete all versions of a prefixed range of keys from the datastore.
@@ -357,12 +357,12 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Keys");
-		if beg > end {
+		if rng.start > rng.end {
 			return Ok(vec![]);
 		}
-		self.inner.keys(beg..end, limit, version).await
+		self.inner.keys(rng, limit, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -380,12 +380,12 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Keysr");
-		if beg > end {
+		if rng.start > rng.end {
 			return Ok(vec![]);
 		}
-		self.inner.keysr(beg..end, limit, version).await
+		self.inner.keysr(rng, limit, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -403,12 +403,12 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Scan");
-		if beg > end {
+		if rng.start > rng.end {
 			return Ok(vec![]);
 		}
-		self.inner.scan(beg..end, limit, version).await
+		self.inner.scan(rng, limit, version).await
 	}
 
 	#[instrument(level = "trace", target = TARGET, skip_all)]
@@ -423,12 +423,12 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), limit = limit, version = version, "Scanr");
-		if beg > end {
+		if rng.start > rng.end {
 			return Ok(vec![]);
 		}
-		self.inner.scanr(beg..end, limit, version).await
+		self.inner.scanr(rng, limit, version).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -446,9 +446,9 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
-		self.inner.batch_keys(beg..end, batch, version).await
+		self.inner.batch_keys(rng, batch, version).await
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -461,9 +461,9 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), "Count");
-		self.inner.count(beg..end).await
+		self.inner.count(rng).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -481,9 +481,9 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
-		self.inner.batch_keys_vals(beg..end, batch, version).await
+		self.inner.batch_keys_vals(rng, batch, version).await
 	}
 
 	/// Retrieve a batched scan of all versions over a specific range of keys in the datastore.
@@ -500,9 +500,9 @@ impl Transactor {
 	{
 		let beg: Key = rng.start.encode_owned()?;
 		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
+		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), "BatchVersions");
-		self.inner.batch_keys_vals_versions(beg..end, batch).await
+		self.inner.batch_keys_vals_versions(rng, batch).await
 	}
 
 	/// Obtain a new change timestamp for a key
