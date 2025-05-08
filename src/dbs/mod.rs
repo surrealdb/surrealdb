@@ -359,12 +359,12 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_experimental(&self) -> Targets<ExperimentalTarget> {
-		// If there was a global deny, we allow if there is a general allow or some specific allows for HTTP
+		// If there was a global deny, we allow if there is a general allow or some specific allows for experimental features
 		if self.deny_all {
 			return self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None);
 		}
 
-		// If there was a general deny for HTTP, we allow if there are specific allows for HTTP routes
+		// If there was a general deny for experimental features, we allow if there are specific targets
 		if let Some(Targets::All) = self.deny_experimental {
 			match &self.allow_experimental {
 				Some(t @ Targets::Some(_)) => return t.clone(),
@@ -374,7 +374,7 @@ impl DbsCapabilities {
 
 		// If there are no high level denies, we allow the provided Experimental features
 		// If nothing was provided, we deny Experimental targets by default (Targets::None)
-		self.allow_experimental.clone().unwrap_or(Targets::None) // Experimental targets are disabled by default for the server
+		self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None) // Experimental targets are disabled by default for the server
 	}
 
 	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
@@ -398,7 +398,7 @@ impl DbsCapabilities {
 
 		// If there are no high level denies, we allow the provided arbitrary query subjects
 		// If nothing was provided, we allow arbitrary queries by default (Targets::All)
-		self.allow_arbitrary_query.clone().unwrap_or(Targets::All) // arbitrary queries are enabled by default for the server
+		self.allow_arbitrary_query.as_ref().cloned().unwrap_or(Targets::All) // arbitrary queries are enabled by default for the server
 	}
 
 	fn get_deny_funcs(&self) -> Targets<FuncTarget> {
