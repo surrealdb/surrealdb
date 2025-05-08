@@ -144,11 +144,7 @@ impl Transaction {
 	where
 		K: KeyEncode + Debug,
 	{
-		let mut keys_encoded = Vec::new();
-		for k in keys {
-			keys_encoded.push(k.encode_owned()?);
-		}
-		self.lock().await.getm(keys_encoded).await
+		self.lock().await.getm(keys).await
 	}
 
 	/// Retrieve a specific prefix of keys from the datastore.
@@ -159,7 +155,7 @@ impl Transaction {
 	where
 		K: KeyEncode + Debug,
 	{
-		self.lock().await.getp(key.encode_owned()?).await
+		self.lock().await.getp(key).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -174,9 +170,6 @@ impl Transaction {
 	where
 		K: KeyEncode + Debug,
 	{
-		let beg: Key = rng.start.encode_owned()?;
-		let end: Key = rng.end.encode_owned()?;
-		let rng = beg.as_slice()..end.as_slice();
 		self.lock().await.getr(rng, version).await
 	}
 
