@@ -1,3 +1,5 @@
+extend = "Makefile.common.toml"
+
 [env]
 RUSTFLAGS = { value = "-D warnings", condition = { env_not_set = [
     "RUSTFLAGS",
@@ -118,7 +120,8 @@ env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration=debug", condit
     "RUST_LOG",
 ] } } }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
@@ -129,6 +132,7 @@ args = [
     "--",
     "cli_integration",
 ]
+dependencies = ["install-nextest"]
 
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
@@ -137,7 +141,8 @@ env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "http_integration=debug", condi
     "RUST_LOG",
 ] } } }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
@@ -148,6 +153,7 @@ args = [
     "--",
     "http_integration",
 ]
+dependencies = ["install-nextest"]
 
 [tasks.ci-ws-integration]
 category = "WS - INTEGRATION TESTS"
@@ -156,7 +162,8 @@ env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "ws_integration=debug", conditi
     "RUST_LOG",
 ] } } }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
@@ -167,6 +174,7 @@ args = [
     "--",
     "ws_integration",
 ]
+dependencies = ["install-nextest"]
 
 [tasks.ci-ml-integration]
 category = "ML - INTEGRATION TESTS"
@@ -175,7 +183,8 @@ env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug"
     "RUST_LOG",
 ] } } }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--features",
     "storage-mem,ml",
@@ -186,6 +195,7 @@ args = [
     "ml_integration",
     "--nocapture",
 ]
+dependencies = ["install-nextest"]
 
 [tasks.ci-graphql-integration]
 category = "GRAPHQL - INTEGRATION TESTS"
@@ -194,7 +204,8 @@ env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug"
     "RUST_LOG",
 ] } }, SURREAL_CAPS_ALLOW_EXPERIMENTAL = "graphql" }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--features",
     "storage-mem",
@@ -205,12 +216,14 @@ args = [
     "graphql_integration",
     "--nocapture",
 ]
+dependencies = ["install-nextest"]
 
 [tasks.ci-test-workspace]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
@@ -232,12 +245,14 @@ args = [
     "--skip",
     "database_upgrade",
 ]
+dependencies = ["install-nextest"]
 
 [tasks.ci-workspace-coverage]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
     "llvm-cov",
+    "nextest",
     "--html",
     "--locked",
     "--no-default-features",
@@ -260,6 +275,7 @@ args = [
     "--skip",
     "database_upgrade",
 ]
+dependencies = ["install-nextest"]
 
 [tasks.test-workspace-coverage-complete]
 category = "CI - INTEGRATION TESTS"
@@ -297,7 +313,8 @@ private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--package",
     "surrealdb-core",
@@ -313,7 +330,8 @@ private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--package",
     "surrealdb",
@@ -339,7 +357,8 @@ private = true
 command = "cargo"
 env = { RUST_LOG = "info" }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",

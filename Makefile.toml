@@ -1,3 +1,21 @@
+# `cargo make` configuration file for SurrealDB.
+#
+# Makefile hierarchy:
+# ```
+#       ┌─────Makefile.toml────┐
+#       │                      │
+#       ▼                      ▼
+# Makefile.ci.toml    Makefile.local.toml
+#             │          │
+#             ▼          ▼
+#         Makefile.common.toml
+# ```
+#
+# Makefile.toml: The configuration entrypoint for `cargo make`.
+# Makefile.local.toml: Tasks which are only for local development.
+# Makefile.ci.toml: CI Tasks but which are also useful for local development.
+# Makefile.common.toml: Common setup tasks used by both local and CI.
+
 extend = [
     { path = "Makefile.local.toml" },
     { path = "Makefile.ci.toml" },

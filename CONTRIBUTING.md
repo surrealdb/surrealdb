@@ -54,6 +54,8 @@ To run all tests manually, use the SurrealDB command-line from your terminal:
 
 ```bash
 cargo test
+# Or use nextest
+cargo nextest run
 ```
 
 To build a production-ready SurrealDB binary, execute the following command:

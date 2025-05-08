@@ -1,0 +1,29 @@
+
+[tasks.cargo-upgrade]
+private = true
+command = "cargo"
+args = ["upgrade", "--pinned"]
+
+[tasks.cargo-update]
+private = true
+command = "cargo"
+args = ["update"]
+
+[tasks.setup]
+category = "LOCAL USAGE"
+dependencies = ["cargo-upgrade", "cargo-update"]
+
+[tasks.install-binstall]
+command = "cargo"
+args = [
+    "install",
+    "binstall",
+]
+
+[tasks.install-nextest]
+command = "cargo"
+args = [
+    "binstall",
+    "-y",
+    "cargo-nextest",
+]

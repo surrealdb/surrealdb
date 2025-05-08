@@ -1,3 +1,5 @@
+extend = "Makefile.common.toml"
+
 [env]
 RUSTFLAGS = { value = "-D warnings", condition = { env_not_set = [
     "RUSTFLAGS",
@@ -36,7 +38,8 @@ args = [
 [tasks.test]
 category = "LOCAL USAGE"
 command = "cargo"
-args = ["test", "--profile", "make", "--workspace", "--no-fail-fast"]
+args = ["nextest", "run", "--profile", "make", "--workspace", "--no-fail-fast"]
+dependencies = ["install-nextest"]
 
 # Format
 [tasks.cargo-fmt]
