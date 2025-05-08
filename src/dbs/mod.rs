@@ -722,6 +722,28 @@ mod tests {
 				true,
 				"1".to_string(),
 			),
+			// Specific experimental feature enabled
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::RecordReferences.into())
+				),
+				Session::owner().with_ns("test").with_db("test"),
+				"DEFINE FIELD a ON allow_record TYPE record REFERENCE".to_string(),
+				true,
+				"NONE".to_string(),
+			),
+			// Specific experimental feature disabled
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.without_experimental(ExperimentalTarget::RecordReferences.into())
+				),
+				Session::owner().with_ns("test").with_db("test"),
+				"DEFINE FIELD a ON deny_record TYPE record REFERENCE".to_string(),
+				false,
+				"Experimental capability `record_references` is not enabled".to_string(),
+			),
 			//
 			// Some functions are not allowed
 			//
