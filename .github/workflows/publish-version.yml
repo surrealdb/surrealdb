@@ -5,10 +5,10 @@ on:
         required: true
         type: string
         description: "The git ref of this release version. All 'actions/checkout' steps will use it"
-      suffix:
+      release-type:
         type: string
         default: nightly
-        description: "The suffix of the version, e.g. none, nightly, alpha.1 or beta.1"
+        description: "The type of release, e.g. release, patch, nightly, alpha.1 or beta.1"
       latest:
         required: false
         type: boolean
@@ -76,8 +76,8 @@ jobs:
         run: |
           set -x
 
-          suffix=$(echo ${{ inputs.suffix }} | tr "." "\n" | sed -n 1p)
-          patch=$(echo ${{ inputs.suffix }} | tr "." "\n" | sed -n 2p)
+          suffix=$(echo ${{ inputs.release-type }} | tr "." "\n" | sed -n 1p)
+          patch=$(echo ${{ inputs.release-type }} | tr "." "\n" | sed -n 2p)
           version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
           echo "current-version=${version}" >> $GITHUB_OUTPUT
 
@@ -86,8 +86,8 @@ jobs:
             exit 400
           fi
 
-          if [[ $suffix != "none" && $suffix != "nightly" && $suffix != "alpha" && $suffix != "beta" && $suffix != "rc" ]]; then
-            echo "'${suffix}' is not a supported suffix"
+          if [[ "${{ inputs.release-type }}" != "release" && "${{ inputs.release-type }}" != "patch" && "${{ inputs.release-type }}" != "nightly" && $suffix != "alpha" && $suffix != "beta" && $suffix != "rc" ]]; then
+            echo "'${{ inputs.release-type }}' is not a supported release type"
             exit 400
           fi
 
@@ -101,8 +101,15 @@ jobs:
             fi
           fi
 
-          if [[ $suffix == "none" ]]; then
+          if [[ $suffix == "release" ]]; then
             patch=$(echo ${version} | tr "." "\n" | sed -n 3p)
+            environment=stable
+          elif [[ $suffix == "patch" ]]; then
+            major=$(echo ${version} | tr "." "\n" | sed -n 1p)
+            minor=$(echo ${version} | tr "." "\n" | sed -n 2p)
+            currentPatch=$(echo ${version} | tr "." "\n" | sed -n 3p)
+            patch=$(($currentPatch + 1))
+            version=${major}.${minor}.${patch}
             environment=stable
           elif [[ $suffix == "nightly" ]]; then
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
@@ -110,14 +117,14 @@ jobs:
             patch=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
             rev=$(git rev-parse --short HEAD)
             buildMetadata=${date}.${rev}
-            version=${version}-${{ inputs.suffix }}
-            environment=${{ inputs.suffix }}
+            version=${version}-${{ inputs.release-type }}
+            environment=${{ inputs.release-type }}
           elif [[  $suffix == "rc" ]]; then
-            version=${version}-${{ inputs.suffix }}
+            version=${version}-${{ inputs.release-type }}
             patch=$(($patch - 1))
             environment=release-candidate
           else
-            version=${version}-${{ inputs.suffix }}
+            version=${version}-${{ inputs.release-type }}
             patch=$(($patch - 1))
             environment=${suffix}
           fi
@@ -148,7 +155,7 @@ jobs:
           git checkout -b ${{ steps.outputs.outputs.release-branch }}
 
       - name: Patch release version
-        if: ${{ steps.outputs.outputs.environment != 'stable' }}
+        if: ${{ inputs.release-type != 'release' }}
         run: |
           set -x
 
@@ -554,6 +561,11 @@ jobs:
           git_tag_enable = false
           EOF
 
+      - name: Configure git
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
       - name: Patch crate version
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
         run: |
@@ -571,6 +583,9 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
           sed -i "s#surrealdb = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
           sed -i "s#surrealdb-core = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
+
+          # Temporarily commit patch
+          git commit -am "Patch crate version"
 
       - name: Patch crate name and description
         if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
@@ -596,11 +611,8 @@ jobs:
           sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
           sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
 
-          # Temporarily commit patches
-          # These should not be pushed back to the repo
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git commit -am "Name and version patches"
+          # Temporarily commit patch
+          git commit -am "Patch crate names"
 
       - run: cat Cargo.toml
       - run: cat crates/sdk/Cargo.toml
