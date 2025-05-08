@@ -50,12 +50,18 @@ By default, SurrealDB runs locally on port 8000. To change the default listening
 cargo run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root --bind 0.0.0.0:9000 memory
 ```
 
-To run all tests manually, use the SurrealDB command-line from your terminal:
+We recommend using `nextest` to speed up test execution. You can install
+the test dependencies as follows:
+
+```bash
+cargo install --locked binstall
+cargo binstall -y --locked cargo-nextest cargo-make
+```
+
+To run all tests without `nextest`, use the following command:
 
 ```bash
 cargo test
-# Or use nextest
-cargo nextest run
 ```
 
 To build a production-ready SurrealDB binary, execute the following command:

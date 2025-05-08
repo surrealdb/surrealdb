@@ -250,8 +250,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Depenencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
@@ -270,6 +271,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Depenencies
+        run: cargo binstall -y cargo-nextest cargo-make
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -313,8 +318,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Depenencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
@@ -334,8 +340,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Depenencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Run GraphQL integration tests
         run: cargo make ci-graphql-integration
@@ -359,14 +366,15 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
+      - name: Update system dependencies
         run: sudo apt-get -y update
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
@@ -422,8 +430,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Test Any engine
         run: cargo make ci-api-integration-any
@@ -451,8 +460,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Test WS engine
         run: cargo make ci-api-integration-ws
@@ -480,8 +490,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Test HTTP engine
         run: cargo make ci-api-integration-http
@@ -509,8 +520,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Test Memory engine
         run: cargo make ci-api-integration-mem
@@ -538,8 +550,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Test File engine
         run: cargo make ci-api-integration-file
@@ -567,8 +580,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Test RocksDB engine
         run: cargo make ci-api-integration-rocksdb
@@ -596,8 +610,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Test SurrealKV engine
         run: cargo make ci-api-integration-surrealkv
@@ -632,8 +647,9 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
           done
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Test TiKV engine
         run: cargo make ci-api-integration-tikv
@@ -661,8 +677,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
@@ -695,8 +712,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
@@ -733,8 +751,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install Dependencies
+        run: cargo binstall -y --locked cargo-nextest cargo-make
 
       - name: Test upgrade
         run: cargo make ci-database-upgrade

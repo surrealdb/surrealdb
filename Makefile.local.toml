@@ -39,7 +39,6 @@ args = [
 category = "LOCAL USAGE"
 command = "cargo"
 args = ["nextest", "run", "--profile", "make", "--workspace", "--no-fail-fast"]
-dependencies = ["install-nextest"]
 
 # Format
 [tasks.cargo-fmt]

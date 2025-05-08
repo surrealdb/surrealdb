@@ -132,7 +132,6 @@ args = [
     "--",
     "cli_integration",
 ]
-dependencies = ["install-nextest"]
 
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
@@ -153,7 +152,6 @@ args = [
     "--",
     "http_integration",
 ]
-dependencies = ["install-nextest"]
 
 [tasks.ci-ws-integration]
 category = "WS - INTEGRATION TESTS"
@@ -174,7 +172,6 @@ args = [
     "--",
     "ws_integration",
 ]
-dependencies = ["install-nextest"]
 
 [tasks.ci-ml-integration]
 category = "ML - INTEGRATION TESTS"
@@ -195,7 +192,6 @@ args = [
     "ml_integration",
     "--nocapture",
 ]
-dependencies = ["install-nextest"]
 
 [tasks.ci-graphql-integration]
 category = "GRAPHQL - INTEGRATION TESTS"
@@ -216,7 +212,6 @@ args = [
     "graphql_integration",
     "--nocapture",
 ]
-dependencies = ["install-nextest"]
 
 [tasks.ci-test-workspace]
 category = "CI - INTEGRATION TESTS"
@@ -245,7 +240,6 @@ args = [
     "--skip",
     "database_upgrade",
 ]
-dependencies = ["install-nextest"]
 
 [tasks.ci-workspace-coverage]
 category = "CI - INTEGRATION TESTS"
@@ -275,7 +269,6 @@ args = [
     "--skip",
     "database_upgrade",
 ]
-dependencies = ["install-nextest"]
 
 [tasks.test-workspace-coverage-complete]
 category = "CI - INTEGRATION TESTS"
