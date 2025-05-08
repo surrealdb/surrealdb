@@ -1,15 +1,10 @@
 [workspace]
-members = [
-    ".",
-    "crates/core",
-    "crates/sdk",
-]
+members = [".", "crates/core", "crates/sdk"]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2021"
 license-file = "LICENSE"
-name = "surreal"
 publish = false
 version = "3.0.0"
 rust-version = "1.84.0"
@@ -24,7 +19,6 @@ keywords = [
     "kv-store",
 ]
 categories = ["database-implementations", "data-structures", "embedded"]
-resolver = "2"
 
 [workspace.dependencies]
 # workspace internal dependencies
@@ -37,7 +31,9 @@ dmp = "0.2.3"
 indxdb = "0.6.0"
 ipnet = "2.9.0"
 surrealkv = { version = "0.9.1" }
-surrealml = { version = "0.1.7", package = "surrealml-core", features = ["dynamic"]}
+surrealml = { version = "0.1.7", package = "surrealml-core", features = [
+    "dynamic",
+] }
 ## Somewhat a surreal crate as it is maintained by @Delskayn.
 js = { version = "0.9.0", package = "rquickjs" }
 lexicmp = "0.2.0"
@@ -211,24 +207,6 @@ storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 # Doesn't do anything. Use a version specific `storage-fdb-*` feature instead.
 storage-fdb = ["surrealdb/kv-fdb"]
 enterprise = ["surrealdb-core/enterprise"]
-
-[profile.release]
-codegen-units = 1
-lto = true
-opt-level = 3
-panic = 'abort'
-strip = true
-
-[profile.bench]
-strip = false
-
-[profile.make]
-inherits = "dev"
-
-[profile.profiling]
-debug = true
-inherits = "release"
-strip = false
 
 [dependencies]
 # workspace internal dependencies
@@ -459,3 +437,22 @@ lossy_float_literal = "warn"
 # SurrealDB relies on async functions in the AST parser and executor to avoid stack overflows.
 # Warning or denying this lint can cause unexpected errors.
 unused_async = "allow"
+
+# Profiles
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = 'abort'
+strip = true
+
+[profile.bench]
+strip = false
+
+[profile.make]
+inherits = "dev"
+
+[profile.profiling]
+debug = true
+inherits = "release"
+strip = false
