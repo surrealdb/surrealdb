@@ -407,7 +407,7 @@ impl DbsCapabilities {
 	}
 
 	fn get_deny_experimental(&self) -> Targets<ExperimentalTarget> {
-		self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None)
+		self.deny_experimental.as_ref().cloned().unwrap_or(Targets::None)
 	}
 
 	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
