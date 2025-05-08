@@ -1,13 +1,30 @@
-[package]
+[workspace]
+members = [
+    ".",
+    "crates/core",
+    "crates/sdk",
+]
+
+[workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2021"
 license-file = "LICENSE"
 name = "surreal"
 publish = false
 version = "3.0.0"
-
-[workspace]
-members = ["crates/core", "crates/sdk"]
+rust-version = "1.84.0"
+description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
+repository = "https://github.com/surrealdb/surrealdb"
+homepage = "https://github.com/surrealdb/surrealdb"
+keywords = [
+    "database",
+    "embedded-database",
+    "key-value",
+    "key-value-store",
+    "kv-store",
+]
+categories = ["database-implementations", "data-structures", "embedded"]
+resolver = "2"
 
 [workspace.dependencies]
 # workspace internal dependencies
@@ -149,6 +166,20 @@ test-log = "0.2.13"
 time = "0.3.36"
 tracing-subscriber = "0.3.18"
 wiremock = "0.6.0"
+
+[package]
+name = "surreal"
+publish = false
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
 
 [features]
 # Public features
