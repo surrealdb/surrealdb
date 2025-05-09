@@ -312,7 +312,7 @@ args = [
     "${_TEST_FEATURES}",
     "--lib",
     "kvs::tests",
-    # Run the tests one at a time to avoid contention on the database.
+    # Run the tests one at a time in order to ensure isolation.
     "--test-threads", "1",
 ]
 
@@ -332,6 +332,8 @@ args = [
     "--test",
     "api",
     "api_integration::${_TEST_API_ENGINE}",
+    # Run the tests one at a time in order to ensure isolation.
+    "--test-threads", "1",
 ]
 
 [tasks.ci-api-integration]
