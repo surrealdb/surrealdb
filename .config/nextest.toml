@@ -1,0 +1,11 @@
+# Nextest configuration file.
+# https://nexte.st/docs/configuration/
+
+[profile.default]
+
+# Show test failures immediately and at the end.
+failure-output = "immediate-final"
+
+# Mark tests as slow if they take longer than 30 seconds.
+# Terminate the test if it takes longer than 3 minutes.
+slow-timeout = { period = "30s", terminate-after = 6 }
