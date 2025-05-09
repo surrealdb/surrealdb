@@ -378,11 +378,6 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
-		// If there was a global deny, we allow if there is a general allow or some specific allows for arbitrary queries
-		if self.deny_all {
-			return self.allow_arbitrary_query.as_ref().cloned().unwrap_or(Targets::None);
-		}
-
 		// If there was a general deny for arbitrary queries, we allow if there are specific allows for arbitrary query subjects
 		if let Some(Targets::All) = self.deny_arbitrary_query {
 			match &self.allow_arbitrary_query {
