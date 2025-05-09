@@ -24,6 +24,16 @@ pub(super) struct FileCollector {
 	paging: FilePaging,
 }
 
+impl std::fmt::Debug for FileCollector {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("FileCollector")
+			.field("len", &self.len)
+			.field("dir", &self.dir.path())
+			.field("orders", &self.orders)
+			.finish()
+	}
+}
+
 impl FileCollector {
 	const INDEX_FILE_NAME: &'static str = "ix";
 	const RECORDS_FILE_NAME: &'static str = "re";

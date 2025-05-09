@@ -150,8 +150,18 @@ pub fn filter_tests(testset: TestSet, matches: &ArgMatches) -> TestSet {
 	let subset =
 		testset.filter_map(|_, test| test.config.test.as_ref().map(|x| x.upgrade).unwrap_or(false));
 
-	let subset = if let Some(x) = matches.get_one::<String>("filter") {
-		subset.filter_map(|name, _| name.contains(x))
+	let subset = if let Some(filters) = matches.get_many::<String>("filter") {
+		let filters: Vec<String> = filters.map(|x| x.to_string()).collect();
+
+		testset.filter_map(|name, _| {
+			for filter in &filters {
+				if name.contains(filter) {
+					return true;
+				}
+			}
+
+			false
+		})
 	} else {
 		subset
 	};
