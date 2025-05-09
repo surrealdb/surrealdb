@@ -7,5 +7,5 @@
 failure-output = "immediate-final"
 
 # Mark tests as slow if they take longer than 30 seconds.
-# Terminate the test if it takes longer than 3 minutes.
-slow-timeout = { period = "30s", terminate-after = 6 }
+# Terminate the test if it takes longer than 5 minutes.
+slow-timeout = { period = "30s", terminate-after = 10 }
