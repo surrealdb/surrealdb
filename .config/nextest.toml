@@ -9,3 +9,15 @@ failure-output = "immediate-final"
 # Mark tests as slow if they take longer than 30 seconds.
 # Terminate the test if it takes longer than 5 minutes.
 slow-timeout = { period = "30s", terminate-after = 10 }
+
+[[profile.default.overrides]]
+filter = 'test(/define::define_statement_index_concurrently_building_status_full_text/)'
+threads-required = 4
+
+[[profile.default.overrides]]
+filter = 'test(/syn::test::test_excessive_size/)'
+threads-required = 4
+
+[[profile.default.overrides]]
+filter = 'test(/idx::/)'
+threads-required = 4
