@@ -191,9 +191,6 @@ strip = true
 [profile.bench]
 strip = false
 
-[profile.make]
-inherits = "dev"
-
 [profile.profiling]
 debug = true
 inherits = "release"
