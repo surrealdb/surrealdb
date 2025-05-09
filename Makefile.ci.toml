@@ -188,9 +188,7 @@ args = [
     "--workspace",
     "--test",
     "ml_integration",
-    "--",
-    "ml_integration",
-    "--nocapture",
+    "--no-capture",
 ]
 
 [tasks.ci-graphql-integration]
@@ -208,9 +206,7 @@ args = [
     "--workspace",
     "--test",
     "graphql_integration",
-    "--",
-    "graphql_integration",
-    "--nocapture",
+    "--no-capture",
 ]
 
 [tasks.ci-test-workspace]
@@ -316,6 +312,8 @@ args = [
     "${_TEST_FEATURES}",
     "--lib",
     "kvs::tests",
+    # Run the tests one at a time to avoid contention on the database.
+    "--test-threads", "1",
 ]
 
 [tasks.test-api-integration]
