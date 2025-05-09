@@ -359,9 +359,7 @@ args = [
     "--workspace",
     "--test",
     "database_upgrade",
-    "--",
-    "database_upgrade",
-    "--show-output",
+    "--success-output", "final",
 ]
 
 #
