@@ -2175,5 +2175,42 @@ mod http_integration {
 			let res = res.text().await.unwrap();
 			assert!(res.contains("The HTTP route 'sql' is forbidden"), "body: {}", res);
 		}
+		// Deny arbitrary querying
+		{
+			// Start server disallowing routes for queries, exporting and importing
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-arbitrary-query *".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that denied routes are disallowed
+			let res = client
+				.post(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body("123")
+				.send()
+				.await
+				.unwrap();
+			let res = res.text().await.unwrap();
+			assert!(res.contains("The HTTP route 'sql' is forbidden"), "body: {}", res);
+		}
 	}
 }
