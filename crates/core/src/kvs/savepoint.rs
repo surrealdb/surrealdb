@@ -1,27 +1,29 @@
-#![cfg_attr(target_family = "wasm", expect(dead_code, reason = "Not used in WASM."))]
+#![cfg_attr(
+	not(any(feature = "kv-fdb", feature = "kv-tikv")),
+	expect(dead_code, reason = "This is only used in FoundationDB and TiKV")
+)]
 
 use crate::err::Error;
-use crate::kvs::api::Transaction;
 use crate::kvs::{Key, Val};
 use std::collections::{HashMap, VecDeque};
 
 type SavePoint = HashMap<Key, SavedValue>;
 
 #[derive(Debug)]
-pub(super) enum SaveOperation {
+pub(crate) enum SaveOperation {
 	Set,
 	Put,
 	Del,
 }
 
-pub(super) struct SavedValue {
-	saved_val: Option<Val>,
-	saved_version: Option<u64>,
-	last_operation: SaveOperation,
+pub(crate) struct SavedValue {
+	pub(crate) saved_val: Option<Val>,
+	pub(crate) saved_version: Option<u64>,
+	pub(crate) last_operation: SaveOperation,
 }
 
 impl SavedValue {
-	pub(super) fn new(val: Option<Val>, version: Option<u64>, op: SaveOperation) -> Self {
+	pub(crate) fn new(val: Option<Val>, version: Option<u64>, op: SaveOperation) -> Self {
 		Self {
 			saved_val: val,
 			saved_version: version,
@@ -29,13 +31,12 @@ impl SavedValue {
 		}
 	}
 
-	#[cfg(any(feature = "kv-fdb", feature = "kv-tikv"))]
-	pub(super) fn get_val(&self) -> Option<&Val> {
+	pub(crate) fn get_val(&self) -> Option<&Val> {
 		self.saved_val.as_ref()
 	}
 }
 
-pub(super) enum SavePrepare {
+pub(crate) enum SavePrepare {
 	AlreadyPresent(Key, SaveOperation),
 	NewKey(Key, SavedValue),
 }
@@ -85,70 +86,5 @@ impl SavePoints {
 				}
 			}
 		}
-	}
-
-	pub(super) async fn rollback<T>(sp: SavePoint, tx: &mut T) -> Result<(), Error>
-	where
-		T: Transaction,
-	{
-		for (key, saved_value) in sp {
-			match saved_value.last_operation {
-				SaveOperation::Set | SaveOperation::Put => {
-					if let Some(initial_value) = saved_value.saved_val {
-						// If the last operation was a SET or PUT
-						// then we just have set back the key to its initial value
-						tx.set(key, initial_value, saved_value.saved_version).await?;
-					} else {
-						// If the last operation on this key was not a DEL operation,
-						// then we have to delete the key
-						tx.del(key).await?;
-					}
-				}
-				SaveOperation::Del => {
-					if let Some(initial_value) = saved_value.saved_val {
-						// If the last operation was a DEL,
-						// then we have to put back the initial value
-						tx.put(key, initial_value, saved_value.saved_version).await?;
-					}
-				}
-			}
-		}
-		Ok(())
-	}
-}
-
-pub(super) trait SavePointImpl: Transaction + Sized {
-	fn get_save_points(&mut self) -> &mut SavePoints;
-
-	fn new_save_point(&mut self) {
-		self.get_save_points().new_save_point()
-	}
-
-	async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
-		let sp = self.get_save_points().pop()?;
-		SavePoints::rollback(sp, self).await
-	}
-
-	fn release_last_save_point(&mut self) -> Result<(), Error> {
-		self.get_save_points().pop()?;
-		Ok(())
-	}
-
-	async fn save_point_prepare(
-		&mut self,
-		key: &Key,
-		version: Option<u64>,
-		op: SaveOperation,
-	) -> Result<Option<SavePrepare>, Error> {
-		let is_saved_key = self.get_save_points().is_saved_key(key);
-		let r = match is_saved_key {
-			None => None,
-			Some(true) => Some(SavePrepare::AlreadyPresent(key.clone(), op)),
-			Some(false) => {
-				let val = self.get(key.clone(), version).await?;
-				Some(SavePrepare::NewKey(key.clone(), SavedValue::new(val, version, op)))
-			}
-		};
-		Ok(r)
 	}
 }

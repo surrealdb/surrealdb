@@ -1,25 +1,18 @@
 [package]
 name = "surrealdb-core"
 publish = true
-edition = "2021"
-version = "3.0.0"
-rust-version = "1.84.0"
 readme = "README.md"
-authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
-repository = "https://github.com/surrealdb/surrealdb"
-homepage = "https://github.com/surrealdb/surrealdb"
 documentation = "https://docs.rs/surrealdb-core/"
-keywords = [
-    "database",
-    "embedded-database",
-    "key-value",
-    "key-value-store",
-    "kv-store",
-]
-categories = ["database-implementations", "data-structures", "embedded"]
-license-file = "../../LICENSE"
-resolver = "2"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
 
 [features]
 # Public features
@@ -122,6 +115,7 @@ async-executor.workspace = true
 async-graphql = { workspace = true, default-features = false, features = [
     "dynamic-schema",
 ] }
+async-trait.workspace = true
 base64.workspace = true
 bcrypt.workspace = true
 bincode.workspace = true
