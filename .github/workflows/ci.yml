@@ -185,12 +185,11 @@ jobs:
         run: cargo build --manifest-path crates/fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
-        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
+        #        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
+        uses: emmanuel-keller/oss-fuzz/infra/cifuzz/actions/build_fuzzers@surrealdb-update-rust-compiler
         with:
           oss-fuzz-project-name: surrealdb
           language: rust
-        # Temporarily allow this step to fail
-        continue-on-error: true
 
   check-wasm:
     name: Check Wasm
@@ -346,7 +345,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [runner-arm64-2xlarge]
+    runs-on: [ runner-arm64-2xlarge ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
