@@ -197,8 +197,8 @@ impl Display for GraphSubjects {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum GraphSubject {
-	Table(pub Table),
-	Range(pub Table, pub IdRange),
+	Table(Table),
+	Range(Table, IdRange),
 }
 
 impl GraphSubject {
