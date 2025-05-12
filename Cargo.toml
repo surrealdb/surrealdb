@@ -1,4 +1,5 @@
 [workspace]
+# Note: Be sure to update the members list in `.github/scripts/patch_crate.sh`.
 members = [
     ".",
     "crates/common",
