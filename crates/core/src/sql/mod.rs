@@ -150,6 +150,8 @@ pub use self::start::Start;
 pub use self::statement::Statement;
 pub use self::statement::Statements;
 pub use self::strand::Strand;
+pub use self::stream::Stream;
+pub use self::stream::StreamVal;
 pub use self::subquery::Subquery;
 pub use self::table::Table;
 pub use self::table::Tables;

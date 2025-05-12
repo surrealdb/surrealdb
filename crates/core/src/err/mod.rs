@@ -7,6 +7,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::{CastError, CoerceError, Value};
+use crate::sql::Bytesize;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
@@ -1360,6 +1361,12 @@ pub enum Error {
 
 	#[error("No streams are available in this context")]
 	StreamsUnavailable,
+
+	#[error("Expected a stream of up to {0} bytes")]
+	StreamTooLarge(Bytesize),
+
+	#[error("The stream is currently locked elsewhere")]
+	StreamLocked,
 }
 
 impl From<Error> for String {

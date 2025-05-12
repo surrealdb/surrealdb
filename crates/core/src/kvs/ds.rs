@@ -27,7 +27,6 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::stream::StreamVal;
 use crate::sql::FlowResultExt as _;
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
@@ -97,8 +96,6 @@ pub struct Datastore {
 	buckets: Arc<BucketConnections>,
 	// The sequences
 	sequences: Sequences,
-	// Streams
-	streams: Arc<DashMap<Uuid, StreamVal>>,
 }
 
 #[derive(Clone)]
@@ -411,7 +408,6 @@ impl Datastore {
 				cache: Arc::new(DatastoreCache::new()),
 				buckets: Arc::new(DashMap::new()),
 				sequences: Sequences::new(tf),
-				streams: Arc::new(DashMap::new()),
 			}
 		})
 	}
@@ -438,7 +434,6 @@ impl Datastore {
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(self.transaction_factory.clone()),
 			transaction_factory: self.transaction_factory,
-			streams: Arc::new(DashMap::new()),
 		}
 	}
 
@@ -1227,7 +1222,6 @@ impl Datastore {
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
-			self.streams.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

@@ -18,6 +18,7 @@ use crate::{
 	kvs::{Datastore, Transaction},
 	sql::{
 		statements::define::{config::api::ApiConfig, ApiDefinition},
+		stream::{Stream, StreamVal},
 		FlowResultExt as _, Object, Value,
 	},
 };
@@ -51,16 +52,25 @@ impl ApiInvocation {
 		ds: Arc<Datastore>,
 		sess: &Session,
 		api: &ApiDefinition,
-		body: ApiBody,
-	) -> Result<Option<(ApiResponse, ResponseInstruction)>, Error> {
+		stream: StreamVal,
+	) -> Result<Option<(Context, ApiResponse, ResponseInstruction)>, Error> {
 		let opt = ds.setup_options(sess);
 
 		let mut ctx = ds.setup_ctx()?;
 		ctx.set_transaction(tx);
-		let ctx = &ctx.freeze();
+		let ctx = ctx.freeze();
+
+		let body = ApiBody {
+			body: Value::Stream(Stream::from_stream(&ctx, stream)?),
+			native: false,
+		};
 
 		let mut stack = TreeStack::new();
-		stack.enter(|stk| self.invoke_with_context(stk, ctx, &opt, api, body)).finish().await
+		stack
+			.enter(|stk| self.invoke_with_context(stk, &ctx, &opt, api, body))
+			.finish()
+			.await
+			.map(|x| x.map(|(res, res_instruction)| (ctx, res, res_instruction)))
 	}
 
 	// The `invoke` method accepting a parameter like `Option<&mut Stk>`
@@ -96,7 +106,7 @@ impl ApiInvocation {
 		inv_ctx.apply_middleware(builtin)?;
 
 		// Prepare the response headers and conversion
-		let res_instruction = if body.is_native() {
+		let res_instruction = if body.native {
 			ResponseInstruction::Native
 		} else if inv_ctx.response_body_raw {
 			ResponseInstruction::Raw
@@ -104,7 +114,7 @@ impl ApiInvocation {
 			ResponseInstruction::for_format(&self)?
 		};
 
-		let body = body.process(&inv_ctx, &self).await?;
+		let body = body.process(ctx, &inv_ctx, &self).await?;
 
 		// Edit the options
 		let opt = opt.new_with_perms(false);

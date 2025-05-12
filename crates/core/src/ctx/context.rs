@@ -26,7 +26,7 @@ use std::fmt::{self, Debug};
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use trice::Instant;
 #[cfg(feature = "http")]
@@ -74,7 +74,7 @@ pub struct MutableContext {
 	// A map of bucket connections
 	buckets: Option<Arc<BucketConnections>>,
 	// A map of stream values
-	streams: Option<Arc<DashMap<Uuid, StreamVal>>>,
+	streams: Option<Arc<DashMap<Uuid, Mutex<StreamVal>>>>,
 }
 
 impl Default for MutableContext {
@@ -222,7 +222,6 @@ impl MutableContext {
 		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: Arc<BucketConnections>,
-		streams: Arc<DashMap<Uuid, StreamVal>>,
 	) -> Result<MutableContext, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -244,7 +243,7 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: Some(buckets),
-			streams: Some(streams),
+			streams: Some(Default::default()),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -526,7 +525,7 @@ impl MutableContext {
 		self.buckets.clone()
 	}
 
-	pub(crate) fn get_streams(&self) -> Option<Arc<DashMap<Uuid, StreamVal>>> {
+	pub(crate) fn get_streams(&self) -> Option<Arc<DashMap<Uuid, Mutex<StreamVal>>>> {
 		self.streams.clone()
 	}
 
