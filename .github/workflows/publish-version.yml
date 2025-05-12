@@ -37,7 +37,7 @@ on:
       rust_version:
         required: false
         type: string
-        default: "stable"
+        default: "1.86.0"
         description: "The Rust version to use for building binaries"
       onnx_version:
         required: false
