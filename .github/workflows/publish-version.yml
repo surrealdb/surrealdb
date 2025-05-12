@@ -104,16 +104,14 @@ jobs:
         run: |
           set -x
 
-          version=${{ steps.outputs.outputs.version }}
+          ENVIRONMENT="not-release" \
+            CURRENT_VERSION=${{ steps.outputs.outputs.current-version }} \
+            VERSION=${{ steps.outputs.outputs.version }} \
+            PATCH=${{ steps.outputs.outputs.patch }} \
+            ./.github/scripts/patch_crate.sh version
 
-          # Bump the crate version
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
-
-          # Update Cargo.lock without updating dependency versions
-          cargo check --no-default-features --features storage-mem
-
-          # Commit changes
-          git commit -m "Prepare v${version} release"
+          # Temporarily commit patch
+          git commit -am "Prepare v${{ steps.outputs.outputs.version }} release"
 
       - name: Push the release branch
         run: git push
@@ -241,10 +239,10 @@ jobs:
             CURRENT_VERSION=${{ needs.prepare-vars.outputs.current-version }} \
             VERSION=${{ needs.prepare-vars.outputs.version }} \
             PATCH=${{ needs.prepare-vars.outputs.patch }} \
-            ./.github/scripts/patch_crate.sh
+            ./.github/scripts/patch_crate.sh all
 
           # Temporarily commit patch
-          git commit -m "Patch crate name, version, and description"
+          git commit -am "Patch crate name, version, and description"
 
       - run: cat Cargo.toml ./crates/*/Cargo.toml
 
