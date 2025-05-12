@@ -7,6 +7,8 @@ CURRENT_VERSION="${CURRENT_VERSION}"
 VERSION="${VERSION}"
 PATCH="${PATCH}"
 
+COMMAND="${1}"
+
 # Note: Keep these in sync with the `members` array in the `Cargo.toml` file.
 members=("surrealdb-common" "surrealdb-expr" "surrealdb-core" "surrealdb-sql" "surrealdb")
 member_paths=("crates/common" "crates/expr" "crates/core" "crates/sql" "crates/sdk")
@@ -75,13 +77,35 @@ function patch_description() {
     sed -i "s#^description = \".*\"#description = \"${start} ${ENVIRONMENT} release of the crate.\"#" Cargo.toml
 }
 
+# Check the environment and exit early if it's stable.
 case "${ENVIRONMENT}" in
     "stable")
         echo "Stable release, no patching required"
+        exit 0
         ;;
     *)
+        ;;
+esac
+
+case "${COMMAND}" in
+    "version")
+        patch_version
+        ;;
+    "name")
+        patch_name
+        ;;
+    "description")
+        patch_description
+        ;;
+    "all")
         patch_version
         patch_name
         patch_description
         ;;
+    *)
+        echo "Invalid command. Use 'version', 'name', 'description', or 'all'."
+        exit 1
+        ;;
 esac
+
+echo "Patching completed successfully."
