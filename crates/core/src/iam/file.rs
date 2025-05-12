@@ -10,20 +10,46 @@ pub(crate) fn is_path_allowed(path: &Path) -> Result<PathBuf> {
 }
 
 /// Checks if the requested file path is within any of the allowed directories.
-fn check_is_path_allowed(path: &Path, allowed_path: &[PathBuf]) -> Result<PathBuf> {
+fn check_is_path_allowed(path: &Path, allowed_paths: &[PathBuf]) -> Result<PathBuf, Error> {
 	// Convert the requested path to its canonical form.
 	let canonical_path = fs::canonicalize(path)?;
 
 	// If the list is empty, we don't operate any control
-	if allowed_path.is_empty() {
+	if allowed_paths.is_empty() {
 		return Ok(canonical_path);
 	}
 
 	// Check if the canonical path starts with any of the allowed paths.
-	if allowed_path.iter().any(|allowed| canonical_path.starts_with(allowed)) {
+	if allowed_paths.iter().any(|allowed| {
+		#[cfg(windows)]
+		{
+			// On Windows, handle case-insensitive comparison and canonical prefixes
+			const WINDOWS_CANONICAL_PREFIX: &str = "//?/";
+
+			// Convert paths to strings for normalization
+			let mut canonical_str =
+				canonical_path.to_string_lossy().to_lowercase().replace("\\", "/");
+			let allowed_str = allowed.to_string_lossy().to_lowercase().replace("\\", "/");
+
+			// Strip Windows canonical prefix if present
+			if canonical_str.starts_with(WINDOWS_CANONICAL_PREFIX) {
+				canonical_str = canonical_str
+					.strip_prefix(WINDOWS_CANONICAL_PREFIX)
+					.unwrap_or(&canonical_str)
+					.to_string();
+			}
+
+			canonical_str.starts_with(&allowed_str)
+		}
+		#[cfg(not(windows))]
+		{
+			canonical_path.starts_with(allowed)
+		}
+	}) {
 		Ok(canonical_path)
 	} else {
-		Err(anyhow::Error::new(Error::FileAccessDenied(path.to_string_lossy().to_string())))
+		// Use the new, direct error type
+		Err(Error::FileAccessDenied(path.to_string_lossy().to_string()))
 	}
 }
 
