@@ -33,6 +33,10 @@ No details provided.
 
 - [ ] No documentation needed
 
+## Does this change add, remove, or make changes to any environment variables?
+
+- [ ] No changes made to env vars
+
 ## Have you read the Contributing Guidelines?
 
 <!-- All pull requests require that the contributing guidelines have been read and agreed to. -->
