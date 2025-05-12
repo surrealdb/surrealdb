@@ -33,9 +33,9 @@ No details provided.
 
 - [ ] No documentation needed
 
-## Does this change add, remove, or make changes to any environment variables?
+## Does this change make any alterations to environment variables or CLI commands?
 
-<!-- Please add the label "Modifies env vars" from the Labels dropdown to the right if such changes are made. No more details are needed as the code itself will show what has changed. -->
+<!-- Please add the label "Modifies env vars or commands" from the Labels dropdown to the right and detail the changes. -->
 
 - [ ] No changes made to env vars
 
