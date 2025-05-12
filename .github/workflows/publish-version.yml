@@ -75,7 +75,9 @@ jobs:
         id: outputs
         run: |
           GITHUB_OUTPUT=${GITHUB_OUTPUT} \
-            ./.github/scripts/prepare-vars.sh ${{ inputs.release-type }} ${{ inputs.git-ref }} 
+            RELEASE_TYPE=${{ inputs.release-type }} \
+            GITHUB_REF=${{ inputs.git-ref }} \
+            ./.github/scripts/prepare_vars.sh
 
       - name: Configure git
         run: |
@@ -96,7 +98,6 @@ jobs:
           set -x
 
           version=${{ steps.outputs.outputs.version }}
-          currentVersion=${{ steps.outputs.outputs.current-version }}
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
@@ -105,7 +106,7 @@ jobs:
           cargo check --no-default-features --features storage-mem
 
           # Commit changes
-          git commit -am "Prepare v${version} release"
+          git commit -m "Prepare v${version} release"
 
       - name: Push the release branch
         run: git push
@@ -481,7 +482,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
 
-      - name: Patch crate version
+      - name: Patch crate name, version, and description
         run: |
           set -x
 
@@ -493,7 +494,7 @@ jobs:
             ./.github/scripts/patch_crate.sh
 
           # Temporarily commit patch
-          git commit -am "Patch crate version"
+          git commit -m "Patch crate name, version, and description"
 
       - run: cat Cargo.toml ./crates/*/Cargo.toml
 
