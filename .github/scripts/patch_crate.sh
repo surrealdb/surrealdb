@@ -72,7 +72,7 @@ function patch_description() {
     else
         start="A"
     fi
-    sed -i "s#^description = \".*\"#description = \"${start} ${ENVIRONMENT} release of the surrealdb crate\"#" Cargo.toml
+    sed -i "s#^description = \".*\"#description = \"${start} ${ENVIRONMENT} release of the crate.\"#" Cargo.toml
 }
 
 case "${ENVIRONMENT}" in
