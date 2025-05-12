@@ -5949,6 +5949,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-common"
+version = "3.0.0"
+dependencies = [
+ "arbitrary",
+ "geo-types",
+ "http 1.3.1",
+ "regex-syntax 0.8.5",
+ "revision 0.11.0",
+ "rust_decimal",
+ "serde",
+ "storekey",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
 name = "surrealdb-core"
 version = "3.0.0"
 dependencies = [
@@ -6061,6 +6077,35 @@ dependencies = [
  "wasmtimer",
  "wiremock",
  "ws_stream_wasm",
+]
+
+[[package]]
+name = "surrealdb-expr"
+version = "3.0.0"
+dependencies = [
+ "arbitrary",
+ "geo-types",
+ "http 1.3.1",
+ "regex-syntax 0.8.5",
+ "revision 0.11.0",
+ "rust_decimal",
+ "serde",
+ "storekey",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
+name = "surrealdb-sql"
+version = "3.0.0"
+dependencies = [
+ "arbitrary",
+ "geo-types",
+ "regex-syntax 0.8.5",
+ "revision 0.11.0",
+ "rust_decimal",
+ "surrealdb-common",
+ "uuid",
 ]
 
 [[package]]
