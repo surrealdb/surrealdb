@@ -15,7 +15,6 @@ categories.workspace = true
 license-file.workspace = true
 
 [features]
-
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -26,8 +25,6 @@ arbitrary = [
 ]
 
 [dependencies]
-
-
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 http.workspace = true
 regex-syntax = { workspace = true, optional = true }
