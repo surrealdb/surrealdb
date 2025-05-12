@@ -35,6 +35,8 @@ No details provided.
 
 ## Does this change add, remove, or make changes to any environment variables?
 
+<!-- Please add the label "Modifies env vars" from the Labels dropdown to the right if such changes are made. No more details are needed as the code itself will show what has changed. -->
+
 - [ ] No changes made to env vars
 
 ## Have you read the Contributing Guidelines?
