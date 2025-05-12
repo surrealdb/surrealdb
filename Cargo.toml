@@ -1,5 +1,12 @@
 [workspace]
-members = [".", "crates/core", "crates/sdk"]
+members = [
+    ".",
+    "crates/common",
+    "crates/core",
+    "crates/expr",
+    "crates/sdk",
+    "crates/sql",
+]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -22,8 +29,11 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb = { version = "=3.0.0", package = "surrealdb", path = "./crates/sdk" }
-surrealdb-core = { version = "=3.0.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
+surrealdb = { version = "=3.0.0", package = "surrealdb", path = "crates/sdk" }
+surrealdb-common = { version = "=3.0.0", package = "surrealdb-common", path = "crates/common", default-features = false }
+surrealdb-core = { version = "=3.0.0", package = "surrealdb-core", path = "crates/core", default-features = false }
+surrealdb-expr = { version = "=3.0.0", package = "surrealdb-expr", path = "crates/expr", default-features = false }
+surrealdb-sql = { version = "=3.0.0", package = "surrealdb-sql", path = "crates/sql", default-features = false }
 
 # External surreal crates
 affinitypool = { version = "0.3.1" }

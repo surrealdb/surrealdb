@@ -74,72 +74,8 @@ jobs:
       - name: Set outputs
         id: outputs
         run: |
-          set -x
-
-          suffix=$(echo ${{ inputs.release-type }} | tr "." "\n" | sed -n 1p)
-          patch=$(echo ${{ inputs.release-type }} | tr "." "\n" | sed -n 2p)
-          version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
-          echo "current-version=${version}" >> $GITHUB_OUTPUT
-
-          if [[ $version == *"-"* ]]; then
-            echo "Found an unexpected pre-release version, '${version}', in ${{ inputs.git-ref }}"
-            exit 400
-          fi
-
-          if [[ "${{ inputs.release-type }}" != "release" && "${{ inputs.release-type }}" != "patch" && "${{ inputs.release-type }}" != "nightly" && $suffix != "alpha" && $suffix != "beta" && $suffix != "rc" ]]; then
-            echo "'${{ inputs.release-type }}' is not a supported release type"
-            exit 400
-          fi
-
-          if [[ $suffix == "alpha" || $suffix == "beta" || $suffix == "rc" ]]; then
-            if [[ -z $patch ]]; then
-              echo "Pre-releases require a patch number, e.g. beta.3"
-              exit 400
-            elif ! [[ $patch =~ ^[0-9]+$ ]]; then
-              echo "The patch number should be an integer, found ${patch}"
-              exit 400
-            fi
-          fi
-
-          if [[ $suffix == "release" ]]; then
-            patch=$(echo ${version} | tr "." "\n" | sed -n 3p)
-            environment=stable
-          elif [[ $suffix == "patch" ]]; then
-            major=$(echo ${version} | tr "." "\n" | sed -n 1p)
-            minor=$(echo ${version} | tr "." "\n" | sed -n 2p)
-            currentPatch=$(echo ${version} | tr "." "\n" | sed -n 3p)
-            patch=$(($currentPatch + 1))
-            version=${major}.${minor}.${patch}
-            environment=stable
-          elif [[ $suffix == "nightly" ]]; then
-            date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
-            # This sets the nightly version to something like `1.3.20250224221932`
-            patch=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
-            rev=$(git rev-parse --short HEAD)
-            buildMetadata=${date}.${rev}
-            version=${version}-${{ inputs.release-type }}
-            environment=${{ inputs.release-type }}
-          elif [[  $suffix == "rc" ]]; then
-            version=${version}-${{ inputs.release-type }}
-            patch=$(($patch - 1))
-            environment=release-candidate
-          else
-            version=${version}-${{ inputs.release-type }}
-            patch=$(($patch - 1))
-            environment=${suffix}
-          fi
-
-          echo "version=${version}" >> $GITHUB_OUTPUT
-          echo "patch=${patch}" >> $GITHUB_OUTPUT
-          echo "environment=${environment}" >> $GITHUB_OUTPUT
-          echo "build-metadata=${buildMetadata}" >> $GITHUB_OUTPUT
-          echo "release-branch=releases/${version}" >> $GITHUB_OUTPUT
-
-          if [[ "${environment}" == "nightly" ]]; then
-            echo "name=${environment}" >> $GITHUB_OUTPUT
-          else
-            echo "name=v${version}" >> $GITHUB_OUTPUT
-          fi
+          GITHUB_OUTPUT=${GITHUB_OUTPUT} \
+            ./.github/scripts/prepare-vars.sh ${{ inputs.release-type }} ${{ inputs.git-ref }} 
 
       - name: Configure git
         run: |
@@ -164,12 +100,6 @@ jobs:
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
-
-          # Update dependency versions
-          sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -543,23 +473,8 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable
 
-      - name: Install release-plz
-        run: |
-          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
-          sudo chmod +x /usr/bin/release-plz
-
       - name: Create a temporary branch
         run: git checkout -b crate
-
-      - name: Configure release-plz
-        run: |
-          cat << EOF > /tmp/release-plz.toml
-          [workspace]
-          changelog_update = false
-          git_release_enable = false
-          semver_check = false
-          git_tag_enable = false
-          EOF
 
       - name: Configure git
         run: |
@@ -567,62 +482,28 @@ jobs:
           git config user.name "github-actions[bot]"
 
       - name: Patch crate version
-        if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
         run: |
           set -x
 
           # Derive crate version
-          currentVersion=${{ needs.prepare-vars.outputs.current-version }}
-          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-          version=${major}.${minor}.${{ needs.prepare-vars.outputs.patch }}
-
-          # Update the version to a nightly one
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/sdk/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" crates/core/Cargo.toml
-          sed -i "s#surrealdb = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb = { version = \"=${version}\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${{ needs.prepare-vars.outputs.version }}\"#surrealdb-core = { version = \"=${version}\"#" Cargo.toml
+          ENVIRONMENT=${{ needs.prepare-vars.outputs.environment }} \
+            CURRENT_VERSION=${{ needs.prepare-vars.outputs.current-version }} \
+            VERSION=${{ needs.prepare-vars.outputs.version }} \
+            PATCH=${{ needs.prepare-vars.outputs.patch }} \
+            ./.github/scripts/patch_crate.sh
 
           # Temporarily commit patch
           git commit -am "Patch crate version"
 
-      - name: Patch crate name and description
-        if: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
-        run: |
-          set -x
-
-          environment=${{ needs.prepare-vars.outputs.environment }}
-
-          # Patch crate name
-          sed -i "0,/surrealdb/s//surrealdb-${environment}/" crates/sdk/Cargo.toml
-          sed -i "0,/surrealdb-core/s//surrealdb-core-${environment}/" crates/core/Cargo.toml
-
-          # Patch dependency package
-          sed -i "s/package = \"surrealdb\"/package = \"surrealdb-${environment}\"/" Cargo.toml
-          sed -i "s/package = \"surrealdb-core\"/package = \"surrealdb-core-${environment}\"/" Cargo.toml
-
-          # Patch the description
-          if [[ $environment == 'alpha' ]]; then
-            start="An"
-          else
-            start="A"
-          fi
-          sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb crate\"#" crates/sdk/Cargo.toml
-          sed -i "s#^description = \".*\"#description = \"${start} ${environment} release of the surrealdb-core crate\"#" crates/core/Cargo.toml
-
-          # Temporarily commit patch
-          git commit -am "Patch crate names"
-
-      - run: cat Cargo.toml
-      - run: cat crates/sdk/Cargo.toml
-      - run: cat crates/core/Cargo.toml
+      - run: cat Cargo.toml ./crates/*/Cargo.toml
 
       - name: Publish the crate
+        uses: release-plz/action@v0.5
         if: ${{ inputs.publish }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: release-plz release --config /tmp/release-plz.toml
+        with:
+          command: release
 
       - name: Download artifacts
         if: ${{ inputs.publish }}
