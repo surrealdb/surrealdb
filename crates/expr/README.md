@@ -11,11 +11,11 @@
 <br>
 
 <p align="center">
-    <a href="https://docs.rs/surrealdb-sql/latest/surrealdb_sql/"><img src="https://img.shields.io/badge/docs.rs-view-f4c153.svg?style=flat-square"></a>
+    <a href="https://docs.rs/surrealdb-expr/latest/surrealdb_expr/"><img src="https://img.shields.io/badge/docs.rs-view-f4c153.svg?style=flat-square"></a>
     &nbsp;
-	<a href="https://crates.io/crates/surrealdb-sql"><img src="https://img.shields.io/crates/v/surrealdb-sql?color=dca282&style=flat-square"></a>
+	<a href="https://crates.io/crates/surrealdb-expr"><img src="https://img.shields.io/crates/v/surrealdb-expr?color=dca282&style=flat-square"></a>
 	&nbsp;
-	<a href="https://crates.io/crates/surrealdb-sql"><img src="https://img.shields.io/crates/d/surrealdb-sql?style=flat-square"></a>
+	<a href="https://crates.io/crates/surrealdb-expr"><img src="https://img.shields.io/crates/d/surrealdb-expr?style=flat-square"></a>
 </p>
 
 <p align="center">

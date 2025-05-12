@@ -1,0 +1,44 @@
+[package]
+name = "surrealdb-catalog"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-catalog/"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
+
+[features]
+arbitrary = [
+    "dep:arbitrary",
+    "dep:regex-syntax",
+    "regex-syntax/arbitrary",
+    "rust_decimal/rust-fuzz",
+    "geo-types/arbitrary",
+    "uuid/arbitrary",
+]
+
+[dependencies]
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+http.workspace = true
+regex-syntax = { workspace = true, optional = true }
+revision = { workspace = true, features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+geo-types.workspace = true
+serde.workspace = true
+storekey.workspace = true
+thiserror.workspace = true
+uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
