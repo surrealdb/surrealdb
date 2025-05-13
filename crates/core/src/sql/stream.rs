@@ -147,9 +147,9 @@ impl Hash for Stream {
 }
 
 #[cfg(feature = "arbitrary")]
-impl<'a> arbitrary::Arbitrary<'a> for Stream {
+impl<'a> Arbitrary<'a> for Stream {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		let data = Bytes.arbitrary()?;
+		let data: Bytes = Arbitrary::arbitrary(u)?;
 		Ok(data.into())
 	}
 }
