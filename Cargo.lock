@@ -5819,7 +5819,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surreal"
-version = "3.0.0"
+version = "3.0.0-alpha.1"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -5890,7 +5890,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "3.0.0"
+version = "3.0.0-alpha.1"
 dependencies = [
  "arrayvec",
  "async-channel",
@@ -5949,7 +5949,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-catalog"
-version = "3.0.0"
+version = "3.0.0-alpha.1"
 dependencies = [
  "arbitrary",
  "geo-types",
@@ -5965,7 +5965,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-common"
-version = "3.0.0"
+version = "3.0.0-alpha.1"
 dependencies = [
  "arbitrary",
  "geo-types",
@@ -5981,7 +5981,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "3.0.0"
+version = "3.0.0-alpha.1"
 dependencies = [
  "addr",
  "affinitypool",
@@ -6095,7 +6095,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-expr"
-version = "3.0.0"
+version = "3.0.0-alpha.1"
 dependencies = [
  "arbitrary",
  "geo-types",
@@ -6111,7 +6111,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-sql"
-version = "3.0.0"
+version = "3.0.0-alpha.1"
 dependencies = [
  "arbitrary",
  "geo-types",
