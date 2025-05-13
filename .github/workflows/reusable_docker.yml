@@ -135,7 +135,7 @@ jobs:
           if [[ "${{ inputs.environment }}" == "stable" ]]; then
             major=$(echo ${{ inputs.tag-prefix }} | tr "." "\n" | sed -n 1p)
             minor=$(echo ${{ inputs.tag-prefix }} | tr "." "\n" | sed -n 2p)
-            echo "tags=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}.${minor}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
+            echo "tags=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }},surrealdb/surrealdb:${major}.${minor}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
           else
             echo "tags=surrealdb/surrealdb:${{ inputs.tag-prefix }}${{ matrix.tag-suffix }}"  >> $GITHUB_OUTPUT
           fi
@@ -150,18 +150,5 @@ jobs:
           file: docker/Dockerfile
           target: ${{ matrix.build-target }}
           tags: ${{ steps.tags.outputs.tags }}
-          build-args: |
-            ARTIFACT_PREFIX=surreal-${{ inputs.tag-prefix }}
-
-      - name: Push to DockerHub (latest)
-        uses: docker/build-push-action@v5
-        if: ${{ inputs.push && inputs.latest }}
-        with:
-          context: artifacts
-          push: true
-          platforms: linux/amd64,linux/arm64
-          file: docker/Dockerfile
-          target: ${{ matrix.build-target }}
-          tags: surrealdb/surrealdb:latest${{ matrix.tag-suffix }}
           build-args: |
             ARTIFACT_PREFIX=surreal-${{ inputs.tag-prefix }}
