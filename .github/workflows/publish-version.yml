@@ -103,6 +103,9 @@ jobs:
             PATCH=${{ steps.outputs.outputs.patch }} \
             ./.github/scripts/patch_crate.sh version
 
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
           # Temporarily commit patch
           git commit -am "Prepare v${{ steps.outputs.outputs.version }} release"
 
@@ -490,6 +493,9 @@ jobs:
             VERSION=${{ needs.prepare-vars.outputs.version }} \
             PATCH=${{ needs.prepare-vars.outputs.patch }} \
             ./.github/scripts/patch_crate.sh all
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
 
           # Temporarily commit patch
           git commit -am "Patch crate name, version, and description"

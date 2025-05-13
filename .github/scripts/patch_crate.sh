@@ -10,7 +10,7 @@ PATCH="${PATCH}"
 COMMAND="${1}"
 
 # Note: Keep these in sync with the `members` array in the `Cargo.toml` file.
-members=("surrealdb-catalog", "surrealdb-common" "surrealdb-expr" "surrealdb-core" "surrealdb-sql" "surrealdb")
+members=("surrealdb-catalog" "surrealdb-common" "surrealdb-expr" "surrealdb-core" "surrealdb-sql" "surrealdb")
 member_paths=("crates/catalog", "crates/common" "crates/expr" "crates/core" "crates/sql" "crates/sdk")
 
 # Get the path of a crate based on its name
@@ -52,7 +52,7 @@ function patch_version() {
     for crate_name in "${members[@]}"; do
         echo "${crate_name}"
         crate_path="$(get_member_path $crate_name)"
-        sed -i "s#^${crate_name} = { version = \"=${VERSION}\"#${crate_name} = { version = \"=${new_version}\"#" Cargo.toml
+        sed -i "s#^${crate_name} = { version = \"=${CURRENT_VERSION}\"#${crate_name} = { version = \"=${new_version}\"#" Cargo.toml
     done
 }
 
@@ -60,7 +60,6 @@ function patch_version() {
 function patch_name() {
     for crate_name in "${members[@]}"; do
         crate_path="$(get_member_path $crate_name)"
-        echo "${crate_name} -> ${crate_path}"
         set -x
         sed -i "0,/name = \"${crate_name}\"/s//name = \"${crate_name}-${ENVIRONMENT}\"/" ${crate_path}/Cargo.toml
         set +x
