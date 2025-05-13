@@ -122,7 +122,7 @@ impl Model {
 				let mut args = v
 					.into_iter()
 					.map(|(k, v)| Ok((k, v.coerce_to::<f64>()? as f32)))
-					.collect::<Result<HashMap<String, f32>, Error>>()
+					.collect::<Result<HashMap<String, f32>>>()
 					.map_err(|_| Error::InvalidArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),
 						message: ARGUMENTS.into(),
@@ -182,7 +182,7 @@ impl Model {
 				let args = v
 					.into_iter()
 					.map(|x| x.coerce_to::<f64>().map(|x| x as f32).map_err(Error::from))
-					.collect::<Result<Vec<f32>, Error>>()
+					.collect::<Result<Vec<f32>>>()
 					.map_err(|_| Error::InvalidArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),
 						message: ARGUMENTS.into(),
@@ -226,8 +226,8 @@ impl Model {
 		_opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
-		Err(ControlFlow::from(Error::InvalidModel {
+		Err(ControlFlow::from(anyhow::Error::new(Error::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),
-		}))
+		})))
 	}
 }

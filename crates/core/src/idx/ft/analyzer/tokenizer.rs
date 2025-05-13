@@ -1,9 +1,9 @@
-use crate::err;
 use crate::err::Error;
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
 use crate::idx::ft::offsets::{Offset, Position};
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
+use anyhow::{bail, Result};
 
 pub(in crate::idx) struct Tokens {
 	/// The input string
@@ -20,11 +20,11 @@ impl Tokens {
 		}
 	}
 
-	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&'a str, Error> {
+	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&'a str> {
 		t.get_str(&self.i)
 	}
 
-	pub(super) fn filter(self, f: &Filter) -> Result<Tokens, Error> {
+	pub(super) fn filter(self, f: &Filter) -> Result<Tokens> {
 		let mut tks = Vec::new();
 		for tk in self.t {
 			if tk.is_empty() {
@@ -65,9 +65,9 @@ impl Tokens {
 }
 
 impl TryFrom<Tokens> for Value {
-	type Error = err::Error;
+	type Error = anyhow::Error;
 
-	fn try_from(tokens: Tokens) -> Result<Self, Error> {
+	fn try_from(tokens: Tokens) -> Result<Self> {
 		let mut vec: Vec<Value> = Vec::with_capacity(tokens.t.len());
 		for token in tokens.t {
 			vec.push(token.get_str(&tokens.i)?.into())
@@ -157,7 +157,7 @@ impl Token {
 		}
 	}
 
-	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&'a str, Error> {
+	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&'a str> {
 		match self {
 			Token::Ref {
 				bytes,
@@ -167,7 +167,7 @@ impl Token {
 				let e = bytes.1 as usize;
 				let l = i.len();
 				if s >= l || e > l {
-					return Err(Error::AnalyzerError(format!(
+					bail!(Error::AnalyzerError(format!(
 						"Unable to extract the token. The offset position ({s},{e}) is out of range ({l})."
 					)));
 				}

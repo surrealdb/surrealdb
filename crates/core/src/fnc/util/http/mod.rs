@@ -3,6 +3,7 @@ use crate::err::Error;
 use crate::sql::{Bytes, Object, Strand, Value};
 use crate::syn;
 
+use anyhow::{bail, Result};
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
 use reqwest::redirect::Policy;
@@ -22,7 +23,7 @@ fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
 	}
 }
 
-async fn decode_response(res: Response) -> Result<Value, Error> {
+async fn decode_response(res: Response) -> Result<Value> {
 	match res.error_for_status() {
 		Ok(res) => match res.headers().get(CONTENT_TYPE) {
 			Some(mime) => match mime.to_str() {
@@ -45,12 +46,12 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 			_ => Ok(Value::None),
 		},
 		Err(err) => match err.status() {
-			Some(s) => Err(Error::Http(format!(
+			Some(s) => bail!(Error::Http(format!(
 				"{} {}",
 				s.as_u16(),
 				s.canonical_reason().unwrap_or_default(),
 			))),
-			None => Err(Error::Http(err.to_string())),
+			None => bail!(Error::Http(err.to_string())),
 		},
 	}
 }
@@ -61,7 +62,7 @@ async fn request(
 	uri: Strand,
 	body: Option<Value>,
 	opts: impl Into<Object>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	// Check if the URI is valid and allowed
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
 	ctx.check_allowed_net(&url)?;
@@ -113,12 +114,12 @@ async fn request(
 		match res.error_for_status() {
 			Ok(_) => Ok(Value::None),
 			Err(err) => match err.status() {
-				Some(s) => Err(Error::Http(format!(
+				Some(s) => bail!(Error::Http(format!(
 					"{} {}",
 					s.as_u16(),
 					s.canonical_reason().unwrap_or_default(),
 				))),
-				None => Err(Error::Http(err.to_string())),
+				None => bail!(Error::Http(err.to_string())),
 			},
 		}
 	} else {
@@ -127,11 +128,11 @@ async fn request(
 	}
 }
 
-pub async fn head(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+pub async fn head(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::HEAD, uri, None, opts).await
 }
 
-pub async fn get(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+pub async fn get(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::GET, uri, None, opts).await
 }
 
@@ -140,7 +141,7 @@ pub async fn put(
 	uri: Strand,
 	body: Value,
 	opts: impl Into<Object>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	request(ctx, Method::PUT, uri, Some(body), opts).await
 }
 
@@ -149,7 +150,7 @@ pub async fn post(
 	uri: Strand,
 	body: Value,
 	opts: impl Into<Object>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	request(ctx, Method::POST, uri, Some(body), opts).await
 }
 
@@ -158,10 +159,10 @@ pub async fn patch(
 	uri: Strand,
 	body: Value,
 	opts: impl Into<Object>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	request(ctx, Method::PATCH, uri, Some(body), opts).await
 }
 
-pub async fn delete(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+pub async fn delete(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::DELETE, uri, None, opts).await
 }

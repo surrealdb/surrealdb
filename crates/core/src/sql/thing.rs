@@ -9,6 +9,7 @@ use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode as _;
 use crate::sql::{escape::EscapeRid, id::Id, Strand, Value};
 use crate::syn;
+use anyhow::{bail, Result};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -140,7 +141,7 @@ impl Thing {
 		opt: &Options,
 		ft: Option<&Table>,
 		ff: Option<&Idiom>,
-	) -> Result<Vec<Thing>, Error> {
+	) -> Result<Vec<Thing>> {
 		let (ns, db) = opt.ns_db()?;
 
 		let (prefix, suffix) = match (ft, ff) {
@@ -161,9 +162,7 @@ impl Thing {
 				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
 			),
 			(None, Some(_)) => {
-				return Err(Error::Unreachable(
-					"A foreign field was passed without a foreign table".into(),
-				))
+				bail!(Error::unreachable("A foreign field was passed without a foreign table"))
 			}
 		};
 
@@ -294,7 +293,7 @@ impl Thing {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		Ok(Value::Thing(Thing {
 			tb: self.tb.clone(),
 			id: self.id.compute(stk, ctx, opt, doc).await?,

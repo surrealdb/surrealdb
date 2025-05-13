@@ -8,6 +8,7 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::Value;
+use anyhow::Result;
 use async_channel::Sender;
 use chrono::prelude::Utc;
 use chrono::TimeZone;
@@ -65,7 +66,7 @@ impl From<Config> for Value {
 }
 
 impl TryFrom<&Value> for Config {
-	type Error = Error;
+	type Error = anyhow::Error;
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Object(obj) => {
@@ -78,10 +79,10 @@ impl TryFrom<&Value> for Config {
 								config.$prop = v.to_owned();
 							}
 							Some(v) => {
-								return Err(Error::InvalidExportConfig(
+								return Err(anyhow::Error::new(Error::InvalidExportConfig(
 									v.to_owned(),
 									"a bool".into(),
-								))
+								)))
 							}
 							_ => (),
 						}
@@ -102,7 +103,10 @@ impl TryFrom<&Value> for Config {
 
 				Ok(config)
 			}
-			v => Err(Error::InvalidExportConfig(v.to_owned(), "an object".into())),
+			v => Err(anyhow::Error::new(Error::InvalidExportConfig(
+				v.to_owned(),
+				"an object".into(),
+			))),
 		}
 	}
 }
@@ -137,27 +141,33 @@ impl From<Vec<&str>> for TableConfig {
 }
 
 impl TryFrom<&Value> for TableConfig {
-	type Error = Error;
+	type Error = anyhow::Error;
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
-			Value::Bool(b) => match b {
-				true => Ok(TableConfig::All),
-				false => Ok(TableConfig::None),
-			},
+			Value::Bool(b) => {
+				if *b {
+					Ok(TableConfig::All)
+				} else {
+					Ok(TableConfig::None)
+				}
+			}
 			Value::None | Value::Null => Ok(TableConfig::None),
 			Value::Array(v) => v
 				.iter()
 				.cloned()
 				.map(|v| match v {
 					Value::Strand(str) => Ok(str.0),
-					v => Err(Error::InvalidExportConfig(v.clone(), "a string".into())),
+					v => Err(anyhow::Error::new(Error::InvalidExportConfig(
+						v.clone(),
+						"a string".into(),
+					))),
 				})
-				.collect::<Result<Vec<String>, Error>>()
+				.collect::<Result<Vec<String>>>()
 				.map(TableConfig::Some),
-			v => Err(Error::InvalidExportConfig(
+			v => Err(anyhow::Error::new(Error::InvalidExportConfig(
 				v.to_owned(),
 				"a bool, none, null or array<string>".into(),
-			)),
+			))),
 		}
 	}
 }
@@ -216,7 +226,7 @@ impl Transaction {
 		db: &str,
 		cfg: Config,
 		chn: Sender<Vec<u8>>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Output USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
 		self.export_metadata(&cfg, &chn, ns, db).await?;
 		// Output TABLES
@@ -230,7 +240,7 @@ impl Transaction {
 		chn: &Sender<Vec<u8>>,
 		ns: &str,
 		db: &str,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Output OPTIONS
 		self.export_section("OPTION", vec!["OPTION IMPORT"], chn).await?;
 
@@ -278,7 +288,7 @@ impl Transaction {
 		title: &str,
 		items: Vec<T>,
 		chn: &Sender<Vec<u8>>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if items.is_empty() {
 			return Ok(());
 		}
@@ -302,7 +312,7 @@ impl Transaction {
 		db: &str,
 		cfg: &Config,
 		chn: &Sender<Vec<u8>>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check if tables are included in the export config
 		if !cfg.tables.is_any() {
 			return Ok(());
@@ -332,7 +342,7 @@ impl Transaction {
 		db: &str,
 		table: &DefineTableStatement,
 		chn: &Sender<Vec<u8>>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!(format!("-- TABLE: {}", InlineCommentDisplay(&table.name)))).await?;
 		chn.send(bytes!("-- ------------------------------")).await?;
@@ -368,7 +378,7 @@ impl Transaction {
 		table: &DefineTableStatement,
 		cfg: &Config,
 		chn: &Sender<Vec<u8>>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!(format!("-- TABLE DATA: {}", InlineCommentDisplay(&table.name)))).await?;
 		chn.send(bytes!("-- ------------------------------")).await?;
@@ -481,12 +491,12 @@ impl Transaction {
 	///
 	/// # Returns
 	///
-	/// * `Result<(), Error>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error occurs.
+	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error occurs.
 	async fn export_versioned_data(
 		&self,
 		versioned_values: Vec<(Vec<u8>, Vec<u8>, u64, bool)>,
 		chn: &Sender<Vec<u8>>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Initialize a vector to hold graph edge records.
 		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 
@@ -569,12 +579,12 @@ impl Transaction {
 	///
 	/// # Returns
 	///
-	/// * `Result<(), Error>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error occurs.
+	/// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error occurs.
 	async fn export_regular_data(
 		&self,
 		regular_values: Vec<(Vec<u8>, Vec<u8>)>,
 		chn: &Sender<Vec<u8>>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Initialize vectors to hold normal records and graph edge records.
 		let mut records_normal = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);

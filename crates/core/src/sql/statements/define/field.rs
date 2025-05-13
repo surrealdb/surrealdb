@@ -11,6 +11,7 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::sql::{Literal, Part};
 use crate::sql::{Relation, TableType};
+use anyhow::{bail, ensure, Result};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -50,7 +51,7 @@ impl DefineFieldStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Validate reference options
@@ -74,7 +75,7 @@ impl DefineFieldStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::FdAlreadyExists {
+				bail!(Error::FdAlreadyExists {
 					name: fd,
 				});
 			}
@@ -179,11 +180,10 @@ impl DefineFieldStatement {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.kind.as_ref() {
 					// The `in` field must be a record type
-					if !kind.is_record() {
-						return Err(Error::Thrown(
-							"in field on a relation must be a record".into(),
-						));
-					}
+					ensure!(
+						kind.is_record(),
+						Error::Thrown("in field on a relation must be a record".into(),)
+					);
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
@@ -215,11 +215,10 @@ impl DefineFieldStatement {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.kind.as_ref() {
 					// The `out` field must be a record type
-					if !kind.is_record() {
-						return Err(Error::Thrown(
-							"out field on a relation must be a record".into(),
-						));
-					}
+					ensure!(
+						kind.is_record(),
+						Error::Thrown("out field on a relation must be a record".into(),)
+					);
 					// Add the TYPE to the DEFINE TABLE statement
 					if relation.from.as_ref() != self.kind.as_ref() {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
@@ -248,7 +247,7 @@ impl DefineFieldStatement {
 		Ok(Value::None)
 	}
 
-	fn validate_reference_options(&self, ctx: &Context) -> Result<(), Error> {
+	fn validate_reference_options(&self, ctx: &Context) -> Result<()> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(());
 		}
@@ -262,37 +261,32 @@ impl DefineFieldStatement {
 			// Check if any of the kinds are references
 			if kinds.iter().any(|k| matches!(k, Kind::References(_, _))) {
 				// If any of the kinds are references, all of them must be
-				if !kinds.iter().all(|k| matches!(k, Kind::References(_, _))) {
-					return Err(Error::RefsMismatchingVariants);
-				}
+				ensure!(
+					kinds.iter().all(|k| matches!(k, Kind::References(_, _))),
+					Error::RefsMismatchingVariants
+				);
 
 				// As the refs and dynrefs type essentially take over a field
 				// they are not allowed to be mixed with most other clauses
 				let typename = kind.to_string();
 
-				if self.reference.is_some() {
-					return Err(Error::RefsTypeConflict("REFERENCE".into(), typename));
-				}
+				ensure!(
+					self.reference.is_none(),
+					Error::RefsTypeConflict("REFERENCE".into(), typename)
+				);
 
-				if self.default.is_some() {
-					return Err(Error::RefsTypeConflict("DEFAULT".into(), typename));
-				}
+				ensure!(
+					self.default.is_none(),
+					Error::RefsTypeConflict("DEFAULT".into(), typename)
+				);
 
-				if self.value.is_some() {
-					return Err(Error::RefsTypeConflict("VALUE".into(), typename));
-				}
+				ensure!(self.value.is_none(), Error::RefsTypeConflict("VALUE".into(), typename));
 
-				if self.assert.is_some() {
-					return Err(Error::RefsTypeConflict("ASSERT".into(), typename));
-				}
+				ensure!(self.assert.is_none(), Error::RefsTypeConflict("ASSERT".into(), typename));
 
-				if self.flex {
-					return Err(Error::RefsTypeConflict("FLEXIBLE".into(), typename));
-				}
+				ensure!(!self.flex, Error::RefsTypeConflict("FLEXIBLE".into(), typename));
 
-				if self.readonly {
-					return Err(Error::RefsTypeConflict("READONLY".into(), typename));
-				}
+				ensure!(!self.readonly, Error::RefsTypeConflict("READONLY".into(), typename));
 			}
 
 			// If a reference is defined, the field must be a record
@@ -310,20 +304,17 @@ impl DefineFieldStatement {
 					kind => &vec![kind.to_owned()],
 				};
 
-				if !kinds.iter().all(|k| matches!(k, Kind::Record(_))) {
-					return Err(Error::ReferenceTypeConflict(kind.to_string()));
-				}
+				ensure!(
+					kinds.iter().all(|k| matches!(k, Kind::Record(_))),
+					Error::ReferenceTypeConflict(kind.to_string())
+				);
 			}
 		}
 
 		Ok(())
 	}
 
-	async fn correct_reference_type(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Option<Kind>, Error> {
+	async fn correct_reference_type(&self, ctx: &Context, opt: &Options) -> Result<Option<Kind>> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
 		}
@@ -334,10 +325,13 @@ impl DefineFieldStatement {
 			let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
 				Ok(fd) => fd,
 				// If the field does not exist, there is nothing to correct
-				Err(Error::FdNotFound {
-					..
-				}) => return Ok(None),
-				Err(e) => return Err(e),
+				Err(e) => {
+					if matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
+						return Ok(None);
+					} else {
+						return Err(e);
+					}
+				}
 			};
 
 			// Check if the field is an array-like value and thus "containing" references
@@ -360,7 +354,7 @@ impl DefineFieldStatement {
 		Ok(None)
 	}
 
-	async fn disallow_mismatched_types(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
+	async fn disallow_mismatched_types(&self, ctx: &Context, opt: &Options) -> Result<()> {
 		let (ns, db) = opt.ns_db()?;
 		let fds = ctx.tx().all_tb_fields(ns, db, &self.what, None).await?;
 
@@ -370,7 +364,7 @@ impl DefineFieldStatement {
 					if let Some(fd_kind) = &fd.kind {
 						let path = self.name[fd.name.len()..].to_vec();
 						if !fd_kind.allows_nested_kind(&path, self_kind) {
-							return Err(Error::MismatchedFieldTypes {
+							bail!(Error::MismatchedFieldTypes {
 								name: self.name.to_string(),
 								kind: self_kind.to_string(),
 								existing_name: fd.name.to_string(),

@@ -18,6 +18,7 @@ use crate::api::Surreal;
 #[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
+use anyhow::Result;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
 use std::collections::HashSet;

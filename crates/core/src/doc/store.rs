@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
+use anyhow::{anyhow, Result};
 
 impl Document {
 	pub(super) async fn store_record_data(
@@ -10,7 +11,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check if changed
 		if !self.changed() {
 			return Ok(());
@@ -53,9 +54,15 @@ impl Document {
 					.await
 				{
 					// The key already exists, so return an error
-					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
-						thing: rid.as_ref().to_owned(),
-					}),
+					Err(e) => {
+						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+							Err(anyhow!(Error::RecordExists {
+								thing: rid.as_ref().to_owned(),
+							}))
+						} else {
+							Err(e)
+						}
+					}
 					// Return other values
 					x => x,
 				}
@@ -73,9 +80,15 @@ impl Document {
 					.await
 				{
 					// The key already exists, so return an error
-					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
-						thing: rid.as_ref().to_owned(),
-					}),
+					Err(e) => {
+						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+							Err(anyhow!(Error::RecordExists {
+								thing: rid.as_ref().to_owned(),
+							}))
+						} else {
+							Err(e)
+						}
+					}
 					// Return other values
 					x => x,
 				}
@@ -93,9 +106,15 @@ impl Document {
 					.await
 				{
 					// The key already exists, so return an error
-					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
-						thing: rid.as_ref().to_owned(),
-					}),
+					Err(e) => {
+						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+							Err(anyhow!(Error::RecordExists {
+								thing: rid.as_ref().to_owned(),
+							}))
+						} else {
+							Err(e)
+						}
+					}
 					x => x,
 				}
 			}

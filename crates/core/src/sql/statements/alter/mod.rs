@@ -7,8 +7,8 @@ pub use table::AlterTableStatement;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::value::Value;
+use anyhow::Result;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -37,7 +37,7 @@ impl AlterStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		match self {
 			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(ref v) => v.compute(ctx, opt).await,

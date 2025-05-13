@@ -1,5 +1,5 @@
-use crate::err::Error;
 use crate::sql::Value as CoreValue;
+use anyhow::Result;
 use revision::revisioned;
 use revision::Revisioned;
 use serde::ser::SerializeStruct;
@@ -25,7 +25,7 @@ pub enum QueryType {
 #[non_exhaustive]
 pub struct Response {
 	pub time: Duration,
-	pub result: Result<CoreValue, Error>,
+	pub result: Result<CoreValue, anyhow::Error>,
 	// Record the query type in case processing the response is necessary (such as tracking live queries).
 	pub query_type: QueryType,
 }
@@ -37,7 +37,7 @@ impl Response {
 	}
 
 	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<CoreValue, Error> {
+	pub fn output(self) -> Result<CoreValue, anyhow::Error> {
 		self.result
 	}
 }

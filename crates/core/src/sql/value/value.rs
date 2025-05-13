@@ -18,6 +18,7 @@ use crate::sql::{
 	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
 use crate::sql::{Closure, ControlFlow, FlowResult};
+use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
@@ -187,7 +188,7 @@ impl Value {
 	// -----------------------------------
 
 	/// Convert this Value to a Result
-	pub fn ok(self) -> Result<Value, Error> {
+	pub fn ok(self) -> Result<Value> {
 		Ok(self)
 	}
 
@@ -436,20 +437,20 @@ impl Value {
 	}
 
 	/// Try to convert this Value into a set of JSONPatch operations
-	pub fn to_operations(&self) -> Result<Vec<Operation>, Error> {
+	pub fn to_operations(&self) -> Result<Vec<Operation>> {
 		match self {
 			Value::Array(v) => v
 				.iter()
 				.map(|v| match v {
 					Value::Object(v) => v.to_operation(),
-					_ => Err(Error::InvalidPatch {
+					_ => Err(anyhow::Error::new(Error::InvalidPatch {
 						message: String::from("Operation must be an object"),
-					}),
+					})),
 				})
-				.collect::<Result<Vec<_>, Error>>(),
-			_ => Err(Error::InvalidPatch {
+				.collect::<Result<Vec<_>>>(),
+			_ => Err(anyhow::Error::new(Error::InvalidPatch {
 				message: String::from("Operations must be an array"),
-			}),
+			})),
 		}
 	}
 
@@ -820,7 +821,7 @@ impl Value {
 	}
 
 	/// Validate that a Value is computed or contains only computed Values
-	pub fn validate_computed(&self) -> Result<(), Error> {
+	pub fn validate_computed(&self) -> Result<()> {
 		use Value::*;
 		match self {
 			None | Null | Bool(_) | Number(_) | Strand(_) | Duration(_) | Datetime(_) | Uuid(_)
@@ -828,7 +829,7 @@ impl Value {
 			Array(a) => a.validate_computed(),
 			Object(o) => o.validate_computed(),
 			Range(r) => r.validate_computed(),
-			_ => Err(Error::NonComputed),
+			_ => Err(anyhow::Error::new(Error::NonComputed)),
 		}
 	}
 
@@ -856,7 +857,7 @@ impl Value {
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
 		// Prevent infinite recursion due to casting, expressions, etc.
-		let opt = &opt.dive(1)?;
+		let opt = &opt.dive(1).map_err(anyhow::Error::new)?;
 
 		let res = match self {
 			Value::Cast(v) => return v.compute(stk, ctx, opt, doc).await,
@@ -932,19 +933,19 @@ impl InfoStructure for Value {
 
 pub(crate) trait TryAdd<Rhs = Self> {
 	type Output;
-	fn try_add(self, rhs: Rhs) -> Result<Self::Output, Error>;
+	fn try_add(self, rhs: Rhs) -> Result<Self::Output>;
 }
 
 impl TryAdd for Value {
 	type Output = Self;
-	fn try_add(self, other: Self) -> Result<Self, Error> {
+	fn try_add(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
 			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v.try_add(w)?),
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
-			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
 }
@@ -953,19 +954,19 @@ impl TryAdd for Value {
 
 pub(crate) trait TrySub<Rhs = Self> {
 	type Output;
-	fn try_sub(self, v: Rhs) -> Result<Self::Output, Error>;
+	fn try_sub(self, v: Rhs) -> Result<Self::Output>;
 }
 
 impl TrySub for Value {
 	type Output = Self;
-	fn try_sub(self, other: Self) -> Result<Self, Error> {
+	fn try_sub(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
 			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v.try_sub(w)?),
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
-			(v, w) => return Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
 }
@@ -974,15 +975,15 @@ impl TrySub for Value {
 
 pub(crate) trait TryMul<Rhs = Self> {
 	type Output;
-	fn try_mul(self, v: Self) -> Result<Self::Output, Error>;
+	fn try_mul(self, v: Self) -> Result<Self::Output>;
 }
 
 impl TryMul for Value {
 	type Output = Self;
-	fn try_mul(self, other: Self) -> Result<Self, Error> {
+	fn try_mul(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_mul(w)?),
-			(v, w) => return Err(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
 }
@@ -991,15 +992,15 @@ impl TryMul for Value {
 
 pub(crate) trait TryDiv<Rhs = Self> {
 	type Output;
-	fn try_div(self, v: Self) -> Result<Self::Output, Error>;
+	fn try_div(self, v: Self) -> Result<Self::Output>;
 }
 
 impl TryDiv for Value {
 	type Output = Self;
-	fn try_div(self, other: Self) -> Result<Self, Error> {
+	fn try_div(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_div(w)?),
-			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
 }
@@ -1008,15 +1009,15 @@ impl TryDiv for Value {
 
 pub(crate) trait TryFloatDiv<Rhs = Self> {
 	type Output;
-	fn try_float_div(self, v: Self) -> Result<Self::Output, Error>;
+	fn try_float_div(self, v: Self) -> Result<Self::Output>;
 }
 
 impl TryFloatDiv for Value {
 	type Output = Self;
-	fn try_float_div(self, other: Self) -> Result<Self::Output, Error> {
+	fn try_float_div(self, other: Self) -> Result<Self::Output> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_float_div(w)?),
-			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
 }
@@ -1025,15 +1026,15 @@ impl TryFloatDiv for Value {
 
 pub(crate) trait TryRem<Rhs = Self> {
 	type Output;
-	fn try_rem(self, v: Self) -> Result<Self::Output, Error>;
+	fn try_rem(self, v: Self) -> Result<Self::Output>;
 }
 
 impl TryRem for Value {
 	type Output = Self;
-	fn try_rem(self, other: Self) -> Result<Self, Error> {
+	fn try_rem(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_rem(w)?),
-			(v, w) => return Err(Error::TryRem(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryRem(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
 }
@@ -1042,15 +1043,15 @@ impl TryRem for Value {
 
 pub(crate) trait TryPow<Rhs = Self> {
 	type Output;
-	fn try_pow(self, v: Self) -> Result<Self::Output, Error>;
+	fn try_pow(self, v: Self) -> Result<Self::Output>;
 }
 
 impl TryPow for Value {
 	type Output = Self;
-	fn try_pow(self, other: Self) -> Result<Self, Error> {
+	fn try_pow(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Value::Number(v), Value::Number(w)) => Self::Number(v.try_pow(w)?),
-			(v, w) => return Err(Error::TryPow(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryPow(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
 }
@@ -1059,15 +1060,15 @@ impl TryPow for Value {
 
 pub(crate) trait TryNeg<Rhs = Self> {
 	type Output;
-	fn try_neg(self) -> Result<Self::Output, Error>;
+	fn try_neg(self) -> Result<Self::Output>;
 }
 
 impl TryNeg for Value {
 	type Output = Self;
-	fn try_neg(self) -> Result<Self, Error> {
+	fn try_neg(self) -> Result<Self> {
 		Ok(match self {
 			Self::Number(n) => Self::Number(n.try_neg()?),
-			v => return Err(Error::TryNeg(v.to_string())),
+			v => bail!(Error::TryNeg(v.to_string())),
 		})
 	}
 }
@@ -1463,7 +1464,7 @@ mod tests {
 	fn check_size() {
 		assert!(64 >= std::mem::size_of::<Value>(), "size of value too big");
 		assert!(104 >= std::mem::size_of::<Error>());
-		assert!(104 >= std::mem::size_of::<Result<Value, Error>>());
+		assert!(104 >= std::mem::size_of::<Result<Value>>());
 		assert!(24 >= std::mem::size_of::<crate::sql::number::Number>());
 		assert!(24 >= std::mem::size_of::<crate::sql::strand::Strand>());
 		assert!(16 >= std::mem::size_of::<crate::sql::duration::Duration>());

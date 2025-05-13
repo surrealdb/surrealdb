@@ -3,6 +3,7 @@
 use crate::err::Error;
 use crate::kvs::api::Transaction;
 use crate::kvs::{Key, Val};
+use anyhow::Result;
 use std::collections::{HashMap, VecDeque};
 
 type SavePoint = HashMap<Key, SavedValue>;
@@ -58,7 +59,7 @@ impl SavePoints {
 		self.current.is_some()
 	}
 
-	pub(super) fn pop(&mut self) -> Result<SavePoint, Error> {
+	pub(super) fn pop(&mut self) -> Result<SavePoint> {
 		if let Some(c) = self.current.take() {
 			self.current = self.stack.pop_back();
 			Ok(c)
@@ -87,7 +88,7 @@ impl SavePoints {
 		}
 	}
 
-	pub(super) async fn rollback<T>(sp: SavePoint, tx: &mut T) -> Result<(), Error>
+	pub(super) async fn rollback<T>(sp: SavePoint, tx: &mut T) -> Result<()>
 	where
 		T: Transaction,
 	{
@@ -124,12 +125,12 @@ pub(super) trait SavePointImpl: Transaction + Sized {
 		self.get_save_points().new_save_point()
 	}
 
-	async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+	async fn rollback_to_save_point(&mut self) -> Result<()> {
 		let sp = self.get_save_points().pop()?;
 		SavePoints::rollback(sp, self).await
 	}
 
-	fn release_last_save_point(&mut self) -> Result<(), Error> {
+	fn release_last_save_point(&mut self) -> Result<()> {
 		self.get_save_points().pop()?;
 		Ok(())
 	}
@@ -139,7 +140,7 @@ pub(super) trait SavePointImpl: Transaction + Sized {
 		key: &Key,
 		version: Option<u64>,
 		op: SaveOperation,
-	) -> Result<Option<SavePrepare>, Error> {
+	) -> Result<Option<SavePrepare>> {
 		let is_saved_key = self.get_save_points().is_saved_key(key);
 		let r = match is_saved_key {
 			None => None,

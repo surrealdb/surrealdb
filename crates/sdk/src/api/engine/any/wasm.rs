@@ -11,6 +11,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
+use anyhow::Result;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use tokio::sync::watch;

@@ -23,6 +23,7 @@ pub trait Parse<T> {
 #[cfg(test)]
 mod test;
 
+use anyhow::{bail, ensure, Result};
 use error::RenderedError;
 use lexer::{compound, Lexer};
 use parser::{Parser, ParserSettings};
@@ -47,7 +48,7 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn parse(input: &str) -> Result<Query, Error> {
+pub fn parse(input: &str) -> Result<Query> {
 	let capabilities = Capabilities::all();
 	parse_with_capabilities(input, &capabilities)
 }
@@ -63,12 +64,10 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Query, Error> {
+pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Query> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -90,23 +89,22 @@ pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 		.finish()
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value(input: &str) -> Result<Value, Error> {
+pub fn value(input: &str) -> Result<Value> {
 	let capabilities = Capabilities::all();
 	value_with_capabilities(input, &capabilities)
 }
 
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Value, Error> {
+pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Value> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -128,16 +126,15 @@ pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json(input: &str) -> Result<Value, Error> {
+pub fn json(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing inert JSON value");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -154,16 +151,15 @@ pub fn json(input: &str) -> Result<Value, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parses a SurrealQL Subquery [`Subquery`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn subquery(input: &str) -> Result<Subquery, Error> {
+pub fn subquery(input: &str) -> Result<Subquery> {
 	trace!(target: TARGET, "Parsing SurrealQL subquery");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -180,16 +176,15 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parses a SurrealQL [`Idiom`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn idiom(input: &str) -> Result<Idiom, Error> {
+pub fn idiom(input: &str) -> Result<Idiom> {
 	trace!(target: TARGET, "Parsing SurrealQL idiom");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -207,33 +202,33 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parse a datetime without enclosing delimiters from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn datetime(input: &str) -> Result<Datetime, Error> {
+pub fn datetime(input: &str) -> Result<Datetime> {
 	trace!(target: TARGET, "Parsing SurrealQL datetime");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut lexer = Lexer::new(input.as_bytes());
 	let res = compound::datetime_inner(&mut lexer);
 	if let Err(e) = lexer.assert_finished() {
-		return Err(Error::InvalidQuery(e.render_on(input)));
+		bail!(Error::InvalidQuery(e.render_on(input)));
 	}
-	res.map(Datetime).map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	res.map(Datetime)
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parse a duration from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn duration(input: &str) -> Result<Duration, Error> {
+pub fn duration(input: &str) -> Result<Duration> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new(input.as_bytes());
 	parser
@@ -241,16 +236,15 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parse a range.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn range(input: &str) -> Result<Range, Error> {
+pub fn range(input: &str) -> Result<Range> {
 	trace!(target: TARGET, "Parsing SurrealQL range");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
@@ -260,16 +254,15 @@ pub fn range(input: &str) -> Result<Range, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parse a record id.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing(input: &str) -> Result<Thing, Error> {
+pub fn thing(input: &str) -> Result<Thing> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -286,16 +279,15 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parse a record id including ranges.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing_with_range(input: &str) -> Result<Thing, Error> {
+pub fn thing_with_range(input: &str) -> Result<Thing> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -312,16 +304,15 @@ pub fn thing_with_range(input: &str) -> Result<Thing, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parse a block, expects the value to be wrapped in `{}`.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn block(input: &str) -> Result<Block, Error> {
+pub fn block(input: &str) -> Result<Block> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -342,26 +333,22 @@ pub fn block(input: &str) -> Result<Block, Error> {
 				.and_then(|e| parser.assert_finished().map(|_| e))
 				.map_err(|e| e.render_on(input))
 				.map_err(Error::InvalidQuery)
+				.map_err(anyhow::Error::new)
 		}
-		found => Err(Error::InvalidQuery(
+		found => Err(anyhow::Error::new(Error::InvalidQuery(
 			error::SyntaxError::new(format_args!("Unexpected token `{found}` expected `{{`"))
 				.with_span(token.span, error::MessageKind::Error)
 				.render_on(input),
-		)),
+		))),
 	}
 }
 
 /// Parses fields for a SELECT statement
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn fields_with_capabilities(
-	input: &str,
-	capabilities: &Capabilities,
-) -> Result<Fields, Error> {
+pub(crate) fn fields_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Fields> {
 	trace!(target: TARGET, "Parsing select fields");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -383,21 +370,17 @@ pub(crate) fn fields_with_capabilities(
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parses an output for a RETURN clause
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn output_with_capabilities(
-	input: &str,
-	capabilities: &Capabilities,
-) -> Result<Output, Error> {
+pub(crate) fn output_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Output> {
 	trace!(target: TARGET, "Parsing RETURN condition");
 
 	let input = format!("RETURN {input}");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -418,14 +401,15 @@ pub(crate) fn output_with_capabilities(
 		.finish()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input.as_str()))
-		.map_err(Error::InvalidQuery)?;
+		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)?;
 
 	match output {
 		Some(output) => Ok(output),
-		_ => Err(Error::InvalidQuery(RenderedError {
+		_ => Err(anyhow::Error::new(Error::InvalidQuery(RenderedError {
 			errors: vec!["Missing Output".into()],
 			snippets: vec![],
-		})),
+		}))),
 	}
 }
 
@@ -434,14 +418,12 @@ pub(crate) fn output_with_capabilities(
 pub(crate) fn condition_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,
-) -> Result<Cond, Error> {
+) -> Result<Cond> {
 	trace!(target: TARGET, "Parsing WHERE condition");
 
 	let input = format!("WHERE {input}");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -462,25 +444,24 @@ pub(crate) fn condition_with_capabilities(
 		.finish()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input.as_str()))
-		.map_err(Error::InvalidQuery)?;
+		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)?;
 
 	match cond {
 		Some(cond) => Ok(cond),
-		_ => Err(Error::InvalidQuery(RenderedError {
+		_ => Err(anyhow::Error::new(Error::InvalidQuery(RenderedError {
 			errors: vec!["Missing Condition".into()],
 			snippets: vec![],
-		})),
+		}))),
 	}
 }
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
+pub fn value_legacy_strand(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -498,16 +479,15 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
+pub fn json_legacy_strand(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -525,16 +505,15 @@ pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }
 
 /// Parse a kind from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn kind(input: &str) -> Result<Kind, Error> {
+pub fn kind(input: &str) -> Result<Kind> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
-	if input.len() > u32::MAX as usize {
-		return Err(Error::QueryTooLarge);
-	}
+	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
@@ -544,4 +523,5 @@ pub fn kind(input: &str) -> Result<Kind, Error> {
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
 }

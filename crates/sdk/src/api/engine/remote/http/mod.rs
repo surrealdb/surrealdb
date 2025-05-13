@@ -15,6 +15,7 @@ use crate::headers::DB;
 use crate::headers::NS;
 use crate::opt::IntoEndpoint;
 use crate::Value;
+use anyhow::Result;
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;

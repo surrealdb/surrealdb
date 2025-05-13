@@ -1,6 +1,7 @@
 use crate::dbs::capabilities::NetTarget;
 use crate::err::Error;
 use crate::kvs::Datastore;
+use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::jwk::{
 	AlgorithmParameters::*, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
@@ -78,7 +79,7 @@ pub(super) async fn config(
 	kid: &str,
 	url: &str,
 	token_alg: jsonwebtoken::Algorithm,
-) -> Result<(DecodingKey, Validation), Error> {
+) -> Result<(DecodingKey, Validation)> {
 	// Retrieve JWKS cache
 	let cache = kvs.jwks_cache();
 	// Attempt to fetch relevant JWK object either from local cache or remote location
@@ -223,7 +224,7 @@ pub(super) async fn config(
 
 // Checks if network access to a remote location is allowed by the datastore capabilities
 // Attempts to find a relevant JWK object inside a JWKS object fetched from the remote location
-async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk, Error> {
+async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk> {
 	// Check that the datastore capabilities allow connections to the URL host
 	if let Err(err) = check_capabilities_url(kvs, url) {
 		warn!("Network access to JWKS location is not allowed: '{}'", err);
@@ -253,7 +254,7 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk,
 }
 
 // Returns an error if network access to the address from a given URL string is not allowed
-fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<(), Error> {
+fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 	let url_parsed = match Url::parse(url) {
 		Ok(url) => url,
 		Err(_) => {
@@ -288,7 +289,7 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<(), Error> {
 }
 
 // Attempts to fetch a JWKS object from a remote location and stores it in the cache if successful
-async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Result<JwkSet, Error> {
+async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Result<JwkSet> {
 	let client = Client::new();
 	#[cfg(not(target_family = "wasm"))]
 	let res = client.get(url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;

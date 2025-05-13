@@ -16,6 +16,7 @@ use crate::sql::thing::Thing;
 use crate::sql::value::every::ArrayBehaviour;
 use crate::sql::value::{CoerceError, Value};
 use crate::sql::{FlowResultExt as _, Part};
+use anyhow::{bail, ensure, Result};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -29,7 +30,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the table
 		let tb = self.tb(ctx, opt).await?;
 		// This table is schemafull
@@ -61,17 +62,18 @@ impl Document {
 						// Built-in fields
 						fd if fd.is_special() => continue,
 						// Custom fields
-						fd => match opt.strict {
-							// If strict, then throw an error on an undefined field
-							true => {
-								return Err(Error::FieldUndefined {
+						fd => {
+							if opt.strict {
+								// If strict, then throw an error on an undefined field
+								bail!(Error::FieldUndefined {
 									table: tb.name.to_raw(),
 									field: fd.to_owned(),
 								})
+							} else {
+								// Otherwise, delete the field silently and don't error
+								self.current.doc.to_mut().cut(fd)
 							}
-							// Otherwise, delete the field silently and don't error
-							false => self.current.doc.to_mut().cut(fd),
-						},
+						}
 					}
 				}
 			}
@@ -97,7 +99,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check import
 		if opt.import {
 			return Ok(());
@@ -136,12 +138,15 @@ impl Document {
 				let inp = Arc::new(inp.pick(&k));
 				// Check for the `id` field
 				if fd.name.is_id() {
-					if !self.is_new() && val.ne(&old) {
-						return Err(Error::FieldReadonly {
+					ensure!(
+						self.is_new() && !val.ne(&old),
+						Error::FieldReadonly {
 							field: fd.name.clone(),
 							thing: rid.to_string(),
-						});
-					} else if !self.is_new() {
+						}
+					);
+
+					if !self.is_new() {
 						continue;
 					}
 				}
@@ -175,7 +180,7 @@ impl Document {
 							// clause, then this should not be
 							// allowed, and we throw an error.
 							_ => {
-								return Err(Error::FieldReadonly {
+								bail!(Error::FieldReadonly {
 									field: fd.name.clone(),
 									thing: rid.to_string(),
 								});
@@ -252,7 +257,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check import
 		if opt.import {
 			return Ok(());
@@ -324,7 +329,7 @@ enum RefAction<'a> {
 
 impl FieldEditContext<'_> {
 	/// Process any TYPE clause for the field definition
-	async fn process_type_clause(&self, val: Value) -> Result<Value, Error> {
+	async fn process_type_clause(&self, val: Value) -> Result<Value> {
 		// Check for a TYPE clause
 		if let Some(kind) = &self.def.kind {
 			// Check if this is the `id` field
@@ -347,7 +352,7 @@ impl FieldEditContext<'_> {
 				// The outer value should be a record
 				else {
 					// There was a field check error
-					return Err(Error::FieldCoerce {
+					bail!(Error::FieldCoerce {
 						thing: self.rid.to_string(),
 						field_name: "id".to_string(),
 						error: Box::new(CoerceError::InvalidKind {
@@ -373,7 +378,7 @@ impl FieldEditContext<'_> {
 		Ok(val)
 	}
 	/// Process any DEFAULT clause for the field definition
-	async fn process_default_clause(&mut self, val: Value) -> Result<Value, Error> {
+	async fn process_default_clause(&mut self, val: Value) -> Result<Value> {
 		// This field has a value specified
 		if !val.is_none() {
 			return Ok(val);
@@ -426,7 +431,7 @@ impl FieldEditContext<'_> {
 		Ok(val)
 	}
 	/// Process any VALUE clause for the field definition
-	async fn process_value_clause(&mut self, val: Value) -> Result<Value, Error> {
+	async fn process_value_clause(&mut self, val: Value) -> Result<Value> {
 		// Check for a VALUE clause
 		if let Some(expr) = &self.def.value {
 			// Arc the current value
@@ -462,7 +467,7 @@ impl FieldEditContext<'_> {
 		Ok(val)
 	}
 	/// Process any ASSERT clause for the field definition
-	async fn process_assert_clause(&mut self, val: Value) -> Result<Value, Error> {
+	async fn process_assert_clause(&mut self, val: Value) -> Result<Value> {
 		// If the field TYPE is optional, and the
 		// field value was not set or is NONE we
 		// ignore any defined ASSERT clause.
@@ -498,20 +503,21 @@ impl FieldEditContext<'_> {
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Check the ASSERT clause result
-			if !res.is_truthy() {
-				return Err(Error::FieldValue {
+			ensure!(
+				res.is_truthy(),
+				Error::FieldValue {
 					thing: self.rid.to_string(),
 					field: self.def.name.clone(),
 					check: expr.to_string(),
 					value: now.to_string(),
-				});
-			}
+				}
+			);
 		}
 		// Return the original value
 		Ok(val)
 	}
 	/// Process any PERMISSIONS clause for the field definition
-	async fn process_permissions_clause(&mut self, val: Value) -> Result<Value, Error> {
+	async fn process_permissions_clause(&mut self, val: Value) -> Result<Value> {
 		// Check for a PERMISSIONS clause
 		if self.opt.check_perms(Action::Edit)? {
 			// Get the permission clause
@@ -588,7 +594,7 @@ impl FieldEditContext<'_> {
 		Ok(val)
 	}
 	/// Process any REFERENCE clause for the field definition
-	async fn process_reference_clause(&mut self, val: &Value) -> Result<(), Error> {
+	async fn process_reference_clause(&mut self, val: &Value) -> Result<()> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(());
 		}
@@ -715,7 +721,7 @@ impl FieldEditContext<'_> {
 	}
 
 	/// Process any `TYPE reference` clause for the field definition
-	async fn process_refs_type(&mut self) -> Result<Option<Value>, Error> {
+	async fn process_refs_type(&mut self) -> Result<Option<Value>> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
 		}
@@ -742,9 +748,7 @@ impl FieldEditContext<'_> {
 					.collect();
 
 				// If the length does not match, there were non-reference types
-				if pairs.len() != kinds.len() {
-					return Err(Error::RefsMismatchingVariants);
-				}
+				ensure!(pairs.len() == kinds.len(), Error::RefsMismatchingVariants);
 
 				// All ok
 				Refs(pairs)

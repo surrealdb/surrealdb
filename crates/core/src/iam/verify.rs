@@ -8,6 +8,7 @@ use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::access_type::{AccessType, Jwt, JwtAccessVerify};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
+use anyhow::{bail, Result};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
@@ -15,7 +16,7 @@ use std::str::{self, FromStr};
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation), Error> {
+fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
 	let (dec, mut val) = match alg {
 		Algorithm::Hs256 => {
 			(DecodingKey::from_secret(key), Validation::new(jsonwebtoken::Algorithm::HS256))
@@ -85,7 +86,7 @@ pub async fn basic(
 	pass: &str,
 	ns: Option<&str>,
 	db: Option<&str>,
-) -> Result<(), Error> {
+) -> Result<()> {
 	// Log the authentication type
 	trace!("Attempting basic authentication");
 	// Check if the parameters exist
@@ -125,12 +126,12 @@ pub async fn basic(
 			debug!(
 				"Attempted basic authentication in database '{db}' without specifying a namespace"
 			);
-			Err(Error::InvalidAuth)
+			Err(anyhow::Error::new(Error::InvalidAuth))
 		}
 	}
 }
 
-pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Result<(), Error> {
+pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Result<()> {
 	// Log the authentication type
 	trace!("Attempting token authentication");
 	// Decode the token without verifying
@@ -141,14 +142,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
 			debug!("Token verification failed due to the 'nbf' claim containing a future time");
-			return Err(Error::InvalidAuth);
+			bail!(Error::InvalidAuth);
 		}
 	}
 	// Check if the auth token has expired
 	if let Some(exp) = token_data.claims.exp {
 		if exp < Utc::now().timestamp() {
 			debug!("Token verification failed due to the 'exp' claim containing a past time");
-			return Err(Error::ExpiredToken);
+			bail!(Error::ExpiredToken);
 		}
 	}
 	// Check the token authentication claims
@@ -184,9 +185,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
-					_ => return Err(Error::AccessMethodMismatch),
+					_ => bail!(Error::AccessMethodMismatch),
 				}?,
-				_ => return Err(Error::AccessMethodMismatch),
+				_ => bail!(Error::AccessMethodMismatch),
 			};
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
@@ -247,7 +248,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							}
 						}
 						#[cfg(not(feature = "jwks"))]
-						_ => return Err(Error::AccessMethodMismatch),
+						_ => bail!(Error::AccessMethodMismatch),
 					}?;
 					// Verify the token
 					verify_token(token, &cf.0, &cf.1)?;
@@ -267,8 +268,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						// If roles are provided, parse them
 						Some(roles) => roles
 							.iter()
-							.map(|r| -> Result<Role, Error> {
-								Role::from_str(r.as_str()).map_err(Error::IamError)
+							.map(|r| -> Result<Role> {
+								Role::from_str(r.as_str())
+									.map_err(Error::IamError)
+									.map_err(anyhow::Error::new)
 							})
 							.collect::<Result<Vec<_>, _>>()?,
 					};
@@ -303,7 +306,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 								}
 							}
 							#[cfg(not(feature = "jwks"))]
-							_ => return Err(Error::AccessMethodMismatch),
+							_ => bail!(Error::AccessMethodMismatch),
 						}?;
 
 						// Verify the token
@@ -330,7 +333,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							Level::Record(ns.to_string(), db.to_string(), rid.to_string()),
 						)));
 					}
-					_ => return Err(Error::AccessMethodMismatch),
+					_ => bail!(Error::AccessMethodMismatch),
 				},
 			};
 			Ok(())
@@ -394,13 +397,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							Err(Error::MissingTokenHeader("kid".to_string()))
+							bail!(Error::MissingTokenHeader("kid".to_string()))
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
-					_ => return Err(Error::AccessMethodMismatch),
+					_ => bail!(Error::AccessMethodMismatch),
 				},
-				_ => return Err(Error::AccessMethodMismatch),
+				_ => bail!(Error::AccessMethodMismatch),
 			}?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
@@ -420,8 +423,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// If roles are provided, parse them
 				Some(roles) => roles
 					.iter()
-					.map(|r| -> Result<Role, Error> {
-						Role::from_str(r.as_str()).map_err(Error::IamError)
+					.map(|r| -> Result<Role> {
+						Role::from_str(r.as_str())
+							.map_err(Error::IamError)
+							.map_err(anyhow::Error::new)
 					})
 					.collect::<Result<Vec<_>, _>>()?,
 			};
@@ -495,13 +500,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							Err(Error::MissingTokenHeader("kid".to_string()))
+							bail!(Error::MissingTokenHeader("kid".to_string()))
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
-					_ => return Err(Error::AccessMethodMismatch),
+					_ => bail!(Error::AccessMethodMismatch),
 				},
-				_ => return Err(Error::AccessMethodMismatch),
+				_ => bail!(Error::AccessMethodMismatch),
 			}?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
@@ -521,8 +526,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// If roles are provided, parse them
 				Some(roles) => roles
 					.iter()
-					.map(|r| -> Result<Role, Error> {
-						Role::from_str(r.as_str()).map_err(Error::IamError)
+					.map(|r| -> Result<Role> {
+						Role::from_str(r.as_str())
+							.map_err(Error::IamError)
+							.map_err(anyhow::Error::new)
 					})
 					.collect::<Result<Vec<_>, _>>()?,
 			};
@@ -568,7 +575,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			Ok(())
 		}
 		// There was an auth error
-		_ => Err(Error::InvalidAuth),
+		_ => Err(anyhow::Error::new(Error::InvalidAuth)),
 	}
 }
 
@@ -576,7 +583,7 @@ pub async fn verify_root_creds(
 	ds: &Datastore,
 	user: &str,
 	pass: &str,
-) -> Result<DefineUserStatement, Error> {
+) -> Result<DefineUserStatement> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
@@ -599,7 +606,7 @@ pub async fn verify_ns_creds(
 	ns: &str,
 	user: &str,
 	pass: &str,
-) -> Result<DefineUserStatement, Error> {
+) -> Result<DefineUserStatement> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
@@ -623,7 +630,7 @@ pub async fn verify_db_creds(
 	db: &str,
 	user: &str,
 	pass: &str,
-) -> Result<DefineUserStatement, Error> {
+) -> Result<DefineUserStatement> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
@@ -641,26 +648,28 @@ pub async fn verify_db_creds(
 	Ok(user)
 }
 
-fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
+fn verify_pass(pass: &str, hash: &str) -> Result<()> {
 	// Compute the hash and verify the password
 	let hash = PasswordHash::new(hash).unwrap();
 	// Attempt to verify the password using Argon2
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
-		_ => Err(Error::InvalidPass),
+		_ => Err(anyhow::Error::new(Error::InvalidPass)),
 	}
 }
 
-fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Result<(), Error> {
+fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Result<()> {
 	match decode::<Claims>(token, key, validation) {
 		Ok(_) => Ok(()),
 		Err(err) => {
 			// Only transparently return certain token verification errors
 			match err.kind() {
-				jsonwebtoken::errors::ErrorKind::ExpiredSignature => Err(Error::ExpiredToken),
+				jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+					Err(anyhow::Error::new(Error::ExpiredToken))
+				}
 				_ => {
 					debug!("Error verifying authentication token: {err}");
-					Err(Error::InvalidAuth)
+					Err(anyhow::Error::new(Error::InvalidAuth))
 				}
 			}
 		}
@@ -884,11 +893,11 @@ mod tests {
 
 			// Basic authentication using the newly defined user.
 			let res = basic(&ds, &mut sess, "user", "pass", level.ns, level.db).await;
-			match res {
-				Err(Error::IamError(IamError::InvalidRole(_))) => {} // ok
-				res => {
-					panic!("Expected an invalid role IAM error, but instead received: {:?}", res)
-				}
+
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::IamError(IamError::InvalidRole(_)) => {}
+				e => panic!("Unexpected error, expected IamError(InvalidRole) found {e}"),
 			}
 		}
 	}
@@ -1568,10 +1577,10 @@ mod tests {
 		let mut sess = Session::default();
 		let res = token(&ds, &mut sess, &enc).await;
 
-		match res {
-			Err(Error::ExpiredToken) => {} // ok
-			Err(err) => panic!("Unexpected error signing in with expired token: {:?}", err),
-			res => panic!("Unexpected success signing in with expired token: {:?}", res),
+		let e = res.unwrap_err();
+		match e.downcast().expect("Unexpected error kind") {
+			Error::ExpiredToken => {}
+			e => panic!("Unexpected error, expected ExpiredToken found {e}"),
 		}
 	}
 
@@ -1707,7 +1716,7 @@ mod tests {
 
 				if let Some(expected_err) = &case.expected_error {
 					assert!(res.is_err(), "Unexpected success for case: {:?}", case);
-					let err = res.unwrap_err();
+					let err = res.unwrap_err().downcast().expect("Unexpected error type");
 					match (expected_err, &err) {
 						(Error::InvalidAuth, Error::InvalidAuth) => {}
 						(Error::Thrown(expected_msg), Error::Thrown(msg))
@@ -1968,12 +1977,10 @@ mod tests {
 			let mut sess = Session::default();
 			let res = token(&ds, &mut sess, &enc).await;
 
-			match res {
-				Err(Error::Thrown(e)) if e == "This user is not enabled" => {} // ok
-				res => panic!(
-				    "Expected authentication to failed due to user not being enabled, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::Thrown(e) => assert_eq!(e, "This user is not enabled"),
+				e => panic!("Unexpected error, expected Thrown found {e:?}"),
 			}
 		}
 
@@ -2023,12 +2030,10 @@ mod tests {
 			let mut sess = Session::default();
 			let res = token(&ds, &mut sess, &enc).await;
 
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected authentication to generally fail, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::InvalidAuth => {}
+				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
 	}

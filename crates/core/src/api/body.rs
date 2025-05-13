@@ -16,6 +16,7 @@ use crate::rpc::format::revision;
 use crate::sql;
 use crate::sql::Bytesize;
 use crate::sql::Value;
+use anyhow::Result;
 
 use super::context::InvocationContext;
 use super::err::ApiError;

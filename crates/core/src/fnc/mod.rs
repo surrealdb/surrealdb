@@ -4,10 +4,10 @@ use crate::ctx::Context;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
 use crate::sql::Thing;
+use anyhow::Result;
 use reblessive::tree::Stk;
 pub mod api;
 pub mod args;
@@ -47,7 +47,7 @@ pub async fn run(
 	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	if name.eq("sleep")
 		|| name.eq("api::invoke")
 		|| name.eq("array::all")
@@ -110,10 +110,10 @@ macro_rules! dispatch {
                     $function_name => {
                         $(
                             if !$ctx.get_capabilities().allows_experimental(&ExperimentalTarget::$exp_target) {
-                                return Err($crate::err::Error::InvalidFunction {
+                                return Err(::anyhow::Error::new($crate::err::Error::InvalidFunction {
                                     name: String::from($name),
                                     message: format!("Experimental feature {} is not enabled", ExperimentalTarget::$exp_target),
-                                });
+                                }));
                             }
                         )?
                         let args = args::FromArgs::from_args($name, $args)?;
@@ -122,10 +122,10 @@ macro_rules! dispatch {
                     },
                 )+
                 _ => {
-                    Err($crate::err::Error::InvalidFunction{
+                    return Err(::anyhow::Error::new($crate::err::Error::InvalidFunction{
                         name: String::from($name),
                         message: $message.to_string()
-                    })
+                    }))
                 }
             }
         }
@@ -138,7 +138,7 @@ pub fn synchronous(
 	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	dispatch!(
 		ctx,
 		name,
@@ -501,7 +501,7 @@ pub async fn asynchronous(
 	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
 	#[cfg(not(target_family = "wasm"))]
@@ -596,11 +596,11 @@ pub async fn idiom(
 	doc: Option<&CursorDoc>,
 	value: Value,
 	name: &str,
-	args: Vec<Value>,
-) -> Result<Value, Error> {
-	let args = [vec![value.clone()], args].concat();
-	let specific = match value {
-		Value::Array(_) => {
+	mut args: Vec<Value>,
+) -> Result<Value> {
+	match value {
+		Value::Array(x) => {
+			args.insert(0, Value::Array(x));
 			dispatch!(
 				ctx,
 				name,
@@ -689,9 +689,57 @@ pub async fn idiom(
 				"vector_similarity_jaccard" => vector::similarity::jaccard,
 				"vector_similarity_pearson" => vector::similarity::pearson,
 				"vector_similarity_spearman" => vector::similarity::spearman,
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Bytes(_) => {
+		Value::Bytes(x) => {
+			args.insert(0, Value::Bytes(x));
 			dispatch!(
 				ctx,
 				name,
@@ -701,7 +749,8 @@ pub async fn idiom(
 				"len" => bytes::len,
 			)
 		}
-		Value::Duration(_) => {
+		Value::Duration(d) => {
+			args.insert(0, Value::Duration(d));
 			dispatch!(
 				ctx,
 				name,
@@ -717,9 +766,59 @@ pub async fn idiom(
 				"secs" => duration::secs,
 				"weeks" => duration::weeks,
 				"years" => duration::years,
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
+
 			)
 		}
-		Value::Geometry(_) => {
+		Value::Geometry(g) => {
+			args.insert(0, Value::Geometry(g));
 			dispatch!(
 				ctx,
 				name,
@@ -733,9 +832,59 @@ pub async fn idiom(
 				"hash_decode" => geo::hash::decode,
 				"hash_encode" => geo::hash::encode,
 				"is_valid" => geo::is::valid,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Thing(_) => {
+		Value::Thing(t) => {
+			args.insert(0, Value::Thing(t));
 			dispatch!(
 				ctx,
 				name,
@@ -747,9 +896,59 @@ pub async fn idiom(
 				"table" => record::tb,
 				"tb" => record::tb,
 				"refs" => record::refs((stk, ctx, opt, doc)).await,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Object(_) => {
+		Value::Object(o) => {
+			args.insert(0, Value::Object(o));
 			dispatch!(
 				ctx,
 				name,
@@ -761,9 +960,59 @@ pub async fn idiom(
 				"keys" => object::keys,
 				"len" => object::len,
 				"values" => object::values,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Number(_) => {
+		Value::Number(n) => {
+			args.insert(0, Value::Number(n));
 			dispatch!(
 				ctx,
 				name,
@@ -789,9 +1038,59 @@ pub async fn idiom(
 				"sign" => math::sign,
 				"sin" => math::sin,
 				"tan" => math::tan,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Strand(_) => {
+		Value::Strand(s) => {
+			args.insert(0, Value::Strand(s));
 			dispatch!(
 				ctx,
 				name,
@@ -855,9 +1154,54 @@ pub async fn idiom(
 				"semver_set_major" => string::semver::set::major,
 				"semver_set_minor" => string::semver::set::minor,
 				"semver_set_patch" => string::semver::set::patch,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_string" => r#type::is::string,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
 			)
 		}
-		Value::Datetime(_) => {
+		Value::Datetime(d) => {
+			args.insert(0, Value::Datetime(d));
 			dispatch!(
 				ctx,
 				name,
@@ -883,9 +1227,59 @@ pub async fn idiom(
 				"week" => time::week,
 				"yday" => time::yday,
 				"year" => time::year,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::File(_) => {
+		Value::File(f) => {
+			args.insert(0, Value::File(f));
 			dispatch!(
 				ctx,
 				name,
@@ -905,19 +1299,60 @@ pub async fn idiom(
 				exp(Files) "rename" => file::rename((stk, ctx, opt, doc)).await,
 				exp(Files) "rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
 				exp(Files) "exists" => file::exists((stk, ctx, opt, doc)).await,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		_ => Err(Error::InvalidFunction {
-			name: "".into(),
-			message: "".into(),
-		}),
-	};
-
-	match specific {
-		Err(Error::InvalidFunction {
-			..
-		}) => {
-			let message = format!("no such method found for the {} type", value.kindof());
+		x => {
+			let message = format!("no such method found for the {} type", x.kindof());
+			args.insert(0, x);
 			dispatch!(
 				ctx,
 				name,
@@ -973,7 +1408,6 @@ pub async fn idiom(
 				"repeat" => array::repeat,
 			)
 		}
-		v => v,
 	}
 }
 

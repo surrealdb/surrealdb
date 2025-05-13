@@ -10,6 +10,7 @@ use crate::kvs::Key;
 use crate::kvs::KeyEncode;
 use crate::kvs::Val;
 use crate::vs::VersionStamp;
+use anyhow::Result;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::pin::Pin;
@@ -63,7 +64,7 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
+	pub(crate) async fn new(path: &str) -> Result<Datastore> {
 		// Configure the client and keyspace
 		let config = match *cnf::TIKV_API_VERSION {
 			2 => match *cnf::TIKV_KEYSPACE {
@@ -96,13 +97,13 @@ impl Datastore {
 	}
 
 	/// Shutdown the database
-	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+	pub(crate) async fn shutdown(&self) -> Result<()> {
 		// Nothing to do here
 		Ok(())
 	}
 
 	/// Start a new transaction
-	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+	pub(crate) async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction> {
 		// Set whether this should be an optimistic or pessimistic transaction
 		let mut opt = if lock {
 			TransactionOptions::new_pessimistic()
@@ -163,7 +164,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Cancel a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<()> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -180,7 +181,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Commit a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<()> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -204,7 +205,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
@@ -224,7 +225,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
@@ -244,7 +245,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -281,7 +282,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -330,7 +331,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -377,7 +378,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	async fn del<K>(&mut self, key: K) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
@@ -409,7 +410,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
@@ -454,7 +455,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a range of keys from the databases
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
+	async fn delr<K>(&mut self, rng: Range<K>) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
@@ -481,7 +482,7 @@ impl super::api::Transaction for Transaction {
 		rng: Range<K>,
 		limit: u32,
 		version: Option<u64>,
-	) -> Result<Vec<Key>, Error>
+	) -> Result<Vec<Key>>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
@@ -499,7 +500,7 @@ impl super::api::Transaction for Transaction {
 		rng: Range<K>,
 		limit: u32,
 		version: Option<u64>,
-	) -> Result<Vec<Key>, Error>
+	) -> Result<Vec<Key>>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
@@ -517,7 +518,7 @@ impl super::api::Transaction for Transaction {
 		rng: Range<K>,
 		limit: u32,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
+	) -> Result<Vec<(Key, Val)>>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
@@ -535,7 +536,7 @@ impl super::api::Transaction for Transaction {
 		rng: Range<K>,
 		limit: u32,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
+	) -> Result<Vec<(Key, Val)>>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
@@ -549,7 +550,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Obtain a new change timestamp for a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp, Error>
+	async fn get_timestamp<K>(&mut self, key: K) -> Result<VersionStamp>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
@@ -584,7 +585,7 @@ impl SavePointImpl for Transaction {
 }
 
 impl Transaction {
-	fn prepare_scan<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<Range<Key>, Error>
+	fn prepare_scan<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<Range<Key>>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{

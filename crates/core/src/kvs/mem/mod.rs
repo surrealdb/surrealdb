@@ -3,6 +3,7 @@
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::{Key, Val, Version};
+use anyhow::{bail, ensure, Result};
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::OnceLock;
@@ -60,7 +61,7 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new() -> Result<Datastore, Error> {
+	pub(crate) async fn new() -> Result<Datastore> {
 		// Create new configuration options
 		let mut opts = Options::new();
 		// Ensure versions are disabled
@@ -72,18 +73,18 @@ impl Datastore {
 			Ok(db) => Ok(Datastore {
 				db,
 			}),
-			Err(e) => Err(Error::Ds(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
 		}
 	}
 
 	/// Shutdown the database
-	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+	pub(crate) async fn shutdown(&self) -> Result<()> {
 		// Nothing to do here
 		Ok(())
 	}
 
 	/// Start a new transaction
-	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction> {
 		// Specify the check level
 		#[cfg(not(debug_assertions))]
 		let check = Check::Warn;
@@ -97,7 +98,7 @@ impl Datastore {
 				write,
 				inner: Some(inner),
 			}),
-			Err(e) => Err(Error::Tx(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Tx(e.to_string()))),
 		}
 	}
 }
@@ -120,11 +121,9 @@ impl super::api::Transaction for Transaction {
 
 	/// Cancels the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Mark the transaction as done.
 		self.done = true;
 		// Rollback this transaction
@@ -137,15 +136,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Commits the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Mark the transaction as done.
 		self.done = true;
 
@@ -162,14 +157,12 @@ impl super::api::Transaction for Transaction {
 
 	/// Checks if a key exists in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
+	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Get the arguments
 		let key = key.encode_owned()?;
 
@@ -189,14 +182,12 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Get the arguments
 		let key = key.encode_owned()?;
 
@@ -215,19 +206,15 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let val = val.into();
@@ -247,19 +234,15 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert or replace a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn replace<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn replace<K, V>(&mut self, key: K, val: V) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let val = val.into();
@@ -277,19 +260,15 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
+	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let val = val.into();
@@ -303,7 +282,7 @@ impl super::api::Transaction for Transaction {
 		} else {
 			match inner.get(&key)? {
 				None => inner.set(&key, &val)?,
-				_ => return Err(Error::TxKeyAlreadyExists),
+				_ => bail!(Error::TxKeyAlreadyExists),
 			}
 		}
 
@@ -313,19 +292,15 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let val = val.into();
@@ -338,7 +313,7 @@ impl super::api::Transaction for Transaction {
 		match (inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => inner.set(&key, &val)?,
 			(None, None) => inner.set(&key, &val)?,
-			_ => return Err(Error::TxConditionNotMet),
+			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Return result
 		Ok(())
@@ -346,18 +321,14 @@ impl super::api::Transaction for Transaction {
 
 	/// Deletes a key from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	async fn del<K>(&mut self, key: K) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Get the arguments
 		let key = key.encode_owned()?;
 		// Get the inner transaction
@@ -372,19 +343,15 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let chk = chk.map(Into::into);
@@ -397,7 +364,7 @@ impl super::api::Transaction for Transaction {
 		match (inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => inner.soft_delete(&key)?,
 			(None, None) => inner.soft_delete(&key)?,
-			_ => return Err(Error::TxConditionNotMet),
+			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Return result
 		Ok(())
@@ -405,18 +372,14 @@ impl super::api::Transaction for Transaction {
 
 	/// Deletes all versions of a key from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn clr<K>(&mut self, key: K) -> Result<(), Error>
+	async fn clr<K>(&mut self, key: K) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Get the arguments
 		let key = key.encode_owned()?;
 		// Get the inner transaction
@@ -431,19 +394,16 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete all versions of a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn clrc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	async fn clrc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<()>
 	where
 		K: KeyEncode + Sprintable + Debug,
 		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
+
 		// Get the arguments
 		let key = key.encode_owned()?;
 		let chk = chk.map(Into::into);
@@ -456,7 +416,7 @@ impl super::api::Transaction for Transaction {
 		match (inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => inner.delete(&key)?,
 			(None, None) => inner.delete(&key)?,
-			_ => return Err(Error::TxConditionNotMet),
+			_ => bail!(Error::TxConditionNotMet),
 		};
 
 		// Return result
@@ -465,19 +425,12 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieves a range of key-value pairs from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys<K>(
-		&mut self,
-		rng: Range<K>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<Key>, Error>
+	async fn keys<K>(&mut self, rng: Range<K>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
 		let beg = rng.start.encode_owned()?;
 		let end = rng.end.encode_owned()?;
@@ -508,14 +461,12 @@ impl super::api::Transaction for Transaction {
 		rng: Range<K>,
 		limit: u32,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error>
+	) -> Result<Vec<(Key, Val)>>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
 		let beg = rng.start.encode_owned()?;
 		let end = rng.end.encode_owned()?;
@@ -528,12 +479,14 @@ impl super::api::Transaction for Transaction {
 		let res = match version {
 			Some(ts) => inner
 				.scan_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
-				.map(|r| r.map(|(k, v)| (k.to_vec(), v)).map_err(Into::<Error>::into))
-				.collect::<Result<_, Error>>()?,
+				.map(|r| {
+					r.map(|(k, v)| (k.to_vec(), v)).map_err(Error::from).map_err(anyhow::Error::new)
+				})
+				.collect::<Result<_>>()?,
 			None => inner
 				.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))
 				.map(|r| r.map(|(k, v, _)| (k.to_vec(), v)).map_err(Into::into))
-				.collect::<Result<_, Error>>()?,
+				.collect::<Result<_>>()?,
 		};
 		// Return result
 		Ok(res)
@@ -545,13 +498,11 @@ impl super::api::Transaction for Transaction {
 		&mut self,
 		rng: Range<K>,
 		limit: u32,
-	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
+	) -> Result<Vec<(Key, Val, Version, bool)>>
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
 		let beg = rng.start.encode_owned()?;
 		let end = rng.end.encode_owned()?;
@@ -564,7 +515,7 @@ impl super::api::Transaction for Transaction {
 		let res = inner
 			.scan_all_versions(beg.as_slice()..end.as_slice(), Some(limit as usize))
 			.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
-			.collect::<Result<_, Error>>()?;
+			.collect::<Result<_>>()?;
 		// Return result
 		Ok(res)
 	}
@@ -577,14 +528,14 @@ impl Transaction {
 		}
 	}
 
-	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<(), Error> {
+	pub(crate) async fn rollback_to_save_point(&mut self) -> Result<()> {
 		if let Some(inner) = &mut self.inner {
 			inner.rollback_to_savepoint()?;
 		}
 		Ok(())
 	}
 
-	pub(crate) fn release_last_save_point(&mut self) -> Result<(), Error> {
+	pub(crate) fn release_last_save_point(&mut self) -> Result<()> {
 		Ok(())
 	}
 }

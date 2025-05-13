@@ -2,6 +2,7 @@ use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, 
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
+use anyhow::{bail, Result};
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -732,7 +733,7 @@ macro_rules! impl_simple_try_op {
 	($trt:ident, $fn:ident, $unchecked:ident, $checked:ident) => {
 		impl $trt for Number {
 			type Output = Self;
-			fn $fn(self, other: Self) -> Result<Self, Error> {
+			fn $fn(self, other: Self) -> Result<Self> {
 				Ok(match (self, other) {
 					(Number::Int(v), Number::Int(w)) => Number::Int(
 						v.$checked(w).ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
@@ -762,12 +763,12 @@ impl_simple_try_op!(TryRem, try_rem, rem, checked_rem);
 
 impl TryPow for Number {
 	type Output = Self;
-	fn try_pow(self, power: Self) -> Result<Self, Error> {
+	fn try_pow(self, power: Self) -> Result<Self> {
 		Ok(match (self, power) {
 			(Self::Int(v), Self::Int(p)) => Self::Int(match v {
 				0 => match p.cmp(&0) {
 					// 0^(-x)
-					Ordering::Less => return Err(Error::TryPow(v.to_string(), p.to_string())),
+					Ordering::Less => bail!(Error::TryPow(v.to_string(), p.to_string())),
 					// 0^0
 					Ordering::Equal => 1,
 					// 0^x
@@ -808,7 +809,7 @@ impl TryPow for Number {
 impl TryNeg for Number {
 	type Output = Self;
 
-	fn try_neg(self) -> Result<Self::Output, Error> {
+	fn try_neg(self) -> Result<Self::Output> {
 		Ok(match self {
 			Self::Int(n) => {
 				Number::Int(n.checked_neg().ok_or_else(|| Error::TryNeg(n.to_string()))?)
@@ -821,7 +822,7 @@ impl TryNeg for Number {
 
 impl TryFloatDiv for Number {
 	type Output = Self;
-	fn try_float_div(self, other: Self) -> Result<Self, Error> {
+	fn try_float_div(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Number::Int(v), Number::Int(w)) => {
 				let quotient = (v as f64).div(w as f64);

@@ -3,6 +3,7 @@ use crate::dbs::plan::Explanation;
 use crate::err::Error;
 use crate::sql::order::OrderList;
 use crate::sql::value::Value;
+use anyhow::Result;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 

@@ -22,6 +22,7 @@ use crate::{
 		Array, Fields, Function, Model, Output, Query, Strand, Value,
 	},
 };
+use anyhow::Result;
 
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocolV2: RpcContext {
@@ -128,7 +129,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
-		let out: Result<Value, Error> =
+		let out: Result<Value> =
 			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -150,7 +151,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
-		let out: Result<Value, Error> =
+		let out: Result<Value> =
 			crate::iam::signin::signin(self.kvs(), &mut session, v).await.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -172,10 +173,9 @@ pub trait RpcProtocolV2: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Attempt authentication, mutating the session
-		let out: Result<Value, Error> =
-			crate::iam::verify::token(self.kvs(), &mut session, &token.0)
-				.await
-				.map(|_| Value::None);
+		let out: Result<Value> = crate::iam::verify::token(self.kvs(), &mut session, &token.0)
+			.await
+			.map(|_| Value::None);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -209,7 +209,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Reset the current session
-		crate::iam::reset::reset(&mut session)?;
+		crate::iam::reset::reset(&mut session);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -350,9 +350,10 @@ pub trait RpcProtocolV2: RpcContext {
 		let (what, diff) = params.needs_one_or_two()?;
 		// Specify the SQL query string
 		let sql = LiveStatement::new_from_what_expr(
-			match diff.is_true() {
-				true => Fields::default(),
-				false => Fields::all(),
+			if diff.is_true() {
+				Fields::default()
+			} else {
+				Fields::all()
 			},
 			what.could_be_table(),
 		)
@@ -405,9 +406,9 @@ pub trait RpcProtocolV2: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(RpcError::InternalError(e)),
 			})?
 			.into())
 	}
@@ -435,9 +436,9 @@ pub trait RpcProtocolV2: RpcContext {
 		}
 		// Extract the data from the Option
 		let Some(data) = opts.data_expr() else {
-			return Err(
-				fail!("Data content was previously set, so it cannot be Option::None").into()
-			);
+			return Err(RpcError::from(anyhow::Error::new(Error::unreachable(
+				"Data content was previously set, so it cannot be Option::None",
+			))));
 		};
 		// Specify the query parameters
 		let var = Some(opts.merge_vars(&self.session().parameters));
@@ -461,9 +462,9 @@ pub trait RpcProtocolV2: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(RpcError::InternalError(e)),
 			})?
 			.into())
 	}
@@ -513,9 +514,9 @@ pub trait RpcProtocolV2: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(RpcError::InternalError(e)),
 			})?
 			.into())
 	}
@@ -564,9 +565,9 @@ pub trait RpcProtocolV2: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(RpcError::InternalError(e)),
 			})?
 			.into())
 	}
@@ -615,9 +616,9 @@ pub trait RpcProtocolV2: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(RpcError::InternalError(e)),
 			})?
 			.into())
 	}
@@ -668,9 +669,9 @@ pub trait RpcProtocolV2: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(RpcError::InternalError(e)),
 			})?
 			.into())
 	}
@@ -714,9 +715,9 @@ pub trait RpcProtocolV2: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(RpcError::InternalError(e)),
 			})?
 			.into())
 	}
@@ -916,14 +917,13 @@ pub trait RpcProtocolV2: RpcContext {
 		// Execute the request against the schema
 		let res = schema.execute(req).await;
 		// Serialize the graphql response
-		let out = match pretty {
-			true => {
-				let mut buf = Vec::new();
-				let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
-				let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
-				res.serialize(&mut ser).ok().and_then(|_| String::from_utf8(buf).ok())
-			}
-			false => serde_json::to_string(&res).ok(),
+		let out = if pretty {
+			let mut buf = Vec::new();
+			let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
+			let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
+			res.serialize(&mut ser).ok().and_then(|_| String::from_utf8(buf).ok())
+		} else {
+			serde_json::to_string(&res).ok()
 		}
 		.ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
 		// Output the graphql response
@@ -947,7 +947,11 @@ pub trait RpcProtocolV2: RpcContext {
 		let res = match query {
 			Value::Query(sql) => self.kvs().process(sql, &self.session(), vars).await?,
 			Value::Strand(sql) => self.kvs().execute(&sql, &self.session(), vars).await?,
-			_ => return Err(fail!("Unexpected query type: {query:?}").into()),
+			_ => {
+				return Err(RpcError::from(anyhow::Error::new(Error::unreachable(
+					"Unexpected query type: {query:?}",
+				))))
+			}
 		};
 
 		// Post-process hooks for web layer

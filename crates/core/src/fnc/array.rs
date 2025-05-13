@@ -19,6 +19,7 @@ use crate::sql::value::Value;
 use crate::sql::Closure;
 use crate::sql::FlowResultExt as _;
 use crate::sql::Function;
+use anyhow::{bail, ensure, Result};
 use rand::prelude::SliceRandom;
 use reblessive::tree::Stk;
 use std::cmp::Ordering;
@@ -39,7 +40,7 @@ fn limit(name: &str, n: usize) -> Result<(), Error> {
 	}
 }
 
-pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
+pub fn add((mut array, value): (Array, Value)) -> Result<Value> {
 	match value {
 		Value::Array(value) => {
 			for v in value.0 {
@@ -61,7 +62,7 @@ pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 pub async fn all(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(array, Optional(check)): (Array, Optional<Value>),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	Ok(match check {
 		Some(closure) if closure.is_closure() => {
 			if let Some(opt) = opt {
@@ -87,7 +88,7 @@ pub async fn all(
 pub async fn any(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(array, Optional(check)): (Array, Optional<Value>),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	Ok(match check {
 		Some(closure) if closure.is_closure() => {
 			if let Some(opt) = opt {
@@ -105,17 +106,17 @@ pub async fn any(
 				Value::None
 			}
 		}
-		Some(value) => array.iter().any(|v: &Value| *v == value).into(),
+		Some(value) => array.contains(&value).into(),
 		None => array.iter().any(Value::is_truthy).into(),
 	})
 }
 
-pub fn append((mut array, value): (Array, Value)) -> Result<Value, Error> {
+pub fn append((mut array, value): (Array, Value)) -> Result<Value> {
 	array.push(value);
 	Ok(array.into())
 }
 
-pub fn at((array, i): (Array, i64)) -> Result<Value, Error> {
+pub fn at((array, i): (Array, i64)) -> Result<Value> {
 	let mut idx = i as usize;
 	if i < 0 {
 		idx = (array.len() as i64 + i) as usize;
@@ -123,7 +124,7 @@ pub fn at((array, i): (Array, i64)) -> Result<Value, Error> {
 	Ok(array.get(idx).cloned().unwrap_or_default())
 }
 
-pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value, Error> {
+pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value> {
 	let longest_length = lh.len().max(rh.len());
 	let mut results = Array::with_capacity(longest_length);
 	for i in 0..longest_length {
@@ -135,12 +136,12 @@ pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	Ok(results.into())
 }
 
-pub fn boolean_not((mut array,): (Array,)) -> Result<Value, Error> {
+pub fn boolean_not((mut array,): (Array,)) -> Result<Value> {
 	array.iter_mut().for_each(|v| *v = (!v.is_truthy()).into());
 	Ok(array.into())
 }
 
-pub fn boolean_or((lh, rh): (Array, Array)) -> Result<Value, Error> {
+pub fn boolean_or((lh, rh): (Array, Array)) -> Result<Value> {
 	let longest_length = lh.len().max(rh.len());
 	let mut results = Array::with_capacity(longest_length);
 	for i in 0..longest_length {
@@ -152,7 +153,7 @@ pub fn boolean_or((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	Ok(results.into())
 }
 
-pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
+pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value> {
 	let longest_length = lh.len().max(rh.len());
 	let mut results = Array::with_capacity(longest_length);
 	for i in 0..longest_length {
@@ -164,20 +165,20 @@ pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	Ok(results.into())
 }
 
-pub fn clump((array, clump_size): (Array, i64)) -> Result<Value, Error> {
+pub fn clump((array, clump_size): (Array, i64)) -> Result<Value> {
 	let clump_size = clump_size.max(0) as usize;
 	Ok(array.clump(clump_size)?.into())
 }
 
-pub fn combine((array, other): (Array, Array)) -> Result<Value, Error> {
+pub fn combine((array, other): (Array, Array)) -> Result<Value> {
 	Ok(array.combine(other).into())
 }
 
-pub fn complement((array, other): (Array, Array)) -> Result<Value, Error> {
+pub fn complement((array, other): (Array, Array)) -> Result<Value> {
 	Ok(array.complement(other).into())
 }
 
-pub fn concat(Rest(mut arrays): Rest<Array>) -> Result<Value, Error> {
+pub fn concat(Rest(mut arrays): Rest<Array>) -> Result<Value> {
 	let len = match arrays.iter().map(Array::len).reduce(|c, v| c + v) {
 		None => Err(Error::InvalidArguments {
 			name: String::from("array::concat"),
@@ -192,11 +193,11 @@ pub fn concat(Rest(mut arrays): Rest<Array>) -> Result<Value, Error> {
 	Ok(arr.into())
 }
 
-pub fn difference((array, other): (Array, Array)) -> Result<Value, Error> {
+pub fn difference((array, other): (Array, Array)) -> Result<Value> {
 	Ok(array.difference(other).into())
 }
 
-pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
+pub fn distinct((array,): (Array,)) -> Result<Value> {
 	Ok(array.uniq().into())
 }
 
@@ -207,7 +208,7 @@ pub fn fill(
 		Optional<i64>,
 		Optional<i64>,
 	),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	let len = array.len();
 
 	let start = start.unwrap_or(0);
@@ -235,7 +236,7 @@ pub fn fill(
 pub async fn filter(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(array, check): (Array, Value),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	Ok(match check {
 		closure if closure.is_closure() => {
 			if let Some(opt) = opt {
@@ -259,7 +260,7 @@ pub async fn filter(
 pub async fn filter_index(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(array, value): (Array, Value),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	Ok(match value {
 		closure if closure.is_closure() => {
 			if let Some(opt) = opt {
@@ -294,7 +295,7 @@ pub async fn filter_index(
 pub async fn find(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(array, value): (Array, Value),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	Ok(match value {
 		closure if closure.is_closure() => {
 			if let Some(opt) = opt {
@@ -317,7 +318,7 @@ pub async fn find(
 pub async fn find_index(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(array, value): (Array, Value),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	Ok(match value {
 		closure if closure.is_closure() => {
 			if let Some(opt) = opt {
@@ -347,7 +348,7 @@ pub async fn find_index(
 	})
 }
 
-pub fn first((array,): (Array,)) -> Result<Value, Error> {
+pub fn first((array,): (Array,)) -> Result<Value> {
 	if let [first, ..] = &array[0..] {
 		Ok(first.to_owned())
 	} else {
@@ -355,14 +356,14 @@ pub fn first((array,): (Array,)) -> Result<Value, Error> {
 	}
 }
 
-pub fn flatten((array,): (Array,)) -> Result<Value, Error> {
+pub fn flatten((array,): (Array,)) -> Result<Value> {
 	Ok(array.flatten().into())
 }
 
 pub async fn fold(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(array, init, mapper): (Array, Value, Box<Closure>),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	if let Some(opt) = opt {
 		let mut accum = init;
 		for (i, val) in array.into_iter().enumerate() {
@@ -376,13 +377,11 @@ pub async fn fold(
 	}
 }
 
-pub fn group((array,): (Array,)) -> Result<Value, Error> {
+pub fn group((array,): (Array,)) -> Result<Value> {
 	Ok(array.flatten().uniq().into())
 }
 
-pub fn insert(
-	(mut array, value, Optional(index)): (Array, Value, Optional<i64>),
-) -> Result<Value, Error> {
+pub fn insert((mut array, value, Optional(index)): (Array, Value, Optional<i64>)) -> Result<Value> {
 	match index {
 		Some(mut index) => {
 			// Negative index means start from the back
@@ -405,19 +404,19 @@ pub fn insert(
 	}
 }
 
-pub fn intersect((array, other): (Array, Array)) -> Result<Value, Error> {
+pub fn intersect((array, other): (Array, Array)) -> Result<Value> {
 	Ok(array.intersect(other).into())
 }
 
-pub fn is_empty((array,): (Array,)) -> Result<Value, Error> {
+pub fn is_empty((array,): (Array,)) -> Result<Value> {
 	Ok(array.is_empty().into())
 }
 
-pub fn join((arr, sep): (Array, String)) -> Result<Value, Error> {
+pub fn join((arr, sep): (Array, String)) -> Result<Value> {
 	Ok(arr.into_iter().map(Value::as_raw_string).collect::<Vec<_>>().join(&sep).into())
 }
 
-pub fn last((array,): (Array,)) -> Result<Value, Error> {
+pub fn last((array,): (Array,)) -> Result<Value> {
 	if let [.., last] = &array[0..] {
 		Ok(last.to_owned())
 	} else {
@@ -425,11 +424,11 @@ pub fn last((array,): (Array,)) -> Result<Value, Error> {
 	}
 }
 
-pub fn len((array,): (Array,)) -> Result<Value, Error> {
+pub fn len((array,): (Array,)) -> Result<Value> {
 	Ok(array.len().into())
 }
 
-pub fn logical_and((lh, rh): (Array, Array)) -> Result<Value, Error> {
+pub fn logical_and((lh, rh): (Array, Array)) -> Result<Value> {
 	let mut result_arr = Array::with_capacity(lh.len().max(rh.len()));
 	let mut iters = (lh.into_iter(), rh.into_iter());
 	for (lhv, rhv) in std::iter::from_fn(|| {
@@ -453,7 +452,7 @@ pub fn logical_and((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	Ok(result_arr.into())
 }
 
-pub fn logical_or((lh, rh): (Array, Array)) -> Result<Value, Error> {
+pub fn logical_or((lh, rh): (Array, Array)) -> Result<Value> {
 	let mut result_arr = Array::with_capacity(lh.len().max(rh.len()));
 	let mut iters = (lh.into_iter(), rh.into_iter());
 	for (lhv, rhv) in std::iter::from_fn(|| {
@@ -477,7 +476,7 @@ pub fn logical_or((lh, rh): (Array, Array)) -> Result<Value, Error> {
 	Ok(result_arr.into())
 }
 
-pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
+pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value> {
 	let mut result_arr = Array::with_capacity(lh.len().max(rh.len()));
 	let mut iters = (lh.into_iter(), rh.into_iter());
 	for (lhv, rhv) in std::iter::from_fn(|| {
@@ -504,7 +503,7 @@ pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value, Error> {
 pub async fn map(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(array, mapper): (Array, Box<Closure>),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	if let Some(opt) = opt {
 		let mut res = Vec::with_capacity(array.len());
 		for (i, arg) in array.into_iter().enumerate() {
@@ -518,46 +517,47 @@ pub async fn map(
 	}
 }
 
-pub fn matches((array, compare_val): (Array, Value)) -> Result<Value, Error> {
+pub fn matches((array, compare_val): (Array, Value)) -> Result<Value> {
 	Ok(array.matches(compare_val).into())
 }
 
-pub fn max((array,): (Array,)) -> Result<Value, Error> {
+pub fn max((array,): (Array,)) -> Result<Value> {
 	Ok(array.into_iter().max().unwrap_or_default())
 }
 
-pub fn min((array,): (Array,)) -> Result<Value, Error> {
+pub fn min((array,): (Array,)) -> Result<Value> {
 	Ok(array.into_iter().min().unwrap_or_default())
 }
 
-pub fn pop((mut array,): (Array,)) -> Result<Value, Error> {
+pub fn pop((mut array,): (Array,)) -> Result<Value> {
 	Ok(array.pop().into())
 }
 
-pub fn prepend((mut array, value): (Array, Value)) -> Result<Value, Error> {
+pub fn prepend((mut array, value): (Array, Value)) -> Result<Value> {
 	array.insert(0, value);
 	Ok(array.into())
 }
 
-pub fn push((mut array, value): (Array, Value)) -> Result<Value, Error> {
+pub fn push((mut array, value): (Array, Value)) -> Result<Value> {
 	array.push(value);
 	Ok(array.into())
 }
 
-pub fn range((start, count): (i64, i64)) -> Result<Value, Error> {
-	if count < 0 {
-		return Err(Error::InvalidArguments {
+pub fn range((start, count): (i64, i64)) -> Result<Value> {
+	ensure!(
+		count >= 0,
+		Error::InvalidArguments {
 			name: String::from("array::range"),
 			message: format!(
 				"Argument 1 was the wrong type. Expected a positive number but found {count}"
 			),
-		});
-	}
+		}
+	);
 
 	if let Some(end) = start.checked_add(count - 1) {
 		Ok(Array((start..=end).map(Value::from).collect::<Vec<_>>()).into())
 	} else {
-		Err(Error::InvalidArguments {
+		bail!(Error::InvalidArguments {
 			name: String::from("array::range"),
 			message: String::from("The range overflowed the maximum value for an integer"),
 		})
@@ -567,15 +567,13 @@ pub fn range((start, count): (i64, i64)) -> Result<Value, Error> {
 pub async fn reduce(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(array, mapper): (Array, Box<Closure>),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	if let Some(opt) = opt {
 		match array.len() {
 			0 => Ok(Value::None),
 			1 => {
 				let Some(val) = array.into_iter().next() else {
-					return Err(Error::Unreachable(
-						"Iterator should have an item at this point".into(),
-					));
+					bail!(Error::unreachable("Iterator should have an item at this point"))
 				};
 				Ok(val)
 			}
@@ -601,7 +599,7 @@ pub async fn reduce(
 	}
 }
 
-pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
+pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value> {
 	// Negative index means start from the back
 	if index < 0 {
 		index += array.len() as i64;
@@ -616,19 +614,19 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
-pub fn repeat((value, count): (Value, i64)) -> Result<Value, Error> {
+pub fn repeat((value, count): (Value, i64)) -> Result<Value> {
 	// TODO: Fix signed to unsigned casting here.
 	let count = count as usize;
 	limit("array::repeat", size_of_val(&value).saturating_mul(count))?;
 	Ok(Array(std::iter::repeat_n(value, count).collect()).into())
 }
 
-pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {
+pub fn reverse((mut array,): (Array,)) -> Result<Value> {
 	array.reverse();
 	Ok(array.into())
 }
 
-pub fn shuffle((mut array,): (Array,)) -> Result<Value, Error> {
+pub fn shuffle((mut array,): (Array,)) -> Result<Value> {
 	let mut rng = rand::thread_rng();
 	array.shuffle(&mut rng);
 	Ok(array.into())
@@ -636,7 +634,7 @@ pub fn shuffle((mut array,): (Array,)) -> Result<Value, Error> {
 
 pub fn slice(
 	(array, Optional(beg), Optional(lim)): (Array, Optional<i64>, Optional<i64>),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	let skip = match beg {
 		Some(v) if v < 0 => array.len().saturating_sub(v.unsigned_abs() as usize),
 		Some(v) => v as usize,
@@ -669,7 +667,7 @@ fn sort_as_asc(order: &Option<Value>) -> bool {
 	}
 }
 
-pub fn sort((mut array, Optional(order)): (Array, Optional<Value>)) -> Result<Value, Error> {
+pub fn sort((mut array, Optional(order)): (Array, Optional<Value>)) -> Result<Value> {
 	if sort_as_asc(&order) {
 		array.sort_unstable();
 		Ok(array.into())
@@ -679,9 +677,7 @@ pub fn sort((mut array, Optional(order)): (Array, Optional<Value>)) -> Result<Va
 	}
 }
 
-pub fn sort_natural(
-	(mut array, Optional(order)): (Array, Optional<Value>),
-) -> Result<Value, Error> {
+pub fn sort_natural((mut array, Optional(order)): (Array, Optional<Value>)) -> Result<Value> {
 	if sort_as_asc(&order) {
 		array.sort_unstable_by(|a, b| a.natural_cmp(b).unwrap_or(Ordering::Equal));
 		Ok(array.into())
@@ -691,9 +687,7 @@ pub fn sort_natural(
 	}
 }
 
-pub fn sort_lexical(
-	(mut array, Optional(order)): (Array, Optional<Value>),
-) -> Result<Value, Error> {
+pub fn sort_lexical((mut array, Optional(order)): (Array, Optional<Value>)) -> Result<Value> {
 	if sort_as_asc(&order) {
 		array.sort_unstable_by(|a, b| a.lexical_cmp(b).unwrap_or(Ordering::Equal));
 		Ok(array.into())
@@ -705,7 +699,7 @@ pub fn sort_lexical(
 
 pub fn sort_natural_lexical(
 	(mut array, Optional(order)): (Array, Optional<Value>),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	if sort_as_asc(&order) {
 		array.sort_unstable_by(|a, b| a.natural_lexical_cmp(b).unwrap_or(Ordering::Equal));
 		Ok(array.into())
@@ -715,7 +709,7 @@ pub fn sort_natural_lexical(
 	}
 }
 
-pub fn swap((mut array, from, to): (Array, i64, i64)) -> Result<Value, Error> {
+pub fn swap((mut array, from, to): (Array, i64, i64)) -> Result<Value> {
 	let min = 0;
 	let max = array.len();
 	let negative_max = -(max as isize);
@@ -748,31 +742,31 @@ pub fn swap((mut array, from, to): (Array, i64, i64)) -> Result<Value, Error> {
 	Ok(array.into())
 }
 
-pub fn transpose((array,): (Array,)) -> Result<Value, Error> {
+pub fn transpose((array,): (Array,)) -> Result<Value> {
 	Ok(array.transpose().into())
 }
 
-pub fn union((array, other): (Array, Array)) -> Result<Value, Error> {
+pub fn union((array, other): (Array, Array)) -> Result<Value> {
 	Ok(array.union(other).into())
 }
 
-pub fn windows((array, window_size): (Array, i64)) -> Result<Value, Error> {
+pub fn windows((array, window_size): (Array, i64)) -> Result<Value> {
 	let window_size = window_size.max(0) as usize;
 	Ok(array.windows(window_size)?.into())
 }
 
 pub mod sort {
 
-	use crate::err::Error;
 	use crate::sql::array::Array;
 	use crate::sql::value::Value;
+	use anyhow::Result;
 
-	pub fn asc((mut array,): (Array,)) -> Result<Value, Error> {
+	pub fn asc((mut array,): (Array,)) -> Result<Value> {
 		array.sort_unstable();
 		Ok(array.into())
 	}
 
-	pub fn desc((mut array,): (Array,)) -> Result<Value, Error> {
+	pub fn desc((mut array,): (Array,)) -> Result<Value> {
 		array.sort_unstable_by(|a, b| b.cmp(a));
 		Ok(array.into())
 	}

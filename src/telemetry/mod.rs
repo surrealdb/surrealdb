@@ -3,7 +3,6 @@ pub mod metrics;
 pub mod traces;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::err::Error;
 use opentelemetry::global;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::{

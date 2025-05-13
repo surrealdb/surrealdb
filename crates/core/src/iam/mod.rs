@@ -1,3 +1,4 @@
+use anyhow::Result;
 use cedar_policy::Context;
 pub use entities::Level;
 use thiserror::Error;
@@ -47,7 +48,7 @@ pub fn is_allowed(
 	action: &Action,
 	resource: &Resource,
 	ctx: Option<Context>,
-) -> Result<(), Error> {
+) -> Result<()> {
 	match policies::is_allowed(actor, action, resource, ctx.unwrap_or(Context::empty())) {
 		(allowed, _) if allowed => Ok(()),
 		_ => {
@@ -58,7 +59,7 @@ pub fn is_allowed(
 			};
 
 			trace!("{}", err);
-			Err(err)
+			Err(anyhow::Error::new(err))
 		}
 	}
 }
