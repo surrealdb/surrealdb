@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{changefeed::ChangeFeed, Base, Ident, Permissions, Strand, Value};
+use crate::sql::{Base, ChangeFeed, Ident, Permissions, Strand, Value};
 use crate::sql::{Kind, TableType};
 
 use reblessive::tree::Stk;
@@ -14,14 +14,15 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AlterTableStatement {
 	pub name: Ident,
 	pub if_exists: bool,
-	pub drop: Option<bool>,
+	#[revision(end = 2, convert_fn = "convert_drop")]
+	pub _drop: Option<bool>,
 	pub full: Option<bool>,
 	pub permissions: Option<Permissions>,
 	pub changefeed: Option<Option<ChangeFeed>>,
@@ -30,6 +31,14 @@ pub struct AlterTableStatement {
 }
 
 impl AlterTableStatement {
+	fn convert_drop(
+		&mut self,
+		_revision: u16,
+		_value: Option<bool>,
+	) -> Result<(), revision::Error> {
+		Ok(())
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
@@ -53,9 +62,6 @@ impl AlterTableStatement {
 		};
 		// Process the statement
 		let key = crate::key::database::tb::new(ns, db, &self.name);
-		if let Some(ref drop) = &self.drop {
-			dt.drop = *drop;
-		}
 		if let Some(ref full) = &self.full {
 			dt.full = *full;
 		}
@@ -124,9 +130,6 @@ impl Display for AlterTableStatement {
 				}
 			}
 		}
-		if let Some(drop) = self.drop {
-			write!(f, " DROP {drop}")?;
-		}
 		if let Some(full) = self.full {
 			f.write_str(if full {
 				" SCHEMAFULL"
@@ -135,10 +138,18 @@ impl Display for AlterTableStatement {
 			})?;
 		}
 		if let Some(comment) = &self.comment {
-			write!(f, " COMMENT {}", comment.clone().unwrap_or("NONE".into()))?
+			if let Some(ref comment) = comment {
+				write!(f, " COMMENT {}", comment.clone())?;
+			} else {
+				write!(f, " DROP COMMENT")?;
+			}
 		}
 		if let Some(changefeed) = &self.changefeed {
-			write!(f, " CHANGEFEED {}", changefeed.map_or("NONE".into(), |v| v.to_string()))?
+			if let Some(ref changefeed) = changefeed {
+				write!(f, " CHANGEFEED {}", changefeed.clone())?;
+			} else {
+				write!(f, " DROP CHANGEFEED")?;
+			}
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
