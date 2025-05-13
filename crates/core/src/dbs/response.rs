@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::sql::Statement;
 use crate::sql::Value as CoreValue;
 use revision::revisioned;
 use revision::Revisioned;
@@ -9,15 +10,34 @@ use std::time::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
-#[derive(Debug)]
+#[revisioned(revision = 1)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum QueryType {
 	// Any kind of query
+	#[default]
 	Other,
 	// Indicates that the response live query id must be tracked
 	Live,
 	// Indicates that the live query should be removed from tracking
 	Kill,
+}
+
+impl QueryType {
+	fn is_other(&self) -> bool {
+		matches!(self, Self::Other)
+	}
+}
+
+impl From<&Statement> for QueryType {
+	fn from(stmt: &Statement) -> Self {
+		match stmt {
+			Statement::Live(_) => QueryType::Live,
+			Statement::Kill(_) => QueryType::Kill,
+			_ => QueryType::Other,
+		}
+	}
 }
 
 /// The return value when running a query set on the database.
@@ -56,8 +76,21 @@ impl Serialize for Response {
 	where
 		S: serde::Serializer,
 	{
-		let mut val = serializer.serialize_struct(TOKEN, 3)?;
+		let includes_type = !self.query_type.is_other();
+		let mut val = serializer.serialize_struct(
+			TOKEN,
+			if includes_type {
+				3
+			} else {
+				4
+			},
+		)?;
+
 		val.serialize_field("time", self.speed().as_str())?;
+		if includes_type {
+			val.serialize_field("type", &self.query_type)?;
+		}
+
 		match &self.result {
 			Ok(v) => {
 				val.serialize_field("status", &Status::Ok)?;

@@ -146,4 +146,19 @@ mod tests {
 		assert_eq!(val.pick(&res[2]), Value::from("design"));
 		assert_eq!(val.pick(&res[3]), Value::from("operations"));
 	}
+
+	#[test]
+	fn each_wildcards() {
+		let val = Value::parse(
+			"{ test: { a: { color: 'red' }, b: { color: 'blue' }, c: { color: 'green' } } }",
+		);
+
+		let res = vec![
+			Idiom::parse("test.a.color"),
+			Idiom::parse("test.b.color"),
+			Idiom::parse("test.c.color"),
+		];
+
+		assert_eq!(res, val.each(&Idiom::parse("test.*.color")));
+	}
 }

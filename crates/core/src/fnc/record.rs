@@ -90,7 +90,7 @@ async fn correct_refs_field(
 	// Check if the field is an array-like value and thus "containing" references
 	let is_contained = if let Some(kind) = &fd.kind {
 		matches!(
-			kind.non_optional(),
+			kind.get_optional_inner_kind(),
 			Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_))
 		)
 	} else {

@@ -3573,6 +3573,7 @@ dependencies = [
  "async-channel",
  "async-executor",
  "async-graphql",
+ "async-trait",
  "base64 0.21.7",
  "bcrypt",
  "bincode",

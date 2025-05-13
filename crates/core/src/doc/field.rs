@@ -7,7 +7,7 @@ use crate::err::Error;
 use crate::iam::Action;
 use crate::kvs::KeyEncode as _;
 use crate::sql::data::Data;
-use crate::sql::idiom::Idiom;
+use crate::sql::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::sql::kind::Kind;
 use crate::sql::permission::Permission;
 use crate::sql::reference::Refs;
@@ -34,44 +34,73 @@ impl Document {
 		let tb = self.tb(ctx, opt).await?;
 		// This table is schemafull
 		if tb.full {
+			// Prune unspecified fields from the document that are not defined via `DefineFieldStatement`s.
+
 			// Create a vector to store the keys
-			let mut keys: Vec<Idiom> = vec![];
-			// Loop through all field statements
+			let mut defined_field_names = IdiomTrie::new();
+
+			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
-				// Is this a schemaless field?
-				match fd.flex || fd.kind.as_ref().is_some_and(Kind::contains_literal) {
-					false => {
-						// Loop over this field in the document
-						for k in self.current.doc.each(&fd.name).into_iter() {
-							keys.push(k);
-						}
-					}
-					true => {
-						// Loop over every field under this field in the document
-						for k in self.current.doc.every(Some(&fd.name), true, true).into_iter() {
-							keys.push(k);
-						}
-					}
+				let is_flex = fd.flex;
+				let is_literal = fd.kind.as_ref().is_some_and(Kind::contains_literal);
+				for k in self.current.doc.each(&fd.name).into_iter() {
+					defined_field_names.insert(&k, is_flex || is_literal);
 				}
 			}
+
 			// Loop over every field in the document
-			for fd in self.current.doc.every(None, true, true).iter() {
-				if !keys.contains(fd) {
-					match fd {
-						// Built-in fields
-						fd if fd.is_special() => continue,
-						// Custom fields
-						fd => match opt.strict {
-							// If strict, then throw an error on an undefined field
-							true => {
-								return Err(Error::FieldUndefined {
-									table: tb.name.to_raw(),
-									field: fd.to_owned(),
-								})
+			for current_doc_field_idiom in self.current.doc.every(None, true, true).iter() {
+				if current_doc_field_idiom.is_special() {
+					// This field is a built-in field, so we can skip it.
+					continue;
+				}
+
+				// Check if the field is defined in the schema
+				match defined_field_names.contains(current_doc_field_idiom) {
+					IdiomTrieContains::Exact(_) => {
+						// This field is defined in the schema, so we can skip it.
+						continue;
+					}
+					IdiomTrieContains::Ancestor(true) => {
+						// This field is not explicitly defined in the schema, but it is a child of a flex or literal field.
+						// If the field is a child of a flex field, then any nested fields are allowed.
+						// If the field is a child of a literal field, then allow any fields as they will be caught during coercion.
+						continue;
+					}
+					IdiomTrieContains::Ancestor(false) => {
+						if let Some(part) = current_doc_field_idiom.last() {
+							// This field is an array index, so it is automatically allowed.
+							if part.is_index() {
+								// This field is an array index, so we can skip it.
+								continue;
 							}
-							// Otherwise, delete the field silently and don't error
-							false => self.current.doc.to_mut().cut(fd),
-						},
+						}
+
+						// This field is not explicitly defined in the schema or it is not a child of a flex field.
+						if opt.strict {
+							// If strict, then throw an error on an undefined field
+							return Err(Error::FieldUndefined {
+								table: tb.name.to_raw(),
+								field: current_doc_field_idiom.to_owned(),
+							});
+						}
+
+						// Otherwise, delete the field silently and don't error
+						self.current.doc.to_mut().cut(current_doc_field_idiom);
+					}
+
+					IdiomTrieContains::None => {
+						// This field is not explicitly defined in the schema or it is not a child of a flex field.
+						if opt.strict {
+							// If strict, then throw an error on an undefined field
+							return Err(Error::FieldUndefined {
+								table: tb.name.to_raw(),
+								field: current_doc_field_idiom.to_owned(),
+							});
+						}
+
+						// Otherwise, delete the field silently and don't error
+						self.current.doc.to_mut().cut(current_doc_field_idiom);
 					}
 				}
 			}

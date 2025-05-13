@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{self, Notification, Options};
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
@@ -43,6 +43,8 @@ impl RemoveTableStatement {
 			let tb = txn.get_tb(ns, db, &self.name).await?;
 			// Get the foreign tables
 			let fts = txn.all_tb_views(ns, db, &self.name).await?;
+			// Get the live queries
+			let lvs = txn.all_tb_lives(ns, db, &self.name).await?;
 			// Delete the definition
 			let key = crate::key::database::tb::new(ns, db, &self.name);
 			match self.expunge {
@@ -92,6 +94,17 @@ impl RemoveTableStatement {
 						})?,
 						None,
 					)
+					.await?;
+				}
+			}
+			if let Some(chn) = opt.sender.as_ref() {
+				for lv in lvs.iter() {
+					chn.send(Notification {
+						id: lv.id,
+						action: dbs::Action::Killed,
+						record: Value::None,
+						result: Value::None,
+					})
 					.await?;
 				}
 			}
