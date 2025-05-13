@@ -16,12 +16,12 @@ use std::{
 	fmt::{self, Display, Formatter},
 	ops::DerefMut,
 };
-use ulid::Ulid;
+use uuid::Uuid;
 
 #[derive(Clone)]
 #[non_exhaustive]
-// The ULID is used for ordering and uniqueness of the value
-pub struct Stream(pub(crate) Arc<Mutex<Option<StreamVal>>>, Ulid);
+// The UUID is used for ordering and uniqueness of the value
+pub struct Stream(pub(crate) Arc<Mutex<Option<StreamVal>>>, Uuid);
 
 impl Stream {
 	pub fn consume(&self) -> Result<StreamVal, Error> {
@@ -57,7 +57,7 @@ impl From<bytes::Bytes> for Stream {
 			Ok(bytes) as Result<bytes::Bytes, Box<dyn Display + Send + Sync>>
 		})));
 
-		Self(Arc::new(Mutex::new(Some(stream_value))), Ulid::new())
+		Self(Arc::new(Mutex::new(Some(stream_value))), Uuid::now_v7())
 	}
 }
 
@@ -69,7 +69,7 @@ impl From<Bytes> for Stream {
 
 impl From<StreamVal> for Stream {
 	fn from(stream: StreamVal) -> Self {
-		Self(Arc::new(Mutex::new(Some(stream))), Ulid::new())
+		Self(Arc::new(Mutex::new(Some(stream))), Uuid::now_v7())
 	}
 }
 
