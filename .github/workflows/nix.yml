@@ -38,9 +38,9 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: cachix/install-nix-action@8887e596b4ee1134dae06b98d573bd674693f47c # v26
-      - uses: cachix/cachix-action@18cf96c7c98e048e10a83abd92116114cd8504be # v14
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+      - uses: cachix/install-nix-action@8887e596b4ee1134dae06b98d573bd674693f47c # (Actions must be pinned by commit hash) v26
+      - uses: cachix/cachix-action@18cf96c7c98e048e10a83abd92116114cd8504be # (Actions must be pinned by commit hash) v14
         with:
           name: surrealdb
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -53,9 +53,9 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: cachix/install-nix-action@8887e596b4ee1134dae06b98d573bd674693f47c # v26
-      - uses: cachix/cachix-action@18cf96c7c98e048e10a83abd92116114cd8504be # v14
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+      - uses: cachix/install-nix-action@8887e596b4ee1134dae06b98d573bd674693f47c # (Actions must be pinned by commit hash) v26
+      - uses: cachix/cachix-action@18cf96c7c98e048e10a83abd92116114cd8504be # (Actions must be pinned by commit hash) v14
         with:
           name: surrealdb
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
