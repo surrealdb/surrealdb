@@ -19,7 +19,7 @@ pub struct UpdateStatement {
 	#[revision(start = 2)]
 	pub only: bool,
 	pub what: Values,
-	#[revision(start = 2)]
+	#[revision(start = 3)]
 	pub with: Option<With>,
 	pub data: Option<Data>,
 	pub cond: Option<Cond>,

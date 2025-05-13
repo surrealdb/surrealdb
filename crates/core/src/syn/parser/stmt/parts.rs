@@ -77,6 +77,11 @@ impl Parser<'_> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
 		}
+		self.parse_output(ctx).await.map(Some)
+	}
+
+	/// Needed because some part of the RPC needs to call into the parser for this specific part.
+	pub async fn parse_output(&mut self, ctx: &mut Stk) -> ParseResult<Output> {
 		let res = match self.peek_kind() {
 			t!("NONE") => {
 				self.pop_peek();
@@ -100,7 +105,7 @@ impl Parser<'_> {
 			}
 			_ => Output::Fields(self.parse_fields(ctx).await?),
 		};
-		Ok(Some(res))
+		Ok(res)
 	}
 
 	/// Parses a statement timeout if the next token is `TIMEOUT`.
@@ -116,11 +121,15 @@ impl Parser<'_> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
+		Ok(Some(self.parse_fetchs(ctx).await?))
+	}
+
+	pub async fn parse_fetchs(&mut self, ctx: &mut Stk) -> ParseResult<Fetchs> {
 		let mut fetchs = self.try_parse_param_or_idiom_or_fields(ctx).await?;
 		while self.eat(t!(",")) {
 			fetchs.append(&mut self.try_parse_param_or_idiom_or_fields(ctx).await?);
 		}
-		Ok(Some(Fetchs(fetchs)))
+		Ok(Fetchs(fetchs))
 	}
 
 	pub async fn try_parse_param_or_idiom_or_fields(

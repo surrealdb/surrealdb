@@ -129,32 +129,32 @@ impl TransactionFactory {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::Mem(tx), true, false)
+				(tx, true, false)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::RocksDB(tx), true, true)
+				(tx, true, true)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			DatastoreFlavor::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::IndxDB(tx), true, false)
+				(tx, true, false)
 			}
 			#[cfg(feature = "kv-tikv")]
 			DatastoreFlavor::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::TiKV(tx), false, true)
+				(tx, false, true)
 			}
 			#[cfg(feature = "kv-fdb")]
 			DatastoreFlavor::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::FoundationDB(tx), false, false)
+				(tx, false, false)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::SurrealKV(tx), true, false)
+				(tx, true, false)
 			}
 			_ => unreachable!(),
 		};
@@ -165,7 +165,6 @@ impl TransactionFactory {
 				inner,
 				stash: super::stash::Stash::default(),
 				cf: cf::Writer::new(),
-				clock: self.clock.clone(),
 			},
 		))
 	}
@@ -503,8 +502,7 @@ impl Datastore {
 		self.capabilities.allows_http_route(route_target)
 	}
 
-	/// Does the datastore allow requesting an HTTP route?
-	/// This function needs to be public to allow access from the CLI crate.
+	/// Is the user allowed to query?
 	pub fn allows_query_by_subject(&self, subject: impl Into<ArbitraryQueryTarget>) -> bool {
 		self.capabilities.allows_query(&subject.into())
 	}

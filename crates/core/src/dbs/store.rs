@@ -320,13 +320,26 @@ impl MemoryOrderedLimit {
 	}
 
 	pub(in crate::dbs) fn push(&mut self, value: Value) {
-		let value = OrderedValue {
-			value,
-			orders: self.orders.clone(),
-		};
-		self.heap.push(Reverse(value));
-		if self.heap.len() > self.limit {
-			self.heap.pop();
+		if self.heap.len() >= self.limit {
+			// When the heap is full, first check if the new value
+			// if smaller that the top of this min-heap in order to
+			// prevent unnecessary push/pop and Arc::clone.
+			if let Some(top) = self.heap.peek() {
+				let cmp = self.orders.compare(&value, &top.0.value);
+				if cmp == Ordering::Less {
+					self.heap.push(Reverse(OrderedValue {
+						value,
+						orders: self.orders.clone(),
+					}));
+					self.heap.pop();
+				}
+			}
+		} else {
+			// Push the value onto the heap because it's not full.
+			self.heap.push(Reverse(OrderedValue {
+				value,
+				orders: self.orders.clone(),
+			}));
 		}
 	}
 

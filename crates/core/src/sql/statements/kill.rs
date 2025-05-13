@@ -1,4 +1,4 @@
-use crate::dbs::Options;
+use crate::dbs::{Action, Notification, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::kvs::Live;
@@ -75,6 +75,15 @@ impl KillStatement {
 					value: self.id.to_string(),
 				});
 			}
+		}
+		if let Some(chn) = opt.sender.as_ref() {
+			chn.send(Notification {
+				id: lid.into(),
+				action: Action::Killed,
+				record: Value::None,
+				result: Value::None,
+			})
+			.await?;
 		}
 		// Return the query id
 		Ok(Value::None)

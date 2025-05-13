@@ -1,11 +1,11 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{self, Notification, Options};
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::{Base, Ident, Value};
-use anyhow::Result;
 
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -52,19 +52,19 @@ impl RemoveTableStatement {
 		};
 		// Get the foreign tables
 		let fts = txn.all_tb_views(ns, db, &self.name).await?;
+		// Get the live queries
+		let lvs = txn.all_tb_lives(ns, db, &self.name).await?;
 		// Delete the definition
 		let key = crate::key::database::tb::new(ns, db, &self.name);
-		if self.expunge {
-			txn.clr(key).await?
-		} else {
-			txn.del(key).await?
+		match self.expunge {
+			true => txn.clr(key).await?,
+			false => txn.del(key).await?,
 		};
 		// Remove the resource data
 		let key = crate::key::table::all::new(ns, db, &self.name);
-		if self.expunge {
-			txn.clrp(key).await?
-		} else {
-			txn.delp(key).await?
+		match self.expunge {
+			true => txn.clrp(key).await?,
+			false => txn.delp(key).await?,
 		};
 		// Process each attached foreign table
 		for ft in fts.iter() {
@@ -74,16 +74,12 @@ impl RemoveTableStatement {
 			txn.set(
 				key,
 				revision::to_vec(&DefineTableStatement {
-					view: None,
+					cache_tables_ts: Uuid::now_v7(),
 					..tb.as_ref().clone()
 				})?,
 				None,
 			)
 			.await?;
-			// Clear the cache
-			if let Some(cache) = ctx.get_cache() {
-				cache.clear_tb(ns, db, &ft.name);
-			}
 		}
 		// Check if this is a foreign table
 		if let Some(view) = &tb.view {
@@ -103,6 +99,17 @@ impl RemoveTableStatement {
 					})?,
 					None,
 				)
+				.await?;
+			}
+		}
+		if let Some(chn) = opt.sender.as_ref() {
+			for lv in lvs.iter() {
+				chn.send(Notification {
+					id: lv.id,
+					action: dbs::Action::Killed,
+					record: Value::None,
+					result: Value::None,
+				})
 				.await?;
 			}
 		}

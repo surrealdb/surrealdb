@@ -5,7 +5,7 @@ use crate::{
 	dbs::{capabilities::ExperimentalTarget, Capabilities},
 	err::Error,
 	sql::{
-		Block, Cond, Datetime, Duration, Fields, Idiom, Kind, Output, Query, Range, Subquery,
+		Block, Datetime, Duration, Fetchs, Fields, Idiom, Kind, Output, Query, Range, Subquery,
 		Thing, Value,
 	},
 };
@@ -24,7 +24,6 @@ pub trait Parse<T> {
 mod test;
 
 use anyhow::{bail, ensure, Result};
-use error::RenderedError;
 use lexer::{compound, Lexer};
 use parser::{Parser, ParserSettings};
 use reblessive::Stack;
@@ -373,12 +372,40 @@ pub(crate) fn fields_with_capabilities(input: &str, capabilities: &Capabilities)
 		.map_err(anyhow::Error::new)
 }
 
+/// Parses fields for a SELECT statement
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub(crate) fn fetchs_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Fetchs> {
+	trace!(target: TARGET, "Parsing fetch fields");
+
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
+
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			references_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			bearer_access_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
+			..Default::default()
+		},
+	);
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_fetchs(stk))
+		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
+		.map_err(anyhow::Error::new)
+}
+
 /// Parses an output for a RETURN clause
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub(crate) fn output_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Output> {
-	trace!(target: TARGET, "Parsing RETURN condition");
-
-	let input = format!("RETURN {input}");
+	trace!(target: TARGET, "Parsing RETURN clause");
 
 	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
 
@@ -396,64 +423,13 @@ pub(crate) fn output_with_capabilities(input: &str, capabilities: &Capabilities)
 		},
 	);
 	let mut stack = Stack::new();
-	let output = stack
-		.enter(|stk| parser.try_parse_output(stk))
+	stack
+		.enter(|stk| parser.parse_output(stk))
 		.finish()
 		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input.as_str()))
+		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)?;
-
-	match output {
-		Some(output) => Ok(output),
-		_ => Err(anyhow::Error::new(Error::InvalidQuery(RenderedError {
-			errors: vec!["Missing Output".into()],
-			snippets: vec![],
-		}))),
-	}
-}
-
-/// Parses a condition for a WHERE clause
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn condition_with_capabilities(
-	input: &str,
-	capabilities: &Capabilities,
-) -> Result<Cond> {
-	trace!(target: TARGET, "Parsing WHERE condition");
-
-	let input = format!("WHERE {input}");
-
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
-
-	let mut parser = Parser::new_with_settings(
-		input.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-			references_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			bearer_access_enabled: capabilities
-				.allows_experimental(&ExperimentalTarget::BearerAccess),
-			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	let cond = stack
-		.enter(|stk| parser.try_parse_condition(stk))
-		.finish()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input.as_str()))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)?;
-
-	match cond {
-		Some(cond) => Ok(cond),
-		_ => Err(anyhow::Error::new(Error::InvalidQuery(RenderedError {
-			errors: vec!["Missing Condition".into()],
-			snippets: vec![],
-		}))),
-	}
+		.map_err(anyhow::Error::new)
 }
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.

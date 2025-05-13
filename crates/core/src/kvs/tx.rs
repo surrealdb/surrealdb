@@ -102,7 +102,7 @@ impl Transaction {
 	/// calls to functions on this transaction will result
 	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
-		self.lock().await.closed().await
+		self.lock().await.closed()
 	}
 
 	/// Cancel a transaction.

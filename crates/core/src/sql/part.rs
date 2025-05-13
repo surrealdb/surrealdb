@@ -118,6 +118,10 @@ impl From<&str> for Part {
 }
 
 impl Part {
+	pub(crate) fn is_index(&self) -> bool {
+		matches!(self, Part::Index(_) | Part::First | Part::Last)
+	}
+
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {

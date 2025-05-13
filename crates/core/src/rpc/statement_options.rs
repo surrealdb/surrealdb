@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use crate::{
 	dbs::Capabilities,
-	sql::{Cond, Data, Fields, Limit, Number, Output, Start, Timeout, Value, Version},
+	sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, Start, Timeout, Value, Version},
 	syn::{
-		condition_with_capabilities, fields_with_capabilities, output_with_capabilities,
+		fetchs_with_capabilities, fields_with_capabilities, output_with_capabilities,
 		value_with_capabilities,
 	},
 };
@@ -96,6 +96,12 @@ pub(crate) struct StatementOptions {
 	/// - An object, containing variables to define during execution of the method
 	/// - For all (`select`, `insert`, `create`, `upsert`, `update`, `relate` and `delete`) methods
 	pub vars: Option<BTreeMap<String, Value>>,
+	/// - A boolean, stating wether the LQ notifications should contain diffs
+	/// - For the `live` method
+	pub diff: bool,
+	/// - A string, containing fields to fetch.
+	/// - For the `select` and `live` methods
+	pub fetch: Option<Fetchs>,
 }
 
 impl StatementOptions {
@@ -166,7 +172,8 @@ impl StatementOptions {
 			// Process "cond" option
 			if let Some(v) = obj.remove("cond") {
 				if let Value::Strand(v) = v {
-					self.cond = Some(condition_with_capabilities(v.as_str(), capabilities)?)
+					let v = value_with_capabilities(v.as_str(), capabilities)?;
+					self.cond = Some(Cond(v))
 				} else {
 					return Err(RpcError::InvalidParams);
 				}
@@ -225,6 +232,29 @@ impl StatementOptions {
 			if let Some(v) = obj.remove("vars") {
 				if let Value::Object(v) = v {
 					self.vars = Some(v.0)
+				} else {
+					return Err(RpcError::InvalidParams);
+				}
+			}
+
+			// Process "diff" option
+			if let Some(v) = obj.remove("diff") {
+				if self.fields.is_some() {
+					// diff and fields cannot co-exist, as diff overwrites the fields
+					return Err(RpcError::InvalidParams);
+				}
+
+				if let Value::Bool(v) = v {
+					self.diff = v;
+				} else {
+					return Err(RpcError::InvalidParams);
+				}
+			}
+
+			// Process "fetch" option
+			if let Some(v) = obj.remove("fetch") {
+				if let Value::Strand(v) = v {
+					self.fetch = Some(fetchs_with_capabilities(v.as_str(), capabilities)?)
 				} else {
 					return Err(RpcError::InvalidParams);
 				}

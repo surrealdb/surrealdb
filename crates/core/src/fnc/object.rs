@@ -58,6 +58,11 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 	Ok(Value::Object(Object(obj)))
 }
 
+pub fn extend((mut object, other): (Object, Object)) -> Result<Value> {
+	object.0.extend(other.0);
+	Ok(Value::Object(object))
+}
+
 pub fn is_empty((object,): (Object,)) -> Result<Value> {
 	Ok(Value::Bool(object.0.is_empty()))
 }
@@ -68,6 +73,38 @@ pub fn len((object,): (Object,)) -> Result<Value> {
 
 pub fn keys((object,): (Object,)) -> Result<Value> {
 	Ok(Value::Array(Array(object.keys().map(|v| Value::Strand(Strand(v.to_owned()))).collect())))
+}
+
+pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
+	match targets {
+		Value::Strand(target) => {
+			object.remove(&target.0);
+		}
+		Value::Array(targets) => {
+			let mut remove_targets = Vec::with_capacity(targets.len());
+			for target in targets {
+				let Value::Strand(s) = target else {
+					bail!(Error::InvalidArguments {
+						name: "object::remove".to_string(),
+						message: format!(
+							"'{target}' cannot be used as a key. Please use a string instead."
+						),
+					});
+				};
+				remove_targets.push(s.0);
+			}
+			for target in remove_targets {
+				object.remove(&target);
+			}
+		}
+		other => {
+			bail!(Error::InvalidArguments {
+				name: "object::remove".to_string(),
+				message: format!("'{other}' cannot be used as a key. Please use a string instead."),
+			})
+		}
+	}
+	Ok(Value::Object(object))
 }
 
 pub fn values((object,): (Object,)) -> Result<Value> {
