@@ -31,9 +31,7 @@ dmp = "0.2.3"
 indxdb = "0.6.0"
 ipnet = "2.9.0"
 surrealkv = { version = "0.9.1" }
-surrealml = { version = "0.1.7", package = "surrealml-core", features = [
-    "dynamic",
-] }
+surrealml = { version = "0.1.1", package = "surrealml-core" }
 ## Somewhat a surreal crate as it is maintained by @Delskayn.
 js = { version = "0.9.0", package = "rquickjs" }
 lexicmp = "0.2.0"
