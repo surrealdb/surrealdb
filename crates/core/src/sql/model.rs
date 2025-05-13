@@ -24,6 +24,8 @@ use surrealml::errors::error::SurrealError;
 #[cfg(feature = "ml")]
 use surrealml::execution::compute::ModelComputation;
 #[cfg(feature = "ml")]
+use surrealml::ndarray as mlNdarray;
+#[cfg(feature = "ml")]
 use surrealml::storage::surml_file::SurMlFile;
 
 #[cfg(feature = "ml")]
@@ -157,7 +159,7 @@ impl Model {
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
 				// Convert the argument to a tensor
-				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
+				let tensor = mlNdarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
@@ -191,7 +193,7 @@ impl Model {
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
 				// Convert the argument to a tensor
-				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
+				let tensor = mlNdarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {

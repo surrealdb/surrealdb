@@ -30,11 +30,6 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
-	/// This error is used for ignoring a document when processing a query
-	#[doc(hidden)]
-	#[error("Conditional clause is not truthy")]
-	Ignore,
-
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),

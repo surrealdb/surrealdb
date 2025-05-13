@@ -41,8 +41,7 @@ pub(crate) mod cache;
 
 #[cfg(not(target_family = "wasm"))]
 mod index;
-#[cfg(any(feature = "kv-tikv", feature = "kv-fdb", feature = "kv-indxdb",))]
-mod savepoint;
+pub(crate) mod savepoint;
 pub(crate) mod sequences;
 #[cfg(test)]
 mod tests;
