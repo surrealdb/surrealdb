@@ -30,20 +30,36 @@ if [[ $suffix == "alpha" || $suffix == "beta" || $suffix == "rc" ]]; then
     fi
 fi
 
+function get_major_version() {
+    local version=$1
+    echo $version | tr "." "\n" | sed -n 1p
+}
+
+function get_minor_version() {
+    local version=$1
+    echo $version | tr "." "\n" | sed -n 2p
+}
+
+function get_patch_version() {
+    local version=$1
+    echo $version | tr "." "\n" | sed -n 3p
+}
+
+current_major=$(get_major_version ${current_version})
+current_minor=$(get_minor_version ${current_version})
+current_patch=$(get_patch_version ${current_version})
+
 buildMetadata=""
 
 case $suffix in
     "release")
         version=${current_version}
-        patch=$(echo ${current_version} | tr "." "\n" | sed -n 3p)
+        patch=${current_patch}
         environment=stable
         ;;
     "patch")
-        major=$(echo ${current_version} | tr "." "\n" | sed -n 1p)
-        minor=$(echo ${current_version} | tr "." "\n" | sed -n 2p)
-        currentPatch=$(echo ${current_version} | tr "." "\n" | sed -n 3p)
-        patch=$(($currentPatch + 1))
-        version=${major}.${minor}.${patch}
+        patch=$((${current_patch} + 1))
+        version=${current_major}.${current_minor}.${patch}
         environment=stable
         ;;
     "nightly")
@@ -52,17 +68,17 @@ case $suffix in
         patch=$(git show --no-patch --format=%ad --date=format:%Y%m%d%H%M%S)
         rev=$(git rev-parse --short HEAD)
         buildMetadata=${date}.${rev}
-        version=${current_version}-${RELEASE_TYPE}
+        version=${current_major}.${current_minor}.${patch}-${RELEASE_TYPE}
         environment=${RELEASE_TYPE}
         ;;
     "rc")
-        version=${current_version}-${RELEASE_TYPE}
         patch=$(($patch - 1))
+        version=${current_major}.${current_minor}.${patch}-${RELEASE_TYPE}
         environment=rc
         ;;
     *)
-        version=${current_version}-${RELEASE_TYPE}
         patch=$(($patch - 1))
+        version=${current_major}.${current_minor}.${patch}-${RELEASE_TYPE}
         environment=${suffix}
         ;;
 esac

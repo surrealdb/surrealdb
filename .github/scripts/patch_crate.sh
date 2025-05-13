@@ -43,16 +43,12 @@ function get_member_path() {
 
 # This function updates the version in the Cargo.toml file and pins the version in the member crates.
 function patch_version() {
-    major=$(echo $CURRENT_VERSION | tr "." "\n" | sed -n 1p)
-    minor=$(echo $CURRENT_VERSION | tr "." "\n" | sed -n 2p)
-    new_version=${major}.${minor}.${PATCH}
-
-    sed -i "s#^version = \".*\"#version = \"${new_version}\"#" ./Cargo.toml
+    sed -i "s#^version = \".*\"#version = \"${VERSION}\"#" ./Cargo.toml
 
     for crate_name in "${members[@]}"; do
         echo "${crate_name}"
         crate_path="$(get_member_path $crate_name)"
-        sed -i "s#^${crate_name} = { version = \"=${CURRENT_VERSION}\"#${crate_name} = { version = \"=${new_version}\"#" Cargo.toml
+        sed -i "s#^${crate_name} = { version = \"=${CURRENT_VERSION}\"#${crate_name} = { version = \"=${VERSION}\"#" Cargo.toml
     done
 }
 
