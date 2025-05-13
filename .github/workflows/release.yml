@@ -50,5 +50,5 @@ jobs:
       release-type: ${{ inputs.release-type }}
       publish: ${{ inputs.publish }}
       extra-features: ${{ inputs.extra-features }}
-      create-release: ${{ inputs.publish }}
+      create-release: ${{ inputs.publish && inputs.release-type != 'nightly' }}
     secrets: inherit
