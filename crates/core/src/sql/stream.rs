@@ -2,6 +2,8 @@ use crate::err::Error;
 use crate::sql::Bytesize;
 
 use super::Bytes;
+#[cfg(feature = "arbitrary")]
+use arbitrary::Arbitrary;
 use futures::StreamExt;
 use revision::Revisioned;
 use serde::de::Error as DeError;
@@ -17,7 +19,6 @@ use std::{
 use ulid::Ulid;
 
 #[derive(Clone)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 // The ULID is used for ordering and uniqueness of the value
 pub struct Stream(pub(crate) Arc<Mutex<Option<StreamVal>>>, Ulid);
@@ -142,6 +143,14 @@ impl Debug for Stream {
 impl Hash for Stream {
 	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
 		self.1.hash(state);
+	}
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Stream {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let data = Bytes.arbitrary()?;
+		Ok(data.into())
 	}
 }
 
