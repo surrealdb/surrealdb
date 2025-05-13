@@ -522,6 +522,7 @@ impl Value {
 			Value::Refs(_) => None,
 			Value::Expression(_) => None,
 			Value::File(file) => Some(Kind::File(vec![Ident::from(file.bucket.as_str())])),
+			Value::Stream(_) => Some(Kind::Stream),
 		}
 	}
 
