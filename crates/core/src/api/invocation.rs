@@ -18,7 +18,7 @@ use crate::{
 	kvs::{Datastore, Transaction},
 	sql::{
 		statements::define::{config::api::ApiConfig, ApiDefinition},
-		stream::{Stream, StreamVal},
+		stream::StreamVal,
 		FlowResultExt as _, Object, Value,
 	},
 };
@@ -53,7 +53,7 @@ impl ApiInvocation {
 		sess: &Session,
 		api: &ApiDefinition,
 		stream: StreamVal,
-	) -> Result<Option<(Context, ApiResponse, ResponseInstruction)>, Error> {
+	) -> Result<Option<(ApiResponse, ResponseInstruction)>, Error> {
 		let opt = ds.setup_options(sess);
 
 		let mut ctx = ds.setup_ctx()?;
@@ -61,16 +61,12 @@ impl ApiInvocation {
 		let ctx = ctx.freeze();
 
 		let body = ApiBody {
-			body: Value::Stream(Stream::from_stream(&ctx, stream)?),
+			body: Value::Stream(stream.into()),
 			native: false,
 		};
 
 		let mut stack = TreeStack::new();
-		stack
-			.enter(|stk| self.invoke_with_context(stk, &ctx, &opt, api, body))
-			.finish()
-			.await
-			.map(|x| x.map(|(res, res_instruction)| (ctx, res, res_instruction)))
+		stack.enter(|stk| self.invoke_with_context(stk, &ctx, &opt, api, body)).finish().await
 	}
 
 	// The `invoke` method accepting a parameter like `Option<&mut Stk>`
@@ -114,7 +110,7 @@ impl ApiInvocation {
 			ResponseInstruction::for_format(&self)?
 		};
 
-		let body = body.process(ctx, &inv_ctx, &self).await?;
+		let body = body.process(&inv_ctx, &self).await?;
 
 		// Edit the options
 		let opt = opt.new_with_perms(false);

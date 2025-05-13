@@ -125,7 +125,7 @@ async fn handler(
 	}
 
 	// Process the result
-	let (ctx, mut res, res_instruction) = res?;
+	let (mut res, res_instruction) = res?;
 
 	// Obtain the body
 	let res_body: Either<Vec<u8>, StreamedResponse> = if let Some(body) = res.body {
@@ -147,7 +147,7 @@ async fn handler(
 				}
 				Value::Stream(stream) => {
 					let stream = stream
-						.consume(&ctx)
+						.consume()
 						.map_err(|e| Error::Api(ApiError::InvalidApiResponse(e.to_string())))?;
 
 					Either::E2(StreamedResponse::new(stream))

@@ -25,6 +25,7 @@ mod record;
 mod search;
 mod sequence;
 mod session;
+mod stream;
 mod string;
 mod time;
 mod r#type;
@@ -58,6 +59,7 @@ impl_module_def!(
 	"sequence" => (sequence::Package),
 	"session" => (session::Package),
 	"sleep" => fut Async,
+	"stream" => (stream::Package),
 	"string" => (string::Package),
 	"time" => (time::Package),
 	"type" => (r#type::Package),

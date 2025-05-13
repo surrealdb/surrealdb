@@ -85,6 +85,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::sort::desc") => PathKind::Function,
 		//
 		UniCase::ascii("bytes::len") => PathKind::Function,
+		UniCase::ascii("bytes::stream") => PathKind::Function,
 		//
 		UniCase::ascii("count") => PathKind::Function,
 		//
@@ -257,6 +258,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("session::token") => PathKind::Function,
 		//
 		UniCase::ascii("sleep") => PathKind::Function,
+		//
+		UniCase::ascii("stream::consume") => PathKind::Function,
 		//
 		UniCase::ascii("string::concat") => PathKind::Function,
 		UniCase::ascii("string::contains") => PathKind::Function,

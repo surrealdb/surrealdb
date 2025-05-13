@@ -55,7 +55,7 @@ impl From<Value> for serde_json::Value {
 			Value::Closure(closure) => json!(closure),
 			Value::Refs(_) => json!(sql::Array::new()),
 			Value::File(file) => file.to_string().into(),
-			Value::Stream(uuid) => json!(uuid.0 .0),
+			Value::Stream(_) => json!(sql::Array::new()),
 		}
 	}
 }

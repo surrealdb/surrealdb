@@ -16,22 +16,19 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::mem::ALLOC;
-use crate::sql::stream::StreamVal;
 use crate::sql::value::Value;
 use async_channel::Sender;
-use dashmap::DashMap;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
-use uuid::Uuid;
 
 pub type Context = Arc<MutableContext>;
 
@@ -73,8 +70,6 @@ pub struct MutableContext {
 	isolated: bool,
 	// A map of bucket connections
 	buckets: Option<Arc<BucketConnections>>,
-	// A map of stream values
-	streams: Option<Arc<DashMap<Uuid, Mutex<StreamVal>>>>,
 }
 
 impl Default for MutableContext {
@@ -125,7 +120,6 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: None,
-			streams: None,
 		}
 	}
 
@@ -151,7 +145,6 @@ impl MutableContext {
 			isolated: false,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
-			streams: parent.streams.clone(),
 		}
 	}
 
@@ -179,7 +172,6 @@ impl MutableContext {
 			isolated: true,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
-			streams: parent.streams.clone(),
 		}
 	}
 
@@ -207,7 +199,6 @@ impl MutableContext {
 			isolated: false,
 			parent: None,
 			buckets: from.buckets.clone(),
-			streams: from.streams.clone(),
 		}
 	}
 
@@ -243,7 +234,6 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: Some(buckets),
-			streams: Some(Default::default()),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -523,10 +513,6 @@ impl MutableContext {
 
 	pub(crate) fn get_buckets(&self) -> Option<Arc<BucketConnections>> {
 		self.buckets.clone()
-	}
-
-	pub(crate) fn get_streams(&self) -> Option<Arc<DashMap<Uuid, Mutex<StreamVal>>>> {
-		self.streams.clone()
 	}
 
 	/// Obtain the connection for a bucket

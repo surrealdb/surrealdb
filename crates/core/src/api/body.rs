@@ -1,13 +1,11 @@
 use super::context::InvocationContext;
 use super::err::ApiError;
 use super::invocation::ApiInvocation;
-use crate::ctx::Context;
 use crate::err::Error;
 use crate::rpc::format::cbor;
 use crate::rpc::format::json;
 use crate::rpc::format::revision;
 use crate::sql;
-use crate::sql::stream::Stream;
 use crate::sql::Bytesize;
 use crate::sql::Value;
 use http::header::CONTENT_TYPE;
@@ -20,7 +18,6 @@ pub struct ApiBody {
 impl ApiBody {
 	pub async fn process(
 		self,
-		ctx: &Context,
 		inv_ctx: &InvocationContext,
 		invocation: &ApiInvocation,
 	) -> Result<Value, Error> {
@@ -29,12 +26,12 @@ impl ApiBody {
 				Ok(self.body)
 			} else {
 				let bytes = self.body.coerce_to::<sql::Bytes>()?;
-				Ok(Value::Stream(Stream::from_bytes(ctx, bytes)?))
+				Ok(Value::Stream(bytes.into()))
 			}
 		} else {
 			let max = inv_ctx.request_body_max.unwrap_or(Bytesize::MAX);
 			let bytes = match self.body {
-				Value::Stream(stream) => match stream.consume_bytes(ctx, Some(max)).await {
+				Value::Stream(stream) => match stream.consume_bytes(Some(max)).await {
 					Err(Error::StreamTooLarge(max)) => {
 						return Err(ApiError::RequestBodyTooLarge(max).into())
 					}

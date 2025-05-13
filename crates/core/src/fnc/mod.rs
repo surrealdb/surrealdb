@@ -196,6 +196,7 @@ pub fn synchronous(
 		"array::windows" => array::windows,
 		//
 		"bytes::len" => bytes::len,
+		"bytes::stream" => bytes::stream,
 		//
 		"count" => count::count,
 		//
@@ -581,6 +582,8 @@ pub async fn asynchronous(
 		//
 		"sequence::nextval" => sequence::nextval((ctx, opt)).await,
 		//
+		"stream::consume" => stream::consume.await,
+		//
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 		//
@@ -700,7 +703,7 @@ pub async fn idiom(
 				"no such method found for the bytes type",
 				//
 				"len" => bytes::len,
-				"stream" => bytes::stream(ctx),
+				"stream" => bytes::stream,
 			)
 		}
 		Value::Stream(_) => {
@@ -710,7 +713,7 @@ pub async fn idiom(
 				args.clone(),
 				"no such method found for the stream type",
 				//
-				"bytes" => stream::bytes(ctx).await,
+				"consume" => stream::consume.await,
 			)
 		}
 		Value::Duration(_) => {

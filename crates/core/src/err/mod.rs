@@ -1359,14 +1359,8 @@ pub enum Error {
 	#[error("The stream is already consumed")]
 	StreamConsumed,
 
-	#[error("No streams are available in this context")]
-	StreamsUnavailable,
-
 	#[error("Expected a stream of up to {0} bytes")]
 	StreamTooLarge(Bytesize),
-
-	#[error("The stream is currently locked elsewhere")]
-	StreamLocked,
 }
 
 impl From<Error> for String {
