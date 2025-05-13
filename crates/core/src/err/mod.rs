@@ -1359,7 +1359,7 @@ pub enum Error {
 	#[error("The stream is already consumed")]
 	StreamConsumed,
 
-	#[error("Expected a stream of up to {0} bytes")]
+	#[error("Stream to large to consume, expected a size up to {0}")]
 	StreamTooLarge(Bytesize),
 }
 
