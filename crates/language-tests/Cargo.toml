@@ -8,17 +8,16 @@ edition = "2021"
 members = []
 
 [features]
-default = ["backend-mem"]
-backend-mem = ["surrealdb-core/kv-mem"]
+default = ["upgrade"]
 backend-surrealkv = ["surrealdb-core/kv-surrealkv"]
 backend-rocksdb = ["surrealdb-core/kv-rocksdb"]
 backend-foundation-7_1 = ["surrealdb-core/kv-fdb-7_1"]
 backend-foundation-7_3 = ["surrealdb-core/kv-fdb-7_3"]
-upgrade = ["backend-surrealkv"] # Upgrade test suite.
+upgrade = ["backend-surrealkv","tokio-tungstenite","revision"] # Upgrade test suite.
 
 [dependencies]
 # Crates for running surrealdb.
-surrealdb-core = { path = "../core/", default-features=false, features = ["scripting"] }
+surrealdb-core = { path = "../core/", default-features=false, features = ["scripting","kv-mem"] }
 reblessive = { version = "0.4.3" }
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 
@@ -30,7 +29,7 @@ rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 anyhow = "1.0.81"
 
 # Async utility crates
-tokio = { version = "1.41.1", features = ["full"] }
+tokio = { version = "1.44.2", features = ["full"] }
 futures = "0.3.30"
 
 # Config and cli parsing
@@ -44,3 +43,8 @@ semver = "1.0.26"
 base64 = "0.21.5"
 similar = "2.6.0"
 
+# Used for for communicating with the surrealdb server during upgrade tests.
+tokio-tungstenite = { version = "0.23.1", optional = true }
+revision = { version = "0.11.0", optional = true }
+cfg-if = "1.0.0"
+serde_json = "1.0.140"

@@ -17,7 +17,7 @@ use crate::sql::{
 	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
 	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
-use crate::sql::{Closure, ControlFlow, FlowResult};
+use crate::sql::{Closure, ControlFlow, FlowResult, Ident, Kind};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
@@ -477,6 +477,52 @@ impl Value {
 	// Simple output of value type
 	// -----------------------------------
 
+	pub fn kind(&self) -> Option<Kind> {
+		match self {
+			Value::None => None,
+			Value::Null => Some(Kind::Null),
+			Value::Bool(_) => Some(Kind::Bool),
+			Value::Number(_) => Some(Kind::Number),
+			Value::Strand(_) => Some(Kind::String),
+			Value::Duration(_) => Some(Kind::Duration),
+			Value::Datetime(_) => Some(Kind::Datetime),
+			Value::Uuid(_) => Some(Kind::Uuid),
+			Value::Array(arr) => Some(Kind::Array(
+				Box::new(arr.first().and_then(|v| v.kind()).unwrap_or_default()),
+				None,
+			)),
+			Value::Object(_) => Some(Kind::Object),
+			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
+			Value::Bytes(_) => Some(Kind::Bytes),
+			Value::Thing(thing) => Some(Kind::Record(vec![thing.tb.clone().into()])),
+			Value::Param(_) => None,
+			Value::Idiom(_) => None,
+			Value::Table(_) => None,
+			Value::Mock(_) => None,
+			Value::Regex(_) => None,
+			Value::Cast(_) => None,
+			Value::Block(_) => None,
+			Value::Range(_) => None,
+			Value::Edges(_) => None,
+			Value::Future(_) => None,
+			Value::Constant(_) => None,
+			Value::Function(_) => None,
+			Value::Subquery(_) => None,
+			Value::Query(_) => None,
+			Value::Model(_) => None,
+			Value::Closure(closure) => {
+				let args_kinds =
+					closure.args.iter().map(|(_, kind)| kind.clone()).collect::<Vec<_>>();
+				let returns_kind = closure.returns.clone().map(Box::new);
+
+				Some(Kind::Function(Some(args_kinds), returns_kind))
+			}
+			Value::Refs(_) => None,
+			Value::Expression(_) => None,
+			Value::File(file) => Some(Kind::File(vec![Ident::from(file.bucket.as_str())])),
+		}
+	}
+
 	/// Returns the surql representation of the kind of the value as a string.
 	///
 	/// # Warning
@@ -935,6 +981,8 @@ pub(crate) trait TryAdd<Rhs = Self> {
 	fn try_add(self, rhs: Rhs) -> Result<Self::Output, Error>;
 }
 
+use std::ops::Add;
+
 impl TryAdd for Value {
 	type Output = Self;
 	fn try_add(self, other: Self) -> Result<Self, Error> {
@@ -944,6 +992,8 @@ impl TryAdd for Value {
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
+			(Self::Array(v), Self::Array(w)) => Self::Array(v.add(w)),
+			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
 			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
 	}

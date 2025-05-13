@@ -14,6 +14,7 @@ impl Value {
 			None => self._every(steps, arrays.into(), Idiom::default()),
 		}
 	}
+
 	fn _every(&self, steps: bool, arrays: ArrayBehaviour, mut prev: Idiom) -> Vec<Idiom> {
 		match self {
 			// Current path part is an object and is not empty
@@ -192,6 +193,45 @@ mod tests {
 	}
 
 	#[test]
+	fn every_given_one_path_part() {
+		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let res = vec![
+			Idiom::parse("test"),
+			Idiom::parse("test.something"),
+			Idiom::parse("test.something[1]"),
+			Idiom::parse("test.something[1].age"),
+			Idiom::parse("test.something[1].tags"),
+			Idiom::parse("test.something[1].tags[1]"),
+			Idiom::parse("test.something[1].tags[0]"),
+			Idiom::parse("test.something[0]"),
+			Idiom::parse("test.something[0].age"),
+			Idiom::parse("test.something[0].tags"),
+			Idiom::parse("test.something[0].tags[1]"),
+			Idiom::parse("test.something[0].tags[0]"),
+		];
+		assert_eq!(res, val.every(Some(&Idiom::parse("test")), true, true));
+	}
+
+	#[test]
+	fn every_given_two_path_parts() {
+		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let res = vec![
+			Idiom::parse("test.something"),
+			Idiom::parse("test.something[1]"),
+			Idiom::parse("test.something[1].age"),
+			Idiom::parse("test.something[1].tags"),
+			Idiom::parse("test.something[1].tags[1]"),
+			Idiom::parse("test.something[1].tags[0]"),
+			Idiom::parse("test.something[0]"),
+			Idiom::parse("test.something[0].age"),
+			Idiom::parse("test.something[0].tags"),
+			Idiom::parse("test.something[0].tags[1]"),
+			Idiom::parse("test.something[0].tags[0]"),
+		];
+		assert_eq!(res, val.every(Some(&Idiom::parse("test.something")), true, true));
+	}
+
+	#[test]
 	fn every_including_intermediary_nodes_including_array_indexes_ending_all() {
 		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
 		let res = vec![
@@ -208,5 +248,21 @@ mod tests {
 			Idiom::parse("test.something[0].tags[0]"),
 		];
 		assert_eq!(res, val.every(Some(&Idiom::parse("test.something.*")), true, true));
+	}
+
+	#[test]
+	fn every_wildcards() {
+		let val = Value::parse(
+			"{ test: { a: { color: 'red' }, b: { color: 'blue' }, c: { color: 'green' } } }",
+		);
+
+		let res = vec![
+			Idiom::parse("test.*.color"),
+			Idiom::parse("test.*.color[2]"),
+			Idiom::parse("test.*.color[1]"),
+			Idiom::parse("test.*.color[0]"),
+		];
+
+		assert_eq!(res, val.every(Some(&Idiom::parse("test.*.color")), true, true));
 	}
 }

@@ -28,6 +28,7 @@ macro_rules! endpoints {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
+		#[expect(deprecated)]
 					let mut endpoint = IntoEndpoint::<FDb>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
