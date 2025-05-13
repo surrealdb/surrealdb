@@ -745,9 +745,6 @@ allow_unsafe = true
 [pkg.rust_decimal]
 build.allow_apis = ["fs"]
 
-[pkg.rust_decimal_macros]
-allow_proc_macro = true
-
 [pkg.ref-cast]
 build.allow_apis = ["process"]
 allow_unsafe = true
