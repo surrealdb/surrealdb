@@ -30,9 +30,11 @@ if [[ $suffix == "alpha" || $suffix == "beta" || $suffix == "rc" ]]; then
     fi
 fi
 
+buildMetadata=""
 
 case $suffix in
     "release")
+        version=${current_version}
         patch=$(echo ${current_version} | tr "." "\n" | sed -n 3p)
         environment=stable
         ;;
