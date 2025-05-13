@@ -97,7 +97,7 @@ jobs:
         run: |
           set -x
 
-          ENVIRONMENT="not-release" \
+          ENVIRONMENT="nightly" \
             CURRENT_VERSION=${{ steps.outputs.outputs.current-version }} \
             VERSION=${{ steps.outputs.outputs.version }} \
             PATCH=${{ steps.outputs.outputs.patch }} \
@@ -494,8 +494,14 @@ jobs:
           # Temporarily commit patch
           git commit -am "Patch crate name, version, and description"
 
-      - run: cat Cargo.toml ./crates/*/Cargo.toml
-
+      - run: cat Cargo.toml
+      - run: cat crates/catalog/Cargo.toml
+      - run: cat crates/common/Cargo.toml
+      - run: cat crates/core/Cargo.toml
+      - run: cat crates/expr/Cargo.toml
+      - run: cat crates/sdk/Cargo.toml
+      - run: cat crates/sql/Cargo.toml
+      
       - name: Publish the crate
         uses: release-plz/action@v0.5
         if: ${{ inputs.publish }}
