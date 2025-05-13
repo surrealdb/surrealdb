@@ -5,8 +5,8 @@ use crate::{
 	dbs::{capabilities::ExperimentalTarget, Capabilities},
 	err::Error,
 	sql::{
-		Block, Cond, Datetime, Duration, Fields, Idiom, Kind, Output, Query, Range, Subquery,
-		Thing, Value,
+		Block, Cond, Datetime, Duration, Fetchs, Fields, Idiom, Kind, Output, Query, Range,
+		Subquery, Thing, Value,
 	},
 };
 
@@ -379,6 +379,40 @@ pub(crate) fn fields_with_capabilities(
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| parser.parse_fields(stk))
+		.finish()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
+}
+
+/// Parses fields for a SELECT statement
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub(crate) fn fetchs_with_capabilities(
+	input: &str,
+	capabilities: &Capabilities,
+) -> Result<Fetchs, Error> {
+	trace!(target: TARGET, "Parsing fetch fields");
+
+	if input.len() > u32::MAX as usize {
+		return Err(Error::QueryTooLarge);
+	}
+
+	let mut parser = Parser::new_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+			query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+			references_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::RecordReferences),
+			bearer_access_enabled: capabilities
+				.allows_experimental(&ExperimentalTarget::BearerAccess),
+			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
+			..Default::default()
+		},
+	);
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_fetchs(stk))
 		.finish()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))

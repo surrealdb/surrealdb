@@ -557,6 +557,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.rustc_version]
+allow_apis = ["process"]
 
 [pkg.concurrent-queue]
 allow_unsafe = true
@@ -695,6 +696,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.relative-path]
+allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.miette]
@@ -1359,3 +1361,7 @@ allow_unsafe = true
 [pkg.surrealdb-tikv-client]
 allow_unsafe = true
 allow_apis = ["fs", "net"]
+
+[pkg.rstest_macros]
+allow_apis = ["fs"]
+allow_proc_macro = true

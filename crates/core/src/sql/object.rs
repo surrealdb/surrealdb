@@ -294,6 +294,16 @@ impl Object {
 	}
 }
 
+impl std::ops::Add for Object {
+	type Output = Self;
+
+	fn add(self, rhs: Self) -> Self::Output {
+		let mut lhs = self;
+		lhs.0.extend(rhs.0);
+		lhs
+	}
+}
+
 impl Display for Object {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
