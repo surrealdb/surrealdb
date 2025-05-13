@@ -471,15 +471,15 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "2.2.0"
-when = "2025-02-11"
+version = "2.2.2"
+when = "2025-04-10"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "2.2.0"
-when = "2025-02-11"
+version = "2.2.2"
+when = "2025-04-10"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -520,11 +520,11 @@ user-login = "dtolnay"
 user-name = "David Tolnay"
 
 [[publisher.tokio]]
-version = "1.43.0"
-when = "2025-01-08"
-user-id = 6741
-user-login = "Darksonn"
-user-name = "Alice Ryhl"
+version = "1.43.1"
+when = "2025-04-04"
+user-id = 10
+user-login = "carllerche"
+user-name = "Carl Lerche"
 
 [[publisher.tokio-macros]]
 version = "2.5.0"
@@ -560,6 +560,27 @@ when = "2024-12-24"
 user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"
+
+[[publisher.unicode-normalization]]
+version = "0.1.24"
+when = "2024-09-17"
+user-id = 1139
+user-login = "Manishearth"
+user-name = "Manish Goregaokar"
+
+[[publisher.unicode-segmentation]]
+version = "1.12.0"
+when = "2024-09-13"
+user-id = 1139
+user-login = "Manishearth"
+user-name = "Manish Goregaokar"
+
+[[publisher.unicode-width]]
+version = "0.1.14"
+when = "2024-09-19"
+user-id = 1139
+user-login = "Manishearth"
+user-name = "Manish Goregaokar"
 
 [[publisher.unicode-width]]
 version = "0.2.0"
@@ -1331,6 +1352,13 @@ delta = "0.3.4 -> 0.3.5"
 notes = "Reviewed on https://fxrev.dev/906795"
 aggregated-from = "https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/third_party/rust_crates/supply-chain/audits.toml?format=TEXT"
 
+[[audits.google.audits.autocfg]]
+who = "Manish Goregaokar <manishearth@google.com>"
+criteria = "safe-to-deploy"
+version = "1.4.0"
+notes = "Contains no unsafe"
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
 [[audits.google.audits.bitflags]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
@@ -1564,6 +1592,19 @@ who = "George Burgess IV <gbiv@google.com>"
 criteria = "safe-to-deploy"
 version = "1.0.3"
 aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
+
+[[audits.google.audits.indexmap]]
+who = "Lukasz Anforowicz <lukasza@chromium.org>"
+criteria = "safe-to-deploy"
+version = "2.7.1"
+notes = '''
+Grepped for `-i cipher`, `-i crypto`, `'\bfs\b'`, `'\bnet\b'`
+and there were no hits.
+
+There is a little bit of `unsafe` Rust code - the audit can be found at
+https://chromium-review.googlesource.com/c/chromium/src/+/6187726/2
+'''
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
 [[audits.google.audits.itoa]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
@@ -1812,6 +1853,21 @@ type/value always.
 """
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
+[[audits.google.audits.rust_decimal]]
+who = "Lukasz Anforowicz <lukasza@chromium.org>"
+criteria = "safe-to-deploy"
+version = "1.36.0"
+notes = '''
+Grepped for `-i cipher`, `-i crypto`, `'\bfs\b'`, `'\bnet\b'`, `'\bunsafe\b'`
+and there were no hits except:
+
+* Some reasonable `fs` usage in `build.rs`, under `make/scripts`, in one test
+* A single `unsafe` usage in one test.  I think this still qualifies this crate
+  as `ub-risk-0`.  FWIW the test usage seems sound - see:
+  https://chromium-review.googlesource.com/c/chromium/src/+/6187726/2/third_party/rust/chromium_crates_io/vendor/rust_decimal-1.36.0/tests/decimal_tests.rs
+'''
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
 [[audits.google.audits.rustversion]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
@@ -1891,6 +1947,19 @@ criteria = "safe-to-deploy"
 version = "0.10.5"
 notes = "Reviewed on https://fxrev.dev/712371."
 aggregated-from = "https://fuchsia.googlesource.com/fuchsia/+/refs/heads/main/third_party/rust_crates/supply-chain/audits.toml?format=TEXT"
+
+[[audits.google.audits.smallvec]]
+who = "Manish Goregaokar <manishearth@google.com>"
+criteria = "safe-to-deploy"
+version = "1.13.2"
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
+[[audits.google.audits.stable_deref_trait]]
+who = "Manish Goregaokar <manishearth@google.com>"
+criteria = "safe-to-deploy"
+version = "1.2.0"
+notes = "Purely a trait, crates using this should be carefully vetted since self-referential stuff can be super tricky around various unsafe rust edges."
+aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
 [[audits.google.audits.static_assertions]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
@@ -2131,11 +2200,6 @@ who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "2.5.0 -> 2.6.1"
 
-[[audits.isrg.audits.untrusted]]
-who = "David Cook <dcook@divviup.org>"
-criteria = "safe-to-deploy"
-version = "0.7.1"
-
 [[audits.mozilla.wildcard-audits.cexpr]]
 who = "Emilio Cobos Álvarez <emilio@crisal.io>"
 criteria = "safe-to-deploy"
@@ -2172,6 +2236,24 @@ user-id = 4484 # Henri Sivonen (hsivonen)
 start = "2019-02-26"
 end = "2025-10-23"
 notes = "I, Henri Sivonen, wrote encoding_rs for Gecko and have reviewed contributions by others. There are two caveats to the certification: 1) The crate does things that are documented to be UB but that do not appear to actually be UB due to integer types differing from the general rule; https://github.com/hsivonen/encoding_rs/issues/79 . 2) It would be prudent to re-review the code that reinterprets buffers of integers as SIMD vectors; see https://github.com/hsivonen/encoding_rs/issues/87 ."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.wildcard-audits.unicode-normalization]]
+who = "Manish Goregaokar <manishsmail@gmail.com>"
+criteria = "safe-to-deploy"
+user-id = 1139 # Manish Goregaokar (Manishearth)
+start = "2019-11-06"
+end = "2026-02-01"
+notes = "All code written or reviewed by Manish"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.wildcard-audits.unicode-segmentation]]
+who = "Manish Goregaokar <manishsmail@gmail.com>"
+criteria = "safe-to-deploy"
+user-id = 1139 # Manish Goregaokar (Manishearth)
+start = "2019-05-15"
+end = "2026-02-01"
+notes = "All code written or reviewed by Manish"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.wildcard-audits.unicode-width]]
@@ -2313,6 +2395,13 @@ aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-ch
 who = "Jan-Erik Rediger <jrediger@mozilla.com>"
 criteria = "safe-to-deploy"
 delta = "0.5.13 -> 0.5.14"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.crossbeam-channel]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.14 -> 0.5.15"
+notes = "Fixes a regression from an earlier version which could lead to a double free"
 aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.crypto-common]]
@@ -2605,12 +2694,6 @@ aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-ch
 who = "Valentin Gosu <valentin.gosu@gmail.com>"
 criteria = "safe-to-deploy"
 version = "1.2.0"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.indexmap]]
-who = "Erich Gubler <erichdongubler@gmail.com>"
-criteria = "safe-to-deploy"
-delta = "2.2.6 -> 2.7.1"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.litemap]]
