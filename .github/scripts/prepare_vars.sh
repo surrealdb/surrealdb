@@ -56,7 +56,7 @@ case $suffix in
     "rc")
         version=${current_version}-${RELEASE_TYPE}
         patch=$(($patch - 1))
-        environment=release-candidate
+        environment=rc
         ;;
     *)
         version=${current_version}-${RELEASE_TYPE}
