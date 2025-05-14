@@ -25,7 +25,6 @@ macro_rules! endpoints {
 				type Client = Client;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-		#[expect(deprecated)]
 					let mut endpoint = IntoEndpoint::<Http>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
@@ -45,7 +44,6 @@ macro_rules! endpoints {
 				type Client = Client;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-		#[expect(deprecated)]
 					let mut endpoint = IntoEndpoint::<Https>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)

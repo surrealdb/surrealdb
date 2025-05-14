@@ -152,43 +152,6 @@ type LiveQueryMap = HashMap<Uuid, Sender<Notification<CoreValue>>>;
 #[derive(Debug)]
 pub struct Mem;
 
-/// File database
-///
-/// # Examples
-///
-/// Instantiating a file-backed instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::File;
-///
-/// let db = Surreal::new::<File>("path/to/database-folder").await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Instantiating a file-backed strict instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::File;
-///
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<File>(("path/to/database-folder", config)).await?;
-/// # Ok(())
-/// # }
-/// ```
-#[cfg(feature = "kv-rocksdb")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-rocksdb")))]
-#[derive(Debug)]
-#[deprecated]
-pub struct File;
-
 /// RocksDB database
 ///
 /// # Examples
@@ -378,7 +341,6 @@ impl Surreal<Db> {
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
-			#[expect(deprecated)]
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
