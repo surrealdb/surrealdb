@@ -8,8 +8,10 @@ use std::fmt;
 #[non_exhaustive]
 pub struct BeginStatement;
 
-impl fmt::Display for BeginStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(BeginStatement);
+
+impl crate::sql::DisplaySql for BeginStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("BEGIN TRANSACTION")
 	}
 }

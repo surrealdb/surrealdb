@@ -17,8 +17,10 @@ impl Default for ChangeFeedInclude {
 	}
 }
 
-impl fmt::Display for ChangeFeedInclude {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ChangeFeedInclude);
+
+impl crate::sql::DisplaySql for ChangeFeedInclude {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str(match self {
 			Self::Original => "Original",
 		})

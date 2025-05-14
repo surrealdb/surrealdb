@@ -89,8 +89,10 @@ impl UpsertStatement {
 	}
 }
 
-impl fmt::Display for UpsertStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(UpsertStatement);
+
+impl crate::sql::DisplaySql for UpsertStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "UPSERT")?;
 		if self.only {
 			f.write_str(" ONLY")?

@@ -134,8 +134,10 @@ impl InsertStatement {
 	}
 }
 
-impl fmt::Display for InsertStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(InsertStatement);
+
+impl crate::sql::DisplaySql for InsertStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("INSERT")?;
 		if self.relation {
 			f.write_str(" RELATION")?

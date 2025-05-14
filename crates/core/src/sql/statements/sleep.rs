@@ -41,8 +41,10 @@ impl SleepStatement {
 	}
 }
 
-impl fmt::Display for SleepStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(SleepStatement);
+
+impl crate::sql::DisplaySql for SleepStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SLEEP {}", self.duration)
 	}
 }

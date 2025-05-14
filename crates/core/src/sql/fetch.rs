@@ -34,8 +34,10 @@ impl IntoIterator for Fetchs {
 	}
 }
 
-impl fmt::Display for Fetchs {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Fetchs);
+
+impl crate::sql::DisplaySql for Fetchs {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FETCH {}", Fmt::comma_separated(&self.0))
 	}
 }
@@ -148,8 +150,10 @@ impl Deref for Fetch {
 	}
 }
 
-impl Display for Fetch {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Fetch);
+
+impl crate::sql::DisplaySql for Fetch {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
 	}
 }

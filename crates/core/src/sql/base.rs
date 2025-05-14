@@ -22,8 +22,10 @@ impl Default for Base {
 	}
 }
 
-impl fmt::Display for Base {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Base);
+
+impl crate::sql::DisplaySql for Base {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Ns => f.write_str("NAMESPACE"),
 			Self::Db => f.write_str("DATABASE"),

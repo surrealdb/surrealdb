@@ -26,8 +26,10 @@ impl Deref for Tables {
 	}
 }
 
-impl Display for Tables {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Tables);
+
+impl crate::sql::DisplaySql for Tables {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
@@ -73,8 +75,10 @@ impl Table {
 	}
 }
 
-impl Display for Table {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Table);
+
+impl crate::sql::DisplaySql for Table {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		EscapeIdent(&self.0).fmt(f)
 	}
 }

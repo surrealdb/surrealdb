@@ -10,7 +10,7 @@ use crate::sql::{Base, FlowResultExt as _, Ident, Permission, Strand, Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Write};
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -78,8 +78,10 @@ impl DefineParamStatement {
 	}
 }
 
-impl Display for DefineParamStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineParamStatement);
+
+impl crate::sql::DisplaySql for DefineParamStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE PARAM")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

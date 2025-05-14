@@ -45,8 +45,10 @@ impl Future {
 	}
 }
 
-impl fmt::Display for Future {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Future);
+
+impl crate::sql::DisplaySql for Future {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "<future> {}", self.0)
 	}
 }

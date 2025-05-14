@@ -387,8 +387,10 @@ impl Function {
 	}
 }
 
-impl fmt::Display for Function {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Function);
+
+impl crate::sql::DisplaySql for Function {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),

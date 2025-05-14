@@ -54,8 +54,10 @@ impl Permissions {
 	}
 }
 
-impl Display for Permissions {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Permissions);
+
+impl crate::sql::DisplaySql for Permissions {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "PERMISSIONS")?;
 		if self.is_none() {
 			return write!(f, " NONE");
@@ -152,8 +154,10 @@ impl PermissionKind {
 	}
 }
 
-impl Display for PermissionKind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(PermissionKind);
+
+impl crate::sql::DisplaySql for PermissionKind {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		f.write_str(self.as_str())
 	}
 }
@@ -183,8 +187,10 @@ impl Permission {
 	}
 }
 
-impl Display for Permission {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Permission);
+
+impl crate::sql::DisplaySql for Permission {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::None => f.write_str("NONE"),
 			Self::Full => f.write_str("FULL"),

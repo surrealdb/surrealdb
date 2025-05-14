@@ -90,8 +90,10 @@ impl UpdateStatement {
 	}
 }
 
-impl fmt::Display for UpdateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(UpdateStatement);
+
+impl crate::sql::DisplaySql for UpdateStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "UPDATE")?;
 		if self.only {
 			f.write_str(" ONLY")?

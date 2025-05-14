@@ -186,8 +186,10 @@ impl Part {
 	}
 }
 
-impl fmt::Display for Part {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Part);
+
+impl crate::sql::DisplaySql for Part {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Part::All => f.write_str("[*]"),
 			Part::Last => f.write_str("[$]"),
@@ -484,8 +486,10 @@ impl DestructurePart {
 	}
 }
 
-impl fmt::Display for DestructurePart {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DestructurePart);
+
+impl crate::sql::DisplaySql for DestructurePart {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			DestructurePart::All(fd) => write!(f, "{fd}.*"),
 			DestructurePart::Field(fd) => write!(f, "{fd}"),
@@ -533,8 +537,10 @@ impl TryInto<(u32, Option<u32>)> for Recurse {
 	}
 }
 
-impl fmt::Display for Recurse {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Recurse);
+
+impl crate::sql::DisplaySql for Recurse {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Recurse::Fixed(v) => write!(f, "{v}"),
 			Recurse::Range(beg, end) => match (beg, end) {
@@ -760,8 +766,10 @@ impl RecurseInstruction {
 	}
 }
 
-impl fmt::Display for RecurseInstruction {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(RecurseInstruction);
+
+impl crate::sql::DisplaySql for RecurseInstruction {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Path {
 				inclusive,

@@ -6,7 +6,7 @@ use crate::sql::{Base, Ident, Value};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Formatter};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -50,8 +50,10 @@ impl RemoveAnalyzerStatement {
 	}
 }
 
-impl Display for RemoveAnalyzerStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(RemoveAnalyzerStatement);
+
+impl crate::sql::DisplaySql for RemoveAnalyzerStatement {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE ANALYZER")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?

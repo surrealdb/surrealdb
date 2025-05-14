@@ -15,7 +15,7 @@ use argon2::{
 use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -217,8 +217,10 @@ impl DefineUserStatement {
 	}
 }
 
-impl Display for DefineUserStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineUserStatement);
+
+impl crate::sql::DisplaySql for DefineUserStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE USER")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

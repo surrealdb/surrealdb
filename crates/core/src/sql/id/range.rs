@@ -133,8 +133,10 @@ impl Ord for IdRange {
 	}
 }
 
-impl fmt::Display for IdRange {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(IdRange);
+
+impl crate::sql::DisplaySql for IdRange {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self.beg {
 			Bound::Unbounded => write!(f, ""),
 			Bound::Included(v) => write!(f, "{v}"),

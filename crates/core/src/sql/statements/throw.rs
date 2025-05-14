@@ -36,8 +36,10 @@ impl ThrowStatement {
 	}
 }
 
-impl fmt::Display for ThrowStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ThrowStatement);
+
+impl crate::sql::DisplaySql for ThrowStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "THROW {}", self.error)
 	}
 }

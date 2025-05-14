@@ -200,8 +200,10 @@ impl Expression {
 	}
 }
 
-impl fmt::Display for Expression {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Expression);
+
+impl crate::sql::DisplaySql for Expression {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Unary {
 				o,

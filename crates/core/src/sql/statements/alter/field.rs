@@ -11,7 +11,7 @@ use crate::sql::{Idiom, Kind};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self};
 use std::ops::Deref;
 use uuid::Uuid;
 
@@ -132,8 +132,10 @@ impl AlterFieldStatement {
 	}
 }
 
-impl Display for AlterFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(AlterFieldStatement);
+
+impl crate::sql::DisplaySql for AlterFieldStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "ALTER FIELD")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?

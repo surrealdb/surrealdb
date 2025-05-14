@@ -15,8 +15,10 @@ pub enum Ordering {
 	Order(OrderList),
 }
 
-impl fmt::Display for Ordering {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Ordering);
+
+impl crate::sql::DisplaySql for Ordering {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Ordering::Random => write!(f, "ORDER BY RAND()"),
 			Ordering::Order(list) => writeln!(f, "ORDER BY {list}"),
@@ -37,8 +39,10 @@ impl Deref for OrderList {
 	}
 }
 
-impl fmt::Display for OrderList {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(OrderList);
+
+impl crate::sql::DisplaySql for OrderList {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", Fmt::comma_separated(&self.0))
 	}
 }
@@ -76,8 +80,10 @@ pub struct Order {
 	pub direction: bool,
 }
 
-impl fmt::Display for Order {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Order);
+
+impl crate::sql::DisplaySql for Order {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", self.value)?;
 		if self.collate {
 			write!(f, " COLLATE")?;

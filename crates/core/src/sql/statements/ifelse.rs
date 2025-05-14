@@ -7,7 +7,7 @@ use crate::sql::{FlowResult, Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Write};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -57,8 +57,10 @@ impl IfelseStatement {
 	}
 }
 
-impl Display for IfelseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(IfelseStatement);
+
+impl crate::sql::DisplaySql for IfelseStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		match self.bracketed() {
 			true => {

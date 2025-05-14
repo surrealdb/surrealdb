@@ -98,8 +98,10 @@ impl Graph {
 	}
 }
 
-impl Display for Graph {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Graph);
+
+impl crate::sql::DisplaySql for Graph {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		if self.what.0.len() <= 1
 			&& self.cond.is_none()
 			&& self.alias.is_none()
@@ -186,8 +188,10 @@ impl GraphSubjects {
 	}
 }
 
-impl Display for GraphSubjects {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(GraphSubjects);
+
+impl crate::sql::DisplaySql for GraphSubjects {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
@@ -307,8 +311,10 @@ impl From<Table> for GraphSubject {
 	}
 }
 
-impl Display for GraphSubject {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(GraphSubject);
+
+impl crate::sql::DisplaySql for GraphSubject {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Table(tb) => Display::fmt(&tb, f),
 			Self::Range(tb, rng) => write!(f, "{tb}:{rng}"),

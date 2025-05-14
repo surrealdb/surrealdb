@@ -67,8 +67,10 @@ impl Closure {
 	}
 }
 
-impl fmt::Display for Closure {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Closure);
+
+impl crate::sql::DisplaySql for Closure {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("|")?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {

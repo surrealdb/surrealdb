@@ -26,8 +26,10 @@ impl IntoIterator for Groups {
 	}
 }
 
-impl Display for Groups {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Groups);
+
+impl crate::sql::DisplaySql for Groups {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		if self.0.is_empty() {
 			write!(f, "GROUP ALL")
 		} else {
@@ -49,8 +51,10 @@ impl Deref for Group {
 	}
 }
 
-impl Display for Group {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Group);
+
+impl crate::sql::DisplaySql for Group {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
 	}
 }

@@ -74,8 +74,10 @@ impl DefineFunctionStatement {
 	}
 }
 
-impl fmt::Display for DefineFunctionStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineFunctionStatement);
+
+impl crate::sql::DisplaySql for DefineFunctionStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FUNCTION")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

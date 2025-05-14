@@ -42,8 +42,10 @@ impl IntoIterator for Idioms {
 	}
 }
 
-impl Display for Idioms {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Idioms);
+
+impl crate::sql::DisplaySql for Idioms {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
@@ -202,8 +204,10 @@ impl Idiom {
 	}
 }
 
-impl Display for Idiom {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Idiom);
+
+impl crate::sql::DisplaySql for Idiom {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		Display::fmt(
 			&Fmt::new(
 				self.0.iter().enumerate().map(|args| {

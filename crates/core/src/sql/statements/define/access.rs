@@ -10,7 +10,7 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self};
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -175,8 +175,10 @@ impl DefineAccessStatement {
 	}
 }
 
-impl Display for DefineAccessStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineAccessStatement);
+
+impl crate::sql::DisplaySql for DefineAccessStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE ACCESS",)?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

@@ -30,8 +30,10 @@ impl Deref for Script {
 	}
 }
 
-impl Display for Script {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Script);
+
+impl crate::sql::DisplaySql for Script {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
 	}
 }

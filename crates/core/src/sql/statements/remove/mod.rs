@@ -90,8 +90,10 @@ impl RemoveStatement {
 	}
 }
 
-impl Display for RemoveStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(RemoveStatement);
+
+impl crate::sql::DisplaySql for RemoveStatement {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Namespace(v) => Display::fmt(v, f),
 			Self::Database(v) => Display::fmt(v, f),

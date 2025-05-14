@@ -89,8 +89,10 @@ impl KillStatement {
 	}
 }
 
-impl fmt::Display for KillStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(KillStatement);
+
+impl crate::sql::DisplaySql for KillStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "KILL {}", self.id)
 	}
 }

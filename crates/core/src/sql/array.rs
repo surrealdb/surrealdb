@@ -10,7 +10,7 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::{self, Formatter, Write};
 use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -125,8 +125,10 @@ impl Array {
 	}
 }
 
-impl Display for Array {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Array);
+
+impl crate::sql::DisplaySql for Array {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		f.write_char('[')?;
 		if !self.is_empty() {

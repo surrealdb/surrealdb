@@ -191,8 +191,10 @@ impl RelateStatement {
 	}
 }
 
-impl fmt::Display for RelateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(RelateStatement);
+
+impl crate::sql::DisplaySql for RelateStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "RELATE")?;
 		if self.only {
 			f.write_str(" ONLY")?

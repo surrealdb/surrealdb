@@ -89,8 +89,10 @@ impl DeleteStatement {
 	}
 }
 
-impl fmt::Display for DeleteStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DeleteStatement);
+
+impl crate::sql::DisplaySql for DeleteStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DELETE")?;
 		if self.only {
 			f.write_str(" ONLY")?

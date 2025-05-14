@@ -9,7 +9,7 @@ use crate::sql::{ControlFlow, FlowResult};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -143,8 +143,10 @@ impl ForeachStatement {
 	}
 }
 
-impl Display for ForeachStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ForeachStatement);
+
+impl crate::sql::DisplaySql for ForeachStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)
 	}
 }

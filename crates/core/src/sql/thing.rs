@@ -280,8 +280,10 @@ impl Thing {
 	}
 }
 
-impl fmt::Display for Thing {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Thing);
+
+impl crate::sql::DisplaySql for Thing {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}:{}", EscapeRid(&self.tb), self.id)
 	}
 }

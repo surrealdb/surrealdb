@@ -91,8 +91,10 @@ impl Data {
 	}
 }
 
-impl Display for Data {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Data);
+
+impl crate::sql::DisplaySql for Data {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::EmptyExpression => Ok(()),
 			Self::SetExpression(v) => write!(

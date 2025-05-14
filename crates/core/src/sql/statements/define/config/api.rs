@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use std::fmt::{self};
 
 use crate::api::middleware::RequestMiddleware;
 use crate::sql::fmt::Fmt;
@@ -22,8 +22,10 @@ impl ApiConfig {
 	}
 }
 
-impl Display for ApiConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ApiConfig);
+
+impl crate::sql::DisplaySql for ApiConfig {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, " API")?;
 
 		if let Some(mw) = &self.middleware {

@@ -8,7 +8,7 @@ use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -56,8 +56,10 @@ impl RemoveSequenceStatement {
 	}
 }
 
-impl Display for RemoveSequenceStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(RemoveSequenceStatement);
+
+impl crate::sql::DisplaySql for RemoveSequenceStatement {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE SEQUENCE")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?

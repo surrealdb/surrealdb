@@ -58,8 +58,10 @@ impl SetStatement {
 	}
 }
 
-impl fmt::Display for SetStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(SetStatement);
+
+impl crate::sql::DisplaySql for SetStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "LET ${}", self.name)?;
 		if let Some(ref kind) = self.kind {
 			write!(f, ": {}", kind)?;

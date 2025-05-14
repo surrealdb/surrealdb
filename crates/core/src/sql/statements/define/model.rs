@@ -72,8 +72,10 @@ impl DefineModelStatement {
 	}
 }
 
-impl fmt::Display for DefineModelStatement {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineModelStatement);
+
+impl crate::sql::DisplaySql for DefineModelStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "DEFINE MODEL")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

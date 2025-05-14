@@ -172,8 +172,10 @@ impl Duration {
 	}
 }
 
-impl fmt::Display for Duration {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Duration);
+
+impl crate::sql::DisplaySql for Duration {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		// Split up the duration
 		let secs = self.0.as_secs();
 		let nano = self.0.subsec_nanos();

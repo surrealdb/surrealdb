@@ -21,8 +21,10 @@ impl Default for Dir {
 	}
 }
 
-impl fmt::Display for Dir {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Dir);
+
+impl crate::sql::DisplaySql for Dir {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str(match self {
 			Self::In => "<-",
 			Self::Out => "->",

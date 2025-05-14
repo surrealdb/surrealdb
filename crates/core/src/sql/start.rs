@@ -46,8 +46,10 @@ impl Start {
 	}
 }
 
-impl fmt::Display for Start {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Start);
+
+impl crate::sql::DisplaySql for Start {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "START {}", self.0)
 	}
 }

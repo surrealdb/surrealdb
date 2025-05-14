@@ -91,8 +91,10 @@ impl Debug for Regex {
 	}
 }
 
-impl Display for Regex {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Regex);
+
+impl crate::sql::DisplaySql for Regex {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		let t = self.0.to_string().replace('/', "\\/");
 		write!(f, "/{}/", &t)
 	}

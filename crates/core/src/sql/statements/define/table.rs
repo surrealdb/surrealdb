@@ -18,7 +18,7 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Write};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -229,8 +229,10 @@ impl DefineTableStatement {
 	}
 }
 
-impl Display for DefineTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineTableStatement);
+
+impl crate::sql::DisplaySql for DefineTableStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE TABLE")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

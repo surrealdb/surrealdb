@@ -90,8 +90,10 @@ impl IntoIterator for Fields {
 	}
 }
 
-impl Display for Fields {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Fields);
+
+impl crate::sql::DisplaySql for Fields {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self.single() {
 			Some(v) => write!(f, "VALUE {}", &v),
 			None => Display::fmt(&Fmt::comma_separated(&self.0), f),
@@ -303,8 +305,10 @@ pub enum Field {
 	},
 }
 
-impl Display for Field {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Field);
+
+impl crate::sql::DisplaySql for Field {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::All => f.write_char('*'),
 			Self::Single {

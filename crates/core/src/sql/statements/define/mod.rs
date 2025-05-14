@@ -143,8 +143,10 @@ impl DefineStatement {
 	}
 }
 
-impl Display for DefineStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineStatement);
+
+impl crate::sql::DisplaySql for DefineStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Namespace(v) => Display::fmt(v, f),
 			Self::Database(v) => Display::fmt(v, f),

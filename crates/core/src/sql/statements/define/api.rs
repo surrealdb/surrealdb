@@ -82,8 +82,10 @@ impl DefineApiStatement {
 	}
 }
 
-impl Display for DefineApiStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineApiStatement);
+
+impl crate::sql::DisplaySql for DefineApiStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE API")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
@@ -167,8 +169,10 @@ impl InfoStructure for ApiDefinition {
 	}
 }
 
-impl Display for ApiDefinition {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ApiDefinition);
+
+impl crate::sql::DisplaySql for ApiDefinition {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let da: DefineApiStatement = self.clone().into();
 		da.fmt(f)
 	}
@@ -184,8 +188,10 @@ pub struct ApiAction {
 	pub config: Option<ApiConfig>,
 }
 
-impl Display for ApiAction {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ApiAction);
+
+impl crate::sql::DisplaySql for ApiAction {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
 		let indent = pretty_indent();
 		if let Some(config) = &self.config {

@@ -46,8 +46,10 @@ impl Limit {
 	}
 }
 
-impl fmt::Display for Limit {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Limit);
+
+impl crate::sql::DisplaySql for Limit {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "LIMIT {}", self.0)
 	}
 }

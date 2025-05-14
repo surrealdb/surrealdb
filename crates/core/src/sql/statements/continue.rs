@@ -30,8 +30,10 @@ impl ContinueStatement {
 	}
 }
 
-impl fmt::Display for ContinueStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ContinueStatement);
+
+impl crate::sql::DisplaySql for ContinueStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("CONTINUE")
 	}
 }

@@ -8,8 +8,10 @@ use std::fmt;
 #[non_exhaustive]
 pub struct Explain(pub bool);
 
-impl fmt::Display for Explain {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Explain);
+
+impl crate::sql::DisplaySql for Explain {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("EXPLAIN")?;
 		if self.0 {
 			f.write_str(" FULL")?;

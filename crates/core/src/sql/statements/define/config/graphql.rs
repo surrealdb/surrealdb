@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Write};
 
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
@@ -48,8 +48,10 @@ pub enum FunctionsConfig {
 	Exclude(Vec<Ident>),
 }
 
-impl Display for GraphQLConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(GraphQLConfig);
+
+impl crate::sql::DisplaySql for GraphQLConfig {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, " GRAPHQL")?;
 
 		write!(f, " TABLES {}", self.tables)?;
@@ -58,8 +60,10 @@ impl Display for GraphQLConfig {
 	}
 }
 
-impl Display for TablesConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(TablesConfig);
+
+impl crate::sql::DisplaySql for TablesConfig {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			TablesConfig::Auto => write!(f, "AUTO")?,
 			TablesConfig::None => write!(f, "NONE")?,
@@ -112,15 +116,19 @@ impl TryFrom<Value> for TableConfig {
 	}
 }
 
-impl Display for TableConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(TableConfig);
+
+impl crate::sql::DisplaySql for TableConfig {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", self.name)?;
 		Ok(())
 	}
 }
 
-impl Display for FunctionsConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(FunctionsConfig);
+
+impl crate::sql::DisplaySql for FunctionsConfig {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			FunctionsConfig::Auto => write!(f, "AUTO")?,
 			FunctionsConfig::None => write!(f, "NONE")?,

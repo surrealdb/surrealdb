@@ -51,8 +51,10 @@ impl OutputStatement {
 	}
 }
 
-impl fmt::Display for OutputStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(OutputStatement);
+
+impl crate::sql::DisplaySql for OutputStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "RETURN {}", self.what)?;
 		if let Some(ref v) = self.fetch {
 			write!(f, " {v}")?

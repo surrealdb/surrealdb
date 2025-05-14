@@ -54,8 +54,10 @@ impl SqlError {
 }
 
 impl std::error::Error for SqlError {}
-impl fmt::Display for SqlError {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+crate::sql::impl_display_from_sql!(SqlError);
+
+impl crate::sql::DisplaySql for SqlError {
+	fn fmt_sql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			SqlError::Thrown(message) => {
 				write!(f, "An error was raised by a THROW statement: {message}")

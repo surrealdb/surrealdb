@@ -34,8 +34,10 @@ pub enum CastError {
 	},
 }
 impl std::error::Error for CastError {}
-impl fmt::Display for CastError {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+crate::sql::impl_display_from_sql!(CastError);
+
+impl crate::sql::DisplaySql for CastError {
+	fn fmt_sql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			CastError::InvalidKind {
 				from,
@@ -47,7 +49,7 @@ impl fmt::Display for CastError {
 				inner,
 				into,
 			} => {
-				inner.fmt(f)?;
+				inner.fmt_sql(f)?;
 				write!(f, " when coercing an element of `{into}`")
 			}
 			CastError::InvalidLength {

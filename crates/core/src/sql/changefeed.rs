@@ -3,7 +3,7 @@ use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Formatter};
 use std::str;
 use std::time;
 
@@ -15,8 +15,10 @@ pub struct ChangeFeed {
 	#[revision(start = 2)]
 	pub store_diff: bool,
 }
-impl Display for ChangeFeed {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ChangeFeed);
+
+impl crate::sql::DisplaySql for ChangeFeed {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "CHANGEFEED {}", Duration(self.expiry))?;
 		if self.store_diff {
 			write!(f, " INCLUDE ORIGINAL")?;

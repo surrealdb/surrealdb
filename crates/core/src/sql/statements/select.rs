@@ -156,8 +156,10 @@ impl SelectStatement {
 	}
 }
 
-impl fmt::Display for SelectStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(SelectStatement);
+
+impl crate::sql::DisplaySql for SelectStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {}", self.expr)?;
 		if let Some(ref v) = self.omit {
 			write!(f, " OMIT {v}")?

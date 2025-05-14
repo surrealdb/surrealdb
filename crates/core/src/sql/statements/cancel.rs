@@ -8,8 +8,10 @@ use std::fmt;
 #[non_exhaustive]
 pub struct CancelStatement;
 
-impl fmt::Display for CancelStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(CancelStatement);
+
+impl crate::sql::DisplaySql for CancelStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("CANCEL TRANSACTION")
 	}
 }

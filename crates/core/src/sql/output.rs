@@ -22,8 +22,10 @@ impl Default for Output {
 	}
 }
 
-impl Display for Output {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Output);
+
+impl crate::sql::DisplaySql for Output {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("RETURN ")?;
 		match self {
 			Self::None => f.write_str("NONE"),

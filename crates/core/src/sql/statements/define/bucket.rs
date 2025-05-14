@@ -89,8 +89,10 @@ impl DefineBucketStatement {
 	}
 }
 
-impl Display for DefineBucketStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineBucketStatement);
+
+impl crate::sql::DisplaySql for DefineBucketStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE BUCKET")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
@@ -165,8 +167,10 @@ impl InfoStructure for BucketDefinition {
 	}
 }
 
-impl Display for BucketDefinition {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(BucketDefinition);
+
+impl crate::sql::DisplaySql for BucketDefinition {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let db: DefineBucketStatement = self.clone().into();
 		db.fmt(f)
 	}
