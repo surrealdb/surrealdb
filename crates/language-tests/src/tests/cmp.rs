@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::Bound};
+use std::{collections::BTreeMap, ops::Bound, sync::LazyLock};
 
 use rust_decimal::Decimal;
 use surrealdb_core::sql::{
@@ -12,6 +12,8 @@ pub struct RoughlyEqConfig {
 	pub record_id_keys: bool,
 	pub uuid: bool,
 	pub datetime: bool,
+	pub float: bool,
+	pub decimal: bool,
 }
 
 impl RoughlyEqConfig {
@@ -20,6 +22,8 @@ impl RoughlyEqConfig {
 			record_id_keys: true,
 			uuid: true,
 			datetime: true,
+			float: false,
+			decimal: false,
 		}
 	}
 }
@@ -189,10 +193,48 @@ impl RoughlyEq for Uuid {
 	}
 }
 
+/// Tolerance for floating point comparisons.
+const EPSILON: f64 = 1e-15;
+/// Tolerance for decimal comparisons (1e-15).
+const EPSILON_DECIMAL: LazyLock<Decimal> = LazyLock::new(|| Decimal::try_new(1, 15).unwrap());
+
+impl RoughlyEq for f64 {
+	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
+		if config.float {
+			(self - other).abs() < EPSILON
+		} else {
+			self == other
+		}
+	}
+}
+
+impl RoughlyEq for Decimal {
+	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
+		if config.decimal {
+			(self - other).abs() < *EPSILON_DECIMAL
+		} else {
+			self == other
+		}
+	}
+}
+
+impl RoughlyEq for Number {
+	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
+		if self.is_nan() && other.is_nan() {
+			return true;
+		}
+
+		match (self, other) {
+			(Number::Float(a), Number::Float(b)) => a.roughly_equal(b, config),
+			(Number::Decimal(a), Number::Decimal(b)) => a.roughly_equal(b, config),
+			(a, b) => a == b,
+		}
+	}
+}
+
 impl_roughly_eq_delegate!(
-	i64, f64, Decimal, Query, bool, String, Closure, Expression, Number, Geometry, Bytes, Param,
-	Model, Subquery, Function, Constant, Future, Edges, Range, Block, Cast, Regex, Mock, Idiom,
-	Duration, File
+	i64, Query, bool, String, Closure, Expression, Geometry, Bytes, Param, Model, Subquery,
+	Function, Constant, Future, Edges, Range, Block, Cast, Regex, Mock, Idiom, Duration, File
 );
 
 impl_roughly_eq_struct!(Array, 0);
