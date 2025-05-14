@@ -1,0 +1,1 @@
+REMOVE INDEX foo ON bar;

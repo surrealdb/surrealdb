@@ -5,9 +5,10 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn model_count() -> Result<(), Error> {
+async fn model_count() -> Result<()> {
 	let sql = "
 		CREATE |test:1000| SET time = time::now();
 		SELECT count() FROM test GROUP ALL;
@@ -32,7 +33,7 @@ async fn model_count() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn model_range() -> Result<(), Error> {
+async fn model_range() -> Result<()> {
 	let sql = "
 		CREATE |test:101..1100| SET time = time::now();
 		SELECT count() FROM test GROUP ALL;

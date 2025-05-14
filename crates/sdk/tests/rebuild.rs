@@ -7,9 +7,10 @@ use helpers::*;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn rebuild_index_statement() -> Result<(), Error> {
+async fn rebuild_index_statement() -> Result<()> {
 	let sql = "
 		CREATE book:1 SET title = 'Rust Web Programming', isbn = '978-1803234694', author = 'Maxwell Flitton';
 		DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE;

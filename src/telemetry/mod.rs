@@ -58,7 +58,7 @@ impl Default for Builder {
 
 impl Builder {
 	/// Install the tracing dispatcher globally
-	pub fn init(self) -> Result<(WorkerGuard, WorkerGuard), Error> {
+	pub fn init(self) -> Result<(WorkerGuard, WorkerGuard)> {
 		// Setup logs, tracing, and metrics
 		let (registry, stdout, stderr) = self.build()?;
 		// Initialise the registry

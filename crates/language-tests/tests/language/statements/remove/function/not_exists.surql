@@ -1,0 +1,1 @@
+REMOVE FUNCTION fn::foo;

@@ -1,0 +1,1 @@
+REMOVE FIELD foo ON bar;

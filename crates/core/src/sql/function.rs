@@ -388,7 +388,7 @@ impl Function {
 				}
 				#[cfg(not(feature = "scripting"))]
 				{
-					Err(ControlFlow::Err(Box::new(Error::InvalidScript {
+					Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidScript {
 						message: String::from("Embedded functions are not enabled."),
 					})))
 				}

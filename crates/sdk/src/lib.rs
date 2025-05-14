@@ -188,16 +188,8 @@ pub use crate::api::{
 	value::{
 		self, Action, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value,
 	},
-	Connect, Connection, Response, Result, Surreal,
+	Connect, Connection, Response, Surreal,
 };
 
-/// An error originating from the SurrealDB client library
-#[derive(Debug, thiserror::Error, serde::Serialize)]
-pub enum Error {
-	/// An error with an embedded storage engine
-	#[error("{0}")]
-	Db(#[from] crate::error::Db),
-	/// An error with a remote database instance
-	#[error("{0}")]
-	Api(#[from] crate::error::Api),
-}
+/// A specialized `Result` type
+pub type Result<T> = anyhow::Result<T>;

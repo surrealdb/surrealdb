@@ -5,9 +5,10 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn option_import_indexes_should_be_populated() -> Result<(), Error> {
+async fn option_import_indexes_should_be_populated() -> Result<()> {
 	let sql = "
 		OPTION IMPORT;
 		DEFINE INDEX field_num ON test FIELDS num;

@@ -1,0 +1,1 @@
+REMOVE ACCESS foo ON DB;

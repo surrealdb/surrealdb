@@ -1,0 +1,1 @@
+REMOVE EVENT foo ON bar;

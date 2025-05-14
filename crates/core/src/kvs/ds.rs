@@ -30,7 +30,9 @@ use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, FlowResultExt as _, Query, Value};
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
-use anyhow::{bail, ensure, Result};
+#[allow(unused_imports)]
+use anyhow::bail;
+use anyhow::{ensure, Result};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
@@ -265,7 +267,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
-                return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a File datastore
 			s if s.starts_with("file:") => {
@@ -284,7 +286,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-                return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a RocksDB datastore
 			s if s.starts_with("rocksdb:") => {
@@ -302,7 +304,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-                return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a SurrealKV datastore
 			s if s.starts_with("surrealkv") => {
@@ -322,7 +324,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
-                return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {

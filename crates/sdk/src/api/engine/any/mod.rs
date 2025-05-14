@@ -140,7 +140,6 @@ use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::path_to_string;
-use anyhow::Result;
 use std::marker::PhantomData;
 use url::Url;
 

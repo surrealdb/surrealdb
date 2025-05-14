@@ -19,7 +19,6 @@ use crate::engine::remote::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::{Action, Notification};
-use anyhow::Result;
 use async_channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;

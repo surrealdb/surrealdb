@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use hashbrown::HashSet;
+use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::err::Error;
 use surrealdb_core::kvs::Datastore;
@@ -26,7 +27,7 @@ async fn concurrent_task_asc(ds: Arc<Datastore>, seq: &str, count: usize) -> Has
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn concurrent_sequence_next_val() -> Result<(), Error> {
+async fn concurrent_sequence_next_val() -> Result<()> {
 	let ds = Arc::new(new_ds().await?);
 	let ses = Session::owner().with_ns("test").with_db("test");
 
@@ -82,7 +83,7 @@ async fn concurrent_sequence_next_val() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn sequence_next_val_after_restart() -> Result<(), Error> {
+async fn sequence_next_val_after_restart() -> Result<()> {
 	let ds = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 

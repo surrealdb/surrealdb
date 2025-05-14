@@ -6,12 +6,12 @@ use anyhow::Result;
 
 #[cfg(not(feature = "http"))]
 pub async fn head(_: &Context, (_, _): (Value, Optional<Value>)) -> Result<Value> {
-	Err(Error::HttpDisabled)
+	anyhow::bail!(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
 pub async fn get(_: &Context, (_, _): (Value, Optional<Value>)) -> Result<Value> {
-	Err(Error::HttpDisabled)
+	anyhow::bail!(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
@@ -19,7 +19,7 @@ pub async fn put(
 	_: &Context,
 	(_, _, _): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
-	Err(Error::HttpDisabled)
+	anyhow::bail!(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
@@ -27,7 +27,7 @@ pub async fn post(
 	_: &Context,
 	(_, _, _): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
-	Err(Error::HttpDisabled)
+	anyhow::bail!(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
@@ -35,12 +35,12 @@ pub async fn patch(
 	_: &Context,
 	(_, _, _): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
-	Err(Error::HttpDisabled)
+	anyhow::bail!(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
 pub async fn delete(_: &Context, (_, _): (Value, Optional<Value>)) -> Result<Value> {
-	Err(Error::HttpDisabled)
+	anyhow::bail!(Error::HttpDisabled)
 }
 
 #[cfg(feature = "http")]

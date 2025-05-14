@@ -1,0 +1,1 @@
+REMOVE NAMESPACE foo;

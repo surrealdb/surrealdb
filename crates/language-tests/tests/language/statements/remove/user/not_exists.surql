@@ -1,0 +1,1 @@
+REMOVE USER foo ON ROOT;

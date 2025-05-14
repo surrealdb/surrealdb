@@ -1,0 +1,1 @@
+		REMOVE TABLE foo;

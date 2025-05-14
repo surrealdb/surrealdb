@@ -83,6 +83,9 @@ pub struct TestEnv {
 	#[serde(default)]
 	pub auth: bool,
 
+	#[serde(default)]
+	pub strict: bool,
+
 	pub namespace: Option<BoolOr<String>>,
 	pub database: Option<BoolOr<String>>,
 
