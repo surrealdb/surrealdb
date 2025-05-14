@@ -1,0 +1,118 @@
+use crate::expr::fmt::Fmt;
+use crate::expr::idiom::Idiom;
+use crate::expr::Value;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::ops::Deref;
+use std::{cmp, fmt};
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum Ordering {
+	Random,
+	Order(OrderList),
+}
+
+crate::expr::impl_display_from_sql!(Ordering);
+
+impl crate::expr::DisplaySql for Ordering {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Ordering::Random => write!(f, "ORDER BY RAND()"),
+			Ordering::Order(list) => writeln!(f, "ORDER BY {list}"),
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct OrderList(pub Vec<Order>);
+
+impl Deref for OrderList {
+	type Target = Vec<Order>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+crate::expr::impl_display_from_sql!(OrderList);
+
+impl crate::expr::DisplaySql for OrderList {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}", Fmt::comma_separated(&self.0))
+	}
+}
+
+impl OrderList {
+	pub(crate) fn compare(&self, a: &Value, b: &Value) -> cmp::Ordering {
+		for order in &self.0 {
+			// Reverse the ordering if DESC
+			let o = match order.direction {
+				true => a.compare(b, &order.value.0, order.collate, order.numeric),
+				false => b.compare(a, &order.value.0, order.collate, order.numeric),
+			};
+			//
+			match o {
+				Some(cmp::Ordering::Greater) => return cmp::Ordering::Greater,
+				Some(cmp::Ordering::Equal) => continue,
+				Some(cmp::Ordering::Less) => return cmp::Ordering::Less,
+				None => continue,
+			}
+		}
+		cmp::Ordering::Equal
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct Order {
+	/// The value to order by
+	pub value: Idiom,
+	pub collate: bool,
+	pub numeric: bool,
+	/// true if the direction is ascending
+	pub direction: bool,
+}
+
+crate::expr::impl_display_from_sql!(Order);
+
+impl crate::expr::DisplaySql for Order {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}", self.value)?;
+		if self.collate {
+			write!(f, " COLLATE")?;
+		}
+		if self.numeric {
+			write!(f, " NUMERIC")?;
+		}
+		if !self.direction {
+			write!(f, " DESC")?;
+		}
+		Ok(())
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct OldOrders(pub Vec<OldOrder>);
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct OldOrder {
+	pub order: Idiom,
+	pub random: bool,
+	pub collate: bool,
+	pub numeric: bool,
+	/// true if the direction is ascending
+	pub direction: bool,
+}

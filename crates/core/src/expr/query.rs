@@ -1,0 +1,149 @@
+use crate::expr::fmt::Pretty;
+use crate::expr::function::Function;
+use crate::expr::model::Model;
+use crate::expr::statements::CreateStatement;
+use crate::expr::statements::DeleteStatement;
+use crate::expr::statements::InsertStatement;
+use crate::expr::statements::KillStatement;
+use crate::expr::statements::LiveStatement;
+use crate::expr::statements::RelateStatement;
+use crate::expr::statements::SelectStatement;
+use crate::expr::statements::UpdateStatement;
+use crate::expr::statements::UpsertStatement;
+use crate::expr::statements::{DefineStatement, RemoveStatement};
+use crate::expr::{Statement, Statements};
+
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::fmt::Write;
+use std::fmt::{self, Formatter};
+use std::ops::{Deref, DerefMut};
+use std::str;
+
+pub(crate) const TOKEN: &str = "$surrealdb::private::expr::Query";
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::expr::Query")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct Query(pub Statements);
+
+impl From<DefineStatement> for Query {
+	fn from(s: DefineStatement) -> Self {
+		Query(Statements(vec![Statement::Define(s)]))
+	}
+}
+
+impl From<RemoveStatement> for Query {
+	fn from(s: RemoveStatement) -> Self {
+		Query(Statements(vec![Statement::Remove(s)]))
+	}
+}
+
+impl From<SelectStatement> for Query {
+	fn from(s: SelectStatement) -> Self {
+		Query(Statements(vec![Statement::Select(s)]))
+	}
+}
+
+impl From<CreateStatement> for Query {
+	fn from(s: CreateStatement) -> Self {
+		Query(Statements(vec![Statement::Create(s)]))
+	}
+}
+
+impl From<UpsertStatement> for Query {
+	fn from(s: UpsertStatement) -> Self {
+		Query(Statements(vec![Statement::Upsert(s)]))
+	}
+}
+
+impl From<UpdateStatement> for Query {
+	fn from(s: UpdateStatement) -> Self {
+		Query(Statements(vec![Statement::Update(s)]))
+	}
+}
+
+impl From<RelateStatement> for Query {
+	fn from(s: RelateStatement) -> Self {
+		Query(Statements(vec![Statement::Relate(s)]))
+	}
+}
+
+impl From<DeleteStatement> for Query {
+	fn from(s: DeleteStatement) -> Self {
+		Query(Statements(vec![Statement::Delete(s)]))
+	}
+}
+
+impl From<InsertStatement> for Query {
+	fn from(s: InsertStatement) -> Self {
+		Query(Statements(vec![Statement::Insert(s)]))
+	}
+}
+
+impl From<LiveStatement> for Query {
+	fn from(s: LiveStatement) -> Self {
+		Query(Statements(vec![Statement::Live(s)]))
+	}
+}
+
+impl From<KillStatement> for Query {
+	fn from(s: KillStatement) -> Self {
+		Query(Statements(vec![Statement::Kill(s)]))
+	}
+}
+
+impl From<Function> for Query {
+	fn from(f: Function) -> Self {
+		Query(Statements(vec![Statement::Value(f.into())]))
+	}
+}
+
+impl From<Model> for Query {
+	fn from(m: Model) -> Self {
+		Query(Statements(vec![Statement::Value(m.into())]))
+	}
+}
+
+impl From<Statement> for Query {
+	fn from(s: Statement) -> Self {
+		Query(Statements(vec![s]))
+	}
+}
+
+impl From<Vec<Statement>> for Query {
+	fn from(s: Vec<Statement>) -> Self {
+		Query(Statements(s))
+	}
+}
+
+impl Deref for Query {
+	type Target = Vec<Statement>;
+	fn deref(&self) -> &Self::Target {
+		&self.0 .0
+	}
+}
+
+impl DerefMut for Query {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0 .0
+	}
+}
+
+impl IntoIterator for Query {
+	type Item = Statement;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
+
+crate::expr::impl_display_from_sql!(Query);
+
+impl crate::expr::DisplaySql for Query {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
+		write!(Pretty::from(f), "{}", &self.0)
+	}
+}

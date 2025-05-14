@@ -1,0 +1,17 @@
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct BeginStatement;
+
+crate::expr::impl_display_from_sql!(BeginStatement);
+
+impl crate::expr::DisplaySql for BeginStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.write_str("BEGIN TRANSACTION")
+	}
+}

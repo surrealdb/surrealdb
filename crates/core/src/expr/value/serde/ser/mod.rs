@@ -2,9 +2,9 @@ mod r#enum;
 mod r#struct;
 
 use crate::err::Error;
-use crate::sql;
-use crate::sql::value::Value;
-use crate::sql::Bytes;
+use crate::expr;
+use crate::expr::value::Value;
+use crate::expr::Bytes;
 use castaway::match_type;
 use serde::ser::Serialize;
 use serde_content::Number;
@@ -16,25 +16,25 @@ use std::fmt::Display;
 
 type Content = serde_content::Value<'static>;
 
-/// Convert a `T` into `surrealdb::sql::Value` which is an enum that can represent any valid SQL data.
+/// Convert a `T` into `surrealdb::expr::Value` which is an enum that can represent any valid SQL data.
 pub fn to_value<T>(value: T) -> Result<Value, Error>
 where
 	T: Serialize + 'static,
 {
 	match_type!(value, {
 		Value as v => Ok(v),
-		sql::Number as v => Ok(v.into()),
+		expr::Number as v => Ok(v.into()),
 		rust_decimal::Decimal as v => Ok(v.into()),
-		sql::Strand as v => Ok(v.into()),
-		sql::Duration as v => Ok(v.into()),
+		expr::Strand as v => Ok(v.into()),
+		expr::Duration as v => Ok(v.into()),
 		core::time::Duration as v => Ok(v.into()),
-		sql::Datetime as v => Ok(v.into()),
+		expr::Datetime as v => Ok(v.into()),
 		chrono::DateTime<chrono::Utc> as v => Ok(v.into()),
-		sql::Uuid as v => Ok(v.into()),
+		expr::Uuid as v => Ok(v.into()),
 		uuid::Uuid as v => Ok(v.into()),
-		sql::Array as v => Ok(v.into()),
-		sql::Object as v => Ok(v.into()),
-		sql::Geometry as v => Ok(v.into()),
+		expr::Array as v => Ok(v.into()),
+		expr::Object as v => Ok(v.into()),
+		expr::Geometry as v => Ok(v.into()),
 		geo_types::Point as v => Ok(v.into()),
 		geo_types::LineString as v => Ok(Value::Geometry(v.into())),
 		geo_types::Polygon as v => Ok(Value::Geometry(v.into())),
@@ -42,26 +42,26 @@ where
 		geo_types::MultiLineString as v => Ok(Value::Geometry(v.into())),
 		geo_types::MultiPolygon as v => Ok(Value::Geometry(v.into())),
 		geo_types::Point as v => Ok(Value::Geometry(v.into())),
-		sql::Bytes as v => Ok(v.into()),
-		sql::Thing as v => Ok(v.into()),
-		sql::Param as v => Ok(v.into()),
-		sql::Idiom as v => Ok(v.into()),
-		sql::Table as v => Ok(v.into()),
-		sql::Mock as v => Ok(v.into()),
-		sql::Regex as v => Ok(v.into()),
-		sql::Cast as v => Ok(v.into()),
-		sql::Block as v => Ok(v.into()),
-		sql::Range as v => Ok(v.into()),
-		sql::Edges as v => Ok(v.into()),
-		sql::Future as v => Ok(v.into()),
-		sql::Constant as v => Ok(v.into()),
-		sql::Function as v => Ok(v.into()),
-		sql::Subquery as v => Ok(v.into()),
-		sql::Expression as v => Ok(v.into()),
-		sql::Query as v => Ok(v.into()),
-		sql::Model as v => Ok(v.into()),
-		sql::Closure as v => Ok(v.into()),
-		sql::File as v => Ok(v.into()),
+		expr::Bytes as v => Ok(v.into()),
+		expr::Thing as v => Ok(v.into()),
+		expr::Param as v => Ok(v.into()),
+		expr::Idiom as v => Ok(v.into()),
+		expr::Table as v => Ok(v.into()),
+		expr::Mock as v => Ok(v.into()),
+		expr::Regex as v => Ok(v.into()),
+		expr::Cast as v => Ok(v.into()),
+		expr::Block as v => Ok(v.into()),
+		expr::Range as v => Ok(v.into()),
+		expr::Edges as v => Ok(v.into()),
+		expr::Future as v => Ok(v.into()),
+		expr::Constant as v => Ok(v.into()),
+		expr::Function as v => Ok(v.into()),
+		expr::Subquery as v => Ok(v.into()),
+		expr::Expression as v => Ok(v.into()),
+		expr::Query as v => Ok(v.into()),
+		expr::Model as v => Ok(v.into()),
+		expr::Closure as v => Ok(v.into()),
+		expr::File as v => Ok(v.into()),
 		value => Serializer::new().serialize(value)?.try_into(),
 	})
 }
@@ -118,7 +118,7 @@ impl TryFrom<Vec<Content>> for Value {
 		for content in v {
 			vec.push(content.try_into()?);
 		}
-		Ok(Self::Array(sql::Array(vec)))
+		Ok(Self::Array(expr::Array(vec)))
 	}
 }
 
@@ -140,7 +140,7 @@ impl TryFrom<Vec<(Content, Content)>> for Value {
 			let value = value.try_into()?;
 			map.insert(key, value);
 		}
-		Ok(Self::Object(sql::Object(map)))
+		Ok(Self::Object(expr::Object(map)))
 	}
 }
 
@@ -152,7 +152,7 @@ impl TryFrom<Vec<(Cow<'static, str>, Content)>> for Value {
 		for (key, value) in v {
 			map.insert(key.into_owned(), value.try_into()?);
 		}
-		Ok(Self::Object(sql::Object(map)))
+		Ok(Self::Object(expr::Object(map)))
 	}
 }
 
@@ -162,18 +162,18 @@ impl TryFrom<(Cow<'static, str>, Content)> for Value {
 	fn try_from((key, value): (Cow<'static, str>, Content)) -> Result<Self, Self::Error> {
 		let mut map = BTreeMap::new();
 		map.insert(key.into_owned(), value.try_into()?);
-		Ok(Self::Object(sql::Object(map)))
+		Ok(Self::Object(expr::Object(map)))
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql;
-	use crate::sql::block::Entry;
-	use crate::sql::statements::CreateStatement;
-	use crate::sql::Number;
-	use crate::sql::*;
+	use crate::expr;
+	use crate::expr::block::Entry;
+	use crate::expr::statements::CreateStatement;
+	use crate::expr::Number;
+	use crate::expr::*;
 	use ::serde::Serialize;
 	use graph::{GraphSubject, GraphSubjects};
 	use std::ops::Bound;
@@ -339,7 +339,7 @@ mod tests {
 
 	#[test]
 	fn thing() {
-		let record_id = sql::thing("foo:bar").unwrap();
+		let record_id = expr::thing("foo:bar").unwrap();
 		let value = to_value(record_id.clone()).unwrap();
 		let expected = Value::Thing(record_id);
 		assert_eq!(value, expected);
@@ -389,7 +389,7 @@ mod tests {
 	fn edges() {
 		let edges = Box::new(Edges {
 			dir: Dir::In,
-			from: sql::thing("foo:bar").unwrap(),
+			from: expr::thing("foo:bar").unwrap(),
 			what: GraphSubjects(vec![GraphSubject::Table(Table("foo".into()))]),
 		});
 		let value = to_value(edges.clone()).unwrap();
@@ -433,7 +433,7 @@ mod tests {
 
 	#[test]
 	fn query() {
-		let query = sql::parse("SELECT * FROM foo").unwrap();
+		let query = expr::parse("SELECT * FROM foo").unwrap();
 		let value = to_value(query.clone()).unwrap();
 		let expected = Value::Query(query);
 		assert_eq!(value, expected);
