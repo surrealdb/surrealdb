@@ -84,14 +84,6 @@ impl Constant {
 			Self::DurationMax => ConstantValue::Duration(Duration::MAX),
 		}
 	}
-	/// Process this type returning a computed simple Value
-	pub fn compute(&self) -> Result<Value, Error> {
-		Ok(match self.value() {
-			ConstantValue::Datetime(d) => d.into(),
-			ConstantValue::Float(f) => f.into(),
-			ConstantValue::Duration(d) => d.into(),
-		})
-	}
 }
 
 crate::sql::impl_display_from_sql!(Constant);

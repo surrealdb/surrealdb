@@ -64,30 +64,6 @@ impl RemoveStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self {
-			Self::Namespace(ref v) => v.compute(ctx, opt).await,
-			Self::Database(ref v) => v.compute(ctx, opt).await,
-			Self::Function(ref v) => v.compute(ctx, opt).await,
-			Self::Access(ref v) => v.compute(ctx, opt).await,
-			Self::Param(ref v) => v.compute(ctx, opt).await,
-			Self::Table(ref v) => v.compute(ctx, opt).await,
-			Self::Event(ref v) => v.compute(ctx, opt).await,
-			Self::Field(ref v) => v.compute(ctx, opt).await,
-			Self::Index(ref v) => v.compute(ctx, opt).await,
-			Self::Analyzer(ref v) => v.compute(ctx, opt).await,
-			Self::User(ref v) => v.compute(ctx, opt).await,
-			Self::Model(ref v) => v.compute(ctx, opt).await,
-			Self::Bucket(ref v) => v.compute(ctx, opt).await,
-			Self::Sequence(ref v) => v.compute(ctx, opt).await,
-		}
-	}
 }
 
 crate::sql::impl_display_from_sql!(RemoveStatement);

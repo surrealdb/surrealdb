@@ -25,24 +25,6 @@ impl Version {
 		self.0 = Value::Datetime(old);
 		Ok(())
 	}
-
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<u64, Error> {
-		match self.0.compute(stk, ctx, opt, doc).await.catch_return()? {
-			Value::Datetime(v) => match v.to_u64() {
-				Some(ts) => Ok(ts),
-				_ => Err(Error::Unreachable("Failed to convert datetime to timestamp".into())),
-			},
-			found => Err(Error::InvalidVersion {
-				found,
-			}),
-		}
-	}
 }
 
 crate::sql::impl_display_from_sql!(Version);

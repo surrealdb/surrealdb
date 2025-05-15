@@ -181,21 +181,6 @@ pub enum Distance {
 	Pearson,
 }
 
-impl Distance {
-	pub(crate) fn compute(&self, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number, Error> {
-		match self {
-			Self::Cosine => v1.cosine_distance(v2),
-			Self::Chebyshev => v1.chebyshev_distance(v2),
-			Self::Euclidean => v1.euclidean_distance(v2),
-			Self::Hamming => v1.hamming_distance(v2),
-			Self::Jaccard => v1.jaccard_similarity(v2),
-			Self::Manhattan => v1.manhattan_distance(v2),
-			Self::Minkowski(r) => v1.minkowski_distance(v2, r),
-			Self::Pearson => v1.pearson_similarity(v2),
-		}
-	}
-}
-
 crate::sql::impl_display_from_sql!(Distance);
 
 impl crate::sql::DisplaySql for Distance {

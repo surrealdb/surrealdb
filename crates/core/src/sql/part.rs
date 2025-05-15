@@ -13,7 +13,7 @@ use std::str;
 
 use super::{
 	fmt::{is_pretty, pretty_indent},
-	value::idiom_recursion::{clean_iteration, compute_idiom_recursion, is_final, Recursion},
+	value::idiom_recursion::{clean_iteration, is_final, Recursion},
 };
 
 #[revisioned(revision = 4)]
@@ -298,86 +298,6 @@ pub enum RecursionPlan {
 		// Path after the repeat symbol
 		after: Vec<Part>,
 	},
-}
-
-impl<'a> RecursionPlan {
-	pub async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		rec: Recursion<'a>,
-	) -> Result<Value, Error> {
-		match rec.current {
-			Value::Array(value) => stk
-				.scope(|scope| {
-					let futs = value.iter().map(|value| {
-						scope.run(|stk| {
-							let rec = rec.with_current(value);
-							self.compute_inner(stk, ctx, opt, doc, rec)
-						})
-					});
-					try_join_all_buffered(futs)
-				})
-				.await
-				.map(Into::into),
-			_ => stk.run(|stk| self.compute_inner(stk, ctx, opt, doc, rec)).await,
-		}
-	}
-
-	pub async fn compute_inner(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		rec: Recursion<'a>,
-	) -> Result<Value, Error> {
-		match self {
-			Self::Repeat => compute_idiom_recursion(stk, ctx, opt, doc, rec).await,
-			Self::Destructure {
-				parts,
-				field,
-				before,
-				plan,
-				after,
-			} => {
-				let v = stk
-					.run(|stk| rec.current.get(stk, ctx, opt, doc, before))
-					.await
-					.catch_return()?;
-				let v = plan.compute(stk, ctx, opt, doc, rec.with_current(&v)).await?;
-				let v = stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await.catch_return()?;
-				let v = clean_iteration(v);
-
-				if rec.iterated < rec.min && is_final(&v) {
-					// We do not use get_final here, because it's not a result
-					// the user will see, it's rather about path elimination
-					// By returning NONE, an array to be eliminated will be
-					// filled with NONE, and thus eliminated
-					return Ok(Value::None);
-				}
-
-				let path = &[Part::Destructure(parts.to_owned())];
-				match stk
-					.run(|stk| rec.current.get(stk, ctx, opt, doc, path))
-					.await
-					.catch_return()?
-				{
-					Value::Object(mut obj) => {
-						obj.insert(field.to_raw(), v);
-						Ok(Value::Object(obj))
-					}
-					Value::None => Ok(Value::None),
-					v => Err(Error::Unreachable(format!(
-						"Expected an object or none, found {}.",
-						v.kindof()
-					))),
-				}
-			}
-		}
-	}
 }
 
 pub trait FindRecursionPlan<'a> {
@@ -732,81 +652,6 @@ macro_rules! walk_paths {
 
 		Ok(open.into())
 	}};
-}
-
-impl RecurseInstruction {
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		rec: Recursion<'_>,
-		finished: &mut Vec<Value>,
-	) -> Result<Value, Error> {
-		match self {
-			Self::Path {
-				inclusive,
-			} => {
-				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Option::<&Value>::None)
-			}
-			Self::Shortest {
-				expects,
-				inclusive,
-			} => {
-				let expects = expects
-					.compute(stk, ctx, opt, doc)
-					.await
-					.catch_return()?
-					.coerce_to::<Thing>()?
-					.into();
-				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Some(&expects))
-			}
-			Self::Collect {
-				inclusive,
-			} => {
-				macro_rules! persist {
-					($finished:ident, $subject:expr) => {
-						match $subject {
-							Value::Array(v) => {
-								for v in v.iter() {
-									// Add a unique value to the finished collection
-									if !$finished.contains(v) {
-										$finished.push(v.to_owned());
-									}
-								}
-							}
-							v => {
-								if !$finished.contains(v) {
-									// Add a unique value to the finished collection
-									$finished.push(v.to_owned());
-								}
-							}
-						}
-					};
-				}
-
-				// If we are inclusive, we add the starting point to the collection
-				if rec.iterated == 1 && *inclusive {
-					persist!(finished, rec.current);
-				}
-
-				// Apply the recursed path to the current values
-				let res = stk
-					.run(|stk| rec.current.get(stk, ctx, opt, doc, rec.path))
-					.await
-					.catch_return()?;
-				// Clean the iteration
-				let res = clean_iteration(res);
-
-				// Persist any new values from the result
-				persist!(finished, &res);
-
-				// Continue
-				Ok(res)
-			}
-		}
-	}
 }
 
 crate::sql::impl_display_from_sql!(RecurseInstruction);

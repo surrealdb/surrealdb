@@ -27,47 +27,6 @@ pub struct DefineAnalyzerStatement {
 	pub overwrite: bool,
 }
 
-impl DefineAnalyzerStatement {
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		let (ns, db) = opt.ns_db()?;
-		// Check if the definition exists
-		if txn.get_db_analyzer(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				return Err(Error::AzAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::database::az::new(ns, db, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		let az = DefineAnalyzerStatement {
-			// Don't persist the `IF NOT EXISTS` clause to schema
-			if_not_exists: false,
-			overwrite: false,
-			..self.clone()
-		};
-		ctx.get_index_stores().mappers().load(&az).await?;
-		txn.set(key, revision::to_vec(&az)?, None).await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 crate::sql::impl_display_from_sql!(DefineAnalyzerStatement);
 
 impl crate::sql::DisplaySql for DefineAnalyzerStatement {

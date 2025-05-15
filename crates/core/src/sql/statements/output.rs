@@ -24,31 +24,6 @@ impl OutputStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		self.what.writeable()
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Ensure futures are processed
-		let opt = &opt.new_with_futures(true);
-		// Process the output value
-		let mut value = self.what.compute(stk, ctx, opt, doc).await?;
-		// Fetch any
-		if let Some(fetchs) = &self.fetch {
-			let mut idioms = Vec::with_capacity(fetchs.0.len());
-			for fetch in fetchs.iter() {
-				fetch.compute(stk, ctx, opt, &mut idioms).await?
-			}
-			for i in &idioms {
-				value.fetch(stk, ctx, opt, i).await?;
-			}
-		}
-		//
-		Err(ControlFlow::Return(value))
-	}
 }
 
 crate::sql::impl_display_from_sql!(OutputStatement);

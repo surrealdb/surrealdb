@@ -254,34 +254,3 @@ impl crate::sql::DisplaySql for Id {
 		}
 	}
 }
-
-impl Id {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Id, Error> {
-		match self {
-			Id::Number(v) => Ok(Id::Number(*v)),
-			Id::String(v) => Ok(Id::String(v.clone())),
-			Id::Uuid(v) => Ok(Id::Uuid(*v)),
-			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
-				Value::Array(v) => Ok(Id::Array(v)),
-				v => Err(fail!("Expected a Value::Array but found {v:?}")),
-			},
-			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
-				Value::Object(v) => Ok(Id::Object(v)),
-				v => Err(fail!("Expected a Value::Object but found {v:?}")),
-			},
-			Id::Generate(v) => match v {
-				Gen::Rand => Ok(Self::rand()),
-				Gen::Ulid => Ok(Self::ulid()),
-				Gen::Uuid => Ok(Self::uuid()),
-			},
-			Id::Range(v) => Ok(Id::Range(Box::new(v.compute(stk, ctx, opt, doc).await?))),
-		}
-	}
-}

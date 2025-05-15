@@ -41,20 +41,6 @@ impl Edges {
 		self.what = old.into();
 		Ok(())
 	}
-
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		Ok(Value::Edges(Box::new(Self {
-			dir: self.dir.clone(),
-			from: self.from.clone(),
-			what: self.what.clone().compute(stk, ctx, opt, doc).await?,
-		})))
-	}
 }
 
 crate::sql::impl_display_from_sql!(Edges);

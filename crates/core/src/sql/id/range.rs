@@ -150,37 +150,3 @@ impl crate::sql::DisplaySql for IdRange {
 		Ok(())
 	}
 }
-
-impl IdRange {
-	/// Process the values in the bounds for this IdRange
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<IdRange, Error> {
-		let beg = match &self.beg {
-			Bound::Included(beg) => {
-				Bound::Included(stk.run(|stk| beg.compute(stk, ctx, opt, doc)).await?)
-			}
-			Bound::Excluded(beg) => {
-				Bound::Excluded(stk.run(|stk| beg.compute(stk, ctx, opt, doc)).await?)
-			}
-			Bound::Unbounded => Bound::Unbounded,
-		};
-
-		let end = match &self.end {
-			Bound::Included(end) => {
-				Bound::Included(stk.run(|stk| end.compute(stk, ctx, opt, doc)).await?)
-			}
-			Bound::Excluded(end) => {
-				Bound::Excluded(stk.run(|stk| end.compute(stk, ctx, opt, doc)).await?)
-			}
-			Bound::Unbounded => Bound::Unbounded,
-		};
-
-		// The TryFrom implementation ensures that the bounds do not contain an `Id::Range` value
-		IdRange::try_from((beg, end))
-	}
-}

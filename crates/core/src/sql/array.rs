@@ -94,22 +94,6 @@ impl Array {
 }
 
 impl Array {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		let mut x = Self::with_capacity(self.len());
-		for v in self.iter() {
-			let v = v.compute(stk, ctx, opt, doc).await?;
-			x.push(v);
-		}
-		Ok(Value::Array(x))
-	}
-
 	pub(crate) fn is_all_none_or_null(&self) -> bool {
 		self.0.iter().all(|v| v.is_none_or_null())
 	}

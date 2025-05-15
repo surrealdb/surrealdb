@@ -12,7 +12,6 @@ mod compare;
 mod cut;
 mod decrement;
 mod def;
-mod del;
 mod diff;
 mod each;
 pub(crate) mod every;

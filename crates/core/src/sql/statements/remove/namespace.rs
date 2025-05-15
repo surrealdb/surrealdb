@@ -20,58 +20,6 @@ pub struct RemoveNamespaceStatement {
 	pub expunge: bool,
 }
 
-impl RemoveNamespaceStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
-		let future = async {
-			// Allowed to run?
-			opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
-			// Get the transaction
-			let txn = ctx.tx();
-			// Remove the index stores
-			#[cfg(not(target_family = "wasm"))]
-			ctx.get_index_stores()
-				.namespace_removed(ctx.get_index_builder(), &txn, &self.name)
-				.await?;
-			#[cfg(target_family = "wasm")]
-			ctx.get_index_stores().namespace_removed(&txn, &self.name).await?;
-			// Remove the sequences
-			if let Some(seq) = ctx.get_sequences() {
-				seq.namespace_removed(&txn, &self.name).await?;
-			}
-			// Get the definition
-			let ns = txn.get_ns(&self.name).await?;
-			// Delete the definition
-			let key = crate::key::root::ns::new(&ns.name);
-			match self.expunge {
-				true => txn.clr(key).await?,
-				false => txn.del(key).await?,
-			};
-			// Delete the resource data
-			let key = crate::key::namespace::all::new(&ns.name);
-			match self.expunge {
-				true => txn.clrp(key).await?,
-				false => txn.delp(key).await?,
-			};
-			// Clear the cache
-			if let Some(cache) = ctx.get_cache() {
-				cache.clear();
-			}
-			// Clear the cache
-			txn.clear();
-			// Ok all good
-			Ok(Value::None)
-		}
-		.await;
-		match future {
-			Err(Error::NsNotFound {
-				..
-			}) if self.if_exists => Ok(Value::None),
-			v => v,
-		}
-	}
-}
-
 crate::sql::impl_display_from_sql!(RemoveNamespaceStatement);
 
 impl crate::sql::DisplaySql for RemoveNamespaceStatement {

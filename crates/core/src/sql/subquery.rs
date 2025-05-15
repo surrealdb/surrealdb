@@ -74,43 +74,6 @@ impl Subquery {
 			Self::Info(v) => v.writeable(),
 		}
 	}
-
-	/// Process this type returning a computed simple Value, without catching errors
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Duplicate context
-		let mut ctx = MutableContext::new(ctx);
-		// Add parent document
-		if let Some(doc) = doc {
-			ctx.add_value("parent", doc.doc.as_ref().clone().into());
-		}
-		let ctx = ctx.freeze();
-		// Process the subquery
-		let res = match self {
-			Self::Value(ref v) => return v.compute(stk, &ctx, opt, doc).await,
-			Self::Ifelse(ref v) => return v.compute(stk, &ctx, opt, doc).await,
-			Self::Output(ref v) => return v.compute(stk, &ctx, opt, doc).await,
-			Self::Define(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Rebuild(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Remove(ref v) => v.compute(&ctx, opt, doc).await?,
-			Self::Select(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Create(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Upsert(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Update(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Delete(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Relate(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Insert(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Alter(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Info(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-		};
-
-		Ok(res)
-	}
 }
 
 crate::sql::impl_display_from_sql!(Subquery);

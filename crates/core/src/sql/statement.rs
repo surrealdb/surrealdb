@@ -136,69 +136,6 @@ impl Statement {
 			_ => false,
 		}
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		let stm = match (opt.import, self) {
-			// All exports in SurrealDB 1.x are done with `UPDATE`, but
-			// because `UPDATE` works different in SurrealDB 2.x, we need
-			// to convert these statements into `UPSERT` statements.
-			(true, Self::Update(stm)) => &Statement::Upsert(UpsertStatement {
-				only: stm.only,
-				what: stm.what.clone(),
-				with: stm.with.clone(),
-				data: stm.data.clone(),
-				cond: stm.cond.clone(),
-				output: stm.output.clone(),
-				timeout: stm.timeout.clone(),
-				parallel: stm.parallel,
-				explain: stm.explain.clone(),
-			}),
-			(_, stm) => stm,
-		};
-
-		let res = match stm {
-			Self::Access(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Alter(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Analyze(v) => v.compute(ctx, opt, doc).await,
-			Self::Break(v) => return v.compute(ctx, opt, doc).await,
-			Self::Continue(v) => return v.compute(ctx, opt, doc).await,
-			Self::Create(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Delete(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Define(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Foreach(v) => return v.compute(stk, ctx, opt, doc).await,
-			Self::Ifelse(v) => return v.compute(stk, ctx, opt, doc).await,
-			Self::Info(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Insert(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Kill(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Live(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Output(v) => return v.compute(stk, ctx, opt, doc).await,
-			Self::Relate(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Rebuild(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Remove(v) => v.compute(ctx, opt, doc).await,
-			Self::Select(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Set(v) => return v.compute(stk, ctx, opt, doc).await,
-			Self::Show(v) => v.compute(ctx, opt, doc).await,
-			Self::Sleep(v) => v.compute(ctx, opt, doc).await,
-			Self::Throw(v) => return v.compute(stk, ctx, opt, doc).await,
-			Self::Update(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Upsert(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Value(v) => {
-				// Ensure futures are processed
-				let opt = &opt.new_with_futures(true);
-				// Process the output value
-				return v.compute(stk, ctx, opt, doc).await;
-			}
-			_ => Err(fail!("Unexpected statement type encountered: {self:?}")),
-		};
-
-		res.map_err(ControlFlow::from)
-	}
 }
 
 crate::sql::impl_display_from_sql!(Statement);

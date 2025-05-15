@@ -34,20 +34,6 @@ impl AlterStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self {
-			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Sequence(ref v) => v.compute(ctx, opt).await,
-			Self::Field(ref v) => v.compute(stk, ctx, opt, doc).await,
-		}
-	}
 }
 
 crate::sql::impl_display_from_sql!(AlterStatement);

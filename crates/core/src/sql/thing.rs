@@ -133,57 +133,6 @@ impl Thing {
 			))))),
 		}
 	}
-
-	pub(crate) async fn refs(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		ft: Option<&Table>,
-		ff: Option<&Idiom>,
-	) -> Result<Vec<Thing>, Error> {
-		let (ns, db) = opt.ns_db()?;
-
-		let (prefix, suffix) = match (ft, ff) {
-			(Some(ft), Some(ff)) => {
-				let ff = ff.to_string();
-
-				(
-					crate::key::r#ref::ffprefix(ns, db, &self.tb, &self.id, ft, &ff),
-					crate::key::r#ref::ffsuffix(ns, db, &self.tb, &self.id, ft, &ff),
-				)
-			}
-			(Some(ft), None) => (
-				crate::key::r#ref::ftprefix(ns, db, &self.tb, &self.id, ft),
-				crate::key::r#ref::ftsuffix(ns, db, &self.tb, &self.id, ft),
-			),
-			(None, None) => (
-				crate::key::r#ref::prefix(ns, db, &self.tb, &self.id),
-				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
-			),
-			(None, Some(_)) => {
-				return Err(Error::Unreachable(
-					"A foreign field was passed without a foreign table".into(),
-				))
-			}
-		};
-
-		let range = prefix?..suffix?;
-		let txn = ctx.tx();
-		let mut stream = txn.stream_keys(range, None, ScanDirection::Forward);
-
-		let mut ids = Vec::new();
-		while let Some(res) = stream.next().await {
-			yield_now!();
-			let x = res?;
-			let key = Ref::decode(&x)?;
-			ids.push(Thing {
-				tb: key.ft.to_string(),
-				id: key.fk,
-			})
-		}
-
-		Ok(ids)
-	}
 }
 
 impl From<(&str, Id)> for Thing {
@@ -294,22 +243,6 @@ crate::sql::impl_display_from_sql!(Thing);
 impl crate::sql::DisplaySql for Thing {
 	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}:{}", EscapeRid(&self.tb), self.id)
-	}
-}
-
-impl Thing {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		Ok(Value::Thing(Thing {
-			tb: self.tb.clone(),
-			id: self.id.compute(stk, ctx, opt, doc).await?,
-		}))
 	}
 }
 

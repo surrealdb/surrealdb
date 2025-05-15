@@ -94,66 +94,6 @@ impl SelectStatement {
 		}
 		self.cond.as_deref().is_some_and(Value::writeable)
 	}
-
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Valid options?
-		opt.valid_for_db()?;
-		// Assign the statement
-		let stm = Statement::from(self);
-		// Create a new iterator
-		let mut i = Iterator::new();
-		// Ensure futures are stored and the version is set if specified
-		let version = match &self.version {
-			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
-			_ => None,
-		};
-		let opt = Arc::new(opt.new_with_futures(false).with_version(version));
-		// Extract the limits
-		i.setup_limit(stk, ctx, &opt, &stm).await?;
-		// Fail for multiple targets without a limit
-		if self.only && !i.is_limit_one_or_zero() && self.what.0.len() > 1 {
-			return Err(Error::SingleOnlyOutput);
-		}
-		// Check if there is a timeout
-		let ctx = stm.setup_timeout(ctx)?;
-		// Get a query planner
-		let mut planner = QueryPlanner::new();
-		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
-		// Loop over the select targets
-		for w in self.what.0.iter() {
-			let v = w.compute(stk, &ctx, &opt, doc).await.catch_return()?;
-			i.prepare(stk, &mut planner, &stm_ctx, v).await?;
-		}
-		// Attach the query planner to the context
-		let ctx = stm.setup_query_planner(planner, ctx);
-		// Process the statement
-		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		if ctx.is_timedout().await? {
-			return Err(Error::QueryTimedout);
-		}
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There were no results
-				0 => Ok(Value::None),
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(Error::SingleOnlyOutput),
-			},
-			// This is standard query result
-			v => Ok(v),
-		}
-	}
 }
 
 crate::sql::impl_display_from_sql!(SelectStatement);

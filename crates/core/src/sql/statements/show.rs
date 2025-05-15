@@ -43,35 +43,6 @@ pub struct ShowStatement {
 	pub limit: Option<u32>,
 }
 
-impl ShowStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::View, ResourceKind::Table, &Base::Db)?;
-		// Get the transaction
-		let txn = ctx.tx();
-		// Process the show query
-		let (ns, db) = opt.ns_db()?;
-		let r = crate::cf::read(
-			&txn,
-			ns,
-			db,
-			self.table.as_deref().map(String::as_str),
-			self.since.clone(),
-			self.limit,
-		)
-		.await?;
-		// Return the changes
-		let a: Vec<Value> = r.iter().cloned().map(|x| x.into_value()).collect();
-		Ok(a.into())
-	}
-}
-
 crate::sql::impl_display_from_sql!(ShowStatement);
 
 impl crate::sql::DisplaySql for ShowStatement {

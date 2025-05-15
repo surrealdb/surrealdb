@@ -1,11 +1,16 @@
 use std::fmt::{self};
 
-use crate::api::middleware::RequestMiddleware;
 use crate::sql::fmt::Fmt;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Permission, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct RequestMiddleware(pub Vec<(String, Vec<Value>)>);
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

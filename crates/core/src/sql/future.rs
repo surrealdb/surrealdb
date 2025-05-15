@@ -26,25 +26,6 @@ impl From<Value> for Future {
 	}
 }
 
-impl Future {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Process the future if enabled
-		match opt.futures {
-			Futures::Enabled => {
-				stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return()?.ok()
-			}
-			_ => Ok(self.clone().into()),
-		}
-	}
-}
-
 crate::sql::impl_display_from_sql!(Future);
 
 impl crate::sql::DisplaySql for Future {

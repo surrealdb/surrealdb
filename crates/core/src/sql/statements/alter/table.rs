@@ -38,61 +38,6 @@ impl AlterTableStatement {
 	) -> Result<(), revision::Error> {
 		Ok(())
 	}
-
-	pub(crate) async fn compute(
-		&self,
-		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Get the table definition
-		let mut dt = match txn.get_tb(ns, db, &self.name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(Error::TbNotFound {
-				..
-			}) if self.if_exists => return Ok(Value::None),
-			Err(v) => return Err(v),
-		};
-		// Process the statement
-		let key = crate::key::database::tb::new(ns, db, &self.name);
-		if let Some(ref full) = &self.full {
-			dt.full = *full;
-		}
-		if let Some(ref permissions) = &self.permissions {
-			dt.permissions = permissions.clone();
-		}
-		if let Some(ref changefeed) = &self.changefeed {
-			dt.changefeed = *changefeed;
-		}
-		if let Some(ref comment) = &self.comment {
-			dt.comment.clone_from(comment);
-		}
-		if let Some(ref kind) = &self.kind {
-			dt.kind = kind.clone();
-		}
-
-		// Add table relational fields
-		if matches!(self.kind, Some(TableType::Relation(_))) {
-			DefineTableStatement::add_in_out_fields(&txn, ns, db, &mut dt).await?;
-		}
-		// Set the table definition
-		txn.set(key, revision::to_vec(&dt)?, None).await?;
-		// Record definition change
-		if self.changefeed.is_some() && dt.changefeed.is_some() {
-			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
-		}
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
 }
 
 crate::sql::impl_display_from_sql!(AlterTableStatement);

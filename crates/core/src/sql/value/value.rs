@@ -895,39 +895,6 @@ impl Value {
 			_ => false,
 		}
 	}
-	/// Process this type returning a computed simple Value.
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Prevent infinite recursion due to casting, expressions, etc.
-		let opt = &opt.dive(1)?;
-
-		let res = match self {
-			Value::Cast(v) => return v.compute(stk, ctx, opt, doc).await,
-			Value::Thing(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Block(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Range(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Idiom(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Array(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Object(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Constant(v) => v.compute(),
-			Value::Function(v) => return v.compute(stk, ctx, opt, doc).await,
-			Value::Model(v) => return v.compute(stk, ctx, opt, doc).await,
-			Value::Subquery(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Expression(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Refs(v) => v.compute(ctx, opt, doc).await,
-			Value::Edges(v) => v.compute(stk, ctx, opt, doc).await,
-			_ => Ok(self.to_owned()),
-		};
-
-		res.map_err(ControlFlow::from)
-	}
 }
 
 crate::sql::impl_display_from_sql!(Value);

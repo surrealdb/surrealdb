@@ -22,18 +22,6 @@ impl ThrowStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		false
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		Err(ControlFlow::from(Error::Thrown(
-			self.error.compute(stk, ctx, opt, doc).await?.to_raw_string(),
-		)))
-	}
 }
 
 crate::sql::impl_display_from_sql!(ThrowStatement);

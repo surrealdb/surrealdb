@@ -18,16 +18,6 @@ impl ContinueStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		false
 	}
-
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context,
-		_opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		Err(ControlFlow::Continue)
-	}
 }
 
 crate::sql::impl_display_from_sql!(ContinueStatement);

@@ -29,59 +29,6 @@ pub struct DefineApiStatement {
 	pub comment: Option<Strand>,
 }
 
-impl DefineApiStatement {
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		let (ns, db) = (opt.ns()?, opt.db()?);
-		// Check if the definition exists
-		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				return Err(Error::ApAlreadyExists {
-					value: self.path.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let path: Path = self
-			.path
-			.compute(stk, ctx, opt, doc)
-			.await
-			// Might be correct to not catch here.
-			.catch_return()?
-			.coerce_to::<String>()?
-			.parse()?;
-		let name = path.to_string();
-		let key = crate::key::database::ap::new(ns, db, &name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		let ap = ApiDefinition {
-			// Don't persist the `IF NOT EXISTS` clause to schema
-			path,
-			actions: self.actions.clone(),
-			fallback: self.fallback.clone(),
-			config: self.config.clone(),
-			comment: self.comment.clone(),
-			..Default::default()
-		};
-		txn.set(key, revision::to_vec(&ap)?, None).await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 crate::sql::impl_display_from_sql!(DefineApiStatement);
 
 impl crate::sql::DisplaySql for DefineApiStatement {

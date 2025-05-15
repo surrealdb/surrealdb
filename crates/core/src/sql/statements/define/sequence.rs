@@ -24,47 +24,6 @@ pub struct DefineSequenceStatement {
 	pub timeout: Option<Timeout>,
 }
 
-impl DefineSequenceStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		let (ns, db) = opt.ns_db()?;
-		// Check if the definition exists
-		if txn.get_db_sequence(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				return Err(Error::SeqAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = Sq::new(ns, db, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		let sq = DefineSequenceStatement {
-			// Don't persist the `IF NOT EXISTS` clause to schema
-			if_not_exists: false,
-			overwrite: false,
-			..self.clone()
-		};
-		// Set the definition
-		txn.set(key, revision::to_vec(&sq)?, None).await?;
-		// Clear any pre-existing sequence records
-		let (beg, end) = Prefix::new_ba_range(ns, db, &sq.name)?;
-		txn.delr(beg..end).await?;
-		let (beg, end) = Prefix::new_st_range(ns, db, &sq.name)?;
-		txn.delr(beg..end).await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 crate::sql::impl_display_from_sql!(DefineSequenceStatement);
 
 impl crate::sql::DisplaySql for DefineSequenceStatement {

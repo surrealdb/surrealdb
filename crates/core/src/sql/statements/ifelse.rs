@@ -36,25 +36,6 @@ impl IfelseStatement {
 			&& (self.close.as_ref().is_none()
 				|| self.close.as_ref().is_some_and(|v| matches!(v, Value::Block(_))))
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		for (ref cond, ref then) in &self.exprs {
-			let v = cond.compute(stk, ctx, opt, doc).await?;
-			if v.is_truthy() {
-				return then.compute(stk, ctx, opt, doc).await;
-			}
-		}
-		match self.close {
-			Some(ref v) => v.compute(stk, ctx, opt, doc).await,
-			None => Ok(Value::None),
-		}
-	}
 }
 
 crate::sql::impl_display_from_sql!(IfelseStatement);

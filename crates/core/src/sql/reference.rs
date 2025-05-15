@@ -77,48 +77,6 @@ impl InfoStructure for ReferenceDeleteStrategy {
 #[non_exhaustive]
 pub struct Refs(pub Vec<(Option<Table>, Option<Idiom>)>);
 
-impl Refs {
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(Value::Array(Default::default()));
-		}
-
-		// Collect an array of references
-		let arr: Array = match doc {
-			// Check if the current document has specified an ID
-			Some(doc) => {
-				// Obtain a record id from the document
-				let rid = match &doc.rid {
-					Some(id) => id.as_ref().to_owned(),
-					None => match &doc.doc.rid() {
-						Value::Thing(id) => id.to_owned(),
-						_ => return Err(Error::InvalidRefsContext),
-					},
-				};
-
-				let mut ids: Vec<Thing> = Vec::new();
-
-				// Map over all input pairs
-				for (ft, ff) in self.0.iter() {
-					// Collect the references
-					ids.append(&mut rid.refs(ctx, opt, ft.as_ref(), ff.as_ref()).await?);
-				}
-
-				// Convert the references into values
-				ids.into_iter().map(Value::Thing).collect()
-			}
-			None => return Err(Error::InvalidRefsContext),
-		};
-
-		Ok(Value::Array(arr.uniq()))
-	}
-}
-
 crate::sql::impl_display_from_sql!(Refs);
 
 impl crate::sql::DisplaySql for Refs {

@@ -37,60 +37,6 @@ impl Default for Data {
 	}
 }
 
-impl Data {
-	/// Fetch the 'id' field if one has been specified
-	pub(crate) async fn rid(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Option<Value>, Error> {
-		self.pick(stk, ctx, opt, &*ID).await
-	}
-	/// Fetch a field path value if one is specified
-	pub(crate) async fn pick(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		path: &[Part],
-	) -> Result<Option<Value>, Error> {
-		match self {
-			Self::MergeExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => {
-					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
-				}
-				_ => Ok(None),
-			},
-			Self::ReplaceExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => {
-					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
-				}
-				_ => Ok(None),
-			},
-			Self::ContentExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => {
-					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
-				}
-				_ => Ok(None),
-			},
-			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_field(path)) {
-				Some((_, _, v)) => {
-					// This SET expression has this field
-					Ok(v.compute(stk, ctx, opt, None).await.catch_return()?.some())
-				}
-				// This SET expression does not have this field
-				_ => Ok(None),
-			},
-			// Return nothing
-			_ => Ok(None),
-		}
-	}
-}
-
 crate::sql::impl_display_from_sql!(Data);
 
 impl crate::sql::DisplaySql for Data {

@@ -27,51 +27,6 @@ pub struct DefineModelStatement {
 	pub overwrite: bool,
 }
 
-impl DefineModelStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Check if the definition exists
-		let (ns, db) = opt.ns_db()?;
-		if txn.get_db_model(ns, db, &self.name, &self.version).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				return Err(Error::MlAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineModelStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 crate::sql::impl_display_from_sql!(DefineModelStatement);
 
 impl crate::sql::DisplaySql for DefineModelStatement {

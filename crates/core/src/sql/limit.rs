@@ -17,35 +17,6 @@ use super::FlowResultExt as _;
 #[non_exhaustive]
 pub struct Limit(pub Value);
 
-impl Limit {
-	pub(crate) async fn process(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<u32, Error> {
-		match self.0.compute(stk, ctx, opt, doc).await.catch_return() {
-			// This is a valid limiting number
-			Ok(Value::Number(Number::Int(v))) if v >= 0 => {
-				if v > u32::MAX as i64 {
-					Err(Error::InvalidLimit {
-						value: v.to_string(),
-					})
-				} else {
-					Ok(v as u32)
-				}
-			}
-			// An invalid value was specified
-			Ok(v) => Err(Error::InvalidLimit {
-				value: v.as_string(),
-			}),
-			// A different error occurred
-			Err(e) => Err(e),
-		}
-	}
-}
-
 crate::sql::impl_display_from_sql!(Limit);
 
 impl crate::sql::DisplaySql for Limit {

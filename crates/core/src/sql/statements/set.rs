@@ -26,36 +26,6 @@ impl SetStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		self.what.writeable()
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Check if the variable is a protected variable
-		match PROTECTED_PARAM_NAMES.contains(&self.name.as_str()) {
-			// The variable isn't protected and can be stored
-			false => {
-				let result = self.what.compute(stk, ctx, opt, doc).await?;
-				match self.kind {
-					Some(ref kind) => result
-						.coerce_to_kind(kind)
-						.map_err(|e| Error::SetCoerce {
-							name: self.name.to_string(),
-							error: Box::new(e),
-						})
-						.map_err(ControlFlow::from),
-					None => Ok(result),
-				}
-			}
-			// The user tried to set a protected variable
-			true => Err(ControlFlow::from(Error::InvalidParam {
-				name: self.name.clone(),
-			})),
-		}
-	}
 }
 
 crate::sql::impl_display_from_sql!(SetStatement);

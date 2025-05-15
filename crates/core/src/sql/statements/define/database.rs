@@ -25,60 +25,6 @@ pub struct DefineDatabaseStatement {
 	pub overwrite: bool,
 }
 
-impl DefineDatabaseStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
-		// Get the NS
-		let ns = opt.ns()?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Check if the definition exists
-		if txn.get_db(ns, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				return Err(Error::DbAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::namespace::db::new(ns, &self.name);
-		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineDatabaseStatement {
-				id: match (self.id, nsv.id) {
-					(Some(id), _) => Some(id),
-					(None, Some(nsv_id)) => Some(txn.lock().await.get_next_db_id(nsv_id).await?),
-					(None, None) => None,
-				},
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear();
-		}
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 crate::sql::impl_display_from_sql!(DefineDatabaseStatement);
 
 impl crate::sql::DisplaySql for DefineDatabaseStatement {

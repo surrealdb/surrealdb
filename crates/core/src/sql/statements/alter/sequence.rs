@@ -21,40 +21,6 @@ pub struct AlterSequenceStatement {
 	pub timeout: Option<Timeout>,
 }
 
-impl AlterSequenceStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Get the sequence definition
-		let mut sq = match txn.get_db_sequence(ns, db, &self.name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(Error::SeqNotFound {
-				..
-			}) if self.if_exists => return Ok(Value::None),
-			Err(v) => return Err(v),
-		};
-		// Process the statement
-		if let Some(ref timeout) = &self.timeout {
-			if timeout.is_zero() {
-				sq.timeout = None;
-			} else {
-				sq.timeout = Some(timeout.clone());
-			}
-		}
-		// Set the table definition
-		let key = Sq::new(ns, db, &self.name);
-		txn.set(key, revision::to_vec(&sq)?, None).await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 crate::sql::impl_display_from_sql!(AlterSequenceStatement);
 
 impl crate::sql::DisplaySql for AlterSequenceStatement {

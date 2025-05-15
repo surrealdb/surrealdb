@@ -171,23 +171,6 @@ impl Deref for GraphSubjects {
 	}
 }
 
-impl GraphSubjects {
-	pub(crate) async fn compute(
-		self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Self, Error> {
-		stk.scope(|scope| {
-			let futs = self.0.into_iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc)));
-			try_join_all_buffered(futs)
-		})
-		.await
-		.map(GraphSubjects)
-	}
-}
-
 crate::sql::impl_display_from_sql!(GraphSubjects);
 
 impl crate::sql::DisplaySql for GraphSubjects {
@@ -203,106 +186,6 @@ impl crate::sql::DisplaySql for GraphSubjects {
 pub enum GraphSubject {
 	Table(Table),
 	Range(Table, IdRange),
-}
-
-impl GraphSubject {
-	pub(crate) async fn compute(
-		self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Self, Error> {
-		if let Self::Range(tb, rng) = self {
-			let rng = rng.compute(stk, ctx, opt, doc).await?;
-			Ok(Self::Range(tb, rng))
-		} else {
-			Ok(self)
-		}
-	}
-
-	pub(crate) fn presuf(
-		&self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		id: &Id,
-		dir: &Dir,
-	) -> (Result<Vec<u8>, Error>, Result<Vec<u8>, Error>) {
-		match self {
-			Self::Table(t) => (
-				crate::key::graph::ftprefix(ns, db, tb, id, dir, &t.0),
-				crate::key::graph::ftsuffix(ns, db, tb, id, dir, &t.0),
-			),
-			Self::Range(t, r) => {
-				let beg = match &r.beg {
-					Bound::Unbounded => crate::key::graph::ftprefix(ns, db, tb, id, dir, &t.0),
-					Bound::Included(v) => crate::key::graph::new(
-						ns,
-						db,
-						tb,
-						id,
-						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
-						},
-					)
-					.encode(),
-					Bound::Excluded(v) => crate::key::graph::new(
-						ns,
-						db,
-						tb,
-						id,
-						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
-						},
-					)
-					.encode()
-					.map(|mut v| {
-						v.push(0x00);
-						v
-					}),
-				};
-				// Prepare the range end key
-				let end = match &r.end {
-					Bound::Unbounded => crate::key::graph::ftsuffix(ns, db, tb, id, dir, &t.0),
-					Bound::Excluded(v) => crate::key::graph::new(
-						ns,
-						db,
-						tb,
-						id,
-						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
-						},
-					)
-					.encode(),
-					Bound::Included(v) => crate::key::graph::new(
-						ns,
-						db,
-						tb,
-						id,
-						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
-						},
-					)
-					.encode()
-					.map(|mut v| {
-						v.push(0x00);
-						v
-					}),
-				};
-
-				(beg, end)
-			}
-		}
-	}
 }
 
 impl From<Table> for GraphSubject {

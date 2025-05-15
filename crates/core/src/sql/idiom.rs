@@ -169,46 +169,6 @@ impl Idiom {
 	pub(crate) fn writeable(&self) -> bool {
 		self.0.iter().any(|v| v.writeable())
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		match self.first() {
-			// The starting part is a value
-			Some(Part::Start(v)) => {
-				v.compute(stk, ctx, opt, doc)
-					.await?
-					.get(stk, ctx, opt, doc, self.as_ref().next())
-					.await?
-					.compute(stk, ctx, opt, doc)
-					.await
-			}
-			// Otherwise use the current document
-			_ => match doc {
-				// There is a current document
-				Some(v) => {
-					v.doc
-						.as_ref()
-						.get(stk, ctx, opt, doc, self)
-						.await?
-						.compute(stk, ctx, opt, doc)
-						.await
-				}
-				// There isn't any document
-				None => {
-					Value::None
-						.get(stk, ctx, opt, doc, self.next_method())
-						.await?
-						.compute(stk, ctx, opt, doc)
-						.await
-				}
-			},
-		}
-	}
 }
 
 crate::sql::impl_display_from_sql!(Idiom);

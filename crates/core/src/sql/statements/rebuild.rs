@@ -26,18 +26,6 @@ impl RebuildStatement {
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self {
-			Self::Index(s) => s.compute(stk, ctx, opt, doc).await,
-		}
-	}
 }
 
 crate::sql::impl_display_from_sql!(RebuildStatement);
@@ -58,39 +46,6 @@ pub struct RebuildIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
 	pub if_exists: bool,
-}
-
-impl RebuildIndexStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		let future = async {
-			// Allowed to run?
-			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-			// Get the index definition
-			let (ns, db) = opt.ns_db()?;
-			let mut ix =
-				ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await?.as_ref().clone();
-			ix.overwrite = true;
-			ix.if_not_exists = false;
-			// Rebuild the index
-			ix.compute(stk, ctx, opt, doc).await?;
-			// Ok all good
-			Ok(Value::None)
-		}
-		.await;
-		match future {
-			Err(Error::IxNotFound {
-				..
-			}) if self.if_exists => Ok(Value::None),
-			v => v,
-		}
-	}
 }
 
 crate::sql::impl_display_from_sql!(RebuildIndexStatement);

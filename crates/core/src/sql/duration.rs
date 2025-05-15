@@ -86,6 +86,18 @@ impl TryFrom<&str> for Duration {
 	}
 }
 
+impl From<Duration> for crate::expr::Duration {
+	fn from(v: Duration) -> Self {
+		crate::expr::Duration(v.0)
+	}
+}
+
+impl From<crate::expr::Duration> for Duration {
+	fn from(v: crate::expr::Duration) -> Self {
+		Self(v.0)
+	}
+}
+
 impl Deref for Duration {
 	type Target = time::Duration;
 	fn deref(&self) -> &Self::Target {

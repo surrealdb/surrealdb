@@ -165,12 +165,13 @@ pub use self::version::Version;
 pub use self::view::View;
 pub use self::with::With;
 
-// module reexporting parsing function to prevent a breaking change.
-mod parser {
-	pub use crate::syn::*;
-}
+// // module reexporting parsing function to prevent a breaking change.
+// mod parser {
+// 	pub use crate::syn::*;
+// }
 
-pub use self::parser::{idiom, json, parse, subquery, thing, value};
+// pub use self::parser::{idiom, json, parse, subquery, thing, value};
+
 
 /// A trait for types that can be formatted as SurrealQL.
 ///

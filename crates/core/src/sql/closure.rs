@@ -19,54 +19,6 @@ pub struct Closure {
 	pub body: Value,
 }
 
-impl Closure {
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		args: Vec<Value>,
-	) -> Result<Value, Error> {
-		let mut ctx = MutableContext::new_isolated(ctx);
-		for (i, (name, kind)) in self.args.iter().enumerate() {
-			match (kind, args.get(i)) {
-				(Kind::Option(_), None) => continue,
-				(_, None) => {
-					return Err(Error::InvalidArguments {
-						name: "ANONYMOUS".to_string(),
-						message: format!("Expected a value for ${}", name),
-					})
-				}
-				(kind, Some(val)) => {
-					if let Ok(val) = val.to_owned().coerce_to_kind(kind) {
-						ctx.add_value(name.to_string(), val.into());
-					} else {
-						return Err(Error::InvalidArguments {
-							name: "ANONYMOUS".to_string(),
-							message: format!(
-								"Expected a value of type '{kind}' for argument ${}",
-								name
-							),
-						});
-					}
-				}
-			}
-		}
-
-		let ctx = ctx.freeze();
-		let result = self.body.compute(stk, &ctx, opt, doc).await.catch_return()?;
-		if let Some(returns) = &self.returns {
-			result.coerce_to_kind(returns).map_err(|e| Error::ReturnCoerce {
-				name: "ANONYMOUS".to_string(),
-				error: Box::new(e),
-			})
-		} else {
-			Ok(result)
-		}
-	}
-}
-
 crate::sql::impl_display_from_sql!(Closure);
 
 impl crate::sql::DisplaySql for Closure {

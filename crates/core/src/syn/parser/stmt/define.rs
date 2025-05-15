@@ -1,10 +1,9 @@
 use reblessive::Stk;
 
 use crate::api::method::Method;
-use crate::api::middleware::RequestMiddleware;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
-use crate::sql::statements::define::config::api::ApiConfig;
+use crate::sql::statements::define::config::api::{ApiConfig, RequestMiddleware};
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::define::{

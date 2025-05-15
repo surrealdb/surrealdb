@@ -298,6 +298,51 @@ impl Kind {
 	}
 }
 
+impl From<Kind> for crate::expr::Kind {
+	fn from(v: Kind) -> Self {
+		match v {
+			Kind::Any => crate::expr::Kind::Any,
+			Kind::Null => crate::expr::Kind::Null,
+			Kind::Bool => crate::expr::Kind::Bool,
+			Kind::Bytes => crate::expr::Kind::Bytes,
+			Kind::Datetime => crate::expr::Kind::Datetime,
+			Kind::Decimal => crate::expr::Kind::Decimal,
+			Kind::Duration => crate::expr::Kind::Duration,
+			Kind::Float => crate::expr::Kind::Float,
+			Kind::Int => crate::expr::Kind::Int,
+			Kind::Number => crate::expr::Kind::Number,
+			Kind::Object => crate::expr::Kind::Object,
+			Kind::Point => crate::expr::Kind::Point,
+			Kind::String => crate::expr::Kind::String,
+			Kind::Uuid => crate::expr::Kind::Uuid,
+			Kind::Regex => crate::expr::Kind::Regex,
+			Kind::Record(tables) => {
+				crate::expr::Kind::Record(tables.into_iter().map(Into::into).collect())
+			},
+			Kind::Geometry(geometries) => {
+				crate::expr::Kind::Geometry(geometries.into_iter().collect())
+			}
+			Kind::Option(k) => crate::expr::Kind::Option(k.as_ref().clone().into()),
+			Kind::Either(kinds) => crate::expr::Kind::Either(
+				kinds.into_iter().map(Into::into).collect(),
+			),
+			Kind::Set(k, l) => crate::expr::Kind::Set(k.as_ref().clone().into(), l),
+			Kind::Array(k, l) => crate::expr::Kind::Array(k.as_ref().clone().into(), l),
+			Kind::Function(args, ret) => crate::expr::Kind::Function(
+				args.map(|args| args.into_iter().map(Into::into).collect()),
+				ret.map(|ret| ret.as_ref().clone().into()),
+			),
+			Kind::Range => crate::expr::Kind::Range,
+			Kind::Literal(l) => crate::expr::Kind::Literal(l),
+			Kind::References(t, i) => crate::expr::Kind::References(
+				t.as_ref().map(|t| t.clone().into()),
+				i.as_ref().cloned(),
+			),
+			Kind::File(k) => crate::expr::Kind::File(k.into_iter().map(Into::into).collect()),
+		}
+	}
+}
+
 /// Trait for retrieving the `kind` equivalent of a rust type.
 ///
 /// Returns the most general kind for a type.

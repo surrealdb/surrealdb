@@ -43,21 +43,6 @@ impl Cast {
 	pub(crate) fn is_static(&self) -> bool {
 		self.1.is_static()
 	}
-	/// Was marked recursively
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Compute the value to be cast and convert it
-		stk.run(|stk| self.1.compute(stk, ctx, opt, doc))
-			.await?
-			.cast_to_kind(&self.0)
-			.map_err(Error::from)
-			.map_err(ControlFlow::from)
-	}
 }
 
 crate::sql::impl_display_from_sql!(Cast);
