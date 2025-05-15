@@ -9,8 +9,7 @@ use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::VersionStamp;
-use anyhow::Result;
-use std::fmt::Debug;
+use anyhow::{bail, ensure, Result};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -80,7 +79,7 @@ impl Datastore {
 				info!(target: TARGET, "Connecting with cluster API V1");
 				Config::default()
 			}
-			_ => return Err(Error::Ds("Invalid TiKV API version".into())),
+			_ => bail!(Error::Ds("Invalid TiKV API version".into())),
 		};
 		// Set the default request timeout
 		let config = config.with_timeout(Duration::from_secs(*cnf::TIKV_REQUEST_TIMEOUT));
@@ -91,7 +90,7 @@ impl Datastore {
 			Ok(db) => Ok(Datastore {
 				db: Arc::pin(db),
 			}),
-			Err(e) => Err(Error::Ds(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
 		}
 	}
 
@@ -144,7 +143,7 @@ impl Datastore {
 				db: self.db.clone(),
 				save_points: Default::default(),
 			})),
-			Err(e) => Err(Error::Tx(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Tx(e.to_string()))),
 		}
 	}
 }
@@ -279,9 +278,7 @@ impl super::api::Transaction for Transaction {
 			self.inner.key_exists(key.clone()).await?
 		};
 		// If the key exists we return an error
-		if key_exists {
-			return Err(Error::TxKeyAlreadyExists);
-		}
+		ensure!(!key_exists, Error::TxKeyAlreadyExists);
 		// Set the key if empty
 		self.inner.put(key, val).await?;
 		// Confirm the save point
@@ -315,7 +312,7 @@ impl super::api::Transaction for Transaction {
 		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.put(key, val).await?,
 			(None, None) => self.inner.put(key, val).await?,
-			_ => return Err(Error::TxConditionNotMet),
+			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Confirm the save point
 		if let Some(prep) = prep {
@@ -371,7 +368,7 @@ impl super::api::Transaction for Transaction {
 		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => self.inner.delete(key).await?,
 			(None, None) => self.inner.delete(key).await?,
-			_ => return Err(Error::TxConditionNotMet),
+			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Confirm the save point
 		if let Some(prep) = prep {
@@ -467,9 +464,7 @@ impl super::api::Transaction for Transaction {
 		// Calculate the previous version value
 		if let Some(prev) = self.get(key.clone(), None).await? {
 			let prev = VersionStamp::from_slice(prev.as_slice())?.try_into_u64()?;
-			if prev >= ver {
-				return Err(Error::TxFailure);
-			}
+			ensure!(prev < ver, Error::TxFailure);
 		};
 		// Convert the timestamp to a versionstamp
 		let ver = VersionStamp::from_u64(ver);
