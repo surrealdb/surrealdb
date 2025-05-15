@@ -648,6 +648,7 @@ jobs:
           body: "Release ${{ needs.prepare-vars.outputs.version }}"
           target_commitish: ${{ needs.prepare-vars.outputs.release-branch }}
           prerelease: ${{ needs.prepare-vars.outputs.environment != 'stable' }}
+          make_latest: ${{ inputs.latest }}
           fail_on_unmatched_files: true
           files: |
             LICENSE
