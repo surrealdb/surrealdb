@@ -1,5 +1,5 @@
 use super::server;
-use crate::api::conn::Connection;
+use crate::api::conn;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
@@ -46,7 +46,7 @@ impl Surreal<Client> {
 
 impl crate::api::Connection for Client {}
 
-impl Connection for Client {
+impl conn::Sealed for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = async_channel::bounded(capacity);
