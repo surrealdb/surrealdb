@@ -153,6 +153,12 @@ mod into_endpoint {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
+pub fn __into_endpoint(path: impl IntoEndpoint) -> Result<Endpoint> {
+	into_endpoint::Sealed::into_endpoint(path)
+}
+
 fn split_url(url: &str) -> (&str, &str) {
 	match url.split_once("://") {
 		Some(parts) => parts,
