@@ -28,7 +28,7 @@ use surrealdb::gql::error::resolver_error;
 use surrealdb::kvs::Datastore;
 use tower_service::Service;
 
-use crate::err::Error as SurrealError;
+use crate::net::error::Error as NetError;
 
 /// A GraphQL service.
 #[derive(Clone)]
@@ -75,7 +75,7 @@ where
 					&RouteTarget::GraphQL
 				);
 				return Ok(
-					SurrealError::ForbiddenRoute(RouteTarget::GraphQL.to_string()).into_response()
+					NetError::ForbiddenRoute(RouteTarget::GraphQL.to_string()).into_response()
 				);
 			}
 

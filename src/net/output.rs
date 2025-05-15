@@ -1,5 +1,5 @@
 use super::headers::Accept;
-use crate::err::Error;
+use anyhow::Result;
 use axum::response::{IntoResponse, Response};
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
@@ -56,7 +56,7 @@ where
 }
 
 /// Convert and simplify the value into JSON
-pub fn simplify<T: Serialize + 'static>(v: T) -> Result<Json, Error> {
+pub fn simplify<T: Serialize + 'static>(v: T) -> Result<Json> {
 	Ok(sql::to_value(v)?.into())
 }
 

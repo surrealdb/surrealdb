@@ -9,7 +9,6 @@ mod util;
 
 use std::collections::HashMap;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::Value;
 use surrealdb::Result;

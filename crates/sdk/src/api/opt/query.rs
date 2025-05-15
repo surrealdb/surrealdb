@@ -374,7 +374,7 @@ where
 				[] => Ok(None),
 				[value] => {
 					let value = mem::take(value);
-					from_core_value(value).map_err(Into::into)
+					from_core_value(value)
 				}
 				_ => Err(Error::LossyTake(QueryResponse {
 					results: mem::take(&mut response.results),
@@ -384,7 +384,7 @@ where
 			},
 			_ => {
 				let value = mem::take(value);
-				from_core_value(value).map_err(Into::into)
+				from_core_value(value)
 			}
 		};
 		response.results.swap_remove(&self);
@@ -475,7 +475,7 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				from_core_value(value).map_err(Into::into)
+				from_core_value(value)
 			}
 			_ => Ok(None),
 		}
@@ -500,7 +500,7 @@ where
 				return Ok(vec![]);
 			}
 		};
-		from_core_value(vec.into()).map_err(Into::into)
+		from_core_value(vec.into())
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {

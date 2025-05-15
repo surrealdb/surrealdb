@@ -1,3 +1,5 @@
+use crate::net::error::Error as NetError;
+use anyhow::{bail, Result};
 use axum::RequestPartsExt;
 use axum::{body::Body, Extension};
 use axum_extra::headers::{
@@ -14,8 +16,6 @@ use surrealdb::{
 };
 use tower_http::auth::AsyncAuthorizeRequest;
 use uuid::Uuid;
-
-use crate::err::Error;
 
 use super::{
 	client_ip::ExtractClientIP,
@@ -71,7 +71,7 @@ impl AsyncAuthorizeRequest<Body> for SurrealAuth {
 	}
 }
 
-async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
+async fn check_auth(parts: &mut Parts) -> Result<Session> {
 	let or = if let Ok(or) = parts.extract::<TypedHeader<Origin>>().await {
 		if !or.is_null() {
 			Some(or.to_string())
@@ -91,7 +91,7 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 				// The specified request id was a valid UUID.
 				Ok(id) => Some(id.to_string()),
 				// The specified request id was not a valid UUID.
-				Err(_) => return Err(Error::Request),
+				Err(_) => bail!(NetError::Request),
 			}
 		}
 		// No request id was specified, create a new id.
@@ -118,7 +118,7 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 
 	let Extension(state) = parts.extract::<Extension<AppState>>().await.map_err(|err| {
 		tracing::error!("Error extracting the app state: {:?}", err);
-		Error::InvalidAuth
+		NetError::InvalidAuth
 	})?;
 
 	let kvs = &state.datastore;

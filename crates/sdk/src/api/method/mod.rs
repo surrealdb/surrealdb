@@ -334,7 +334,7 @@ where
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: to_core_value(value).map_err(Into::into),
+			value: to_core_value(value),
 		}
 	}
 
@@ -646,7 +646,6 @@ where
 				let capabilities = &router.config.capabilities;
 				#[expect(deprecated)]
 				syn::parse_with_capabilities(surql, capabilities)
-					.map_err(Into::into)
 					.and_then(opt::IntoQuery::into_query)
 			}),
 			#[expect(deprecated)]

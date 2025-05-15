@@ -7,7 +7,6 @@ use std::sync::Arc;
 use hashbrown::HashSet;
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
 use surrealdb_core::kvs::Datastore;
 
 async fn concurrent_task(ds: &Datastore, seq: &str, count: usize) -> HashSet<i64> {

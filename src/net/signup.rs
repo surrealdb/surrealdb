@@ -1,9 +1,11 @@
+use super::error::ResponseError;
 use super::headers::Accept;
 use super::AppState;
 use crate::cnf::HTTP_MAX_SIGNIN_BODY_SIZE;
-use crate::err::Error;
+use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
+use anyhow::Context as _;
 use axum::extract::DefaultBodyLimit;
 use axum::response::IntoResponse;
 use axum::routing::options;
@@ -51,22 +53,21 @@ async fn handler(
 	Extension(mut session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	body: Bytes,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> Result<impl IntoResponse, ResponseError> {
 	// Get a database reference
 	let kvs = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !kvs.allows_http_route(&RouteTarget::Signup) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Signup);
-		return Err(Error::ForbiddenRoute(RouteTarget::Signup.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Signup.to_string()).into());
 	}
 	// Convert the HTTP body into text
-	let data = bytes_to_utf8(&body)?;
+	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the provided data as JSON
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match surrealdb::iam::signup::signup(kvs, &mut session, vars).await.map_err(Error::from)
-			{
+			match surrealdb::iam::signup::signup(kvs, &mut session, vars).await {
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {
 					// Simple serialization
@@ -84,13 +85,13 @@ async fn handler(
 					// Return nothing
 					None => Ok(output::none()),
 					// An incorrect content-type was requested
-					_ => Err(Error::InvalidType),
+					_ => Err(NetError::InvalidType.into()),
 				},
 				// There was an error with authentication
-				Err(err) => Err(err),
+				Err(err) => Err(ResponseError(err)),
 			}
 		}
 		// The provided value was not an object
-		_ => Err(Error::Request),
+		_ => Err(NetError::Request.into()),
 	}
 }

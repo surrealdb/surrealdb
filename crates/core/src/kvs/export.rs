@@ -43,31 +43,8 @@ impl Default for Config {
 	}
 }
 
-impl From<Config> for Value {
-	fn from(config: Config) -> Value {
-		let obj = map!(
-			"users" => config.users.into(),
-			"accesses" => config.accesses.into(),
-			"params" => config.params.into(),
-			"functions" => config.functions.into(),
-			"analyzers" => config.analyzers.into(),
-			"versions" => config.versions.into(),
-			"records" => config.records.into(),
-			"sequences" => config.sequences.into(),
-			"tables" => match config.tables {
-				TableConfig::All => true.into(),
-				TableConfig::None => false.into(),
-				TableConfig::Some(v) => v.into()
-			},
-		);
-
-		obj.into()
-	}
-}
-
-impl TryFrom<&Value> for Config {
-	type Error = anyhow::Error;
-	fn try_from(value: &Value) -> Result<Self, Self::Error> {
+impl Config {
+	pub fn from_value(value: &Value) -> Result<Self, anyhow::Error> {
 		match value {
 			Value::Object(obj) => {
 				let mut config = Config::default();
@@ -108,6 +85,28 @@ impl TryFrom<&Value> for Config {
 				"an object".into(),
 			))),
 		}
+	}
+}
+
+impl From<Config> for Value {
+	fn from(config: Config) -> Value {
+		let obj = map!(
+			"users" => config.users.into(),
+			"accesses" => config.accesses.into(),
+			"params" => config.params.into(),
+			"functions" => config.functions.into(),
+			"analyzers" => config.analyzers.into(),
+			"versions" => config.versions.into(),
+			"records" => config.records.into(),
+			"sequences" => config.sequences.into(),
+			"tables" => match config.tables {
+				TableConfig::All => true.into(),
+				TableConfig::None => false.into(),
+				TableConfig::Some(v) => v.into()
+			},
+		);
+
+		obj.into()
 	}
 }
 

@@ -1,25 +1,26 @@
 //! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
 use super::AppState;
 use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
-use crate::err::Error;
-#[cfg(feature = "ml")]
-use crate::net::output;
+use crate::net::error::{Error as NetError, ResponseError};
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path};
-use axum::response::IntoResponse;
-#[cfg(feature = "ml")]
-use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Extension;
 use axum::Router;
+use surrealdb::dbs::capabilities::RouteTarget;
+use surrealdb::dbs::Session;
+use tower_http::limit::RequestBodyLimitLayer;
+
+#[cfg(feature = "ml")]
+use crate::net::output;
+#[cfg(feature = "ml")]
+use axum::response::Response;
 #[cfg(feature = "ml")]
 use bytes::Bytes;
 #[cfg(feature = "ml")]
 use futures_util::StreamExt;
 #[cfg(feature = "ml")]
 use http::StatusCode;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::dbs::Session;
 #[cfg(feature = "ml")]
 use surrealdb::iam::check::check_ns_db;
 #[cfg(feature = "ml")]
@@ -32,7 +33,6 @@ use surrealdb::kvs::{LockType::Optimistic, TransactionType::Read};
 use surrealdb::ml::storage::surml_file::SurMlFile;
 #[cfg(feature = "ml")]
 use surrealdb::sql::statements::{DefineModelStatement, DefineStatement};
-use tower_http::limit::RequestBodyLimitLayer;
 
 /// The router definition for the ML API endpoints.
 pub(super) fn router<S>() -> Router<S>
@@ -52,7 +52,7 @@ async fn import(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	body: Body,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> Result<impl IntoResponse, ResponseError> {
 	let mut stream = body.into_data_stream();
 	// Get the datastore reference
 	let db = &state.datastore;
@@ -111,8 +111,9 @@ async fn export(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	Path((name, version)): Path<(String, String)>,
-) -> Result<impl IntoResponse, Error> {
+) -> Result<impl IntoResponse, ResponseError> {
 	// Get the datastore reference
+
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Ml) {
@@ -150,15 +151,16 @@ async fn import(
 	Extension(state): Extension<AppState>,
 	Extension(_): Extension<Session>,
 	_: Body,
-) -> Result<(), impl IntoResponse> {
+) -> Result<(), ResponseError> {
 	// Get the datastore reference
+
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Ml) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
-		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Ml.to_string()).into());
 	}
-	Err(Error::Request)
+	Err(NetError::Request.into())
 }
 
 /// This endpoint allows the user to export a model from the database.
@@ -167,13 +169,14 @@ async fn export(
 	Extension(state): Extension<AppState>,
 	Extension(_): Extension<Session>,
 	Path((_, _)): Path<(String, String)>,
-) -> Result<(), impl IntoResponse> {
+) -> Result<(), ResponseError> {
 	// Get the datastore reference
+
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Ml) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
-		return Err(Error::ForbiddenRoute(RouteTarget::Ml.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Ml.to_string()).into());
 	}
-	Err(Error::Request)
+	Err(NetError::Request.into())
 }

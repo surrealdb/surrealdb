@@ -5,7 +5,6 @@ use helpers::{new_ds, Test};
 use surrealdb::sql::Number;
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
 use surrealdb_core::iam::Role;
 use surrealdb_core::sql::Value;
 

@@ -162,7 +162,7 @@ where
 		return Ok(buf);
 	}
 	surrealdb_core::sql::serde::serialize(value)
-		.map_err(|error| surrealdb_core::err::Error::from(error))
+		.map_err(surrealdb_core::err::Error::from)
 		.map_err(anyhow::Error::new)
 }
 
@@ -173,10 +173,10 @@ where
 	if revisioned {
 		let mut read = std::io::Cursor::new(bytes);
 		return T::deserialize_revisioned(&mut read)
-			.map_err(|error| surrealdb_core::err::Error::from(error))
+			.map_err(surrealdb_core::err::Error::from)
 			.map_err(anyhow::Error::new);
 	}
 	surrealdb_core::sql::serde::deserialize(bytes)
-		.map_err(|error| surrealdb_core::err::Error::from(error))
+		.map_err(surrealdb_core::err::Error::from)
 		.map_err(anyhow::Error::new)
 }

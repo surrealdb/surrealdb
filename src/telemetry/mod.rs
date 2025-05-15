@@ -3,6 +3,7 @@ pub mod metrics;
 pub mod traces;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
+use anyhow::Result;
 use opentelemetry::global;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::{
@@ -84,7 +85,7 @@ impl Builder {
 	/// Build a tracing dispatcher with the logs and tracer subscriber
 	pub fn build(
 		&self,
-	) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, WorkerGuard, WorkerGuard), Error> {
+	) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, WorkerGuard, WorkerGuard)> {
 		// Create a non-blocking stdout log destination
 		let (stdout, stdout_guard) = NonBlockingBuilder::default()
 			.lossy(true)
@@ -114,17 +115,15 @@ impl Builder {
 	}
 }
 
-pub fn shutdown() -> Result<(), Error> {
+pub fn shutdown() {
 	// Output information to logs
 	trace!("Shutting down telemetry service");
 	// Flush all telemetry data and block until done
 	opentelemetry::global::shutdown_tracer_provider();
-	// Everything ok
-	Ok(())
 }
 
 /// Create an EnvFilter from the given value. If the value is not a valid log level, it will be treated as EnvFilter directives.
-pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
+pub fn filter_from_value(v: &str) -> std::result::Result<EnvFilter, ParseError> {
 	match v {
 		// Don't show any logs at all
 		"none" => Ok(EnvFilter::default()),

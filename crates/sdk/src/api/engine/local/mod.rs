@@ -400,7 +400,7 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 				map.insert(index, (stats, Ok(value)));
 			}
 			Err(error) => {
-				map.insert(index, (stats, Err(error.into())));
+				map.insert(index, (stats, Err(error)));
 			}
 		};
 	}

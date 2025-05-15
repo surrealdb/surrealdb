@@ -1,7 +1,6 @@
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::Result;
 
 #[tokio::test]
