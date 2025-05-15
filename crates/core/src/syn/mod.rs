@@ -66,7 +66,7 @@ pub fn parse(input: &str) -> Result<Query> {
 pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Query> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -103,7 +103,7 @@ pub fn value(input: &str) -> Result<Value> {
 pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Value> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -133,7 +133,7 @@ pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 pub fn json(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing inert JSON value");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -158,7 +158,7 @@ pub fn json(input: &str) -> Result<Value> {
 pub fn subquery(input: &str) -> Result<Subquery> {
 	trace!(target: TARGET, "Parsing SurrealQL subquery");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -183,7 +183,7 @@ pub fn subquery(input: &str) -> Result<Subquery> {
 pub fn idiom(input: &str) -> Result<Idiom> {
 	trace!(target: TARGET, "Parsing SurrealQL idiom");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -209,7 +209,7 @@ pub fn idiom(input: &str) -> Result<Idiom> {
 pub fn datetime(input: &str) -> Result<Datetime> {
 	trace!(target: TARGET, "Parsing SurrealQL datetime");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut lexer = Lexer::new(input.as_bytes());
 	let res = compound::datetime_inner(&mut lexer);
@@ -227,7 +227,7 @@ pub fn datetime(input: &str) -> Result<Datetime> {
 pub fn duration(input: &str) -> Result<Duration> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new(input.as_bytes());
 	parser
@@ -243,7 +243,7 @@ pub fn duration(input: &str) -> Result<Duration> {
 pub fn range(input: &str) -> Result<Range> {
 	trace!(target: TARGET, "Parsing SurrealQL range");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
@@ -261,7 +261,7 @@ pub fn range(input: &str) -> Result<Range> {
 pub fn thing(input: &str) -> Result<Thing> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -286,7 +286,7 @@ pub fn thing(input: &str) -> Result<Thing> {
 pub fn thing_with_range(input: &str) -> Result<Thing> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -311,7 +311,7 @@ pub fn thing_with_range(input: &str) -> Result<Thing> {
 pub fn block(input: &str) -> Result<Block> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -347,7 +347,7 @@ pub fn block(input: &str) -> Result<Block> {
 pub(crate) fn fields_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Fields> {
 	trace!(target: TARGET, "Parsing select fields");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -407,7 +407,7 @@ pub(crate) fn fetchs_with_capabilities(input: &str, capabilities: &Capabilities)
 pub(crate) fn output_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Output> {
 	trace!(target: TARGET, "Parsing RETURN clause");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -437,7 +437,7 @@ pub(crate) fn output_with_capabilities(input: &str, capabilities: &Capabilities)
 pub fn value_legacy_strand(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -463,7 +463,7 @@ pub fn value_legacy_strand(input: &str) -> Result<Value> {
 pub fn json_legacy_strand(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new_with_settings(
 		input.as_bytes(),
@@ -489,7 +489,7 @@ pub fn json_legacy_strand(input: &str) -> Result<Value> {
 pub fn kind(input: &str) -> Result<Kind> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
-	ensure!(input.len() > u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();

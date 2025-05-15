@@ -94,7 +94,7 @@ impl Document {
 					IdiomTrieContains::None => {
 						// This field is not explicitly defined in the schema or it is not a child of a flex field.
 						ensure!(
-							opt.strict,
+							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
 								table: tb.name.to_raw(),

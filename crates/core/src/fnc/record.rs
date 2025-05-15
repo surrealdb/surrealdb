@@ -18,7 +18,7 @@ pub async fn exists(
 ) -> Result<Value> {
 	if let Some(opt) = opt {
 		let v = Value::Thing(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()?;
-		Ok(Value::Bool(v.is_none()))
+		Ok(Value::Bool(!v.is_none()))
 	} else {
 		Ok(Value::None)
 	}

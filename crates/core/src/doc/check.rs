@@ -59,7 +59,7 @@ impl Document {
 			}
 			Statement::Relate(_) => {
 				ensure!(
-					tb.allows_normal(),
+					tb.allows_relation(),
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: true,

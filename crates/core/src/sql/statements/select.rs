@@ -120,7 +120,7 @@ impl SelectStatement {
 		i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Fail for multiple targets without a limit
 		ensure!(
-			!self.only && i.is_limit_one_or_zero() && self.what.0.len() <= 1,
+			!self.only || i.is_limit_one_or_zero() || self.what.0.len() <= 1,
 			Error::SingleOnlyOutput
 		);
 		// Check if there is a timeout

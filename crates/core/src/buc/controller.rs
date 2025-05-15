@@ -59,7 +59,7 @@ impl<'a> BucketController<'a> {
 
 	/// Checks if the bucket allows writes, and if not, return an `Error::ReadonlyBucket`
 	fn require_writeable(&self) -> Result<()> {
-		ensure!(self.bucket.readonly, err::Error::ReadonlyBucket(self.bucket.name.to_raw()));
+		ensure!(!self.bucket.readonly, err::Error::ReadonlyBucket(self.bucket.name.to_raw()));
 		Ok(())
 	}
 

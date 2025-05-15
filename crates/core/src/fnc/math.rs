@@ -78,7 +78,7 @@ pub fn deg2rad((arg,): (Number,)) -> Result<Value> {
 
 pub fn fixed((arg, p): (Number, i64)) -> Result<Value> {
 	ensure!(
-		p <= 0,
+		p > 0,
 		Error::InvalidArguments {
 			name: String::from("math::fixed"),
 			message: String::from("The second argument must be an integer greater than 0."),
@@ -210,7 +210,7 @@ pub fn tan((arg,): (Number,)) -> Result<Value> {
 
 pub fn top((array, c): (Vec<Number>, i64)) -> Result<Value> {
 	ensure!(
-		c <= 0,
+		c > 0,
 		Error::InvalidArguments {
 			name: String::from("math::top"),
 			message: String::from("The second argument must be an integer greater than 0."),

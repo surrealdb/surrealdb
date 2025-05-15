@@ -231,7 +231,7 @@ impl Iterator {
 
 	/// Prepares a value for processing
 	pub(crate) fn prepare_mock(&mut self, stm: &Statement<'_>, v: Mock) -> Result<()> {
-		ensure!(!stm.is_only() && self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Add the records to the iterator
 		for v in v {
 			match stm.is_deferable() {
@@ -245,7 +245,7 @@ impl Iterator {
 
 	/// Prepares a value for processing
 	pub(crate) fn prepare_edges(&mut self, stm: &Statement<'_>, v: Edges) -> Result<()> {
-		ensure!(!stm.is_only() && self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Check if this is a create statement
 		ensure!(
 			!stm.is_create(),
@@ -317,7 +317,7 @@ impl Iterator {
 		ctx: &StatementContext<'_>,
 		v: Array,
 	) -> Result<()> {
-		ensure!(!ctx.stm.is_only() && self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Add the records to the iterator
 		for v in v {
 			match v {

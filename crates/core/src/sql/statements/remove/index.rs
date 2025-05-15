@@ -44,6 +44,7 @@ impl RemoveIndexStatement {
 			if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
 				return Ok(Value::None);
 			}
+			return Err(e);
 		}
 
 		// Delete the definition

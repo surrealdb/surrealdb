@@ -956,7 +956,7 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn compute(&self, val: Value, sess: &Session, vars: Variables) -> Result<Value> {
 		// Check if the session has expired
-		ensure!(sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
@@ -1030,7 +1030,7 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn evaluate(&self, val: &Value, sess: &Session, vars: Variables) -> Result<Value> {
 		// Check if the session has expired
-		ensure!(sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
@@ -1099,7 +1099,7 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
 		// Check if the session has expired
-		ensure!(sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}
@@ -1111,7 +1111,7 @@ impl Datastore {
 		S: Stream<Item = Result<Bytes>>,
 	{
 		// Check if the session has expired
-		ensure!(sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
 		self.execute_import(sess, None, stream).await
 	}
@@ -1137,7 +1137,7 @@ impl Datastore {
 		cfg: export::Config,
 	) -> Result<impl Future<Output = Result<()>>> {
 		// Check if the session has expired
-		ensure!(sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
