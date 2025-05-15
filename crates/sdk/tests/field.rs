@@ -5,7 +5,6 @@ use crate::helpers::Test;
 use helpers::new_ds;
 use helpers::with_enough_stack;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
 use surrealdb::Result;

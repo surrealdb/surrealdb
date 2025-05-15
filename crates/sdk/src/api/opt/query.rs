@@ -526,12 +526,12 @@ where
 								}
 							}
 						}
-						from_core_value(responses.into()).map_err(Into::into)
+						from_core_value(responses.into())
 					}
 					val => {
 						if let CoreValue::Object(object) = val {
 							if let Some(value) = object.remove(key) {
-								return from_core_value(vec![value].into()).map_err(Into::into);
+								return from_core_value(vec![value].into());
 							}
 						}
 						Ok(vec![])

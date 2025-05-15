@@ -22,7 +22,7 @@ mod obj;
 pub use obj::{IntoIter, Iter, IterMut, Object};
 
 pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T> {
-	Ok(surrealdb_core::sql::from_value(value.0)?)
+	surrealdb_core::sql::from_value(value.0)
 }
 
 pub fn to_value<T: Serialize + 'static>(value: T) -> Result<Value> {

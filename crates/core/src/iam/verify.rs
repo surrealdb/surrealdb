@@ -181,7 +181,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							Err(Error::MissingTokenHeader("kid".to_string()))
+							Err(anyhow::Error::new(Error::MissingTokenHeader("kid".to_string())))
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
@@ -244,7 +244,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							if let Some(kid) = token_data.header.kid {
 								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 							} else {
-								Err(Error::MissingTokenHeader("kid".to_string()))
+								Err(anyhow::Error::new(Error::MissingTokenHeader(
+									"kid".to_string(),
+								)))
 							}
 						}
 						#[cfg(not(feature = "jwks"))]
@@ -302,7 +304,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 								if let Some(kid) = token_data.header.kid {
 									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 								} else {
-									Err(Error::MissingTokenHeader("kid".to_string()))
+									Err(anyhow::Error::new(Error::MissingTokenHeader(
+										"kid".to_string(),
+									)))
 								}
 							}
 							#[cfg(not(feature = "jwks"))]

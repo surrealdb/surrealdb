@@ -1,7 +1,7 @@
 use crate::dbs::capabilities::NetTarget;
 use crate::err::Error;
 use crate::kvs::Datastore;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::jwk::{
 	AlgorithmParameters::*, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
@@ -96,7 +96,7 @@ pub(super) async fn config(
 						// Check that the cached JWKS object has not been recently updated
 						if Utc::now().signed_duration_since(jwks.time) < *CACHE_COOLDOWN {
 							debug!("Refused to refresh cache before cooldown period is over");
-							return Err(Error::InvalidAuth); // Return opaque error
+							bail!(Error::InvalidAuth); // Return opaque error
 						}
 						find_jwk_from_url(kvs, url, kid).await?
 					}
@@ -133,7 +133,7 @@ pub(super) async fn config(
 			KeyAlgorithm::RS512 => RS512,
 			_ => {
 				warn!("Unspported value for parameter 'alg' in JWK object: '{:?}'", alg);
-				return Err(Error::InvalidAuth); // Return opaque error
+				bail!(Error::InvalidAuth); // Return opaque error
 			}
 		},
 		// If not specified, use the algorithm provided in the token header
@@ -151,7 +151,7 @@ pub(super) async fn config(
 						"Algorithm from token '{:?}' does not match JWK key type '{:?}'",
 						token_alg, key.key_type
 					);
-					return Err(Error::InvalidAuth); // Return opaque error
+					bail!(Error::InvalidAuth); // Return opaque error
 				}
 				(EllipticCurve(_), ES256 | ES384) => token_alg,
 				(EllipticCurve(key), _) => {
@@ -159,7 +159,7 @@ pub(super) async fn config(
 						"Algorithm from token '{:?}' does not match JWK key type '{:?}'",
 						token_alg, key.key_type
 					);
-					return Err(Error::InvalidAuth); // Return opaque error
+					bail!(Error::InvalidAuth); // Return opaque error
 				}
 				(OctetKey(_), HS256 | HS384 | HS512) => token_alg,
 				(OctetKey(key), _) => {
@@ -167,7 +167,7 @@ pub(super) async fn config(
 						"Algorithm from token '{:?}' does not match JWK key type '{:?}'",
 						token_alg, key.key_type
 					);
-					return Err(Error::InvalidAuth); // Return opaque error
+					bail!(Error::InvalidAuth); // Return opaque error
 				}
 				(OctetKeyPair(_), EdDSA) => token_alg,
 				(OctetKeyPair(key), _) => {
@@ -175,7 +175,7 @@ pub(super) async fn config(
 						"Algorithm from token '{:?}' does not match JWK key type '{:?}'",
 						token_alg, key.key_type
 					);
-					return Err(Error::InvalidAuth); // Return opaque error
+					bail!(Error::InvalidAuth); // Return opaque error
 				}
 			}
 		}
@@ -186,19 +186,19 @@ pub(super) async fn config(
 		Some(PublicKeyUse::Signature) => (),
 		Some(key_use) => {
 			warn!("Invalid value for parameter 'use' in JWK object: '{:?}'", key_use);
-			return Err(Error::InvalidAuth); // Return opaque error
+			bail!(Error::InvalidAuth); // Return opaque error
 		}
 		None => (),
 	}
 	// Check if the key operations (if specified) include verification
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.3
 	if let Some(ops) = &jwk.common.key_operations {
-		if !ops.iter().any(|op| *op == KeyOperations::Verify) {
+		if !ops.contains(&KeyOperations::Verify) {
 			warn!(
 				"Invalid values for parameter 'key_ops' in JWK object: '{:?}'",
 				jwk.common.key_operations
 			);
-			return Err(Error::InvalidAuth); // Return opaque error
+			bail!(Error::InvalidAuth); // Return opaque error
 		}
 	}
 
@@ -217,7 +217,7 @@ pub(super) async fn config(
 		}
 		Err(err) => {
 			warn!("Failed to retrieve decoding key from JWK object: '{}'", err);
-			Err(Error::InvalidAuth) // Return opaque error
+			Err(anyhow::Error::new(Error::InvalidAuth)) // Return opaque error
 		}
 	}
 }
@@ -228,7 +228,7 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk>
 	// Check that the datastore capabilities allow connections to the URL host
 	if let Err(err) = check_capabilities_url(kvs, url) {
 		warn!("Network access to JWKS location is not allowed: '{}'", err);
-		return Err(Error::InvalidAuth); // Return opaque error
+		bail!(Error::InvalidAuth); // Return opaque error
 	}
 
 	// Retrieve JWKS cache
@@ -242,13 +242,13 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk>
 				Some(jwk) => Ok(jwk.to_owned()),
 				_ => {
 					debug!("Failed to find JWK object with key identifier '{kid}' in remote JWKS object");
-					Err(Error::InvalidAuth) // Return opaque error
+					Err(anyhow::Error::new(Error::InvalidAuth)) // Return opaque error
 				}
 			}
 		}
 		Err(err) => {
 			warn!("Failed to fetch JWKS object from remote location: '{}'", err);
-			Err(Error::InvalidAuth) // Return opaque error
+			Err(anyhow::Error::new(Error::InvalidAuth)) // Return opaque error
 		}
 	}
 }
@@ -258,7 +258,7 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 	let url_parsed = match Url::parse(url) {
 		Ok(url) => url,
 		Err(_) => {
-			return Err(Error::InvalidUrl(url.to_string()));
+			bail!(Error::InvalidUrl(url.to_string()));
 		}
 	};
 	let addr = match url_parsed.host_str() {
@@ -270,18 +270,18 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 			}
 		}
 		None => {
-			return Err(Error::InvalidUrl(url.to_string()));
+			bail!(Error::InvalidUrl(url.to_string()));
 		}
 	};
 	let target = match NetTarget::from_str(&addr) {
 		Ok(host) => host,
 		Err(_) => {
-			return Err(Error::InvalidUrl(url.to_string()));
+			bail!(Error::InvalidUrl(url.to_string()));
 		}
 	};
 	if !kvs.allows_network_target(&target) {
 		warn!("Capabilities denied outgoing network connection attempt, target: '{target}'");
-		return Err(Error::InvalidUrl(url.to_string()));
+		bail!(Error::InvalidUrl(url.to_string()));
 	}
 	trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 
@@ -297,7 +297,7 @@ async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Resul
 	let res = client.get(url).send().await?;
 	if !res.status().is_success() {
 		warn!("Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'", res.status());
-		return Err(Error::InvalidAuth); // Return opaque error
+		bail!(Error::InvalidAuth); // Return opaque error
 	}
 	let jwks = res.bytes().await?;
 
@@ -313,7 +313,7 @@ async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Resul
 		}
 		Err(err) => {
 			warn!("Failed to parse malformed JWKS object: '{}'", err);
-			Err(Error::InvalidAuth) // Return opaque error
+			Err(anyhow::Error::new(Error::InvalidAuth)) // Return opaque error
 		}
 	}
 }

@@ -121,7 +121,7 @@ async fn concurrency() -> Result<()> {
 				if matches!(err.downcast_ref(), Some(Error::QueryTimedout)) {
 					Ok(false)
 				} else {
-					return Err(err);
+					Err(err)
 				}
 			}
 			Ok(res) => {

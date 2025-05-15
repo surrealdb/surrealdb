@@ -4,7 +4,6 @@ use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::{Action, Notification, Session};
-use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::{Thing, Value};
 use surrealdb::Result;
