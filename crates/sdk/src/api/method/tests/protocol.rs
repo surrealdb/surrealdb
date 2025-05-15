@@ -2,6 +2,7 @@ use super::server;
 use crate::api::conn;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
+use crate::api::opt::endpoint::private;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
@@ -19,7 +20,8 @@ use url::Url;
 #[derive(Debug)]
 pub struct Test;
 
-impl IntoEndpoint<Test> for () {
+impl IntoEndpoint<Test> for () {}
+impl private::Sealed<Test> for () {
 	type Client = Client;
 
 	fn into_endpoint(self) -> Result<Endpoint> {

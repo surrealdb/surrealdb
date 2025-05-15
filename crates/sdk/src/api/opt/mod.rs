@@ -7,7 +7,7 @@ pub mod auth;
 pub mod capabilities;
 
 mod config;
-mod endpoint;
+pub(crate) mod endpoint;
 mod export;
 mod query;
 mod resource;

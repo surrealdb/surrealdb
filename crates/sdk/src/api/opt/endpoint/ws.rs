@@ -2,6 +2,7 @@ use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::Ws;
 use crate::api::engine::remote::ws::Wss;
 use crate::api::err::Error;
+use crate::api::opt::endpoint::private;
 use crate::api::opt::IntoEndpoint;
 use crate::api::Endpoint;
 use crate::api::Result;
@@ -12,7 +13,8 @@ use url::Url;
 macro_rules! endpoints {
 	($($name:ty),*) => {
 		$(
-			impl IntoEndpoint<Ws> for $name {
+			impl IntoEndpoint<Ws> for $name {}
+			impl private::Sealed<Ws> for $name {
 				type Client = Client;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
@@ -21,17 +23,19 @@ macro_rules! endpoints {
 				}
 			}
 
-			impl IntoEndpoint<Ws> for ($name, Config) {
+			impl IntoEndpoint<Ws> for ($name, Config) {}
+			impl private::Sealed<Ws> for ($name, Config) {
 				type Client = Client;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let mut endpoint = IntoEndpoint::<Ws>::into_endpoint(self.0)?;
+					let mut endpoint = private::Sealed::<Ws>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
 				}
 			}
 
-			impl IntoEndpoint<Wss> for $name {
+			impl IntoEndpoint<Wss> for $name {}
+			impl private::Sealed<Wss> for $name {
 				type Client = Client;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
@@ -40,11 +44,12 @@ macro_rules! endpoints {
 				}
 			}
 
-			impl IntoEndpoint<Wss> for ($name, Config) {
+			impl IntoEndpoint<Wss> for ($name, Config) {}
+			impl private::Sealed<Wss> for ($name, Config) {
 				type Client = Client;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let mut endpoint = IntoEndpoint::<Wss>::into_endpoint(self.0)?;
+					let mut endpoint = private::Sealed::<Wss>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
 				}

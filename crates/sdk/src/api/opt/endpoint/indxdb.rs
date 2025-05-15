@@ -1,5 +1,6 @@
 use crate::api::engine::local::Db;
 use crate::api::engine::local::IndxDb;
+use crate::api::opt::endpoint::private;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
@@ -9,7 +10,8 @@ use url::Url;
 macro_rules! endpoints {
 	($($name:ty),*) => {
 		$(
-			impl IntoEndpoint<IndxDb> for $name {
+			impl IntoEndpoint<IndxDb> for $name {}
+			impl private::Sealed<IndxDb> for $name {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
@@ -22,11 +24,12 @@ macro_rules! endpoints {
 				}
 			}
 
-			impl IntoEndpoint<IndxDb> for ($name, Config) {
+			impl IntoEndpoint<IndxDb> for ($name, Config) {}
+			impl private::Sealed<IndxDb> for ($name, Config) {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let mut endpoint = IntoEndpoint::<IndxDb>::into_endpoint(self.0)?;
+					let mut endpoint = private::Sealed::<IndxDb>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
 				}

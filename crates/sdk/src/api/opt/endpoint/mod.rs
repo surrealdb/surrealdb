@@ -52,12 +52,19 @@ impl Endpoint {
 }
 
 /// A trait for converting inputs to a server address object
-pub trait IntoEndpoint<Scheme> {
-	/// The client implied by this scheme and address combination
-	type Client: Connection;
-	/// Converts an input into a server address object
-	#[deprecated(since = "2.3.0")]
-	fn into_endpoint(self) -> Result<Endpoint>;
+pub trait IntoEndpoint<Scheme>: private::Sealed<Scheme> {}
+
+pub(crate) mod private {
+	use super::Endpoint;
+	use crate::api::Connection;
+	use crate::api::Result;
+
+	pub trait Sealed<Scheme> {
+		/// The client implied by this scheme and address combination
+		type Client: Connection;
+		/// Converts an input into a server address object
+		fn into_endpoint(self) -> Result<Endpoint>;
+	}
 }
 
 fn replace_tilde(path: &str) -> String {
