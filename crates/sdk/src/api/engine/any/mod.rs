@@ -144,10 +144,13 @@ use std::marker::PhantomData;
 use url::Url;
 
 /// A trait for converting inputs to a server address object
-pub trait IntoEndpoint {
-	/// Converts an input into a server address object
-	#[deprecated(since = "2.3.0")]
-	fn into_endpoint(self) -> Result<Endpoint>;
+pub trait IntoEndpoint: private::Sealed {}
+
+mod private {
+	pub trait Sealed {
+		/// Converts an input into a server address object
+		fn into_endpoint(self) -> super::Result<super::Endpoint>;
+	}
 }
 
 fn split_url(url: &str) -> (&str, &str) {
@@ -160,7 +163,8 @@ fn split_url(url: &str) -> (&str, &str) {
 	}
 }
 
-impl IntoEndpoint for &str {
+impl IntoEndpoint for &str {}
+impl private::Sealed for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (url, path) = match self {
 			"memory" | "mem://" => (Url::parse("mem://").unwrap(), "memory".to_owned()),
@@ -183,24 +187,27 @@ impl IntoEndpoint for &str {
 	}
 }
 
-impl IntoEndpoint for &String {
+impl IntoEndpoint for &String {}
+impl private::Sealed for &String {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		self.as_str().into_endpoint()
 	}
 }
 
-impl IntoEndpoint for String {
+impl IntoEndpoint for String {}
+impl private::Sealed for String {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		self.as_str().into_endpoint()
 	}
 }
 
-impl<T> IntoEndpoint for (T, Config)
+impl<T> IntoEndpoint for (T, Config) where T: Into<String> {}
+impl<T> private::Sealed for (T, Config)
 where
 	T: Into<String>,
 {
 	fn into_endpoint(self) -> Result<Endpoint> {
-		let mut endpoint = IntoEndpoint::into_endpoint(self.0.into())?;
+		let mut endpoint = private::Sealed::into_endpoint(self.0.into())?;
 		endpoint.config = self.1;
 		Ok(endpoint)
 	}
