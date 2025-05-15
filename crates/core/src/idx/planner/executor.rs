@@ -30,9 +30,9 @@ use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs::TransactionType;
-use crate::sql::index::{Distance, Index};
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{
+use crate::expr::index::{Distance, Index};
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{
 	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
 };
 use num_traits::{FromPrimitive, ToPrimitive};

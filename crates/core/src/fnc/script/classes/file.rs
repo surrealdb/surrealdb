@@ -1,6 +1,6 @@
 use js::{class::Trace, JsLifetime};
 
-use crate::sql::file;
+use crate::expr::file;
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]

@@ -4,7 +4,7 @@ use crate::dbs::Statement;
 use crate::dbs::Workable;
 use crate::dbs::{Options, Processed};
 use crate::doc::Document;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 

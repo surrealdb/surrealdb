@@ -12,8 +12,8 @@ use crate::fnc::util::math::spread::Spread;
 use crate::fnc::util::math::top::Top;
 use crate::fnc::util::math::trimean::Trimean;
 use crate::fnc::util::math::variance::Variance;
-use crate::sql::number::{Number, Sort};
-use crate::sql::value::{TryPow, Value};
+use crate::expr::number::{Number, Sort};
+use crate::expr::value::{TryPow, Value};
 
 pub fn abs((arg,): (Number,)) -> Result<Value, Error> {
 	let Some(x) = arg.checked_abs() else {

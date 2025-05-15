@@ -7,7 +7,7 @@ use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
-use crate::sql::index::HnswParams;
+use crate::expr::index::HnswParams;
 use reblessive::tree::Stk;
 
 pub(super) enum HnswFlavor {

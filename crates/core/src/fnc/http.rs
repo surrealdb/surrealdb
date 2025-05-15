@@ -1,7 +1,7 @@
 use super::args::Optional;
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 
 #[cfg(not(feature = "http"))]
 pub async fn head(_: &Context, (_, _): (Value, Optional<Value>)) -> Result<Value, Error> {
@@ -43,7 +43,7 @@ pub async fn delete(_: &Context, (_, _): (Value, Optional<Value>)) -> Result<Val
 }
 
 #[cfg(feature = "http")]
-fn try_as_uri(fn_name: &str, value: Value) -> Result<crate::sql::Strand, Error> {
+fn try_as_uri(fn_name: &str, value: Value) -> Result<crate::expr::Strand, Error> {
 	match value {
 		// Pre-check URI.
 		Value::Strand(uri) if crate::fnc::util::http::uri_is_valid(&uri) => Ok(uri),
@@ -60,7 +60,7 @@ fn try_as_opts(
 	fn_name: &str,
 	error_message: &str,
 	value: Option<Value>,
-) -> Result<Option<crate::sql::Object>, Error> {
+) -> Result<Option<crate::expr::Object>, Error> {
 	match value {
 		Some(Value::Object(opts)) => Ok(Some(opts)),
 		None => Ok(None),

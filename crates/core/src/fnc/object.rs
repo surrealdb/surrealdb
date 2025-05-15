@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::sql::value::Value;
-use crate::sql::{Array, Object, Strand};
+use crate::expr::value::Value;
+use crate::expr::{Array, Object, Strand};
 use std::collections::BTreeMap;
 
 pub fn entries((object,): (Object,)) -> Result<Value, Error> {

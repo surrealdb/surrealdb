@@ -15,7 +15,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 use js::async_with;
 use js::prelude::*;
 use js::CatchResultExt;

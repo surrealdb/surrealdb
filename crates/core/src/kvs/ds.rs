@@ -27,8 +27,8 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::FlowResultExt as _;
-use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
+use crate::expr::FlowResultExt as _;
+use crate::expr::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use async_channel::{Receiver, Sender};
@@ -1244,14 +1244,14 @@ impl Datastore {
 
 #[cfg(test)]
 mod test {
-	use crate::sql::FlowResultExt as _;
+	use crate::expr::FlowResultExt as _;
 
 	use super::*;
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<(), Error> {
 		use crate::kvs::Datastore;
-		use crate::sql::{Expression, Future, Number, Operator, Value};
+		use crate::expr::{Expression, Future, Number, Operator, Value};
 		use reblessive::{Stack, Stk};
 
 		// build query manually to bypass query limits.

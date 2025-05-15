@@ -6,7 +6,7 @@ use crate::kvs::KeyDecode as _;
 use crate::kvs::Live;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::sql::statements::LiveStatement;
+use crate::expr::statements::LiveStatement;
 use std::time::Duration;
 
 const TARGET: &str = "surrealdb::core::kvs::node";

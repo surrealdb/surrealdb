@@ -4,10 +4,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::table::Table;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::{
+use crate::expr::table::Table;
+use crate::expr::thing::Thing;
+use crate::expr::value::Value;
+use crate::expr::{
 	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Kind, Number, Range,
 	Strand, Uuid,
 };
@@ -182,9 +182,9 @@ pub fn uuid((val,): (Value,)) -> Result<Value, Error> {
 pub mod is {
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
-	use crate::sql::table::Table;
-	use crate::sql::value::Value;
-	use crate::sql::Geometry;
+	use crate::expr::table::Table;
+	use crate::expr::value::Value;
+	use crate::expr::Geometry;
 
 	pub fn array((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(arg.is_array().into())
@@ -290,7 +290,7 @@ pub mod is {
 mod tests {
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 
 	#[test]
 	fn is_array() {

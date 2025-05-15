@@ -1,9 +1,9 @@
-use crate::sql::array::Array;
-use crate::sql::object::Object;
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::Operation;
+use crate::expr::array::Array;
+use crate::expr::object::Object;
+use crate::expr::statements::DefineTableStatement;
+use crate::expr::thing::Thing;
+use crate::expr::value::Value;
+use crate::expr::Operation;
 use crate::vs::VersionStamp;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -124,7 +124,7 @@ impl TableMutation {
 				h
 			}
 		};
-		let o = crate::sql::object::Object::from(h);
+		let o = crate::expr::object::Object::from(h);
 		Value::Object(o)
 	}
 }

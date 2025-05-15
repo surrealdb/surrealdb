@@ -8,8 +8,8 @@ use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, Memo
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
-use crate::sql::order::Ordering;
-use crate::sql::Value;
+use crate::expr::order::Ordering;
+use crate::expr::Value;
 use reblessive::tree::Stk;
 
 pub(super) enum Results {

@@ -1,8 +1,8 @@
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
-use crate::sql::value::Value;
-use crate::sql::Regex;
+use crate::expr::value::Value;
+use crate::expr::Regex;
 
 use super::args::{Any, Cast, Optional};
 
@@ -184,7 +184,7 @@ pub fn words((string,): (String,)) -> Result<Value, Error> {
 pub mod distance {
 
 	use crate::err::Error;
-	use crate::sql::Value;
+	use crate::expr::Value;
 
 	use strsim;
 
@@ -236,7 +236,7 @@ pub mod distance {
 
 pub mod html {
 	use crate::err::Error;
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 
 	pub fn encode((arg,): (String,)) -> Result<Value, Error> {
 		Ok(ammonia::clean_text(&arg).into())
@@ -250,8 +250,8 @@ pub mod html {
 pub mod is {
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
-	use crate::sql::value::Value;
-	use crate::sql::{Datetime, Thing};
+	use crate::expr::value::Value;
+	use crate::expr::{Datetime, Thing};
 	use chrono::NaiveDateTime;
 	use regex::Regex;
 	use semver::Version;
@@ -362,7 +362,7 @@ pub mod similarity {
 
 	use crate::err::Error;
 	use crate::fnc::util::string::fuzzy::Fuzzy;
-	use crate::sql::Value;
+	use crate::expr::Value;
 
 	use strsim;
 
@@ -396,7 +396,7 @@ pub mod similarity {
 pub mod semver {
 
 	use crate::err::Error;
-	use crate::sql::Value;
+	use crate::expr::Value;
 	use semver::Version;
 
 	fn parse_version(ver: &str, func: &str, msg: &str) -> Result<Version, Error> {
@@ -439,7 +439,7 @@ pub mod semver {
 	pub mod inc {
 		use crate::err::Error;
 		use crate::fnc::string::semver::parse_version;
-		use crate::sql::Value;
+		use crate::expr::Value;
 
 		pub fn major((version,): (String,)) -> Result<Value, Error> {
 			parse_version(&version, "string::semver::inc::major", "Invalid semantic version").map(
@@ -475,7 +475,7 @@ pub mod semver {
 	pub mod set {
 		use crate::err::Error;
 		use crate::fnc::string::semver::parse_version;
-		use crate::sql::Value;
+		use crate::expr::Value;
 
 		pub fn major((version, value): (String, i64)) -> Result<Value, Error> {
 			// TODO: Deal with negative trunc:

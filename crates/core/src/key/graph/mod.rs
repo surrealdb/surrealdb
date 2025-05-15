@@ -3,9 +3,9 @@ use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::{impl_key, KeyEncode};
-use crate::sql::dir::Dir;
-use crate::sql::id::Id;
-use crate::sql::thing::Thing;
+use crate::expr::dir::Dir;
+use crate::expr::id::Id;
+use crate::expr::thing::Thing;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

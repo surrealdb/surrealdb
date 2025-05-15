@@ -16,7 +16,7 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::mem::ALLOC;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 use async_channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;

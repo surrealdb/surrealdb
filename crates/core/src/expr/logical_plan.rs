@@ -30,17 +30,17 @@ use super::{ControlFlow, FlowResult};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Statements(pub Vec<Statement>);
+pub struct Statements(pub Vec<LogicalPlan>);
 
 impl Deref for Statements {
-	type Target = Vec<Statement>;
+	type Target = Vec<LogicalPlan>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
 impl IntoIterator for Statements {
-	type Item = Statement;
+	type Item = LogicalPlan;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
@@ -62,7 +62,7 @@ impl crate::expr::DisplaySql for Statements {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub enum Statement {
+pub enum LogicalPlan {
 	Value(Value),
 	Analyze(AnalyzeStatement),
 	Begin(BeginStatement),
@@ -101,7 +101,7 @@ pub enum Statement {
 	Access(AccessStatement),
 }
 
-impl Statement {
+impl LogicalPlan {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
@@ -148,7 +148,7 @@ impl Statement {
 			// All exports in SurrealDB 1.x are done with `UPDATE`, but
 			// because `UPDATE` works different in SurrealDB 2.x, we need
 			// to convert these statements into `UPSERT` statements.
-			(true, Self::Update(stm)) => &Statement::Upsert(UpsertStatement {
+			(true, Self::Update(stm)) => &LogicalPlan::Upsert(UpsertStatement {
 				only: stm.only,
 				what: stm.what.clone(),
 				with: stm.with.clone(),
@@ -201,9 +201,9 @@ impl Statement {
 	}
 }
 
-crate::expr::impl_display_from_sql!(Statement);
+crate::expr::impl_display_from_sql!(LogicalPlan);
 
-impl crate::expr::DisplaySql for Statement {
+impl crate::expr::DisplaySql for LogicalPlan {
 	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Value(v) => write!(Pretty::from(f), "{v}"),

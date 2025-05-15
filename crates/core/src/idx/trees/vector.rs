@@ -1,8 +1,8 @@
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::idx::VersionedStore;
-use crate::sql::index::{Distance, VectorType};
-use crate::sql::{Number, Value};
+use crate::expr::index::{Distance, VectorType};
+use crate::expr::{Number, Value};
 use ahash::AHasher;
 use ahash::HashSet;
 use linfa_linalg::norm::Norm;
@@ -556,7 +556,7 @@ impl Distance {
 mod tests {
 	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec, RandomItemGenerator};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::sql::index::{Distance, VectorType};
+	use crate::expr::index::{Distance, VectorType};
 
 	fn test_distance(dist: Distance, a1: &[f64], a2: &[f64], res: f64) {
 		// Convert the arrays to Vec<Number>

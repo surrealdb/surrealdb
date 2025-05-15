@@ -3,7 +3,7 @@ use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::Transaction;
-use crate::sql::index::Distance;
+use crate::expr::index::Distance;
 use dashmap::DashMap;
 
 pub(super) struct HnswElements {

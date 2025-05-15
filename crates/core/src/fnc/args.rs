@@ -1,7 +1,7 @@
 use std::vec::IntoIter;
 
 use crate::err::Error;
-use crate::sql::value::{Cast as CastTrait, Coerce, Value};
+use crate::expr::value::{Cast as CastTrait, Coerce, Value};
 
 /// The number of arguments a function takes.
 #[derive(Debug)]

@@ -4,7 +4,7 @@ use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
 use crate::kvs::KeyEncode;
-use crate::sql::id::Id;
+use crate::expr::id::Id;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

@@ -4,9 +4,9 @@ use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
 use crate::err::Error;
 use crate::kvs::{Key, KeyEncode};
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::thing::Thing;
-use crate::sql::Idiom;
+use crate::expr::statements::DefineTableStatement;
+use crate::expr::thing::Thing;
+use crate::expr::Idiom;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
 // The versionstamp key is the key that contains the current versionstamp and might be used by the
@@ -152,15 +152,15 @@ mod tests {
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
-	use crate::sql::changefeed::ChangeFeed;
-	use crate::sql::id::Id;
-	use crate::sql::statements::show::ShowSince;
-	use crate::sql::statements::{
+	use crate::expr::changefeed::ChangeFeed;
+	use crate::expr::id::Id;
+	use crate::expr::statements::show::ShowSince;
+	use crate::expr::statements::{
 		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,
 	};
-	use crate::sql::thing::Thing;
-	use crate::sql::value::Value;
-	use crate::sql::Datetime;
+	use crate::expr::thing::Thing;
+	use crate::expr::value::Value;
+	use crate::expr::Datetime;
 	use crate::vs::VersionStamp;
 
 	const DONT_STORE_PREVIOUS: bool = false;
@@ -417,11 +417,11 @@ mod tests {
 
 	async fn init(store_diff: bool) -> Datastore {
 		let dns = DefineNamespaceStatement {
-			name: crate::sql::Ident(NS.to_string()),
+			name: crate::expr::Ident(NS.to_string()),
 			..Default::default()
 		};
 		let ddb = DefineDatabaseStatement {
-			name: crate::sql::Ident(DB.to_string()),
+			name: crate::expr::Ident(DB.to_string()),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_diff,

@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::sql::Value;
+use crate::expr::Value;
 
 /// Return the next value for a given sequence.
 pub async fn nextval((ctx, opt): (&Context, &Options), (seq,): (Value,)) -> Result<Value, Error> {

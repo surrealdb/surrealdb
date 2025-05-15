@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::idiom::Idiom;
-use crate::sql::value::Value;
-use crate::sql::{Closure, FlowResultExt as _, Function};
+use crate::expr::idiom::Idiom;
+use crate::expr::value::Value;
+use crate::expr::{Closure, FlowResultExt as _, Function};
 use reblessive::tree::Stk;
 
 pub async fn chain(

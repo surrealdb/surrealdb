@@ -8,9 +8,9 @@ use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::key;
 use crate::kvs::TransactionType;
-use crate::sql::index::{HnswParams, MTreeParams, SearchParams};
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Index, Part, Thing, Value};
+use crate::expr::index::{HnswParams, MTreeParams, SearchParams};
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{Array, Index, Part, Thing, Value};
 use reblessive::tree::Stk;
 
 pub(crate) struct IndexOperation<'a> {

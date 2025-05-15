@@ -6,8 +6,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::value::Value;
-use crate::sql::Thing;
+use crate::expr::value::Value;
+use crate::expr::Thing;
 use reblessive::tree::Stk;
 pub mod api;
 pub mod args;
@@ -1162,7 +1162,7 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
-				use crate::sql::Value;
+				use crate::expr::Value;
 
 				let name = name.replace("::", ".");
 				let sql =

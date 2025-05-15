@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::Value;
+use crate::expr::Value;
 
 /// Returns a boolean that is false if the input is truthy and true otherwise.
 pub fn not((val,): (Value,)) -> Result<Value, Error> {

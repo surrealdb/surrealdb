@@ -4,13 +4,13 @@ use crate::dbs::Statement;
 use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::paths::EDGE;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
-use crate::sql::value::Value;
-use crate::sql::Dir;
-use crate::sql::Relation;
-use crate::sql::TableType;
+use crate::expr::paths::EDGE;
+use crate::expr::paths::IN;
+use crate::expr::paths::OUT;
+use crate::expr::value::Value;
+use crate::expr::Dir;
+use crate::expr::Relation;
+use crate::expr::TableType;
 
 impl Document {
 	pub(super) async fn store_edges_data(

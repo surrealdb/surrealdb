@@ -1,8 +1,8 @@
 use crate::cnf::ID_CHARS;
 use crate::err::Error;
-use crate::sql::uuid::Uuid;
-use crate::sql::value::Value;
-use crate::sql::{Datetime, Duration, Number};
+use crate::expr::uuid::Uuid;
+use crate::expr::value::Value;
+use crate::expr::{Datetime, Duration, Number};
 use chrono::{TimeZone, Utc};
 use nanoid::nanoid;
 use rand::distributions::{Alphanumeric, DistString};
@@ -286,9 +286,9 @@ pub mod uuid {
 
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
-	use crate::sql::uuid::Uuid;
-	use crate::sql::value::Value;
-	use crate::sql::Datetime;
+	use crate::expr::uuid::Uuid;
+	use crate::expr::value::Value;
+	use crate::expr::Datetime;
 
 	pub fn v4(_: ()) -> Result<Value, Error> {
 		Ok(Uuid::new_v4().into())

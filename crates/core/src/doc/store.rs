@@ -32,7 +32,7 @@ impl Document {
 		// The cloning of the doc is required because the resulting doc
 		// must be returned to the caller with the id present.
 		let mut doc_without_id = self.current.doc.clone();
-		if let crate::sql::Value::Object(obj) = doc_without_id.to_mut() {
+		if let crate::expr::Value::Object(obj) = doc_without_id.to_mut() {
 			obj.0.remove("id");
 		}
 		// Match the statement type

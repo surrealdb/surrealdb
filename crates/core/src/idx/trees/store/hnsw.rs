@@ -3,7 +3,7 @@ use crate::err::Error;
 use crate::idx::trees::hnsw::index::HnswIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs::Key;
-use crate::sql::index::HnswParams;
+use crate::expr::index::HnswParams;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;

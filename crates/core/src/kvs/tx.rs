@@ -15,26 +15,26 @@ use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
-use crate::sql::statements::define::BucketDefinition;
-use crate::sql::statements::define::DefineConfigStatement;
-use crate::sql::statements::define::{ApiDefinition, DefineSequenceStatement};
-use crate::sql::statements::AccessGrant;
-use crate::sql::statements::DefineAccessStatement;
-use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::statements::DefineDatabaseStatement;
-use crate::sql::statements::DefineEventStatement;
-use crate::sql::statements::DefineFieldStatement;
-use crate::sql::statements::DefineFunctionStatement;
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::statements::DefineModelStatement;
-use crate::sql::statements::DefineNamespaceStatement;
-use crate::sql::statements::DefineParamStatement;
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::statements::DefineUserStatement;
-use crate::sql::statements::LiveStatement;
-use crate::sql::Id;
-use crate::sql::Permissions;
-use crate::sql::Value;
+use crate::expr::statements::define::BucketDefinition;
+use crate::expr::statements::define::DefineConfigStatement;
+use crate::expr::statements::define::{ApiDefinition, DefineSequenceStatement};
+use crate::expr::statements::AccessGrant;
+use crate::expr::statements::DefineAccessStatement;
+use crate::expr::statements::DefineAnalyzerStatement;
+use crate::expr::statements::DefineDatabaseStatement;
+use crate::expr::statements::DefineEventStatement;
+use crate::expr::statements::DefineFieldStatement;
+use crate::expr::statements::DefineFunctionStatement;
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::statements::DefineModelStatement;
+use crate::expr::statements::DefineNamespaceStatement;
+use crate::expr::statements::DefineParamStatement;
+use crate::expr::statements::DefineTableStatement;
+use crate::expr::statements::DefineUserStatement;
+use crate::expr::statements::LiveStatement;
+use crate::expr::Id;
+use crate::expr::Permissions;
+use crate::expr::Value;
 use futures::lock::Mutex;
 use futures::lock::MutexGuard;
 use futures::stream::Stream;
@@ -1633,7 +1633,7 @@ impl Transaction {
 				Some(val) => {
 					let mut val: Value = revision::from_slice(&val)?;
 					// Inject the id field into the document
-					let rid = crate::sql::Thing::from((tb, id.clone()));
+					let rid = crate::expr::Thing::from((tb, id.clone()));
 					val.def(&rid);
 					let val = cache::tx::Entry::Val(Arc::new(val));
 					val.try_into_val()
@@ -1655,7 +1655,7 @@ impl Transaction {
 						Some(val) => {
 							let mut val: Value = revision::from_slice(&val)?;
 							// Inject the id field into the document
-							let rid = crate::sql::Thing::from((tb, id.clone()));
+							let rid = crate::expr::Thing::from((tb, id.clone()));
 							val.def(&rid);
 							let val = cache::tx::Entry::Val(Arc::new(val));
 							self.cache.insert(qey, val.clone());

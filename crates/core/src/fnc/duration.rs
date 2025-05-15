@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::sql::duration::Duration;
-use crate::sql::value::Value;
+use crate::expr::duration::Duration;
+use crate::expr::value::Value;
 
 pub fn days((val,): (Duration,)) -> Result<Value, Error> {
 	Ok(val.days().into())
@@ -41,8 +41,8 @@ pub fn years((val,): (Duration,)) -> Result<Value, Error> {
 pub mod from {
 
 	use crate::err::Error;
-	use crate::sql::duration::Duration;
-	use crate::sql::value::Value;
+	use crate::expr::duration::Duration;
+	use crate::expr::value::Value;
 
 	pub fn days((val,): (i64,)) -> Result<Value, Error> {
 		// TODO: Deal with truncation:

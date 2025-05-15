@@ -15,9 +15,9 @@ use crate::idx::IndexKeyBase;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
-use crate::sql::index::HnswParams;
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::Index;
+use crate::expr::index::HnswParams;
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::Index;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 

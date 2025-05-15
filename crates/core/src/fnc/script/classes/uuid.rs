@@ -1,4 +1,4 @@
-use crate::sql::uuid;
+use crate::expr::uuid;
 use js::{class::Trace, JsLifetime};
 
 #[derive(Clone, Trace, JsLifetime)]

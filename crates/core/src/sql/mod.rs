@@ -52,6 +52,7 @@ pub(crate) mod param;
 pub(crate) mod part;
 pub(crate) mod paths;
 pub(crate) mod permission;
+pub(crate) mod planner;
 pub(crate) mod query;
 pub(crate) mod range;
 pub(crate) mod reference;
@@ -257,5 +258,13 @@ impl FlowResultExt for FlowResult<Value> {
 			Err(ControlFlow::Err(e)) => Err(*e),
 			Ok(x) => Ok(x),
 		}
+	}
+}
+
+use crate::expr::LogicalPlan;
+
+pub fn statement_to_logical_expr(stmt: Statement) -> Result<LogicalPlan, Error> {
+	match stmt {
+
 	}
 }

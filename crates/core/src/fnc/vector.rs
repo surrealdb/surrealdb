@@ -3,7 +3,7 @@ use crate::fnc::util::math::vector::{
 	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Scale,
 	Subtract,
 };
-use crate::sql::{Number, Value};
+use crate::expr::{Number, Value};
 
 pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 	Ok(a.add(&b)?.into())
@@ -59,7 +59,7 @@ pub mod distance {
 		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
 	};
 	use crate::idx::planner::IterationStage;
-	use crate::sql::{Number, Value};
+	use crate::expr::{Number, Value};
 
 	pub fn chebyshev((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		Ok(a.chebyshev_distance(&b)?.into())
@@ -116,7 +116,7 @@ pub mod similarity {
 
 	use crate::err::Error;
 	use crate::fnc::util::math::vector::{CosineSimilarity, JaccardSimilarity, PearsonSimilarity};
-	use crate::sql::{Number, Value};
+	use crate::expr::{Number, Value};
 
 	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		Ok(a.cosine_similarity(&b)?.into())
@@ -140,7 +140,7 @@ pub mod similarity {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::Number;
+	use crate::expr::Number;
 	use rust_decimal::Decimal;
 
 	#[test]

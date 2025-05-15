@@ -10,10 +10,10 @@ use crate::key;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
-use crate::sql::array::Array;
-use crate::sql::index::{HnswParams, Index, MTreeParams, SearchParams};
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{FlowResultExt as _, Part, Thing, Value};
+use crate::expr::array::Array;
+use crate::expr::index::{HnswParams, Index, MTreeParams, SearchParams};
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{FlowResultExt as _, Part, Thing, Value};
 use reblessive::tree::Stk;
 
 impl Document {

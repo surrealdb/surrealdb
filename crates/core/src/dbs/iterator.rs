@@ -12,14 +12,14 @@ use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
-use crate::sql::array::Array;
-use crate::sql::edges::Edges;
-use crate::sql::mock::Mock;
-use crate::sql::object::Object;
-use crate::sql::table::Table;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::{Fields, Id, IdRange};
+use crate::expr::array::Array;
+use crate::expr::edges::Edges;
+use crate::expr::mock::Mock;
+use crate::expr::object::Object;
+use crate::expr::table::Table;
+use crate::expr::thing::Thing;
+use crate::expr::value::Value;
+use crate::expr::{Fields, Id, IdRange};
 use reblessive::tree::Stk;
 use std::mem;
 use std::sync::Arc;

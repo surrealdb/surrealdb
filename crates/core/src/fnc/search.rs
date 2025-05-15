@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
-use crate::sql::Value;
+use crate::expr::Value;
 use reblessive::tree::Stk;
 
 use super::args::Optional;

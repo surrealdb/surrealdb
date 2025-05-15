@@ -4,7 +4,7 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	iam::Action,
-	sql::{statements::define::BucketDefinition, Bytes, File, FlowResultExt, Permission, Value},
+	expr::{statements::define::BucketDefinition, Bytes, File, FlowResultExt, Permission, Value},
 };
 use core::fmt;
 use reblessive::tree::Stk;

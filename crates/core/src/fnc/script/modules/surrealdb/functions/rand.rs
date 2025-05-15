@@ -1,7 +1,7 @@
 use js::{prelude::Rest, Ctx};
 
 use super::run;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 
 mod uuid;
 

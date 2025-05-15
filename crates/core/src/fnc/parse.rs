@@ -1,7 +1,7 @@
 pub mod email {
 
 	use crate::err::Error;
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 	use addr::email::Host;
 
 	pub fn host((string,): (String,)) -> Result<Value, Error> {
@@ -46,7 +46,7 @@ pub mod email {
 pub mod url {
 
 	use crate::err::Error;
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 	use url::Url;
 
 	pub fn domain((string,): (String,)) -> Result<Value, Error> {
@@ -121,7 +121,7 @@ pub mod url {
 
 	#[cfg(test)]
 	mod tests {
-		use crate::sql::value::Value;
+		use crate::expr::value::Value;
 
 		#[test]
 		fn port_default_port_specified() {

@@ -1,8 +1,8 @@
 use crate::dbs::plan::Explanation;
 #[cfg(not(target_family = "wasm"))]
 use crate::err::Error;
-use crate::sql::order::OrderList;
-use crate::sql::value::Value;
+use crate::expr::order::OrderList;
+use crate::expr::value::Value;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 

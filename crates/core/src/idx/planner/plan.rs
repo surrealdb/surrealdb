@@ -4,9 +4,9 @@ use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
-use crate::sql::with::With;
-use crate::sql::{Array, Expression, Idiom, Number, Object};
-use crate::sql::{Operator, Value};
+use crate::expr::with::With;
+use crate::expr::{Array, Expression, Idiom, Number, Object};
+use crate::expr::{Operator, Value};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
@@ -590,7 +590,7 @@ impl UnionRangeQueryBuilder {
 mod tests {
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-	use crate::sql::{Array, Idiom, Value};
+	use crate::expr::{Array, Idiom, Value};
 	use crate::syn::Parse;
 	use std::collections::HashSet;
 	use std::sync::Arc;

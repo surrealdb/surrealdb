@@ -1,6 +1,6 @@
 use super::args::Optional;
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 
 pub fn count((Optional(arg),): (Optional<Value>,)) -> Result<Value, Error> {
 	Ok(arg

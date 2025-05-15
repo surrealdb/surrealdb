@@ -5,7 +5,7 @@ use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
 use crate::kvs::Transaction;
-use crate::sql::index::HnswParams;
+use crate::expr::index::HnswParams;
 
 #[derive(Debug)]
 pub(super) enum Heuristic {

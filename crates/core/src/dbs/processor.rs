@@ -7,9 +7,9 @@ use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
 use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
-use crate::sql::dir::Dir;
-use crate::sql::id::range::IdRange;
-use crate::sql::{Edges, Table, Thing, Value};
+use crate::expr::dir::Dir;
+use crate::expr::id::range::IdRange;
+use crate::expr::{Edges, Table, Thing, Value};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use std::borrow::Cow;

@@ -6,7 +6,7 @@ use crate::key::sequence::st::St;
 use crate::key::sequence::Prefix;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KeyEncode, LockType, Transaction, TransactionType};
-use crate::sql::statements::define::DefineSequenceStatement;
+use crate::expr::statements::define::DefineSequenceStatement;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use rand::{thread_rng, Rng};

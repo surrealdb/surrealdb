@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::sql::geometry::Geometry;
-use crate::sql::value::Value;
+use crate::expr::geometry::Geometry;
+use crate::expr::value::Value;
 use geo::algorithm::bearing::HaversineBearing;
 use geo::algorithm::centroid::Centroid;
 use geo::algorithm::chamberlain_duquette_area::ChamberlainDuquetteArea;
@@ -54,8 +54,8 @@ pub mod hash {
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
 	use crate::fnc::util::geo;
-	use crate::sql::geometry::Geometry;
-	use crate::sql::value::Value;
+	use crate::expr::geometry::Geometry;
+	use crate::expr::value::Value;
 
 	pub fn encode((arg, Optional(len)): (Geometry, Optional<i64>)) -> Result<Value, Error> {
 		let len = match len {
@@ -84,8 +84,8 @@ pub mod hash {
 pub mod is {
 
 	use crate::err::Error;
-	use crate::sql::geometry::Geometry;
-	use crate::sql::value::Value;
+	use crate::expr::geometry::Geometry;
+	use crate::expr::value::Value;
 
 	pub fn valid((arg,): (Geometry,)) -> Result<Value, Error> {
 		Ok(arg.is_valid().into())

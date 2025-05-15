@@ -1,4 +1,4 @@
-use crate::sql::{id::Gen, id::Id as NewId, Array, IdRange, Object};
+use crate::expr::{id::Gen, id::Id as NewId, Array, IdRange, Object};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 

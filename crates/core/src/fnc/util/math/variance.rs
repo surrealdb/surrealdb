@@ -1,6 +1,6 @@
 use super::mean::Mean;
 use crate::fnc::util::math::ToFloat;
-use crate::sql::number::Number;
+use crate::expr::number::Number;
 
 pub trait Variance {
 	/// Population Variance of Data

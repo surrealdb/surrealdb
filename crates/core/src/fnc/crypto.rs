@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 use md5::Digest;
 use md5::Md5;
 use sha1::Sha1;
@@ -85,7 +85,7 @@ pub mod argon2 {
 
 	use super::COST_ALLOWANCE;
 	use crate::err::Error;
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 	use argon2::{
 		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Argon2,
@@ -119,7 +119,7 @@ pub mod bcrypt {
 
 	use crate::err::Error;
 	use crate::fnc::crypto::COST_ALLOWANCE;
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 	use bcrypt::HashParts;
 	use std::str::FromStr;
 
@@ -149,7 +149,7 @@ pub mod pbkdf2 {
 
 	use super::COST_ALLOWANCE;
 	use crate::err::Error;
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 	use pbkdf2::{
 		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Pbkdf2,
@@ -183,7 +183,7 @@ pub mod pbkdf2 {
 pub mod scrypt {
 
 	use crate::err::Error;
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 	use rand::rngs::OsRng;
 	use scrypt::{
 		password_hash::{PasswordHash, PasswordHasher, SaltString},

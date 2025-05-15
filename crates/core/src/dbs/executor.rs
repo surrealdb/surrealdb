@@ -5,20 +5,22 @@ use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
 use crate::err::Error;
+use crate::expr::LogicalPlan;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
 use crate::kvs::{LockType, Transaction};
-use crate::sql::paths::DB;
-use crate::sql::paths::NS;
-use crate::sql::query::Query;
+use crate::expr::paths::DB;
+use crate::expr::paths::NS;
+use crate::expr::query::Query;
+use crate::expr::statements::{OptionStatement, UseStatement};
+use crate::expr::value::Value;
+use crate::expr::Base;
+use crate::expr::ControlFlow;
+use crate::expr::FlowResult;
+use crate::sql::planner::SqlToLogical;
 use crate::sql::statement::Statement;
-use crate::sql::statements::{OptionStatement, UseStatement};
-use crate::sql::value::Value;
-use crate::sql::Base;
-use crate::sql::ControlFlow;
-use crate::sql::FlowResult;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
 use std::pin::{pin, Pin};
@@ -105,14 +107,15 @@ impl Executor {
 	async fn execute_transaction_statement(
 		&mut self,
 		txn: Arc<Transaction>,
-		stmt: Statement,
+		plan: LogicalPlan,
 	) -> FlowResult<Value> {
-		let res = match stmt {
-			Statement::Set(stm) => {
+		let res: Result<Value, ControlFlow> = match plan {
+			LogicalPlan::Set(stm) => {
 				// Avoid moving in and out of the context via Arc::get_mut
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
 					.set_transaction(txn);
+
 				// Run the statement
 				match self
 					.stack
@@ -175,11 +178,14 @@ impl Executor {
 			}
 		}
 
-		match stmt {
+		let planner = SqlToLogical::new();
+		let logical_plan = planner.statement_to_logical_plan(stmt.clone())?;
+
+		match logical_plan {
 			// These statements don't need a transaction.
-			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
-			stmt => {
-				let writeable = stmt.writeable();
+			LogicalPlan::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
+			plan => {
+				let writeable = plan.writeable();
 				let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
 				let receiver = self.ctx.has_notifications().then(|| {
 					let (send, recv) = async_channel::unbounded();
@@ -187,7 +193,7 @@ impl Executor {
 					recv
 				});
 
-				match self.execute_transaction_statement(txn.clone(), stmt).await {
+				match self.execute_transaction_statement(txn.clone(), plan).await {
 					Ok(value) | Err(ControlFlow::Return(value)) => {
 						let mut lock = txn.lock().await;
 
@@ -340,9 +346,12 @@ impl Executor {
 				_ => QueryType::Other,
 			};
 
+			let planner = SqlToLogical::new();
+			let logical_plan = planner.statement_to_logical_plan(stmt)?;
+
 			let before = Instant::now();
-			let value = match stmt {
-				Statement::Begin(_) => {
+			let value = match logical_plan {
+				LogicalPlan::Begin(_) => {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
 
@@ -380,7 +389,7 @@ impl Executor {
 					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
 					return Ok(());
 				}
-				Statement::Cancel(_) => {
+				LogicalPlan::Cancel(_) => {
 					let _ = txn.cancel().await;
 
 					// update the results indicating cancelation.
@@ -393,7 +402,7 @@ impl Executor {
 
 					return Ok(());
 				}
-				Statement::Commit(_) => {
+				LogicalPlan::Commit(_) => {
 					let mut lock = txn.lock().await;
 
 					// complete_changes and then commit.
@@ -435,7 +444,7 @@ impl Executor {
 
 					return Ok(());
 				}
-				Statement::Option(stmt) => match self.execute_option_statement(stmt) {
+				LogicalPlan::Option(stmt) => match self.execute_option_statement(stmt) {
 					Ok(_) => {
 						// skip adding the value as executing an option statement doesn't produce
 						// results
@@ -443,7 +452,7 @@ impl Executor {
 					}
 					Err(e) => Err(e),
 				},
-				Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
+				LogicalPlan::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 				stmt => {
 					skip_remaining = matches!(stmt, Statement::Output(_));
 
@@ -565,22 +574,27 @@ impl Executor {
 				}
 			};
 
-			match stmt {
-				Statement::Option(stmt) => this.execute_option_statement(stmt)?,
+			let query_type: QueryType = (&stmt).into();
+
+			let planner = SqlToLogical::new();
+			let logical_plan = planner.statement_to_logical_plan(stmt)?;
+
+			match logical_plan {
+				LogicalPlan::Option(option_plan) => this.execute_option_statement(option_plan)?,
 				// handle option here because it doesn't produce a result.
-				Statement::Begin(_) => {
+				LogicalPlan::Begin(_) => {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(Response {
 							time: Duration::ZERO,
 							result: Err(e),
-							query_type: QueryType::Other,
+							query_type,
 						});
 
 						return Ok(this.results);
 					}
 				}
-				stmt => {
-					let query_type: QueryType = (&stmt).into();
+				logical_plan => {
+					
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, stmt).await;

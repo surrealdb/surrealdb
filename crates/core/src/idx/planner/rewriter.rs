@@ -1,7 +1,7 @@
 use crate::idx::planner::executor::KnnExpressions;
-use crate::sql::id::range::IdRange;
-use crate::sql::part::DestructurePart;
-use crate::sql::{
+use crate::expr::id::range::IdRange;
+use crate::expr::part::DestructurePart;
+use crate::expr::{
 	Array, Cast, Cond, Expression, Function, Id, Idiom, Model, Object, Part, Range, Thing, Value,
 };
 

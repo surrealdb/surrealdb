@@ -1,5 +1,5 @@
 use super::key::Key;
-use crate::sql::id::Id;
+use crate::expr::id::Id;
 use quick_cache::Equivalent;
 use uuid::Uuid;
 

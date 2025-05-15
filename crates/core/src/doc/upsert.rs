@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;

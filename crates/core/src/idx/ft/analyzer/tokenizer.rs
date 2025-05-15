@@ -2,8 +2,8 @@ use crate::err;
 use crate::err::Error;
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
 use crate::idx::ft::offsets::{Offset, Position};
-use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
-use crate::sql::Value;
+use crate::expr::tokenizer::Tokenizer as SqlTokenizer;
+use crate::expr::Value;
 
 pub(in crate::idx) struct Tokens {
 	/// The input string
