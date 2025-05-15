@@ -7,7 +7,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::kvs::{Check, Key, Val};
 use crate::vs::VersionStamp;
-use anyhow::Result;
+use anyhow::{bail, ensure, Result};
 use foundationdb::options::DatabaseOption;
 use foundationdb::options::MutationType;
 use foundationdb::Database;
@@ -112,7 +112,7 @@ impl Datastore {
 					_fdbnet,
 				})
 			}
-			Err(e) => Err(Error::Ds(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
 		}
 	}
 
@@ -143,7 +143,7 @@ impl Datastore {
 				inner: Some(inner),
 				save_points: Default::default(),
 			})),
-			Err(e) => Err(Error::Tx(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Tx(e.to_string()))),
 		}
 	}
 }
@@ -196,7 +196,7 @@ impl super::api::Transaction for Transaction {
 		// Cancel this transaction
 		match self.inner.take() {
 			Some(inner) => inner.cancel().reset(),
-			None => return Err(fail!("Unable to cancel an already taken transaction")),
+			None => fail!("Unable to cancel an already taken transaction"),
 		};
 		// Continue
 		Ok(())
@@ -213,8 +213,8 @@ impl super::api::Transaction for Transaction {
 		self.done = true;
 		// Commit this transaction
 		match self.inner.take() {
-			Some(inner) => inner.commit().await?,
-			None => return Err(fail!("Unable to commit an already taken transaction")),
+			Some(inner) => inner.commit().await.map_err(Error::from)?,
+			None => fail!("Unable to commit an already taken transaction"),
 		};
 		// Continue
 		Ok(())
@@ -297,9 +297,7 @@ impl super::api::Transaction for Transaction {
 			inner.get(&key, self.snapshot()).await?.is_some()
 		};
 		// If the key exists we return an error
-		if key_exists {
-			return Err(Error::TxKeyAlreadyExists);
-		}
+		ensure!(!key_exists, Error::TxKeyAlreadyExists);
 		// Set the key if empty
 		inner.set(&key, &val);
 		// Confirm the save point
@@ -312,7 +310,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<(), Error> {
+	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
@@ -335,7 +333,7 @@ impl super::api::Transaction for Transaction {
 		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => inner.set(&key, &val),
 			(None, None) => inner.set(&key, &val),
-			_ => return Err(Error::TxConditionNotMet),
+			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Confirm the save point
 		if let Some(prep) = prep {
@@ -393,7 +391,7 @@ impl super::api::Transaction for Transaction {
 		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => inner.clear(&key),
 			(None, None) => inner.clear(&key),
-			_ => return Err(Error::TxConditionNotMet),
+			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Confirm the save point
 		if let Some(prep) = prep {

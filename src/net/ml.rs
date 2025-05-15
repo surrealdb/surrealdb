@@ -151,9 +151,16 @@ mod implementation {
 
 #[cfg(not(feature = "ml"))]
 mod implementation {
+	use axum::{body::Body, extract::Path, Extension};
+	use surrealdb_core::dbs::{capabilities::RouteTarget, Session};
+
+	use crate::net::{
+		error::{Error as NetError, ResponseError},
+		AppState,
+	};
 
 	/// This endpoint allows the user to import a model into the database.
-	async fn import(
+	pub async fn import(
 		Extension(state): Extension<AppState>,
 		Extension(_): Extension<Session>,
 		_: Body,
@@ -170,8 +177,7 @@ mod implementation {
 	}
 
 	/// This endpoint allows the user to export a model from the database.
-	#[cfg(not(feature = "ml"))]
-	async fn export(
+	pub async fn export(
 		Extension(state): Extension<AppState>,
 		Extension(_): Extension<Session>,
 		Path((_, _)): Path<(String, String)>,
