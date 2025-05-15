@@ -66,7 +66,7 @@ impl Model {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
-		use crate::sql::FlowResultExt;
+		use crate::sql::{value::CoerceError, FlowResultExt};
 
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
@@ -85,18 +85,20 @@ impl Model {
 			match &val.permissions {
 				Permission::Full => (),
 				Permission::None => {
-					return Err(ControlFlow::from(Error::FunctionPermissions {
+					return Err(ControlFlow::from(anyhow::Error::new(Error::FunctionPermissions {
 						name: self.name.clone(),
-					}))
+					})))
 				}
 				Permission::Specific(e) => {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
 					if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
-						return Err(ControlFlow::from(Error::FunctionPermissions {
-							name: self.name.clone(),
-						}));
+						return Err(ControlFlow::from(anyhow::Error::new(
+							Error::FunctionPermissions {
+								name: self.name.clone(),
+							},
+						)));
 					}
 				}
 			}
@@ -111,10 +113,10 @@ impl Model {
 			.await?;
 		// Check the minimum argument length
 		if args.len() != 1 {
-			return Err(ControlFlow::from(Error::InvalidArguments {
+			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
 				name: format!("ml::{}<{}>", self.name, self.version),
 				message: ARGUMENTS.into(),
-			}));
+			})));
 		}
 		// Take the first and only specified argument
 		match args.swap_remove(0) {
@@ -124,23 +126,24 @@ impl Model {
 				let mut args = v
 					.into_iter()
 					.map(|(k, v)| Ok((k, v.coerce_to::<f64>()? as f32)))
-					.collect::<Result<HashMap<String, f32>>>()
+					.collect::<std::result::Result<HashMap<String, f32>, CoerceError>>()
 					.map_err(|_| Error::InvalidArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),
 						message: ARGUMENTS.into(),
-					})?;
+					})
+					.map_err(anyhow::Error::new)?;
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						Error::ModelComputation(err.message.to_string())
+						anyhow::Error::new(Error::ModelComputation(err.message.to_string()))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.buffered_compute(&mut args).map_err(|err: SurrealError| {
-						Error::ModelComputation(err.message.to_string())
+						anyhow::Error::new(Error::ModelComputation(err.message.to_string()))
 					})
 				})
 				.await
@@ -152,24 +155,27 @@ impl Model {
 			// Perform raw compute
 			Value::Number(v) => {
 				// Compute the model function arguments
-				let args: f32 = v.try_into().map_err(|_| Error::InvalidArguments {
-					name: format!("ml::{}<{}>", self.name, self.version),
-					message: ARGUMENTS.into(),
-				})?;
+				let args: f32 = Value::Number(v)
+					.coerce_to::<f64>()
+					.map_err(|_| Error::InvalidArguments {
+						name: format!("ml::{}<{}>", self.name, self.version),
+						message: ARGUMENTS.into(),
+					})
+					.map_err(anyhow::Error::new)? as f32;
 				// Get the model file as bytes
-				let bytes = crate::obs::get(&path).await?;
+				let bytes = crate::obs::get(&path).await.map_err(ControlFlow::from)?;
 				// Convert the argument to a tensor
 				let tensor = mlNdarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						Error::ModelComputation(err.message.to_string())
+						anyhow::Error::new(Error::ModelComputation(err.message.to_string()))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						Error::ModelComputation(err.message.to_string())
+						anyhow::Error::new(Error::ModelComputation(err.message.to_string()))
 					})
 				})
 				.await
@@ -183,13 +189,13 @@ impl Model {
 				// Compute the model function arguments
 				let args = v
 					.into_iter()
-					.map(|x| x.coerce_to::<f64>().map(|x| x as f32).map_err(Error::from))
-					.collect::<Result<Vec<f32>>>()
+					.map(|x| x.coerce_to::<f64>().map(|x| x as f32))
+					.collect::<std::result::Result<Vec<f32>, _>>()
 					.map_err(|_| Error::InvalidArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),
 						message: ARGUMENTS.into(),
 					})
-					.map_err(ControlFlow::from)?;
+					.map_err(anyhow::Error::new)?;
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
 				// Convert the argument to a tensor
@@ -197,13 +203,13 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						Error::ModelComputation(err.message.to_string())
+						anyhow::Error::new(Error::ModelComputation(err.message.to_string()))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						Error::ModelComputation(err.message.to_string())
+						anyhow::Error::new(Error::ModelComputation(err.message.to_string()))
 					})
 				})
 				.await
@@ -213,10 +219,10 @@ impl Model {
 				Ok(outcome.into())
 			}
 			//
-			_ => Err(ControlFlow::from(Error::InvalidArguments {
+			_ => Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
 				name: format!("ml::{}<{}>", self.name, self.version),
 				message: ARGUMENTS.into(),
-			})),
+			}))),
 		}
 	}
 

@@ -3,7 +3,7 @@ use super::headers::Accept;
 use super::AppState;
 use crate::cnf::HTTP_MAX_IMPORT_BODY_SIZE;
 use crate::net::error::Error as NetError;
-use crate::net::output;
+use crate::net::output::{self, Output};
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Request;
 use axum::response::IntoResponse;
@@ -52,15 +52,15 @@ async fn handler(
 			match accept.as_deref() {
 				// Simple serialization
 				Some(Accept::ApplicationJson) => {
-					Ok(output::json(&output::simplify(res).map_err(ResponseError)?))
+					Ok(Output::json(&output::simplify(res).map_err(ResponseError)?))
 				}
 				Some(Accept::ApplicationCbor) => {
-					Ok(output::cbor(&output::simplify(res).map_err(ResponseError)?))
+					Ok(Output::cbor(&output::simplify(res).map_err(ResponseError)?))
 				}
 				// Return nothing
-				Some(Accept::ApplicationOctetStream) => Ok(output::none()),
+				Some(Accept::ApplicationOctetStream) => Ok(Output::None),
 				// Internal serialization
-				Some(Accept::Surrealdb) => Ok(output::full(&res)),
+				Some(Accept::Surrealdb) => Ok(Output::full(&res)),
 				// An incorrect content-type was requested
 				_ => Err(NetError::InvalidType.into()),
 			}

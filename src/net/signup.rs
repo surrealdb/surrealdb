@@ -1,5 +1,6 @@
 use super::error::ResponseError;
 use super::headers::Accept;
+use super::output::Output;
 use super::AppState;
 use crate::cnf::HTTP_MAX_SIGNIN_BODY_SIZE;
 use crate::net::error::Error as NetError;
@@ -53,7 +54,7 @@ async fn handler(
 	Extension(mut session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	body: Bytes,
-) -> Result<impl IntoResponse, ResponseError> {
+) -> Result<Output, ResponseError> {
 	// Get a database reference
 	let kvs = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
@@ -72,18 +73,18 @@ async fn handler(
 				Ok(v) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => {
-						Ok(output::json(&Success::new(v.token, v.refresh)))
+						Ok(Output::json(&Success::new(v.token, v.refresh)))
 					}
 					Some(Accept::ApplicationCbor) => {
-						Ok(output::cbor(&Success::new(v.token, v.refresh)))
+						Ok(Output::cbor(&Success::new(v.token, v.refresh)))
 					}
 					// Text serialization
 					// NOTE: Only the token is returned in a plain text response.
-					Some(Accept::TextPlain) => Ok(output::text(v.token.unwrap_or_default())),
+					Some(Accept::TextPlain) => Ok(Output::Text(v.token.unwrap_or_default())),
 					// Internal serialization
-					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v.token, v.refresh))),
+					Some(Accept::Surrealdb) => Ok(Output::full(&Success::new(v.token, v.refresh))),
 					// Return nothing
-					None => Ok(output::none()),
+					None => Ok(Output::None),
 					// An incorrect content-type was requested
 					_ => Err(NetError::InvalidType.into()),
 				},

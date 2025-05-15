@@ -75,11 +75,11 @@ async fn execute_and_return(
 	match db.execute(sql, session, Some(vars)).await {
 		Ok(res) => match accept {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
-			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+			Some(Accept::ApplicationJson) => Ok(Output::json(&output::simplify(res)?)),
+			Some(Accept::ApplicationCbor) => Ok(Output::cbor(&output::simplify(res)?)),
 			// Internal serialization
 			// TODO: remove format in 2.0.0
-			Some(Accept::Surrealdb) => Ok(output::full(&res)),
+			Some(Accept::Surrealdb) => Ok(Output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(anyhow::Error::new(NetError::InvalidType)),
 		},

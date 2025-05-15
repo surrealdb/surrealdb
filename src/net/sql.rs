@@ -1,5 +1,6 @@
 use super::error::ResponseError;
 use super::headers::Accept;
+use super::output::Output;
 use super::AppState;
 use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
 use crate::net::error::Error as NetError;
@@ -39,7 +40,7 @@ async fn post_handler(
 	output: Option<TypedHeader<Accept>>,
 	params: Query<Params>,
 	sql: Bytes,
-) -> Result<impl IntoResponse, ResponseError> {
+) -> Result<Output, ResponseError> {
 	// Get a database reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
@@ -58,13 +59,13 @@ async fn post_handler(
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => {
-				Ok(output::json(&output::simplify(res).map_err(ResponseError)?))
+				Ok(Output::json(&output::simplify(res).map_err(ResponseError)?))
 			}
 			Some(Accept::ApplicationCbor) => {
-				Ok(output::cbor(&output::simplify(res).map_err(ResponseError)?))
+				Ok(Output::cbor(&output::simplify(res).map_err(ResponseError)?))
 			}
 			// Internal serialization
-			Some(Accept::Surrealdb) => Ok(output::full(&res)),
+			Some(Accept::Surrealdb) => Ok(Output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(NetError::InvalidType.into()),
 		},
