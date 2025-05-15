@@ -16,10 +16,13 @@ use surrealdb_core::sql::{
 use super::Raw;
 
 /// A trait for converting inputs into SQL statements
-pub trait IntoQuery {
+pub trait IntoQuery: into_query::Sealed {
+}
+
+mod into_query {
+pub trait Sealed {
 	/// Converts an input into SQL statements
-	#[deprecated(since = "2.3.0")]
-	fn into_query(self) -> Result<Vec<Statement>>;
+	fn into_query(self) -> super::Result<Vec<super::Statement>>;
 
 	/// Not public API
 	#[doc(hidden)]
@@ -27,152 +30,178 @@ pub trait IntoQuery {
 		None
 	}
 }
+}
 
-impl IntoQuery for sql::Query {
+impl IntoQuery for sql::Query {}
+impl into_query::Sealed for sql::Query {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(self.0 .0)
 	}
 }
 
-impl IntoQuery for Statements {
+impl IntoQuery for Statements {}
+impl into_query::Sealed for Statements {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(self.0)
 	}
 }
 
-impl IntoQuery for Vec<Statement> {
+impl IntoQuery for Vec<Statement> {}
+impl into_query::Sealed for Vec<Statement> {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(self)
 	}
 }
 
-impl IntoQuery for Statement {
+impl IntoQuery for Statement {}
+impl into_query::Sealed for Statement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![self])
 	}
 }
 
-impl IntoQuery for UseStatement {
+impl IntoQuery for UseStatement {}
+impl into_query::Sealed for UseStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Use(self)])
 	}
 }
 
-impl IntoQuery for SetStatement {
+impl IntoQuery for SetStatement {}
+impl into_query::Sealed for SetStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Set(self)])
 	}
 }
 
-impl IntoQuery for InfoStatement {
+impl IntoQuery for InfoStatement {}
+impl into_query::Sealed for InfoStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Info(self)])
 	}
 }
 
-impl IntoQuery for LiveStatement {
+impl IntoQuery for LiveStatement {}
+impl into_query::Sealed for LiveStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Live(self)])
 	}
 }
 
-impl IntoQuery for KillStatement {
+impl IntoQuery for KillStatement {}
+impl into_query::Sealed for KillStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Kill(self)])
 	}
 }
 
-impl IntoQuery for BeginStatement {
+impl IntoQuery for BeginStatement {}
+impl into_query::Sealed for BeginStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Begin(self)])
 	}
 }
 
-impl IntoQuery for CancelStatement {
+impl IntoQuery for CancelStatement {}
+impl into_query::Sealed for CancelStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Cancel(self)])
 	}
 }
 
-impl IntoQuery for CommitStatement {
+impl IntoQuery for CommitStatement {}
+impl into_query::Sealed for CommitStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Commit(self)])
 	}
 }
 
-impl IntoQuery for OutputStatement {
+impl IntoQuery for OutputStatement {}
+impl into_query::Sealed for OutputStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Output(self)])
 	}
 }
 
-impl IntoQuery for IfelseStatement {
+impl IntoQuery for IfelseStatement {}
+impl into_query::Sealed for IfelseStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Ifelse(self)])
 	}
 }
 
-impl IntoQuery for SelectStatement {
+impl IntoQuery for SelectStatement {}
+impl into_query::Sealed for SelectStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Select(self)])
 	}
 }
 
-impl IntoQuery for CreateStatement {
+impl IntoQuery for CreateStatement {}
+impl into_query::Sealed for CreateStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Create(self)])
 	}
 }
 
-impl IntoQuery for UpdateStatement {
+impl IntoQuery for UpdateStatement {}
+impl into_query::Sealed for UpdateStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Update(self)])
 	}
 }
 
-impl IntoQuery for RelateStatement {
+impl IntoQuery for RelateStatement {}
+impl into_query::Sealed for RelateStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Relate(self)])
 	}
 }
 
-impl IntoQuery for DeleteStatement {
+impl IntoQuery for DeleteStatement {}
+impl into_query::Sealed for DeleteStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Delete(self)])
 	}
 }
 
-impl IntoQuery for InsertStatement {
+impl IntoQuery for InsertStatement {}
+impl into_query::Sealed for InsertStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Insert(self)])
 	}
 }
 
-impl IntoQuery for DefineStatement {
+impl IntoQuery for DefineStatement {}
+impl into_query::Sealed for DefineStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Define(self)])
 	}
 }
 
-impl IntoQuery for AlterStatement {
+impl IntoQuery for AlterStatement {}
+impl into_query::Sealed for AlterStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Alter(self)])
 	}
 }
 
-impl IntoQuery for RemoveStatement {
+impl IntoQuery for RemoveStatement {}
+impl into_query::Sealed for RemoveStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Remove(self)])
 	}
 }
 
-impl IntoQuery for OptionStatement {
+impl IntoQuery for OptionStatement {}
+impl into_query::Sealed for OptionStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(vec![Statement::Option(self)])
 	}
 }
 
-impl IntoQuery for &str {
+impl IntoQuery for &str {}
+impl into_query::Sealed for &str {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(Vec::new())
 	}
@@ -182,7 +211,8 @@ impl IntoQuery for &str {
 	}
 }
 
-impl IntoQuery for &String {
+impl IntoQuery for &String {}
+impl into_query::Sealed for &String {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(Vec::new())
 	}
@@ -192,7 +222,8 @@ impl IntoQuery for &String {
 	}
 }
 
-impl IntoQuery for String {
+impl IntoQuery for String {}
+impl into_query::Sealed for String {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Ok(Vec::new())
 	}
@@ -202,7 +233,8 @@ impl IntoQuery for String {
 	}
 }
 
-impl IntoQuery for Raw {
+impl IntoQuery for Raw {}
+impl into_query::Sealed for Raw {
 	fn into_query(self) -> Result<Vec<Statement>> {
 		Err(Error::RawQuery(self.0).into())
 	}
