@@ -30,6 +30,8 @@ pub(crate) mod into_query {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for sql::Query {}
 impl into_query::Sealed for sql::Query {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -37,6 +39,8 @@ impl into_query::Sealed for sql::Query {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for Statements {}
 impl into_query::Sealed for Statements {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -44,6 +48,8 @@ impl into_query::Sealed for Statements {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for Vec<Statement> {}
 impl into_query::Sealed for Vec<Statement> {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -51,6 +57,8 @@ impl into_query::Sealed for Vec<Statement> {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for Statement {}
 impl into_query::Sealed for Statement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -58,6 +66,8 @@ impl into_query::Sealed for Statement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for UseStatement {}
 impl into_query::Sealed for UseStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -65,6 +75,8 @@ impl into_query::Sealed for UseStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for SetStatement {}
 impl into_query::Sealed for SetStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -72,6 +84,8 @@ impl into_query::Sealed for SetStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for InfoStatement {}
 impl into_query::Sealed for InfoStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -79,6 +93,8 @@ impl into_query::Sealed for InfoStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for LiveStatement {}
 impl into_query::Sealed for LiveStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -86,6 +102,8 @@ impl into_query::Sealed for LiveStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for KillStatement {}
 impl into_query::Sealed for KillStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -93,6 +111,8 @@ impl into_query::Sealed for KillStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for BeginStatement {}
 impl into_query::Sealed for BeginStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -100,6 +120,8 @@ impl into_query::Sealed for BeginStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for CancelStatement {}
 impl into_query::Sealed for CancelStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -107,6 +129,8 @@ impl into_query::Sealed for CancelStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for CommitStatement {}
 impl into_query::Sealed for CommitStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -114,6 +138,8 @@ impl into_query::Sealed for CommitStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for OutputStatement {}
 impl into_query::Sealed for OutputStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -121,6 +147,8 @@ impl into_query::Sealed for OutputStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for IfelseStatement {}
 impl into_query::Sealed for IfelseStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -128,6 +156,8 @@ impl into_query::Sealed for IfelseStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for SelectStatement {}
 impl into_query::Sealed for SelectStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -135,6 +165,8 @@ impl into_query::Sealed for SelectStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for CreateStatement {}
 impl into_query::Sealed for CreateStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -142,6 +174,8 @@ impl into_query::Sealed for CreateStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for UpdateStatement {}
 impl into_query::Sealed for UpdateStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -149,6 +183,8 @@ impl into_query::Sealed for UpdateStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for RelateStatement {}
 impl into_query::Sealed for RelateStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -156,6 +192,8 @@ impl into_query::Sealed for RelateStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for DeleteStatement {}
 impl into_query::Sealed for DeleteStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -163,6 +201,8 @@ impl into_query::Sealed for DeleteStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for InsertStatement {}
 impl into_query::Sealed for InsertStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -170,6 +210,8 @@ impl into_query::Sealed for InsertStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for DefineStatement {}
 impl into_query::Sealed for DefineStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -177,6 +219,8 @@ impl into_query::Sealed for DefineStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for AlterStatement {}
 impl into_query::Sealed for AlterStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -184,6 +228,8 @@ impl into_query::Sealed for AlterStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for RemoveStatement {}
 impl into_query::Sealed for RemoveStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
@@ -191,6 +237,8 @@ impl into_query::Sealed for RemoveStatement {
 	}
 }
 
+#[doc(hidden)]
+/// Internal API
 impl IntoQuery for OptionStatement {}
 impl into_query::Sealed for OptionStatement {
 	fn into_query(self) -> Result<Vec<Statement>> {
