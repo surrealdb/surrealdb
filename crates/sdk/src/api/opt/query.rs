@@ -16,20 +16,19 @@ use surrealdb_core::sql::{
 use super::Raw;
 
 /// A trait for converting inputs into SQL statements
-pub trait IntoQuery: into_query::Sealed {
-}
+pub trait IntoQuery: into_query::Sealed {}
 
 mod into_query {
-pub trait Sealed {
-	/// Converts an input into SQL statements
-	fn into_query(self) -> super::Result<Vec<super::Statement>>;
+	pub trait Sealed {
+		/// Converts an input into SQL statements
+		fn into_query(self) -> super::Result<Vec<super::Statement>>;
 
-	/// Not public API
-	#[doc(hidden)]
-	fn as_str(&self) -> Option<&str> {
-		None
+		/// Not public API
+		#[doc(hidden)]
+		fn as_str(&self) -> Option<&str> {
+			None
+		}
 	}
-}
 }
 
 impl IntoQuery for sql::Query {}
@@ -241,22 +240,29 @@ impl into_query::Sealed for Raw {
 }
 
 /// Represents a way to take a single query result from a list of responses
-pub trait QueryResult<Response>
+pub trait QueryResult<Response>: query_result::Sealed<Response>
 where
 	Response: DeserializeOwned,
 {
-	/// Extracts and deserializes a query result from a query response
-	#[deprecated(since = "2.3.0")]
-	fn query_result(self, response: &mut QueryResponse) -> Result<Response>;
+}
 
-	/// Extracts the statistics from a query response
-	#[deprecated(since = "2.3.0")]
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
-		response.results.get(&0).map(|x| x.0)
+mod query_result {
+	pub trait Sealed<Response>
+	where
+		Response: super::DeserializeOwned,
+	{
+		/// Extracts and deserializes a query result from a query response
+		fn query_result(self, response: &mut super::QueryResponse) -> super::Result<Response>;
+
+		/// Extracts the statistics from a query response
+		fn stats(&self, response: &super::QueryResponse) -> Option<super::Stats> {
+			response.results.get(&0).map(|x| x.0)
+		}
 	}
 }
 
-impl QueryResult<Value> for usize {
+impl QueryResult<Value> for usize {}
+impl query_result::Sealed<Value> for usize {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		match response.results.swap_remove(&self) {
 			Some((_, result)) => Ok(Value::from_inner(result?)),
@@ -269,7 +275,8 @@ impl QueryResult<Value> for usize {
 	}
 }
 
-impl<T> QueryResult<Option<T>> for usize
+impl<T> QueryResult<Option<T>> for usize where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Option<T>> for usize
 where
 	T: DeserializeOwned,
 {
@@ -314,7 +321,8 @@ where
 	}
 }
 
-impl QueryResult<Value> for (usize, &str) {
+impl QueryResult<Value> for (usize, &str) {}
+impl query_result::Sealed<Value> for (usize, &str) {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		let (index, key) = self;
 		let value = match response.results.get_mut(&index) {
@@ -344,7 +352,8 @@ impl QueryResult<Value> for (usize, &str) {
 	}
 }
 
-impl<T> QueryResult<Option<T>> for (usize, &str)
+impl<T> QueryResult<Option<T>> for (usize, &str) where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Option<T>> for (usize, &str)
 where
 	T: DeserializeOwned,
 {
@@ -404,7 +413,8 @@ where
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for usize
+impl<T> QueryResult<Vec<T>> for usize where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Vec<T>> for usize
 where
 	T: DeserializeOwned,
 {
@@ -426,7 +436,8 @@ where
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for (usize, &str)
+impl<T> QueryResult<Vec<T>> for (usize, &str) where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Vec<T>> for (usize, &str)
 where
 	T: DeserializeOwned,
 {
@@ -470,13 +481,15 @@ where
 	}
 }
 
-impl QueryResult<Value> for &str {
+impl QueryResult<Value> for &str {}
+impl query_result::Sealed<Value> for &str {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		(0, self).query_result(response)
 	}
 }
 
-impl<T> QueryResult<Option<T>> for &str
+impl<T> QueryResult<Option<T>> for &str where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Option<T>> for &str
 where
 	T: DeserializeOwned,
 {
@@ -485,7 +498,8 @@ where
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for &str
+impl<T> QueryResult<Vec<T>> for &str where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Vec<T>> for &str
 where
 	T: DeserializeOwned,
 {
