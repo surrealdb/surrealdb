@@ -52,9 +52,9 @@ impl Endpoint {
 }
 
 /// A trait for converting inputs to a server address object
-pub trait IntoEndpoint<Scheme>: private::Sealed<Scheme> {}
+pub trait IntoEndpoint<Scheme>: into_endpoint::Sealed<Scheme> {}
 
-pub(crate) mod private {
+pub(crate) mod into_endpoint {
 	pub trait Sealed<Scheme> {
 		/// The client implied by this scheme and address combination
 		type Client: super::Connection;

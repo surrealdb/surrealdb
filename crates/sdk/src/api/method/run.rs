@@ -88,10 +88,10 @@ where
 }
 
 /// Converts a function into name and version parts
-pub trait IntoFn: private::Sealed {}
+pub trait IntoFn: into_fn::Sealed {}
 
 impl IntoFn for String {}
-impl private::Sealed for String {
+impl into_fn::Sealed for String {
 	fn into_fn(self) -> Result<(String, Option<String>)> {
 		match self.split_once('<') {
 			Some((name, rest)) => match rest.strip_suffix('>') {
@@ -108,7 +108,7 @@ impl private::Sealed for String {
 }
 
 impl IntoFn for &str {}
-impl private::Sealed for &str {
+impl into_fn::Sealed for &str {
 	fn into_fn(self) -> Result<(String, Option<String>)> {
 		match self.split_once('<') {
 			Some((name, rest)) => match rest.strip_suffix('>') {
@@ -125,13 +125,13 @@ impl private::Sealed for &str {
 }
 
 impl IntoFn for &String {}
-impl private::Sealed for &String {
+impl into_fn::Sealed for &String {
 	fn into_fn(self) -> Result<(String, Option<String>)> {
 		self.as_str().into_fn()
 	}
 }
 
-mod private {
+mod into_fn {
 	pub trait Sealed {
 		/// Handles the conversion of the function string
 		fn into_fn(self) -> super::Result<(String, Option<String>)>;

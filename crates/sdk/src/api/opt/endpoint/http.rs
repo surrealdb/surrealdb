@@ -2,7 +2,7 @@ use crate::api::engine::remote::http::Client;
 use crate::api::engine::remote::http::Http;
 use crate::api::engine::remote::http::Https;
 use crate::api::err::Error;
-use crate::api::opt::endpoint::private;
+use crate::api::opt::endpoint::into_endpoint;
 use crate::api::opt::IntoEndpoint;
 use crate::api::Endpoint;
 use crate::api::Result;
@@ -14,7 +14,7 @@ macro_rules! endpoints {
 	($($name:ty),*) => {
 		$(
 			impl IntoEndpoint<Http> for $name {}
-			impl private::Sealed<Http> for $name {
+			impl into_endpoint::Sealed<Http> for $name {
 				type Client = Client;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
@@ -24,18 +24,18 @@ macro_rules! endpoints {
 			}
 
 			impl IntoEndpoint<Http> for ($name, Config) {}
-			impl private::Sealed<Http> for ($name, Config) {
+			impl into_endpoint::Sealed<Http> for ($name, Config) {
 				type Client = Client;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let mut endpoint = private::Sealed::<Http>::into_endpoint(self.0)?;
+					let mut endpoint = into_endpoint::Sealed::<Http>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
 				}
 			}
 
 			impl IntoEndpoint<Https> for $name {}
-			impl private::Sealed<Https> for $name {
+			impl into_endpoint::Sealed<Https> for $name {
 				type Client = Client;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
@@ -45,11 +45,11 @@ macro_rules! endpoints {
 			}
 
 			impl IntoEndpoint<Https> for ($name, Config) {}
-			impl private::Sealed<Https> for ($name, Config) {
+			impl into_endpoint::Sealed<Https> for ($name, Config) {
 				type Client = Client;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let mut endpoint = private::Sealed::<Https>::into_endpoint(self.0)?;
+					let mut endpoint = into_endpoint::Sealed::<Https>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
 				}

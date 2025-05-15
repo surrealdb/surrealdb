@@ -11,10 +11,10 @@ pub enum ExportDestination {
 }
 
 /// A trait for converting inputs into database export locations
-pub trait IntoExportDestination<R>: private::Sealed<R> {}
+pub trait IntoExportDestination<R>: into_export_destination::Sealed<R> {}
 
 impl<T> IntoExportDestination<PathBuf> for T where T: AsRef<Path> {}
-impl<T> private::Sealed<PathBuf> for T
+impl<T> into_export_destination::Sealed<PathBuf> for T
 where
 	T: AsRef<Path>,
 {
@@ -24,11 +24,11 @@ where
 }
 
 impl IntoExportDestination<()> for () {}
-impl private::Sealed<()> for () {
+impl into_export_destination::Sealed<()> for () {
 	fn into_export_destination(self) {}
 }
 
-mod private {
+mod into_export_destination {
 	pub trait Sealed<R> {
 		/// Converts an input into a database export location
 		fn into_export_destination(self) -> R;

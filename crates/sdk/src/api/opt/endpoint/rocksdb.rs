@@ -1,6 +1,6 @@
 use crate::api::engine::local::Db;
 use crate::api::engine::local::RocksDb;
-use crate::api::opt::endpoint::private;
+use crate::api::opt::endpoint::into_endpoint;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
@@ -13,7 +13,7 @@ macro_rules! endpoints {
 	($($name:ty),*) => {
 		$(
 			impl IntoEndpoint<RocksDb> for $name {}
-			impl private::Sealed<RocksDb> for $name {
+			impl into_endpoint::Sealed<RocksDb> for $name {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
@@ -27,11 +27,11 @@ macro_rules! endpoints {
 			}
 
 			impl IntoEndpoint<RocksDb> for ($name, Config) {}
-			impl private::Sealed<RocksDb> for ($name, Config) {
+			impl into_endpoint::Sealed<RocksDb> for ($name, Config) {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let mut endpoint = private::Sealed::<RocksDb>::into_endpoint(self.0)?;
+					let mut endpoint = into_endpoint::Sealed::<RocksDb>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
 				}
