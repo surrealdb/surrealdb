@@ -1,14 +1,8 @@
 use crate::{
-	cnf::IDIOM_RECURSION_LIMIT,
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	exe::try_join_all_buffered,
-	sql::{
+	cnf::IDIOM_RECURSION_LIMIT, ctx::Context, dbs::Options, doc::CursorDoc, err::Error, exe::try_join_all_buffered, expr, sql::{
 		fmt::Fmt, strand::no_nul_bytes, FlowResultExt as _, Graph, Ident, Idiom, Number, Thing,
 		Value,
-	},
+	}
 };
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -112,6 +106,55 @@ impl From<&str> for Part {
 		match v.parse::<isize>() {
 			Ok(v) => Self::from(v),
 			_ => Self::from(v.to_owned()),
+		}
+	}
+}
+
+impl From<Part> for crate::expr::Part {
+	fn from(v: Part) -> Self {
+		match v {
+			Part::All => crate::expr::Part::All,
+			Part::Flatten => crate::expr::Part::Flatten,
+			Part::Last => crate::expr::Part::Last,
+			Part::First => crate::expr::Part::First,
+			Part::Field(ident) => crate::expr::Part::Field(ident.into()),
+			Part::Index(number) => crate::expr::Part::Index(number.into()),
+			Part::Where(value) => crate::expr::Part::Where(value.into()),
+			Part::Graph(graph) => crate::expr::Part::Graph(graph.into()),
+			Part::Value(value) => crate::expr::Part::Value(value.into()),
+			Part::Start(value) => crate::expr::Part::Start(value.into()),
+			Part::Method(method, values) => {
+				crate::expr::Part::Method(method, values.into_iter().map(Into::into).collect())
+			}
+			Part::Destructure(parts) => {
+				crate::expr::Part::Destructure(
+					parts.into_iter().map(Into::into).collect(),
+				)
+			}
+			Part::Optional => crate::expr::Part::Optional,
+			Part::Recurse(recurse, idiom, instructions) => {
+				let idiom = idiom.map(|idiom| idiom.into());
+				let instructions = instructions.map(|instruction| {
+					match instruction {
+						RecurseInstruction::Path { inclusive } => {
+							crate::expr::part::RecurseInstruction::Path { inclusive }
+						}
+						RecurseInstruction::Collect { inclusive } => {
+							crate::expr::part::RecurseInstruction::Collect { inclusive }
+						}
+						RecurseInstruction::Shortest { expects, inclusive } => {
+							crate::expr::part::RecurseInstruction::Shortest {
+								expects: expects.into(),
+								inclusive,
+							}
+						}
+					}
+				});
+				crate::expr::Part::Recurse(recurse, idiom, instructions)
+			}
+			Part::Doc => crate::expr::Part::Doc,
+			Part::RepeatRecurse => crate::expr::Part::RepeatRecurse,
+			
 		}
 	}
 }

@@ -178,6 +178,20 @@ impl From<Thing> for Id {
 	}
 }
 
+impl From<Id> for crate::expr::Id {
+	fn from(v: Id) -> Self {
+		match v {
+			Id::Number(v) => crate::expr::Id::Number(v),
+			Id::String(v) => crate::expr::Id::String(v),
+			Id::Uuid(v) => crate::expr::Id::Uuid(v.into()),
+			Id::Array(v) => crate::expr::Id::Array(v.into()),
+			Id::Object(v) => crate::expr::Id::Object(v.into()),
+			Id::Generate(v) => crate::expr::Id::Generate(v.into()),
+			Id::Range(v) => crate::expr::Id::Range(*v.into()),
+		}
+	}
+}
+
 impl Id {
 	/// Generate a new random ID
 	pub fn rand() -> Self {

@@ -5,7 +5,7 @@ use crate::{
 	ctx::Context,
 	dbs::Options,
 	err::Error,
-	sql::{File, Object, Strand, Value},
+	expr::{File, Object, Strand, Value},
 };
 
 use super::{args::Optional, CursorDoc};

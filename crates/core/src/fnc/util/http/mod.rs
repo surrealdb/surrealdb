@@ -29,7 +29,7 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 				Ok(v) if v.starts_with("application/json") => {
 					let txt = res.text().await?;
 					let val = syn::json(&txt)?;
-					Ok(val)
+					Ok(val.into())
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
 					let bytes = res.bytes().await?;

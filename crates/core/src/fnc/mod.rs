@@ -1098,7 +1098,7 @@ mod tests {
 	use crate::dbs::Capabilities;
 	use crate::{
 		dbs::capabilities::ExperimentalTarget,
-		sql::{statements::OutputStatement, Function, Query, Statement, Value},
+		expr::{statements::OutputStatement, Function, Query, Statement, Value},
 	};
 
 	#[tokio::test]

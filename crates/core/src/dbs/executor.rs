@@ -13,9 +13,10 @@ use crate::kvs::TransactionType;
 use crate::kvs::{LockType, Transaction};
 use crate::expr::paths::DB;
 use crate::expr::paths::NS;
-use crate::expr::query::Query;
+use crate::sql::Query;
 use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::value::Value;
+use crate::sql::value::Value as SqlValue;
 use crate::expr::Base;
 use crate::expr::ControlFlow;
 use crate::expr::FlowResult;
@@ -165,7 +166,7 @@ impl Executor {
 	async fn execute_bare_statement(
 		&mut self,
 		kvs: &Datastore,
-		stmt: Statement,
+		plan: LogicalPlan,
 	) -> Result<Value, Error> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
@@ -178,10 +179,7 @@ impl Executor {
 			}
 		}
 
-		let planner = SqlToLogical::new();
-		let logical_plan = planner.statement_to_logical_plan(stmt.clone())?;
-
-		match logical_plan {
+		match plan {
 			// These statements don't need a transaction.
 			LogicalPlan::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 			plan => {
@@ -347,10 +345,10 @@ impl Executor {
 			};
 
 			let planner = SqlToLogical::new();
-			let logical_plan = planner.statement_to_logical_plan(stmt)?;
+			let plan = planner.statement_to_logical_plan(stmt)?;
 
 			let before = Instant::now();
-			let value = match logical_plan {
+			let result: Result<Value, Error> = match plan {
 				LogicalPlan::Begin(_) => {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
@@ -454,9 +452,9 @@ impl Executor {
 				},
 				LogicalPlan::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 				stmt => {
-					skip_remaining = matches!(stmt, Statement::Output(_));
+					skip_remaining = matches!(stmt, LogicalPlan::Output(_));
 
-					let r = match self.execute_transaction_statement(txn.clone(), stmt).await {
+					let result = match self.execute_transaction_statement(txn.clone(), stmt).await {
 						Ok(x) => Ok(x),
 						Err(ControlFlow::Return(value)) => {
 							skip_remaining = true;
@@ -508,13 +506,13 @@ impl Executor {
 						self.results.truncate(start_results)
 					}
 
-					r
+					result
 				}
 			};
 
 			self.results.push(Response {
 				time: before.elapsed(),
-				result: value,
+				result,
 				query_type,
 			});
 		}
@@ -577,10 +575,11 @@ impl Executor {
 			let query_type: QueryType = (&stmt).into();
 
 			let planner = SqlToLogical::new();
-			let logical_plan = planner.statement_to_logical_plan(stmt)?;
+			let plan = planner.statement_to_logical_plan(stmt)?;
+	
 
-			match logical_plan {
-				LogicalPlan::Option(option_plan) => this.execute_option_statement(option_plan)?,
+			match plan {
+				LogicalPlan::Option(stmt) => this.execute_option_statement(stmt)?,
 				// handle option here because it doesn't produce a result.
 				LogicalPlan::Begin(_) => {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
@@ -593,14 +592,14 @@ impl Executor {
 						return Ok(this.results);
 					}
 				}
-				logical_plan => {
+				plan => {
 					
 
 					let now = Instant::now();
-					let result = this.execute_bare_statement(kvs, stmt).await;
+					let result = this.execute_bare_statement(kvs, plan).await;
 					this.results.push(Response {
 						time: now.elapsed(),
-						result,
+						result: result.into(),
 						query_type,
 					});
 				}

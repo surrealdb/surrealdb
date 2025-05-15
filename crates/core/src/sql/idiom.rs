@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
@@ -97,6 +98,12 @@ impl From<&[Part]> for Idiom {
 impl From<Part> for Idiom {
 	fn from(v: Part) -> Self {
 		Self(vec![v])
+	}
+}
+
+impl From<Idiom> for crate::expr::Idiom {
+	fn from(v: Idiom) -> Self {
+		crate::expr::Idiom(v.0.into_iter().map(Into::into).collect())
 	}
 }
 

@@ -82,7 +82,7 @@ mod tests {
 
 	use crate::{
 		fnc::args::Optional,
-		sql::{Bytes, Value},
+		expr::{Bytes, Value},
 	};
 
 	#[test]

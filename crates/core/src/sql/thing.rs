@@ -265,6 +265,15 @@ impl TryFrom<&str> for Thing {
 	}
 }
 
+impl From<Thing> for crate::expr::Thing {
+	fn from(v: Thing) -> Self {
+		crate::expr::Thing {
+			tb: v.tb,
+			id: v.id.into(),
+		}
+	}
+}
+
 impl Thing {
 	/// Convert the Thing to a raw String
 	pub fn to_raw(&self) -> String {

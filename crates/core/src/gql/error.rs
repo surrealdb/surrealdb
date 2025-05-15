@@ -3,7 +3,7 @@ use std::{backtrace, fmt::Debug};
 use async_graphql::{InputType, InputValueError};
 use thiserror::Error;
 
-use crate::sql::Kind;
+use crate::expr::Kind;
 
 #[derive(Error, Debug)]
 pub enum GqlError {

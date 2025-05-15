@@ -11,7 +11,7 @@ use crate::{
 	ctx::Context,
 	dbs::{Attach, Options},
 	doc::CursorDoc,
-	sql::FlowResultExt as _,
+	expr::FlowResultExt as _,
 };
 
 mod classes;

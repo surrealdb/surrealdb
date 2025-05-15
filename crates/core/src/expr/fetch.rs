@@ -113,7 +113,7 @@ impl Fetch {
 							Value::Param(v) => {
 								strand_or_idiom(v.compute(stk, ctx, opt, None).await?)?
 							}
-							Value::Strand(s) => syn::idiom(s.as_str())?,
+							Value::Strand(s) => syn::idiom(s.as_str())?.into(),
 							Value::Idiom(i) => i,
 							v => {
 								return Err(Error::InvalidFetch {

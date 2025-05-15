@@ -783,7 +783,7 @@ mod tests {
 	use super::{at, first, join, last, slice};
 	use crate::{
 		fnc::args::Optional,
-		sql::{Array, Value},
+		expr::{Array, Value},
 	};
 
 	#[test]

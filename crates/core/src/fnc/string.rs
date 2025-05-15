@@ -519,7 +519,7 @@ mod tests {
 	use crate::{
 		err::Error,
 		fnc::args::{Cast, Optional},
-		sql::Value,
+		expr::Value,
 	};
 
 	#[test]

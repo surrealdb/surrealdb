@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	err::Error,
-	sql::{statements::info::InfoStructure, Object, Value},
+	expr::{statements::info::InfoStructure, Object, Value},
 };
 
 #[revisioned(revision = 1)]

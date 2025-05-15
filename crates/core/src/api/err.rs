@@ -1,7 +1,7 @@
 use http::StatusCode;
 use thiserror::Error;
 
-use crate::sql::Bytesize;
+use crate::expr::Bytesize;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]

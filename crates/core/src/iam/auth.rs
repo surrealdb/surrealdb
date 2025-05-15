@@ -1,4 +1,4 @@
-use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
+use crate::expr::statements::{DefineAccessStatement, DefineUserStatement};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 

@@ -16,7 +16,7 @@ use crate::{
 	dbs::{Options, Session},
 	err::Error,
 	kvs::{Datastore, Transaction},
-	sql::{
+	expr::{
 		statements::define::{config::api::ApiConfig, ApiDefinition},
 		FlowResultExt as _, Object, Value,
 	},

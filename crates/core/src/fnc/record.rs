@@ -46,8 +46,8 @@ pub async fn refs(
 
 	// Process the inputs and make sure they are valid
 	let ft = ft.map(Table::from);
-	let ff = match ff {
-		Some(ff) => Some(crate::syn::idiom(&ff)?),
+	let ff: Option<Idiom> = match ff {
+		Some(ff) => Some(ff.into()),
 		None => None,
 	};
 

@@ -6,7 +6,7 @@ use http::{
 use crate::{
 	err::Error,
 	rpc::format::Format,
-	sql::{Object, Value},
+	expr::{Object, Value},
 };
 
 use super::{err::ApiError, invocation::ApiInvocation};

@@ -2,7 +2,7 @@ use http::HeaderMap;
 
 use crate::{
 	err::Error,
-	sql::{Bytesize, Duration},
+	expr::{Bytesize, Duration},
 };
 
 use super::middleware::{invoke::InvokeMiddleware, CollectedMiddleware};

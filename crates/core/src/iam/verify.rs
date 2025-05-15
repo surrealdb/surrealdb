@@ -1,12 +1,13 @@
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::expr::Thing;
 use crate::iam::access::{authenticate_generic, authenticate_record};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
 use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::access_type::{AccessType, Jwt, JwtAccessVerify};
-use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
+use crate::expr::access_type::{AccessType, Jwt, JwtAccessVerify};
+use crate::expr::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
@@ -166,7 +167,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let mut rid = syn::thing(id)?;
+			let mut rid: Thing = syn::thing(id)?.into();
 			// Get the database access method
 			let de = tx.get_db_access(ns, db, ac).await?;
 			// Ensure that the transaction is cancelled
@@ -823,7 +824,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::{
+		use crate::expr::{
 			statements::{define::DefineStatement, DefineUserStatement},
 			user::UserDuration,
 			Base, Statement,

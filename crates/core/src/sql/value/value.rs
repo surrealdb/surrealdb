@@ -1437,6 +1437,84 @@ impl FromIterator<(String, Value)> for Value {
 	}
 }
 
+impl From<Value> for crate::expr::Value {
+	fn from(v: Value) -> Self {
+		match v {
+			Value::None => crate::expr::Value::None,
+			Value::Null => crate::expr::Value::Null,
+			Value::Bool(v) => crate::expr::Value::Bool(v),
+			Value::Number(v) => crate::expr::Value::Number(v.into()),
+			Value::Strand(v) => crate::expr::Value::Strand(v.into()),
+			Value::Duration(v) => crate::expr::Value::Duration(v.into()),
+			Value::Datetime(v) => crate::expr::Value::Datetime(v.into()),
+			Value::Uuid(v) => crate::expr::Value::Uuid(v.into()),
+			Value::Array(v) => crate::expr::Value::Array(v.into()),
+			Value::Object(v) => crate::expr::Value::Object(v.into()),
+			Value::Geometry(v) => crate::expr::Value::Geometry(v.into()),
+			Value::Bytes(v) => crate::expr::Value::Bytes(v.into()),
+			Value::Thing(v) => crate::expr::Value::Thing(v.into()),
+			Value::Param(v) => crate::expr::Value::Param(v.into()),
+			Value::Idiom(v) => crate::expr::Value::Idiom(v.into()),
+			Value::Table(v) => crate::expr::Value::Table(v.into()),
+			Value::Mock(v) => crate::expr::Value::Mock(v.into()),
+			Value::Regex(v) => crate::expr::Value::Regex(v.into()),
+			Value::Cast(v) => crate::expr::Value::Cast(v.into()),
+			Value::Block(v) => crate::expr::Value::Block(v.into()),
+			Value::Range(v) => crate::expr::Value::Range(v.into()),
+			Value::Edges(v) => crate::expr::Value::Edges(v.into()),
+			Value::Future(v) => crate::expr::Value::Future(v.into()),
+			Value::Constant(v) => crate::expr::Value::Constant(v.into()),
+			Value::Function(v) => crate::expr::Value::Function(v.into()),
+			Value::Model(v) => crate::expr::Value::Model(v.into()),
+			Value::Subquery(v) => crate::expr::Value::Subquery(v.into()),
+			Value::Expression(v) => crate::expr::Value::Expression(v.into()),
+			Value::Query(v) => crate::expr::Value::Query(v.into()),
+			Value::Closure(v) => crate::expr::Value::Closure(v.into()),
+			Value::Refs(v) => crate::expr::Value::Refs(v.into()),
+			Value::File(v) => crate::expr::Value::File(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::Value> for Value {
+	fn from(v: crate::expr::Value) -> Self {
+		match v {
+			crate::expr::Value::None => Value::None,
+			crate::expr::Value::Null => Value::Null,
+			crate::expr::Value::Bool(v) => Value::Bool(v),
+			crate::expr::Value::Number(v) => Value::Number(v.into()),
+			crate::expr::Value::Strand(v) => Value::Strand(v.into()),
+			crate::expr::Value::Duration(v) => Value::Duration(v.into()),
+			crate::expr::Value::Datetime(v) => Value::Datetime(v.into()),
+			crate::expr::Value::Uuid(v) => Value::Uuid(v.into()),
+			crate::expr::Value::Array(v) => Value::Array(v.into()),
+			crate::expr::Value::Object(v) => Value::Object(v.into()),
+			crate::expr::Value::Geometry(v) => Value::Geometry(v.into()),
+			crate::expr::Value::Bytes(v) => Value::Bytes(v.into()),
+			crate::expr::Value::Thing(v) => Value::Thing(v.into()),
+			crate::expr::Value::Param(v) => Value::Param(v.into()),
+			crate::expr::Value::Idiom(v) => Value::Idiom(v.into()),
+			crate::expr::Value::Table(v) => Value::Table(v.into()),
+			crate::expr::Value::Mock(v) => Value::Mock(v.into()),
+			crate::expr::Value::Regex(v) => Value::Regex(v.into()),
+			crate::expr::Value::Cast(v) => Value::Cast(v.into()),
+			crate::expr::Value::Block(v) => Value::Block(v.into()),
+			crate::expr::Value::Range(v) => Value::Range(v.into()),
+			crate::expr::Value::Edges(v) => Value::Edges(v.into()),
+			crate::expr::Value::Future(v) => Value::Future(v.into()),
+			crate::expr::Value::Constant(v) => Value::Constant(v.into()),
+			crate::expr::Value::Function(v) => Value::Function(v.into()),
+			crate::expr::Value::Model(v) => Value::Model(v.into()),
+			crate::expr::Value::Subquery(v) => Value::Subquery(v.into()),
+			crate::expr::Value::Expression(v) => Value::Expression(v.into()),
+			crate::expr::Value::Query(v) => Value::Query(v.into()),
+			crate::expr::Value::Closure(v) => Value::Closure(v.into()),
+			crate::expr::Value::Refs(v) => Value::Refs(v.into()),
+			crate::expr::Value::File(v) => Value::File(v.into()),
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 

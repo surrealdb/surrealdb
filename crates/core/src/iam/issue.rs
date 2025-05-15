@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::sql::duration::Duration;
-use crate::sql::Algorithm;
+use crate::expr::duration::Duration;
+use crate::expr::Algorithm;
 use chrono::Duration as ChronoDuration;
 use chrono::Utc;
 use jsonwebtoken::EncodingKey;

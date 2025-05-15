@@ -1,7 +1,7 @@
 use crate::dbs;
 use crate::dbs::Notification;
-use crate::sql;
-use crate::sql::Value;
+use crate::expr;
+use crate::expr::Value;
 use revision::revisioned;
 use serde::Serialize;
 
@@ -50,8 +50,8 @@ impl TryFrom<Data> for Value {
 
 	fn try_from(val: Data) -> Result<Self, Self::Error> {
 		match val {
-			Data::Query(v) => sql::to_value(v),
-			Data::Live(v) => sql::to_value(v),
+			Data::Query(v) => expr::to_value(v),
+			Data::Live(v) => expr::to_value(v),
 			Data::Other(v) => Ok(v),
 		}
 	}

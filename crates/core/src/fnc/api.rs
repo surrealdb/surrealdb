@@ -7,7 +7,7 @@ use crate::{
 	ctx::Context,
 	dbs::Options,
 	err::Error,
-	sql::{statements::FindApi, Object, Value},
+	expr::{statements::FindApi, Object, Value},
 };
 
 use super::args::Optional;

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Level, Resource, ResourceKind};
 use crate::iam::{Error, Role};
-use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
+use crate::expr::statements::{DefineAccessStatement, DefineUserStatement};
 
 //
 // User

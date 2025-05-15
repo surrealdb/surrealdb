@@ -1,23 +1,21 @@
 use std::collections::BTreeMap;
 
 use crate::{
-	dbs::Capabilities,
-	sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, Start, Timeout, Value, Version},
-	syn::{
+	dbs::{sql_variables_to_expr_variables, Capabilities}, expr::Value, sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, Value as SqlValue, Start, Timeout, Version}, syn::{
 		condition_with_capabilities, fetchs_with_capabilities, fields_with_capabilities,
 		output_with_capabilities, value_with_capabilities,
-	},
+	}
 };
 
 use super::RpcError;
 
 #[derive(Clone, Debug)]
 pub(crate) enum RpcData {
-	Patch(Value),
-	Merge(Value),
-	Replace(Value),
-	Content(Value),
-	Single(Value),
+	Patch(SqlValue),
+	Merge(SqlValue),
+	Replace(SqlValue),
+	Content(SqlValue),
+	Single(SqlValue),
 }
 
 impl From<RpcData> for Data {
@@ -33,7 +31,7 @@ impl From<RpcData> for Data {
 }
 
 impl RpcData {
-	pub(crate) fn value(&self) -> &Value {
+	pub(crate) fn value(&self) -> &SqlValue {
 		match self {
 			RpcData::Patch(v) => v,
 			RpcData::Merge(v) => v,
@@ -43,7 +41,7 @@ impl RpcData {
 		}
 	}
 
-	pub(crate) fn from_string(str: String, v: Value) -> Result<RpcData, RpcError> {
+	pub(crate) fn from_string(str: String, v: SqlValue) -> Result<RpcData, RpcError> {
 		match str.to_lowercase().as_str() {
 			"patch" => Ok(RpcData::Patch(v)),
 			"merge" => Ok(RpcData::Merge(v)),
@@ -95,7 +93,7 @@ pub(crate) struct StatementOptions {
 	pub timeout: Option<Timeout>,
 	/// - An object, containing variables to define during execution of the method
 	/// - For all (`select`, `insert`, `create`, `upsert`, `update`, `relate` and `delete`) methods
-	pub vars: Option<BTreeMap<String, Value>>,
+	pub vars: Option<BTreeMap<String, SqlValue>>,
 	/// - A boolean, stating wether the LQ notifications should contain diffs
 	/// - For the `live` method
 	pub diff: bool,
@@ -105,7 +103,7 @@ pub(crate) struct StatementOptions {
 }
 
 impl StatementOptions {
-	pub(crate) fn with_data_content(&mut self, v: Value) -> &mut Self {
+	pub(crate) fn with_data_content(&mut self, v: SqlValue) -> &mut Self {
 		self.data = Some(RpcData::Content(v));
 		self
 	}
@@ -117,14 +115,14 @@ impl StatementOptions {
 
 	pub(crate) fn process_options(
 		&mut self,
-		opts: Value,
+		opts: SqlValue,
 		capabilities: &Capabilities,
 	) -> Result<&mut Self, RpcError> {
-		if let Value::Object(mut obj) = opts {
+		if let SqlValue::Object(mut obj) = opts {
 			// Process "data_expr" option
 			if let Some(data) = &self.data {
 				if let Some(v) = obj.remove("data_expr") {
-					if let Value::Strand(v) = v {
+					if let SqlValue::Strand(v) = v {
 						self.data =
 							Some(RpcData::from_string(v.to_string(), data.value().to_owned())?);
 					} else {
@@ -135,7 +133,7 @@ impl StatementOptions {
 
 			// Process "fields" option
 			if let Some(v) = obj.remove("fields") {
-				if let Value::Strand(v) = v {
+				if let SqlValue::Strand(v) = v {
 					self.fields = Some(fields_with_capabilities(v.as_str(), capabilities)?)
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -144,7 +142,7 @@ impl StatementOptions {
 
 			// Process "return" option
 			if let Some(v) = obj.remove("return") {
-				if let Value::Strand(v) = v {
+				if let SqlValue::Strand(v) = v {
 					self.output = Some(output_with_capabilities(v.as_str(), capabilities)?)
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -153,7 +151,7 @@ impl StatementOptions {
 
 			// Process "limit" option
 			if let Some(v) = obj.remove("limit") {
-				if let Value::Number(Number::Int(_)) = v {
+				if let SqlValue::Number(Number::Int(_)) = v {
 					self.limit = Some(Limit(v))
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -162,7 +160,7 @@ impl StatementOptions {
 
 			// Process "start" option
 			if let Some(v) = obj.remove("start") {
-				if let Value::Number(Number::Int(_)) = v {
+				if let SqlValue::Number(Number::Int(_)) = v {
 					self.start = Some(Start(v))
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -171,7 +169,7 @@ impl StatementOptions {
 
 			// Process "cond" option
 			if let Some(v) = obj.remove("cond") {
-				if let Value::Strand(v) = v {
+				if let SqlValue::Strand(v) = v {
 					self.cond = Some(condition_with_capabilities(v.as_str(), capabilities)?)
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -181,8 +179,8 @@ impl StatementOptions {
 			// Process "version" option
 			if let Some(v) = obj.remove("version") {
 				let v = match v {
-					v @ Value::Datetime(_) => v,
-					Value::Strand(v) => value_with_capabilities(v.as_str(), capabilities)?,
+					v @ SqlValue::Datetime(_) => v,
+					SqlValue::Strand(v) => value_with_capabilities(v.as_str(), capabilities)?,
 					_ => {
 						return Err(RpcError::InvalidParams);
 					}
@@ -193,7 +191,7 @@ impl StatementOptions {
 
 			// Process "timeout" option
 			if let Some(v) = obj.remove("timeout") {
-				if let Value::Duration(v) = v {
+				if let SqlValue::Duration(v) = v {
 					self.timeout = Some(Timeout(v))
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -202,7 +200,7 @@ impl StatementOptions {
 
 			// Process "only" option
 			if let Some(v) = obj.remove("only") {
-				if let Value::Bool(v) = v {
+				if let SqlValue::Bool(v) = v {
 					self.only = v;
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -211,7 +209,7 @@ impl StatementOptions {
 
 			// Process "relation" option
 			if let Some(v) = obj.remove("relation") {
-				if let Value::Bool(v) = v {
+				if let SqlValue::Bool(v) = v {
 					self.relation = v;
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -220,7 +218,7 @@ impl StatementOptions {
 
 			// Process "unique" option
 			if let Some(v) = obj.remove("unique") {
-				if let Value::Bool(v) = v {
+				if let SqlValue::Bool(v) = v {
 					self.unique = v;
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -229,7 +227,7 @@ impl StatementOptions {
 
 			// Process "vars" option
 			if let Some(v) = obj.remove("vars") {
-				if let Value::Object(v) = v {
+				if let SqlValue::Object(v) = v {
 					self.vars = Some(v.0)
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -243,7 +241,7 @@ impl StatementOptions {
 					return Err(RpcError::InvalidParams);
 				}
 
-				if let Value::Bool(v) = v {
+				if let SqlValue::Bool(v) = v {
 					self.diff = v;
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -252,7 +250,7 @@ impl StatementOptions {
 
 			// Process "fetch" option
 			if let Some(v) = obj.remove("fetch") {
-				if let Value::Strand(v) = v {
+				if let SqlValue::Strand(v) = v {
 					self.fetch = Some(fetchs_with_capabilities(v.as_str(), capabilities)?)
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -270,8 +268,9 @@ impl StatementOptions {
 	}
 
 	pub(crate) fn merge_vars(&self, v: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {
-		match &self.vars {
-			Some(vars) => mrg! {vars.clone(), v},
+		let vars = sql_variables_to_expr_variables(&self.vars);
+		match vars {
+			Some(vars) => mrg! {vars, v},
 			None => v.clone(),
 		}
 	}
