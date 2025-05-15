@@ -1,3 +1,4 @@
+use super::Raw;
 use crate::{
 	api::{err::Error, Response as QueryResponse, Result},
 	method::{self, Stats, Stream},
@@ -12,8 +13,6 @@ use std::mem;
 use surrealdb_core::sql::{
 	self, from_value as from_core_value, statements::*, Statement, Statements, Value as CoreValue,
 };
-
-use super::Raw;
 
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery: into_query::Sealed {}
@@ -509,13 +508,20 @@ where
 }
 
 /// A way to take a query stream future from a query response
-pub trait QueryStream<R> {
-	/// Retrieves the query stream future
-	#[deprecated(since = "2.3.0")]
-	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<R>>;
+pub trait QueryStream<R>: query_stream::Sealed<R> {}
+
+mod query_stream {
+	pub trait Sealed<R> {
+		/// Retrieves the query stream future
+		fn query_stream(
+			self,
+			response: &mut super::QueryResponse,
+		) -> super::Result<super::method::QueryStream<R>>;
+	}
 }
 
-impl QueryStream<Value> for usize {
+impl QueryStream<Value> for usize {}
+impl query_stream::Sealed<Value> for usize {
 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
 		let stream = response
 			.live_queries
@@ -534,7 +540,8 @@ impl QueryStream<Value> for usize {
 	}
 }
 
-impl QueryStream<Value> for () {
+impl QueryStream<Value> for () {}
+impl query_stream::Sealed<Value> for () {
 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
 		let mut streams = Vec::with_capacity(response.live_queries.len());
 		for (index, result) in mem::take(&mut response.live_queries) {
@@ -555,7 +562,8 @@ impl QueryStream<Value> for () {
 	}
 }
 
-impl<R> QueryStream<Notification<R>> for usize
+impl<R> QueryStream<Notification<R>> for usize where R: DeserializeOwned + Unpin {}
+impl<R> query_stream::Sealed<Notification<R>> for usize
 where
 	R: DeserializeOwned + Unpin,
 {
@@ -585,7 +593,8 @@ where
 	}
 }
 
-impl<R> QueryStream<Notification<R>> for ()
+impl<R> QueryStream<Notification<R>> for () where R: DeserializeOwned + Unpin {}
+impl<R> query_stream::Sealed<Notification<R>> for ()
 where
 	R: DeserializeOwned + Unpin,
 {
