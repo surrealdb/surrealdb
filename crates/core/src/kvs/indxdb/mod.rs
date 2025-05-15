@@ -50,7 +50,7 @@ impl Datastore {
 			Ok(db) => Ok(Datastore {
 				db,
 			}),
-			Err(e) => Err(Error::Ds(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
 		}
 	}
 	/// Shutdown the database
@@ -78,7 +78,7 @@ impl Datastore {
 				inner,
 				save_points: Default::default(),
 			})),
-			Err(e) => Err(Error::Tx(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Tx(e.to_string()))),
 		}
 	}
 }
