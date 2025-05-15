@@ -93,11 +93,16 @@ impl DefineTableStatement {
 			} else {
 				None
 			},
-			// Don't persist the `IF NOT EXISTS` clause to schema
+			// Don't persist the `IF NOT EXISTS` clause to the schema
 			if_not_exists: false,
 			overwrite: false,
 			..self.clone()
 		};
+		// Make sure we are refreshing the caches
+		dt.cache_fields_ts = Uuid::now_v7();
+		dt.cache_events_ts = Uuid::now_v7();
+		dt.cache_indexes_ts = Uuid::now_v7();
+		dt.cache_tables_ts = Uuid::now_v7();
 		// Add table relational fields
 		Self::add_in_out_fields(&txn, ns, db, &mut dt).await?;
 		// Set the table definition
