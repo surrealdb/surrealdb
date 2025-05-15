@@ -1,6 +1,23 @@
 /**
 [env]
 strict = true
+
+[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The table 'test' does not exist"
+
+[[test.results]]
+error = "The table 'test' does not exist"
+
+[[test.results]]
+error = "The table 'test' does not exist"
 */
 
 DEFINE NAMESPACE test;

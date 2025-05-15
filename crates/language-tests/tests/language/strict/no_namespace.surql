@@ -1,6 +1,23 @@
 /**
 [env]
 strict = true
+
+[test]
+
+[[test.results]]
+error = "The namespace 'test' does not exist"
+
+[[test.results]]
+error = "The namespace 'test' does not exist"
+
+[[test.results]]
+error = "The namespace 'test' does not exist"
+
+[[test.results]]
+error = "The namespace 'test' does not exist"
+
+[[test.results]]
+error = "The namespace 'test' does not exist"
 */
 
 -- DEFINE NAMESPACE test;

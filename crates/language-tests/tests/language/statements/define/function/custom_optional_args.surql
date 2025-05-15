@@ -1,3 +1,58 @@
+/**
+[test]
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "'test'"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+error = "Incorrect arguments for function fn::one_arg(). The function expects 1 argument."
+
+[[test.results]]
+error = "Incorrect arguments for function fn::last_option(). The function expects 1 to 2 arguments."
+
+[[test.results]]
+error = "Incorrect arguments for function fn::middle_option(). The function expects 3 arguments."
+
+[[test.results]]
+error = "Incorrect arguments for function fn::zero_arg(). The function expects 0 arguments."
+
+[[test.results]]
+value = "'other'"
+
+[[test.results]]
+value = "[true]"
+
+[[test.results]]
+value = "[true, NONE]"
+
+[[test.results]]
+value = "[true, false]"
+
+[[test.results]]
+value = "[true, false, true]"
+
+[[test.results]]
+value = "[true, NONE, true]"
+
+*/
 DEFINE FUNCTION fn::any_arg($a: any) { $a || 'test' };
 DEFINE FUNCTION fn::zero_arg() { [] };
 DEFINE FUNCTION fn::one_arg($a: bool) { [$a] };
