@@ -31,7 +31,6 @@ use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Db {}
-
 impl conn::Sealed for Db {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {

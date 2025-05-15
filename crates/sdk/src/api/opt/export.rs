@@ -14,27 +14,23 @@ pub enum ExportDestination {
 pub trait IntoExportDestination<R>: private::Sealed<R> {}
 
 impl<T> IntoExportDestination<PathBuf> for T where T: AsRef<Path> {}
+impl<T> private::Sealed<PathBuf> for T
+where
+	T: AsRef<Path>,
+{
+	fn into_export_destination(self) -> PathBuf {
+		self.as_ref().to_path_buf()
+	}
+}
+
 impl IntoExportDestination<()> for () {}
+impl private::Sealed<()> for () {
+	fn into_export_destination(self) {}
+}
 
 mod private {
-	use std::path::Path;
-	use std::path::PathBuf;
-
 	pub trait Sealed<R> {
 		/// Converts an input into a database export location
 		fn into_export_destination(self) -> R;
-	}
-
-	impl<T> Sealed<PathBuf> for T
-	where
-		T: AsRef<Path>,
-	{
-		fn into_export_destination(self) -> PathBuf {
-			self.as_ref().to_path_buf()
-		}
-	}
-
-	impl Sealed<()> for () {
-		fn into_export_destination(self) {}
 	}
 }

@@ -94,7 +94,6 @@ pub(crate) async fn connect(
 }
 
 impl crate::api::Connection for Client {}
-
 impl conn::Sealed for Client {
 	fn connect(
 		mut address: Endpoint,

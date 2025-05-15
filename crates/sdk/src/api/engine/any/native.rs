@@ -30,7 +30,6 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::Connector;
 
 impl crate::api::Connection for Any {}
-
 impl conn::Sealed for Any {
 	#[allow(
 		unused_variables,

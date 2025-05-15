@@ -18,7 +18,6 @@ use url::Url;
 use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Client {}
-
 impl conn::Sealed for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {

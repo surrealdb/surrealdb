@@ -20,7 +20,6 @@ use tokio::sync::watch;
 use url::Url;
 
 impl crate::api::Connection for Client {}
-
 impl conn::Sealed for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {

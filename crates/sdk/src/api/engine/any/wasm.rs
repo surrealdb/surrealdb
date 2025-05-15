@@ -17,7 +17,6 @@ use tokio::sync::watch;
 use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Any {}
-
 impl conn::Sealed for Any {
 	#[allow(
 		unused_variables,

@@ -48,7 +48,6 @@ type MessageSink = SplitSink<WsStream, Message>;
 type RouterState = super::RouterState<MessageSink, MessageStream>;
 
 impl crate::api::Connection for Client {}
-
 impl conn::Sealed for Client {
 	fn connect(
 		mut address: Endpoint,

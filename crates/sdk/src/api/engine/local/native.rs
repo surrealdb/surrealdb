@@ -23,7 +23,6 @@ use tokio::sync::{watch, RwLock};
 use tokio_util::sync::CancellationToken;
 
 impl crate::api::Connection for Db {}
-
 impl conn::Sealed for Db {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {

@@ -91,52 +91,49 @@ where
 pub trait IntoFn: private::Sealed {}
 
 impl IntoFn for String {}
+impl private::Sealed for String {
+	fn into_fn(self) -> Result<(String, Option<String>)> {
+		match self.split_once('<') {
+			Some((name, rest)) => match rest.strip_suffix('>') {
+				Some(version) => Ok((name.to_owned(), Some(version.to_owned()))),
+				None => Err(crate::error::Db::InvalidFunction {
+					name: self,
+					message: "function version is missing a clossing '>'".to_owned(),
+				}
+				.into()),
+			},
+			None => Ok((self, None)),
+		}
+	}
+}
+
 impl IntoFn for &str {}
+impl private::Sealed for &str {
+	fn into_fn(self) -> Result<(String, Option<String>)> {
+		match self.split_once('<') {
+			Some((name, rest)) => match rest.strip_suffix('>') {
+				Some(version) => Ok((name.to_owned(), Some(version.to_owned()))),
+				None => Err(crate::error::Db::InvalidFunction {
+					name: self.to_owned(),
+					message: "function version is missing a clossing '>'".to_owned(),
+				}
+				.into()),
+			},
+			None => Ok((self.to_owned(), None)),
+		}
+	}
+}
+
 impl IntoFn for &String {}
+impl private::Sealed for &String {
+	fn into_fn(self) -> Result<(String, Option<String>)> {
+		self.as_str().into_fn()
+	}
+}
 
 mod private {
-	use crate::api::Result;
-
 	pub trait Sealed {
 		/// Handles the conversion of the function string
-		fn into_fn(self) -> Result<(String, Option<String>)>;
-	}
-
-	impl Sealed for String {
-		fn into_fn(self) -> Result<(String, Option<String>)> {
-			match self.split_once('<') {
-				Some((name, rest)) => match rest.strip_suffix('>') {
-					Some(version) => Ok((name.to_owned(), Some(version.to_owned()))),
-					None => Err(crate::error::Db::InvalidFunction {
-						name: self,
-						message: "function version is missing a clossing '>'".to_owned(),
-					}
-					.into()),
-				},
-				None => Ok((self, None)),
-			}
-		}
-	}
-
-	impl Sealed for &str {
-		fn into_fn(self) -> Result<(String, Option<String>)> {
-			match self.split_once('<') {
-				Some((name, rest)) => match rest.strip_suffix('>') {
-					Some(version) => Ok((name.to_owned(), Some(version.to_owned()))),
-					None => Err(crate::error::Db::InvalidFunction {
-						name: self.to_owned(),
-						message: "function version is missing a clossing '>'".to_owned(),
-					}
-					.into()),
-				},
-				None => Ok((self.to_owned(), None)),
-			}
-		}
-	}
-
-	impl Sealed for &String {
-		fn into_fn(self) -> Result<(String, Option<String>)> {
-			self.as_str().into_fn()
-		}
+		fn into_fn(self) -> super::Result<(String, Option<String>)>;
 	}
 }
