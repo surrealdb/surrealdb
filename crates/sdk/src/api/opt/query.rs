@@ -17,7 +17,7 @@ use surrealdb_core::sql::{
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery: into_query::Sealed {}
 
-mod into_query {
+pub(crate) mod into_query {
 	pub trait Sealed {
 		/// Converts an input into SQL statements
 		fn into_query(self) -> super::Result<Vec<super::Statement>>;

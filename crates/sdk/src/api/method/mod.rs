@@ -646,7 +646,7 @@ where
 				let capabilities = &router.config.capabilities;
 				syn::parse_with_capabilities(surql, capabilities)
 					.map_err(Into::into)
-					.and_then(opt::IntoQuery::into_query)
+					.and_then(opt::query::into_query::Sealed::into_query)
 			}),
 			None => query.into_query(),
 		};
