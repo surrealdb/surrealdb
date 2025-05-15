@@ -311,9 +311,12 @@ impl From<ops::RangeFull> for KeyRange {
 }
 
 /// A trait for types which can be used as a resource selection for a query.
-pub trait IntoResource<Output> {
-	#[deprecated(since = "2.3.0")]
-	fn into_resource(self) -> Result<Resource>;
+pub trait IntoResource<Output>: private::Sealed<Output> {}
+
+mod private {
+	pub trait Sealed<Output> {
+		fn into_resource(self) -> super::Result<super::Resource>;
+	}
 }
 
 /// A trait for types which can be used as a resource selection for a query that returns an `Option`.
@@ -334,25 +337,29 @@ fn no_colon(a: &str) -> Result<()> {
 
 // IntoResource
 
-impl IntoResource<Value> for Resource {
+impl IntoResource<Value> for Resource {}
+impl private::Sealed<Value> for Resource {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self)
 	}
 }
 
-impl<R> IntoResource<Option<R>> for Object {
+impl<R> IntoResource<Option<R>> for Object {}
+impl<R> private::Sealed<Option<R>> for Object {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
-impl<R> IntoResource<Option<R>> for RecordId {
+impl<R> IntoResource<Option<R>> for RecordId {}
+impl<R> private::Sealed<Option<R>> for RecordId {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
-impl<R> IntoResource<Option<R>> for &RecordId {
+impl<R> IntoResource<Option<R>> for &RecordId {}
+impl<R> private::Sealed<Option<R>> for &RecordId {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.clone().into())
 	}
@@ -363,30 +370,40 @@ where
 	T: Into<String>,
 	I: Into<RecordIdKey>,
 {
+}
+impl<R, T, I> private::Sealed<Option<R>> for (T, I)
+where
+	T: Into<String>,
+	I: Into<RecordIdKey>,
+{
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
-impl<R> IntoResource<Vec<R>> for Vec<Value> {
+impl<R> IntoResource<Vec<R>> for Vec<Value> {}
+impl<R> private::Sealed<Vec<R>> for Vec<Value> {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
-impl<R> IntoResource<Vec<R>> for Edge {
+impl<R> IntoResource<Vec<R>> for Edge {}
+impl<R> private::Sealed<Vec<R>> for Edge {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
-impl<R> IntoResource<Vec<R>> for QueryRange {
+impl<R> IntoResource<Vec<R>> for QueryRange {}
+impl<R> private::Sealed<Vec<R>> for QueryRange {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
-impl<T, R> IntoResource<Vec<R>> for Table<T>
+impl<T, R> IntoResource<Vec<R>> for Table<T> where T: Into<String> {}
+impl<T, R> private::Sealed<Vec<R>> for Table<T>
 where
 	T: Into<String>,
 {
@@ -396,28 +413,32 @@ where
 	}
 }
 
-impl<R> IntoResource<Vec<R>> for &str {
+impl<R> IntoResource<Vec<R>> for &str {}
+impl<R> private::Sealed<Vec<R>> for &str {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(self)?;
 		Ok(self.into())
 	}
 }
 
-impl<R> IntoResource<Vec<R>> for String {
+impl<R> IntoResource<Vec<R>> for String {}
+impl<R> private::Sealed<Vec<R>> for String {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(&self)?;
 		Ok(self.into())
 	}
 }
 
-impl<R> IntoResource<Vec<R>> for &String {
+impl<R> IntoResource<Vec<R>> for &String {}
+impl<R> private::Sealed<Vec<R>> for &String {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(self)?;
 		Ok(self.into())
 	}
 }
 
-impl<R> IntoResource<Vec<R>> for () {
+impl<R> IntoResource<Vec<R>> for () {}
+impl<R> private::Sealed<Vec<R>> for () {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(Resource::Unspecified)
 	}
