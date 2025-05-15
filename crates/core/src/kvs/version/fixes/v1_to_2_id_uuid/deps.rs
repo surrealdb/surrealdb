@@ -57,7 +57,7 @@ pub mod key {
 
 	use crate::{
 		kvs::impl_key,
-		sql::{id::Id as NewId, Dir},
+		expr::{id::Id as NewId, Dir},
 	};
 
 	use super::Id;

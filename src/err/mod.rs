@@ -175,21 +175,6 @@ impl Serialize for Error {
 	}
 }
 
-impl serde::ser::Error for Error {
-	fn custom<T>(msg: T) -> Self
-	where
-		T: Display,
-	{
-		Self::Serialization(msg.to_string())
-	}
-}
-
-impl From<serde_content::Error> for Error {
-	fn from(error: serde_content::Error) -> Self {
-		Self::Serialization(error.to_string())
-	}
-}
-
 #[derive(Serialize)]
 pub(super) struct Message {
 	code: u16,

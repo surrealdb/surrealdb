@@ -38,6 +38,24 @@ impl IfelseStatement {
 	}
 }
 
+impl From<IfelseStatement> for crate::expr::statements::IfelseStatement {
+	fn from(v: IfelseStatement) -> Self {
+		crate::expr::statements::IfelseStatement {
+			exprs: v.exprs.into_iter().map(Into::into).collect(),
+			close: v.close.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::IfelseStatement> for IfelseStatement {
+	fn from(v: crate::expr::statements::IfelseStatement) -> Self {
+		IfelseStatement {
+			exprs: v.exprs.into_iter().map(Into::into).collect(),
+			close: v.close.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(IfelseStatement);
 
 impl crate::sql::DisplaySql for IfelseStatement {

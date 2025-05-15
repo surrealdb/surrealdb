@@ -21,6 +21,26 @@ pub struct ForeachStatement {
 	pub block: Block,
 }
 
+impl From<ForeachStatement> for crate::expr::statements::ForeachStatement {
+	fn from(v: ForeachStatement) -> Self {
+		Self {
+			param: v.param.into(),
+			range: v.range.into(),
+			block: v.block.into(),
+		}
+	}
+}
+
+impl From<crate::expr::statements::ForeachStatement> for ForeachStatement {
+	fn from(v: crate::expr::statements::ForeachStatement) -> Self {
+		Self {
+			param: v.param.into(),
+			range: v.range.into(),
+			block: v.block.into(),
+		}
+	}
+}
+
 enum ForeachIter {
 	Array(std::vec::IntoIter<Value>),
 	Range(std::iter::Map<TypedRange<i64>, fn(i64) -> Value>),

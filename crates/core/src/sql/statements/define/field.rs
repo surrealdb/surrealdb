@@ -159,6 +159,46 @@ impl DefineFieldStatement {
 	}
 }
 
+impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatement {
+	fn from(v: DefineFieldStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			what: v.what.into(),
+			flex: v.flex,
+			kind: v.kind.map(Into::into),
+			value: v.value.map(Into::into),
+			assert: v.assert.map(Into::into),
+			default: v.default.map(Into::into),
+			permissions: v.permissions,
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			reference: v.reference.map(Into::into),
+			default_always: v.default_always,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatement {
+	fn from(v: crate::expr::statements::DefineFieldStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			what: v.what.into(),
+			flex: v.flex,
+			kind: v.kind.map(Into::into),
+			value: v.value.map(Into::into),
+			assert: v.assert.map(Into::into),
+			default: v.default.map(Into::into),
+			permissions: v.permissions,
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			reference: v.reference.map(Into::into),
+			default_always: v.default_always,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(DefineFieldStatement);
 
 impl crate::sql::DisplaySql for DefineFieldStatement {

@@ -35,6 +35,38 @@ impl UpsertStatement {
 	}
 }
 
+impl From<UpsertStatement> for crate::expr::statements::UpsertStatement {
+	fn from(v: UpsertStatement) -> Self {
+		Self {
+			only: v.only,
+			what: v.what.into_iter().map(Into::into).collect(),
+			with: v.with.map(Into::into),
+			data: v.data.map(Into::into),
+			cond: v.cond.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			explain: v.explain.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::UpsertStatement> for UpsertStatement {
+	fn from(v: crate::expr::statements::UpsertStatement) -> Self {
+		Self {
+			only: v.only,
+			what: v.what.into_iter().map(Into::into).collect(),
+			with: v.with.map(Into::into),
+			data: v.data.map(Into::into),
+			cond: v.cond.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			explain: v.explain.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(UpsertStatement);
 
 impl crate::sql::DisplaySql for UpsertStatement {

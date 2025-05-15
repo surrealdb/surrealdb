@@ -103,7 +103,13 @@ impl From<Part> for Idiom {
 
 impl From<Idiom> for crate::expr::Idiom {
 	fn from(v: Idiom) -> Self {
-		crate::expr::Idiom(v.0.into_iter().map(Into::into).collect())
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Idiom> for Idiom {
+	fn from(v: crate::expr::Idiom) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
 	}
 }
 

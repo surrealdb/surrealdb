@@ -24,6 +24,32 @@ pub struct DefineSequenceStatement {
 	pub timeout: Option<Timeout>,
 }
 
+impl From<DefineSequenceStatement> for crate::expr::statements::define::DefineSequenceStatement {
+	fn from(v: DefineSequenceStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			batch: v.batch,
+			start: v.start,
+			timeout: v.timeout.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::DefineSequenceStatement> for DefineSequenceStatement {
+	fn from(v: crate::expr::statements::define::DefineSequenceStatement) -> Self {
+		DefineSequenceStatement {
+			name: v.name.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			batch: v.batch,
+			start: v.start,
+			timeout: v.timeout.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(DefineSequenceStatement);
 
 impl crate::sql::DisplaySql for DefineSequenceStatement {

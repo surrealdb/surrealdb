@@ -101,6 +101,38 @@ impl DefineUserStatement {
 	}
 }
 
+impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement {
+	fn from(v: DefineUserStatement) -> Self {
+		Self {
+			name: v.name,
+			base: v.base,
+			hash: v.hash,
+			code: v.code,
+			roles: v.roles.into_iter().map(Into::into).collect(),
+			duration: v.duration.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineUserStatement> for DefineUserStatement {
+	fn from(v: crate::expr::statements::DefineUserStatement) -> Self {
+		Self {
+			name: v.name,
+			base: v.base,
+			hash: v.hash,
+			code: v.code,
+			roles: v.roles.into_iter().map(Into::into).collect(),
+			duration: v.duration.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(DefineUserStatement);
 
 impl crate::sql::DisplaySql for DefineUserStatement {

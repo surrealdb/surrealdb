@@ -59,6 +59,18 @@ impl From<Ident> for Table {
 	}
 }
 
+impl From<Table> for crate::expr::Table {
+	fn from(v: Table) -> Self {
+		crate::expr::Table(v.0)
+	}
+}
+
+impl From<crate::expr::Table> for Table {
+	fn from(v: crate::expr::Table) -> Self {
+		Self(v.0)
+	}
+}
+
 impl Deref for Table {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {

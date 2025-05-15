@@ -400,7 +400,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 			GqlValue::String(s) => {
 				use Kind::*;
 				any_try_kinds!(val, Datetime, Duration, Uuid);
-				syn::value_legacy_strand(s.as_str()).map_err(|_| type_error(kind, val))
+				syn::value_legacy_strand(s.as_str()).map(Into::into).map_err(|_| type_error(kind, val))
 			}
 			GqlValue::Null => Ok(SqlValue::Null),
 			obj @ GqlValue::Object(_) => gql_to_sql_kind(obj, Kind::Object),
@@ -424,7 +424,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		},
 		Kind::Datetime => match val {
 			GqlValue::String(s) => match syn::datetime(s) {
-				Ok(dt) => Ok(dt.into()),
+				Ok(dt) => Ok(SqlValue::Datetime(dt.into())),
 				Err(_) => Err(type_error(kind, val)),
 			},
 			_ => Err(type_error(kind, val)),
@@ -441,7 +441,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 					Err(type_error(kind, val))
 				}
 			}
-			GqlValue::String(s) => match syn::value(s) {
+			GqlValue::String(s) => match syn::value(s).map(Into::into) {
 				Ok(SqlValue::Number(n)) => match n {
 					expr::Number::Int(i) => Ok(SqlValue::Number(expr::Number::Decimal(i.into()))),
 					expr::Number::Float(f) => match Decimal::from_f64(f) {
@@ -456,7 +456,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		},
 		Kind::Duration => match val {
 			GqlValue::String(s) => match syn::duration(s) {
-				Ok(d) => Ok(d.into()),
+				Ok(d) => Ok(SqlValue::Duration(d.into())),
 				Err(_) => Err(type_error(kind, val)),
 			},
 			_ => Err(type_error(kind, val)),
@@ -473,7 +473,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}
 			}
-			GqlValue::String(s) => match syn::value(s) {
+			GqlValue::String(s) => match syn::value(s).map(Into::into) {
 				Ok(SqlValue::Number(n)) => match n {
 					expr::Number::Int(int) => Ok(SqlValue::Number(expr::Number::Float(int as f64))),
 					expr::Number::Float(float) => Ok(SqlValue::Number(expr::Number::Float(float))),
@@ -494,7 +494,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 					Err(type_error(kind, val))
 				}
 			}
-			GqlValue::String(s) => match syn::value(s) {
+			GqlValue::String(s) => match syn::value(s).map(Into::into) {
 				Ok(SqlValue::Number(n)) => match n {
 					expr::Number::Int(int) => Ok(SqlValue::Number(expr::Number::Int(int))),
 					expr::Number::Float(float) => {
@@ -525,7 +525,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}
 			}
-			GqlValue::String(s) => match syn::value(s) {
+			GqlValue::String(s) => match syn::value(s).map(Into::into) {
 				Ok(SqlValue::Number(n)) => Ok(SqlValue::Number(n)),
 				_ => Err(type_error(kind, val)),
 			},
@@ -539,7 +539,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 					.collect();
 				Ok(SqlValue::Object(out?.into()))
 			}
-			GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()) {
+			GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()).map(Into::into) {
 				Ok(obj @ SqlValue::Object(_)) => Ok(obj),
 				_ => Err(type_error(kind, val)),
 			},
@@ -570,7 +570,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Record(ref ts) => match val {
 			GqlValue::String(s) => match syn::thing(s) {
 				Ok(t) => match ts.contains(&t.tb.as_str().into()) {
-					true => Ok(SqlValue::Thing(t)),
+					true => Ok(SqlValue::Thing(t.into())),
 					false => Err(type_error(kind, val)),
 				},
 				Err(_) => Err(type_error(kind, val)),

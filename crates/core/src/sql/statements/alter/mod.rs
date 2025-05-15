@@ -36,6 +36,26 @@ impl AlterStatement {
 	}
 }
 
+impl From<AlterStatement> for crate::expr::statements::AlterStatement {
+	fn from(v: AlterStatement) -> Self {
+		match v {
+			AlterStatement::Table(v) => Self::Table(v.into()),
+			AlterStatement::Sequence(v) => Self::Sequence(v.into()),
+			AlterStatement::Field(v) => Self::Field(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::AlterStatement> for AlterStatement {
+	fn from(v: crate::expr::statements::AlterStatement) -> Self {
+		match v {
+			crate::expr::statements::AlterStatement::Table(v) => Self::Table(v.into()),
+			crate::expr::statements::AlterStatement::Sequence(v) => Self::Sequence(v.into()),
+			crate::expr::statements::AlterStatement::Field(v) => Self::Field(v.into()),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(AlterStatement);
 
 impl crate::sql::DisplaySql for AlterStatement {

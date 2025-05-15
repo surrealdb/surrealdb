@@ -47,6 +47,18 @@ impl From<Array> for Vec<Value> {
 	}
 }
 
+impl From<Array> for crate::expr::Array {
+	fn from(s: Array) -> Self {
+		Self(s.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Array> for Array {
+	fn from(s: crate::expr::Array) -> Self {
+		Self(s.0.into_iter().map(Into::into).collect())
+	}
+}
+
 impl FromIterator<Value> for Array {
 	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
 		Array(iter.into_iter().collect())

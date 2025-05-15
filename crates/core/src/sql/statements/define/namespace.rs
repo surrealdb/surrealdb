@@ -24,6 +24,30 @@ pub struct DefineNamespaceStatement {
 	pub overwrite: bool,
 }
 
+impl From<DefineNamespaceStatement> for crate::expr::statements::DefineNamespaceStatement {
+	fn from(v: DefineNamespaceStatement) -> Self {
+		Self {
+			id: v.id,
+			name: v.name.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineNamespaceStatement> for DefineNamespaceStatement {
+	fn from(v: crate::expr::statements::DefineNamespaceStatement) -> Self {
+		Self {
+			id: v.id,
+			name: v.name.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(DefineNamespaceStatement);
 
 impl crate::sql::DisplaySql for DefineNamespaceStatement {

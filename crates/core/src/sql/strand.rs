@@ -54,6 +54,18 @@ impl From<&str> for Strand {
 	}
 }
 
+impl From<Strand> for crate::expr::Strand {
+	fn from(v: Strand) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<crate::expr::Strand> for Strand {
+	fn from(v: crate::expr::Strand) -> Self {
+		Self(v.0)
+	}
+}
+
 impl Deref for Strand {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {

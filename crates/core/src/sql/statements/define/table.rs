@@ -126,6 +126,50 @@ impl DefineTableStatement {
 	}
 }
 
+impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatement {
+	fn from(v: DefineTableStatement) -> Self {
+		crate::expr::statements::DefineTableStatement {
+			id: v.id,
+			name: v.name.into(),
+			drop: v.drop,
+			full: v.full,
+			view: v.view.map(Into::into),
+			permissions: v.permissions.into(),
+			changefeed: v.changefeed.map(Into::into),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			kind: v.kind.into(),
+			overwrite: v.overwrite,
+			cache_fields_ts: v.cache_fields_ts,
+			cache_events_ts: v.cache_events_ts,
+			cache_tables_ts: v.cache_tables_ts,
+			cache_indexes_ts: v.cache_indexes_ts,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatement {
+	fn from(v: crate::expr::statements::DefineTableStatement) -> Self {
+		DefineTableStatement {
+			id: v.id,
+			name: v.name.into(),
+			drop: v.drop,
+			full: v.full,
+			view: v.view.map(Into::into),
+			permissions: v.permissions.into(),
+			changefeed: v.changefeed.map(Into::into),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			kind: v.kind.into(),
+			overwrite: v.overwrite,
+			cache_fields_ts: v.cache_fields_ts,
+			cache_events_ts: v.cache_events_ts,
+			cache_tables_ts: v.cache_tables_ts,
+			cache_indexes_ts: v.cache_indexes_ts,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(DefineTableStatement);
 
 impl crate::sql::DisplaySql for DefineTableStatement {

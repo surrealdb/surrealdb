@@ -777,7 +777,7 @@ pub mod convert_expr {
 							CborData::Text(v) => {
 								let block = crate::syn::block(v.as_str())
 									.map_err(|_| "Failed to parse block")?;
-								Ok(expr::Value::Future(Box::new(expr::Future(block))))
+								Ok(expr::Value::Future(Box::new(expr::Future(block.into()))))
 							}
 							_ => Err("Expected a CBOR text data type"),
 						},

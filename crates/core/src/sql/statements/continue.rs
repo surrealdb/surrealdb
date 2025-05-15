@@ -20,6 +20,18 @@ impl ContinueStatement {
 	}
 }
 
+impl From<ContinueStatement> for crate::expr::statements::ContinueStatement {
+	fn from(_v: ContinueStatement) -> Self {
+		Self {}
+	}
+}
+
+impl From<crate::expr::statements::ContinueStatement> for ContinueStatement {
+	fn from(_v: crate::expr::statements::ContinueStatement) -> Self {
+		Self {}
+	}
+}
+
 crate::sql::impl_display_from_sql!(ContinueStatement);
 
 impl crate::sql::DisplaySql for ContinueStatement {

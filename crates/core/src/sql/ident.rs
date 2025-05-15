@@ -24,6 +24,18 @@ impl From<&str> for Ident {
 	}
 }
 
+impl From<Ident> for crate::expr::Ident {
+	fn from(v: Ident) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<crate::expr::Ident> for Ident {
+	fn from(v: crate::expr::Ident) -> Self {
+		Self(v.0)
+	}
+}
+
 impl Deref for Ident {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {

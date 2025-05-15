@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
 	err::Error,
 	kvs::{KeyEncode as _, Transaction},
-	sql::{
+	expr::{
 		access_type::{JwtAccessVerify, JwtAccessVerifyKey},
 		statements::{
 			define::{DefineScopeStatement, DefineTokenStatement},

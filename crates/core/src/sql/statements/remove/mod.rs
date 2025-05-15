@@ -66,6 +66,48 @@ impl RemoveStatement {
 	}
 }
 
+impl From<RemoveStatement> for crate::expr::statements::RemoveStatement {
+	fn from(v: RemoveStatement) -> Self {
+		match v {
+			RemoveStatement::Namespace(v) => Self::Namespace(v.into()),
+			RemoveStatement::Database(v) => Self::Database(v.into()),
+			RemoveStatement::Function(v) => Self::Function(v.into()),
+			RemoveStatement::Analyzer(v) => Self::Analyzer(v.into()),
+			RemoveStatement::Access(v) => Self::Access(v.into()),
+			RemoveStatement::Param(v) => Self::Param(v.into()),
+			RemoveStatement::Table(v) => Self::Table(v.into()),
+			RemoveStatement::Event(v) => Self::Event(v.into()),
+			RemoveStatement::Field(v) => Self::Field(v.into()),
+			RemoveStatement::Index(v) => Self::Index(v.into()),
+			RemoveStatement::User(v) => Self::User(v.into()),
+			RemoveStatement::Model(v) => Self::Model(v.into()),
+			RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
+			RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::RemoveStatement> for RemoveStatement {
+	fn from(v: crate::expr::statements::RemoveStatement) -> Self {
+		match v {
+			crate::expr::statements::RemoveStatement::Namespace(v) => Self::Namespace(v.into()),
+			crate::expr::statements::RemoveStatement::Database(v) => Self::Database(v.into()),
+			crate::expr::statements::RemoveStatement::Function(v) => Self::Function(v.into()),
+			crate::expr::statements::RemoveStatement::Analyzer(v) => Self::Analyzer(v.into()),
+			crate::expr::statements::RemoveStatement::Access(v) => Self::Access(v.into()),
+			crate::expr::statements::RemoveStatement::Param(v) => Self::Param(v.into()),
+			crate::expr::statements::RemoveStatement::Table(v) => Self::Table(v.into()),
+			crate::expr::statements::RemoveStatement::Event(v) => Self::Event(v.into()),
+			crate::expr::statements::RemoveStatement::Field(v) => Self::Field(v.into()),
+			crate::expr::statements::RemoveStatement::Index(v) => Self::Index(v.into()),
+			crate::expr::statements::RemoveStatement::User(v) => Self::User(v.into()),
+			crate::expr::statements::RemoveStatement::Model(v) => Self::Model(v.into()),
+			crate::expr::statements::RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
+			crate::expr::statements::RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(RemoveStatement);
 
 impl crate::sql::DisplaySql for RemoveStatement {

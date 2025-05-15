@@ -96,6 +96,54 @@ impl SelectStatement {
 	}
 }
 
+impl From<SelectStatement> for crate::expr::statements::SelectStatement {
+	fn from(v: SelectStatement) -> Self {
+		Self {
+			expr: v.expr.into_iter().map(Into::into).collect(),
+			omit: v.omit.map(Into::into),
+			only: v.only,
+			what: v.what.into_iter().map(Into::into).collect(),
+			with: v.with.map(Into::into),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			fetch: v.fetch.map(Into::into),
+			version: v.version.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			explain: v.explain.map(Into::into),
+			tempfiles: v.tempfiles,
+		}
+	}
+}
+
+impl From<crate::expr::statements::SelectStatement> for SelectStatement {
+	fn from(v: crate::expr::statements::SelectStatement) -> Self {
+		Self {
+			expr: v.expr.into_iter().map(Into::into).collect(),
+			omit: v.omit.map(Into::into),
+			only: v.only,
+			what: v.what.into_iter().map(Into::into).collect(),
+			with: v.with.map(Into::into),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			fetch: v.fetch.map(Into::into),
+			version: v.version.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			explain: v.explain.map(Into::into),
+			tempfiles: v.tempfiles,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(SelectStatement);
 
 impl crate::sql::DisplaySql for SelectStatement {

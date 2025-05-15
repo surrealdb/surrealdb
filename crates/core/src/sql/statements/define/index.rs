@@ -38,6 +38,36 @@ pub struct DefineIndexStatement {
 	pub concurrently: bool,
 }
 
+impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatement {
+	fn from(v: DefineIndexStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			what: v.what.into(),
+			cols: v.cols.into_iter().map(Into::into).collect(),
+			index: v.index.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			concurrently: v.concurrently,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineIndexStatement> for DefineIndexStatement {
+	fn from(v: crate::expr::statements::DefineIndexStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			what: v.what.into(),
+			cols: v.cols.into_iter().map(Into::into).collect(),
+			index: v.index.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			concurrently: v.concurrently,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(DefineIndexStatement);
 
 impl crate::sql::DisplaySql for DefineIndexStatement {

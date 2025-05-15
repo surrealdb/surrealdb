@@ -28,6 +28,26 @@ impl SetStatement {
 	}
 }
 
+impl From<SetStatement> for crate::expr::statements::SetStatement {
+	fn from(v: SetStatement) -> Self {
+		crate::expr::statements::SetStatement {
+			name: v.name,
+			what: v.what,
+			kind: v.kind,
+		}
+	}
+}
+
+impl From<crate::expr::statements::SetStatement> for SetStatement {
+	fn from(v: crate::expr::statements::SetStatement) -> Self {
+		SetStatement {
+			name: v.name,
+			what: v.what,
+			kind: v.kind,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(SetStatement);
 
 impl crate::sql::DisplaySql for SetStatement {

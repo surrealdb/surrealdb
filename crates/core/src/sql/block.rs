@@ -43,6 +43,18 @@ impl From<Value> for Block {
 	}
 }
 
+impl From<Block> for crate::expr::Block {
+	fn from(v: Block) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Block> for Block {
+	fn from(v: crate::expr::Block) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 impl Block {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
@@ -138,6 +150,60 @@ impl PartialOrd for Entry {
 	#[inline]
 	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
 		None
+	}
+}
+
+impl From<Entry> for crate::expr::Entry {
+	fn from(v: Entry) -> Self {
+		match v {
+			Entry::Value(v) => Self::Value(v.into()),
+			Entry::Set(v) => Self::Set(v.into()),
+			Entry::Ifelse(v) => Self::Ifelse(v.into()),
+			Entry::Select(v) => Self::Select(v.into()),
+			Entry::Create(v) => Self::Create(v.into()),
+			Entry::Update(v) => Self::Update(v.into()),
+			Entry::Delete(v) => Self::Delete(v.into()),
+			Entry::Relate(v) => Self::Relate(v.into()),
+			Entry::Insert(v) => Self::Insert(v.into()),
+			Entry::Output(v) => Self::Output(v.into()),
+			Entry::Define(v) => Self::Define(v.into()),
+			Entry::Remove(v) => Self::Remove(v.into()),
+			Entry::Throw(v) => Self::Throw(v.into()),
+			Entry::Break(v) => Self::Break(v.into()),
+			Entry::Continue(v) => Self::Continue(v.into()),
+			Entry::Foreach(v) => Self::Foreach(v.into()),
+			Entry::Rebuild(v) => Self::Rebuild(v.into()),
+			Entry::Upsert(v) => Self::Upsert(v.into()),
+			Entry::Alter(v) => Self::Alter(v.into()),
+			Entry::Info(v) => Self::Info(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::Entry> for Entry {
+	fn from(v: crate::expr::Entry) -> Self {
+		match v {
+			crate::expr::Entry::Value(v) => Self::Value(v.into()),
+			crate::expr::Entry::Set(v) => Self::Set(v.into()),
+			crate::expr::Entry::Ifelse(v) => Self::Ifelse(v.into()),
+			crate::expr::Entry::Select(v) => Self::Select(v.into()),
+			crate::expr::Entry::Create(v) => Self::Create(v.into()),
+			crate::expr::Entry::Update(v) => Self::Update(v.into()),
+			crate::expr::Entry::Delete(v) => Self::Delete(v.into()),
+			crate::expr::Entry::Relate(v) => Self::Relate(v.into()),
+			crate::expr::Entry::Insert(v) => Self::Insert(v.into()),
+			crate::expr::Entry::Output(v) => Self::Output(v.into()),
+			crate::expr::Entry::Define(v) => Self::Define(v.into()),
+			crate::expr::Entry::Remove(v) => Self::Remove(v.into()),
+			crate::expr::Entry::Throw(v) => Self::Throw(v.into()),
+			crate::expr::Entry::Break(v) => Self::Break(v.into()),
+			crate::expr::Entry::Continue(v) => Self::Continue(v.into()),
+			crate::expr::Entry::Foreach(v) => Self::Foreach(v.into()),
+			crate::expr::Entry::Rebuild(v) => Self::Rebuild(v.into()),
+			crate::expr::Entry::Upsert(v) => Self::Upsert(v.into()),
+			crate::expr::Entry::Alter(v) => Self::Alter(v.into()),
+			crate::expr::Entry::Info(v) => Self::Info(v.into()),
+		}
 	}
 }
 

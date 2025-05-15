@@ -29,6 +29,36 @@ pub struct DefineFunctionStatement {
 	pub returns: Option<Kind>,
 }
 
+impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionStatement {
+	fn from(v: DefineFunctionStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
+			block: v.block.into(),
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions,
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			returns: v.returns.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineFunctionStatement> for DefineFunctionStatement {
+	fn from(v: crate::expr::statements::DefineFunctionStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
+			block: v.block.into(),
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions,
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			returns: v.returns.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(DefineFunctionStatement);
 
 impl crate::sql::DisplaySql for DefineFunctionStatement {

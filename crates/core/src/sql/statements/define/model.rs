@@ -27,6 +27,34 @@ pub struct DefineModelStatement {
 	pub overwrite: bool,
 }
 
+impl From<DefineModelStatement> for crate::expr::statements::DefineModelStatement {
+	fn from(v: DefineModelStatement) -> Self {
+		Self {
+			hash: v.hash,
+			name: v.name.into(),
+			version: v.version,
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineModelStatement> for DefineModelStatement {
+	fn from(v: crate::expr::statements::DefineModelStatement) -> Self {
+		Self {
+			hash: v.hash,
+			name: v.name.into(),
+			version: v.version,
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(DefineModelStatement);
 
 impl crate::sql::DisplaySql for DefineModelStatement {

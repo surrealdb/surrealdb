@@ -27,6 +27,32 @@ pub struct DefineParamStatement {
 	pub overwrite: bool,
 }
 
+impl From<DefineParamStatement> for crate::expr::statements::DefineParamStatement {
+	fn from(v: DefineParamStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			value: v.value.into(),
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineParamStatement> for DefineParamStatement {
+	fn from(v: crate::expr::statements::DefineParamStatement) -> Self {
+		DefineParamStatement {
+			name: v.name.into(),
+			value: v.value.into(),
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(DefineParamStatement);
 
 impl crate::sql::DisplaySql for DefineParamStatement {

@@ -159,6 +159,16 @@ impl From<Object> for crate::expr::Object {
 	}
 }
 
+impl From<crate::expr::Object> for Object {
+	fn from(v: crate::expr::Object) -> Self {
+		let mut object_map = BTreeMap::new();
+		for (k, v) in v.0 {
+			object_map.insert(k, v.into());
+		}
+		Self(object_map)
+	}
+}
+
 impl Deref for Object {
 	type Target = BTreeMap<String, Value>;
 	fn deref(&self) -> &Self::Target {

@@ -28,6 +28,22 @@ impl RebuildStatement {
 	}
 }
 
+impl From<RebuildStatement> for crate::expr::statements::rebuild::RebuildStatement {
+	fn from(v: RebuildStatement) -> Self {
+		match v {
+			RebuildStatement::Index(v) => Self::Index(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::rebuild::RebuildStatement> for RebuildStatement {
+	fn from(v: crate::expr::statements::rebuild::RebuildStatement) -> Self {
+		match v {
+			crate::expr::statements::rebuild::RebuildStatement::Index(v) => Self::Index(v.into()),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(RebuildStatement);
 
 impl crate::sql::DisplaySql for RebuildStatement {
@@ -46,6 +62,26 @@ pub struct RebuildIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
 	pub if_exists: bool,
+}
+
+impl From<RebuildIndexStatement> for crate::expr::statements::rebuild::RebuildIndexStatement {
+	fn from(v: RebuildIndexStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			what: v.what.into(),
+			if_exists: v.if_exists,
+		}
+	}
+}
+
+impl From<crate::expr::statements::rebuild::RebuildIndexStatement> for RebuildIndexStatement {
+	fn from(v: crate::expr::statements::rebuild::RebuildIndexStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			what: v.what.into(),
+			if_exists: v.if_exists,
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(RebuildIndexStatement);

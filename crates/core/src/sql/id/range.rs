@@ -73,6 +73,24 @@ impl TryFrom<Value> for IdRange {
 	}
 }
 
+impl From<IdRange> for crate::expr::IdRange {
+	fn from(v: IdRange) -> Self {
+		Self {
+			beg: v.beg.into(),
+			end: v.end.into(),
+		}
+	}
+}
+
+impl From<crate::expr::IdRange> for IdRange {
+	fn from(v: crate::expr::IdRange) -> Self {
+		Self {
+			beg: v.beg.into(),
+			end: v.end.into(),
+		}
+	}
+}
+
 impl PartialOrd for IdRange {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))

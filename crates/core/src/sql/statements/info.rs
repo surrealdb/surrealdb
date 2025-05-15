@@ -47,6 +47,32 @@ impl InfoStatement {
 	}
 }
 
+impl From<InfoStatement> for crate::expr::statements::InfoStatement {
+	fn from(v: InfoStatement) -> Self {
+		match v {
+			InfoStatement::Root(v) => Self::Root(v),
+			InfoStatement::Ns(v) => Self::Ns(v),
+			InfoStatement::Db(v, ver) => Self::Db(v, ver),
+			InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver),
+			InfoStatement::User(u, b, v) => Self::User(u.into(), b.map(Into::into), v),
+			InfoStatement::Index(i, t, v) => Self::Index(i.into(), t.into(), v),
+		}
+	}
+}
+
+impl From<crate::expr::statements::InfoStatement> for InfoStatement {
+	fn from(v: crate::expr::statements::InfoStatement) -> Self {
+		match v {
+			crate::expr::statements::InfoStatement::Root(v) => Self::Root(v),
+			crate::expr::statements::InfoStatement::Ns(v) => Self::Ns(v),
+			crate::expr::statements::InfoStatement::Db(v, ver) => Self::Db(v, ver),
+			crate::expr::statements::InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver),
+			crate::expr::statements::InfoStatement::User(u, b, v) => Self::User(u.into(), b.map(Into::into), v),
+			crate::expr::statements::InfoStatement::Index(i, t, v) => Self::Index(i.into(), t.into(), v),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(InfoStatement);
 
 impl crate::sql::DisplaySql for InfoStatement {

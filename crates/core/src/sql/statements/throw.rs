@@ -24,6 +24,22 @@ impl ThrowStatement {
 	}
 }
 
+impl From<ThrowStatement> for crate::expr::statements::ThrowStatement {
+	fn from(v: ThrowStatement) -> Self {
+		Self {
+			error: v.error.into(),
+		}
+	}
+}
+
+impl From<crate::expr::statements::ThrowStatement> for ThrowStatement {
+	fn from(v: crate::expr::statements::ThrowStatement) -> Self {
+		Self {
+			error: v.error.into(),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(ThrowStatement);
 
 impl crate::sql::DisplaySql for ThrowStatement {

@@ -26,6 +26,24 @@ impl OutputStatement {
 	}
 }
 
+impl From<OutputStatement> for crate::expr::statements::OutputStatement {
+	fn from(v: OutputStatement) -> Self {
+		crate::expr::statements::OutputStatement {
+			what: v.what.into(),
+			fetch: v.fetch.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::OutputStatement> for OutputStatement {
+	fn from(v: crate::expr::statements::OutputStatement) -> Self {
+		OutputStatement {
+			what: v.what.into(),
+			fetch: v.fetch.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(OutputStatement);
 
 impl crate::sql::DisplaySql for OutputStatement {

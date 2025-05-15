@@ -38,6 +38,38 @@ impl InsertStatement {
 	}
 }
 
+impl From<InsertStatement> for crate::expr::statements::InsertStatement {
+	fn from(v: InsertStatement) -> Self {
+		crate::expr::statements::InsertStatement {
+			into: v.into.map(Into::into),
+			data: v.data.into(),
+			ignore: v.ignore,
+			update: v.update.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			relation: v.relation,
+			version: v.version.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::InsertStatement> for InsertStatement {
+	fn from(v: crate::expr::statements::InsertStatement) -> Self {
+		InsertStatement {
+			into: v.into.map(Into::into),
+			data: v.data.into(),
+			ignore: v.ignore,
+			update: v.update.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			relation: v.relation,
+			version: v.version.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(InsertStatement);
 
 impl crate::sql::DisplaySql for InsertStatement {

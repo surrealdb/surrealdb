@@ -113,48 +113,66 @@ impl From<&str> for Part {
 impl From<Part> for crate::expr::Part {
 	fn from(v: Part) -> Self {
 		match v {
-			Part::All => crate::expr::Part::All,
-			Part::Flatten => crate::expr::Part::Flatten,
-			Part::Last => crate::expr::Part::Last,
-			Part::First => crate::expr::Part::First,
-			Part::Field(ident) => crate::expr::Part::Field(ident.into()),
-			Part::Index(number) => crate::expr::Part::Index(number.into()),
-			Part::Where(value) => crate::expr::Part::Where(value.into()),
-			Part::Graph(graph) => crate::expr::Part::Graph(graph.into()),
-			Part::Value(value) => crate::expr::Part::Value(value.into()),
-			Part::Start(value) => crate::expr::Part::Start(value.into()),
+			Part::All => Self::All,
+			Part::Flatten => Self::Flatten,
+			Part::Last => Self::Last,
+			Part::First => Self::First,
+			Part::Field(ident) => Self::Field(ident.into()),
+			Part::Index(number) => Self::Index(number.into()),
+			Part::Where(value) => Self::Where(value.into()),
+			Part::Graph(graph) => Self::Graph(graph.into()),
+			Part::Value(value) => Self::Value(value.into()),
+			Part::Start(value) => Self::Start(value.into()),
 			Part::Method(method, values) => {
-				crate::expr::Part::Method(method, values.into_iter().map(Into::into).collect())
+				Self::Method(method, values.into_iter().map(Into::into).collect())
 			}
 			Part::Destructure(parts) => {
-				crate::expr::Part::Destructure(
+				Self::Destructure(
 					parts.into_iter().map(Into::into).collect(),
 				)
 			}
-			Part::Optional => crate::expr::Part::Optional,
+			Part::Optional => Self::Optional,
 			Part::Recurse(recurse, idiom, instructions) => {
 				let idiom = idiom.map(|idiom| idiom.into());
-				let instructions = instructions.map(|instruction| {
-					match instruction {
-						RecurseInstruction::Path { inclusive } => {
-							crate::expr::part::RecurseInstruction::Path { inclusive }
-						}
-						RecurseInstruction::Collect { inclusive } => {
-							crate::expr::part::RecurseInstruction::Collect { inclusive }
-						}
-						RecurseInstruction::Shortest { expects, inclusive } => {
-							crate::expr::part::RecurseInstruction::Shortest {
-								expects: expects.into(),
-								inclusive,
-							}
-						}
-					}
-				});
-				crate::expr::Part::Recurse(recurse, idiom, instructions)
+				let instructions = instructions.map(Into::into);
+				crate::expr::Part::Recurse(recurse.into(), idiom, instructions)
 			}
 			Part::Doc => crate::expr::Part::Doc,
 			Part::RepeatRecurse => crate::expr::Part::RepeatRecurse,
 			
+		}
+	}
+}
+
+impl From<crate::expr::Part> for Part {
+	fn from(v: crate::expr::Part) -> Self {
+		match v {
+			crate::expr::Part::All => Self::All,
+			crate::expr::Part::Flatten => Self::Flatten,
+			crate::expr::Part::Last => Self::Last,
+			crate::expr::Part::First => Self::First,
+			crate::expr::Part::Field(ident) => Self::Field(ident.into()),
+			crate::expr::Part::Index(number) => Self::Index(number.into()),
+			crate::expr::Part::Where(value) => Self::Where(value.into()),
+			crate::expr::Part::Graph(graph) => Self::Graph(graph.into()),
+			crate::expr::Part::Value(value) => Self::Value(value.into()),
+			crate::expr::Part::Start(value) => Self::Start(value.into()),
+			crate::expr::Part::Method(method, values) => {
+				Self::Method(method, values.into_iter().map(Into::<Value>::into).collect())
+			}
+			crate::expr::Part::Destructure(parts) => {
+				Self::Destructure(
+					parts.into_iter().map(Into::<DestructurePart>::into).collect(),
+				)
+			}
+			crate::expr::Part::Optional => Self::Optional,
+			crate::expr::Part::Recurse(recurse, idiom, instructions) => {
+				let idiom = idiom.map(|idiom| idiom.into());
+				let instructions = instructions.map(Into::<RecurseInstruction>::into);
+				Self::_Recurse(recurse.into(), idiom, instructions)
+			}
+			crate::expr::Part::Doc => Self::Doc,
+			crate::expr::Part::RepeatRecurse => Self::RepeatRecurse,
 		}
 	}
 }
@@ -496,6 +514,24 @@ impl TryInto<(u32, Option<u32>)> for Recurse {
 				expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
 			}),
 			v => Ok(v),
+		}
+	}
+}
+
+impl From<Recurse> for crate::expr::part::Recurse {
+	fn from(v: Recurse) -> Self {
+		match v {
+			Recurse::Fixed(v) => Self::Fixed(v),
+			Recurse::Range(min, max) => Self::Range(min, max),
+		}
+	}
+}
+
+impl From<crate::expr::part::Recurse> for Recurse {
+	fn from(v: crate::expr::part::Recurse) -> Self {
+		match v {
+			crate::expr::part::Recurse::Fixed(v) => Self::Fixed(v),
+			crate::expr::part::Recurse::Range(min, max) => Self::Range(min, max),
 		}
 	}
 }

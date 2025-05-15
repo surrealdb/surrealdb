@@ -241,7 +241,7 @@ impl FromStr for Range {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match syn::range(s) {
-			Ok(v) => Ok(v),
+			Ok(v) => Ok(v.into()),
 			_ => Err(()),
 		}
 	}

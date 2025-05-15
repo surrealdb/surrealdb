@@ -107,12 +107,56 @@ impl DefineStatement {
 	) -> Result<Self, revision::Error> {
 		Ok(DefineStatement::Access(fields.0.into()))
 	}
-}
 
-impl DefineStatement {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
+	}
+}
+
+impl From<DefineStatement> for crate::expr::statements::DefineStatement {
+	fn from(v: DefineStatement) -> Self {
+		match v {
+			DefineStatement::Namespace(v) => Self::Namespace(v.into()),
+			DefineStatement::Database(v) => Self::Database(v.into()),
+			DefineStatement::Function(v) => Self::Function(v.into()),
+			DefineStatement::Analyzer(v) => Self::Analyzer(v.into()),
+			DefineStatement::Param(v) => Self::Param(v.into()),
+			DefineStatement::Table(v) => Self::Table(v.into()),
+			DefineStatement::Event(v) => Self::Event(v.into()),
+			DefineStatement::Field(v) => Self::Field(v.into()),
+			DefineStatement::Index(v) => Self::Index(v.into()),
+			DefineStatement::User(v) => Self::User(v.into()),
+			DefineStatement::Model(v) => Self::Model(v.into()),
+			DefineStatement::Access(v) => Self::Access(v.into()),
+			DefineStatement::Config(v) => Self::Config(v.into()),
+			DefineStatement::Api(v) => Self::Api(v.into()),
+			DefineStatement::Bucket(v) => Self::Bucket(v.into()),
+			DefineStatement::Sequence(v) => Self::Sequence(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineStatement> for DefineStatement {
+	fn from(v: crate::expr::statements::DefineStatement) -> Self {
+		match v {
+			crate::expr::statements::DefineStatement::Namespace(v) => Self::Namespace(v.into()),
+			crate::expr::statements::DefineStatement::Database(v) => Self::Database(v.into()),
+			crate::expr::statements::DefineStatement::Function(v) => Self::Function(v.into()),
+			crate::expr::statements::DefineStatement::Analyzer(v) => Self::Analyzer(v.into()),
+			crate::expr::statements::DefineStatement::Param(v) => Self::Param(v.into()),
+			crate::expr::statements::DefineStatement::Table(v) => Self::Table(v.into()),
+			crate::expr::statements::DefineStatement::Event(v) => Self::Event(v.into()),
+			crate::expr::statements::DefineStatement::Field(v) => Self::Field(v.into()),
+			crate::expr::statements::DefineStatement::Index(v) => Self::Index(v.into()),
+			crate::expr::statements::DefineStatement::User(v) => Self::User(v.into()),
+			crate::expr::statements::DefineStatement::Model(v) => Self::Model(v.into()),
+			crate::expr::statements::DefineStatement::Access(v) => Self::Access(v.into()),
+			crate::expr::statements::DefineStatement::Config(v) => Self::Config(v.into()),
+			crate::expr::statements::DefineStatement::Api(v) => Self::Api(v.into()),
+			crate::expr::statements::DefineStatement::Bucket(v) => Self::Bucket(v.into()),
+			crate::expr::statements::DefineStatement::Sequence(v) => Self::Sequence(v.into()),
+		}
 	}
 }
 

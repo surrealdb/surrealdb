@@ -34,6 +34,38 @@ impl RelateStatement {
 	}
 }
 
+impl From<RelateStatement> for crate::expr::statements::RelateStatement {
+	fn from(v: RelateStatement) -> Self {
+		crate::expr::statements::RelateStatement {
+			only: v.only,
+			kind: v.kind.into(),
+			from: v.from.into(),
+			with: v.with.into(),
+			uniq: v.uniq,
+			data: v.data.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+		}
+	}
+}
+
+impl From<crate::expr::statements::RelateStatement> for RelateStatement {
+	fn from(v: crate::expr::statements::RelateStatement) -> Self {
+		RelateStatement {
+			only: v.only,
+			kind: v.kind.into(),
+			from: v.from.into(),
+			with: v.with.into(),
+			uniq: v.uniq,
+			data: v.data.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(RelateStatement);
 
 impl crate::sql::DisplaySql for RelateStatement {

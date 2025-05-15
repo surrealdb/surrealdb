@@ -40,6 +40,34 @@ impl CreateStatement {
 	}
 }
 
+impl From<CreateStatement> for crate::expr::statements::CreateStatement {
+	fn from(v: CreateStatement) -> Self {
+		crate::expr::statements::CreateStatement {
+			only: v.only,
+			what: v.what.into_iter().map(Into::into).collect(),
+			data: v.data.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			version: v.version.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::CreateStatement> for CreateStatement {
+	fn from(v: crate::expr::statements::CreateStatement) -> Self {
+		CreateStatement {
+			only: v.only,
+			what: v.what.into_iter().map(Into::into).collect(),
+			data: v.data.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			version: v.version.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(CreateStatement);
 
 impl crate::sql::DisplaySql for CreateStatement {

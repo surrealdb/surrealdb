@@ -322,21 +322,21 @@ impl From<Kind> for crate::expr::Kind {
 			Kind::Geometry(geometries) => {
 				crate::expr::Kind::Geometry(geometries.into_iter().collect())
 			}
-			Kind::Option(k) => crate::expr::Kind::Option(k.as_ref().clone().into()),
+			Kind::Option(k) => crate::expr::Kind::Option(Box::new(k.as_ref().clone().into())),
 			Kind::Either(kinds) => crate::expr::Kind::Either(
 				kinds.into_iter().map(Into::into).collect(),
 			),
-			Kind::Set(k, l) => crate::expr::Kind::Set(k.as_ref().clone().into(), l),
-			Kind::Array(k, l) => crate::expr::Kind::Array(k.as_ref().clone().into(), l),
+			Kind::Set(k, l) => crate::expr::Kind::Set(Box::new(k.as_ref().clone().into()), l),
+			Kind::Array(k, l) => crate::expr::Kind::Array(Box::new(k.as_ref().clone().into()), l),
 			Kind::Function(args, ret) => crate::expr::Kind::Function(
 				args.map(|args| args.into_iter().map(Into::into).collect()),
-				ret.map(|ret| ret.as_ref().clone().into()),
+				ret.map(|ret| Box::new(ret.as_ref().clone().into())),
 			),
 			Kind::Range => crate::expr::Kind::Range,
 			Kind::Literal(l) => crate::expr::Kind::Literal(l),
 			Kind::References(t, i) => crate::expr::Kind::References(
 				t.as_ref().map(|t| t.clone().into()),
-				i.as_ref().cloned(),
+				i.as_ref().cloned().into(),
 			),
 			Kind::File(k) => crate::expr::Kind::File(k.into_iter().map(Into::into).collect()),
 		}

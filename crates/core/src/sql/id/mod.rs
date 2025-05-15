@@ -27,6 +27,26 @@ pub enum Gen {
 	Uuid,
 }
 
+impl From<Gen> for crate::expr::id::Gen {
+	fn from(v: Gen) -> Self {
+		match v {
+			Gen::Rand => crate::expr::id::Gen::Rand,
+			Gen::Ulid => crate::expr::id::Gen::Ulid,
+			Gen::Uuid => crate::expr::id::Gen::Uuid,
+		}
+	}
+}
+
+impl From<crate::expr::id::Gen> for Gen {
+	fn from(v: crate::expr::id::Gen) -> Self {
+		match v {
+			crate::expr::id::Gen::Rand => Gen::Rand,
+			crate::expr::id::Gen::Ulid => Gen::Ulid,
+			crate::expr::id::Gen::Uuid => Gen::Uuid,
+		}
+	}
+}
+
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -187,7 +207,21 @@ impl From<Id> for crate::expr::Id {
 			Id::Array(v) => crate::expr::Id::Array(v.into()),
 			Id::Object(v) => crate::expr::Id::Object(v.into()),
 			Id::Generate(v) => crate::expr::Id::Generate(v.into()),
-			Id::Range(v) => crate::expr::Id::Range(*v.into()),
+			Id::Range(v) => crate::expr::Id::Range(Box::new(*v.into())),
+		}
+	}
+}
+
+impl From<crate::expr::Id> for Id {
+	fn from(v: crate::expr::Id) -> Self {
+		match v {
+			crate::expr::Id::Number(v) => Self::Number(v),
+			crate::expr::Id::String(v) => Self::String(v),
+			crate::expr::Id::Uuid(v) => Self::Uuid(v.into()),
+			crate::expr::Id::Array(v) => Self::Array(v.into()),
+			crate::expr::Id::Object(v) => Self::Object(v.into()),
+			crate::expr::Id::Generate(v) => Self::Generate(v.into()),
+			crate::expr::Id::Range(v) => Self::Range(Box::new(*v.into())),
 		}
 	}
 }

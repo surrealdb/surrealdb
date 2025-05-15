@@ -137,6 +137,24 @@ impl Range {
 	}
 }
 
+impl From<Range> for crate::expr::Range {
+	fn from(value: Range) -> Self {
+		crate::expr::Range {
+			beg: value.beg,
+			end: value.end,
+		}
+	}
+}
+
+impl From<crate::expr::Range> for Range {
+	fn from(value: crate::expr::Range) -> Self {
+		Range {
+			beg: value.beg,
+			end: value.end,
+		}
+	}
+}
+
 /// A range but with specific value types.
 #[derive(Clone, Debug)]
 pub struct TypedRange<T> {

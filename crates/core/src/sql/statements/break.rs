@@ -21,6 +21,18 @@ impl BreakStatement {
 	}
 }
 
+impl From<BreakStatement> for crate::expr::statements::BreakStatement {
+	fn from(_v: BreakStatement) -> Self {
+		Self {}
+	}
+}
+
+impl From<crate::expr::statements::BreakStatement> for BreakStatement {
+	fn from(_v: crate::expr::statements::BreakStatement) -> Self {
+		Self {}
+	}
+}
+
 crate::sql::impl_display_from_sql!(BreakStatement);
 
 impl crate::sql::DisplaySql for BreakStatement {

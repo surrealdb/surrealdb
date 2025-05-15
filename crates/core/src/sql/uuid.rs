@@ -62,6 +62,18 @@ impl TryFrom<&str> for Uuid {
 	}
 }
 
+impl From<Uuid> for crate::expr::Uuid {
+	fn from(v: Uuid) -> Self {
+		crate::expr::Uuid(v.0)
+	}
+}
+
+impl From<crate::expr::Uuid> for Uuid {
+	fn from(v: crate::expr::Uuid) -> Self {
+		Self(v.0)
+	}
+}
+
 impl Deref for Uuid {
 	type Target = uuid::Uuid;
 	fn deref(&self) -> &Self::Target {
