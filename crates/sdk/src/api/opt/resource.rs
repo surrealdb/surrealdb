@@ -311,18 +311,21 @@ impl From<ops::RangeFull> for KeyRange {
 }
 
 /// A trait for types which can be used as a resource selection for a query.
-pub trait IntoResource<Output>: private::Sealed<Output> {}
+pub trait IntoResource<Output>: into_resource::Sealed<Output> {}
 
-mod private {
+mod into_resource {
 	pub trait Sealed<Output> {
 		fn into_resource(self) -> super::Result<super::Resource>;
 	}
 }
 
 /// A trait for types which can be used as a resource selection for a query that returns an `Option`.
-pub trait CreateResource<Output> {
-	#[deprecated(since = "2.3.0")]
-	fn into_resource(self) -> Result<Resource>;
+pub trait CreateResource<Output>: create_resource::Sealed<Output> {}
+
+mod create_resource {
+	pub trait Sealed<Output> {
+		fn into_resource(self) -> super::Result<super::Resource>;
+	}
 }
 
 fn no_colon(a: &str) -> Result<()> {
@@ -338,28 +341,28 @@ fn no_colon(a: &str) -> Result<()> {
 // IntoResource
 
 impl IntoResource<Value> for Resource {}
-impl private::Sealed<Value> for Resource {
+impl into_resource::Sealed<Value> for Resource {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self)
 	}
 }
 
 impl<R> IntoResource<Option<R>> for Object {}
-impl<R> private::Sealed<Option<R>> for Object {
+impl<R> into_resource::Sealed<Option<R>> for Object {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
 impl<R> IntoResource<Option<R>> for RecordId {}
-impl<R> private::Sealed<Option<R>> for RecordId {
+impl<R> into_resource::Sealed<Option<R>> for RecordId {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
 impl<R> IntoResource<Option<R>> for &RecordId {}
-impl<R> private::Sealed<Option<R>> for &RecordId {
+impl<R> into_resource::Sealed<Option<R>> for &RecordId {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.clone().into())
 	}
@@ -371,7 +374,7 @@ where
 	I: Into<RecordIdKey>,
 {
 }
-impl<R, T, I> private::Sealed<Option<R>> for (T, I)
+impl<R, T, I> into_resource::Sealed<Option<R>> for (T, I)
 where
 	T: Into<String>,
 	I: Into<RecordIdKey>,
@@ -382,28 +385,28 @@ where
 }
 
 impl<R> IntoResource<Vec<R>> for Vec<Value> {}
-impl<R> private::Sealed<Vec<R>> for Vec<Value> {
+impl<R> into_resource::Sealed<Vec<R>> for Vec<Value> {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
 impl<R> IntoResource<Vec<R>> for Edge {}
-impl<R> private::Sealed<Vec<R>> for Edge {
+impl<R> into_resource::Sealed<Vec<R>> for Edge {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
 impl<R> IntoResource<Vec<R>> for QueryRange {}
-impl<R> private::Sealed<Vec<R>> for QueryRange {
+impl<R> into_resource::Sealed<Vec<R>> for QueryRange {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
 impl<T, R> IntoResource<Vec<R>> for Table<T> where T: Into<String> {}
-impl<T, R> private::Sealed<Vec<R>> for Table<T>
+impl<T, R> into_resource::Sealed<Vec<R>> for Table<T>
 where
 	T: Into<String>,
 {
@@ -414,7 +417,7 @@ where
 }
 
 impl<R> IntoResource<Vec<R>> for &str {}
-impl<R> private::Sealed<Vec<R>> for &str {
+impl<R> into_resource::Sealed<Vec<R>> for &str {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(self)?;
 		Ok(self.into())
@@ -422,7 +425,7 @@ impl<R> private::Sealed<Vec<R>> for &str {
 }
 
 impl<R> IntoResource<Vec<R>> for String {}
-impl<R> private::Sealed<Vec<R>> for String {
+impl<R> into_resource::Sealed<Vec<R>> for String {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(&self)?;
 		Ok(self.into())
@@ -430,7 +433,7 @@ impl<R> private::Sealed<Vec<R>> for String {
 }
 
 impl<R> IntoResource<Vec<R>> for &String {}
-impl<R> private::Sealed<Vec<R>> for &String {
+impl<R> into_resource::Sealed<Vec<R>> for &String {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(self)?;
 		Ok(self.into())
@@ -438,7 +441,7 @@ impl<R> private::Sealed<Vec<R>> for &String {
 }
 
 impl<R> IntoResource<Vec<R>> for () {}
-impl<R> private::Sealed<Vec<R>> for () {
+impl<R> into_resource::Sealed<Vec<R>> for () {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(Resource::Unspecified)
 	}
@@ -446,25 +449,29 @@ impl<R> private::Sealed<Vec<R>> for () {
 
 // CreateResource
 
-impl CreateResource<Value> for Resource {
+impl CreateResource<Value> for Resource {}
+impl create_resource::Sealed<Value> for Resource {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self)
 	}
 }
 
-impl<R> CreateResource<Option<R>> for Object {
+impl<R> CreateResource<Option<R>> for Object {}
+impl<R> create_resource::Sealed<Option<R>> for Object {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
-impl<R> CreateResource<Option<R>> for RecordId {
+impl<R> CreateResource<Option<R>> for RecordId {}
+impl<R> create_resource::Sealed<Option<R>> for RecordId {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
-impl<R> CreateResource<Option<R>> for &RecordId {
+impl<R> CreateResource<Option<R>> for &RecordId {}
+impl<R> create_resource::Sealed<Option<R>> for &RecordId {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.clone().into())
 	}
@@ -475,12 +482,19 @@ where
 	T: Into<String>,
 	I: Into<RecordIdKey>,
 {
+}
+impl<R, T, I> create_resource::Sealed<Option<R>> for (T, I)
+where
+	T: Into<String>,
+	I: Into<RecordIdKey>,
+{
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}
 }
 
-impl<T, R> CreateResource<Option<R>> for Table<T>
+impl<T, R> CreateResource<Option<R>> for Table<T> where T: Into<String> {}
+impl<T, R> create_resource::Sealed<Option<R>> for Table<T>
 where
 	T: Into<String>,
 {
@@ -490,21 +504,24 @@ where
 	}
 }
 
-impl<R> CreateResource<Option<R>> for &str {
+impl<R> CreateResource<Option<R>> for &str {}
+impl<R> create_resource::Sealed<Option<R>> for &str {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(self)?;
 		Ok(self.into())
 	}
 }
 
-impl<R> CreateResource<Option<R>> for String {
+impl<R> CreateResource<Option<R>> for String {}
+impl<R> create_resource::Sealed<Option<R>> for String {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(&self)?;
 		Ok(self.into())
 	}
 }
 
-impl<R> CreateResource<Option<R>> for &String {
+impl<R> CreateResource<Option<R>> for &String {}
+impl<R> create_resource::Sealed<Option<R>> for &String {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(self)?;
 		Ok(self.into())
