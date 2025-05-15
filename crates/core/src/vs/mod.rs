@@ -134,6 +134,10 @@ impl VersionStamp {
 		self.0
 	}
 
+	pub fn to_vec(self) -> Vec<u8> {
+		self.0.to_vec()
+	}
+
 	pub const fn from_bytes(bytes: [u8; 10]) -> Self {
 		Self(bytes)
 	}

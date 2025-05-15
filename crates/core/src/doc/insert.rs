@@ -31,7 +31,7 @@ impl Document {
 		let retryable = stm.update.is_some();
 		if retryable {
 			// it is retryable so generate a save point we can roll back to.
-			ctx.tx().lock().await.new_save_point().await;
+			ctx.tx().lock().await.new_save_point();
 		}
 
 		// First try to create the value and if that is not possible due to an existing value fall
@@ -111,13 +111,13 @@ impl Document {
 			},
 			Err(IgnoreError::Ignore) => {
 				if retryable {
-					ctx.tx().lock().await.release_last_save_point().await?;
+					ctx.tx().lock().await.release_last_save_point()?;
 				}
 				return Err(IgnoreError::Ignore);
 			}
 			Ok(x) => {
 				if retryable {
-					ctx.tx().lock().await.release_last_save_point().await?;
+					ctx.tx().lock().await.release_last_save_point()?;
 				}
 				return Ok(x);
 			}
