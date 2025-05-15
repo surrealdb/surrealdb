@@ -241,6 +241,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -249,9 +251,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
@@ -262,6 +261,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -304,6 +305,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -312,9 +315,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
@@ -325,6 +325,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -333,9 +335,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Run GraphQL integration tests
         run: cargo make ci-graphql-integration
@@ -348,8 +347,15 @@ jobs:
     name: Test workspace
     runs-on: [runner-arm64-2xlarge]
     steps:
+      - name: Update system dependencies
+        run: sudo apt-get -y update
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -358,15 +364,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: sudo apt-get -y update
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
@@ -413,6 +410,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -421,9 +420,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test Any engine
         run: cargo make ci-api-integration-any
@@ -442,6 +438,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -450,9 +448,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test WS engine
         run: cargo make ci-api-integration-ws
@@ -471,6 +466,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -479,9 +476,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test HTTP engine
         run: cargo make ci-api-integration-http
@@ -500,6 +494,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -508,9 +504,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test Memory engine
         run: cargo make ci-api-integration-mem
@@ -529,6 +522,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -537,9 +532,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test File engine
         run: cargo make ci-api-integration-file
@@ -558,6 +550,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -566,9 +560,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test RocksDB engine
         run: cargo make ci-api-integration-rocksdb
@@ -587,6 +578,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -595,9 +588,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test SurrealKV engine
         run: cargo make ci-api-integration-surrealkv
@@ -616,6 +606,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -631,9 +623,6 @@ jobs:
           while ! ~/.tiup/bin/tiup -v; do
             curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
           done
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test TiKV engine
         run: cargo make ci-api-integration-tikv
@@ -652,6 +641,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -660,9 +651,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
@@ -686,6 +674,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -694,9 +684,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
@@ -724,6 +711,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -732,9 +721,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test upgrade
         run: cargo make ci-database-upgrade
