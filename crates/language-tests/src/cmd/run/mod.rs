@@ -51,8 +51,17 @@ fn try_collect_reports<W: io::Write>(
 }
 
 fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> TestSet {
-	let subset = if let Some(x) = matches.get_one::<String>("filter") {
-		testset.filter_map(|name, _| name.contains(x))
+	let subset = if let Some(filters) = matches.get_many::<String>("filter") {
+		let filters: Vec<String> = filters.map(|x| x.to_string()).collect();
+		testset.filter_map(|name, _| {
+			for filter in &filters {
+				if name.contains(filter) {
+					return true;
+				}
+			}
+
+			false
+		})
 	} else {
 		testset
 	};
