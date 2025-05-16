@@ -134,19 +134,19 @@ impl IntoResponse for ResponseError {
 		if let Some(e) = self.0.downcast_ref() {
 			match e {
 				surrealdb_core::err::Error::InvalidAuth =>
-					return ErrorMessage{
+					ErrorMessage{
 						code: StatusCode::FORBIDDEN,
 						details: Some("Authentication fould".to_string()),
 						description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
 						information: Some("There was a problem with authentication".to_string())
 					}.into_response(),
-					surrealdb_core::err::Error::IamError(SurrealIamError::NotAllowed{ .. }) => return ErrorMessage{
+					surrealdb_core::err::Error::IamError(SurrealIamError::NotAllowed{ .. }) => ErrorMessage{
 						code: StatusCode::FORBIDDEN,
 						details: Some("Forbidden".to_string()),
 						description: Some("Not allowed to do this.".to_string()),
 						information: Some(e.to_string()),
 					}.into_response(),
-					surrealdb_core::err::Error::ApiError(e) => return ErrorMessage {
+					surrealdb_core::err::Error::ApiError(e) => ErrorMessage {
 						code: e.status_code(),
 						details: Some("An error occured while processing this API request".to_string()),
 						description: Some(e.to_string()),
