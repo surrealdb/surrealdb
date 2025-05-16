@@ -12,7 +12,6 @@ use crate::sql::paths::OUT;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 use crate::sql::FlowResultExt as _;
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Result;
