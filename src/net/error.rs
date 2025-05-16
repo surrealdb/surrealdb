@@ -48,15 +48,15 @@ impl IntoResponse for Error {
 			Error::ForbiddenRoute(_) => {
 				ErrorMessage{
 					code: StatusCode::FORBIDDEN,
-					details: Some("Authentication fould".to_string()),
-					description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
+					details: Some("Forbidden".to_string()),
+					description: Some("Not allowed to do this.".to_string()),
 					information: Some(self.to_string())
 				}.into_response()
 			}
 			Error::InvalidAuth => {
 				ErrorMessage{
-					code: StatusCode::FORBIDDEN,
-					details: Some("Authentication fould".to_string()),
+					code: StatusCode::UNAUTHORIZED,
+					details: Some("Authentication failed".to_string()),
 					description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
 					information: Some("There was a problem with authentication".to_string())
 				}.into_response()
@@ -135,8 +135,8 @@ impl IntoResponse for ResponseError {
 			match e {
 				surrealdb_core::err::Error::InvalidAuth =>
 					ErrorMessage{
-						code: StatusCode::FORBIDDEN,
-						details: Some("Authentication fould".to_string()),
+						code: StatusCode::UNAUTHORIZED,
+						details: Some("Authentication failed".to_string()),
 						description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
 						information: Some("There was a problem with authentication".to_string())
 					}.into_response(),

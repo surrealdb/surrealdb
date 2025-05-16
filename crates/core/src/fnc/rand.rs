@@ -297,7 +297,7 @@ pub mod uuid {
 		let uuid = match timestamp {
 			Some(timestamp) => {
 				#[cfg(target_family = "wasm")]
-				ensure!(
+				anyhow::ensure!(
 					timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
 					Error::InvalidArguments {
 						name: String::from("rand::ulid"),

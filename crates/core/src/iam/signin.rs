@@ -294,7 +294,6 @@ pub async fn db_access(
 										if *INSECURE_FORWARD_ACCESS_ERRORS {
 											Err(e)
 										} else {
-											dbg!(e);
 											Err(anyhow::Error::new(
 												Error::AccessRecordSigninQueryFailed,
 											))

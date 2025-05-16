@@ -643,9 +643,10 @@ where
 		self,
 		response: &mut QueryResponse,
 	) -> Result<method::QueryStream<Notification<R>>> {
-		dbg!(&response.results[self]);
-		let mut stream = dbg!(response.live_queries.swap_remove(&self))
-			.and_then(|result| match dbg!(result) {
+		let mut stream = response
+			.live_queries
+			.swap_remove(&self)
+			.and_then(|result| match result {
 				Err(e) => {
 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
 						response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
@@ -655,7 +656,7 @@ where
 				}
 				result => Some(result),
 			})
-			.unwrap_or_else(|| match dbg!(response.results.contains_key(&self)) {
+			.unwrap_or_else(|| match response.results.contains_key(&self) {
 				true => Err(Error::NotLiveQuery(self).into()),
 				false => Err(Error::QueryIndexOutOfBounds(self).into()),
 			})?;
