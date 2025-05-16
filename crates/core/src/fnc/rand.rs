@@ -1,4 +1,4 @@
-use crate::cnf::ID_CHARS;fnc/rand.r
+use crate::cnf::ID_CHARS;
 use crate::err::Error;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
@@ -242,13 +242,15 @@ pub fn ulid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 	let ulid = match timestamp {
 		Some(timestamp) => {
 			#[cfg(target_family = "wasm")]
-			ensure!(timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
+			ensure!(
+				timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
 				Error::InvalidArguments {
 					name: String::from("rand::ulid"),
 					message: format!(
 						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
 					),
-				});
+				}
+			);
 
 			Ulid::from_datetime(timestamp.0.into())
 		}
@@ -262,13 +264,15 @@ pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 	let uuid = match timestamp {
 		Some(timestamp) => {
 			#[cfg(target_family = "wasm")]
-			ensure!(timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
+			ensure!(
+				timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
 				Error::InvalidArguments {
 					name: String::from("rand::ulid"),
 					message: format!(
 						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
 					),
-				});
+				}
+			);
 
 			Uuid::new_v7_from_datetime(timestamp)
 		}
