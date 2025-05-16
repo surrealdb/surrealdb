@@ -451,7 +451,7 @@ impl super::api::Transaction for Transaction {
 		rng: Range<Key>,
 		limit: u32,
 	) -> Result<Vec<(Key, Val, Version, bool)>> {
-		ensure!(self.done, Error::TxFinished);
+		ensure!(!self.done, Error::TxFinished);
 		// Set the key range
 		let beg = rng.start;
 		let end = rng.end;

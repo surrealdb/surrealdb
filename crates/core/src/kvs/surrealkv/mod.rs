@@ -235,7 +235,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(self.done, Error::TxFinished);
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.write, Error::TxReadonly);
 
@@ -322,7 +322,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del(&mut self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(self.done, Error::TxFinished);
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.write, Error::TxReadonly);
 

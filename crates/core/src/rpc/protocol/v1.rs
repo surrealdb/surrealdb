@@ -987,7 +987,7 @@ pub trait RpcProtocolV1: RpcContext {
 		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>> {
 		// If no live query handler force realtime off
-		ensure!(Self::LQ_SUPPORT && !self.session().rt, RpcError::BadLQConfig);
+		ensure!(Self::LQ_SUPPORT || !self.session().rt, RpcError::BadLQConfig);
 		// Execute the query on the database
 		let res = match query {
 			Value::Query(sql) => self.kvs().process(sql, &self.session(), vars).await?,
