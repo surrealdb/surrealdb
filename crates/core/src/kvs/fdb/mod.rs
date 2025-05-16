@@ -190,7 +190,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn cancel(&mut self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(self.done, Error::TxFinished);
+		ensure!(!self.done, Error::TxFinished);
 		// Mark this transaction as done
 		self.done = true;
 		// Cancel this transaction
@@ -206,7 +206,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn commit(&mut self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(self.done, Error::TxFinished);
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.write, Error::TxReadonly);
 		// Mark this transaction as done
@@ -226,7 +226,7 @@ impl super::api::Transaction for Transaction {
 		// FoundationDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		ensure!(self.done, Error::TxFinished);
+		ensure!(!self.done, Error::TxFinished);
 		// Check the key
 		let res = self.inner.as_ref().unwrap().get(&key, self.snapshot()).await?.is_some();
 		// Return result

@@ -2,10 +2,9 @@
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SavePointImpl, SavePoints};
-use crate::kvs::{Check, Key, KeyEncode, Val};
+use crate::kvs::savepoint::SavePoints;
+use crate::kvs::{Check, Key, Val};
 use anyhow::{ensure, Result};
-use std::fmt::Debug;
 use std::ops::Range;
 
 pub struct Datastore {

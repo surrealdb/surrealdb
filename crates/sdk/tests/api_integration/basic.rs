@@ -330,11 +330,11 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 		match e {
 			surrealdb::error::Api::Query(e) => assert_eq!(
 				e,
-				"There was a problem with the database: The record access signup query failed"
+				"There was a problem with the database: The record access signin query failed"
 			),
 			surrealdb::error::Api::Http(e) => assert_eq!(
 				e,
-				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
 			),
 			x => panic!("unexpected error: {x:?}"),
 		}

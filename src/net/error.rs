@@ -45,52 +45,52 @@ pub enum Error {
 impl IntoResponse for Error {
 	fn into_response(self) -> Response {
 		match self {
-					Error::ForbiddenRoute(_) => {
-						ErrorMessage{
-							code: StatusCode::FORBIDDEN,
-							details: Some("Authentication fould".to_string()),
-							description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
-							information: Some(self.to_string())
-						}.into_response()
-					}
-					Error::InvalidAuth => {
-						ErrorMessage{
-							code: StatusCode::FORBIDDEN,
-							details: Some("Authentication fould".to_string()),
-							description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
-							information: Some("There was a problem with authentication".to_string())
-						}.into_response()
-					}
-					Error::InvalidType => {
-						ErrorMessage {
-							code: StatusCode::UNSUPPORTED_MEDIA_TYPE,
-							details: Some("Unsupported media type".to_string()),
-							description: Some("The request needs to adhere to certain constraints. Refer to the documentation for supported content types.".to_string()),
-							information: None,
-						}.into_response()
-					}
-					Error::NotFound(_) => {
-						ErrorMessage {
-							code: StatusCode::NOT_FOUND,
-							details: Some("Not found".to_string()),
-							description: Some("The request was made to an endpoint which does not exist.".to_string()),
-							information: Some(self.to_string()),
-						}.into_response()
-					}
-					Error::InvalidStorage =>
-						ErrorMessage {
-							code: StatusCode::INTERNAL_SERVER_ERROR,
-							details: Some("Health check failed".to_string()),
-							description: Some("The database health check for this instance failed. There was an issue with the underlying storage engine.".to_string()),
-							information: Some(self.to_string()),
-						}.into_response(),
-					_ => ErrorMessage {
-						code: StatusCode::BAD_REQUEST,
-						details: Some("Request problems dectected".to_string()),
-						description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
-						information: Some(format!("{self}")),
-					}.into_response()
-				}
+			Error::ForbiddenRoute(_) => {
+				ErrorMessage{
+					code: StatusCode::FORBIDDEN,
+					details: Some("Authentication fould".to_string()),
+					description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
+					information: Some(self.to_string())
+				}.into_response()
+			}
+			Error::InvalidAuth => {
+				ErrorMessage{
+					code: StatusCode::FORBIDDEN,
+					details: Some("Authentication fould".to_string()),
+					description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
+					information: Some("There was a problem with authentication".to_string())
+				}.into_response()
+			}
+			Error::InvalidType => {
+				ErrorMessage {
+					code: StatusCode::UNSUPPORTED_MEDIA_TYPE,
+					details: Some("Unsupported media type".to_string()),
+					description: Some("The request needs to adhere to certain constraints. Refer to the documentation for supported content types.".to_string()),
+					information: None,
+				}.into_response()
+			}
+			Error::NotFound(_) => {
+				ErrorMessage {
+					code: StatusCode::NOT_FOUND,
+					details: Some("Not found".to_string()),
+					description: Some("The request was made to an endpoint which does not exist.".to_string()),
+					information: Some(self.to_string()),
+				}.into_response()
+			}
+			Error::InvalidStorage =>
+				ErrorMessage {
+					code: StatusCode::INTERNAL_SERVER_ERROR,
+					details: Some("Health check failed".to_string()),
+					description: Some("The database health check for this instance failed. There was an issue with the underlying storage engine.".to_string()),
+					information: Some(self.to_string()),
+				}.into_response(),
+			_ => ErrorMessage {
+				code: StatusCode::BAD_REQUEST,
+				details: Some("Request problems dectected".to_string()),
+				description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
+				information: Some(format!("{self}")),
+			}.into_response()
+		}
 	}
 }
 
@@ -152,24 +152,30 @@ impl IntoResponse for ResponseError {
 						description: Some(e.to_string()),
 						information: None,
 					}.into_response(),
-				_ => return ErrorMessage {
-					code: StatusCode::BAD_REQUEST,
-					details: Some("Request problems dectected".to_string()),
-					description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
-					information: Some(format!("{e}")),
-				}.into_response()
+					_ => ErrorMessage {
+						code: StatusCode::BAD_REQUEST,
+						details: Some("Request problems dectected".to_string()),
+						description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
+						information: Some(format!("{e}")),
+					}.into_response()
 			}
 		} else if let Some(e) = self.0.downcast_ref::<ApiError>() {
-			return ErrorMessage {
+			ErrorMessage {
 				code: e.status_code(),
 				details: Some("An error occured while processing this API request".to_string()),
 				description: Some(e.to_string()),
 				information: None,
 			}
-			.into_response();
+			.into_response()
 		} else if self.0.is::<Error>() {
-			return self.0.downcast::<Error>().unwrap().into_response();
+			self.0.downcast::<Error>().unwrap().into_response()
+		} else {
+			ErrorMessage {
+				code: StatusCode::BAD_REQUEST,
+				details: Some("Request problems dectected".to_string()),
+				description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
+				information: Some(format!("{}",self.0)),
+			}.into_response()
 		}
-		todo!()
 	}
 }
