@@ -992,7 +992,7 @@ mod tests {
 			..Response::new()
 		};
 
-		let Err(e) = response.take::<Value>(0) else {
+		let Err(e) = response.take::<Option<bool>>(0) else {
 			panic!("silently dropping records not allowed");
 		};
 		let Ok(Error::LossyTake(Response {

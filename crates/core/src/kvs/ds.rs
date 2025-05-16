@@ -216,9 +216,9 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// # use surrealdb_core::kvs::Datastore;
-	/// # use surrealdb_core::err::Error;
+	/// # use anyhow::Error;
 	/// # #[tokio::main]
-	/// # async fn main() -> Result<()> {
+	/// # async fn main() -> Result<(),Error> {
 	/// let ds = Datastore::new("memory").await?;
 	/// # Ok(())
 	/// # }
@@ -228,9 +228,9 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// # use surrealdb_core::kvs::Datastore;
-	/// # use surrealdb_core::err::Error;
+	/// # use anyhow::Error;
 	/// # #[tokio::main]
-	/// # async fn main() -> Result<()> {
+	/// # async fn main() -> Result<(),Error> {
 	/// let ds = Datastore::new("surrealkv://temp.skv").await?;
 	/// # Ok(())
 	/// # }
@@ -240,9 +240,9 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// # use surrealdb_core::kvs::Datastore;
-	/// # use surrealdb_core::err::Error;
+	/// # use anyhow::Error;
 	/// # #[tokio::main]
-	/// # async fn main() -> Result<()> {
+	/// # async fn main() -> Result<(),Error> {
 	/// let ds = Datastore::new("tikv://127.0.0.1:2379").await?;
 	/// # Ok(())
 	/// # }
@@ -742,10 +742,10 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::{Datastore, TransactionType::*, LockType::*};
-	/// use surrealdb_core::err::Error;
+	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<()> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("file://database.db").await?;
 	///     let mut tx = ds.transaction(Write, Optimistic).await?;
 	///     tx.cancel().await?;
@@ -759,12 +759,12 @@ impl Datastore {
 	/// Parse and execute an SQL query
 	///
 	/// ```rust,no_run
+	/// use anyhow::Error;
 	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::err::Error;
 	/// use surrealdb_core::dbs::Session;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<()> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let ast = "USE NS test DB test; SELECT * FROM person;";
@@ -800,10 +800,12 @@ impl Datastore {
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
-			actor: "anonymous".to_string(),
-			action: "process".to_string(),
-			resource: "query".to_string(),
+		self.check_anon(sess).map_err(|_| {
+			Error::from(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "process".to_string(),
+				resource: "query".to_string(),
+			})
 		})?;
 
 		// Create a new query options
@@ -892,12 +894,12 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::err::Error;
 	/// use surrealdb_core::dbs::Session;
 	/// use surrealdb_core::sql::parse;
+	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<()> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let ast = parse("USE NS test DB test; SELECT * FROM person;")?;
@@ -916,10 +918,12 @@ impl Datastore {
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
-			actor: "anonymous".to_string(),
-			action: "process".to_string(),
-			resource: "query".to_string(),
+		self.check_anon(sess).map_err(|_| {
+			Error::from(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "process".to_string(),
+				resource: "query".to_string(),
+			})
 		})?;
 
 		// Create a new query options
@@ -939,13 +943,13 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::err::Error;
 	/// use surrealdb_core::dbs::Session;
 	/// use surrealdb_core::sql::Future;
 	/// use surrealdb_core::sql::Value;
+	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<()> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
@@ -959,10 +963,12 @@ impl Datastore {
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
-			actor: "anonymous".to_string(),
-			action: "compute".to_string(),
-			resource: "value".to_string(),
+		self.check_anon(sess).map_err(|_| {
+			Error::from(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "compute".to_string(),
+				resource: "value".to_string(),
+			})
 		})?;
 
 		// Create a new memory stack
@@ -1013,13 +1019,13 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::err::Error;
 	/// use surrealdb_core::dbs::Session;
 	/// use surrealdb_core::sql::Future;
 	/// use surrealdb_core::sql::Value;
+	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<()> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
@@ -1075,11 +1081,11 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::err::Error;
 	/// use surrealdb_core::dbs::Session;
+	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<()> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("memory").await?.with_notifications();
 	///     let ses = Session::owner();
 	/// 	if let Some(channel) = ds.notifications() {

@@ -3,7 +3,7 @@ use crate::err::Error;
 use crate::sql::{Bytes, Object, Strand, Value};
 use crate::syn;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context as _, Result};
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
 use reqwest::redirect::Policy;
@@ -28,16 +28,18 @@ async fn decode_response(res: Response) -> Result<Value> {
 		Ok(res) => match res.headers().get(CONTENT_TYPE) {
 			Some(mime) => match mime.to_str() {
 				Ok(v) if v.starts_with("application/json") => {
-					let txt = res.text().await?;
-					let val = syn::json(&txt)?;
+					let txt = res.text().await.map_err(Error::from)?;
+					let val = syn::json(&txt)
+						.context("Failed to parse JSON response")
+						.map_err(|e| Error::Http(e.to_string()))?;
 					Ok(val)
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
-					let bytes = res.bytes().await?;
+					let bytes = res.bytes().await.map_err(Error::from)?;
 					Ok(Value::Bytes(Bytes(bytes.into())))
 				}
 				Ok(v) if v.starts_with("text") => {
-					let txt = res.text().await?;
+					let txt = res.text().await.map_err(Error::from)?;
 					let val = txt.into();
 					Ok(val)
 				}
@@ -105,8 +107,8 @@ async fn request(
 	// Send the request and wait
 	let res = match ctx.timeout() {
 		#[cfg(not(target_family = "wasm"))]
-		Some(d) => req.timeout(d).send().await?,
-		_ => req.send().await?,
+		Some(d) => req.timeout(d).send().await.map_err(Error::from)?,
+		_ => req.send().await.map_err(Error::from)?,
 	};
 
 	if is_head {

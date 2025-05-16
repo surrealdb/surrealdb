@@ -193,3 +193,4 @@ pub use crate::api::{
 
 /// A specialized `Result` type
 pub type Result<T> = anyhow::Result<T>;
+pub use anyhow::Error;

@@ -238,12 +238,12 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 
 	if let Some(e) = err.downcast_ref() {
 		match e {
-			surrealdb::err::Error::Thrown(e) => assert_eq!(e, "signup_thrown_error"),
+			surrealdb::err::Error::Thrown(e) => assert_eq!(e, "signin_thrown_error"),
 			x => panic!("unexpected error: {x:?}"),
 		}
 	} else if let Some(e) = err.downcast_ref() {
 		match e {
-			surrealdb::error::Api::Query(e) => assert!(e.contains("signup")),
+			surrealdb::error::Api::Query(e) => assert!(e.contains("signin")),
 			surrealdb::error::Api::Http(e) => assert_eq!(
 				e,
 				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"

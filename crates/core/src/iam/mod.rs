@@ -1,4 +1,3 @@
-use anyhow::Result;
 use cedar_policy::Context;
 pub use entities::Level;
 use thiserror::Error;
@@ -37,18 +36,12 @@ pub enum Error {
 	},
 }
 
-impl From<Error> for String {
-	fn from(e: Error) -> String {
-		e.to_string()
-	}
-}
-
 pub fn is_allowed(
 	actor: &Actor,
 	action: &Action,
 	resource: &Resource,
 	ctx: Option<Context>,
-) -> Result<()> {
+) -> Result<(), Error> {
 	match policies::is_allowed(actor, action, resource, ctx.unwrap_or(Context::empty())) {
 		(allowed, _) if allowed => Ok(()),
 		_ => {
@@ -59,7 +52,7 @@ pub fn is_allowed(
 			};
 
 			trace!("{}", err);
-			Err(anyhow::Error::new(err))
+			Err(err)
 		}
 	}
 }

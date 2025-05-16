@@ -96,8 +96,11 @@ pub async fn basic(
 			Ok(u) => {
 				debug!("Authenticated as database user '{}'", user);
 				session.exp = expiration(u.duration.session)?;
-				session.au =
-					Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).try_into()?);
+				session.au = Arc::new(
+					(&u, Level::Database(ns.to_owned(), db.to_owned()))
+						.try_into()
+						.map_err(Error::from)?,
+				);
 				Ok(())
 			}
 			Err(err) => Err(err),
@@ -107,7 +110,9 @@ pub async fn basic(
 			Ok(u) => {
 				debug!("Authenticated as namespace user '{}'", user);
 				session.exp = expiration(u.duration.session)?;
-				session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).try_into()?);
+				session.au = Arc::new(
+					(&u, Level::Namespace(ns.to_owned())).try_into().map_err(Error::from)?,
+				);
 				Ok(())
 			}
 			Err(err) => Err(err),
@@ -117,7 +122,7 @@ pub async fn basic(
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
 				session.exp = expiration(u.duration.session)?;
-				session.au = Arc::new((&u, Level::Root).try_into()?);
+				session.au = Arc::new((&u, Level::Root).try_into().map_err(Error::from)?);
 				Ok(())
 			}
 			Err(err) => Err(err),
@@ -373,7 +378,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
-				de.roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
+				de.roles
+					.iter()
+					.map(|e| Role::from_str(e).map_err(Error::from))
+					.collect::<Result<_, _>>()?,
 				Level::Database(ns.to_string(), db.to_string()),
 			)));
 			Ok(())
@@ -477,7 +485,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
-				de.roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
+				de.roles
+					.iter()
+					.map(|e| Role::from_str(e).map_err(Error::from))
+					.collect::<Result<_, _>>()?,
 				Level::Namespace(ns.to_string()),
 			)));
 			Ok(())
@@ -573,7 +584,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
-				de.roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
+				de.roles
+					.iter()
+					.map(|e| Role::from_str(e).map_err(Error::from))
+					.collect::<Result<_, _>>()?,
 				Level::Root,
 			)));
 			Ok(())

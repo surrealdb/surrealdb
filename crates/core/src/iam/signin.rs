@@ -354,7 +354,9 @@ pub async fn db_user(
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Database(ns.clone(), db.clone())).try_into()?);
+			session.au = Arc::new(
+				(&u, Level::Database(ns.clone(), db.clone())).try_into().map_err(Error::from)?,
+			);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -437,7 +439,8 @@ pub async fn ns_user(
 			session.tk = Some((&val).into());
 			session.ns = Some(ns.clone());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Namespace(ns.clone())).try_into()?);
+			session.au =
+				Arc::new((&u, Level::Namespace(ns.clone())).try_into().map_err(Error::from)?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -485,7 +488,7 @@ pub async fn root_user(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Root).try_into()?);
+			session.au = Arc::new((&u, Level::Root).try_into().map_err(Error::from)?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -685,7 +688,11 @@ pub async fn signin_bearer(
 		access::Subject::User(user) => {
 			session.au = Arc::new(Auth::new(Actor::new(
 				user.to_string(),
-				roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
+				roles
+					.iter()
+					.map(|e| Role::from_str(e))
+					.collect::<Result<_, _>>()
+					.map_err(Error::from)?,
 				match (ns, db) {
 					(Some(ns), Some(db)) => Level::Database(ns, db),
 					(Some(ns), None) => Level::Namespace(ns),
