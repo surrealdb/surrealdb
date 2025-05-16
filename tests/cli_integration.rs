@@ -266,13 +266,18 @@ mod cli_integration {
 	#[test(tokio::test)]
 	async fn with_root_auth() {
 		// Commands with credentials when auth is enabled, should succeed
-		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
-		let creds = format!("--user {USER} --pass {PASS}");
+		let (addr, mut server) =
+			common::start_server(StartServerArguments {
+				args: format!("--user {} --pass {}", USER, PASS),
+				..Default::default()
+			})
+			.await
+			.unwrap();
 		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
 		info!("* Query over HTTP");
 		{
-			let args = format!("{sql_args} {creds}");
+			let args = format!("{sql_args}");
 			let input = "INFO FOR ROOT;";
 			let output = common::run(&args).input(input).output();
 			assert!(output.is_ok(), "failed to query over HTTP: {}", output.err().unwrap());
@@ -280,7 +285,7 @@ mod cli_integration {
 
 		info!("* Query over WS");
 		{
-			let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
+			let args = format!("sql --conn ws://{addr} --multi --pretty");
 			let input = "INFO FOR ROOT;";
 			let output = common::run(&args).input(input).output();
 			assert!(output.is_ok(), "failed to query over WS: {}", output.err().unwrap());
@@ -290,7 +295,7 @@ mod cli_integration {
 		let exported = {
 			let exported = common::tmp_file("exported.surql");
 			let args = format!(
-				"export --conn http://{addr} {creds} --ns {throwaway} --db {throwaway} {exported}",
+				"export --conn http://{addr} --ns {throwaway} --db {throwaway} {exported}",
 				throwaway = Ulid::new()
 			);
 
@@ -301,7 +306,7 @@ mod cli_integration {
 		info!("* Root user can do imports");
 		{
 			let args = format!(
-				"import --conn http://{addr} {creds} --ns {throwaway} --db {throwaway} {exported}",
+				"import --conn http://{addr} --ns {throwaway} --db {throwaway} {exported}",
 				throwaway = Ulid::new()
 			);
 			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run import: {args}"));
@@ -1894,6 +1899,77 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 	}
+	#[tokio::test]
+async fn test_export_cancellation() {
+    use std::process::Stdio;
+    use tokio::process::Command;
+    use tokio::time::{sleep, Duration};
+    use reqwest;
+
+    // Compile the Rust code and get the path to the new binary
+    let binary_path = {
+        let output = std::process::Command::new("cargo")
+            .args(&["build", "--release"])
+            .output()
+            .expect("Failed to compile SurrealDB");
+        assert!(output.status.success(), "Failed to compile SurrealDB");
+        std::env::current_dir().unwrap().join("target/release/surreal")
+    };
+
+    // Spawn the surreal export process using the newly built binary
+    let mut export_process = Command::new(binary_path)
+        .arg("export")
+        .arg("--endpoint")
+        .arg("http://localhost:8000")
+        .arg("--username")
+        .arg("root")
+        .arg("--password")
+        .arg("root")
+        .arg("--namespace")
+        .arg("test")
+        .arg("--database")
+        .arg("test")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn export process");
+
+    // Allow the export to run briefly
+    sleep(Duration::from_secs(2)).await;
+
+    // Send SIGINT to cancel the export process
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{kill, Signal};
+        use nix::unistd::Pid;
+        
+        let pid = export_process.id().expect("Failed to get export process ID") as i32;
+        kill(Pid::from_raw(pid), Signal::SIGINT)
+            .expect("Failed to send SIGINT to export process");
+    }
+
+    // Wait for the export process to terminate
+    let output = export_process.wait_with_output().await.expect("Failed to wait on export process");
+    
+    // Check that the process did not exit successfully, indicating cancellation
+    assert!(!output.status.success(), "Export process should not exit successfully after cancellation");
+
+    // Check for cancellation message in stderr
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Export cancelled"), "Export cancellation message not found");
+
+    // Check that the database is still responsive by querying the health endpoint
+    let client = reqwest::Client::new();
+    let response = client
+        .get("http://localhost:8000/health")
+        .send()
+        .await
+        .expect("Failed to send health check request");
+
+    assert!(response.status().is_success(), "Health check failed after export cancellation");
+}
+
+
 
 	#[test(tokio::test)]
 	async fn double_create() {
