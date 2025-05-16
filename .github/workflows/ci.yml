@@ -22,7 +22,7 @@ defaults:
     shell: bash
 
 env:
-  RUST_VERSION: 1.86
+  RUST_VERSION: 1.86.0
 
 jobs:
   # ----------------------------------------
