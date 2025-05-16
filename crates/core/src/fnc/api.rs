@@ -58,7 +58,12 @@ pub async fn invoke(
 			headers,
 		};
 
-		match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(body)).await {
+		let body = ApiBody {
+			body,
+			native: true,
+		};
+
+		match invocation.invoke_with_context(stk, ctx, opt, api, body).await {
 			Ok(Some(v)) => v.0.try_into(),
 			Err(e) => Err(e),
 			_ => Ok(Value::None),

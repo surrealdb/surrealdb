@@ -18,6 +18,7 @@ use crate::{
 	kvs::{Datastore, Transaction},
 	sql::{
 		statements::define::{config::api::ApiConfig, ApiDefinition},
+		stream::StreamVal,
 		FlowResultExt as _, Object, Value,
 	},
 };
@@ -51,16 +52,21 @@ impl ApiInvocation {
 		ds: Arc<Datastore>,
 		sess: &Session,
 		api: &ApiDefinition,
-		body: ApiBody,
+		stream: StreamVal,
 	) -> Result<Option<(ApiResponse, ResponseInstruction)>, Error> {
 		let opt = ds.setup_options(sess);
 
 		let mut ctx = ds.setup_ctx()?;
 		ctx.set_transaction(tx);
-		let ctx = &ctx.freeze();
+		let ctx = ctx.freeze();
+
+		let body = ApiBody {
+			body: Value::Stream(stream.into()),
+			native: false,
+		};
 
 		let mut stack = TreeStack::new();
-		stack.enter(|stk| self.invoke_with_context(stk, ctx, &opt, api, body)).finish().await
+		stack.enter(|stk| self.invoke_with_context(stk, &ctx, &opt, api, body)).finish().await
 	}
 
 	// The `invoke` method accepting a parameter like `Option<&mut Stk>`
@@ -96,7 +102,7 @@ impl ApiInvocation {
 		inv_ctx.apply_middleware(builtin)?;
 
 		// Prepare the response headers and conversion
-		let res_instruction = if body.is_native() {
+		let res_instruction = if body.native {
 			ResponseInstruction::Native
 		} else if inv_ctx.response_body_raw {
 			ResponseInstruction::Raw
