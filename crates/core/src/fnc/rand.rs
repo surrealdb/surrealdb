@@ -299,7 +299,7 @@ pub mod uuid {
 				#[cfg(target_family = "wasm")]
 				anyhow::ensure!(
 					timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
-					Error::InvalidArguments {
+					crate::err::Error::InvalidArguments {
 						name: String::from("rand::ulid"),
 						message: format!(
 							"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
