@@ -338,7 +338,7 @@ where
 		);
 
 		ensure!(
-			server_build.is_empty() && server_build >= &build_meta,
+			server_build.is_empty() || server_build >= &build_meta,
 			Error::BuildMetadataMismatch {
 				server_metadata: server_build.clone(),
 				supported_metadata: build_meta,

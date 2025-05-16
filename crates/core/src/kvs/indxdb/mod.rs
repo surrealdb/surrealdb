@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SavePointImpl, SavePoints};
 use crate::kvs::{Check, Key, KeyEncode, Val};
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use std::fmt::Debug;
 use std::ops::Range;
 
@@ -178,9 +178,7 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// IndxDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
