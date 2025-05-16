@@ -48,7 +48,7 @@ pub(crate) enum RecordStrategy {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ScanDirection {
 	Forward,
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 	Backward,
 }
 
@@ -56,7 +56,7 @@ impl Display for ScanDirection {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		match self {
 			ScanDirection::Forward => f.write_str("forward"),
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 			ScanDirection::Backward => f.write_str("backward"),
 		}
 	}
@@ -207,7 +207,7 @@ impl<'a> StatementContext<'a> {
 	/// The direction is reversed if the first element of order is ID descending.
 	/// Typically: `ORDER BY id DESC`
 	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
-		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv", feature = "kv-surrealkv"))]
 		if let Some(Ordering::Order(o)) = self.order {
 			if let Some(o) = o.first() {
 				if !o.direction && o.value.is_id() {
