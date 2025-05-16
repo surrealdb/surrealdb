@@ -178,7 +178,7 @@ pub fn duration((dur1, dur2): (Duration, Duration)) -> Result<Value> {
 
 	// Max Duration is made of (u64::MAX, NANOS_PER_SEC - 1) so will never overflow
 	let Ok(secs) = u64::try_from(rand / 1_000_000_000) else {
-		bail!(Error::unreachable("Overflow inside rand::duration()"));
+		fail!("Overflow inside rand::duration()");
 	};
 
 	Ok(Value::Duration(Duration::new(secs, nanos)))

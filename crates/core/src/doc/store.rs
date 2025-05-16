@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 impl Document {
 	pub(super) async fn store_record_data(
@@ -56,7 +56,7 @@ impl Document {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
-							Err(anyhow!(Error::RecordExists {
+							Err(anyhow::Error::new(Error::RecordExists {
 								thing: rid.as_ref().to_owned(),
 							}))
 						} else {
@@ -82,7 +82,7 @@ impl Document {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
-							Err(anyhow!(Error::RecordExists {
+							Err(anyhow::Error::new(Error::RecordExists {
 								thing: rid.as_ref().to_owned(),
 							}))
 						} else {
@@ -108,7 +108,7 @@ impl Document {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
-							Err(anyhow!(Error::RecordExists {
+							Err(anyhow::Error::new(Error::RecordExists {
 								thing: rid.as_ref().to_owned(),
 							}))
 						} else {

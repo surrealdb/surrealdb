@@ -162,7 +162,7 @@ impl Thing {
 				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
 			),
 			(None, Some(_)) => {
-				bail!(Error::unreachable("A foreign field was passed without a foreign table"))
+				fail!("A foreign field was passed without a foreign table")
 			}
 		};
 

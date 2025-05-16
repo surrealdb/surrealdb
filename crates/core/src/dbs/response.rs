@@ -45,7 +45,7 @@ impl From<&Statement> for QueryType {
 #[non_exhaustive]
 pub struct Response {
 	pub time: Duration,
-	pub result: Result<CoreValue, anyhow::Error>,
+	pub result: Result<CoreValue>,
 	// Record the query type in case processing the response is necessary (such as tracking live queries).
 	pub query_type: QueryType,
 }
@@ -57,7 +57,7 @@ impl Response {
 	}
 
 	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<CoreValue, anyhow::Error> {
+	pub fn output(self) -> Result<CoreValue> {
 		self.result
 	}
 }
@@ -134,14 +134,12 @@ impl Revisioned for Response {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
-	) -> std::result::Result<(), revision::Error> {
+	) -> Result<(), revision::Error> {
 		QueryMethodResponse::from(self).serialize_revisioned(writer)
 	}
 
 	#[inline]
-	fn deserialize_revisioned<R: std::io::Read>(
-		_reader: &mut R,
-	) -> std::result::Result<Self, revision::Error> {
+	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
 		unreachable!("deserialising `Response` directly is not supported")
 	}
 

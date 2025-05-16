@@ -573,7 +573,7 @@ pub async fn reduce(
 			0 => Ok(Value::None),
 			1 => {
 				let Some(val) = array.into_iter().next() else {
-					bail!(Error::unreachable("Iterator should have an item at this point"))
+					fail!("Iterator should have an item at this point")
 				};
 				Ok(val)
 			}

@@ -169,7 +169,7 @@ impl Document {
 				// Check for the `id` field
 				if fd.name.is_id() {
 					ensure!(
-						self.is_new() && !val.ne(&old),
+						self.is_new() || val == *old,
 						Error::FieldReadonly {
 							field: fd.name.clone(),
 							thing: rid.to_string(),

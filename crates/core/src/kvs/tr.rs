@@ -277,7 +277,7 @@ impl Transactor {
 	/// Delete a prefixed range of keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn delp<K>(&mut self, key: K) -> Result<()>
 	where
 		K: KeyEncode + Debug,
@@ -288,7 +288,7 @@ impl Transactor {
 	}
 
 	/// Delete all versions of a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn clr<K>(&mut self, key: K) -> Result<()>
 	where
 		K: KeyEncode + Debug,
@@ -299,7 +299,7 @@ impl Transactor {
 	}
 
 	/// Delete all versions of a key from the datastore if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn clrc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<()>
 	where
 		K: KeyEncode + Debug,
@@ -313,7 +313,7 @@ impl Transactor {
 	/// Delete all versions of a range of keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn clrr<K>(&mut self, rng: Range<K>) -> Result<()>
 	where
 		K: KeyEncode + Debug,
@@ -328,7 +328,7 @@ impl Transactor {
 	/// Delete all versions of a prefixed range of keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[instrument(level = "trace", target = TARGET, skip_all)]
 	pub async fn clrp<K>(&mut self, key: K) -> Result<()>
 	where
 		K: KeyEncode + Debug,

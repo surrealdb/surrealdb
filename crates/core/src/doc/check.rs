@@ -32,7 +32,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), anyhow::Error> {
+	) -> Result<()> {
 		// Get the table for this document
 		let tb = self.tb(ctx, opt).await?;
 		// Determine the type of statement
@@ -127,7 +127,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), anyhow::Error> {
+	) -> Result<()> {
 		// Get the record id
 		let rid = self.id()?;
 		// Don't bother checking if we generated the document id
@@ -443,13 +443,13 @@ impl Document {
 				if opt.auth.is_record() {
 					let ns = opt.ns()?;
 					if opt.auth.level().ns() != Some(ns) {
-						return Err(IgnoreError::from(anyhow!(Error::NsNotAllowed {
+						return Err(IgnoreError::from(anyhow::Error::new(Error::NsNotAllowed {
 							ns: ns.into(),
 						})));
 					}
 					let db = opt.db()?;
 					if opt.auth.level().db() != Some(db) {
-						return Err(IgnoreError::from(anyhow!(Error::DbNotAllowed {
+						return Err(IgnoreError::from(anyhow::Error::new(Error::DbNotAllowed {
 							db: db.into(),
 						})));
 					}

@@ -254,7 +254,7 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// IndxDB does not support versioned queries.
-		ensure!(!version.is_none(), Error::UnsupportedVersionedQueries);
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Scan the keys
