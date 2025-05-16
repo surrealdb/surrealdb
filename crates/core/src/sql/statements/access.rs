@@ -39,6 +39,28 @@ pub enum AccessStatement {
 	Purge(AccessStatementPurge),   // Purge access grants.
 }
 
+impl From<AccessStatement> for crate::expr::statements::access::AccessStatement {
+	fn from(v: AccessStatement) -> Self {
+		match v {
+			AccessStatement::Grant(v) => Self::Grant(v.into()),
+			AccessStatement::Show(v) => Self::Show(v.into()),
+			AccessStatement::Revoke(v) => Self::Revoke(v.into()),
+			AccessStatement::Purge(v) => Self::Purge(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::access::AccessStatement> for AccessStatement {
+	fn from(v: crate::expr::statements::access::AccessStatement) -> Self {
+		match v {
+			crate::expr::statements::access::AccessStatement::Grant(v) => Self::Grant(v.into()),
+			crate::expr::statements::access::AccessStatement::Show(v) => Self::Show(v.into()),
+			crate::expr::statements::access::AccessStatement::Revoke(v) => Self::Revoke(v.into()),
+			crate::expr::statements::access::AccessStatement::Purge(v) => Self::Purge(v.into()),
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -47,6 +69,26 @@ pub struct AccessStatementGrant {
 	pub ac: Ident,
 	pub base: Option<Base>,
 	pub subject: Subject,
+}
+
+impl From<AccessStatementGrant> for crate::expr::statements::access::AccessStatementGrant {
+	fn from(v: AccessStatementGrant) -> Self {
+		Self {
+			ac: v.ac.into(),
+			base: v.base.map(Into::into),
+			subject: v.subject.into(),
+		}
+	}
+}
+
+impl From<crate::expr::statements::access::AccessStatementGrant> for AccessStatementGrant {
+	fn from(v: crate::expr::statements::access::AccessStatementGrant) -> Self {
+		Self {
+			ac: v.ac.into(),
+			base: v.base.map(Into::into),
+			subject: v.subject.into(),
+		}
+	}
 }
 
 #[revisioned(revision = 1)]
@@ -60,6 +102,28 @@ pub struct AccessStatementShow {
 	pub cond: Option<Cond>,
 }
 
+impl From<AccessStatementShow> for crate::expr::statements::access::AccessStatementShow {
+	fn from(v: AccessStatementShow) -> Self {
+		Self {
+			ac: v.ac.into(),
+			base: v.base.map(Into::into),
+			gr: v.gr.map(Into::into),
+			cond: v.cond.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::access::AccessStatementShow> for AccessStatementShow {
+	fn from(v: crate::expr::statements::access::AccessStatementShow) -> Self {
+		Self {
+			ac: v.ac.into(),
+			base: v.base.map(Into::into),
+			gr: v.gr.map(Into::into),
+			cond: v.cond.map(Into::into),
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -69,6 +133,28 @@ pub struct AccessStatementRevoke {
 	pub base: Option<Base>,
 	pub gr: Option<Ident>,
 	pub cond: Option<Cond>,
+}
+
+impl From<AccessStatementRevoke> for crate::expr::statements::access::AccessStatementRevoke {
+	fn from(v: AccessStatementRevoke) -> Self {
+		Self {
+			ac: v.ac.into(),
+			base: v.base.map(Into::into),
+			gr: v.gr.map(Into::into),
+			cond: v.cond.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::access::AccessStatementRevoke> for AccessStatementRevoke {
+	fn from(v: crate::expr::statements::access::AccessStatementRevoke) -> Self {
+		Self {
+			ac: v.ac.into(),
+			base: v.base.map(Into::into),
+			gr: v.gr.map(Into::into),
+			cond: v.cond.map(Into::into),
+		}
+	}
 }
 
 #[revisioned(revision = 1)]
@@ -81,6 +167,30 @@ pub struct AccessStatementPurge {
 	pub expired: bool,
 	pub revoked: bool,
 	pub grace: Duration,
+}
+
+impl From<AccessStatementPurge> for crate::expr::statements::access::AccessStatementPurge {
+	fn from(v: AccessStatementPurge) -> Self {
+		Self {
+			ac: v.ac.into(),
+			base: v.base.map(Into::into),
+			expired: v.expired,
+			revoked: v.revoked,
+			grace: v.grace.into(),
+		}
+	}
+}
+
+impl From<crate::expr::statements::access::AccessStatementPurge> for AccessStatementPurge {
+	fn from(v: crate::expr::statements::access::AccessStatementPurge) -> Self {
+		Self {
+			ac: v.ac.into(),
+			base: v.base.map(Into::into),
+			expired: v.expired,
+			revoked: v.revoked,
+			grace: v.grace.into(),
+		}
+	}
 }
 
 #[revisioned(revision = 1)]
@@ -199,6 +309,24 @@ impl Subject {
 		match self {
 			Subject::Record(id) => id.to_raw(),
 			Subject::User(name) => name.to_raw(),
+		}
+	}
+}
+
+impl From<Subject> for crate::expr::statements::access::Subject {
+	fn from(v: Subject) -> Self {
+		match v {
+			Subject::Record(id) => Self::Record(id.into()),
+			Subject::User(name) => Self::User(name.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::access::Subject> for Subject {
+	fn from(v: crate::expr::statements::access::Subject) -> Self {
+		match v {
+			crate::expr::statements::access::Subject::Record(id) => Self::Record(id.into()),
+			crate::expr::statements::access::Subject::User(name) => Self::User(name.into()),
 		}
 	}
 }

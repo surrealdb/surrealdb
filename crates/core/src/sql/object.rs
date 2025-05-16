@@ -190,26 +190,26 @@ impl IntoIterator for Object {
 	}
 }
 
-impl TryInto<BTreeMap<String, String>> for Object {
-	type Error = Error;
-	fn try_into(self) -> Result<BTreeMap<String, String>, Self::Error> {
-		self.into_iter().map(|(k, v)| Ok((k, v.coerce_to()?))).collect()
-	}
-}
+// impl TryInto<BTreeMap<String, String>> for Object {
+// 	type Error = Error;
+// 	fn try_into(self) -> Result<BTreeMap<String, String>, Self::Error> {
+// 		self.into_iter().map(|(k, v)| Ok((k, v.coerce_to()?))).collect()
+// 	}
+// }
 
-impl TryInto<HeaderMap> for Object {
-	type Error = Error;
-	fn try_into(self) -> Result<HeaderMap, Self::Error> {
-		let mut headermap = HeaderMap::new();
-		for (k, v) in self.into_iter() {
-			let k: HeaderName = k.parse()?;
-			let v: HeaderValue = v.coerce_to::<String>()?.parse()?;
-			headermap.insert(k, v);
-		}
+// impl TryInto<HeaderMap> for Object {
+// 	type Error = Error;
+// 	fn try_into(self) -> Result<HeaderMap, Self::Error> {
+// 		let mut headermap = HeaderMap::new();
+// 		for (k, v) in self.into_iter() {
+// 			let k: HeaderName = k.parse()?;
+// 			let v: HeaderValue = v.coerce_to::<String>()?.parse()?;
+// 			headermap.insert(k, v);
+// 		}
 
-		Ok(headermap)
-	}
-}
+// 		Ok(headermap)
+// 	}
+// }
 
 impl Object {
 	/// Fetch the record id if there is one

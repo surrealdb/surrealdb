@@ -22,6 +22,28 @@ impl Default for Base {
 	}
 }
 
+impl From<Base> for crate::expr::Base {
+	fn from(v: Base) -> Self {
+		match v {
+			Base::Root => Self::Root,
+			Base::Ns => Self::Ns,
+			Base::Db => Self::Db,
+			Base::Sc(sc) => Self::Sc(sc.into()),
+		}
+	}
+}
+
+impl From<crate::expr::Base> for Base {
+	fn from(v: crate::expr::Base) -> Self {
+		match v {
+			crate::expr::Base::Root => Self::Root,
+			crate::expr::Base::Ns => Self::Ns,
+			crate::expr::Base::Db => Self::Db,
+			crate::expr::Base::Sc(sc) => Self::Sc(sc.into()),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Base);
 
 impl crate::sql::DisplaySql for Base {

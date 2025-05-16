@@ -1,5 +1,6 @@
 use super::kind::HasKind;
-use super::value::{Coerce, CoerceError, CoerceErrorExt as _};
+
+use super::value::CoerceErrorExt;
 use super::{Array, FlowResult, Id};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
@@ -16,6 +17,8 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
+use crate::sql::value::Coerce;
+use crate::sql::value::CoerceError;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
@@ -140,8 +143,16 @@ impl Range {
 impl From<Range> for crate::expr::Range {
 	fn from(value: Range) -> Self {
 		crate::expr::Range {
-			beg: value.beg,
-			end: value.end,
+			beg: match value.beg {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match value.end {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
 		}
 	}
 }
@@ -149,8 +160,16 @@ impl From<Range> for crate::expr::Range {
 impl From<crate::expr::Range> for Range {
 	fn from(value: crate::expr::Range) -> Self {
 		Range {
-			beg: value.beg,
-			end: value.end,
+			beg: match value.beg {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match value.end {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
 		}
 	}
 }

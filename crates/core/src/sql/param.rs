@@ -40,6 +40,18 @@ impl From<&str> for Param {
 	}
 }
 
+impl From<Param> for crate::expr::Param {
+	fn from(v: Param) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Param> for Param {
+	fn from(v: crate::expr::Param) -> Self {
+		Self(v.0.into())
+	}
+}
+
 impl Deref for Param {
 	type Target = Ident;
 	fn deref(&self) -> &Self::Target {

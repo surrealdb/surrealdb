@@ -90,6 +90,18 @@ impl IntoIterator for Fields {
 	}
 }
 
+impl From<Fields> for crate::expr::field::Fields {
+	fn from(v: Fields) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect(), v.1)
+	}
+}
+
+impl From<crate::expr::field::Fields> for Fields {
+	fn from(v: crate::expr::field::Fields) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect(), false)
+	}
+}
+
 crate::sql::impl_display_from_sql!(Fields);
 
 impl crate::sql::DisplaySql for Fields {
@@ -121,6 +133,30 @@ pub enum Field {
 		/// The `quality` in `SELECT rating AS quality FROM ...`
 		alias: Option<Idiom>,
 	},
+}
+
+impl From<Field> for crate::expr::field::Field {
+	fn from(v: Field) -> Self {
+		match v {
+			Field::All => Self::All,
+			Field::Single { expr, alias } => Self::Single {
+				expr: expr.into(),
+				alias: alias.map(Into::into),
+			},
+		}
+	}
+}
+
+impl From<crate::expr::field::Field> for Field {
+	fn from(v: crate::expr::field::Field) -> Self {
+		match v {
+			crate::expr::field::Field::All => Self::All,
+			crate::expr::field::Field::Single { expr, alias } => Self::Single {
+				expr: expr.into(),
+				alias: alias.map(Into::into),
+			},
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(Field);

@@ -35,6 +35,46 @@ pub struct AlterFieldStatement {
 	pub default_always: Option<bool>,
 }
 
+impl From<AlterFieldStatement> for crate::expr::statements::alter::AlterFieldStatement {
+	fn from(v: AlterFieldStatement) -> Self {
+		crate::expr::statements::alter::AlterFieldStatement {
+			name: v.name.into(),
+			what: v.what.into(),
+			if_exists: v.if_exists,
+			flex: v.flex.map(Into::into),
+			kind: v.kind.map(|opt| opt.map(Into::into)),
+			readonly: v.readonly,
+			value: v.value.map(|opt| opt.map(Into::into)),
+			assert: v.assert.map(|opt| opt.map(Into::into)),
+			default: v.default.map(|opt| opt.map(Into::into)),
+			permissions: v.permissions.map(Into::into),
+			comment: v.comment.map(|opt| opt.map(Into::into)),
+			reference: v.reference.map(|opt| opt.map(Into::into)),
+			default_always: v.default_always,
+		}
+	}
+}
+
+impl From<crate::expr::statements::alter::AlterFieldStatement> for AlterFieldStatement {
+	fn from(v: crate::expr::statements::alter::AlterFieldStatement) -> Self {
+		AlterFieldStatement {
+			name: v.name.into(),
+			what: v.what.into(),
+			if_exists: v.if_exists,
+			flex: v.flex.map(Into::into),
+			kind: v.kind.map(|opt| opt.map(Into::into)),
+			readonly: v.readonly,
+			value: v.value.map(|opt| opt.map(Into::into)),
+			assert: v.assert.map(|opt| opt.map(Into::into)),
+			default: v.default.map(|opt| opt.map(Into::into)),
+			permissions: v.permissions.map(Into::into),
+			comment: v.comment.map(|opt| opt.map(Into::into)),
+			reference: v.reference.map(|opt| opt.map(Into::into)),
+			default_always: v.default_always,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(AlterFieldStatement);
 
 impl crate::sql::DisplaySql for AlterFieldStatement {

@@ -45,6 +45,17 @@ impl Cast {
 	}
 }
 
+impl From<Cast> for crate::expr::Cast {
+	fn from(v: Cast) -> Self {
+		Self(v.0.into(), v.1.into())
+	}
+}
+impl From<crate::expr::Cast> for Cast {
+	fn from(v: crate::expr::Cast) -> Self {
+		Self(v.0.into(), v.1.into())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Cast);
 
 impl crate::sql::DisplaySql for Cast {

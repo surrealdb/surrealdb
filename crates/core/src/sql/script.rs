@@ -30,6 +30,19 @@ impl Deref for Script {
 	}
 }
 
+impl From<Script> for crate::expr::Script {
+	fn from(v: Script) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<crate::expr::Script> for Script {
+	fn from(v: crate::expr::Script) -> Self {
+		Self(v.0)
+	}
+}
+
+
 crate::sql::impl_display_from_sql!(Script);
 
 impl crate::sql::DisplaySql for Script {

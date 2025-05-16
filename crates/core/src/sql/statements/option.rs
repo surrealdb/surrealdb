@@ -13,6 +13,24 @@ pub struct OptionStatement {
 	pub what: bool,
 }
 
+impl From<OptionStatement> for crate::expr::statements::OptionStatement {
+	fn from(v: OptionStatement) -> Self {
+		crate::expr::statements::OptionStatement {
+			name: v.name.into(),
+			what: v.what,
+		}
+	}
+}
+
+impl From<crate::expr::statements::OptionStatement> for OptionStatement {
+	fn from(v: crate::expr::statements::OptionStatement) -> Self {
+		OptionStatement {
+			name: v.name.into(),
+			what: v.what,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(OptionStatement);
 
 impl crate::sql::DisplaySql for OptionStatement {

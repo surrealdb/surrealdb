@@ -44,7 +44,7 @@ impl From<CreateStatement> for crate::expr::statements::CreateStatement {
 	fn from(v: CreateStatement) -> Self {
 		crate::expr::statements::CreateStatement {
 			only: v.only,
-			what: v.what.into_iter().map(Into::into).collect(),
+			what: v.what.into(),
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.map(Into::into),

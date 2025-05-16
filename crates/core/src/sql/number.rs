@@ -109,6 +109,26 @@ impl TryFrom<&str> for Number {
 	}
 }
 
+impl From<Number> for crate::expr::Number {
+	fn from(v: Number) -> Self {
+		match v {
+			Number::Int(v) => Self::Int(v.into()),
+			Number::Float(v) => Self::Float(v.into()),
+			Number::Decimal(v) => Self::Decimal(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::Number> for Number {
+	fn from(v: crate::expr::Number) -> Self {
+		match v {
+			crate::expr::Number::Int(v) => Self::Int(v.into()),
+			crate::expr::Number::Float(v) => Self::Float(v.into()),
+			crate::expr::Number::Decimal(v) => Self::Decimal(v.into()),
+		}
+	}
+}
+
 macro_rules! try_into_prim {
 	// TODO: switch to one argument per int once https://github.com/rust-lang/rust/issues/29599 is stable
 	($($int: ty => $to_int: ident),*) => {

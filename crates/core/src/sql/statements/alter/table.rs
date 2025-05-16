@@ -40,6 +40,34 @@ impl AlterTableStatement {
 	}
 }
 
+impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableStatement {
+	fn from(v: AlterTableStatement) -> Self {
+		crate::expr::statements::alter::AlterTableStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			full: v.full,
+			permissions: v.permissions.map(Into::into),
+			changefeed: v.changefeed.map(|opt| opt.map(Into::into)),
+			comment: v.comment.map(|opt| opt.map(Into::into)),
+			kind: v.kind.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableStatement {
+	fn from(v: crate::expr::statements::alter::AlterTableStatement) -> Self {
+		AlterTableStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			full: v.full,
+			permissions: v.permissions.map(Into::into),
+			changefeed: v.changefeed.map(|opt| opt.map(Into::into)),
+			comment: v.comment.map(|opt| opt.map(Into::into)),
+			kind: v.kind.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(AlterTableStatement);
 
 impl crate::sql::DisplaySql for AlterTableStatement {

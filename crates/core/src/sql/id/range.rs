@@ -76,8 +76,16 @@ impl TryFrom<Value> for IdRange {
 impl From<IdRange> for crate::expr::IdRange {
 	fn from(v: IdRange) -> Self {
 		Self {
-			beg: v.beg.into(),
-			end: v.end.into(),
+			beg: match v.beg {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match v.end {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
 		}
 	}
 }
@@ -85,8 +93,16 @@ impl From<IdRange> for crate::expr::IdRange {
 impl From<crate::expr::IdRange> for IdRange {
 	fn from(v: crate::expr::IdRange) -> Self {
 		Self {
-			beg: v.beg.into(),
-			end: v.end.into(),
+			beg: match v.beg {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match v.end {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
 		}
 	}
 }

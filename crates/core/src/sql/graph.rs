@@ -98,6 +98,40 @@ impl Graph {
 	}
 }
 
+impl From<Graph> for crate::expr::Graph {
+	fn from(v: Graph) -> Self {
+		Self {
+			dir: v.dir.into(),
+			expr: v.expr.map(Into::into),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			alias: v.alias.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::Graph> for Graph {
+	fn from(v: crate::expr::Graph) -> Self {
+		Graph {
+			dir: v.dir.into(),
+			expr: v.expr.map(Into::into),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			alias: v.alias.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Graph);
 
 impl crate::sql::DisplaySql for Graph {
@@ -171,6 +205,17 @@ impl Deref for GraphSubjects {
 	}
 }
 
+impl From<GraphSubjects> for crate::expr::graph::GraphSubjects {
+	fn from(v: GraphSubjects) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+impl From<crate::expr::graph::GraphSubjects> for GraphSubjects {
+	fn from(v: crate::expr::graph::GraphSubjects) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 crate::sql::impl_display_from_sql!(GraphSubjects);
 
 impl crate::sql::DisplaySql for GraphSubjects {
@@ -191,6 +236,24 @@ pub enum GraphSubject {
 impl From<Table> for GraphSubject {
 	fn from(x: Table) -> Self {
 		GraphSubject::Table(x)
+	}
+}
+
+impl From<GraphSubject> for crate::expr::graph::GraphSubject {
+	fn from(v: GraphSubject) -> Self {
+		match v {
+			GraphSubject::Table(tb) => Self::Table(tb.into()),
+			GraphSubject::Range(tb, rng) => Self::Range(tb.into(), rng.into()),
+		}
+	}
+}
+
+impl From<crate::expr::graph::GraphSubject> for GraphSubject {
+	fn from(v: crate::expr::graph::GraphSubject) -> Self {
+		match v {
+			crate::expr::graph::GraphSubject::Table(tb) => Self::Table(tb.into()),
+			crate::expr::graph::GraphSubject::Range(tb, rng) => Self::Range(tb.into(), rng.into()),
+		}
 	}
 }
 

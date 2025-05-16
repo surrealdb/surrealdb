@@ -167,9 +167,7 @@ impl From<crate::expr::Part> for Part {
 			}
 			crate::expr::Part::Optional => Self::Optional,
 			crate::expr::Part::Recurse(recurse, idiom, instructions) => {
-				let idiom = idiom.map(|idiom| idiom.into());
-				let instructions = instructions.map(Into::<RecurseInstruction>::into);
-				Self::_Recurse(recurse.into(), idiom, instructions)
+				Self::Recurse(recurse.into(), idiom.map(|idiom| idiom.into()), instructions.map(Into::into))
 			}
 			crate::expr::Part::Doc => Self::Doc,
 			crate::expr::Part::RepeatRecurse => Self::RepeatRecurse,
@@ -467,6 +465,34 @@ impl DestructurePart {
 	}
 }
 
+impl From<DestructurePart> for crate::expr::part::DestructurePart {
+	fn from(v: DestructurePart) -> Self {
+		match v {
+			DestructurePart::All(v) => Self::All(v.into()),
+			DestructurePart::Field(v) => Self::Field(v.into()),
+			DestructurePart::Aliased(v, idiom) => Self::Aliased(v.into(), idiom.into()),
+			DestructurePart::Destructure(v, d) => {
+				Self::Destructure(v.into(), d.into_iter().map(Into::into).collect())
+			}
+		}
+	}
+}
+
+impl From<crate::expr::part::DestructurePart> for DestructurePart {
+	fn from(v: crate::expr::part::DestructurePart) -> Self {
+		match v {
+			crate::expr::part::DestructurePart::All(v) => Self::All(v.into()),
+			crate::expr::part::DestructurePart::Field(v) => Self::Field(v.into()),
+			crate::expr::part::DestructurePart::Aliased(v, idiom) => {
+				Self::Aliased(v.into(), idiom.into())
+			}
+			crate::expr::part::DestructurePart::Destructure(v, d) => {
+				Self::Destructure(v.into(), d.into_iter().map(Into::<DestructurePart>::into).collect())
+			}
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(DestructurePart);
 
 impl crate::sql::DisplaySql for DestructurePart {
@@ -688,6 +714,30 @@ macro_rules! walk_paths {
 
 		Ok(open.into())
 	}};
+}
+
+impl From<RecurseInstruction> for crate::expr::part::RecurseInstruction {
+	fn from(v: RecurseInstruction) -> Self {
+		match v {
+			RecurseInstruction::Path { inclusive } => Self::Path { inclusive },
+			RecurseInstruction::Collect { inclusive } => Self::Collect { inclusive },
+			RecurseInstruction::Shortest { expects, inclusive } => {
+				Self::Shortest { expects: expects.into(), inclusive }
+			}
+		}
+	}
+}
+
+impl From<crate::expr::part::RecurseInstruction> for RecurseInstruction {
+	fn from(v: crate::expr::part::RecurseInstruction) -> Self {
+		match v {
+			crate::expr::part::RecurseInstruction::Path { inclusive } => Self::Path { inclusive },
+			crate::expr::part::RecurseInstruction::Collect { inclusive } => Self::Collect { inclusive },
+			crate::expr::part::RecurseInstruction::Shortest { expects, inclusive } => {
+				Self::Shortest { expects: expects.into(), inclusive }
+			}
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(RecurseInstruction);

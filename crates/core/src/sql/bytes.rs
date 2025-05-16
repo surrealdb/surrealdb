@@ -40,6 +40,18 @@ impl Deref for Bytes {
 	}
 }
 
+impl From<Bytes> for crate::expr::Bytes {
+	fn from(v: Bytes) -> Self {
+		crate::expr::Bytes(v.0)
+	}
+}
+
+impl From<crate::expr::Bytes> for Bytes {
+	fn from(v: crate::expr::Bytes) -> Self {
+		Bytes(v.0)
+	}
+}
+
 crate::sql::impl_display_from_sql!(Bytes);
 
 impl crate::sql::DisplaySql for Bytes {

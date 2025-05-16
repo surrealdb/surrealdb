@@ -43,6 +43,26 @@ impl Edges {
 	}
 }
 
+impl From<Edges> for crate::expr::Edges {
+	fn from(v: Edges) -> Self {
+		Self {
+			dir: v.dir.into(),
+			from: v.from.into(),
+			what: v.what.into(),
+		}
+	}
+}
+
+impl From<crate::expr::Edges> for Edges {
+	fn from(v: crate::expr::Edges) -> Self {
+		Self {
+			dir: v.dir.into(),
+			from: v.from.into(),
+			what: v.what.into(),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Edges);
 
 impl crate::sql::DisplaySql for Edges {

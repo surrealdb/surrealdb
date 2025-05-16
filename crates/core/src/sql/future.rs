@@ -26,6 +26,18 @@ impl From<Value> for Future {
 	}
 }
 
+impl From<Future> for crate::expr::Future {
+	fn from(v: Future) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Future> for Future {
+	fn from(v: crate::expr::Future) -> Self {
+		Future(v.0.into())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Future);
 
 impl crate::sql::DisplaySql for Future {

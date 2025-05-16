@@ -8,6 +8,18 @@ use std::fmt;
 #[non_exhaustive]
 pub struct CommitStatement;
 
+impl From<CommitStatement> for crate::expr::statements::commit::CommitStatement {
+	fn from(_: CommitStatement) -> Self {
+		Self
+	}
+}
+
+impl From<crate::expr::statements::commit::CommitStatement> for CommitStatement {
+	fn from(_: crate::expr::statements::commit::CommitStatement) -> Self {
+		Self
+	}
+}
+
 crate::sql::impl_display_from_sql!(CommitStatement);
 
 impl crate::sql::DisplaySql for CommitStatement {

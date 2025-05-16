@@ -50,6 +50,28 @@ impl Function {
 	}
 }
 
+impl From<Function> for crate::expr::Function {
+	fn from(v: Function) -> Self {
+		match v {
+			Function::Normal(s, e) => Self::Normal(s, e.into_iter().map(Into::into).collect()),
+			Function::Custom(s, e) => Self::Custom(s, e.into_iter().map(Into::into).collect()),
+			Function::Script(s, e) => Self::Script(s.into(), e.into_iter().map(Into::into).collect()),
+			Function::Anonymous(p, e, b) => Self::Anonymous(p.into(), e.into_iter().map(Into::into).collect(), b),
+		}
+	}
+}
+
+impl From<crate::expr::Function> for Function {
+	fn from(v: crate::expr::Function) -> Self {
+		match v {
+			crate::expr::Function::Normal(s, e) => Self::Normal(s, e.into_iter().map(Into::into).collect()),
+			crate::expr::Function::Custom(s, e) => Self::Custom(s, e.into_iter().map(Into::into).collect()),
+			crate::expr::Function::Script(s, e) => Self::Script(s.into(), e.into_iter().map(Into::into).collect()),
+			crate::expr::Function::Anonymous(p, e, b) => Self::Anonymous(p.into(), e.into_iter().map(Into::into).collect(), b),
+		}
+	}
+}
+
 pub(crate) enum OptimisedAggregate {
 	None,
 	Count,

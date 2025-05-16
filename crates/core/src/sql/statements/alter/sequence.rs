@@ -21,6 +21,25 @@ pub struct AlterSequenceStatement {
 	pub timeout: Option<Timeout>,
 }
 
+impl From<AlterSequenceStatement> for crate::expr::statements::alter::AlterSequenceStatement {
+	fn from(v: AlterSequenceStatement) -> Self {
+		crate::expr::statements::alter::AlterSequenceStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			timeout: v.timeout.map(Into::into),
+		}
+	}
+}
+impl From<crate::expr::statements::alter::AlterSequenceStatement> for AlterSequenceStatement {
+	fn from(v: crate::expr::statements::alter::AlterSequenceStatement) -> Self {
+		AlterSequenceStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			timeout: v.timeout.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(AlterSequenceStatement);
 
 impl crate::sql::DisplaySql for AlterSequenceStatement {

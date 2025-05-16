@@ -330,15 +330,64 @@ impl From<Kind> for crate::expr::Kind {
 			Kind::Array(k, l) => crate::expr::Kind::Array(Box::new(k.as_ref().clone().into()), l),
 			Kind::Function(args, ret) => crate::expr::Kind::Function(
 				args.map(|args| args.into_iter().map(Into::into).collect()),
-				ret.map(|ret| Box::new(ret.as_ref().clone().into())),
+				ret.map(|ret| Box::new((*ret).into())),
 			),
 			Kind::Range => crate::expr::Kind::Range,
-			Kind::Literal(l) => crate::expr::Kind::Literal(l),
+			Kind::Literal(l) => crate::expr::Kind::Literal(l.into()),
 			Kind::References(t, i) => crate::expr::Kind::References(
-				t.as_ref().map(|t| t.clone().into()),
-				i.as_ref().cloned().into(),
+				t.map(Into::into),
+				i.map(Into::into),
 			),
 			Kind::File(k) => crate::expr::Kind::File(k.into_iter().map(Into::into).collect()),
+		}
+	}
+}
+
+impl From<crate::expr::Kind> for Kind {
+	fn from(v: crate::expr::Kind) -> Self {
+		match v {
+			crate::expr::Kind::Any => Kind::Any,
+			crate::expr::Kind::Null => Kind::Null,
+			crate::expr::Kind::Bool => Kind::Bool,
+			crate::expr::Kind::Bytes => Kind::Bytes,
+			crate::expr::Kind::Datetime => Kind::Datetime,
+			crate::expr::Kind::Decimal => Kind::Decimal,
+			crate::expr::Kind::Duration => Kind::Duration,
+			crate::expr::Kind::Float => Kind::Float,
+			crate::expr::Kind::Int => Kind::Int,
+			crate::expr::Kind::Number => Kind::Number,
+			crate::expr::Kind::Object => Kind::Object,
+			crate::expr::Kind::Point => Kind::Point,
+			crate::expr::Kind::String => Kind::String,
+			crate::expr::Kind::Uuid => Kind::Uuid,
+			crate::expr::Kind::Regex => Kind::Regex,
+			crate::expr::Kind::Record(tables) => {
+				Kind::Record(tables.into_iter().map(Into::<Table>::into).collect())
+			},
+			crate::expr::Kind::Geometry(geometries) => {
+				Kind::Geometry(geometries.into_iter().collect())
+			}
+			crate::expr::Kind::Option(k) => Kind::Option(Box::new((*k).into())),
+			crate::expr::Kind::Either(kinds) => {
+				let kinds: Vec<Kind> = kinds.into_iter().map(Into::into).collect();
+				if kinds.is_empty() {
+					return Self::Either(vec![Self::Any]);
+				}
+				Self::Either(kinds)
+			}
+			crate::expr::Kind::Set(k, l) => Self::Set(Box::new((*k).into()), l),
+			crate::expr::Kind::Array(k, l) => Self::Array(Box::new((*k).into()), l),
+			crate::expr::Kind::Function(args, ret) => Self::Function(
+				args.map(|args| args.into_iter().map(Into::into).collect()),
+				ret.map(|ret| Box::new((*ret).into())),
+			),
+			crate::expr::Kind::Range => Self::Range,
+			crate::expr::Kind::Literal(l) => Self::Literal(l.into()),
+			crate::expr::Kind::References(t, i) => Self::References(
+				t.map(Into::into),
+				i.map(Into::into),
+			),
+			crate::expr::Kind::File(k) => Kind::File(k.into_iter().map(Into::<Ident>::into).collect()),
 		}
 	}
 }
@@ -720,6 +769,52 @@ impl Literal {
 				_ => false,
 			},
 			_ => false,
+		}
+	}
+}
+
+impl From<Literal> for crate::expr::Literal {
+	fn from(v: Literal) -> Self {
+		match v {
+			Literal::String(s) => Self::String(s.into()),
+			Literal::Number(n) => Self::Number(n.into()),
+			Literal::Duration(d) => Self::Duration(d.into()),
+			Literal::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
+			Literal::Object(o) => Self::Object(
+				o.into_iter()
+					.map(|(k, v)| (k, v.into()))
+					.collect(),
+			),
+			Literal::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
+				k,
+				o.into_iter()
+					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
+					.collect(),
+			),
+			Literal::Bool(b) => Self::Bool(b),
+		}
+	}
+}
+
+impl From<crate::expr::Literal> for Literal {
+	fn from(v: crate::expr::Literal) -> Self {
+		match v {
+			crate::expr::Literal::String(s) => Self::String(s.into()),
+			crate::expr::Literal::Number(n) => Self::Number(n.into()),
+			crate::expr::Literal::Duration(d) => Self::Duration(d.into()),
+			crate::expr::Literal::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
+			crate::expr::Literal::Object(o) => Self::Object(
+				o.into_iter()
+					.map(|(k, v)| (k, v.into()))
+					.collect(),
+			),
+			crate::expr::Literal::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
+				k,
+				o.into_iter()
+					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
+					.collect(),
+			),
+			crate::expr::Literal::Bool(b) => Self::Bool(b),
 		}
 	}
 }

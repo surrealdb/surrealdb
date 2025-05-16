@@ -91,6 +91,18 @@ impl Debug for Regex {
 	}
 }
 
+impl From<Regex> for crate::expr::Regex {
+	fn from(v: Regex) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<crate::expr::Regex> for Regex {
+	fn from(v: crate::expr::Regex) -> Self {
+		Self(v.0)
+	}
+}
+
 crate::sql::impl_display_from_sql!(Regex);
 
 impl crate::sql::DisplaySql for Regex {

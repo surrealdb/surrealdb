@@ -77,6 +77,18 @@ impl InfoStructure for ReferenceDeleteStrategy {
 #[non_exhaustive]
 pub struct Refs(pub Vec<(Option<Table>, Option<Idiom>)>);
 
+impl From<Refs> for crate::expr::reference::Refs {
+	fn from(v: Refs) -> Self {
+		Self(v.0.into_iter().map(|(t, i)| (t.map(Into::into), i.map(Into::into))).collect())
+	}
+}
+
+impl From<crate::expr::reference::Refs> for Refs {
+	fn from(v: crate::expr::reference::Refs) -> Self {
+		Self(v.0.into_iter().map(|(t, i)| (t.map(Into::into), i.map(Into::into))).collect())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Refs);
 
 impl crate::sql::DisplaySql for Refs {

@@ -40,6 +40,23 @@ impl File {
 	}
 }
 
+impl From<File> for crate::expr::File {
+	fn from(v: File) -> Self {
+		Self {
+			bucket: v.bucket,
+			key: v.key,
+		}
+	}
+}
+impl From<crate::expr::File> for File {
+	fn from(v: crate::expr::File) -> Self {
+		Self {
+			bucket: v.bucket,
+			key: v.key,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(File);
 
 impl crate::sql::DisplaySql for File {

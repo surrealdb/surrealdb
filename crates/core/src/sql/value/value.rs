@@ -64,6 +64,18 @@ impl IntoIterator for Values {
 	}
 }
 
+impl From<Values> for crate::expr::Values {
+	fn from(v: Values) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Values> for Values {
+	fn from(v: crate::expr::Values) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Values);
 
 impl crate::sql::DisplaySql for Values {
@@ -1425,18 +1437,18 @@ impl From<Value> for crate::expr::Value {
 			Value::Table(v) => crate::expr::Value::Table(v.into()),
 			Value::Mock(v) => crate::expr::Value::Mock(v.into()),
 			Value::Regex(v) => crate::expr::Value::Regex(v.into()),
-			Value::Cast(v) => crate::expr::Value::Cast(v.into()),
-			Value::Block(v) => crate::expr::Value::Block(v.into()),
-			Value::Range(v) => crate::expr::Value::Range(v.into()),
-			Value::Edges(v) => crate::expr::Value::Edges(v.into()),
-			Value::Future(v) => crate::expr::Value::Future(v.into()),
+			Value::Cast(v) => crate::expr::Value::Cast(Box::new((*v).into())),
+			Value::Block(v) => crate::expr::Value::Block(Box::new((*v).into())),
+			Value::Range(v) => crate::expr::Value::Range(Box::new((*v).into())),
+			Value::Edges(v) => crate::expr::Value::Edges(Box::new((*v).into())),
+			Value::Future(v) => crate::expr::Value::Future(Box::new((*v).into())),
 			Value::Constant(v) => crate::expr::Value::Constant(v.into()),
-			Value::Function(v) => crate::expr::Value::Function(v.into()),
-			Value::Model(v) => crate::expr::Value::Model(v.into()),
-			Value::Subquery(v) => crate::expr::Value::Subquery(v.into()),
-			Value::Expression(v) => crate::expr::Value::Expression(v.into()),
+			Value::Function(v) => crate::expr::Value::Function(Box::new((*v).into())),
+			Value::Model(v) => crate::expr::Value::Model(Box::new((*v).into())),
+			Value::Subquery(v) => crate::expr::Value::Subquery(Box::new((*v).into())),
+			Value::Expression(v) => crate::expr::Value::Expression(Box::new((*v).into())),
 			Value::Query(v) => crate::expr::Value::Query(v.into()),
-			Value::Closure(v) => crate::expr::Value::Closure(v.into()),
+			Value::Closure(v) => crate::expr::Value::Closure(Box::new((*v).into())),
 			Value::Refs(v) => crate::expr::Value::Refs(v.into()),
 			Value::File(v) => crate::expr::Value::File(v.into()),
 		}
@@ -1464,18 +1476,18 @@ impl From<crate::expr::Value> for Value {
 			crate::expr::Value::Table(v) => Value::Table(v.into()),
 			crate::expr::Value::Mock(v) => Value::Mock(v.into()),
 			crate::expr::Value::Regex(v) => Value::Regex(v.into()),
-			crate::expr::Value::Cast(v) => Value::Cast(v.into()),
-			crate::expr::Value::Block(v) => Value::Block(v.into()),
-			crate::expr::Value::Range(v) => Value::Range(v.into()),
-			crate::expr::Value::Edges(v) => Value::Edges(v.into()),
-			crate::expr::Value::Future(v) => Value::Future(v.into()),
+			crate::expr::Value::Cast(v) => Value::Cast(Box::new((*v).into())),
+			crate::expr::Value::Block(v) => Value::Block(Box::new((*v).into())),
+			crate::expr::Value::Range(v) => Value::Range(Box::new((*v).into())),
+			crate::expr::Value::Edges(v) => Value::Edges(Box::new((*v).into())),
+			crate::expr::Value::Future(v) => Value::Future(Box::new((*v).into())),
 			crate::expr::Value::Constant(v) => Value::Constant(v.into()),
-			crate::expr::Value::Function(v) => Value::Function(v.into()),
-			crate::expr::Value::Model(v) => Value::Model(v.into()),
-			crate::expr::Value::Subquery(v) => Value::Subquery(v.into()),
-			crate::expr::Value::Expression(v) => Value::Expression(v.into()),
+			crate::expr::Value::Function(v) => Value::Function(Box::new((*v).into())),
+			crate::expr::Value::Model(v) => Value::Model(Box::new((*v).into())),
+			crate::expr::Value::Subquery(v) => Value::Subquery(Box::new((*v).into())),
+			crate::expr::Value::Expression(v) => Value::Expression(Box::new((*v).into())),
 			crate::expr::Value::Query(v) => Value::Query(v.into()),
-			crate::expr::Value::Closure(v) => Value::Closure(v.into()),
+			crate::expr::Value::Closure(v) => Value::Closure(Box::new((*v).into())),
 			crate::expr::Value::Refs(v) => Value::Refs(v.into()),
 			crate::expr::Value::File(v) => Value::File(v.into()),
 		}

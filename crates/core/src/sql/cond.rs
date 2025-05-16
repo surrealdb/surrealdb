@@ -18,6 +18,18 @@ impl Deref for Cond {
 	}
 }
 
+impl From<Cond> for crate::expr::Cond {
+	fn from(v: Cond) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Cond> for Cond {
+	fn from(v: crate::expr::Cond) -> Self {
+		Self(v.0.into())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Cond);
 
 impl crate::sql::DisplaySql for Cond {

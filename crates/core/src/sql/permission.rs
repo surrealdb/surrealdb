@@ -54,6 +54,28 @@ impl Permissions {
 	}
 }
 
+impl From<Permissions> for crate::expr::Permissions {
+	fn from(v: Permissions) -> Self {
+		crate::expr::Permissions {
+			select: v.select.into(),
+			create: v.create.into(),
+			update: v.update.into(),
+			delete: v.delete.into(),
+		}
+	}
+}
+
+impl From<crate::expr::Permissions> for Permissions {
+	fn from(v: crate::expr::Permissions) -> Self {
+		Permissions {
+			select: v.select.into(),
+			create: v.create.into(),
+			update: v.update.into(),
+			delete: v.delete.into(),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Permissions);
 
 impl crate::sql::DisplaySql for Permissions {
@@ -184,6 +206,26 @@ impl Permission {
 
 	pub fn is_specific(&self) -> bool {
 		matches!(self, Self::Specific(_))
+	}
+}
+
+impl From<Permission> for crate::expr::Permission {
+	fn from(v: Permission) -> Self {
+		match v {
+			Permission::None => crate::expr::Permission::None,
+			Permission::Full => crate::expr::Permission::Full,
+			Permission::Specific(v) => crate::expr::Permission::Specific(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::Permission> for Permission {
+	fn from(v: crate::expr::Permission) -> Self {
+		match v {
+			crate::expr::Permission::None => Self::None,
+			crate::expr::Permission::Full => Self::Full,
+			crate::expr::Permission::Specific(v) => Self::Specific(v.into()),
+		}
 	}
 }
 

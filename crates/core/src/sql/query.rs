@@ -140,6 +140,18 @@ impl IntoIterator for Query {
 	}
 }
 
+impl From<Query> for crate::expr::Query {
+	fn from(v: Query) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Query> for Query {
+	fn from(v: crate::expr::Query) -> Self {
+		Self(v.0.into())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Query);
 
 impl crate::sql::DisplaySql for Query {

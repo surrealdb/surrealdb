@@ -43,6 +43,26 @@ pub struct ShowStatement {
 	pub limit: Option<u32>,
 }
 
+impl From<ShowStatement> for crate::expr::statements::ShowStatement {
+	fn from(v: ShowStatement) -> Self {
+		crate::expr::statements::ShowStatement {
+			table: v.table.map(Into::into),
+			since: v.since.into(),
+			limit: v.limit,
+		}
+	}
+}
+
+impl From<crate::expr::statements::ShowStatement> for ShowStatement {
+	fn from(v: crate::expr::statements::ShowStatement) -> Self {
+		ShowStatement {
+			table: v.table.map(Into::into),
+			since: v.since.into(),
+			limit: v.limit,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(ShowStatement);
 
 impl crate::sql::DisplaySql for ShowStatement {

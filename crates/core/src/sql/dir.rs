@@ -21,6 +21,26 @@ impl Default for Dir {
 	}
 }
 
+impl From<Dir> for crate::expr::Dir {
+	fn from(v: Dir) -> Self {
+		match v {
+			Dir::In => Self::In,
+			Dir::Out => Self::Out,
+			Dir::Both => Self::Both,
+		}
+	}
+}
+
+impl From<crate::expr::Dir> for Dir {
+	fn from(v: crate::expr::Dir) -> Self {
+		match v {
+			crate::expr::Dir::In => Self::In,
+			crate::expr::Dir::Out => Self::Out,
+			crate::expr::Dir::Both => Self::Both,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Dir);
 
 impl crate::sql::DisplaySql for Dir {

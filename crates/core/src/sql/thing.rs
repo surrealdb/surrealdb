@@ -223,6 +223,15 @@ impl From<Thing> for crate::expr::Thing {
 	}
 }
 
+impl From<crate::expr::Thing> for Thing {
+	fn from(v: crate::expr::Thing) -> Self {
+		Self {
+			tb: v.tb,
+			id: v.id.into(),
+		}
+	}
+}
+
 impl Thing {
 	/// Convert the Thing to a raw String
 	pub fn to_raw(&self) -> String {

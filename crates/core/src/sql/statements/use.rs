@@ -13,6 +13,24 @@ pub struct UseStatement {
 	pub db: Option<String>,
 }
 
+impl From<UseStatement> for crate::expr::statements::UseStatement {
+	fn from(v: UseStatement) -> Self {
+		crate::expr::statements::UseStatement {
+			ns: v.ns.map(Into::into),
+			db: v.db.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::UseStatement> for UseStatement {
+	fn from(v: crate::expr::statements::UseStatement) -> Self {
+		UseStatement {
+			ns: v.ns.map(Into::into),
+			db: v.db.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(UseStatement);
 
 impl crate::sql::DisplaySql for UseStatement {

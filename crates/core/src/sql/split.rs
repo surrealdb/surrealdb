@@ -26,6 +26,18 @@ impl IntoIterator for Splits {
 	}
 }
 
+impl From<Splits> for crate::expr::Splits {
+	fn from(v: Splits) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Splits> for Splits {
+	fn from(v: crate::expr::Splits) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Splits);
 
 impl crate::sql::DisplaySql for Splits {
@@ -44,6 +56,18 @@ impl Deref for Split {
 	type Target = Idiom;
 	fn deref(&self) -> &Self::Target {
 		&self.0
+	}
+}
+
+impl From<Split> for crate::expr::Split {
+	fn from(v: Split) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Split> for Split {
+	fn from(v: crate::expr::Split) -> Self {
+		Self(v.0.into())
 	}
 }
 

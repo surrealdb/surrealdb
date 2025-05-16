@@ -25,6 +25,22 @@ pub enum AnalyzeStatement {
 	Idx(Ident, Ident),
 }
 
+impl From<AnalyzeStatement> for crate::expr::statements::analyze::AnalyzeStatement {
+	fn from(value: AnalyzeStatement) -> Self {
+		match value {
+			AnalyzeStatement::Idx(tb, idx) => Self::Idx(tb.into(), idx.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::analyze::AnalyzeStatement> for AnalyzeStatement {
+	fn from(value: crate::expr::statements::analyze::AnalyzeStatement) -> Self {
+		match value {
+			crate::expr::statements::analyze::AnalyzeStatement::Idx(tb, idx) => Self::Idx(tb.into(), idx.into()),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(AnalyzeStatement);
 
 impl crate::sql::DisplaySql for AnalyzeStatement {

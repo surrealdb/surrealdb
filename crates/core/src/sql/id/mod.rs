@@ -207,7 +207,7 @@ impl From<Id> for crate::expr::Id {
 			Id::Array(v) => crate::expr::Id::Array(v.into()),
 			Id::Object(v) => crate::expr::Id::Object(v.into()),
 			Id::Generate(v) => crate::expr::Id::Generate(v.into()),
-			Id::Range(v) => crate::expr::Id::Range(Box::new(*v.into())),
+			Id::Range(v) => crate::expr::Id::Range(Box::new((*v).into())),
 		}
 	}
 }
@@ -221,7 +221,7 @@ impl From<crate::expr::Id> for Id {
 			crate::expr::Id::Array(v) => Self::Array(v.into()),
 			crate::expr::Id::Object(v) => Self::Object(v.into()),
 			crate::expr::Id::Generate(v) => Self::Generate(v.into()),
-			crate::expr::Id::Range(v) => Self::Range(Box::new(*v.into())),
+			crate::expr::Id::Range(v) => Self::Range(Box::new((*v).into())),
 		}
 	}
 }

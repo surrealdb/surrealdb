@@ -76,6 +76,50 @@ impl Subquery {
 	}
 }
 
+impl From<Subquery> for crate::expr::Subquery {
+	fn from(v: Subquery) -> Self {
+		match v {
+			Subquery::Value(v) => Self::Value(v.into()),
+			Subquery::Ifelse(v) => Self::Ifelse(v.into()),
+			Subquery::Output(v) => Self::Output(v.into()),
+			Subquery::Select(v) => Self::Select(v.into()),
+			Subquery::Create(v) => Self::Create(v.into()),
+			Subquery::Update(v) => Self::Update(v.into()),
+			Subquery::Delete(v) => Self::Delete(v.into()),
+			Subquery::Relate(v) => Self::Relate(v.into()),
+			Subquery::Insert(v) => Self::Insert(v.into()),
+			Subquery::Define(v) => Self::Define(v.into()),
+			Subquery::Remove(v) => Self::Remove(v.into()),
+			Subquery::Rebuild(v) => Self::Rebuild(v.into()),
+			Subquery::Upsert(v) => Self::Upsert(v.into()),
+			Subquery::Alter(v) => Self::Alter(v.into()),
+			Subquery::Info(v) => Self::Info(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::Subquery> for Subquery {
+	fn from(v: crate::expr::Subquery) -> Self {
+		match v {
+			crate::expr::Subquery::Value(v) => Self::Value(v.into()),
+			crate::expr::Subquery::Ifelse(v) => Self::Ifelse(v.into()),
+			crate::expr::Subquery::Output(v) => Self::Output(v.into()),
+			crate::expr::Subquery::Select(v) => Self::Select(v.into()),
+			crate::expr::Subquery::Create(v) => Self::Create(v.into()),
+			crate::expr::Subquery::Update(v) => Self::Update(v.into()),
+			crate::expr::Subquery::Delete(v) => Self::Delete(v.into()),
+			crate::expr::Subquery::Relate(v) => Self::Relate(v.into()),
+			crate::expr::Subquery::Insert(v) => Self::Insert(v.into()),
+			crate::expr::Subquery::Define(v) => Self::Define(v.into()),
+			crate::expr::Subquery::Remove(v) => Self::Remove(v.into()),
+			crate::expr::Subquery::Rebuild(v) => Self::Rebuild(v.into()),
+			crate::expr::Subquery::Upsert(v) => Self::Upsert(v.into()),
+			crate::expr::Subquery::Alter(v) => Self::Alter(v.into()),
+			crate::expr::Subquery::Info(v) => Self::Info(v.into()),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Subquery);
 
 impl crate::sql::DisplaySql for Subquery {

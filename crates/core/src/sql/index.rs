@@ -181,6 +181,36 @@ pub enum Distance {
 	Pearson,
 }
 
+impl From<Distance> for crate::expr::index::Distance {
+	fn from(v: Distance) -> Self {
+		match v {
+			Distance::Chebyshev => crate::expr::index::Distance::Chebyshev,
+			Distance::Cosine => crate::expr::index::Distance::Cosine,
+			Distance::Euclidean => crate::expr::index::Distance::Euclidean,
+			Distance::Hamming => crate::expr::index::Distance::Hamming,
+			Distance::Jaccard => crate::expr::index::Distance::Jaccard,
+			Distance::Manhattan => crate::expr::index::Distance::Manhattan,
+			Distance::Minkowski(n) => crate::expr::index::Distance::Minkowski(n.into()),
+			Distance::Pearson => crate::expr::index::Distance::Pearson,
+		}
+	}
+}
+
+impl From<crate::expr::index::Distance> for Distance {
+	fn from(v: crate::expr::index::Distance) -> Self {
+		match v {
+			crate::expr::index::Distance::Chebyshev => Self::Chebyshev,
+			crate::expr::index::Distance::Cosine => Self::Cosine,
+			crate::expr::index::Distance::Euclidean => Self::Euclidean,
+			crate::expr::index::Distance::Hamming => Self::Hamming,
+			crate::expr::index::Distance::Jaccard => Self::Jaccard,
+			crate::expr::index::Distance::Manhattan => Self::Manhattan,
+			crate::expr::index::Distance::Minkowski(n) => Self::Minkowski(n.into()),
+			crate::expr::index::Distance::Pearson => Self::Pearson,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Distance);
 
 impl crate::sql::DisplaySql for Distance {

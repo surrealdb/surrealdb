@@ -26,6 +26,18 @@ impl IntoIterator for Groups {
 	}
 }
 
+impl From<Groups> for crate::expr::Groups {
+	fn from(v: Groups) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Groups> for Groups {
+	fn from(v: crate::expr::Groups) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Groups);
 
 impl crate::sql::DisplaySql for Groups {
@@ -50,6 +62,19 @@ impl Deref for Group {
 		&self.0
 	}
 }
+
+impl From<Group> for crate::expr::Group {
+	fn from(v: Group) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Group> for Group {
+	fn from(v: crate::expr::Group) -> Self {
+		Self(v.0.into())
+	}
+}
+
 
 crate::sql::impl_display_from_sql!(Group);
 

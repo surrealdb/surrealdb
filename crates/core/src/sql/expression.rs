@@ -100,6 +100,52 @@ impl Expression {
 	}
 }
 
+impl From<Expression> for crate::expr::Expression {
+	fn from(v: Expression) -> Self {
+		match v {
+			Expression::Unary {
+				o,
+				v,
+			} => Self::Unary {
+				o: o.into(),
+				v: v.into(),
+			},
+			Expression::Binary {
+				l,
+				o,
+				r,
+			} => Self::Binary {
+				l: l.into(),
+				o: o.into(),
+				r: r.into(),
+			},
+		}
+	}
+}
+
+impl From<crate::expr::Expression> for Expression {
+	fn from(v: crate::expr::Expression) -> Self {
+		match v {
+			crate::expr::Expression::Unary {
+				o,
+				v,
+			} => Self::Unary {
+				o: o.into(),
+				v: v.into(),
+			},
+			crate::expr::Expression::Binary {
+				l,
+				o,
+				r,
+			} => Self::Binary {
+				l: l.into(),
+				o: o.into(),
+				r: r.into(),
+			},
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Expression);
 
 impl crate::sql::DisplaySql for Expression {

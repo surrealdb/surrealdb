@@ -440,6 +440,34 @@ impl From<Geometry> for geo::Geometry<f64> {
 	}
 }
 
+impl From<Geometry> for crate::expr::Geometry {
+	fn from(v: Geometry) -> Self {
+		match v {
+			Geometry::Point(v) => Self::Point(v),
+			Geometry::Line(v) => Self::Line(v),
+			Geometry::Polygon(v) => Self::Polygon(v),
+			Geometry::MultiPoint(v) => Self::MultiPoint(v),
+			Geometry::MultiLine(v) => Self::MultiLine(v),
+			Geometry::MultiPolygon(v) => Self::MultiPolygon(v),
+			Geometry::Collection(v) => Self::Collection(v.into_iter().map(Into::into).collect()),
+		}
+	}
+}
+
+impl From<crate::expr::Geometry> for Geometry {
+	fn from(v: crate::expr::Geometry) -> Self {
+		match v {
+			crate::expr::Geometry::Point(v) => Self::Point(v),
+			crate::expr::Geometry::Line(v) => Self::Line(v),
+			crate::expr::Geometry::Polygon(v) => Self::Polygon(v),
+			crate::expr::Geometry::MultiPoint(v) => Self::MultiPoint(v),
+			crate::expr::Geometry::MultiLine(v) => Self::MultiLine(v),
+			crate::expr::Geometry::MultiPolygon(v) => Self::MultiPolygon(v),
+			crate::expr::Geometry::Collection(v) => Self::Collection(v.into_iter().map(Into::into).collect()),
+		}
+	}
+}
+
 impl FromIterator<Geometry> for geo::Geometry<f64> {
 	fn from_iter<I: IntoIterator<Item = Geometry>>(iter: I) -> Self {
 		let mut c: Vec<geo::Geometry<f64>> = vec![];

@@ -16,6 +16,22 @@ pub struct SleepStatement {
 	pub(crate) duration: Duration,
 }
 
+impl From<SleepStatement> for crate::expr::statements::SleepStatement {
+	fn from(v: SleepStatement) -> Self {
+		crate::expr::statements::SleepStatement {
+			duration: v.duration.into(),
+		}
+	}
+}
+
+impl From<crate::expr::statements::SleepStatement> for SleepStatement {
+	fn from(v: crate::expr::statements::SleepStatement) -> Self {
+		SleepStatement {
+			duration: v.duration.into(),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(SleepStatement);
 
 impl crate::sql::DisplaySql for SleepStatement {

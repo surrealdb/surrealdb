@@ -19,6 +19,26 @@ pub struct Closure {
 	pub body: Value,
 }
 
+impl From<Closure> for crate::expr::Closure {
+	fn from(v: Closure) -> Self {
+		Self {
+			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
+			returns: v.returns.map(Into::into),
+			body: v.body.into(),
+		}
+	}
+}
+
+impl From<crate::expr::Closure> for Closure {
+	fn from(v: crate::expr::Closure) -> Self {
+		Self {
+			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
+			returns: v.returns.map(Into::into),
+			body: v.body.into(),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Closure);
 
 impl crate::sql::DisplaySql for Closure {

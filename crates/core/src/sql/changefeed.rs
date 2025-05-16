@@ -15,6 +15,25 @@ pub struct ChangeFeed {
 	#[revision(start = 2)]
 	pub store_diff: bool,
 }
+
+impl From<ChangeFeed> for crate::expr::ChangeFeed {
+	fn from(v: ChangeFeed) -> Self {
+		crate::expr::ChangeFeed {
+			expiry: v.expiry,
+			store_diff: v.store_diff,
+		}
+	}
+}
+
+impl From<crate::expr::ChangeFeed> for ChangeFeed {
+	fn from(v: crate::expr::ChangeFeed) -> Self {
+		ChangeFeed {
+			expiry: v.expiry,
+			store_diff: v.store_diff,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(ChangeFeed);
 
 impl crate::sql::DisplaySql for ChangeFeed {

@@ -147,7 +147,7 @@ pub use self::split::Split;
 pub use self::split::Splits;
 pub use self::start::Start;
 pub use self::logical_plan::LogicalPlan;
-pub use self::logical_plan::Statements;
+pub use self::logical_plan::LogicalPlans;
 pub use self::strand::Strand;
 pub use self::subquery::Subquery;
 pub use self::table::Table;

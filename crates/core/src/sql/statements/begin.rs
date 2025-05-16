@@ -8,6 +8,17 @@ use std::fmt;
 #[non_exhaustive]
 pub struct BeginStatement;
 
+impl From<BeginStatement> for crate::expr::statements::begin::BeginStatement {
+	fn from(_: BeginStatement) -> Self {
+		Self
+	}
+}
+impl From<crate::expr::statements::begin::BeginStatement> for BeginStatement {
+	fn from(_: crate::expr::statements::begin::BeginStatement) -> Self {
+		Self
+	}
+}
+
 crate::sql::impl_display_from_sql!(BeginStatement);
 
 impl crate::sql::DisplaySql for BeginStatement {

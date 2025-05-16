@@ -44,6 +44,25 @@ pub struct Model {
 	pub args: Vec<Value>,
 }
 
+impl From<Model> for crate::expr::Model {
+	fn from(v: Model) -> Self {
+		Self {
+			name: v.name,
+			version: v.version,
+			args: v.args.into_iter().map(Into::into).collect(),
+		}
+	}
+}
+impl From<crate::expr::Model> for Model {
+	fn from(v: crate::expr::Model) -> Self {
+		Self {
+			name: v.name,
+			version: v.version,
+			args: v.args.into_iter().map(Into::into).collect(),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Model);
 
 impl crate::sql::DisplaySql for Model {

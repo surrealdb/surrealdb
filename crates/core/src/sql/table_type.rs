@@ -16,6 +16,26 @@ pub enum TableType {
 	Relation(Relation),
 }
 
+impl From<TableType> for crate::expr::TableType {
+	fn from(v: TableType) -> Self {
+		match v {
+			TableType::Any => crate::expr::TableType::Any,
+			TableType::Normal => crate::expr::TableType::Normal,
+			TableType::Relation(rel) => crate::expr::TableType::Relation(rel.into()),
+		}
+	}
+}
+
+impl From<crate::expr::TableType> for TableType {
+	fn from(v: crate::expr::TableType) -> Self {
+		match v {
+			crate::expr::TableType::Any => TableType::Any,
+			crate::expr::TableType::Normal => TableType::Normal,
+			crate::expr::TableType::Relation(rel) => TableType::Relation(rel.into()),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(TableType);
 
 impl crate::sql::DisplaySql for TableType {
@@ -74,4 +94,24 @@ pub struct Relation {
 	pub to: Option<Kind>,
 	#[revision(start = 2)]
 	pub enforced: bool,
+}
+
+impl From<Relation> for crate::expr::Relation {
+	fn from(v: Relation) -> Self {
+		crate::expr::Relation {
+			from: v.from.map(Into::into),
+			to: v.to.map(Into::into),
+			enforced: v.enforced,
+		}
+	}
+}
+
+impl From<crate::expr::Relation> for Relation {
+	fn from(v: crate::expr::Relation) -> Self {
+		Relation {
+			from: v.from.map(Into::into),
+			to: v.to.map(Into::into),
+			enforced: v.enforced,
+		}
+	}
 }

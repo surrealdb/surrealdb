@@ -20,6 +20,22 @@ pub struct KillStatement {
 	pub id: Value,
 }
 
+impl From<KillStatement> for crate::expr::statements::KillStatement {
+	fn from(v: KillStatement) -> Self {
+		Self {
+			id: v.id.into(),
+		}
+	}
+}
+
+impl From<crate::expr::statements::KillStatement> for KillStatement {
+	fn from(v: crate::expr::statements::KillStatement) -> Self {
+		Self {
+			id: v.id.into(),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(KillStatement);
 
 impl crate::sql::DisplaySql for KillStatement {

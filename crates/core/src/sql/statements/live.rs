@@ -76,6 +76,35 @@ impl LiveStatement {
 	}
 }
 
+impl From<LiveStatement> for crate::expr::statements::LiveStatement {
+	fn from(v: LiveStatement) -> Self {
+		crate::expr::statements::LiveStatement {
+			id: v.id,
+			node: v.node,
+			expr: v.expr.into(),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			fetch: v.fetch.map(Into::into),
+			auth: v.auth,
+			session: v.session,
+		}
+	}
+}
+impl From<crate::expr::statements::LiveStatement> for LiveStatement {
+	fn from(v: crate::expr::statements::LiveStatement) -> Self {
+		LiveStatement {
+			id: v.id,
+			node: v.node,
+			expr: v.expr.into(),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			fetch: v.fetch.map(Into::into),
+			auth: v.auth,
+			session: v.session.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(LiveStatement);
 
 impl crate::sql::DisplaySql for LiveStatement {

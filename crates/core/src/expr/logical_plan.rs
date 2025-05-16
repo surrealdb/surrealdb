@@ -30,16 +30,16 @@ use super::{ControlFlow, FlowResult};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Statements(pub Vec<LogicalPlan>);
+pub struct LogicalPlans(pub Vec<LogicalPlan>);
 
-impl Deref for Statements {
+impl Deref for LogicalPlans {
 	type Target = Vec<LogicalPlan>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
-impl IntoIterator for Statements {
+impl IntoIterator for LogicalPlans {
 	type Item = LogicalPlan;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
@@ -47,9 +47,9 @@ impl IntoIterator for Statements {
 	}
 }
 
-crate::expr::impl_display_from_sql!(Statements);
+crate::expr::impl_display_from_sql!(LogicalPlans);
 
-impl crate::expr::DisplaySql for Statements {
+impl crate::expr::DisplaySql for LogicalPlans {
 	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		Display::fmt(
 			&Fmt::one_line_separated(self.0.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};")))),
