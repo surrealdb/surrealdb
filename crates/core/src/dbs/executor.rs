@@ -16,7 +16,6 @@ use crate::expr::paths::NS;
 use crate::sql::Query;
 use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::value::Value;
-use crate::sql::value::Value as SqlValue;
 use crate::expr::Base;
 use crate::expr::ControlFlow;
 use crate::expr::FlowResult;

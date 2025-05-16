@@ -3,7 +3,7 @@ use super::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Part,
 	Range, Regex, Strand, Thing, Uuid,
 };
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::{
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
 	Table, Value,
@@ -587,11 +587,7 @@ impl crate::sql::DisplaySql for Kind {
 	}
 }
 
-impl InfoStructure for Kind {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

@@ -8,6 +8,17 @@ use std::fmt;
 #[non_exhaustive]
 pub struct Explain(pub bool);
 
+impl From<Explain> for crate::expr::Explain {
+	fn from(v: Explain) -> Self {
+		Self(v.0)
+	}
+}
+impl From<crate::expr::Explain> for Explain {
+	fn from(v: crate::expr::Explain) -> Self {
+		Self(v.0)
+	}
+}
+
 crate::sql::impl_display_from_sql!(Explain);
 
 impl crate::sql::DisplaySql for Explain {

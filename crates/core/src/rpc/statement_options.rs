@@ -268,9 +268,9 @@ impl StatementOptions {
 	}
 
 	pub(crate) fn merge_vars(&self, v: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {
-		match self.vars {
+		match &self.vars {
 			Some(vars) => {
-				let mut vars = sql_variables_to_expr_variables(&vars);
+				let mut vars = sql_variables_to_expr_variables(vars);
 				mrg! {vars, v}
 			},
 			None => v.clone(),

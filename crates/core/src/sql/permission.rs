@@ -1,7 +1,7 @@
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
 use crate::sql::fmt::pretty_sequence_item;
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -145,17 +145,7 @@ impl crate::sql::DisplaySql for Permissions {
 	}
 }
 
-impl InfoStructure for Permissions {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"select".to_string() => self.select.structure(),
-			"create".to_string() => self.create.structure(),
-			"update".to_string() => self.update.structure(),
-			// TODO(gguillemas): Do not show this value for fields in 3.0.0.
-			"delete".to_string() => self.delete.structure(),
-		})
-	}
-}
+
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum PermissionKind {
@@ -241,12 +231,4 @@ impl crate::sql::DisplaySql for Permission {
 	}
 }
 
-impl InfoStructure for Permission {
-	fn structure(self) -> Value {
-		match self {
-			Permission::None => Value::Bool(false),
-			Permission::Full => Value::Bool(true),
-			Permission::Specific(v) => v.to_string().into(),
-		}
-	}
-}
+

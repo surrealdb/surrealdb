@@ -1,10 +1,5 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{changefeed::ChangeFeed, Base, Ident, Strand, Value};
+
+use crate::sql::{changefeed::ChangeFeed, Ident, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -23,6 +18,32 @@ pub struct DefineDatabaseStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub overwrite: bool,
+}
+
+impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseStatement {
+	fn from(v: DefineDatabaseStatement) -> Self {
+		crate::expr::statements::DefineDatabaseStatement {
+			id: v.id,
+			name: v.name.into(),
+			comment: v.comment.map(Into::into),
+			changefeed: v.changefeed.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineDatabaseStatement> for DefineDatabaseStatement {
+	fn from(v: crate::expr::statements::DefineDatabaseStatement) -> Self {
+		DefineDatabaseStatement {
+			id: v.id,
+			name: v.name.into(),
+			comment: v.comment.map(Into::into),
+			changefeed: v.changefeed.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(DefineDatabaseStatement);
@@ -47,11 +68,4 @@ impl crate::sql::DisplaySql for DefineDatabaseStatement {
 	}
 }
 
-impl InfoStructure for DefineDatabaseStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+

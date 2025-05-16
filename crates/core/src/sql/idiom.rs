@@ -1,16 +1,10 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::expr;
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
-	part::{Next, NextMethod},
 	paths::{ID, IN, META, OUT},
-	Part, Value,
+	Part,
 };
 use md5::{Digest, Md5};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -18,7 +12,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
@@ -43,6 +36,18 @@ impl IntoIterator for Idioms {
 	}
 }
 
+impl From<Idioms> for crate::expr::Idioms {
+	fn from(v: Idioms) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Idioms> for Idioms {
+	fn from(v: crate::expr::Idioms) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Idioms);
 
 impl crate::sql::DisplaySql for Idioms {
@@ -51,11 +56,7 @@ impl crate::sql::DisplaySql for Idioms {
 	}
 }
 
-impl InfoStructure for Idioms {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -196,11 +197,7 @@ impl crate::sql::DisplaySql for Idiom {
 	}
 }
 
-impl InfoStructure for Idiom {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+
 
 /// A trie structure for storing idioms.
 ///

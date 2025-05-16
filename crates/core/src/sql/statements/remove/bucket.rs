@@ -1,8 +1,4 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Ident, Value};
+use crate::sql::Ident;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -15,6 +11,24 @@ use std::fmt::{self, Formatter};
 pub struct RemoveBucketStatement {
 	pub name: Ident,
 	pub if_exists: bool,
+}
+
+impl From<RemoveBucketStatement> for crate::expr::statements::remove::RemoveBucketStatement {
+	fn from(v: RemoveBucketStatement) -> Self {
+		crate::expr::statements::remove::RemoveBucketStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+		}
+	}
+}
+
+impl From<crate::expr::statements::remove::RemoveBucketStatement> for RemoveBucketStatement {
+	fn from(v: crate::expr::statements::remove::RemoveBucketStatement) -> Self {
+		RemoveBucketStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(RemoveBucketStatement);

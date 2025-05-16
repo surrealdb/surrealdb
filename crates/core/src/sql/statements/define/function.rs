@@ -1,11 +1,6 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, Value};
+
+use crate::sql::{Block, Ident, Kind, Permission, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -36,7 +31,7 @@ impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionSt
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			block: v.block.into(),
 			comment: v.comment.map(Into::into),
-			permissions: v.permissions,
+			permissions: v.permissions.into(),
 			if_not_exists: v.if_not_exists,
 			overwrite: v.overwrite,
 			returns: v.returns.map(Into::into),
@@ -51,7 +46,7 @@ impl From<crate::expr::statements::DefineFunctionStatement> for DefineFunctionSt
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			block: v.block.into(),
 			comment: v.comment.map(Into::into),
-			permissions: v.permissions,
+			permissions: v.permissions.into(),
 			if_not_exists: v.if_not_exists,
 			overwrite: v.overwrite,
 			returns: v.returns.map(Into::into),
@@ -96,19 +91,4 @@ impl crate::sql::DisplaySql for DefineFunctionStatement {
 	}
 }
 
-impl InfoStructure for DefineFunctionStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"args".to_string() => self.args
-				.into_iter()
-				.map(|(n, k)| vec![n.structure(), k.structure()].into())
-				.collect::<Vec<Value>>()
-				.into(),
-			"block".to_string() => self.block.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-			"returns".to_string(), if let Some(v) = self.returns => v.structure(),
-		})
-	}
-}
+

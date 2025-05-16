@@ -1,11 +1,5 @@
-use crate::ctx::Context;
-use crate::dbs::{Iterator, Options, Statement};
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::{Cond, Explain, FlowResultExt as _, Output, Timeout, Value, Values, With};
+use crate::sql::{Cond, Explain, Output, Timeout, Values, With};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -39,7 +33,7 @@ impl From<DeleteStatement> for crate::expr::statements::DeleteStatement {
 	fn from(v: DeleteStatement) -> Self {
 		crate::expr::statements::DeleteStatement {
 			only: v.only,
-			what: v.what.into_iter().map(Into::into).collect(),
+			what: v.what.into(),
 			with: v.with.map(Into::into),
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
@@ -54,7 +48,7 @@ impl From<crate::expr::statements::DeleteStatement> for DeleteStatement {
 	fn from(v: crate::expr::statements::DeleteStatement) -> Self {
 		DeleteStatement {
 			only: v.only,
-			what: v.what.into_iter().map(Into::into).collect(),
+			what: v.what.into(),
 			with: v.with.map(Into::into),
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),

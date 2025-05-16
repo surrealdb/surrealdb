@@ -60,6 +60,35 @@ impl Default for Scoring {
 	}
 }
 
+impl From<Scoring> for crate::expr::Scoring {
+	fn from(v: Scoring) -> Self {
+		match v {
+			Scoring::Bm {
+				k1,
+				b,
+			} => crate::expr::Scoring::Bm {
+				k1,
+				b,
+			},
+			Scoring::Vs => crate::expr::Scoring::Vs,
+		}
+	}
+}
+impl From<crate::expr::Scoring> for Scoring {
+	fn from(v: crate::expr::Scoring) -> Self {
+		match v {
+			crate::expr::Scoring::Bm {
+				k1,
+				b,
+			} => Self::Bm {
+				k1,
+				b,
+			},
+			crate::expr::Scoring::Vs => Self::Vs,
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Scoring);
 
 impl crate::sql::DisplaySql for Scoring {

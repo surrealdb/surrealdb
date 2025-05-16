@@ -1,24 +1,16 @@
-use crate::ctx::Context;
 #[cfg(target_family = "wasm")]
 use crate::dbs::Force;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::statements::DefineTableStatement;
+
 #[cfg(target_family = "wasm")]
 use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::sql::{Base, Ident, Idioms, Index, Part, Strand, Value};
+use crate::sql::{Ident, Idioms, Index, Strand};
 #[cfg(target_family = "wasm")]
 use crate::sql::{Output, Values};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
 #[cfg(target_family = "wasm")]
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -43,7 +35,7 @@ impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatemen
 		Self {
 			name: v.name.into(),
 			what: v.what.into(),
-			cols: v.cols.into_iter().map(Into::into).collect(),
+			cols: v.cols.into(),
 			index: v.index.into(),
 			comment: v.comment.map(Into::into),
 			if_not_exists: v.if_not_exists,
@@ -58,7 +50,7 @@ impl From<crate::expr::statements::DefineIndexStatement> for DefineIndexStatemen
 		Self {
 			name: v.name.into(),
 			what: v.what.into(),
-			cols: v.cols.into_iter().map(Into::into).collect(),
+			cols: v.cols.into(),
 			index: v.index.into(),
 			comment: v.comment.map(Into::into),
 			if_not_exists: v.if_not_exists,
@@ -93,14 +85,4 @@ impl crate::sql::DisplaySql for DefineIndexStatement {
 	}
 }
 
-impl InfoStructure for DefineIndexStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.what.structure(),
-			"cols".to_string() => self.cols.structure(),
-			"index".to_string() => self.index.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+

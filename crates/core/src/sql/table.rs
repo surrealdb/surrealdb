@@ -26,6 +26,18 @@ impl Deref for Tables {
 	}
 }
 
+impl From<Tables> for crate::expr::Tables {
+	fn from(v: Tables) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Tables> for Tables {
+	fn from(v: crate::expr::Tables) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Tables);
 
 impl crate::sql::DisplaySql for Tables {

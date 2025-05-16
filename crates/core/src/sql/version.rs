@@ -1,6 +1,4 @@
-use super::FlowResultExt;
-use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::datetime::Datetime};
-use reblessive::tree::Stk;
+use crate::sql::datetime::Datetime;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -24,6 +22,18 @@ impl Version {
 	) -> Result<(), revision::Error> {
 		self.0 = Value::Datetime(old);
 		Ok(())
+	}
+}
+
+impl From<Version> for crate::expr::Version {
+	fn from(v: Version) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Version> for Version {
+	fn from(v: crate::expr::Version) -> Self {
+		Self(v.0.into())
 	}
 }
 

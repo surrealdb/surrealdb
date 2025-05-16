@@ -1,16 +1,8 @@
 use super::id::range::IdRange;
 use super::{Cond, Expression, Ident, Idiom, Operator, Part, Table};
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::idx::planner::ScanDirection;
-use crate::key::r#ref::Ref;
-use crate::kvs::KeyDecode as _;
 use crate::sql::{escape::EscapeRid, id::Id, Strand, Value};
 use crate::syn;
 use futures::StreamExt;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

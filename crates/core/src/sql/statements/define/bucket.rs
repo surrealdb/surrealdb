@@ -1,15 +1,8 @@
-use crate::buc::{self, BucketConnectionKey};
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, FlowResultExt, Ident, Permission, Strand, Value};
-use crate::{ctx::Context, sql::statements::info::InfoStructure};
-use reblessive::tree::Stk;
+use crate::sql::{Ident, Permission, Strand, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-use super::CursorDoc;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -23,6 +16,34 @@ pub struct DefineBucketStatement {
 	pub permissions: Permission,
 	pub readonly: bool,
 	pub comment: Option<Strand>,
+}
+
+impl From<DefineBucketStatement> for crate::expr::statements::define::DefineBucketStatement {
+	fn from(v: DefineBucketStatement) -> Self {
+		crate::expr::statements::define::DefineBucketStatement {
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			name: v.name.into(),
+			backend: v.backend.map(Into::into),
+			permissions: v.permissions.into(),
+			readonly: v.readonly,
+			comment: v.comment.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::DefineBucketStatement> for DefineBucketStatement {
+	fn from(v: crate::expr::statements::define::DefineBucketStatement) -> Self {
+		DefineBucketStatement {
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			name: v.name.into(),
+			backend: v.backend.map(Into::into),
+			permissions: v.permissions.into(),
+			readonly: v.readonly,
+			comment: v.comment.map(Into::into),
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(DefineBucketStatement);
@@ -56,17 +77,7 @@ impl crate::sql::DisplaySql for DefineBucketStatement {
 	}
 }
 
-impl InfoStructure for DefineBucketStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"backend".to_string(), if let Some(backend) = self.backend => backend,
-			"readonly".to_string() => self.readonly.into(),
-			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
-		})
-	}
-}
+
 
 // Computed bucket definition struct
 
@@ -96,12 +107,7 @@ impl From<BucketDefinition> for DefineBucketStatement {
 	}
 }
 
-impl InfoStructure for BucketDefinition {
-	fn structure(self) -> Value {
-		let db: DefineBucketStatement = self.into();
-		db.structure()
-	}
-}
+
 
 crate::sql::impl_display_from_sql!(BucketDefinition);
 

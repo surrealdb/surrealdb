@@ -1,8 +1,5 @@
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
 	AlterStatement, BreakStatement, ContinueStatement, CreateStatement, DefineStatement,
@@ -11,7 +8,6 @@ use crate::sql::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::sql::value::Value;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -19,7 +15,6 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 use super::statements::InfoStatement;
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 
@@ -109,11 +104,7 @@ impl crate::sql::DisplaySql for Block {
 	}
 }
 
-impl InfoStructure for Block {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

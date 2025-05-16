@@ -34,5 +34,4 @@ mod set;
 mod walk;
 
 mod convert;
-pub(crate) use convert::cast::{Cast, CastError};
 pub(crate) use convert::coerce::{Coerce, CoerceError, CoerceErrorExt};

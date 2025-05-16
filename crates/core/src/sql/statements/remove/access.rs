@@ -1,8 +1,4 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Ident, Value};
+use crate::sql::{Base, Ident};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -17,6 +13,26 @@ pub struct RemoveAccessStatement {
 	pub base: Base,
 	#[revision(start = 2)]
 	pub if_exists: bool,
+}
+
+impl From<RemoveAccessStatement> for crate::expr::statements::RemoveAccessStatement {
+	fn from(v: RemoveAccessStatement) -> Self {
+		crate::expr::statements::RemoveAccessStatement {
+			name: v.name.into(),
+			base: v.base.into(),
+			if_exists: v.if_exists,
+		}
+	}
+}
+
+impl From<crate::expr::statements::RemoveAccessStatement> for RemoveAccessStatement {
+	fn from(v: crate::expr::statements::RemoveAccessStatement) -> Self {
+		RemoveAccessStatement {
+			name: v.name.into(),
+			base: v.base.into(),
+			if_exists: v.if_exists,
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(RemoveAccessStatement);

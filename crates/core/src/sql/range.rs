@@ -1,16 +1,12 @@
 use super::kind::HasKind;
 
 use super::value::CoerceErrorExt;
-use super::{Array, FlowResult, Id};
+use super::{Array, Id};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::operator::BindingPower;
 use crate::sql::Value;
 use crate::syn;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;

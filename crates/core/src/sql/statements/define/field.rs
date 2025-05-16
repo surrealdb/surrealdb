@@ -1,23 +1,16 @@
 use crate::ctx::Context;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::kvs::Transaction;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
+
+use crate::sql::{Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::sql::{Literal, Part};
-use crate::sql::{Relation, TableType};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Write};
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 6)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -165,11 +158,12 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			name: v.name.into(),
 			what: v.what.into(),
 			flex: v.flex,
+			readonly: v.readonly,
 			kind: v.kind.map(Into::into),
 			value: v.value.map(Into::into),
 			assert: v.assert.map(Into::into),
 			default: v.default.map(Into::into),
-			permissions: v.permissions,
+			permissions: v.permissions.into(),
 			comment: v.comment.map(Into::into),
 			if_not_exists: v.if_not_exists,
 			overwrite: v.overwrite,
@@ -185,11 +179,12 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			name: v.name.into(),
 			what: v.what.into(),
 			flex: v.flex,
+			readonly: v.readonly,
 			kind: v.kind.map(Into::into),
 			value: v.value.map(Into::into),
 			assert: v.assert.map(Into::into),
 			default: v.default.map(Into::into),
-			permissions: v.permissions,
+			permissions: v.permissions.into(),
 			comment: v.comment.map(Into::into),
 			if_not_exists: v.if_not_exists,
 			overwrite: v.overwrite,
@@ -255,20 +250,4 @@ impl crate::sql::DisplaySql for DefineFieldStatement {
 	}
 }
 
-impl InfoStructure for DefineFieldStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.what.structure(),
-			"flex".to_string() => self.flex.into(),
-			"kind".to_string(), if let Some(v) = self.kind => v.structure(),
-			"value".to_string(), if let Some(v) = self.value => v.structure(),
-			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
-			"default".to_string(), if let Some(v) = self.default => v.structure(),
-			"reference".to_string(), if let Some(v) = self.reference => v.structure(),
-			"readonly".to_string() => self.readonly.into(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+

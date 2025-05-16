@@ -1,11 +1,5 @@
-use crate::ctx::Context;
-use crate::dbs::{Iterator, Options, Statement};
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::{Cond, Data, Explain, FlowResultExt as _, Output, Timeout, Value, Values, With};
+use crate::sql::{Cond, Data, Explain, Output, Timeout, Values, With};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -40,7 +34,7 @@ impl From<UpdateStatement> for crate::expr::statements::UpdateStatement {
 	fn from(v: UpdateStatement) -> Self {
 		crate::expr::statements::UpdateStatement {
 			only: v.only,
-			what: v.what.into_iter().map(Into::into).collect(),
+			what: v.what.into(),
 			with: v.with.map(Into::into),
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),
@@ -56,7 +50,7 @@ impl From<crate::expr::statements::UpdateStatement> for UpdateStatement {
 	fn from(v: crate::expr::statements::UpdateStatement) -> Self {
 		UpdateStatement {
 			only: v.only,
-			what: v.what.into_iter().map(Into::into).collect(),
+			what: v.what.into(),
 			with: v.with.map(Into::into),
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),

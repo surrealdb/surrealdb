@@ -1,15 +1,9 @@
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::block::Block;
 use crate::sql::value::Value;
-use crate::{ctx::Context, dbs::Futures};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::FlowResultExt as _;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 

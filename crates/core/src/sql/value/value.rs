@@ -1,14 +1,11 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::id::range::IdRange;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::{
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
@@ -17,11 +14,10 @@ use crate::sql::{
 	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
 	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
-use crate::sql::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::sql::{Closure, Ident, Kind};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -84,11 +80,7 @@ impl crate::sql::DisplaySql for Values {
 	}
 }
 
-impl InfoStructure for Values {
-	fn structure(self) -> Value {
-		self.into_iter().map(Value::structure).collect::<Vec<_>>().into()
-	}
-}
+
 
 impl From<&Tables> for Values {
 	fn from(tables: &Tables) -> Self {
@@ -951,11 +943,7 @@ impl crate::sql::DisplaySql for Value {
 	}
 }
 
-impl InfoStructure for Value {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+
 
 // ------------------------------
 

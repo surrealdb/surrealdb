@@ -1,12 +1,8 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
 	fmt::{pretty_indent, Fmt, Pretty},
 	Value,
 };
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -15,7 +11,6 @@ use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 

@@ -1,19 +1,11 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{fmt::Fmt, Idiom, Part, Value};
-use crate::syn;
-use reblessive::tree::Stk;
+
+use crate::sql::{fmt::Fmt, Idiom, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 use super::paths::ID;
-use super::{Array, FlowResultExt as _};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -113,11 +105,7 @@ impl crate::sql::DisplaySql for Fields {
 	}
 }
 
-impl InfoStructure for Fields {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

@@ -1,11 +1,6 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::{ControlFlow, FlowResult, Value};
-use crate::{cnf::PROTECTED_PARAM_NAMES, sql::Kind};
+use crate::sql::Value;
+use crate::sql::Kind;
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -32,8 +27,8 @@ impl From<SetStatement> for crate::expr::statements::SetStatement {
 	fn from(v: SetStatement) -> Self {
 		crate::expr::statements::SetStatement {
 			name: v.name,
-			what: v.what,
-			kind: v.kind,
+			what: v.what.into(),
+			kind: v.kind.map(Into::into),
 		}
 	}
 }
@@ -42,8 +37,8 @@ impl From<crate::expr::statements::SetStatement> for SetStatement {
 	fn from(v: crate::expr::statements::SetStatement) -> Self {
 		SetStatement {
 			name: v.name,
-			what: v.what,
-			kind: v.kind,
+			what: v.what.into(),
+			kind: v.kind.map(Into::into),
 		}
 	}
 }

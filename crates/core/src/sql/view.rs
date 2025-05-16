@@ -1,5 +1,5 @@
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{cond::Cond, field::Fields, group::Groups, table::Tables, Value};
+
+use crate::sql::{cond::Cond, field::Fields, group::Groups, table::Tables};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -13,6 +13,28 @@ pub struct View {
 	pub what: Tables,
 	pub cond: Option<Cond>,
 	pub group: Option<Groups>,
+}
+
+impl From<View> for crate::expr::View {
+	fn from(v: View) -> Self {
+		crate::expr::View {
+			expr: v.expr.into(),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			group: v.group.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::View> for View {
+	fn from(v: crate::expr::View) -> Self {
+		View {
+			expr: v.expr.into(),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			group: v.group.map(Into::into),
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(View);
@@ -29,8 +51,4 @@ impl crate::sql::DisplaySql for View {
 		Ok(())
 	}
 }
-impl InfoStructure for View {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+

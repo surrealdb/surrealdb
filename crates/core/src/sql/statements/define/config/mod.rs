@@ -1,13 +1,9 @@
 pub mod api;
 pub mod graphql;
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ConfigKind, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Value};
+use crate::iam::ConfigKind;
+
 
 use api::ApiConfig;
 use graphql::GraphQLConfig;
@@ -23,6 +19,26 @@ pub struct DefineConfigStatement {
 	pub inner: ConfigInner,
 	pub if_not_exists: bool,
 	pub overwrite: bool,
+}
+
+impl From<DefineConfigStatement> for crate::expr::statements::define::DefineConfigStatement {
+	fn from(v: DefineConfigStatement) -> Self {
+		crate::expr::statements::define::DefineConfigStatement {
+			inner: v.inner.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::DefineConfigStatement> for DefineConfigStatement {
+	fn from(v: crate::expr::statements::define::DefineConfigStatement) -> Self {
+		DefineConfigStatement {
+			inner: v.inner.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
 }
 
 #[revisioned(revision = 1)]
@@ -69,15 +85,20 @@ impl From<&ConfigInner> for ConfigKind {
 	}
 }
 
-impl InfoStructure for DefineConfigStatement {
-	fn structure(self) -> Value {
-		match self.inner {
-			ConfigInner::GraphQL(v) => Value::from(map!(
-				"graphql" => v.structure()
-			)),
-			ConfigInner::Api(v) => Value::from(map!(
-				"api" => v.structure()
-			)),
+impl From<ConfigInner> for crate::expr::statements::define::config::ConfigInner {
+	fn from(v: ConfigInner) -> Self {
+		match v {
+			ConfigInner::GraphQL(v) => crate::expr::statements::define::config::ConfigInner::GraphQL(v.into()),
+			ConfigInner::Api(v) => crate::expr::statements::define::config::ConfigInner::Api(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::config::ConfigInner> for ConfigInner {
+	fn from(v: crate::expr::statements::define::config::ConfigInner) -> Self {
+		match v {
+			crate::expr::statements::define::config::ConfigInner::GraphQL(v) => ConfigInner::GraphQL(v.into()),
+			crate::expr::statements::define::config::ConfigInner::Api(v) => ConfigInner::Api(v.into()),
 		}
 	}
 }

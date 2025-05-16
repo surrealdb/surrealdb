@@ -1,11 +1,5 @@
-use crate::ctx::Context;
-use crate::dbs::{Iterator, Options, Statement};
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::{Data, FlowResultExt as _, Output, Timeout, Value, Values, Version};
+use crate::sql::{Data, Output, Timeout, Values, Version};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -58,7 +52,7 @@ impl From<crate::expr::statements::CreateStatement> for CreateStatement {
 	fn from(v: crate::expr::statements::CreateStatement) -> Self {
 		CreateStatement {
 			only: v.only,
-			what: v.what.into_iter().map(Into::into).collect(),
+			what: v.what.into(),
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.map(Into::into),

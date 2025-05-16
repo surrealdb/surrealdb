@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::sql::datetime::Datetime;
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::strand::Strand;
 use crate::sql::Value;
 use crate::syn;
@@ -398,8 +398,4 @@ impl<'a> Sum<&'a Self> for Duration {
 	}
 }
 
-impl InfoStructure for Duration {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+

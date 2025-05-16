@@ -1,5 +1,5 @@
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Ident, Value};
+
+use crate::sql::Ident;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -58,8 +58,4 @@ impl crate::sql::DisplaySql for Base {
 	}
 }
 
-impl InfoStructure for Base {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+

@@ -1,13 +1,7 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::iam::Auth;
-use crate::kvs::Live;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
 
-use reblessive::tree::Stk;
+use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -79,22 +73,22 @@ impl LiveStatement {
 impl From<LiveStatement> for crate::expr::statements::LiveStatement {
 	fn from(v: LiveStatement) -> Self {
 		crate::expr::statements::LiveStatement {
-			id: v.id,
-			node: v.node,
+			id: v.id.into(),
+			node: v.node.into(),
 			expr: v.expr.into(),
 			what: v.what.into(),
 			cond: v.cond.map(Into::into),
 			fetch: v.fetch.map(Into::into),
 			auth: v.auth,
-			session: v.session,
+			session: v.session.map(Into::into),
 		}
 	}
 }
 impl From<crate::expr::statements::LiveStatement> for LiveStatement {
 	fn from(v: crate::expr::statements::LiveStatement) -> Self {
 		LiveStatement {
-			id: v.id,
-			node: v.node,
+			id: v.id.into(),
+			node: v.node.into(),
 			expr: v.expr.into(),
 			what: v.what.into(),
 			cond: v.cond.map(Into::into),
@@ -120,16 +114,7 @@ impl crate::sql::DisplaySql for LiveStatement {
 	}
 }
 
-impl InfoStructure for LiveStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"expr".to_string() => self.expr.structure(),
-			"what".to_string() => self.what.structure(),
-			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
-			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
-		})
-	}
-}
+
 
 #[cfg(test)]
 mod tests {

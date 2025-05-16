@@ -1,18 +1,12 @@
 use crate::api::method::Method;
 use crate::api::path::Path;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{pretty_indent, Fmt};
-use crate::sql::{Base, FlowResultExt as _, Object, Strand, Value};
-use crate::{ctx::Context, sql::statements::info::InfoStructure};
-use reblessive::tree::Stk;
+use crate::sql::{Strand, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 use super::config::api::ApiConfig;
-use super::CursorDoc;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -27,6 +21,34 @@ pub struct DefineApiStatement {
 	pub config: Option<ApiConfig>,
 	#[revision(start = 2)]
 	pub comment: Option<Strand>,
+}
+
+impl From<DefineApiStatement> for crate::expr::statements::DefineApiStatement {
+	fn from(v: DefineApiStatement) -> Self {
+		crate::expr::statements::DefineApiStatement {
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			path: v.path.into(),
+			actions: v.actions.into_iter().map(Into::into).collect(),
+			fallback: v.fallback.map(Into::into),
+			config: v.config.map(Into::into),
+			comment: v.comment.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
+	fn from(v: crate::expr::statements::DefineApiStatement) -> Self {
+		DefineApiStatement {
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			path: v.path.into(),
+			actions: v.actions.into_iter().map(Into::into).collect(),
+			fallback: v.fallback.map(Into::into),
+			config: v.config.map(Into::into),
+			comment: v.comment.map(Into::into),
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(DefineApiStatement);
@@ -71,17 +93,7 @@ impl crate::sql::DisplaySql for DefineApiStatement {
 	}
 }
 
-impl InfoStructure for DefineApiStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"path".to_string() => self.path,
-			"config".to_string(), if let Some(config) = self.config => config.structure(),
-			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
-			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
-			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
-		})
-	}
-}
+
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -109,12 +121,7 @@ impl From<ApiDefinition> for DefineApiStatement {
 	}
 }
 
-impl InfoStructure for ApiDefinition {
-	fn structure(self) -> Value {
-		let da: DefineApiStatement = self.into();
-		da.structure()
-	}
-}
+
 
 crate::sql::impl_display_from_sql!(ApiDefinition);
 
@@ -135,6 +142,26 @@ pub struct ApiAction {
 	pub config: Option<ApiConfig>,
 }
 
+impl From<ApiAction> for crate::expr::statements::define::ApiAction {
+	fn from(v: ApiAction) -> Self {
+		crate::expr::statements::define::ApiAction {
+			methods: v.methods,
+			action: v.action.into(),
+			config: v.config.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::ApiAction> for ApiAction {
+	fn from(v: crate::expr::statements::define::ApiAction) -> Self {
+		ApiAction {
+			methods: v.methods,
+			action: v.action.into(),
+			config: v.config.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(ApiAction);
 
 impl crate::sql::DisplaySql for ApiAction {
@@ -147,48 +174,5 @@ impl crate::sql::DisplaySql for ApiAction {
 		write!(f, "THEN {}", self.action)?;
 		drop(indent);
 		Ok(())
-	}
-}
-
-impl InfoStructure for ApiAction {
-	fn structure(self) -> Value {
-		Value::from(map!(
-			"methods" => Value::from(self.methods.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
-			"action" => Value::from(self.action.to_string()),
-			"config", if let Some(config) = self.config => config.structure(),
-		))
-	}
-}
-
-pub trait FindApi<'a> {
-	fn find_api(
-		&'a self,
-		segments: Vec<&'a str>,
-		method: Method,
-	) -> Option<(&'a ApiDefinition, Object)>;
-}
-
-impl<'a> FindApi<'a> for &'a [ApiDefinition] {
-	fn find_api(
-		&'a self,
-		segments: Vec<&'a str>,
-		method: Method,
-	) -> Option<(&'a ApiDefinition, Object)> {
-		let mut specifity = 0_u8;
-		let mut res = None;
-		for api in self.iter() {
-			if let Some(params) = api.path.fit(segments.as_slice()) {
-				if api.fallback.is_some() || api.actions.iter().any(|x| x.methods.contains(&method))
-				{
-					let s = api.path.specifity();
-					if s > specifity {
-						specifity = s;
-						res = Some((api, params));
-					}
-				}
-			}
-		}
-
-		res
 	}
 }

@@ -11,6 +11,23 @@ pub enum With {
 	Index(Vec<String>),
 }
 
+impl From<With> for crate::expr::With {
+	fn from(v: With) -> Self {
+		match v {
+			With::NoIndex => Self::NoIndex,
+			With::Index(i) => Self::Index(i),
+		}
+	}
+}
+impl From<crate::expr::With> for With {
+	fn from(v: crate::expr::With) -> Self {
+		match v {
+			crate::expr::With::NoIndex => Self::NoIndex,
+			crate::expr::With::Index(i) => Self::Index(i),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(With);
 
 impl crate::sql::DisplaySql for With {

@@ -1,11 +1,6 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::{
-	escape::QuoteStr, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Strand, Value,
+	escape::QuoteStr, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Strand,
 };
 use argon2::{
 	password_hash::{PasswordHasher, SaltString},
@@ -104,8 +99,8 @@ impl DefineUserStatement {
 impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement {
 	fn from(v: DefineUserStatement) -> Self {
 		Self {
-			name: v.name,
-			base: v.base,
+			name: v.name.into(),
+			base: v.base.into(),
 			hash: v.hash,
 			code: v.code,
 			roles: v.roles.into_iter().map(Into::into).collect(),
@@ -120,8 +115,8 @@ impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement 
 impl From<crate::expr::statements::DefineUserStatement> for DefineUserStatement {
 	fn from(v: crate::expr::statements::DefineUserStatement) -> Self {
 		Self {
-			name: v.name,
-			base: v.base,
+			name: v.name.into(),
+			base: v.base.into(),
 			hash: v.hash,
 			code: v.code,
 			roles: v.roles.into_iter().map(Into::into).collect(),
@@ -181,18 +176,4 @@ impl crate::sql::DisplaySql for DefineUserStatement {
 	}
 }
 
-impl InfoStructure for DefineUserStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"base".to_string() => self.base.structure(),
-			"hash".to_string() => self.hash.into(),
-			"roles".to_string() => self.roles.into_iter().map(Ident::structure).collect(),
-			"duration".to_string() => Value::from(map! {
-				"token".to_string() => self.duration.token.into(),
-				"session".to_string() => self.duration.session.into(),
-			}),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+

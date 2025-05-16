@@ -2,14 +2,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::{
-	ctx::Context,
-	dbs::{capabilities::ExperimentalTarget, Options},
-	doc::CursorDoc,
-	err::Error,
-};
 
-use super::{array::Uniq, statements::info::InfoStructure, Array, Idiom, Table, Thing, Value};
+use super::{Idiom, Table, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -20,6 +14,21 @@ pub struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
 }
 
+impl From<Reference> for crate::expr::reference::Reference {
+	fn from(v: Reference) -> Self {
+		Self {
+			on_delete: v.on_delete.into(),
+		}
+	}
+}
+impl From<crate::expr::reference::Reference> for Reference {
+	fn from(v: crate::expr::reference::Reference) -> Self {
+		Self {
+			on_delete: v.on_delete.into(),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(Reference);
 
 impl crate::sql::DisplaySql for Reference {
@@ -28,14 +37,7 @@ impl crate::sql::DisplaySql for Reference {
 	}
 }
 
-impl InfoStructure for Reference {
-	fn structure(self) -> Value {
-		map! {
-			"on_delete" => self.on_delete.structure(),
-		}
-		.into()
-	}
-}
+
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -48,6 +50,30 @@ pub enum ReferenceDeleteStrategy {
 	Cascade,
 	Unset,
 	Custom(Value),
+}
+
+impl From<ReferenceDeleteStrategy> for crate::expr::reference::ReferenceDeleteStrategy {
+	fn from(v: ReferenceDeleteStrategy) -> Self {
+		match v {
+			ReferenceDeleteStrategy::Reject => crate::expr::reference::ReferenceDeleteStrategy::Reject,
+			ReferenceDeleteStrategy::Ignore => crate::expr::reference::ReferenceDeleteStrategy::Ignore,
+			ReferenceDeleteStrategy::Cascade => crate::expr::reference::ReferenceDeleteStrategy::Cascade,
+			ReferenceDeleteStrategy::Unset => crate::expr::reference::ReferenceDeleteStrategy::Unset,
+			ReferenceDeleteStrategy::Custom(v) => crate::expr::reference::ReferenceDeleteStrategy::Custom(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::reference::ReferenceDeleteStrategy> for ReferenceDeleteStrategy {
+	fn from(v: crate::expr::reference::ReferenceDeleteStrategy) -> Self {
+		match v {
+			crate::expr::reference::ReferenceDeleteStrategy::Reject => ReferenceDeleteStrategy::Reject,
+			crate::expr::reference::ReferenceDeleteStrategy::Ignore => ReferenceDeleteStrategy::Ignore,
+			crate::expr::reference::ReferenceDeleteStrategy::Cascade => ReferenceDeleteStrategy::Cascade,
+			crate::expr::reference::ReferenceDeleteStrategy::Unset => ReferenceDeleteStrategy::Unset,
+			crate::expr::reference::ReferenceDeleteStrategy::Custom(v) => ReferenceDeleteStrategy::Custom(v.into()),
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(ReferenceDeleteStrategy);
@@ -64,11 +90,7 @@ impl crate::sql::DisplaySql for ReferenceDeleteStrategy {
 	}
 }
 
-impl InfoStructure for ReferenceDeleteStrategy {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]

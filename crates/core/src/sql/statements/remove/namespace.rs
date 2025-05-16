@@ -1,8 +1,4 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Ident, Value};
+use crate::sql::Ident;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -18,6 +14,26 @@ pub struct RemoveNamespaceStatement {
 	pub if_exists: bool,
 	#[revision(start = 3)]
 	pub expunge: bool,
+}
+
+impl From<RemoveNamespaceStatement> for crate::expr::statements::RemoveNamespaceStatement {
+	fn from(v: RemoveNamespaceStatement) -> Self {
+		crate::expr::statements::RemoveNamespaceStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			expunge: v.expunge,
+		}
+	}
+}
+
+impl From<crate::expr::statements::RemoveNamespaceStatement> for RemoveNamespaceStatement {
+	fn from(v: crate::expr::statements::RemoveNamespaceStatement) -> Self {
+		RemoveNamespaceStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			expunge: v.expunge,
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(RemoveNamespaceStatement);

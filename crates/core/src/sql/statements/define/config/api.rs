@@ -1,7 +1,7 @@
 use std::fmt::{self};
 
 use crate::sql::fmt::Fmt;
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::{Permission, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,22 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RequestMiddleware(pub Vec<(String, Vec<Value>)>);
+
+impl From<RequestMiddleware> for crate::api::middleware::RequestMiddleware {
+	fn from(v: RequestMiddleware) -> Self {
+		crate::api::middleware::RequestMiddleware(
+			v.0.into_iter().map(|(k, v)| (k, v.into_iter().map(Into::into).collect())).collect(),
+		)
+	}
+}
+
+impl From<crate::api::middleware::RequestMiddleware> for RequestMiddleware {
+	fn from(v: crate::api::middleware::RequestMiddleware) -> Self {
+		RequestMiddleware(
+			v.0.into_iter().map(|(k, v)| (k, v.into_iter().map(Into::into).collect())).collect(),
+		)
+	}
+}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -27,6 +43,23 @@ impl ApiConfig {
 	}
 }
 
+impl From<ApiConfig> for crate::expr::statements::define::config::api::ApiConfig {
+	fn from(v: ApiConfig) -> Self {
+		crate::expr::statements::define::config::api::ApiConfig {
+			middleware: v.middleware.map(Into::into),
+			permissions: v.permissions.map(Into::into),
+		}
+	}
+}
+impl From<crate::expr::statements::define::config::api::ApiConfig> for ApiConfig {
+	fn from(v: crate::expr::statements::define::config::api::ApiConfig) -> Self {
+		ApiConfig {
+			middleware: v.middleware.map(Into::into),
+			permissions: v.permissions.map(Into::into),
+		}
+	}
+}
+
 crate::sql::impl_display_from_sql!(ApiConfig);
 
 impl crate::sql::DisplaySql for ApiConfig {
@@ -39,7 +72,7 @@ impl crate::sql::DisplaySql for ApiConfig {
 				f,
 				"{}",
 				Fmt::pretty_comma_separated(
-					mw.iter().map(|(k, v)| format!("{k}({})", Fmt::pretty_comma_separated(v)))
+					mw.0.iter().map(|(k, v)| format!("{k}({})", Fmt::pretty_comma_separated(v)))
 				)
 			)?
 		}
@@ -51,11 +84,4 @@ impl crate::sql::DisplaySql for ApiConfig {
 	}
 }
 
-impl InfoStructure for ApiConfig {
-	fn structure(self) -> Value {
-		Value::from(map!(
-			"permissions", if let Some(v) = self.permissions => v.structure(),
-			"middleware", if let Some(v) = self.middleware => v.structure(),
-		))
-	}
-}
+

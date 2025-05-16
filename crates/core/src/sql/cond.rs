@@ -1,4 +1,4 @@
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::value::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -38,8 +38,4 @@ impl crate::sql::DisplaySql for Cond {
 	}
 }
 
-impl InfoStructure for Cond {
-	fn structure(self) -> Value {
-		self.0.structure()
-	}
-}
+

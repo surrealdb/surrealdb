@@ -1,16 +1,9 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::define::DefineTableStatement;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Strand, Value, Values};
+
+use crate::sql::{Ident, Strand, Value, Values};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
-use uuid::Uuid;
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -26,6 +19,34 @@ pub struct DefineEventStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub overwrite: bool,
+}
+
+impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatement {
+	fn from(v: DefineEventStatement) -> Self {
+		crate::expr::statements::DefineEventStatement {
+			name: v.name.into(),
+			what: v.what.into(),
+			when: v.when.into(),
+			then: v.then.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatement {
+	fn from(v: crate::expr::statements::DefineEventStatement) -> Self {
+		DefineEventStatement {
+			name: v.name.into(),
+			what: v.what.into(),
+			when: v.when.into(),
+			then: v.then.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(DefineEventStatement);
@@ -47,14 +68,4 @@ impl crate::sql::DisplaySql for DefineEventStatement {
 	}
 }
 
-impl InfoStructure for DefineEventStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.what.structure(),
-			"when".to_string() => self.when.structure(),
-			"then".to_string() => self.then.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+

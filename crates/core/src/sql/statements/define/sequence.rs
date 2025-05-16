@@ -1,12 +1,6 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Timeout, Value};
 
-use crate::key::database::sq::Sq;
-use crate::key::sequence::Prefix;
+use crate::sql::{Ident, Timeout};
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
@@ -69,13 +63,4 @@ impl crate::sql::DisplaySql for DefineSequenceStatement {
 	}
 }
 
-impl InfoStructure for DefineSequenceStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-				"name".to_string() => self.name.structure(),
-				"batch".to_string() => Value::from(self.batch).structure(),
-				"start".to_string() => Value::from(self.start).structure(),
-				"timeout".to_string() => self.timeout.as_ref().map(|t|t.0.into()).unwrap_or(Value::None),
-		})
-	}
-}
+

@@ -1,13 +1,6 @@
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::RecordStrategy;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
-use crate::sql::{Data, FlowResultExt as _, Id, Output, Table, Thing, Timeout, Value, Version};
+use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value, Version};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -101,31 +94,6 @@ impl crate::sql::DisplaySql for InsertStatement {
 			f.write_str(" PARALLEL")?
 		}
 		Ok(())
-	}
-}
-
-fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
-	match relation {
-		false => Ok(Iterable::Mergeable(id, v)),
-		true => {
-			let f = match v.pick(&*IN) {
-				Value::Thing(v) => v,
-				v => {
-					return Err(Error::InsertStatementIn {
-						value: v.to_string(),
-					})
-				}
-			};
-			let w = match v.pick(&*OUT) {
-				Value::Thing(v) => v,
-				v => {
-					return Err(Error::InsertStatementOut {
-						value: v.to_string(),
-					})
-				}
-			};
-			Ok(Iterable::Relatable(f, id, w, Some(v)))
-		}
 	}
 }
 

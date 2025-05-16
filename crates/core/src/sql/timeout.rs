@@ -17,6 +17,18 @@ impl Deref for Timeout {
 	}
 }
 
+impl From<Timeout> for crate::expr::Timeout {
+	fn from(v: Timeout) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Timeout> for Timeout {
+	fn from(v: crate::expr::Timeout) -> Self {
+		Self(v.0.into())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Timeout);
 
 impl crate::sql::DisplaySql for Timeout {

@@ -1,7 +1,7 @@
 use std::fmt::{self, Write};
 
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::{Ident, Part, Value};
 
 use revision::revisioned;
@@ -16,6 +16,24 @@ pub struct GraphQLConfig {
 	pub functions: FunctionsConfig,
 }
 
+impl From<GraphQLConfig> for crate::expr::statements::define::config::graphql::GraphQLConfig {
+	fn from(v: GraphQLConfig) -> Self {
+		crate::expr::statements::define::config::graphql::GraphQLConfig {
+			tables: v.tables.into(),
+			functions: v.functions.into(),
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::config::graphql::GraphQLConfig> for GraphQLConfig {
+	fn from(v: crate::expr::statements::define::config::graphql::GraphQLConfig) -> Self {
+		GraphQLConfig {
+			tables: v.tables.into(),
+			functions: v.functions.into(),
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -28,12 +46,53 @@ pub enum TablesConfig {
 	Exclude(Vec<TableConfig>),
 }
 
+impl From<TablesConfig> for crate::expr::statements::define::config::graphql::TablesConfig {
+	fn from(v: TablesConfig) -> Self {
+		match v {
+			TablesConfig::None => Self::None,
+			TablesConfig::Auto => Self::Auto,
+			TablesConfig::Include(cs) => Self::Include(cs.into_iter().map(Into::into).collect()),
+			TablesConfig::Exclude(cs) => Self::Exclude(cs.into_iter().map(Into::into).collect()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::config::graphql::TablesConfig> for TablesConfig {
+	fn from(v: crate::expr::statements::define::config::graphql::TablesConfig) -> Self {
+		match v {
+			crate::expr::statements::define::config::graphql::TablesConfig::None => Self::None,
+			crate::expr::statements::define::config::graphql::TablesConfig::Auto => Self::Auto,
+			crate::expr::statements::define::config::graphql::TablesConfig::Include(cs) => {
+				Self::Include(cs.into_iter().map(Into::<TableConfig>::into).collect())
+			}
+			crate::expr::statements::define::config::graphql::TablesConfig::Exclude(cs) => {
+				Self::Exclude(cs.into_iter().map(Into::<TableConfig>::into).collect())
+			}
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct TableConfig {
 	pub name: String,
+}
+
+impl From<TableConfig> for crate::expr::statements::define::config::graphql::TableConfig {
+	fn from(v: TableConfig) -> Self {
+		crate::expr::statements::define::config::graphql::TableConfig {
+			name: v.name.into(),
+		}
+	}
+}
+impl From<crate::expr::statements::define::config::graphql::TableConfig> for TableConfig {
+	fn from(v: crate::expr::statements::define::config::graphql::TableConfig) -> Self {
+		TableConfig {
+			name: v.name.into(),
+		}
+	}
 }
 
 #[revisioned(revision = 1)]
@@ -46,6 +105,32 @@ pub enum FunctionsConfig {
 	Auto,
 	Include(Vec<Ident>),
 	Exclude(Vec<Ident>),
+}
+
+impl From<FunctionsConfig> for crate::expr::statements::define::config::graphql::FunctionsConfig {
+	fn from(v: FunctionsConfig) -> Self {
+		match v {
+			FunctionsConfig::None => Self::None,
+			FunctionsConfig::Auto => Self::Auto,
+			FunctionsConfig::Include(cs) => Self::Include(cs.into_iter().map(Into::into).collect()),
+			FunctionsConfig::Exclude(cs) => Self::Exclude(cs.into_iter().map(Into::into).collect()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::config::graphql::FunctionsConfig> for FunctionsConfig {
+	fn from(v: crate::expr::statements::define::config::graphql::FunctionsConfig) -> Self {
+		match v {
+			crate::expr::statements::define::config::graphql::FunctionsConfig::None => Self::None,
+			crate::expr::statements::define::config::graphql::FunctionsConfig::Auto => Self::Auto,
+			crate::expr::statements::define::config::graphql::FunctionsConfig::Include(cs) => {
+				Self::Include(cs.into_iter().map(Into::<Ident>::into).collect())
+			}
+			crate::expr::statements::define::config::graphql::FunctionsConfig::Exclude(cs) => {
+				Self::Exclude(cs.into_iter().map(Into::<Ident>::into).collect())
+			}
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(GraphQLConfig);
@@ -158,49 +243,10 @@ impl crate::sql::DisplaySql for FunctionsConfig {
 	}
 }
 
-impl InfoStructure for GraphQLConfig {
-	fn structure(self) -> Value {
-		Value::from(map!(
-			"tables" => self.tables.structure(),
-			"functions" => self.functions.structure(),
-		))
-	}
-}
 
-impl InfoStructure for TablesConfig {
-	fn structure(self) -> Value {
-		match self {
-			TablesConfig::None => Value::None,
-			TablesConfig::Auto => Value::Strand("AUTO".into()),
-			TablesConfig::Include(ts) => Value::from(map!(
-				"include" => Value::Array(ts.into_iter().map(InfoStructure::structure).collect()),
-			)),
-			TablesConfig::Exclude(ts) => Value::from(map!(
-				"exclude" => Value::Array(ts.into_iter().map(InfoStructure::structure).collect()),
-			)),
-		}
-	}
-}
 
-impl InfoStructure for TableConfig {
-	fn structure(self) -> Value {
-		Value::from(map!(
-			"name" => Value::from(self.name),
-		))
-	}
-}
 
-impl InfoStructure for FunctionsConfig {
-	fn structure(self) -> Value {
-		match self {
-			FunctionsConfig::None => Value::None,
-			FunctionsConfig::Auto => Value::Strand("AUTO".into()),
-			FunctionsConfig::Include(fs) => Value::from(map!(
-				"include" => Value::Array(fs.into_iter().map(|i| Value::from(i.to_raw())).collect()),
-			)),
-			FunctionsConfig::Exclude(fs) => Value::from(map!(
-				"exclude" => Value::Array(fs.into_iter().map(|i| Value::from(i.to_raw())).collect()),
-			)),
-		}
-	}
-}
+
+
+
+

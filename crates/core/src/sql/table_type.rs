@@ -1,5 +1,5 @@
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Kind, Value};
+
+use crate::sql::Kind;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -64,26 +64,7 @@ impl crate::sql::DisplaySql for TableType {
 	}
 }
 
-impl InfoStructure for TableType {
-	fn structure(self) -> Value {
-		match self {
-			TableType::Any => Value::from(map! {
-				"kind".to_string() => "ANY".into(),
-			}),
-			TableType::Normal => Value::from(map! {
-				"kind".to_string() => "NORMAL".into(),
-			}),
-			TableType::Relation(rel) => Value::from(map! {
-				"kind".to_string() => "RELATION".into(),
-				"in".to_string(), if let Some(Kind::Record(tables)) = rel.from =>
-					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
-				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
-					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
-				"enforced".to_string() => rel.enforced.into()
-			}),
-		}
-	}
-}
+
 
 #[revisioned(revision = 2)]
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]

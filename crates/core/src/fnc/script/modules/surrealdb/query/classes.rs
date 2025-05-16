@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::expr::{self, Value as SurValue};
+use crate::expr::{Value as SurValue};
 
 use js::{
 	class::Trace,

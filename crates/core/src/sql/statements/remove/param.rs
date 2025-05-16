@@ -1,8 +1,4 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Ident, Value};
+use crate::sql::Ident;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -16,6 +12,24 @@ pub struct RemoveParamStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
 	pub if_exists: bool,
+}
+
+impl From<RemoveParamStatement> for crate::expr::statements::RemoveParamStatement {
+	fn from(v: RemoveParamStatement) -> Self {
+		crate::expr::statements::RemoveParamStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+		}
+	}
+}
+
+impl From<crate::expr::statements::RemoveParamStatement> for RemoveParamStatement {
+	fn from(v: crate::expr::statements::RemoveParamStatement) -> Self {
+		RemoveParamStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(RemoveParamStatement);

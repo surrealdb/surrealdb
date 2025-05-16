@@ -1,6 +1,3 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::AccessStatement;
 use crate::sql::{
@@ -16,7 +13,6 @@ use crate::sql::{
 	value::Value,
 };
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -24,7 +20,6 @@ use std::{
 	ops::Deref,
 };
 
-use super::{ControlFlow, FlowResult};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

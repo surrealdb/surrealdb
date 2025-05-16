@@ -1,10 +1,5 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{filter::Filter, tokenizer::Tokenizer, Array, Base, Ident, Strand, Value};
+
+use crate::sql::{filter::Filter, tokenizer::Tokenizer, Ident, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -25,6 +20,34 @@ pub struct DefineAnalyzerStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 4)]
 	pub overwrite: bool,
+}
+
+impl From<DefineAnalyzerStatement> for crate::expr::statements::DefineAnalyzerStatement {
+	fn from(v: DefineAnalyzerStatement) -> Self {
+		crate::expr::statements::DefineAnalyzerStatement {
+			name: v.name.into(),
+			function: v.function.map(Into::into),
+			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
+			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineAnalyzerStatement> for DefineAnalyzerStatement {
+	fn from(v: crate::expr::statements::DefineAnalyzerStatement) -> Self {
+		DefineAnalyzerStatement {
+			name: v.name.into(),
+			function: v.function.map(Into::into),
+			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
+			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(DefineAnalyzerStatement);
@@ -57,16 +80,4 @@ impl crate::sql::DisplaySql for DefineAnalyzerStatement {
 	}
 }
 
-impl InfoStructure for DefineAnalyzerStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"function".to_string(), if let Some(v) = self.function => v.structure(),
-			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
-				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
-			"filters".to_string(), if let Some(v) = self.filters =>
-				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+

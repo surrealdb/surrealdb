@@ -260,11 +260,3 @@ impl FlowResultExt for FlowResult<Value> {
 		}
 	}
 }
-
-use crate::expr::LogicalPlan;
-
-pub fn statement_to_logical_expr(stmt: Statement) -> Result<LogicalPlan, Error> {
-	match stmt {
-
-	}
-}

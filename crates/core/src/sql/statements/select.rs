@@ -1,20 +1,12 @@
-use crate::ctx::Context;
-use crate::dbs::{Iterator, Options, Statement};
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::FlowResultExt as _;
 use crate::sql::{
 	order::{OldOrders, Order, OrderList, Ordering},
 	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
 	Values, Version, With,
 };
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -99,10 +91,10 @@ impl SelectStatement {
 impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 	fn from(v: SelectStatement) -> Self {
 		Self {
-			expr: v.expr.into_iter().map(Into::into).collect(),
+			expr: v.expr.into(),
 			omit: v.omit.map(Into::into),
 			only: v.only,
-			what: v.what.into_iter().map(Into::into).collect(),
+			what: v.what.into(),
 			with: v.with.map(Into::into),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),
@@ -123,10 +115,10 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 	fn from(v: crate::expr::statements::SelectStatement) -> Self {
 		Self {
-			expr: v.expr.into_iter().map(Into::into).collect(),
+			expr: v.expr.into(),
 			omit: v.omit.map(Into::into),
 			only: v.only,
-			what: v.what.into_iter().map(Into::into).collect(),
+			what: v.what.into(),
 			with: v.with.map(Into::into),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),

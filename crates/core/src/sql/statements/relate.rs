@@ -1,11 +1,5 @@
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::idx::planner::RecordStrategy;
-use crate::sql::{Data, FlowResultExt as _, Output, Timeout, Value};
+use crate::sql::{Data, Output, Timeout, Value};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

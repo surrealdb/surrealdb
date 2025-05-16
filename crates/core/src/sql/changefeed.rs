@@ -1,6 +1,5 @@
 use crate::sql::duration::Duration;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::Value;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Formatter};
@@ -55,11 +54,4 @@ impl Default for ChangeFeed {
 	}
 }
 
-impl InfoStructure for ChangeFeed {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"expiry".to_string() => Duration(self.expiry).structure(),
-			"original".to_string() => self.store_diff.into(),
-		})
-	}
-}
+

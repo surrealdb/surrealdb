@@ -1,10 +1,5 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Strand, Value};
+
+use crate::sql::{Ident, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -67,11 +62,4 @@ impl crate::sql::DisplaySql for DefineNamespaceStatement {
 	}
 }
 
-impl InfoStructure for DefineNamespaceStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+

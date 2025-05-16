@@ -1,25 +1,18 @@
 use super::DefineFieldStatement;
-use crate::ctx::Context;
-use crate::dbs::{Force, Options};
-use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::paths::{IN, OUT};
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::{
-	changefeed::ChangeFeed, statements::UpdateStatement, Base, Ident, Output, Permissions, Strand,
-	Value, Values, View,
+	changefeed::ChangeFeed, Ident, Permissions, Strand, View,
 };
 use crate::sql::{Idiom, Kind, TableType};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Write};
-use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 6)]
@@ -239,17 +232,4 @@ impl crate::sql::DisplaySql for DefineTableStatement {
 	}
 }
 
-impl InfoStructure for DefineTableStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"drop".to_string() => self.drop.into(),
-			"full".to_string() => self.full.into(),
-			"kind".to_string() => self.kind.structure(),
-			"view".to_string(), if let Some(v) = self.view => v.structure(),
-			"changefeed".to_string(), if let Some(v) = self.changefeed => v.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+

@@ -1,10 +1,6 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::{FlowResult, Value};
+use crate::sql::Value;
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Write};
@@ -41,7 +37,7 @@ impl IfelseStatement {
 impl From<IfelseStatement> for crate::expr::statements::IfelseStatement {
 	fn from(v: IfelseStatement) -> Self {
 		crate::expr::statements::IfelseStatement {
-			exprs: v.exprs.into_iter().map(Into::into).collect(),
+			exprs: v.exprs.into_iter().map(|(e1, e2)| (e1.into(), e2.into())).collect(),
 			close: v.close.map(Into::into),
 		}
 	}
@@ -50,7 +46,7 @@ impl From<IfelseStatement> for crate::expr::statements::IfelseStatement {
 impl From<crate::expr::statements::IfelseStatement> for IfelseStatement {
 	fn from(v: crate::expr::statements::IfelseStatement) -> Self {
 		IfelseStatement {
-			exprs: v.exprs.into_iter().map(Into::into).collect(),
+			exprs: v.exprs.into_iter().map(|(e1, e2)| (e1.into(), e2.into())).collect(),
 			close: v.close.map(Into::into),
 		}
 	}

@@ -1,19 +1,10 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::sql::reference::Reference;
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::{Base, Ident, Permissions, Strand, Value};
+use crate::sql::{Ident, Permissions, Strand, Value};
 use crate::sql::{Idiom, Kind};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
-use std::ops::Deref;
-use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

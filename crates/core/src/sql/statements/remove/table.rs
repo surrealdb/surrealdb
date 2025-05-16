@@ -1,14 +1,8 @@
-use crate::ctx::Context;
-use crate::dbs::{self, Notification, Options};
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::define::DefineTableStatement;
-use crate::sql::{Base, Ident, Value};
+use crate::sql::Ident;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Formatter};
-use uuid::Uuid;
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -20,6 +14,26 @@ pub struct RemoveTableStatement {
 	pub if_exists: bool,
 	#[revision(start = 3)]
 	pub expunge: bool,
+}
+
+impl From<RemoveTableStatement> for crate::expr::statements::RemoveTableStatement {
+	fn from(v: RemoveTableStatement) -> Self {
+		crate::expr::statements::RemoveTableStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			expunge: v.expunge,
+		}
+	}
+}
+
+impl From<crate::expr::statements::RemoveTableStatement> for RemoveTableStatement {
+	fn from(v: crate::expr::statements::RemoveTableStatement) -> Self {
+		RemoveTableStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			expunge: v.expunge,
+		}
+	}
 }
 
 crate::sql::impl_display_from_sql!(RemoveTableStatement);

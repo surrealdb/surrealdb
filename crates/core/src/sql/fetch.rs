@@ -1,17 +1,11 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
 use crate::sql::fmt::Fmt;
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::{Idiom, Value};
-use crate::syn;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-use super::Array;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -34,6 +28,17 @@ impl IntoIterator for Fetchs {
 	}
 }
 
+impl From<Fetchs> for crate::expr::Fetchs {
+	fn from(v: Fetchs) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+impl From<crate::expr::Fetchs> for Fetchs {
+	fn from(v: crate::expr::Fetchs) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Fetchs);
 
 impl crate::sql::DisplaySql for Fetchs {
@@ -42,11 +47,7 @@ impl crate::sql::DisplaySql for Fetchs {
 	}
 }
 
-impl InfoStructure for Fetchs {
-	fn structure(self) -> Value {
-		self.into_iter().map(Fetch::structure).collect::<Vec<_>>().into()
-	}
-}
+
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -81,6 +82,18 @@ impl Deref for Fetch {
 	}
 }
 
+impl From<Fetch> for crate::expr::Fetch {
+	fn from(v: Fetch) -> Self {
+		crate::expr::Fetch(v.0.into())
+	}
+}
+
+impl From<crate::expr::Fetch> for Fetch {
+	fn from(v: crate::expr::Fetch) -> Self {
+		Fetch(v.0.into())
+	}
+}
+
 crate::sql::impl_display_from_sql!(Fetch);
 
 impl crate::sql::DisplaySql for Fetch {
@@ -89,8 +102,4 @@ impl crate::sql::DisplaySql for Fetch {
 	}
 }
 
-impl InfoStructure for Fetch {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+

@@ -1,17 +1,8 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::Action;
-use crate::iam::ResourceKind;
-use crate::sql::{Base, Ident, Object, Value, Version};
-use crate::sys::INFORMATION;
+use crate::sql::{Base, Ident, Version};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -52,8 +43,8 @@ impl From<InfoStatement> for crate::expr::statements::InfoStatement {
 		match v {
 			InfoStatement::Root(v) => Self::Root(v),
 			InfoStatement::Ns(v) => Self::Ns(v),
-			InfoStatement::Db(v, ver) => Self::Db(v, ver),
-			InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver),
+			InfoStatement::Db(v, ver) => Self::Db(v, ver.map(Into::into)),
+			InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver.map(Into::into)),
 			InfoStatement::User(u, b, v) => Self::User(u.into(), b.map(Into::into), v),
 			InfoStatement::Index(i, t, v) => Self::Index(i.into(), t.into(), v),
 		}
@@ -65,8 +56,8 @@ impl From<crate::expr::statements::InfoStatement> for InfoStatement {
 		match v {
 			crate::expr::statements::InfoStatement::Root(v) => Self::Root(v),
 			crate::expr::statements::InfoStatement::Ns(v) => Self::Ns(v),
-			crate::expr::statements::InfoStatement::Db(v, ver) => Self::Db(v, ver),
-			crate::expr::statements::InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver),
+			crate::expr::statements::InfoStatement::Db(v, ver) => Self::Db(v, ver.map(Into::into)),
+			crate::expr::statements::InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver.map(Into::into)),
 			crate::expr::statements::InfoStatement::User(u, b, v) => Self::User(u.into(), b.map(Into::into), v),
 			crate::expr::statements::InfoStatement::Index(i, t, v) => Self::Index(i.into(), t.into(), v),
 		}
@@ -113,10 +104,6 @@ impl crate::sql::DisplaySql for InfoStatement {
 	}
 }
 
-pub(crate) trait InfoStructure {
-	fn structure(self) -> Value;
-}
-
 impl InfoStatement {
 	pub(crate) fn structurize(self) -> Self {
 		match self {
@@ -136,24 +123,4 @@ impl InfoStatement {
 			_ => self,
 		}
 	}
-}
-
-fn process<T>(a: Arc<[T]>) -> Value
-where
-	T: InfoStructure + Clone,
-{
-	Value::Array(a.iter().cloned().map(InfoStructure::structure).collect())
-}
-
-async fn system() -> Value {
-	let info = INFORMATION.lock().await;
-	Value::from(map! {
-		"available_parallelism".to_string() => info.available_parallelism.into(),
-		"cpu_usage".to_string() => info.cpu_usage.into(),
-		"load_average".to_string() => info.load_average.to_vec().into(),
-		"memory_usage".to_string() => info.memory_usage.into(),
-		"physical_cores".to_string() => info.physical_cores.into(),
-		"memory_allocated".to_string() => info.memory_allocated.into(),
-		"threads".to_string() => info.threads.into(),
-	})
 }

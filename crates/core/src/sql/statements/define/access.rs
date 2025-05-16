@@ -1,9 +1,4 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Strand, Value};
 
 use rand::distributions::Alphanumeric;
@@ -54,6 +49,36 @@ impl DefineAccessStatement {
 			}
 		};
 		das
+	}
+}
+
+impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatement {
+	fn from(v: DefineAccessStatement) -> Self {
+		crate::expr::statements::DefineAccessStatement {
+			name: v.name.into(),
+			base: v.base.into(),
+			kind: v.kind.into(),
+			authenticate: v.authenticate.map(Into::into),
+			duration: v.duration.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatement {
+	fn from(v: crate::expr::statements::DefineAccessStatement) -> Self {
+		DefineAccessStatement {
+			name: v.name.into(),
+			base: v.base.into(),
+			kind: v.kind.into(),
+			authenticate: v.authenticate.map(Into::into),
+			duration: v.duration.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
 	}
 }
 
@@ -113,19 +138,4 @@ impl crate::sql::DisplaySql for DefineAccessStatement {
 	}
 }
 
-impl InfoStructure for DefineAccessStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"base".to_string() => self.base.structure(),
-			"authenticate".to_string(), if let Some(v) = self.authenticate => v.structure(),
-			"duration".to_string() => Value::from(map!{
-				"session".to_string() => self.duration.session.into(),
-				"grant".to_string(), if self.kind.can_issue_grants() => self.duration.grant.into(),
-				"token".to_string(), if self.kind.can_issue_tokens() => self.duration.token.into(),
-			}),
-			"kind".to_string() => self.kind.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+

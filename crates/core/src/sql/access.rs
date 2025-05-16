@@ -34,6 +34,26 @@ impl Default for AccessDuration {
 	}
 }
 
+impl From<AccessDuration> for crate::expr::access::AccessDuration {
+	fn from(v: AccessDuration) -> Self {
+		Self {
+			grant: v.grant.map(Into::into),
+			token: v.token.map(Into::into),
+			session: v.session.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::access::AccessDuration> for AccessDuration {
+	fn from(v: crate::expr::access::AccessDuration) -> Self {
+		Self {
+			grant: v.grant.map(Into::into),
+			token: v.token.map(Into::into),
+			session: v.session.map(Into::into),
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

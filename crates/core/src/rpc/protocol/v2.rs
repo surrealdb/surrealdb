@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
-use crate::dbs::expr_variables_to_sql_variables;
 use crate::dbs::sql_variables_to_expr_variables;
 use crate::err::Error;
 use crate::rpc::statement_options::StatementOptions;

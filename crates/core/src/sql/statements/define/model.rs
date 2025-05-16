@@ -1,11 +1,6 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Permission, Strand, Value};
+
+use crate::sql::{Ident, Permission, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -81,13 +76,4 @@ impl crate::sql::DisplaySql for DefineModelStatement {
 	}
 }
 
-impl InfoStructure for DefineModelStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"version".to_string() => self.version.into(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+

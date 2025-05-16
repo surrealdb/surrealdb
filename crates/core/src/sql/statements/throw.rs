@@ -1,10 +1,5 @@
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::{ControlFlow, Value};
-use crate::{ctx::Context, sql::FlowResult};
+use crate::sql::Value;
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

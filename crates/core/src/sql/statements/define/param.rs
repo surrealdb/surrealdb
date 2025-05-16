@@ -1,13 +1,7 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, FlowResultExt as _, Ident, Permission, Strand, Value};
 
-use reblessive::tree::Stk;
+use crate::sql::{Ident, Permission, Strand, Value};
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Write};
@@ -79,13 +73,4 @@ impl crate::sql::DisplaySql for DefineParamStatement {
 	}
 }
 
-impl InfoStructure for DefineParamStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"value".to_string() => self.value.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
-	}
-}
+
