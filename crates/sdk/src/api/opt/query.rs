@@ -35,7 +35,7 @@ impl IntoQuery for sql::Query {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: self.0 .0,
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -45,7 +45,7 @@ impl IntoQuery for Statements {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: self.0,
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -55,7 +55,7 @@ impl IntoQuery for Vec<Statement> {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: self,
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -65,7 +65,7 @@ impl IntoQuery for Statement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![self],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -75,7 +75,7 @@ impl IntoQuery for UseStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Use(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -85,7 +85,7 @@ impl IntoQuery for SetStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Set(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -95,7 +95,7 @@ impl IntoQuery for InfoStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Info(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -105,7 +105,7 @@ impl IntoQuery for LiveStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Live(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -115,7 +115,7 @@ impl IntoQuery for KillStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Kill(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -125,7 +125,7 @@ impl IntoQuery for BeginStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Begin(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -135,7 +135,7 @@ impl IntoQuery for CancelStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Cancel(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -145,7 +145,7 @@ impl IntoQuery for CommitStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Commit(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -155,7 +155,7 @@ impl IntoQuery for OutputStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Output(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -165,7 +165,7 @@ impl IntoQuery for IfelseStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Ifelse(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -175,7 +175,7 @@ impl IntoQuery for SelectStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Select(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -185,7 +185,7 @@ impl IntoQuery for CreateStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Create(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -195,7 +195,7 @@ impl IntoQuery for UpdateStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Update(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -205,7 +205,7 @@ impl IntoQuery for RelateStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Relate(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -215,7 +215,7 @@ impl IntoQuery for DeleteStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Delete(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -225,7 +225,7 @@ impl IntoQuery for InsertStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Insert(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -235,7 +235,7 @@ impl IntoQuery for DefineStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Define(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -245,7 +245,7 @@ impl IntoQuery for AlterStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Alter(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -255,7 +255,7 @@ impl IntoQuery for RemoveStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Remove(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -265,7 +265,7 @@ impl IntoQuery for OptionStatement {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: vec![Statement::Option(self)],
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -275,7 +275,7 @@ impl IntoQuery for &str {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: Vec::new(),
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -289,7 +289,7 @@ impl IntoQuery for &String {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: Vec::new(),
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -303,7 +303,7 @@ impl IntoQuery for String {
 	fn into_query(self) -> Result<Query> {
 		Ok(Query(ValidQuery::Normal {
 			query: Vec::new(),
-			register_live_queries: false,
+			register_live_queries: true,
 			bindings: Default::default(),
 		}))
 	}
@@ -643,10 +643,9 @@ where
 		self,
 		response: &mut QueryResponse,
 	) -> Result<method::QueryStream<Notification<R>>> {
-		let mut stream = response
-			.live_queries
-			.swap_remove(&self)
-			.and_then(|result| match result {
+		dbg!(&response.results[self]);
+		let mut stream = dbg!(response.live_queries.swap_remove(&self))
+			.and_then(|result| match dbg!(result) {
 				Err(e) => {
 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
 						response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
@@ -656,7 +655,7 @@ where
 				}
 				result => Some(result),
 			})
-			.unwrap_or_else(|| match response.results.contains_key(&self) {
+			.unwrap_or_else(|| match dbg!(response.results.contains_key(&self)) {
 				true => Err(Error::NotLiveQuery(self).into()),
 				false => Err(Error::QueryIndexOutOfBounds(self).into()),
 			})?;

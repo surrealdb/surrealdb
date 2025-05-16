@@ -127,7 +127,7 @@ where
 
 					// Collect the indexes of the live queries which should be registerd.
 					let query_indicies = if register_live_queries {
-						query_statements
+						dbg!(&query_statements)
 							.iter()
 							// BEGIN, COMMIT, and CANCEL don't return a result.
 							.filter(|x| {
@@ -138,7 +138,7 @@ where
 								)
 							})
 							.enumerate()
-							.filter(|(_, x)| matches!(x, Statement::Live(_)))
+							.filter(|(_, x)| matches!(dbg!(x), Statement::Live(_)))
 							.map(|(i, _)| i)
 							.collect()
 					} else {
@@ -161,6 +161,8 @@ where
 							variables: bindings,
 						})
 						.await?;
+
+					dbg!(&query_indicies);
 
 					for idx in query_indicies {
 						let Some((_, result)) = response.results.get(&idx) else {

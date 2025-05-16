@@ -323,7 +323,7 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 
 	if let Some(e) = err.downcast_ref() {
 		match e {
-			surrealdb::err::Error::AccessRecordSignupQueryFailed => {}
+			surrealdb::err::Error::AccessRecordSigninQueryFailed => {}
 			x => panic!("unexpected error: {x:?}"),
 		}
 	} else if let Some(e) = err.downcast_ref() {
