@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::engine::any::IntoEndpoint;
+use surrealdb::engine::any;
 use surrealdb::engine::tasks;
 use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
@@ -172,7 +172,7 @@ pub async fn init(
 		println!("{LOGO}");
 	}
 	// Clean the path
-	let endpoint = path.into_endpoint()?;
+	let endpoint = any::__into_endpoint(path)?;
 	let path = if endpoint.path.is_empty() {
 		endpoint.url.to_string()
 	} else {

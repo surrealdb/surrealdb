@@ -1,6 +1,6 @@
 use crate::{
 	api::{
-		conn::{Connection, Route, Router},
+		conn::{self, Route, Router},
 		engine::local::Db,
 		method::BoxFuture,
 		opt::{Endpoint, EndpointKind},
@@ -23,8 +23,7 @@ use tokio::sync::{watch, RwLock};
 use tokio_util::sync::CancellationToken;
 
 impl crate::api::Connection for Db {}
-
-impl Connection for Db {
+impl conn::Sealed for Db {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
