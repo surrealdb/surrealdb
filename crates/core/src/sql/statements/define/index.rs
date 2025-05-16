@@ -15,7 +15,7 @@ use crate::sql::{Output, Values};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self};
 #[cfg(target_family = "wasm")]
 use std::sync::Arc;
 use uuid::Uuid;
@@ -190,8 +190,10 @@ impl DefineIndexStatement {
 	}
 }
 
-impl Display for DefineIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineIndexStatement);
+
+impl crate::sql::DisplaySql for DefineIndexStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE INDEX")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

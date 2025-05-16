@@ -60,8 +60,10 @@ impl Default for Scoring {
 	}
 }
 
-impl fmt::Display for Scoring {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Scoring);
+
+impl crate::sql::DisplaySql for Scoring {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Bm {
 				k1,

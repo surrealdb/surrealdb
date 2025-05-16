@@ -53,8 +53,10 @@ impl Deref for Accesses {
 	}
 }
 
-impl Display for Accesses {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Accesses);
+
+impl crate::sql::DisplaySql for Accesses {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
@@ -100,8 +102,10 @@ impl Access {
 	}
 }
 
-impl Display for Access {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Access);
+
+impl crate::sql::DisplaySql for Access {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		EscapeIdent(&self.0).fmt(f)
 	}
 }

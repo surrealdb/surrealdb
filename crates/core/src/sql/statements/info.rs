@@ -358,8 +358,10 @@ impl InfoStatement {
 	}
 }
 
-impl fmt::Display for InfoStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(InfoStatement);
+
+impl crate::sql::DisplaySql for InfoStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Root(false) => f.write_str("INFO FOR ROOT"),
 			Self::Root(true) => f.write_str("INFO FOR ROOT STRUCTURE"),

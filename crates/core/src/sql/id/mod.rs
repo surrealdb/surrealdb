@@ -221,8 +221,10 @@ impl Id {
 	}
 }
 
-impl Display for Id {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Id);
+
+impl crate::sql::DisplaySql for Id {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
 			Self::String(v) => EscapeRid(v).fmt(f),

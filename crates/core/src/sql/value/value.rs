@@ -64,8 +64,10 @@ impl IntoIterator for Values {
 	}
 }
 
-impl Display for Values {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Values);
+
+impl crate::sql::DisplaySql for Values {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
@@ -928,8 +930,10 @@ impl Value {
 	}
 }
 
-impl fmt::Display for Value {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Value);
+
+impl crate::sql::DisplaySql for Value {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		match self {
 			Value::None => write!(f, "NONE"),

@@ -72,8 +72,10 @@ impl ShowStatement {
 	}
 }
 
-impl fmt::Display for ShowStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ShowStatement);
+
+impl crate::sql::DisplaySql for ShowStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SHOW CHANGES FOR")?;
 		match self.table {
 			Some(ref v) => write!(f, " TABLE {}", v)?,

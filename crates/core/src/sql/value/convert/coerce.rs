@@ -31,8 +31,11 @@ pub enum CoerceError {
 	},
 }
 impl std::error::Error for CoerceError {}
-impl fmt::Display for CoerceError {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+
+crate::sql::impl_display_from_sql!(CoerceError);
+
+impl crate::sql::DisplaySql for CoerceError {
+	fn fmt_sql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			CoerceError::InvalidKind {
 				from,
@@ -44,7 +47,7 @@ impl fmt::Display for CoerceError {
 				inner,
 				into,
 			} => {
-				inner.fmt(f)?;
+				inner.fmt_sql(f)?;
 				write!(f, " when coercing an element of `{into}`")
 			}
 			CoerceError::InvalidLength {

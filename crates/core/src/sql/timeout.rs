@@ -17,8 +17,10 @@ impl Deref for Timeout {
 	}
 }
 
-impl fmt::Display for Timeout {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Timeout);
+
+impl crate::sql::DisplaySql for Timeout {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "TIMEOUT {}", self.0)
 	}
 }

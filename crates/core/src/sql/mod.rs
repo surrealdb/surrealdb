@@ -172,6 +172,54 @@ mod parser {
 
 pub use self::parser::{idiom, json, parse, subquery, thing, value};
 
+/// A trait for types that can be formatted as SurrealQL.
+///
+/// This trait has the same signature as `std::fmt::Display` in order to
+/// allow for easy conversion to a string. It is used to format SQL
+/// statements and expressions in a consistent manner.
+pub trait DisplaySql {
+	fn fmt_sql(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result;
+}
+
+/// A trait for types that can be converted to a SurrealQL string.
+pub trait ToSql {
+	/// Converts the value to a SurrealQL string.
+	fn to_sql(&self) -> String;
+}
+
+/// A wrapper type for `DisplaySql` types which makes it possible to use
+/// them in a `std::fmt::Display` context.
+struct SqlWrapper<'a, T: DisplaySql + ?Sized>(&'a T);
+
+impl<T: DisplaySql + ?Sized> std::fmt::Display for SqlWrapper<'_, T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		self.0.fmt_sql(f)
+	}
+}
+
+impl<T: DisplaySql + ?Sized> ToSql for T {
+	fn to_sql(&self) -> String {
+		// Wrap the value in a `SqlWrapper` to use the `Display` implementation.
+		// This is a workaround until `std::fmt::FormattingOptions` is stable.
+		format!("{}", SqlWrapper(self))
+	}
+}
+
+/// A macro to implement `Display` for types that already implement `DisplaySql`.
+macro_rules! impl_display_from_sql {
+	($($t:ty),+) => {
+		$(
+			impl std::fmt::Display for $t {
+				fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+					crate::sql::DisplaySql::fmt_sql(self, f)
+				}
+			}
+		)+
+	};
+}
+
+pub(crate) use impl_display_from_sql;
+
 /// Result of functions which can impact the controlflow of query execution.
 pub type FlowResult<T> = Result<T, ControlFlow>;
 

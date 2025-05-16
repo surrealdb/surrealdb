@@ -7,7 +7,6 @@ use revision::revisioned;
 use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::Display;
 use std::str::FromStr;
 
 /// The type of access methods available
@@ -47,8 +46,10 @@ impl Jwt for AccessType {
 	}
 }
 
-impl Display for AccessType {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(AccessType);
+
+impl crate::sql::DisplaySql for AccessType {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			AccessType::Jwt(ac) => {
 				write!(f, "JWT {}", ac)?;
@@ -163,8 +164,10 @@ impl Jwt for JwtAccess {
 	}
 }
 
-impl Display for JwtAccess {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(JwtAccess);
+
+impl crate::sql::DisplaySql for JwtAccess {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self.verify {
 			JwtAccessVerify::Key(ref v) => {
 				write!(f, "ALGORITHM {} KEY {}", v.alg, QuoteStr(&v.key))?;

@@ -2,7 +2,6 @@ use crate::sql::language::Language;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::Display;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -18,8 +17,10 @@ pub enum Filter {
 	Mapper(String),
 }
 
-impl Display for Filter {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Filter);
+
+impl crate::sql::DisplaySql for Filter {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Ascii => f.write_str("ASCII"),
 			Self::EdgeNgram(min, max) => write!(f, "EDGENGRAM({min},{max})"),

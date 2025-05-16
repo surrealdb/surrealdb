@@ -99,8 +99,10 @@ impl CreateStatement {
 	}
 }
 
-impl fmt::Display for CreateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(CreateStatement);
+
+impl crate::sql::DisplaySql for CreateStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "CREATE")?;
 		if self.only {
 			f.write_str(" ONLY")?

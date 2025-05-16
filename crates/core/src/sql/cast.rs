@@ -60,8 +60,10 @@ impl Cast {
 	}
 }
 
-impl fmt::Display for Cast {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Cast);
+
+impl crate::sql::DisplaySql for Cast {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "<{}> {}", self.0, self.1)
 	}
 }

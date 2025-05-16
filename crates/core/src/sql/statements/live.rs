@@ -144,8 +144,10 @@ impl LiveStatement {
 	}
 }
 
-impl fmt::Display for LiveStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(LiveStatement);
+
+impl crate::sql::DisplaySql for LiveStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "LIVE SELECT {} FROM {}", self.expr, self.what)?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?

@@ -159,8 +159,10 @@ impl TryFrom<Number> for Decimal {
 	}
 }
 
-impl Display for Number {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Number);
+
+impl crate::sql::DisplaySql for Number {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Number::Int(v) => Display::fmt(v, f),
 			Number::Float(v) => {

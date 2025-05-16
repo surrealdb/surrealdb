@@ -8,8 +8,10 @@ use std::fmt;
 #[non_exhaustive]
 pub struct CommitStatement;
 
-impl fmt::Display for CommitStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(CommitStatement);
+
+impl crate::sql::DisplaySql for CommitStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("COMMIT TRANSACTION")
 	}
 }

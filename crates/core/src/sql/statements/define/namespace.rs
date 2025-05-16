@@ -8,7 +8,7 @@ use crate::sql::{Base, Ident, Strand, Value};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self};
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -70,8 +70,10 @@ impl DefineNamespaceStatement {
 	}
 }
 
-impl Display for DefineNamespaceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineNamespaceStatement);
+
+impl crate::sql::DisplaySql for DefineNamespaceStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE NAMESPACE")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

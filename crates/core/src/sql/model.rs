@@ -44,8 +44,10 @@ pub struct Model {
 	pub args: Vec<Value>,
 }
 
-impl fmt::Display for Model {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Model);
+
+impl crate::sql::DisplaySql for Model {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "ml::{}<{}>(", self.name, self.version)?;
 		for (idx, p) in self.args.iter().enumerate() {
 			if idx != 0 {

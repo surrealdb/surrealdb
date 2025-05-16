@@ -140,8 +140,10 @@ impl Block {
 	}
 }
 
-impl Display for Block {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Block);
+
+impl crate::sql::DisplaySql for Block {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		match (self.len(), self.first()) {
 			(0, _) => f.write_str("{}"),
@@ -257,8 +259,10 @@ impl Entry {
 	}
 }
 
-impl Display for Entry {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Entry);
+
+impl crate::sql::DisplaySql for Entry {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Set(v) => write!(f, "{v}"),
 			Self::Value(v) => Display::fmt(v, f),

@@ -82,8 +82,10 @@ impl Strand {
 	}
 }
 
-impl Display for Strand {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Strand);
+
+impl crate::sql::DisplaySql for Strand {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		QuoteStr(&self.0).fmt(f)
 	}
 }

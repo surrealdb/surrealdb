@@ -5,7 +5,7 @@ use serde::{
 	de::{self, Visitor},
 	Deserialize, Serialize,
 };
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Formatter};
 use std::ops::Deref;
 
 #[revisioned(revision = 1)]
@@ -40,8 +40,10 @@ impl Deref for Bytes {
 	}
 }
 
-impl Display for Bytes {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Bytes);
+
+impl crate::sql::DisplaySql for Bytes {
+	fn fmt_sql(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		write!(f, "b\"{}\"", hex::encode_upper(&self.0))
 	}
 }

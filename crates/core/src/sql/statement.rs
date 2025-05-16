@@ -47,8 +47,10 @@ impl IntoIterator for Statements {
 	}
 }
 
-impl Display for Statements {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Statements);
+
+impl crate::sql::DisplaySql for Statements {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		Display::fmt(
 			&Fmt::one_line_separated(self.0.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};")))),
 			f,
@@ -199,8 +201,10 @@ impl Statement {
 	}
 }
 
-impl Display for Statement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Statement);
+
+impl crate::sql::DisplaySql for Statement {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Value(v) => write!(Pretty::from(f), "{v}"),
 			Self::Access(v) => write!(Pretty::from(f), "{v}"),

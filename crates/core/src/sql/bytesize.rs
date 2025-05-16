@@ -146,8 +146,10 @@ impl Bytesize {
 	}
 }
 
-impl fmt::Display for Bytesize {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Bytesize);
+
+impl crate::sql::DisplaySql for Bytesize {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let b = self.0;
 		let pb = b / PIB;
 		let b = b % PIB;

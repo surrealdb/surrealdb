@@ -45,8 +45,10 @@ impl Version {
 	}
 }
 
-impl fmt::Display for Version {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Version);
+
+impl crate::sql::DisplaySql for Version {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "VERSION {}", self.0)
 	}
 }

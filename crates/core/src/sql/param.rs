@@ -122,8 +122,10 @@ impl Param {
 	}
 }
 
-impl fmt::Display for Param {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Param);
+
+impl crate::sql::DisplaySql for Param {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "${}", &self.0 .0)
 	}
 }

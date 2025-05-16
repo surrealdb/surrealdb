@@ -353,8 +353,10 @@ impl Ord for Range {
 	}
 }
 
-impl fmt::Display for Range {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Range);
+
+impl crate::sql::DisplaySql for Range {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self.beg {
 			Bound::Unbounded => write!(f, ""),
 			Bound::Included(v) => {

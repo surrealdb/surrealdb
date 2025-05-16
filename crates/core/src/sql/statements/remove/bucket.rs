@@ -6,7 +6,7 @@ use crate::sql::{Base, Ident, Value};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -46,8 +46,10 @@ impl RemoveBucketStatement {
 	}
 }
 
-impl Display for RemoveBucketStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(RemoveBucketStatement);
+
+impl crate::sql::DisplaySql for RemoveBucketStatement {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE BUCKET")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?

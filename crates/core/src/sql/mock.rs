@@ -66,8 +66,10 @@ impl IntoIterator for Mock {
 	}
 }
 
-impl fmt::Display for Mock {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Mock);
+
+impl crate::sql::DisplaySql for Mock {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Mock::Count(tb, c) => {
 				write!(f, "|{}:{}|", EscapeIdent(tb), c)

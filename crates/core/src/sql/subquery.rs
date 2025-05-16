@@ -113,8 +113,10 @@ impl Subquery {
 	}
 }
 
-impl Display for Subquery {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Subquery);
+
+impl crate::sql::DisplaySql for Subquery {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Value(v) => write!(f, "({v})"),
 			Self::Output(v) => write!(f, "({v})"),

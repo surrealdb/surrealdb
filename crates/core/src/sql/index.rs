@@ -10,7 +10,7 @@ use crate::sql::{Number, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::{Display, Formatter};
+use std::fmt::Formatter;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -196,8 +196,10 @@ impl Distance {
 	}
 }
 
-impl Display for Distance {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Distance);
+
+impl crate::sql::DisplaySql for Distance {
+	fn fmt_sql(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::Chebyshev => f.write_str("CHEBYSHEV"),
 			Self::Cosine => f.write_str("COSINE"),
@@ -224,8 +226,10 @@ pub enum VectorType {
 	I16,
 }
 
-impl Display for VectorType {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+crate::sql::impl_display_from_sql!(VectorType);
+
+impl crate::sql::DisplaySql for VectorType {
+	fn fmt_sql(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::F64 => f.write_str("F64"),
 			Self::F32 => f.write_str("F32"),
@@ -236,8 +240,10 @@ impl Display for VectorType {
 	}
 }
 
-impl Display for Index {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Index);
+
+impl crate::sql::DisplaySql for Index {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Idx => Ok(()),
 			Self::Uniq => f.write_str("UNIQUE"),

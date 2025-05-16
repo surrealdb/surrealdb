@@ -8,7 +8,7 @@ use crate::sql::{Base, Ident, Timeout, Value};
 use crate::key::database::sq::Sq;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Write};
 use std::ops::Deref;
 
 #[revisioned(revision = 1)]
@@ -55,8 +55,10 @@ impl AlterSequenceStatement {
 	}
 }
 
-impl Display for AlterSequenceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(AlterSequenceStatement);
+
+impl crate::sql::DisplaySql for AlterSequenceStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "ALTER SEQUENCE")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?

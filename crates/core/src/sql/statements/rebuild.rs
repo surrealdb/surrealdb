@@ -40,8 +40,10 @@ impl RebuildStatement {
 	}
 }
 
-impl Display for RebuildStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(RebuildStatement);
+
+impl crate::sql::DisplaySql for RebuildStatement {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Index(v) => Display::fmt(v, f),
 		}
@@ -91,8 +93,10 @@ impl RebuildIndexStatement {
 	}
 }
 
-impl Display for RebuildIndexStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(RebuildIndexStatement);
+
+impl crate::sql::DisplaySql for RebuildIndexStatement {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REBUILD INDEX")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?

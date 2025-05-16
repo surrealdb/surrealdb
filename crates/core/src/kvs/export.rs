@@ -7,6 +7,8 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::statements::DefineTableStatement;
+use crate::sql::statements::OptionStatement;
+use crate::sql::ToSql;
 use crate::sql::Value;
 use async_channel::Sender;
 use chrono::prelude::Utc;
@@ -232,7 +234,15 @@ impl Transaction {
 		db: &str,
 	) -> Result<(), Error> {
 		// Output OPTIONS
-		self.export_section("OPTION", vec!["OPTION IMPORT"], chn).await?;
+		self.export_section(
+			"OPTION",
+			vec![OptionStatement {
+				name: "IMPORT".into(),
+				what: true,
+			}],
+			chn,
+		)
+		.await?;
 
 		// Output USERS
 		if cfg.users {
@@ -273,7 +283,7 @@ impl Transaction {
 		Ok(())
 	}
 
-	async fn export_section<T: ToString>(
+	async fn export_section<T: ToSql>(
 		&self,
 		title: &str,
 		items: Vec<T>,
@@ -289,7 +299,7 @@ impl Transaction {
 		chn.send(bytes!("")).await?;
 
 		for item in items {
-			chn.send(bytes!(format!("{};", item.to_string()))).await?;
+			chn.send(bytes!(format!("{};", item.to_sql()))).await?;
 		}
 
 		chn.send(bytes!("")).await?;
@@ -337,24 +347,24 @@ impl Transaction {
 		chn.send(bytes!(format!("-- TABLE: {}", InlineCommentDisplay(&table.name)))).await?;
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
-		chn.send(bytes!(format!("{};", table))).await?;
+		chn.send(bytes!(format!("{};", table.to_sql()))).await?;
 		chn.send(bytes!("")).await?;
 		// Export all table field definitions for this table
 		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
 		for field in fields.iter() {
-			chn.send(bytes!(format!("{};", field))).await?;
+			chn.send(bytes!(format!("{};", field.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table index definitions for this table
 		let indexes = self.all_tb_indexes(ns, db, &table.name).await?;
 		for index in indexes.iter() {
-			chn.send(bytes!(format!("{};", index))).await?;
+			chn.send(bytes!(format!("{};", index.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table event definitions for this table
 		let events = self.all_tb_events(ns, db, &table.name).await?;
 		for event in events.iter() {
-			chn.send(bytes!(format!("{};", event))).await?;
+			chn.send(bytes!(format!("{};", event.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Everything ok
@@ -438,7 +448,7 @@ impl Transaction {
 				if let Some(version) = version {
 					// If a version exists, format the value as an INSERT RELATION VERSION command.
 					let ts = Utc.timestamp_nanos(version as i64);
-					let sql = format!("INSERT RELATION {} VERSION d'{:?}';", v, ts);
+					let sql = format!("INSERT RELATION {} VERSION d'{:?}';", v.to_sql(), ts);
 					records_relate.push(sql);
 					String::new()
 				} else {

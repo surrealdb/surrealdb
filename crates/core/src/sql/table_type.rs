@@ -3,7 +3,6 @@ use crate::sql::{Kind, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::Display;
 
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
@@ -17,8 +16,10 @@ pub enum TableType {
 	Relation(Relation),
 }
 
-impl Display for TableType {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(TableType);
+
+impl crate::sql::DisplaySql for TableType {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			TableType::Normal => {
 				f.write_str(" NORMAL")?;

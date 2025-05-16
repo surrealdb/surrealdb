@@ -13,8 +13,10 @@ pub struct OptionStatement {
 	pub what: bool,
 }
 
-impl fmt::Display for OptionStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(OptionStatement);
+
+impl crate::sql::DisplaySql for OptionStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.what {
 			write!(f, "OPTION {}", self.name)
 		} else {
