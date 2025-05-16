@@ -31,6 +31,8 @@ impl Document {
 		self.process_table_lives(stk, ctx, opt, stm).await?;
 		self.process_table_events(stk, ctx, opt, stm).await?;
 		self.process_changefeeds(ctx, opt, stm).await?;
+		// We have already checked the permissions for CREATE, disable them for the pluck.
+		let opt = &opt.new_with_perms(false);
 		self.pluck(stk, ctx, opt, stm).await
 	}
 }
