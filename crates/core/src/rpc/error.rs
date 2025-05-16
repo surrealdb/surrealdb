@@ -16,7 +16,7 @@ pub enum RpcError {
 	#[error("Invalid params")]
 	InvalidParams,
 	#[error("There was a problem with the database: {0}")]
-	InternalError(err::Error),
+	InternalError(anyhow::Error),
 	#[error("Live Query was made, but is not supported")]
 	LqNotSuported,
 	#[error("RT is enabled for the session, but LQ is not supported by the context")]
@@ -27,11 +27,11 @@ pub enum RpcError {
 	Thrown(String),
 }
 
-impl From<err::Error> for RpcError {
-	fn from(e: err::Error) -> Self {
+impl From<anyhow::Error> for RpcError {
+	fn from(e: anyhow::Error) -> Self {
 		use err::Error;
-		match e {
-			Error::RealtimeDisabled => RpcError::LqNotSuported,
+		match e.downcast_ref() {
+			Some(Error::RealtimeDisabled) => RpcError::LqNotSuported,
 			_ => RpcError::InternalError(e),
 		}
 	}
@@ -40,17 +40,5 @@ impl From<err::Error> for RpcError {
 impl From<&str> for RpcError {
 	fn from(e: &str) -> Self {
 		RpcError::Thrown(e.to_string())
-	}
-}
-
-impl From<RpcError> for err::Error {
-	fn from(value: RpcError) -> Self {
-		use err::Error;
-		match value {
-			RpcError::InternalError(e) => e,
-			RpcError::Thrown(e) => Error::Thrown(e),
-
-			_ => Error::Thrown(value.to_string()),
-		}
 	}
 }

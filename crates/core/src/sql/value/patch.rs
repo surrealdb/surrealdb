@@ -2,9 +2,10 @@ use crate::err::Error;
 use crate::sql::operation::Operation;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
+use anyhow::{ensure, Result};
 
 impl Value {
-	pub(crate) fn patch(&mut self, ops: Value) -> Result<(), Error> {
+	pub(crate) fn patch(&mut self, ops: Value) -> Result<()> {
 		// Create a new object for testing and patching
 		let mut new = self.clone();
 		// Loop over the patch operations and apply them
@@ -105,12 +106,13 @@ impl Value {
 					value,
 				} => {
 					let val = new.pick(&path);
-					if value != val {
-						return Err(Error::PatchTest {
+					ensure!(
+						value == val,
+						Error::PatchTest {
 							expected: value.to_string(),
 							got: val.to_string(),
-						});
-					}
+						}
+					);
 				}
 			}
 		}

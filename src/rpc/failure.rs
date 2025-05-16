@@ -1,4 +1,3 @@
-use crate::err::Error;
 use revision::revisioned;
 use revision::Revisioned;
 use serde::Serialize;
@@ -42,12 +41,6 @@ impl Revisioned for Failure {
 
 impl From<&str> for Failure {
 	fn from(err: &str) -> Self {
-		Failure::custom(err.to_string())
-	}
-}
-
-impl From<Error> for Failure {
-	fn from(err: Error) -> Self {
 		Failure::custom(err.to_string())
 	}
 }

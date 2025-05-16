@@ -4,6 +4,7 @@ use crate::dbs::response::Response;
 use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
+use crate::err;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
@@ -19,6 +20,7 @@ use crate::sql::value::Value;
 use crate::sql::Base;
 use crate::sql::ControlFlow;
 use crate::sql::FlowResult;
+use anyhow::{anyhow, bail, Result};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
 use std::pin::{pin, Pin};
@@ -50,9 +52,12 @@ impl Executor {
 		}
 	}
 
-	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<(), Error> {
-		let ctx_ref = Arc::get_mut(&mut self.ctx)
-			.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?;
+	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<()> {
+		let ctx_ref = Arc::get_mut(&mut self.ctx).ok_or_else(|| {
+			err::Error::unreachable(format_args!(
+				"Tried to unfreeze a Context with multiple references"
+			))
+		})?;
 
 		if let Some(ns) = stmt.ns {
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
@@ -69,7 +74,7 @@ impl Executor {
 		Ok(())
 	}
 
-	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<(), Error> {
+	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<()> {
 		// Allowed to run?
 		self.opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
 		// Convert to uppercase
@@ -111,7 +116,12 @@ impl Executor {
 			Statement::Set(stm) => {
 				// Avoid moving in and out of the context via Arc::get_mut
 				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				// Run the statement
 				match self
@@ -124,8 +134,11 @@ impl Executor {
 						// Set the parameter
 						Arc::get_mut(&mut self.ctx)
 							.ok_or_else(|| {
-								fail!("Tried to unfreeze a Context with multiple references")
-							})?
+								err::Error::unreachable(
+									"Tried to unfreeze a Context with multiple references",
+								)
+							})
+							.map_err(anyhow::Error::new)?
 							.add_value(stm.name, val.into());
 						// Finalise transaction, returning nothing unless it couldn't commit
 						Ok(Value::None)
@@ -137,7 +150,12 @@ impl Executor {
 			stmt => {
 				// The transaction began successfully
 				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				// Process the statement
 				self.stack.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None)).finish().await
@@ -148,10 +166,10 @@ impl Executor {
 		match self.ctx.done(true)? {
 			None => {}
 			Some(Reason::Timedout) => {
-				return Err(ControlFlow::from(Error::QueryTimedout));
+				return Err(ControlFlow::from(anyhow::anyhow!(Error::QueryTimedout)));
 			}
 			Some(Reason::Canceled) => {
-				return Err(ControlFlow::from(Error::QueryCancelled));
+				return Err(ControlFlow::from(anyhow::anyhow!(Error::QueryCancelled)));
 			}
 		}
 
@@ -159,19 +177,15 @@ impl Executor {
 	}
 
 	/// Execute a query not wrapped in a transaction block.
-	async fn execute_bare_statement(
-		&mut self,
-		kvs: &Datastore,
-		stmt: Statement,
-	) -> Result<Value, Error> {
+	async fn execute_bare_statement(&mut self, kvs: &Datastore, stmt: Statement) -> Result<Value> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
 			None => {}
 			Some(Reason::Timedout) => {
-				return Err(Error::QueryTimedout);
+				bail!(Error::QueryTimedout);
 			}
 			Some(Reason::Canceled) => {
-				return Err(Error::QueryCancelled);
+				bail!(Error::QueryCancelled);
 			}
 		}
 
@@ -202,13 +216,13 @@ impl Executor {
 						if let Err(e) = lock.complete_changes(false).await {
 							let _ = lock.cancel().await;
 
-							return Err(Error::QueryNotExecutedDetail {
+							bail!(Error::QueryNotExecutedDetail {
 								message: e.to_string(),
 							});
 						}
 
 						if let Err(e) = lock.commit().await {
-							return Err(Error::QueryNotExecutedDetail {
+							bail!(Error::QueryNotExecutedDetail {
 								message: e.to_string(),
 							});
 						}
@@ -230,11 +244,11 @@ impl Executor {
 						Ok(value)
 					}
 					Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
-						Err(Error::InvalidControlFlow)
+						bail!(Error::InvalidControlFlow)
 					}
 					Err(ControlFlow::Err(e)) => {
 						let _ = txn.cancel().await;
-						Err(*e)
+						Err(e)
 					}
 				}
 			}
@@ -246,9 +260,9 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		mut stream: Pin<&mut S>,
-	) -> Result<(), Error>
+	) -> Result<()>
 	where
-		S: Stream<Item = Result<Statement, Error>>,
+		S: Stream<Item = Result<Statement>>,
 	{
 		let Ok(txn) = kvs.transaction(TransactionType::Write, LockType::Optimistic).await else {
 			// couldn't create a transaction.
@@ -262,7 +276,7 @@ impl Executor {
 
 				self.results.push(Response {
 					time: Duration::ZERO,
-					result: Err(Error::QueryNotExecuted),
+					result: Err(anyhow!(Error::QueryNotExecuted)),
 					query_type: QueryType::Other,
 				});
 			}
@@ -304,7 +318,7 @@ impl Executor {
 
 				for res in &mut self.results[start_results..] {
 					res.query_type = QueryType::Other;
-					res.result = Err(Error::QueryCancelled);
+					res.result = Err(anyhow!(Error::QueryCancelled));
 				}
 
 				while let Some(stmt) = stream.next().await {
@@ -317,8 +331,8 @@ impl Executor {
 					self.results.push(Response {
 						time: Duration::ZERO,
 						result: Err(match done {
-							Reason::Timedout => Error::QueryTimedout,
-							Reason::Canceled => Error::QueryCancelled,
+							Reason::Timedout => anyhow!(Error::QueryTimedout),
+							Reason::Canceled => anyhow!(Error::QueryCancelled),
 						}),
 						query_type: QueryType::Other,
 					});
@@ -348,16 +362,16 @@ impl Executor {
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(Error::QueryNotExecuted);
+						res.result = Err(anyhow!(Error::QueryNotExecuted));
 					}
 
 					self.results.push(Response {
 						time: Duration::ZERO,
-						result: Err(Error::QueryNotExecutedDetail {
+						result: Err(anyhow!(Error::QueryNotExecutedDetail {
 							message:
 								"Tried to start a transaction while another transaction was open"
 									.to_string(),
-						}),
+						})),
 						query_type: QueryType::Other,
 					});
 
@@ -372,7 +386,7 @@ impl Executor {
 
 						self.results.push(Response {
 							time: Duration::ZERO,
-							result: Err(Error::QueryNotExecuted),
+							result: Err(anyhow!(Error::QueryNotExecuted)),
 							query_type: QueryType::Other,
 						});
 					}
@@ -386,7 +400,7 @@ impl Executor {
 					// update the results indicating cancelation.
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(Error::QueryCancelled);
+						res.result = Err(anyhow!(Error::QueryCancelled));
 					}
 
 					self.opt.sender = None;
@@ -426,9 +440,9 @@ impl Executor {
 					// failed to commit
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(Error::QueryNotExecutedDetail {
+						res.result = Err(anyhow!(Error::QueryNotExecutedDetail {
 							message: e.to_string(),
-						});
+						}));
 					}
 
 					self.opt.sender = None;
@@ -454,18 +468,18 @@ impl Executor {
 							Ok(value)
 						}
 						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-							Err(Error::InvalidControlFlow)
+							Err(anyhow!(Error::InvalidControlFlow))
 						}
 						Err(ControlFlow::Err(e)) => {
 							for res in &mut self.results[start_results..] {
 								res.query_type = QueryType::Other;
-								res.result = Err(Error::QueryNotExecuted);
+								res.result = Err(anyhow!(Error::QueryNotExecuted));
 							}
 
 							// statement return an error. Consume all the other statement until we hit a cancel or commit.
 							self.results.push(Response {
 								time: before.elapsed(),
-								result: Err(*e),
+								result: Err(e),
 								query_type,
 							});
 
@@ -482,7 +496,7 @@ impl Executor {
 
 								self.results.push(Response {
 									time: Duration::ZERO,
-									result: Err(Error::QueryNotExecuted),
+									result: Err(anyhow!(Error::QueryNotExecuted)),
 									query_type: QueryType::Other,
 								});
 							}
@@ -516,9 +530,9 @@ impl Executor {
 
 		for res in &mut self.results[start_results..] {
 			res.query_type = QueryType::Other;
-			res.result = Err(Error::QueryNotExecutedDetail {
+			res.result = Err(anyhow!(Error::QueryNotExecutedDetail {
 				message: "Missing COMMIT statement".to_string(),
-			});
+			}));
 		}
 
 		self.opt.sender = None;
@@ -532,7 +546,7 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		qry: Query,
-	) -> Result<Vec<Response>, Error> {
+	) -> Result<Vec<Response>> {
 		let stream = futures::stream::iter(qry.into_iter().map(Ok));
 		Self::execute_stream(kvs, ctx, opt, stream).await
 	}
@@ -543,9 +557,9 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		stream: S,
-	) -> Result<Vec<Response>, Error>
+	) -> Result<Vec<Response>>
 	where
-		S: Stream<Item = Result<Statement, Error>>,
+		S: Stream<Item = Result<Statement>>,
 	{
 		let mut this = Executor::new(ctx, opt);
 		let mut stream = pin!(stream);

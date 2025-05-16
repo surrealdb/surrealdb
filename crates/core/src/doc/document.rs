@@ -20,6 +20,7 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
 use crate::sql::FlowResultExt as _;
+use anyhow::Result;
 use reblessive::tree::Stk;
 use std::fmt::{Debug, Formatter};
 use std::mem;
@@ -301,7 +302,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		permitted: Permitted,
-	) -> Result<bool, Error> {
+	) -> Result<bool> {
 		// Check if this record exists
 		if self.id.is_none() {
 			return Ok(false);
@@ -366,27 +367,23 @@ impl Document {
 	}
 
 	/// Retrieve the record id for this document
-	pub fn id(&self) -> Result<Arc<Thing>, Error> {
+	pub fn id(&self) -> Result<Arc<Thing>> {
 		match self.id.clone() {
 			Some(id) => Ok(id),
-			_ => Err(fail!("Expected a document id to be present")),
+			_ => fail!("Expected a document id to be present"),
 		}
 	}
 
 	/// Retrieve the record id for this document
-	pub fn inner_id(&self) -> Result<Thing, Error> {
+	pub fn inner_id(&self) -> Result<Thing> {
 		match self.id.clone() {
 			Some(id) => Ok(Arc::unwrap_or_clone(id)),
-			_ => Err(fail!("Expected a document id to be present")),
+			_ => fail!("Expected a document id to be present"),
 		}
 	}
 
 	/// Get the database for this document
-	pub async fn db(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Arc<DefineDatabaseStatement>, Error> {
+	pub async fn db(&self, ctx: &Context, opt: &Options) -> Result<Arc<DefineDatabaseStatement>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get transaction
@@ -415,11 +412,7 @@ impl Document {
 	}
 
 	/// Get the table for this document
-	pub async fn tb(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Arc<DefineTableStatement>, Error> {
+	pub async fn tb(&self, ctx: &Context, opt: &Options) -> Result<Arc<DefineTableStatement>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get the record id
@@ -437,17 +430,18 @@ impl Document {
 					Some(val) => val,
 					None => {
 						let val = match txn.get_tb(ns, db, &id.tb).await {
-							// The table doesn't exist
-							Err(Error::TbNotFound {
-								name: _,
-							}) => {
-								// Allowed to run?
-								opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-								// We can create the table automatically
-								txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
+							Err(e) => {
+								// The table doesn't exist
+								if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
+									// Allowed to run?
+									opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+									// We can create the table automatically
+									txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
+								} else {
+									// There was an error
+									Err(e)
+								}
 							}
-							// There was an error
-							Err(err) => Err(err),
 							// The table exists
 							Ok(tb) => Ok(tb),
 						}?;
@@ -462,17 +456,18 @@ impl Document {
 			_ => {
 				// Return the table or attempt to define it
 				match txn.get_tb(ns, db, &id.tb).await {
-					// The table doesn't exist
-					Err(Error::TbNotFound {
-						name: _,
-					}) => {
-						// Allowed to run?
-						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-						// We can create the table automatically
-						txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
+					Err(e) => {
+						// The table doesn't exist
+						if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
+							// Allowed to run?
+							opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+							// We can create the table automatically
+							txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
+						} else {
+							// There was an error
+							Err(e)
+						}
 					}
-					// There was an error
-					Err(err) => Err(err),
 					// The table exists
 					Ok(tb) => Ok(tb),
 				}
@@ -481,11 +476,7 @@ impl Document {
 	}
 
 	/// Get the foreign tables for this document
-	pub async fn ft(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Arc<[DefineTableStatement]>, Error> {
+	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineTableStatement]>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get the document table
@@ -514,11 +505,7 @@ impl Document {
 	}
 
 	/// Get the events for this document
-	pub async fn ev(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Arc<[DefineEventStatement]>, Error> {
+	pub async fn ev(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineEventStatement]>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get the document table
@@ -547,11 +534,7 @@ impl Document {
 	}
 
 	/// Get the fields for this document
-	pub async fn fd(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Arc<[DefineFieldStatement]>, Error> {
+	pub async fn fd(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineFieldStatement]>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get the document table
@@ -580,11 +563,7 @@ impl Document {
 	}
 
 	/// Get the indexes for this document
-	pub async fn ix(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Arc<[DefineIndexStatement]>, Error> {
+	pub async fn ix(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineIndexStatement]>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get the document table
@@ -613,7 +592,7 @@ impl Document {
 	}
 
 	// Get the lives for this document
-	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>, Error> {
+	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get the document table

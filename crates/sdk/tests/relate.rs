@@ -9,9 +9,10 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn relate_with_parameters() -> Result<(), Error> {
+async fn relate_with_parameters() -> Result<()> {
 	let sql = "
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
@@ -47,7 +48,7 @@ async fn relate_with_parameters() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn relate_and_overwrite() -> Result<(), Error> {
+async fn relate_and_overwrite() -> Result<()> {
 	let sql = "
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
@@ -111,7 +112,7 @@ async fn relate_and_overwrite() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn relate_with_param_or_subquery() -> Result<(), Error> {
+async fn relate_with_param_or_subquery() -> Result<()> {
 	let sql = r#"
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
@@ -185,7 +186,7 @@ async fn relate_with_param_or_subquery() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn relate_with_complex_table() -> Result<(), Error> {
+async fn relate_with_complex_table() -> Result<()> {
 	let sql = "
 		CREATE a:1, a:2;
 		RELATE a:1->`-`:`-`->a:2;
@@ -212,7 +213,7 @@ async fn relate_with_complex_table() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn schemafull_relate() -> Result<(), Error> {
+async fn schemafull_relate() -> Result<()> {
 	let sql = r#"
 	INSERT INTO person [
 		{ id: 1 },
@@ -250,16 +251,16 @@ async fn schemafull_relate() -> Result<(), Error> {
 	)?;
 
 	// reason is bool not string
-	t.expect_error_func(|e| matches!(e, Error::FieldCoerce { .. }))?;
+	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::FieldCoerce { .. })))?;
 
 	// dog:1 is not a person
-	t.expect_error_func(|e| matches!(e, Error::FieldCoerce { .. }))?;
+	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::FieldCoerce { .. })))?;
 
 	Ok(())
 }
 
 #[tokio::test]
-async fn relate_enforced() -> Result<(), Error> {
+async fn relate_enforced() -> Result<()> {
 	let sql = "
 	    DEFINE TABLE edge TYPE RELATION ENFORCED;
 		RELATE a:1->edge:1->a:2;
@@ -272,7 +273,7 @@ async fn relate_enforced() -> Result<(), Error> {
 	//
 	t.skip_ok(1)?;
 	//
-	t.expect_error_func(|e| matches!(e, Error::IdNotFound { .. }))?;
+	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::IdNotFound { .. })))?;
 	//
 	t.expect_val("[{ id: a:1 }, { id: a:2 }]")?;
 	//

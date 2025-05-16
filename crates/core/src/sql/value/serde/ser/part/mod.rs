@@ -32,7 +32,7 @@ impl ser::Serializer for Serializer {
 		name: &'static str,
 		_variant_index: u32,
 		variant: &'static str,
-	) -> Result<Self::Ok, Error> {
+	) -> Result<Self::Ok> {
 		match variant {
 			"All" => Ok(Part::All),
 			"Last" => Ok(Part::Last),
@@ -48,7 +48,7 @@ impl ser::Serializer for Serializer {
 		_variant_index: u32,
 		variant: &'static str,
 		value: &T,
-	) -> Result<Self::Ok, Error>
+	) -> Result<Self::Ok>
 	where
 		T: ?Sized + Serialize,
 	{

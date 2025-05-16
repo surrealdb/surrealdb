@@ -3,6 +3,7 @@ use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::{escape::QuoteStr, Algorithm};
+use anyhow::Result;
 use revision::revisioned;
 use revision::Error as RevisionError;
 use serde::{Deserialize, Serialize};

@@ -1,15 +1,16 @@
 use crate::cnf::FILE_ALLOWLIST;
 use crate::err::Error;
+use anyhow::Result;
 use path_clean::PathClean;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn is_path_allowed(path: &Path) -> Result<PathBuf, Error> {
+pub(crate) fn is_path_allowed(path: &Path) -> Result<PathBuf> {
 	check_is_path_allowed(path, &FILE_ALLOWLIST)
 }
 
 /// Checks if the requested file path is within any of the allowed directories.
-fn check_is_path_allowed(path: &Path, allowed_path: &[PathBuf]) -> Result<PathBuf, Error> {
+fn check_is_path_allowed(path: &Path, allowed_path: &[PathBuf]) -> Result<PathBuf> {
 	// Convert the requested path to its canonical form.
 	let canonical_path = fs::canonicalize(path)?;
 
@@ -22,7 +23,7 @@ fn check_is_path_allowed(path: &Path, allowed_path: &[PathBuf]) -> Result<PathBu
 	if allowed_path.iter().any(|allowed| canonical_path.starts_with(allowed)) {
 		Ok(canonical_path)
 	} else {
-		Err(Error::FileAccessDenied(path.to_string_lossy().to_string()))
+		Err(anyhow::Error::new(Error::FileAccessDenied(path.to_string_lossy().to_string())))
 	}
 }
 

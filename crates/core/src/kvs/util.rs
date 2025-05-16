@@ -2,7 +2,7 @@ use std::{ops::Range, sync::Arc};
 
 use revision::Revisioned;
 
-use crate::err::Error;
+use anyhow::Result;
 
 use super::KeyEncode;
 
@@ -17,7 +17,7 @@ pub fn advance_key(key: &mut [u8]) {
 	}
 }
 
-pub fn to_prefix_range<K: KeyEncode>(key: K) -> Result<Range<Vec<u8>>, Error> {
+pub fn to_prefix_range<K: KeyEncode>(key: K) -> Result<Range<Vec<u8>>> {
 	let start = key.encode_owned()?;
 	let mut end = start.clone();
 	end.push(0xff);
@@ -29,7 +29,7 @@ pub fn to_prefix_range<K: KeyEncode>(key: K) -> Result<Range<Vec<u8>>, Error> {
 
 /// Takes an iterator of byte slices and deserializes the byte slices to the expected type,
 /// returning an error if any of the values fail to serialize.
-pub fn deserialize_cache<'a, I, T>(iter: I) -> Result<Arc<[T]>, Error>
+pub fn deserialize_cache<'a, I, T>(iter: I) -> Result<Arc<[T]>>
 where
 	T: Revisioned,
 	I: Iterator<Item = &'a [u8]>,

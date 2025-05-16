@@ -229,13 +229,13 @@ mod http {
 mod mem {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::Mem;
+	use surrealdb::error::Db as DbError;
 	use surrealdb::iam;
 	use surrealdb::opt::capabilities::Capabilities;
 	use surrealdb::opt::capabilities::ExperimentalFeature;
 	use surrealdb::opt::Config;
 	use surrealdb::opt::Resource;
 	use surrealdb::RecordIdKey;
-	use surrealdb::{error::Db as DbError, Error};
 
 	use surrealdb::opt::auth::Root;
 	use surrealdb::Surreal;
@@ -284,13 +284,14 @@ mod mem {
 	#[test_log::test(tokio::test)]
 	async fn cant_sign_into_default_root_account() {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
-		let Error::Db(DbError::InvalidAuth) = db
+		let Some(DbError::InvalidAuth) = db
 			.signin(Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			})
 			.await
 			.unwrap_err()
+			.downcast_ref()
 		else {
 			panic!("unexpected successful login");
 		};
@@ -305,11 +306,11 @@ mod mem {
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.use_ns("namespace").use_db("database").await.unwrap();
 		let res = db.create(Resource::from("item:foo")).await;
-		let Error::Db(DbError::IamError(iam::Error::NotAllowed {
+		let Some(DbError::IamError(iam::Error::NotAllowed {
 			actor: _,
 			action: _,
 			resource: _,
-		})) = res.unwrap_err()
+		})) = res.unwrap_err().downcast_ref()
 		else {
 			panic!("expected permissions error");
 		};

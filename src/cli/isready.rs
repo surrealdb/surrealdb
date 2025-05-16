@@ -1,5 +1,5 @@
 use crate::cli::abstraction::DatabaseConnectionArguments;
-use crate::err::Error;
+use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any::connect;
 
@@ -15,7 +15,7 @@ pub async fn init(
 			endpoint,
 		},
 	}: IsReadyCommandArguments,
-) -> Result<(), Error> {
+) -> Result<()> {
 	// Connect to the database engine
 	connect(endpoint).await?;
 	// Log output ok

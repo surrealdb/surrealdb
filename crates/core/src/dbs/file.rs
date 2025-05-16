@@ -3,6 +3,7 @@ use crate::dbs::plan::Explanation;
 use crate::err::Error;
 use crate::sql::order::Ordering;
 use crate::sql::Value;
+use anyhow::Result;
 use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
 use rand::seq::SliceRandom as _;
 use rand::Rng as _;

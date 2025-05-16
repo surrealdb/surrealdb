@@ -1,3 +1,4 @@
+use super::Value;
 use crate::{
 	cnf::IDIOM_RECURSION_LIMIT,
 	ctx::Context,
@@ -9,8 +10,7 @@ use crate::{
 		Array, FlowResultExt as _, Part,
 	},
 };
-
-use super::Value;
+use anyhow::{bail, Result};
 use reblessive::tree::Stk;
 
 #[derive(Clone, Copy, Debug)]
@@ -73,7 +73,7 @@ pub(crate) async fn compute_idiom_recursion(
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	rec: Recursion<'_>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	// Find the recursion limit
 	let limit = *IDIOM_RECURSION_LIMIT as u32;
 	// Do we recursion instead of looping?
@@ -111,7 +111,7 @@ pub(crate) async fn compute_idiom_recursion(
 				return Ok(current);
 			}
 		} else if i >= limit {
-			return Err(Error::IdiomRecursionLimitExceeded {
+			bail!(Error::IdiomRecursionLimitExceeded {
 				limit,
 			});
 		}
@@ -189,7 +189,7 @@ pub(crate) async fn compute_idiom_recursion(
 				return Ok(output!());
 			}
 		} else if i >= limit {
-			return Err(Error::IdiomRecursionLimitExceeded {
+			bail!(Error::IdiomRecursionLimitExceeded {
 				limit,
 			});
 		}

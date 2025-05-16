@@ -1,4 +1,3 @@
-use crate::err::Error;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::layer::HnswLayer;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
@@ -6,6 +5,7 @@ use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
 use crate::kvs::Transaction;
 use crate::sql::index::HnswParams;
+use anyhow::Result;
 
 #[derive(Debug)]
 pub(super) enum Heuristic {
@@ -43,7 +43,7 @@ impl Heuristic {
 		c: DoublePriorityQueue,
 		ignore: Option<ElementId>,
 		res: &mut S,
-	) -> Result<(), Error>
+	) -> Result<()>
 	where
 		S: DynamicSet,
 	{
@@ -63,7 +63,7 @@ impl Heuristic {
 		layer: &HnswLayer<S>,
 		mut c: DoublePriorityQueue,
 		res: &mut S,
-	) -> Result<(), Error>
+	) -> Result<()>
 	where
 		S: DynamicSet,
 	{
@@ -86,7 +86,7 @@ impl Heuristic {
 		layer: &HnswLayer<S>,
 		mut c: DoublePriorityQueue,
 		res: &mut S,
-	) -> Result<(), Error>
+	) -> Result<()>
 	where
 		S: DynamicSet,
 	{
@@ -122,7 +122,7 @@ impl Heuristic {
 		q_pt: &SharedVector,
 		c: &mut DoublePriorityQueue,
 		ignore: Option<ElementId>,
-	) -> Result<(), Error>
+	) -> Result<()>
 	where
 		S: DynamicSet,
 	{
@@ -162,7 +162,7 @@ impl Heuristic {
 		mut c: DoublePriorityQueue,
 		ignore: Option<ElementId>,
 		res: &mut S,
-	) -> Result<(), Error>
+	) -> Result<()>
 	where
 		S: DynamicSet,
 	{
@@ -180,7 +180,7 @@ impl Heuristic {
 		mut c: DoublePriorityQueue,
 		ignore: Option<ElementId>,
 		res: &mut S,
-	) -> Result<(), Error>
+	) -> Result<()>
 	where
 		S: DynamicSet,
 	{
@@ -194,7 +194,7 @@ impl Heuristic {
 		e_dist: f64,
 		e_id: ElementId,
 		r: &mut S,
-	) -> Result<bool, Error>
+	) -> Result<bool>
 	where
 		S: DynamicSet,
 	{

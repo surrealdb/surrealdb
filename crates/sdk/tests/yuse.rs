@@ -3,11 +3,11 @@ use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn use_statement_set_ns() -> Result<(), Error> {
+async fn use_statement_set_ns() -> Result<()> {
 	let sql = "
 		SELECT * FROM $session.ns, session::ns(), $session.db, session::db();
 		USE NS my_ns;
@@ -33,7 +33,7 @@ async fn use_statement_set_ns() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn use_statement_set_db() -> Result<(), Error> {
+async fn use_statement_set_db() -> Result<()> {
 	let sql = "
 		SELECT * FROM $session.ns, session::ns(), $session.db, session::db();
 		USE DB my_db;
@@ -59,7 +59,7 @@ async fn use_statement_set_db() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn use_statement_set_both() -> Result<(), Error> {
+async fn use_statement_set_both() -> Result<()> {
 	let sql = "
 		SELECT * FROM $session.ns, session::ns(), $session.db, session::db();
 		USE NS my_ns DB my_db;

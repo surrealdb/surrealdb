@@ -1,5 +1,5 @@
 use crate::cli::CF;
-use crate::err::Error;
+use anyhow::Result;
 use clap::Args;
 use std::fs;
 use std::path::PathBuf;
@@ -499,7 +499,7 @@ pub async fn init(
 		temporary_directory,
 		import_file,
 	}: StartCommandDbsOptions,
-) -> Result<Datastore, Error> {
+) -> Result<Datastore> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Log specified strict mode
@@ -552,7 +552,7 @@ pub async fn init(
 	Ok(dbs)
 }
 
-pub async fn fix(path: String) -> Result<(), Error> {
+pub async fn fix(path: String) -> Result<()> {
 	// Parse and setup the desired kv datastore
 	let dbs = Arc::new(Datastore::new(&path).await?);
 	// Ensure the storage version is up-to-date to prevent corruption

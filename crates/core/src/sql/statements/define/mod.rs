@@ -45,8 +45,8 @@ pub use bucket::BucketDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::value::Value;
+use anyhow::Result;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -121,7 +121,7 @@ impl DefineStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		match self {
 			Self::Namespace(ref v) => v.compute(ctx, opt, doc).await,
 			Self::Database(ref v) => v.compute(ctx, opt, doc).await,

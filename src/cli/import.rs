@@ -1,6 +1,6 @@
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
-use crate::err::Error;
+use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any::{connect, IntoEndpoint};
 use surrealdb::opt::{capabilities::Capabilities, Config};
@@ -44,7 +44,7 @@ pub async fn init(
 			database,
 		},
 	}: ImportCommandArguments,
-) -> Result<(), Error> {
+) -> Result<()> {
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.

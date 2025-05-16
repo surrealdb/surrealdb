@@ -14,6 +14,7 @@ use crate::sql::FlowResultExt;
 use crate::sql::Function;
 use crate::sql::Statement;
 use crate::sql::{Thing, Value as SqlValue};
+use anyhow::Result;
 
 use async_graphql::dynamic::FieldValue;
 use async_graphql::{dynamic::indexmap::IndexMap, Name, Value as GqlValue};
@@ -68,13 +69,15 @@ pub struct GQLTx {
 
 impl GQLTx {
 	pub async fn new(kvs: &Arc<Datastore>, sess: &Session) -> Result<Self, GqlError> {
-		kvs.check_anon(sess).map_err(|_| {
-			Error::IamError(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "process".to_string(),
-				resource: "graphql".to_string(),
+		kvs.check_anon(sess)
+			.map_err(|_| {
+				Error::IamError(IamError::NotAllowed {
+					actor: "anonymous".to_string(),
+					action: "process".to_string(),
+					resource: "graphql".to_string(),
+				})
 			})
-		})?;
+			.map_err(anyhow::Error::new)?;
 
 		let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 		let tx = Arc::new(tx);

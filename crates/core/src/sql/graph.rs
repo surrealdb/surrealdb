@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::kvs::KeyEncode;
 use crate::sql::cond::Cond;
@@ -14,6 +13,7 @@ use crate::sql::order::{OldOrders, Order, OrderList, Ordering};
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
 use crate::sql::table::Tables;
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -176,7 +176,7 @@ impl GraphSubjects {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		stk.scope(|scope| {
 			let futs = self.0.into_iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc)));
 			try_join_all_buffered(futs)
@@ -208,7 +208,7 @@ impl GraphSubject {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		if let Self::Range(tb, rng) = self {
 			let rng = rng.compute(stk, ctx, opt, doc).await?;
 			Ok(Self::Range(tb, rng))
@@ -224,7 +224,7 @@ impl GraphSubject {
 		tb: &str,
 		id: &Id,
 		dir: &Dir,
-	) -> (Result<Vec<u8>, Error>, Result<Vec<u8>, Error>) {
+	) -> (Result<Vec<u8>>, Result<Vec<u8>>) {
 		match self {
 			Self::Table(t) => (
 				crate::key::graph::ftprefix(ns, db, tb, id, dir, &t.0),

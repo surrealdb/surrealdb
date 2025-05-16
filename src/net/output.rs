@@ -1,5 +1,5 @@
 use super::headers::Accept;
-use crate::err::Error;
+use anyhow::Result;
 use axum::response::{IntoResponse, Response};
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
@@ -15,48 +15,41 @@ pub enum Output {
 	Cbor(Vec<u8>), // CBOR
 	Full(Vec<u8>), // Full type serialization
 }
-
-pub fn none() -> Output {
-	Output::None
-}
-
-pub fn text(val: String) -> Output {
-	Output::Text(val)
-}
-
-pub fn json<T>(val: &T) -> Output
-where
-	T: Serialize,
-{
-	match serde_json::to_vec(val) {
-		Ok(v) => Output::Json(v),
-		Err(_) => Output::Fail,
+impl Output {
+	pub fn json<T>(val: &T) -> Output
+	where
+		T: Serialize,
+	{
+		match serde_json::to_vec(val) {
+			Ok(v) => Output::Json(v),
+			Err(_) => Output::Fail,
+		}
 	}
-}
 
-pub fn cbor<T>(val: &T) -> Output
-where
-	T: Serialize,
-{
-	let mut out = Vec::new();
-	match ciborium::into_writer(&val, &mut out) {
-		Ok(_) => Output::Cbor(out),
-		Err(_) => Output::Fail,
+	pub fn cbor<T>(val: &T) -> Output
+	where
+		T: Serialize,
+	{
+		let mut out = Vec::new();
+		match ciborium::into_writer(&val, &mut out) {
+			Ok(_) => Output::Cbor(out),
+			Err(_) => Output::Fail,
+		}
 	}
-}
 
-pub fn full<T>(val: &T) -> Output
-where
-	T: Serialize,
-{
-	match surrealdb::sql::serde::serialize(val) {
-		Ok(v) => Output::Full(v),
-		Err(_) => Output::Fail,
+	pub fn full<T>(val: &T) -> Output
+	where
+		T: Serialize,
+	{
+		match surrealdb::sql::serde::serialize(val) {
+			Ok(v) => Output::Full(v),
+			Err(_) => Output::Fail,
+		}
 	}
 }
 
 /// Convert and simplify the value into JSON
-pub fn simplify<T: Serialize + 'static>(v: T) -> Result<Json, Error> {
+pub fn simplify<T: Serialize + 'static>(v: T) -> Result<Json> {
 	Ok(sql::to_value(v)?.into())
 }
 

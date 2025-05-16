@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 pub mod client_ip;
+pub mod error;
 mod export;
 mod gql;
 pub(crate) mod headers;
@@ -22,10 +23,10 @@ mod version;
 
 use crate::cli::CF;
 use crate::cnf;
-use crate::err::Error;
 use crate::net::signals::graceful_shutdown;
 use crate::rpc::{notifications, RpcState};
 use crate::telemetry::metrics::HttpMetricsLayer;
+use anyhow::Result;
 use axum::response::Redirect;
 use axum::routing::get;
 use axum::{middleware, Router};
@@ -66,7 +67,7 @@ pub struct AppState {
 	pub datastore: Arc<Datastore>,
 }
 
-pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error> {
+pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 

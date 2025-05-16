@@ -1,6 +1,6 @@
-use crate::err::Error;
 use crate::rpc::{self, RpcState};
 use crate::telemetry;
+use anyhow::Result;
 use axum_server::Handle;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -45,9 +45,7 @@ pub fn graceful_shutdown(
 				// Cancel the cancellation token
 				canceller.cancel();
 				// Flush all telemetry data
-				if let Err(err) = telemetry::shutdown() {
-					error!("Failed to flush telemetry data: {err}");
-				}
+				telemetry::shutdown();
 			})
 		};
 		// Wait for the primary or secondary signals to complete
@@ -65,9 +63,7 @@ pub fn graceful_shutdown(
 				// Cancel the cancellation token
 				canceller.cancel();
 				// Flush all telemetry data
-				if let Err(err) = telemetry::shutdown() {
-					error!("Failed to flush telemetry data: {err}");
-				}
+				telemetry::shutdown();
 			}
 			// Listen for a secondary signal
 			res = listen() => {
@@ -84,16 +80,14 @@ pub fn graceful_shutdown(
 				// Cancel the cancellation token
 				canceller.cancel();
 				// Flush all telemetry data
-				if let Err(err) = telemetry::shutdown() {
-					error!("Failed to flush telemetry data: {err}");
-				}
+				telemetry::shutdown();
 			},
 		}
 	})
 }
 
 #[cfg(unix)]
-pub async fn listen() -> Result<String, Error> {
+pub async fn listen() -> Result<String> {
 	// Log informational message
 	info!(target: super::LOG, "Listening for a system shutdown signal.");
 	// Import the OS signals
@@ -125,7 +119,7 @@ pub async fn listen() -> Result<String, Error> {
 }
 
 #[cfg(windows)]
-pub async fn listen() -> Result<String, Error> {
+pub async fn listen() -> Result<String> {
 	// Log informational message
 	info!(target: super::LOG, "Listening for a system shutdown signal.");
 	// Import the OS signals

@@ -3,11 +3,11 @@ use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn merge_record() -> Result<(), Error> {
+async fn merge_record() -> Result<()> {
 	let sql = "
 		UPSERT person:test SET name.initials = 'TMH', name.first = 'Tobie', name.last = 'Morgan Hitchcock';
 		UPSERT person:test MERGE {

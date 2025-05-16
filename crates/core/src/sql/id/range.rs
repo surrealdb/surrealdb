@@ -6,6 +6,7 @@ use crate::{
 	err::Error,
 	sql::{Range, Value},
 };
+use anyhow::{bail, Result};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -20,16 +21,16 @@ pub struct IdRange {
 }
 
 impl TryFrom<(Bound<Id>, Bound<Id>)> for IdRange {
-	type Error = Error;
+	type Error = anyhow::Error;
 	fn try_from((beg, end): (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
 		if matches!(beg, Bound::Included(Id::Range(_)) | Bound::Excluded(Id::Range(_))) {
-			return Err(Error::IdInvalid {
+			bail!(Error::IdInvalid {
 				value: "range".into(),
 			});
 		}
 
 		if matches!(end, Bound::Included(Id::Range(_)) | Bound::Excluded(Id::Range(_))) {
-			return Err(Error::IdInvalid {
+			bail!(Error::IdInvalid {
 				value: "range".into(),
 			});
 		}
@@ -42,7 +43,7 @@ impl TryFrom<(Bound<Id>, Bound<Id>)> for IdRange {
 }
 
 impl TryFrom<Range> for IdRange {
-	type Error = Error;
+	type Error = anyhow::Error;
 	fn try_from(v: Range) -> Result<Self, Self::Error> {
 		let beg = match v.beg {
 			Bound::Included(beg) => Bound::Included(Id::try_from(beg)?),
@@ -62,13 +63,13 @@ impl TryFrom<Range> for IdRange {
 }
 
 impl TryFrom<Value> for IdRange {
-	type Error = Error;
+	type Error = anyhow::Error;
 	fn try_from(v: Value) -> Result<Self, Self::Error> {
 		match v {
 			Value::Range(v) => IdRange::try_from(*v),
-			v => Err(Error::IdInvalid {
+			v => Err(anyhow::Error::new(Error::IdInvalid {
 				value: v.kindof().to_string(),
-			}),
+			})),
 		}
 	}
 }
@@ -157,7 +158,7 @@ impl IdRange {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<IdRange, Error> {
+	) -> Result<IdRange> {
 		let beg = match &self.beg {
 			Bound::Included(beg) => {
 				Bound::Included(stk.run(|stk| beg.compute(stk, ctx, opt, doc)).await?)

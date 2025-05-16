@@ -1,9 +1,9 @@
-use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::terms::TermId;
 use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
+use anyhow::Result;
 use roaring::RoaringTreemap;
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ impl TermDocs {
 		tx: &Transaction,
 		term_id: TermId,
 		doc_id: DocId,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let mut docs = self.get_docs(tx, term_id).await?.unwrap_or_else(RoaringTreemap::new);
 		if docs.insert(doc_id) {
 			let key = self.index_key_base.new_bc_key(term_id)?;
@@ -40,7 +40,7 @@ impl TermDocs {
 		&self,
 		tx: &Transaction,
 		term_id: TermId,
-	) -> Result<Option<RoaringTreemap>, Error> {
+	) -> Result<Option<RoaringTreemap>> {
 		let key = self.index_key_base.new_bc_key(term_id)?;
 		if let Some(val) = tx.get(key, None).await? {
 			let docs = RoaringTreemap::deserialize_from(&mut val.as_slice())?;
@@ -55,7 +55,7 @@ impl TermDocs {
 		tx: &Transaction,
 		term_id: TermId,
 		doc_id: DocId,
-	) -> Result<DocLength, Error> {
+	) -> Result<DocLength> {
 		if let Some(mut docs) = self.get_docs(tx, term_id).await? {
 			if docs.contains(doc_id) {
 				docs.remove(doc_id);

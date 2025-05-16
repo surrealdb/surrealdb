@@ -24,6 +24,7 @@ use crate::sql::statements::update::UpdateStatement;
 use crate::sql::statements::upsert::UpsertStatement;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Explain, Permission, Timeout, With};
+use anyhow::Result;
 use std::borrow::Cow;
 use std::fmt;
 

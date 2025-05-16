@@ -4,7 +4,6 @@
 //! - `current`: value after the transaction
 //! - `initial`: value before the transaction
 //! - `id`: traditionally an integer but can be an object or collection such as an array
-use crate::err;
 
 pub(crate) use self::document::*;
 
@@ -36,11 +35,11 @@ mod table; // Processes any foreign tables relevant for this document'
 /// Error result used when a function can result in the value being processed being ignored.
 pub enum IgnoreError {
 	Ignore,
-	Error(Box<err::Error>),
+	Error(anyhow::Error),
 }
 
-impl From<err::Error> for IgnoreError {
-	fn from(value: err::Error) -> Self {
-		IgnoreError::Error(Box::new(value))
+impl From<anyhow::Error> for IgnoreError {
+	fn from(value: anyhow::Error) -> Self {
+		IgnoreError::Error(value)
 	}
 }

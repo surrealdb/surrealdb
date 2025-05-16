@@ -5,6 +5,7 @@ use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Number, Value};
 use ahash::AHasher;
 use ahash::HashSet;
+use anyhow::{ensure, Result};
 use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
@@ -420,7 +421,7 @@ impl From<&Vector> for Value {
 }
 
 impl Vector {
-	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self, Error> {
+	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(d);
@@ -451,7 +452,7 @@ impl Vector {
 		Ok(res)
 	}
 
-	fn check_vector_value<T>(value: &Value, vec: &mut Vec<T>) -> Result<(), Error>
+	fn check_vector_value<T>(value: &Value, vec: &mut Vec<T>) -> Result<()>
 	where
 		T: TryFrom<Number, Error = Error>,
 	{
@@ -466,11 +467,11 @@ impl Vector {
 				vec.push((*n).try_into()?);
 				Ok(())
 			}
-			_ => Err(Error::InvalidVectorValue(value.clone().to_raw_string())),
+			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.clone().to_raw_string()))),
 		}
 	}
 
-	pub fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self, Error> {
+	pub fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(v.len());
@@ -501,7 +502,7 @@ impl Vector {
 		Ok(res)
 	}
 
-	fn check_vector_number<T>(v: &[Number], vec: &mut Vec<T>) -> Result<(), Error>
+	fn check_vector_number<T>(v: &[Number], vec: &mut Vec<T>) -> Result<()>
 	where
 		T: TryFrom<Number, Error = Error>,
 	{
@@ -521,18 +522,18 @@ impl Vector {
 		}
 	}
 
-	pub(super) fn check_expected_dimension(current: usize, expected: usize) -> Result<(), Error> {
-		if current != expected {
-			Err(Error::InvalidVectorDimension {
+	pub(super) fn check_expected_dimension(current: usize, expected: usize) -> Result<()> {
+		ensure!(
+			current == expected,
+			Error::InvalidVectorDimension {
 				current,
 				expected,
-			})
-		} else {
-			Ok(())
-		}
+			}
+		);
+		Ok(())
 	}
 
-	pub(super) fn check_dimension(&self, expected_dim: usize) -> Result<(), Error> {
+	pub(super) fn check_dimension(&self, expected_dim: usize) -> Result<()> {
 		Self::check_expected_dimension(self.len(), expected_dim)
 	}
 }

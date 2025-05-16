@@ -1,4 +1,3 @@
-use crate::err::Error;
 use crate::fnc::util::math::vector::{
 	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
 	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
@@ -7,6 +6,7 @@ use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Number, Value};
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -182,7 +182,7 @@ pub enum Distance {
 }
 
 impl Distance {
-	pub(crate) fn compute(&self, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number, Error> {
+	pub(crate) fn compute(&self, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number> {
 		match self {
 			Self::Cosine => v1.cosine_distance(v2),
 			Self::Chebyshev => v1.chebyshev_distance(v2),

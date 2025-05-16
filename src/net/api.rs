@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
+use super::error::ResponseError;
 use super::params::Params;
 use super::AppState;
 use crate::cnf::HTTP_MAX_API_BODY_SIZE;
-use crate::err::Error;
+use crate::net::error::Error as NetError;
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
@@ -51,7 +52,7 @@ async fn handler(
 	Query(query): Query<Params>,
 	method: Method,
 	body: Body,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> Result<impl IntoResponse, ResponseError> {
 	// Format the full URL
 	let url = format!("/api/{ns}/{db}/{path}");
 	// Get a database reference
@@ -59,12 +60,12 @@ async fn handler(
 	// Check if the experimental capability is enabled
 	if !state.datastore.get_capabilities().allows_experimental(&ExperimentalTarget::DefineApi) {
 		warn!("Experimental capability for API routes is not enabled");
-		return Err(Error::NotFound(url));
+		return Err(NetError::NotFound(url).into());
 	}
 	// Check if capabilities allow querying the requested HTTP route
 	if !ds.allows_http_route(&RouteTarget::Api) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Api);
-		return Err(Error::ForbiddenRoute(RouteTarget::Api.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Api.to_string()).into());
 	}
 
 	let method = match method {
@@ -74,13 +75,15 @@ async fn handler(
 		Method::POST => ApiMethod::Post,
 		Method::PUT => ApiMethod::Put,
 		Method::TRACE => ApiMethod::Trace,
-		_ => return Err(Error::NotFound(url)),
+		_ => return Err(NetError::NotFound(url).into()),
 	};
 
 	let tx = Arc::new(
-		ds.transaction(TransactionType::Write, LockType::Optimistic).await.map_err(Error::from)?,
+		ds.transaction(TransactionType::Write, LockType::Optimistic)
+			.await
+			.map_err(ResponseError)?,
 	);
-	let apis = tx.all_db_apis(&ns, &db).await.map_err(Error::from)?;
+	let apis = tx.all_db_apis(&ns, &db).await.map_err(ResponseError)?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
 	let (mut res, res_instruction) =
@@ -103,70 +106,71 @@ async fn handler(
 				.await
 			{
 				Ok(Some(v)) => v,
-				Err(e) => return Err(Error::from(e)),
-				_ => return Err(Error::NotFound(url)),
+				Ok(None) => return Err(NetError::NotFound(url).into()),
+				Err(e) => return Err(ResponseError(e)),
 			}
 		} else {
-			return Err(Error::NotFound(url));
+			return Err(NetError::NotFound(url).into());
 		};
 
 	// Commit the transaction
-	tx.commit().await.map_err(Error::from)?;
+	tx.commit().await.map_err(ResponseError)?;
 
 	let res_body: Vec<u8> = if let Some(body) = res.body {
 		match res_instruction {
-			ResponseInstruction::Raw => match body {
-				Value::Strand(v) => {
-					res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().map_err(
-						|_| Error::Api(ApiError::Unreachable("Expected a valid format".into())),
-					)?);
-					v.0.into_bytes()
+			ResponseInstruction::Raw => {
+				match body {
+					Value::Strand(v) => {
+						res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().map_err(
+							|_| ApiError::Unreachable("Expected a valid format".into()),
+						)?);
+						v.0.into_bytes()
+					}
+					Value::Bytes(v) => {
+						res.headers.entry(CONTENT_TYPE).or_insert(
+							"application/octet-stream".parse().map_err(|_| {
+								ApiError::Unreachable("Expected a valid format".into())
+							})?,
+						);
+						v.into()
+					}
+					v => {
+						return Err(ApiError::InvalidApiResponse(format!(
+							"Expected bytes or string, found {}",
+							v.kindof()
+						))
+						.into())
+					}
 				}
-				Value::Bytes(v) => {
-					res.headers.entry(CONTENT_TYPE).or_insert(
-						"application/octet-stream".parse().map_err(|_| {
-							Error::Api(ApiError::Unreachable("Expected a valid format".into()))
-						})?,
-					);
-					v.into()
-				}
-				v => {
-					return Err(Error::Api(ApiError::InvalidApiResponse(format!(
-						"Expected bytes or string, found {}",
-						v.kindof()
-					))))
-				}
-			},
+			}
 			ResponseInstruction::Format(format) => {
 				if res.headers.contains_key("Content-Type") {
-					return Err(Error::Api(ApiError::InvalidApiResponse(
+					return Err(ApiError::InvalidApiResponse(
 						"A Content-Type header was already set while this was not expected".into(),
-					)));
+					)
+					.into());
 				}
 
 				let (header, val) = match format {
 					Format::Json => ("application/json", json::res(body)?),
 					Format::Cbor => ("application/cbor", cbor::res(body)?),
 					Format::Revision => ("application/surrealdb", revision::res(body)?),
-					_ => {
-						return Err(Error::Api(ApiError::Unreachable(
-							"Expected a valid format".into(),
-						)))
-					}
+					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),
 				};
 
 				res.headers.insert(
 					CONTENT_TYPE,
-					header.parse().map_err(|_| {
-						Error::Api(ApiError::Unreachable("Expected a valid format".into()))
-					})?,
+					header
+						.parse()
+						.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
 				);
 				val
 			}
 			ResponseInstruction::Native => {
-				return Err(Error::Api(ApiError::Unreachable(
+				return Err(ApiError::Unreachable(
 					"Found a native response instruction where this is not supported".into(),
-				)))
+				)
+				.into())
 			}
 		}
 	} else {

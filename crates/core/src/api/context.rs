@@ -1,9 +1,7 @@
 use http::HeaderMap;
 
-use crate::{
-	err::Error,
-	sql::{Bytesize, Duration},
-};
+use crate::sql::{Bytesize, Duration};
+use anyhow::Result;
 
 use super::middleware::{invoke::InvokeMiddleware, CollectedMiddleware};
 
@@ -17,10 +15,7 @@ pub struct InvocationContext {
 }
 
 impl InvocationContext {
-	pub fn apply_middleware<'a>(
-		&'a mut self,
-		middleware: CollectedMiddleware<'a>,
-	) -> Result<(), Error> {
+	pub fn apply_middleware<'a>(&'a mut self, middleware: CollectedMiddleware<'a>) -> Result<()> {
 		for entry in middleware {
 			entry.invoke(self)?;
 		}

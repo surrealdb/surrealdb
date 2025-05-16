@@ -1,10 +1,10 @@
 mod helpers;
 mod parse;
 use crate::helpers::Test;
-use surrealdb::err::Error;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn select_start_limit_fetch() -> Result<(), Error> {
+async fn select_start_limit_fetch() -> Result<()> {
 	let sql = "
 		CREATE tag:rs SET name = 'Rust';
 		CREATE tag:go SET name = 'Golang';

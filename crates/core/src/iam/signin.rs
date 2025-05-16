@@ -14,6 +14,7 @@ use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::statements::{access, AccessGrant, DefineAccessStatement};
 use crate::sql::{access_type, AccessType, Datetime, Object, Value};
+use anyhow::{bail, ensure, Result};
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use md5::Digest;
@@ -45,11 +46,7 @@ impl From<SigninData> for Value {
 	}
 }
 
-pub async fn signin(
-	kvs: &Datastore,
-	session: &mut Session,
-	vars: Object,
-) -> Result<SigninData, Error> {
+pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SigninData> {
 	// Check vars contains only computed values
 	vars.validate_computed()?;
 	// Parse the specified variables
@@ -84,7 +81,7 @@ pub async fn signin(
 					// Attempt to signin to database
 					super::signin::db_user(kvs, session, ns, db, user, pass).await
 				}
-				_ => Err(Error::MissingUserOrPass),
+				_ => Err(anyhow::Error::new(Error::MissingUserOrPass)),
 			}
 		}
 		// NS signin with access method
@@ -111,7 +108,7 @@ pub async fn signin(
 					// Attempt to signin to namespace
 					super::signin::ns_user(kvs, session, ns, user, pass).await
 				}
-				_ => Err(Error::MissingUserOrPass),
+				_ => Err(anyhow::Error::new(Error::MissingUserOrPass)),
 			}
 		}
 		// ROOT signin with user credentials
@@ -129,10 +126,10 @@ pub async fn signin(
 					// Attempt to signin to root
 					super::signin::root_user(kvs, session, user, pass).await
 				}
-				_ => Err(Error::MissingUserOrPass),
+				_ => Err(anyhow::Error::new(Error::MissingUserOrPass)),
 			}
 		}
-		_ => Err(Error::NoSigninTarget),
+		_ => Err(anyhow::Error::new(Error::NoSigninTarget)),
 	}
 }
 
@@ -143,7 +140,7 @@ pub async fn db_access(
 	db: String,
 	ac: String,
 	vars: Object,
-) -> Result<SigninData, Error> {
+) -> Result<SigninData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -162,7 +159,7 @@ pub async fn db_access(
 					// Check if the record access method supports issuing tokens
 					let iss = match &at.jwt.issue {
 						Some(iss) => iss.clone(),
-						_ => return Err(Error::AccessMethodMismatch),
+						_ => bail!(Error::AccessMethodMismatch),
 					};
 					// Check if a refresh token is defined
 					if let Some(bearer) = &at.bearer {
@@ -274,49 +271,53 @@ pub async fn db_access(
 													token,
 													refresh,
 												}),
-												_ => Err(Error::TokenMakingFailed),
+												_ => Err(anyhow::Error::new(
+													Error::TokenMakingFailed,
+												)),
 											}
 										}
-										_ => Err(Error::NoRecordFound),
+										_ => Err(anyhow::Error::new(Error::NoRecordFound)),
 									}
 								}
-								Err(e) => match e {
+								Err(e) => match e.downcast_ref() {
 									// If the SIGNIN clause throws a specific error, authentication fails with that error
-									Error::Thrown(_) => Err(e),
+									Some(Error::Thrown(_)) => Err(e),
 									// If the SIGNIN clause failed due to an unexpected error, be more specific
 									// This allows clients to handle these errors, which may be retryable
-									Error::Tx(_) | Error::TxFailure | Error::TxRetryable => {
+									Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
 										debug!("Unexpected error found while executing a SIGNIN clause: {e}");
-										Err(Error::UnexpectedAuth)
+										Err(anyhow::Error::new(Error::UnexpectedAuth))
 									}
 									// Otherwise, return a generic error unless it should be forwarded
-									e => {
+									_ => {
 										debug!("Record user signin query failed: {e}");
 										if *INSECURE_FORWARD_ACCESS_ERRORS {
 											Err(e)
 										} else {
-											Err(Error::AccessRecordSigninQueryFailed)
+											Err(anyhow::Error::new(
+												Error::AccessRecordSigninQueryFailed,
+											))
 										}
 									}
 								},
 							}
 						}
-						_ => Err(Error::AccessRecordNoSignin),
+						_ => Err(anyhow::Error::new(Error::AccessRecordNoSignin)),
 					}
 				}
 				AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
 						Some(key) => key.to_raw_string(),
-						None => return Err(Error::AccessBearerMissingKey),
+						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 					};
 
 					signin_bearer(kvs, session, Some(ns), Some(db), av, &at, key).await
 				}
-				_ => Err(Error::AccessMethodMismatch),
+				_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 			}
 		}
-		_ => Err(Error::AccessNotFound),
+		_ => Err(anyhow::Error::new(Error::AccessNotFound)),
 	}
 }
 
@@ -327,7 +328,7 @@ pub async fn db_user(
 	db: String,
 	user: String,
 	pass: String,
-) -> Result<SigninData, Error> {
+) -> Result<SigninData> {
 	match verify_db_creds(kvs, &ns, &db, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -353,7 +354,9 @@ pub async fn db_user(
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Database(ns.clone(), db.clone())).try_into()?);
+			session.au = Arc::new(
+				(&u, Level::Database(ns.clone(), db.clone())).try_into().map_err(Error::from)?,
+			);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -361,13 +364,13 @@ pub async fn db_user(
 					token: tk,
 					refresh: None,
 				}),
-				_ => Err(Error::TokenMakingFailed),
+				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
 		// The password did not verify
 		Err(e) => {
 			debug!("Failed to verify signin credentials for user `{user}` in database `{ns}/{db}`: {e}");
-			Err(Error::InvalidAuth)
+			Err(anyhow::Error::new(Error::InvalidAuth))
 		}
 	}
 }
@@ -378,7 +381,7 @@ pub async fn ns_access(
 	ns: String,
 	ac: String,
 	vars: Object,
-) -> Result<SigninData, Error> {
+) -> Result<SigninData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -394,15 +397,15 @@ pub async fn ns_access(
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
 						Some(key) => key.to_raw_string(),
-						None => return Err(Error::AccessBearerMissingKey),
+						None => bail!(Error::AccessBearerMissingKey),
 					};
 
 					signin_bearer(kvs, session, Some(ns), None, av, &at, key).await
 				}
-				_ => Err(Error::AccessMethodMismatch),
+				_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 			}
 		}
-		_ => Err(Error::AccessNotFound),
+		_ => Err(anyhow::Error::new(Error::AccessNotFound)),
 	}
 }
 
@@ -412,7 +415,7 @@ pub async fn ns_user(
 	ns: String,
 	user: String,
 	pass: String,
-) -> Result<SigninData, Error> {
+) -> Result<SigninData> {
 	match verify_ns_creds(kvs, &ns, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -436,7 +439,8 @@ pub async fn ns_user(
 			session.tk = Some((&val).into());
 			session.ns = Some(ns.clone());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Namespace(ns.clone())).try_into()?);
+			session.au =
+				Arc::new((&u, Level::Namespace(ns.clone())).try_into().map_err(Error::from)?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -444,7 +448,7 @@ pub async fn ns_user(
 					token: tk,
 					refresh: None,
 				}),
-				_ => Err(Error::TokenMakingFailed),
+				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
 		// The password did not verify
@@ -452,7 +456,7 @@ pub async fn ns_user(
 			debug!(
 				"Failed to verify signin credentials for user `{user}` in namespace `{ns}`: {e}"
 			);
-			Err(Error::InvalidAuth)
+			Err(anyhow::Error::new(Error::InvalidAuth))
 		}
 	}
 }
@@ -462,7 +466,7 @@ pub async fn root_user(
 	session: &mut Session,
 	user: String,
 	pass: String,
-) -> Result<SigninData, Error> {
+) -> Result<SigninData> {
 	match verify_root_creds(kvs, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -484,7 +488,7 @@ pub async fn root_user(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.exp = expiration(u.duration.session)?;
-			session.au = Arc::new((&u, Level::Root).try_into()?);
+			session.au = Arc::new((&u, Level::Root).try_into().map_err(Error::from)?);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -492,13 +496,13 @@ pub async fn root_user(
 					token: tk,
 					refresh: None,
 				}),
-				_ => Err(Error::TokenMakingFailed),
+				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
 		// The password did not verify
 		Err(e) => {
 			debug!("Failed to verify signin credentials for user `{user}` in root: {e}");
-			Err(Error::InvalidAuth)
+			Err(anyhow::Error::new(Error::InvalidAuth))
 		}
 	}
 }
@@ -508,7 +512,7 @@ pub async fn root_access(
 	session: &mut Session,
 	ac: String,
 	vars: Object,
-) -> Result<SigninData, Error> {
+) -> Result<SigninData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -524,15 +528,15 @@ pub async fn root_access(
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
 						Some(key) => key.to_raw_string(),
-						None => return Err(Error::AccessBearerMissingKey),
+						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 					};
 
 					signin_bearer(kvs, session, None, None, av, &at, key).await
 				}
-				_ => Err(Error::AccessMethodMismatch),
+				_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 			}
 		}
-		_ => Err(Error::AccessNotFound),
+		_ => Err(anyhow::Error::new(Error::AccessNotFound)),
 	}
 }
 
@@ -544,17 +548,17 @@ pub async fn signin_bearer(
 	av: Arc<DefineAccessStatement>,
 	at: &access_type::BearerAccess,
 	key: String,
-) -> Result<SigninData, Error> {
+) -> Result<SigninData> {
 	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
 	if !kvs.get_capabilities().allows_experimental(&ExperimentalTarget::BearerAccess) {
 		// Return opaque error to avoid leaking the existence of the feature.
 		debug!("Error attempting to authenticate with disabled bearer access feature");
-		return Err(Error::InvalidAuth);
+		bail!(Error::InvalidAuth);
 	}
 	// Check if the bearer access method supports issuing tokens.
 	let iss = match &at.jwt.issue {
 		Some(iss) => iss.clone(),
-		_ => return Err(Error::AccessMethodMismatch),
+		_ => bail!(Error::AccessMethodMismatch),
 	};
 	// Extract key identifier and key from the provided key.
 	let kid = validate_grant_bearer(&key)?;
@@ -565,7 +569,7 @@ pub async fn signin_bearer(
 		(Some(ns), Some(db)) => tx.get_db_access_grant(ns, db, &av.name, &kid).await,
 		(Some(ns), None) => tx.get_ns_access_grant(ns, &av.name, &kid).await,
 		(None, None) => tx.get_root_access_grant(&av.name, &kid).await,
-		(None, Some(_)) => return Err(Error::NsEmpty),
+		(None, Some(_)) => bail!(Error::NsEmpty),
 	}
 	.map_err(|e| {
 		debug!("Error retrieving bearer access grant: {e}");
@@ -597,7 +601,7 @@ pub async fn signin_bearer(
 				// Return opaque error to avoid leaking grant subject existence.
 				Error::InvalidAuth
 			}),
-			(None, Some(_)) => return Err(Error::NsEmpty),
+			(None, Some(_)) => bail!(Error::NsEmpty),
 		}?;
 		// Ensure that the transaction is cancelled.
 		tx.cancel().await?;
@@ -634,7 +638,7 @@ pub async fn signin_bearer(
 			(Some(ns), Some(db)) => Session::editor().with_ns(ns).with_db(db),
 			(Some(ns), None) => Session::editor().with_ns(ns),
 			(None, None) => Session::editor(),
-			(None, Some(_)) => return Err(Error::NsEmpty),
+			(None, Some(_)) => bail!(Error::NsEmpty),
 		};
 		sess.tk = Some((&claims).into());
 		sess.ip.clone_from(&session.ip);
@@ -657,14 +661,14 @@ pub async fn signin_bearer(
 						Some(refresh)
 					} else {
 						debug!("Invalid attempt to authenticate as a record without a namespace and database");
-						return Err(Error::InvalidAuth);
+						bail!(Error::InvalidAuth);
 					}
 				}
 				access::Subject::User(_) => {
 					debug!(
 						"Invalid attempt to authenticatea as a system user with a refresh token"
 					);
-					return Err(Error::InvalidAuth);
+					bail!(Error::InvalidAuth);
 				}
 			}
 		}
@@ -684,12 +688,16 @@ pub async fn signin_bearer(
 		access::Subject::User(user) => {
 			session.au = Arc::new(Auth::new(Actor::new(
 				user.to_string(),
-				roles.iter().map(Role::try_from).collect::<Result<_, _>>()?,
+				roles
+					.iter()
+					.map(|e| Role::from_str(e))
+					.collect::<Result<_, _>>()
+					.map_err(Error::from)?,
 				match (ns, db) {
 					(Some(ns), Some(db)) => Level::Database(ns, db),
 					(Some(ns), None) => Level::Namespace(ns),
 					(None, None) => Level::Root,
-					(None, Some(_)) => return Err(Error::NsEmpty),
+					(None, Some(_)) => bail!(Error::NsEmpty),
 				},
 			)));
 		}
@@ -701,7 +709,7 @@ pub async fn signin_bearer(
 					Level::Record(ns, db, rid.to_string())
 				} else {
 					debug!("Invalid attempt to authenticate as a record without a namespace and database");
-					return Err(Error::InvalidAuth);
+					bail!(Error::InvalidAuth);
 				},
 			)));
 			session.rd = Some(Value::from(rid.to_owned()));
@@ -713,37 +721,28 @@ pub async fn signin_bearer(
 			token,
 			refresh,
 		}),
-		_ => Err(Error::TokenMakingFailed),
+		_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 	}
 }
 
-pub fn validate_grant_bearer(key: &str) -> Result<String, Error> {
+pub fn validate_grant_bearer(key: &str) -> Result<String> {
 	let parts: Vec<&str> = key.split("-").collect();
-	if parts.len() != 4 {
-		return Err(Error::AccessGrantBearerInvalid);
-	}
+	ensure!(parts.len() == 4, Error::AccessGrantBearerInvalid);
 	// Check that the prefix type exists.
 	access_type::BearerAccessType::from_str(parts[1])?;
 	// Retrieve the key identifier from the provided key.
 	let kid = parts[2];
 	// Check the length of the key identifier.
-	if kid.len() != access::GRANT_BEARER_ID_LENGTH {
-		return Err(Error::AccessGrantBearerInvalid);
-	};
+	ensure!(kid.len() == access::GRANT_BEARER_ID_LENGTH, Error::AccessGrantBearerInvalid);
 	// Retrieve the key from the provided key.
 	let key = parts[3];
 	// Check the length of the key.
-	if key.len() != access::GRANT_BEARER_KEY_LENGTH {
-		return Err(Error::AccessGrantBearerInvalid);
-	};
+	ensure!(key.len() == access::GRANT_BEARER_KEY_LENGTH, Error::AccessGrantBearerInvalid);
 
 	Ok(kid.to_string())
 }
 
-pub fn verify_grant_bearer(
-	gr: &Arc<AccessGrant>,
-	key: String,
-) -> Result<&access::GrantBearer, Error> {
+pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<&access::GrantBearer> {
 	// Check if the grant is revoked or expired.
 	match (&gr.expiration, &gr.revocation) {
 		(None, None) => {}
@@ -751,12 +750,12 @@ pub fn verify_grant_bearer(
 			if exp < &Datetime::default() {
 				// Return opaque error to avoid leaking revocation status.
 				debug!("Bearer access grant `{}` for method `{}` is expired", gr.id, gr.ac);
-				return Err(Error::InvalidAuth);
+				bail!(Error::InvalidAuth);
 			}
 		}
 		(_, Some(_)) => {
 			debug!("Bearer access grant `{}` for method `{}` is revoked", gr.id, gr.ac);
-			return Err(Error::InvalidAuth);
+			bail!(Error::InvalidAuth);
 		}
 	}
 	// Check if the provided key matches the bearer key in the grant.
@@ -776,10 +775,10 @@ pub fn verify_grant_bearer(
 				Ok(bearer)
 			} else {
 				debug!("Bearer access grant `{}` for method `{}` is invalid", gr.id, gr.ac);
-				Err(Error::InvalidAuth)
+				Err(anyhow::Error::new(Error::InvalidAuth))
 			}
 		}
-		_ => Err(Error::AccessMethodMismatch),
+		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 	}
 }
 
@@ -1108,10 +1107,11 @@ mod tests {
 				vars.into(),
 			)
 			.await;
-			match res {
-				Ok(data) => panic!("Unexpected successful signin: {:?}", data),
-				Err(Error::InvalidAuth) => {} // ok
-				Err(e) => panic!("Expected InvalidAuth, but got: {e}"),
+
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::InvalidAuth => {}
+				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
 		// Test with expired refresh
@@ -1181,10 +1181,10 @@ mod tests {
 			)
 			.await;
 			// Should fail due to the refresh token being expired
-			match res {
-				Ok(data) => panic!("Unexpected successful signin: {:?}", data),
-				Err(Error::InvalidAuth) => {} // ok
-				Err(e) => panic!("Expected InvalidAuth, but got: {e}"),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::InvalidAuth => {}
+				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
 		// Test that only the hash of the refresh token is stored
@@ -1846,12 +1846,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::Thrown(e)) if e == "This user is not enabled" => {} // ok
-				res => panic!(
-				    "Expected authentication to failed due to user not being enabled, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::Thrown(e) => assert_eq!(e, "This user is not enabled"),
+				e => panic!("Unexpected error, expected Thrown found {e:?}"),
 			}
 		}
 
@@ -1895,12 +1893,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected authentication to generally fail, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::InvalidAuth => {}
+				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
 	}
@@ -1980,13 +1976,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			match (res1, res2) {
 				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
 				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
-				(Err(e1), Ok(_)) => match &e1 {
-						Error::UnexpectedAuth => {} // ok
-						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				(Err(e1), Ok(_)) => {
+					match e1.downcast().expect("Unexpected error kind") {
+						Error::InvalidAuth => {}
+						e => panic!("Unexpected error, expected InvalidAuth found {e}"),
+					}
+
 				}
-				(Ok(_), Err(e2)) => match &e2 {
-						Error::UnexpectedAuth => {} // ok
-						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				(Ok(_), Err(e2)) =>{
+					match e2.downcast().expect("Unexpected error kind") {
+						Error::InvalidAuth => {}
+						e => panic!("Unexpected error, expected InvalidAuth found {e}"),
+					}
 				}
 			}
 		}
@@ -1998,18 +1999,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			ds.execute(
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
-					SIGNIN (
-						SELECT * FROM type::thing('user', $id)
-					)
-					AUTHENTICATE {
-						-- Concurrently write to the same document
+				SIGNIN (
+					SELECT * FROM type::thing('user', $id)
+				)
+				AUTHENTICATE {
+					-- Concurrently write to the same document
 						UPSERT count:1 SET count += 1;
-						-- Increase the duration of the transaction
+					-- Increase the duration of the transaction
 						sleep(500ms);
-						-- Continue with authentication
+					-- Continue with authentication
 						$auth.id -- Continue with authentication
-					}
-					DURATION FOR SESSION 2h
+				}
+				DURATION FOR SESSION 2h
 				;
 
 				CREATE user:1;
@@ -2056,13 +2057,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			match (res1, res2) {
 				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
 				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
-				(Err(e1), Ok(_)) => match &e1 {
-						Error::UnexpectedAuth => {} // ok
-						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				(Err(e1), Ok(_)) => {
+					match e1.downcast().expect("Unexpected error kind") {
+						Error::InvalidAuth => {}
+						e => panic!("Unexpected error, expected InvalidAuth found {e:?}"),
+					}
+
 				}
-				(Ok(_), Err(e2)) => match &e2 {
-						Error::UnexpectedAuth => {} // ok
-						e => panic!("Expected authentication to return an UnexpectedAuth error, but insted got: {e}")
+				(Ok(_), Err(e2)) =>{
+					match e2.downcast().expect("Unexpected error kind") {
+						Error::InvalidAuth => {}
+						e => panic!("Unexpected error, expected InvalidAuth found {e:?}"),
+					}
 				}
 			}
 		}
@@ -2106,12 +2112,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						DURATION FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DURATION FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -2220,15 +2226,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						AUTHENTICATE {{
-							RETURN NONE
-						}}
-						DURATION FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							AUTHENTICATE {{
+								RETURN NONE
+							}}
+							DURATION FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -2337,15 +2343,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						AUTHENTICATE {{
-							THROW "Test authentication error";
-						}}
-						DURATION FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							AUTHENTICATE {{
+								THROW "Test authentication error";
+							}}
+							DURATION FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level,
 						),
 						&sess,
@@ -2404,14 +2410,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					_ => panic!("Unsupported level"),
 				};
 
-				match res {
-					Err(Error::Thrown(e)) => {
-						assert_eq!(e, "Test authentication error")
-					}
-					res => panic!(
-						"Expected a thrown authentication error, but instead received: {:?}",
-						res
-					),
+				let e = res.unwrap_err();
+				match e.downcast().expect("Unexpected error kind") {
+					Error::Thrown(e) => assert_eq!(e, "Test authentication error"),
+					e => panic!("Unexpected error, expected Thrown found {e:?}"),
 				}
 			}
 
@@ -2426,12 +2428,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						DURATION FOR GRANT 1s FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DURATION FOR GRANT 1s FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -2493,12 +2495,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					_ => panic!("Unsupported level"),
 				};
 
-				match res {
-					Err(Error::InvalidAuth) => {} // ok
-					res => panic!(
-						"Expected a generic authentication error, but instead received: {:?}",
-						res
-					),
+				let e = res.unwrap_err();
+				match e.downcast().expect("Unexpected error kind") {
+					Error::InvalidAuth => {}
+					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 				}
 			}
 
@@ -2513,12 +2513,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						DURATION FOR GRANT 1s FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DURATION FOR GRANT 1s FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -2589,12 +2589,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					_ => panic!("Unsupported level"),
 				};
 
-				match res {
-					Err(Error::InvalidAuth) => {} // ok
-					res => panic!(
-						"Expected a generic authentication error, but instead received: {:?}",
-						res
-					),
+				let e = res.unwrap_err();
+				match e.downcast().expect("Unexpected error kind") {
+					Error::InvalidAuth => {}
+					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 				}
 			}
 
@@ -2609,12 +2607,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						DURATION FOR GRANT 1s FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DURATION FOR GRANT 1s FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -2678,12 +2676,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					_ => panic!("Unsupported level"),
 				};
 
-				match res {
-					Err(Error::AccessNotFound) => {} // ok
-					res => panic!(
-						"Expected an access method not found error, but instead received: {:?}",
-						res
-					),
+				let e = res.unwrap_err();
+				match e.downcast().expect("Unexpected error kind") {
+					Error::AccessNotFound => {}
+					e => panic!("Unexpected error, expected AccessNotFound found {e}"),
 				}
 			}
 
@@ -2698,12 +2694,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						DURATION FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DURATION FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -2765,12 +2761,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					_ => panic!("Unsupported level"),
 				};
 
-				match res {
-					Err(Error::AccessBearerMissingKey) => {} // ok
-					res => panic!(
-						"Expected a missing key authentication error, but instead received: {:?}",
-						res
-					),
+				let e = res.unwrap_err();
+				match e.downcast().expect("Unexpected error kind") {
+					Error::AccessBearerMissingKey => {}
+					e => panic!("Unexpected error, expected AccessBearerMissingKey found {e}"),
 				}
 			}
 
@@ -2785,12 +2779,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						DURATION FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DURATION FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -2854,12 +2848,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					_ => panic!("Unsupported level"),
 				};
 
-				match res {
-					Err(Error::AccessGrantBearerInvalid) => {} // ok
-					res => panic!(
-						"Expected an invalid key authentication error, but instead received: {:?}",
-						res
-					),
+				let e = res.unwrap_err();
+				match e.downcast().expect("Unexpected error kind") {
+					Error::AccessGrantBearerInvalid => {}
+					e => panic!("Unexpected error, expected AccessGrantBearerInvalid found {e}"),
 				}
 			}
 
@@ -2874,12 +2866,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						DURATION FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DURATION FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -2943,12 +2935,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					_ => panic!("Unsupported level"),
 				};
 
-				match res {
-					Err(Error::AccessGrantBearerInvalid) => {} // ok
-					res => panic!(
-						"Expected an invalid key authentication error, but instead received: {:?}",
-						res
-					),
+				let e = res.unwrap_err();
+				match e.downcast().expect("Unexpected error kind") {
+					Error::AccessGrantBearerInvalid => {}
+					e => panic!("Unexpected error, expected AccessGrantBearerInvalid found {e}"),
 				}
 			}
 
@@ -2963,12 +2953,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						DURATION FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DURATION FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -3032,12 +3022,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					_ => panic!("Unsupported level"),
 				};
 
-				match res {
-					Err(Error::InvalidAuth) => {} // ok
-					res => panic!(
-						"Expected a generic authentication error, but instead received: {:?}",
-						res
-					),
+				let e = res.unwrap_err();
+				match e.downcast().expect("Unexpected error kind") {
+					Error::InvalidAuth => {}
+					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 				}
 			}
 
@@ -3052,12 +3040,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-					DEFINE ACCESS api ON {} TYPE BEARER FOR USER
-						DURATION FOR SESSION 2h
-					;
-					DEFINE USER tobie ON {} ROLES EDITOR;
-					ACCESS api ON {} GRANT FOR USER tobie;
-					"#,
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DURATION FOR SESSION 2h
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -3121,12 +3109,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					_ => panic!("Unsupported level"),
 				};
 
-				match res {
-					Err(Error::InvalidAuth) => {} // ok
-					res => panic!(
-						"Expected a generic authentication error, but instead received: {:?}",
-						res
-					),
+				let e = res.unwrap_err();
+				match e.downcast().expect("Unexpected error kind") {
+					Error::InvalidAuth => {}
+					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 				}
 			}
 
@@ -3141,12 +3127,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.execute(
 						&format!(
 							r#"
-						DEFINE ACCESS api ON {} TYPE BEARER FOR USER
+							DEFINE ACCESS api ON {} TYPE BEARER FOR USER
 							DURATION FOR SESSION 2h
-						;
-						DEFINE USER tobie ON {} ROLES EDITOR;
-						ACCESS api ON {} GRANT FOR USER tobie;
-						"#,
+							;
+							DEFINE USER tobie ON {} ROLES EDITOR;
+							ACCESS api ON {} GRANT FOR USER tobie;
+							"#,
 							level.level, level.level, level.level
 						),
 						&sess,
@@ -3219,12 +3205,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let res = ds
 				.execute(
 					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
+					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
 					DURATION FOR SESSION 2h
-				;
-				CREATE user:test;
-				ACCESS api ON DATABASE GRANT FOR RECORD user:test;
-				"#,
+					;
+					CREATE user:test;
+					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
+					"#,
 					&sess,
 					None,
 				)
@@ -3295,11 +3281,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let res = ds
 				.execute(
 					r#"
-				DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
+					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
 					DURATION FOR SESSION 2h
-				;
-				ACCESS api ON DATABASE GRANT FOR RECORD user:test;
-				"#,
+					;
+					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
+					"#,
 					&sess,
 					None,
 				)
@@ -3372,10 +3358,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						AUTHENTICATE {{
-							RETURN NONE
-						}}
-						DURATION FOR SESSION 2h
+					AUTHENTICATE {{
+						RETURN NONE
+					}}
+					DURATION FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -3452,10 +3438,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						AUTHENTICATE {{
-							THROW "Test authentication error";
-						}}
-						DURATION FOR SESSION 2h
+					AUTHENTICATE {{
+						THROW "Test authentication error";
+					}}
+					DURATION FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -3499,14 +3485,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::Thrown(e)) => {
-					assert_eq!(e, "Test authentication error")
-				}
-				res => panic!(
-					"Expected a thrown authentication error, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::Thrown(e) => assert_eq!(e, "Test authentication error"),
+				e => panic!("Unexpected error, expected Thrown found {e:?}"),
 			}
 		}
 
@@ -3520,7 +3502,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						DURATION FOR GRANT 1s FOR SESSION 2h
+					DURATION FOR GRANT 1s FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -3567,12 +3549,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::InvalidAuth => {}
+				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
 
@@ -3586,7 +3566,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						DURATION FOR GRANT 1s FOR SESSION 2h
+					DURATION FOR GRANT 1s FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -3638,12 +3618,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::InvalidAuth => {}
+				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
 
@@ -3657,7 +3635,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						DURATION FOR GRANT 1s FOR SESSION 2h
+					DURATION FOR GRANT 1s FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -3704,12 +3682,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::AccessNotFound) => {} // ok
-				res => panic!(
-					"Expected an access method not found error, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::AccessNotFound => {}
+				e => panic!("Unexpected error, expected AccessNotFound found {e}"),
 			}
 		}
 
@@ -3723,7 +3699,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						DURATION FOR SESSION 2h
+					DURATION FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -3768,12 +3744,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::AccessBearerMissingKey) => {} // ok
-				res => panic!(
-					"Expected a missing key authentication error, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::AccessBearerMissingKey => {}
+				e => panic!("Unexpected error, expected AccessBearerMissingKey found {e}"),
 			}
 		}
 
@@ -3787,7 +3761,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						DURATION FOR SESSION 2h
+					DURATION FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -3836,12 +3810,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::AccessGrantBearerInvalid) => {} // ok
-				res => panic!(
-					"Expected an invalid key authentication error, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::AccessGrantBearerInvalid => {}
+				e => panic!("Unexpected error, expected AccessGrantBearerInvalid found {e}"),
 			}
 		}
 
@@ -3855,7 +3827,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						DURATION FOR SESSION 2h
+					DURATION FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -3904,12 +3876,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::AccessGrantBearerInvalid) => {} // ok
-				res => panic!(
-					"Expected an invalid key authentication error, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::AccessGrantBearerInvalid => {}
+				e => panic!("Unexpected error, expected AccessGrantBearerInvalid found {e}"),
 			}
 		}
 
@@ -3923,7 +3893,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						DURATION FOR SESSION 2h
+					DURATION FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -3972,12 +3942,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::InvalidAuth => {}
+				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
 
@@ -3991,7 +3959,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						DURATION FOR SESSION 2h
+					DURATION FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -4040,12 +4008,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			)
 			.await;
 
-			match res {
-				Err(Error::InvalidAuth) => {} // ok
-				res => panic!(
-					"Expected a generic authentication error, but instead received: {:?}",
-					res
-				),
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::InvalidAuth => {}
+				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
 
@@ -4059,7 +4025,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.execute(
 					r#"
 					DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
-						DURATION FOR SESSION 2h
+					DURATION FOR SESSION 2h
 					;
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
@@ -4194,11 +4160,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				_ => panic!("Unsupported level"),
 			};
 
-			match res {
-				Err(Error::IamError(IamError::InvalidRole(_))) => {} // ok
-				res => {
-					panic!("Expected an invalid role IAM error, but instead received: {:?}", res)
-				}
+			let e = res.unwrap_err();
+			match e.downcast().expect("Unexpected error kind") {
+				Error::IamError(IamError::InvalidRole(_)) => {}
+				e => panic!("Unexpected error, expected IamError(InvalidRole) found {e}"),
 			}
 		}
 	}

@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql;
 use crate::sql::value::Value;
 use crate::sql::Bytes;
+use anyhow::Result;
 use castaway::match_type;
 use serde::ser::Serialize;
 use serde_content::Number;
@@ -17,7 +18,7 @@ use std::fmt::Display;
 type Content = serde_content::Value<'static>;
 
 /// Convert a `T` into `surrealdb::sql::Value` which is an enum that can represent any valid SQL data.
-pub fn to_value<T>(value: T) -> Result<Value, Error>
+pub fn to_value<T>(value: T) -> Result<Value>
 where
 	T: Serialize + 'static,
 {
@@ -67,7 +68,7 @@ where
 }
 
 impl TryFrom<Content> for Value {
-	type Error = Error;
+	type Error = anyhow::Error;
 
 	fn try_from(content: Content) -> Result<Self, Self::Error> {
 		match content {
@@ -86,7 +87,7 @@ impl TryFrom<Content> for Value {
 				Number::F64(v) => Ok(v.into()),
 				Number::I128(v) => Ok(v.into()),
 				Number::U128(v) => Ok(v.into()),
-				_ => Err(Error::Serialization("unsupported number".to_owned())),
+				_ => Err(anyhow::Error::new(Error::Serialization("unsupported number".to_owned()))),
 			},
 			Content::Char(v) => Ok(v.to_string().into()),
 			Content::String(v) => match v {
@@ -111,7 +112,7 @@ impl TryFrom<Content> for Value {
 }
 
 impl TryFrom<Vec<Content>> for Value {
-	type Error = Error;
+	type Error = anyhow::Error;
 
 	fn try_from(v: Vec<Content>) -> Result<Self, Self::Error> {
 		let mut vec = Vec::with_capacity(v.len());
@@ -123,7 +124,7 @@ impl TryFrom<Vec<Content>> for Value {
 }
 
 impl TryFrom<Vec<(Content, Content)>> for Value {
-	type Error = Error;
+	type Error = anyhow::Error;
 
 	fn try_from(v: Vec<(Content, Content)>) -> Result<Self, Self::Error> {
 		let mut map = BTreeMap::new();
@@ -145,7 +146,7 @@ impl TryFrom<Vec<(Content, Content)>> for Value {
 }
 
 impl TryFrom<Vec<(Cow<'static, str>, Content)>> for Value {
-	type Error = Error;
+	type Error = anyhow::Error;
 
 	fn try_from(v: Vec<(Cow<'static, str>, Content)>) -> Result<Self, Self::Error> {
 		let mut map = BTreeMap::new();
@@ -157,7 +158,7 @@ impl TryFrom<Vec<(Cow<'static, str>, Content)>> for Value {
 }
 
 impl TryFrom<(Cow<'static, str>, Content)> for Value {
-	type Error = Error;
+	type Error = anyhow::Error;
 
 	fn try_from((key, value): (Cow<'static, str>, Content)) -> Result<Self, Self::Error> {
 		let mut map = BTreeMap::new();

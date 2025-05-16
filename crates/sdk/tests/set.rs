@@ -1,10 +1,10 @@
 mod helpers;
 mod parse;
 use helpers::Test;
-use surrealdb::err::Error;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn typed_set() -> Result<(), Error> {
+async fn typed_set() -> Result<()> {
 	let sql = "
         LET $foo: int = 42;
         RETURN $foo;

@@ -1,6 +1,5 @@
 use super::AppState;
-use crate::err::Error;
-use axum::response::IntoResponse;
+use crate::net::error::Error as NetError;
 use axum::routing::get;
 use axum::Extension;
 use axum::Router;
@@ -14,18 +13,18 @@ where
 	Router::new().route("/health", get(handler))
 }
 
-async fn handler(Extension(state): Extension<AppState>) -> impl IntoResponse {
+async fn handler(Extension(state): Extension<AppState>) -> Result<(), NetError> {
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Health) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Health);
-		return Err(Error::ForbiddenRoute(RouteTarget::Health.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Health.to_string()));
 	}
 	// Attempt to open a transaction
 	match db.transaction(Read, Optimistic).await {
 		// The transaction failed to start
-		Err(_) => Err(Error::InvalidStorage),
+		Err(_) => Err(NetError::InvalidStorage),
 		// The transaction was successful
 		Ok(tx) => {
 			// Cancel the transaction
@@ -36,7 +35,7 @@ async fn handler(Extension(state): Extension<AppState>) -> impl IntoResponse {
 					// Ensure the transaction is cancelled
 					let _ = tx.cancel().await;
 					// Return an error for this endpoint
-					Err(Error::InvalidStorage)
+					Err(NetError::InvalidStorage)
 				}
 				Ok(_) => {
 					// Ensure the transaction is cancelled

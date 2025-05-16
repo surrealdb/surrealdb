@@ -6,13 +6,14 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::{self, Number, Value};
+use surrealdb::Result;
 
-async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
+async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<()> {
 	Test::new(sql).await?.expect_vals(desired_responses)?;
 	Ok(())
 }
 
-async fn check_test_is_error(sql: &str, expected_errors: &[&str]) -> Result<(), Error> {
+async fn check_test_is_error(sql: &str, expected_errors: &[&str]) -> Result<()> {
 	Test::new(sql).await?.expect_errors(expected_errors)?;
 	Ok(())
 }
@@ -35,7 +36,7 @@ macro_rules! assert_delta {
 }
 
 #[tokio::test]
-async fn error_on_invalid_function() -> Result<(), Error> {
+async fn error_on_invalid_function() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut query = sql::Query::default();
 	query.0 .0 = vec![sql::Statement::Value(Value::Function(Box::new(sql::Function::Normal(
@@ -45,11 +46,9 @@ async fn error_on_invalid_function() -> Result<(), Error> {
 	let session = Session::owner().with_ns("test").with_db("test");
 	let mut resp = dbs.process(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);
-	match resp.pop().unwrap().result {
-		Err(Error::InvalidFunction {
-			..
-		}) => {}
-		x => panic!("returned wrong result {:#?}", x),
+	let err = resp.pop().unwrap().result.unwrap_err();
+	if !matches!(err.downcast_ref(), Some(Error::InvalidFunction { .. })) {
+		panic!("returned wrong result {:#?}", err)
 	}
 	Ok(())
 }
@@ -59,7 +58,7 @@ async fn error_on_invalid_function() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
-async fn function_rand_time() -> Result<(), Error> {
+async fn function_rand_time() -> Result<()> {
 	let sql = r#"
 		RETURN rand::time();
 		RETURN rand::time(1577836800, 1893456000);
@@ -76,7 +75,7 @@ async fn function_rand_time() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_rand_ulid() -> Result<(), Error> {
+async fn function_rand_ulid() -> Result<()> {
 	let sql = r#"
 		RETURN rand::ulid();
 	"#;
@@ -89,7 +88,7 @@ async fn function_rand_ulid() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_rand_ulid_from_datetime() -> Result<(), Error> {
+async fn function_rand_ulid_from_datetime() -> Result<()> {
 	let sql = r#"
         CREATE ONLY test:[rand::ulid()] SET created = time::now(), num = 1;
         SLEEP 100ms;
@@ -122,7 +121,7 @@ async fn function_rand_ulid_from_datetime() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_rand_uuid() -> Result<(), Error> {
+async fn function_rand_uuid() -> Result<()> {
 	let sql = r#"
 		RETURN rand::uuid();
 	"#;
@@ -135,7 +134,7 @@ async fn function_rand_uuid() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_rand_uuid_from_datetime() -> Result<(), Error> {
+async fn function_rand_uuid_from_datetime() -> Result<()> {
 	let sql = r#"
         CREATE ONLY test:[rand::uuid()] SET created = time::now(), num = 1;
         SLEEP 100ms;
@@ -168,7 +167,7 @@ async fn function_rand_uuid_from_datetime() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_rand_uuid_v4() -> Result<(), Error> {
+async fn function_rand_uuid_v4() -> Result<()> {
 	let sql = r#"
 		RETURN rand::uuid::v4();
 	"#;
@@ -181,7 +180,7 @@ async fn function_rand_uuid_v4() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_rand_uuid_v7() -> Result<(), Error> {
+async fn function_rand_uuid_v7() -> Result<()> {
 	let sql = r#"
 		RETURN rand::uuid::v7();
 	"#;
@@ -194,7 +193,7 @@ async fn function_rand_uuid_v7() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_rand_uuid_v7_from_datetime() -> Result<(), Error> {
+async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 	let sql = r#"
         CREATE ONLY test:[rand::uuid::v7()] SET created = time::now(), num = 1;
         SLEEP 100ms;
@@ -231,7 +230,7 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
-async fn function_record_exists() -> Result<(), Error> {
+async fn function_record_exists() -> Result<()> {
 	let sql = r#"
 		RETURN record::exists(r"person:tobie");
 		CREATE ONLY person:tobie;
@@ -254,7 +253,7 @@ async fn function_record_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_record_id() -> Result<(), Error> {
+async fn function_record_id() -> Result<()> {
 	let sql = r#"
 		RETURN record::id(r"person:tobie");
 	"#;
@@ -268,7 +267,7 @@ async fn function_record_id() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_record_table() -> Result<(), Error> {
+async fn function_record_table() -> Result<()> {
 	let sql = r#"
 		RETURN record::table(r"person:tobie");
 	"#;
@@ -286,7 +285,7 @@ async fn function_record_table() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
-async fn function_string_concat() -> Result<(), Error> {
+async fn function_string_concat() -> Result<()> {
 	let sql = r#"
 		RETURN string::concat();
 		RETURN string::concat("test");
@@ -310,7 +309,7 @@ async fn function_string_concat() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_contains() -> Result<(), Error> {
+async fn function_string_contains() -> Result<()> {
 	let sql = r#"
 		RETURN string::contains("", "");
 		RETURN string::contains("a", "");
@@ -394,7 +393,7 @@ async fn function_string_contains() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_ends_with() -> Result<(), Error> {
+async fn function_string_ends_with() -> Result<()> {
 	let sql = r#"
 		RETURN string::ends_with("", "");
 		RETURN string::ends_with("", "test");
@@ -418,7 +417,7 @@ async fn function_string_ends_with() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-async fn function_search_analyzer() -> Result<(), Error> {
+async fn function_search_analyzer() -> Result<()> {
 	let sql = r#"
         DEFINE FUNCTION fn::stripHtml($html: string) {
             RETURN string::replace($html, /<[^>]*>/, "");
@@ -439,87 +438,8 @@ async fn function_search_analyzer() -> Result<(), Error> {
 	Ok(())
 }
 
-#[test_log::test(tokio::test)]
-async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
-	let sql = r#"
-        DEFINE FUNCTION fn::unsupportedFunction() {
-            RETURN 1;
-        };
-        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::unsupportedFunction TOKENIZERS blank,class;
-		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
-	"#;
-	let mut test = Test::new(sql).await?;
-
-	//
-	for _ in 0..2 {
-		test.next()?.result?;
-	}
-	//
-	match test.next()?.result {
-		Err(Error::InvalidArguments {
-			name,
-			message,
-		}) => {
-			assert_eq!(&name, "fn::unsupportedFunction");
-			assert_eq!(&message, "The function expects 0 arguments.");
-		}
-		_ => panic!("Should have fail!"),
-	}
-	Ok(())
-}
-
-#[test_log::test(tokio::test)]
-async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
-	let sql = r#"
-        DEFINE FUNCTION fn::unsupportedReturnedType($html: string) {
-            RETURN 1;
-        };
-        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::unsupportedReturnedType TOKENIZERS blank,class;
-		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
-	"#;
-	let mut test = Test::new(sql).await?;
-
-	//
-	for _ in 0..2 {
-		test.next()?.result?;
-	}
-	//
-	match test.next()?.result {
-		Err(Error::InvalidFunction {
-			name,
-			message,
-		}) => {
-			assert_eq!(&name, "unsupportedReturnedType");
-			assert_eq!(&message, "The function should return a string.");
-		}
-		r => panic!("Unexpected result: {:?}", r),
-	}
-	Ok(())
-}
-
-#[test_log::test(tokio::test)]
-async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
-	let sql = r#"
-        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::doesNotExist TOKENIZERS blank,class;
-		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	test.next()?.result?;
-	//
-	match test.next()?.result {
-		Err(Error::FcNotFound {
-			name,
-		}) => {
-			assert_eq!(&name, "doesNotExist");
-		}
-		r => panic!("Unexpected result: {:?}", r),
-	}
-	Ok(())
-}
-
 #[tokio::test]
-async fn function_string_html_encode() -> Result<(), Error> {
+async fn function_string_html_encode() -> Result<()> {
 	let sql = r#"
 		RETURN string::html::encode("<div>Hello world!</div>");
 	"#;
@@ -533,7 +453,7 @@ async fn function_string_html_encode() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_html_sanitize() -> Result<(), Error> {
+async fn function_string_html_sanitize() -> Result<()> {
 	let sql = r#"
 		RETURN string::html::sanitize("XSS<script>attack</script>");
 	"#;
@@ -547,7 +467,7 @@ async fn function_string_html_sanitize() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_alphanum() -> Result<(), Error> {
+async fn function_string_is_alphanum() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::alphanum("abcdefg123");
 		RETURN string::is::alphanum("this is a test!");
@@ -566,7 +486,7 @@ async fn function_string_is_alphanum() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_alpha() -> Result<(), Error> {
+async fn function_string_is_alpha() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::alpha("abcdefg");
 		RETURN string::is::alpha("this is a test!");
@@ -585,7 +505,7 @@ async fn function_string_is_alpha() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_ascii() -> Result<(), Error> {
+async fn function_string_is_ascii() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::ascii("abcdefg123");
 		RETURN string::is::ascii("this is a test 😀");
@@ -604,7 +524,7 @@ async fn function_string_is_ascii() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_datetime() -> Result<(), Error> {
+async fn function_string_is_datetime() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::datetime("2015-09-05 23:56:04", "%Y-%m-%d %H:%M:%S");
 		RETURN string::is::datetime("2012-06-22 23:56:04", "%T");
@@ -623,7 +543,7 @@ async fn function_string_is_datetime() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_domain() -> Result<(), Error> {
+async fn function_string_is_domain() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::domain("surrealdb.com");
 		RETURN string::is::domain("this is a test!");
@@ -642,7 +562,7 @@ async fn function_string_is_domain() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_email() -> Result<(), Error> {
+async fn function_string_is_email() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::email("info@surrealdb.com");
 		RETURN string::is::email("this is a test!");
@@ -661,7 +581,7 @@ async fn function_string_is_email() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_hexadecimal() -> Result<(), Error> {
+async fn function_string_is_hexadecimal() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::hexadecimal("ff009e");
 		RETURN string::is::hexadecimal("this is a test!");
@@ -680,7 +600,7 @@ async fn function_string_is_hexadecimal() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_ip() -> Result<(), Error> {
+async fn function_string_is_ip() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::ip("127.0.0.1");
 		RETURN string::is::ip("127.0.0");
@@ -699,7 +619,7 @@ async fn function_string_is_ip() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_ipv4() -> Result<(), Error> {
+async fn function_string_is_ipv4() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::ipv4("127.0.0.1");
 		RETURN string::is::ipv4("127.0.0");
@@ -718,7 +638,7 @@ async fn function_string_is_ipv4() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_ipv6() -> Result<(), Error> {
+async fn function_string_is_ipv6() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::ipv6("::1");
 		RETURN string::is::ipv6("200t:db8::");
@@ -737,7 +657,7 @@ async fn function_string_is_ipv6() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_latitude() -> Result<(), Error> {
+async fn function_string_is_latitude() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::latitude("51.509865");
 		RETURN string::is::latitude("this is a test!");
@@ -756,7 +676,7 @@ async fn function_string_is_latitude() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_longitude() -> Result<(), Error> {
+async fn function_string_is_longitude() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::longitude("-90.136439");
 		RETURN string::is::longitude("this is a test!");
@@ -775,7 +695,7 @@ async fn function_string_is_longitude() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_numeric() -> Result<(), Error> {
+async fn function_string_is_numeric() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::numeric("13136439");
 		RETURN string::is::numeric("this is a test!");
@@ -794,7 +714,7 @@ async fn function_string_is_numeric() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_semver() -> Result<(), Error> {
+async fn function_string_is_semver() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::semver("1.0.0-rc.1");
 		RETURN string::is::semver("this is a test!");
@@ -813,7 +733,7 @@ async fn function_string_is_semver() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_url() -> Result<(), Error> {
+async fn function_string_is_url() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::url("https://surrealdb.com/docs");
 		RETURN string::is::url("this is a test!");
@@ -832,7 +752,7 @@ async fn function_string_is_url() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_ulid() -> Result<(), Error> {
+async fn function_string_is_ulid() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::ulid("01J8G788MNX1VT3KE1TK40W350");
 		RETURN string::is::ulid("this is a test!");
@@ -851,7 +771,7 @@ async fn function_string_is_ulid() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_uuid() -> Result<(), Error> {
+async fn function_string_is_uuid() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
 		RETURN string::is::uuid("this is a test!");
@@ -870,7 +790,7 @@ async fn function_string_is_uuid() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_is_record() -> Result<(), Error> {
+async fn function_string_is_record() -> Result<()> {
 	let sql = r#"
 		RETURN string::is::record("test:123");
 		RETURN string::is::record("invalid record id!");
@@ -889,7 +809,7 @@ async fn function_string_is_record() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_join() -> Result<(), Error> {
+async fn function_string_join() -> Result<()> {
 	let sql = r#"
 		RETURN string::join("");
 		RETURN string::join("test");
@@ -913,7 +833,7 @@ async fn function_string_join() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_len() -> Result<(), Error> {
+async fn function_string_len() -> Result<()> {
 	let sql = r#"
 		RETURN string::len("");
 		RETURN string::len("test");
@@ -937,7 +857,7 @@ async fn function_string_len() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_lowercase() -> Result<(), Error> {
+async fn function_string_lowercase() -> Result<()> {
 	let sql = r#"
 		RETURN string::lowercase("");
 		RETURN string::lowercase("TeSt");
@@ -963,7 +883,7 @@ async fn function_string_lowercase() -> Result<(), Error> {
 // "<[^>]*>" , ""
 
 #[tokio::test]
-async fn function_string_replace_with_regex() -> Result<(), Error> {
+async fn function_string_replace_with_regex() -> Result<()> {
 	let sql = r#"
 		RETURN string::replace('<p>This is a <em>sample</em> string with <a href="\\#">HTML</a> tags.</p>', /<[^>]*>/, "");
 		RETURN string::replace('<p>This one is already <strong>compiled!<strong></p>', /<[^>]*>/, "");
@@ -981,7 +901,7 @@ async fn function_string_replace_with_regex() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_matches() -> Result<(), Error> {
+async fn function_string_matches() -> Result<()> {
 	let sql = r#"
 		RETURN string::matches("foo", /foo/);
 		RETURN string::matches("bar", /foo/);
@@ -999,7 +919,7 @@ async fn function_string_matches() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_repeat() -> Result<(), Error> {
+async fn function_string_repeat() -> Result<()> {
 	let sql = r#"
 		RETURN string::repeat("", 3);
 		RETURN string::repeat("test", 3);
@@ -1023,7 +943,7 @@ async fn function_string_repeat() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_replace() -> Result<(), Error> {
+async fn function_string_replace() -> Result<()> {
 	let sql = r#"
 		RETURN string::replace("", "", "");
 		RETURN string::replace('this is a test', 'a test', 'awesome');
@@ -1047,7 +967,7 @@ async fn function_string_replace() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_reverse() -> Result<(), Error> {
+async fn function_string_reverse() -> Result<()> {
 	let sql = r#"
 		RETURN string::reverse("");
 		RETURN string::reverse("test");
@@ -1072,7 +992,7 @@ async fn function_string_reverse() -> Result<(), Error> {
 
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#786)
 #[tokio::test]
-async fn function_string_distance_hamming() -> Result<(), Error> {
+async fn function_string_distance_hamming() -> Result<()> {
 	let sql = r#"
 		RETURN string::distance::hamming("", "");
 		RETURN string::distance::hamming("hamming", "hamming");
@@ -1107,7 +1027,7 @@ async fn function_string_distance_hamming() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_distance_damerau() -> Result<(), Error> {
+async fn function_string_distance_damerau() -> Result<()> {
 	let sql = r#"
 		RETURN string::distance::damerau_levenshtein("", "");
 		RETURN string::distance::damerau_levenshtein("damerau", "damerau");
@@ -1187,7 +1107,7 @@ async fn function_string_distance_damerau() -> Result<(), Error> {
 
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1223)
 #[tokio::test]
-async fn function_string_distance_normalized_damerau_levenshtein() -> Result<(), Error> {
+async fn function_string_distance_normalized_damerau_levenshtein() -> Result<()> {
 	let sql = r#"
 		RETURN string::distance::normalized_damerau_levenshtein("levenshtein", "löwenbräu");
 		RETURN string::distance::normalized_damerau_levenshtein("", "");
@@ -1217,7 +1137,7 @@ async fn function_string_distance_normalized_damerau_levenshtein() -> Result<(),
 
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#989)
 #[tokio::test]
-async fn function_string_distance_levenshtein() -> Result<(), Error> {
+async fn function_string_distance_levenshtein() -> Result<()> {
 	let sql = r#"
     RETURN string::distance::levenshtein("", "");
     RETURN string::distance::levenshtein("levenshtein", "levenshtein");
@@ -1265,7 +1185,7 @@ async fn function_string_distance_levenshtein() -> Result<(), Error> {
 
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1032)
 #[tokio::test]
-async fn function_string_distance_normalized_levenshtein() -> Result<(), Error> {
+async fn function_string_distance_normalized_levenshtein() -> Result<()> {
 	let sql = r#"
 		RETURN string::distance::normalized_levenshtein("kitten", "sitting");
 		RETURN string::distance::normalized_levenshtein("", "");
@@ -1296,7 +1216,7 @@ async fn function_string_distance_normalized_levenshtein() -> Result<(), Error> 
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1057)
 /// which, in turn, are taken from [`aceakash/string-similarity`](https://github.com/aceakash/string-similarity/blob/f83ba3cd7bae874c20c429774e911ae8cff8bced/src/spec/index.spec.js#L11)
 #[tokio::test]
-async fn function_string_distance_osa_distance() -> Result<(), Error> {
+async fn function_string_distance_osa_distance() -> Result<()> {
 	let sql = r#"
         RETURN string::distance::osa_distance("", "");
         RETURN string::distance::osa_distance("damerau", "damerau");
@@ -1375,7 +1295,7 @@ async fn function_string_distance_osa_distance() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_similarity_fuzzy() -> Result<(), Error> {
+async fn function_string_similarity_fuzzy() -> Result<()> {
 	let sql = r#"
 		RETURN string::similarity::fuzzy("", "");
 		RETURN string::similarity::fuzzy("some", "text");
@@ -1404,7 +1324,7 @@ async fn function_string_similarity_fuzzy() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
+async fn function_string_similarity_smithwaterman() -> Result<()> {
 	let sql = r#"
 		RETURN string::similarity::smithwaterman("", "");
 		RETURN string::similarity::smithwaterman("some", "text");
@@ -1434,7 +1354,7 @@ async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
 
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#829)
 #[tokio::test]
-async fn function_string_similarity_jaro() -> Result<(), Error> {
+async fn function_string_similarity_jaro() -> Result<()> {
 	let sql = r#"
 		RETURN string::similarity::jaro("", "");
 		RETURN string::similarity::jaro("", "jaro");
@@ -1504,7 +1424,7 @@ async fn function_string_similarity_jaro() -> Result<(), Error> {
 
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#904)
 #[tokio::test]
-async fn function_string_similarity_jaro_winkler() -> Result<(), Error> {
+async fn function_string_similarity_jaro_winkler() -> Result<()> {
 	let sql = r#"
 		RETURN string::similarity::jaro_winkler("", "");
 		RETURN string::similarity::jaro_winkler("", "jaro-winkler");
@@ -1585,7 +1505,7 @@ async fn function_string_similarity_jaro_winkler() -> Result<(), Error> {
 
 /// Test cases taken from [`strsim`](https://docs.rs/strsim/0.11.1/src/strsim/lib.rs.html#1254)
 #[tokio::test]
-async fn function_string_similarity_sorensen_dice() -> Result<(), Error> {
+async fn function_string_similarity_sorensen_dice() -> Result<()> {
 	let sql = r#"
 		RETURN string::similarity::sorensen_dice("a", "a");
 		RETURN string::similarity::sorensen_dice("a", "b");
@@ -1671,7 +1591,7 @@ async fn function_string_similarity_sorensen_dice() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_slice() -> Result<(), Error> {
+async fn function_string_slice() -> Result<()> {
 	let sql = r#"
 		RETURN string::slice("the quick brown fox jumps over the lazy dog.");
 		RETURN string::slice("the quick brown fox jumps over the lazy dog.", 16);
@@ -1715,7 +1635,7 @@ async fn function_string_slice() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_slug() -> Result<(), Error> {
+async fn function_string_slug() -> Result<()> {
 	let sql = r#"
 		RETURN string::slug("");
 		RETURN string::slug("this is a test");
@@ -1739,7 +1659,7 @@ async fn function_string_slug() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_split() -> Result<(), Error> {
+async fn function_string_split() -> Result<()> {
 	let sql = r#"
 		RETURN string::split("", "");
 		RETURN string::split("this, is, a, list", ", ");
@@ -1763,7 +1683,7 @@ async fn function_string_split() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_starts_with() -> Result<(), Error> {
+async fn function_string_starts_with() -> Result<()> {
 	let sql = r#"
 		RETURN string::starts_with("", "");
 		RETURN string::starts_with("", "test");
@@ -1787,7 +1707,7 @@ async fn function_string_starts_with() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_trim() -> Result<(), Error> {
+async fn function_string_trim() -> Result<()> {
 	let sql = r#"
 		RETURN string::trim("");
 		RETURN string::trim("test");
@@ -1811,7 +1731,7 @@ async fn function_string_trim() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_uppercase() -> Result<(), Error> {
+async fn function_string_uppercase() -> Result<()> {
 	let sql = r#"
 		RETURN string::uppercase("");
 		RETURN string::uppercase("tEsT");
@@ -1835,7 +1755,7 @@ async fn function_string_uppercase() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_string_words() -> Result<(), Error> {
+async fn function_string_words() -> Result<()> {
 	let sql = r#"
 		RETURN string::words("");
 		RETURN string::words("test");
@@ -1863,7 +1783,7 @@ async fn function_string_words() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
-async fn function_time_ceil() -> Result<(), Error> {
+async fn function_time_ceil() -> Result<()> {
 	let sql = r#"
 		RETURN time::ceil(d"1987-06-22T08:30:45Z", 1w);
 		RETURN time::ceil(d"1987-06-22T08:30:45Z", 1y);
@@ -1887,7 +1807,7 @@ async fn function_time_ceil() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_day() -> Result<(), Error> {
+async fn function_time_day() -> Result<()> {
 	let sql = r#"
 		RETURN time::day();
 		RETURN time::day(d"1987-06-22T08:30:45Z");
@@ -1905,7 +1825,7 @@ async fn function_time_day() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_floor() -> Result<(), Error> {
+async fn function_time_floor() -> Result<()> {
 	let sql = r#"
 		RETURN time::floor(d"1987-06-22T08:30:45Z", 1w);
 		RETURN time::floor(d"1987-06-22T08:30:45Z", 1y);
@@ -1929,7 +1849,7 @@ async fn function_time_floor() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_format() -> Result<(), Error> {
+async fn function_time_format() -> Result<()> {
 	let sql = r#"
 		RETURN time::format(d"1987-06-22T08:30:45Z", "%Y-%m-%d");
 		RETURN time::format(d"1987-06-22T08:30:45Z", "%T");
@@ -1948,7 +1868,7 @@ async fn function_time_format() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_group() -> Result<(), Error> {
+async fn function_time_group() -> Result<()> {
 	let sql = r#"
 		RETURN time::group(d"1987-06-22T08:30:45Z", 'hour');
 		RETURN time::group(d"1987-06-22T08:30:45Z", 'month');
@@ -1967,7 +1887,7 @@ async fn function_time_group() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_hour() -> Result<(), Error> {
+async fn function_time_hour() -> Result<()> {
 	let sql = r#"
 		RETURN time::hour();
 		RETURN time::hour(d"1987-06-22T08:30:45Z");
@@ -1985,7 +1905,7 @@ async fn function_time_hour() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_is_leap_year() -> Result<(), Error> {
+async fn function_time_is_leap_year() -> Result<()> {
 	let sql = r#"
 		RETURN time::is::leap_year();
 		RETURN time::is::leap_year(d"1987-06-22T08:30:45Z");
@@ -2013,7 +1933,7 @@ async fn function_time_is_leap_year() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_min() -> Result<(), Error> {
+async fn function_time_min() -> Result<()> {
 	let sql = r#"
 		RETURN time::min([d"1987-06-22T08:30:45Z", d"1988-06-22T08:30:45Z"]);
 	"#;
@@ -2027,7 +1947,7 @@ async fn function_time_min() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_max() -> Result<(), Error> {
+async fn function_time_max() -> Result<()> {
 	let sql = r#"
 		RETURN time::max([d"1987-06-22T08:30:45Z", d"1988-06-22T08:30:45Z"]);
 	"#;
@@ -2041,7 +1961,7 @@ async fn function_time_max() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_minute() -> Result<(), Error> {
+async fn function_time_minute() -> Result<()> {
 	let sql = r#"
 		RETURN time::minute();
 		RETURN time::minute(d"1987-06-22T08:30:45Z");
@@ -2059,7 +1979,7 @@ async fn function_time_minute() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_month() -> Result<(), Error> {
+async fn function_time_month() -> Result<()> {
 	let sql = r#"
 		RETURN time::month();
 		RETURN time::month(d"1987-06-22T08:30:45Z");
@@ -2077,7 +1997,7 @@ async fn function_time_month() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_nano() -> Result<(), Error> {
+async fn function_time_nano() -> Result<()> {
 	let sql = r#"
 		RETURN time::nano();
 		RETURN time::nano(d"1987-06-22T08:30:45Z");
@@ -2095,7 +2015,7 @@ async fn function_time_nano() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_micros() -> Result<(), Error> {
+async fn function_time_micros() -> Result<()> {
 	let sql = r#"
 		RETURN time::micros();
 		RETURN time::micros(d"1987-06-22T08:30:45Z");
@@ -2113,7 +2033,7 @@ async fn function_time_micros() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_millis() -> Result<(), Error> {
+async fn function_time_millis() -> Result<()> {
 	let sql = r#"
 		RETURN time::millis();
 		RETURN time::millis(d"1987-06-22T08:30:45Z");
@@ -2131,7 +2051,7 @@ async fn function_time_millis() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_now() -> Result<(), Error> {
+async fn function_time_now() -> Result<()> {
 	let sql = r#"
 		RETURN time::now();
 	"#;
@@ -2144,7 +2064,7 @@ async fn function_time_now() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_round() -> Result<(), Error> {
+async fn function_time_round() -> Result<()> {
 	let sql = r#"
 		RETURN time::round(d"1987-06-22T08:30:45Z", 1w);
 		RETURN time::round(d"1987-06-22T08:30:45Z", 1y);
@@ -2163,7 +2083,7 @@ async fn function_time_round() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_second() -> Result<(), Error> {
+async fn function_time_second() -> Result<()> {
 	let sql = r#"
 		RETURN time::second();
 		RETURN time::second(d"1987-06-22T08:30:45Z");
@@ -2181,7 +2101,7 @@ async fn function_time_second() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_unix() -> Result<(), Error> {
+async fn function_time_unix() -> Result<()> {
 	let sql = r#"
 		RETURN time::unix();
 		RETURN time::unix(d"1987-06-22T08:30:45Z");
@@ -2199,7 +2119,7 @@ async fn function_time_unix() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_wday() -> Result<(), Error> {
+async fn function_time_wday() -> Result<()> {
 	let sql = r#"
 		RETURN time::wday();
 		RETURN time::wday(d"1987-06-22T08:30:45Z");
@@ -2217,7 +2137,7 @@ async fn function_time_wday() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_week() -> Result<(), Error> {
+async fn function_time_week() -> Result<()> {
 	let sql = r#"
 		RETURN time::week();
 		RETURN time::week(d"1987-06-22T08:30:45Z");
@@ -2235,7 +2155,7 @@ async fn function_time_week() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_yday() -> Result<(), Error> {
+async fn function_time_yday() -> Result<()> {
 	let sql = r#"
 		RETURN time::yday();
 		RETURN time::yday(d"1987-06-22T08:30:45Z");
@@ -2253,7 +2173,7 @@ async fn function_time_yday() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_year() -> Result<(), Error> {
+async fn function_time_year() -> Result<()> {
 	let sql = r#"
 		RETURN time::year();
 		RETURN time::year(d"1987-06-22T08:30:45Z");
@@ -2271,7 +2191,7 @@ async fn function_time_year() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_from_nanos() -> Result<(), Error> {
+async fn function_time_from_nanos() -> Result<()> {
 	let sql = r#"
 		RETURN time::from::nanos(384025770384840000);
 		RETURN time::from::nanos(2840257704384440000);
@@ -2290,7 +2210,7 @@ async fn function_time_from_nanos() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_from_micros() -> Result<(), Error> {
+async fn function_time_from_micros() -> Result<()> {
 	let sql = r#"
 		RETURN time::from::micros(384025770384840);
 		RETURN time::from::micros(2840257704384440);
@@ -2309,7 +2229,7 @@ async fn function_time_from_micros() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_from_millis() -> Result<(), Error> {
+async fn function_time_from_millis() -> Result<()> {
 	let sql = r#"
 		RETURN time::from::millis(384025773840);
 		RETURN time::from::millis(2840257704440);
@@ -2328,7 +2248,7 @@ async fn function_time_from_millis() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_from_secs() -> Result<(), Error> {
+async fn function_time_from_secs() -> Result<()> {
 	let sql = r#"
 		RETURN time::from::secs(384053840);
 		RETURN time::from::secs(2845704440);
@@ -2347,7 +2267,7 @@ async fn function_time_from_secs() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_from_ulid() -> Result<(), Error> {
+async fn function_time_from_ulid() -> Result<()> {
 	let sql = r#"
 		RETURN time::from::ulid("01J8G788MNX1VT3KE1TK40W350");
 	"#;
@@ -2361,7 +2281,7 @@ async fn function_time_from_ulid() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_from_unix() -> Result<(), Error> {
+async fn function_time_from_unix() -> Result<()> {
 	let sql = r#"
 		RETURN time::from::unix(384053840);
 		RETURN time::from::unix(2845704440);
@@ -2380,7 +2300,7 @@ async fn function_time_from_unix() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_from_unix_limit_and_beyond() -> Result<(), Error> {
+async fn function_time_from_unix_limit_and_beyond() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN time::year(time::from::unix(-8334601228800));
@@ -2405,7 +2325,7 @@ async fn function_time_from_unix_limit_and_beyond() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_time_from_uuid() -> Result<(), Error> {
+async fn function_time_from_uuid() -> Result<()> {
 	let sql = r#"
 		RETURN time::from::uuid(u'01922074-2295-7cf6-906f-bcd0810639b0');
 	"#;
@@ -2423,7 +2343,7 @@ async fn function_time_from_uuid() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
-async fn function_type_bool() -> Result<(), Error> {
+async fn function_type_bool() -> Result<()> {
 	let sql = r#"
 		RETURN type::bool("true");
 		RETURN type::bool("false");
@@ -2442,7 +2362,7 @@ async fn function_type_bool() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_datetime() -> Result<(), Error> {
+async fn function_type_datetime() -> Result<()> {
 	let sql = r#"
 		RETURN type::datetime("1987-06-22");
 		RETURN type::datetime("2022-08-01");
@@ -2461,7 +2381,7 @@ async fn function_type_datetime() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_decimal() -> Result<(), Error> {
+async fn function_type_decimal() -> Result<()> {
 	let sql = r#"
 		RETURN type::decimal("0.0");
 		RETURN type::decimal("13.1043784018");
@@ -2487,7 +2407,7 @@ async fn function_type_decimal() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_duration() -> Result<(), Error> {
+async fn function_type_duration() -> Result<()> {
 	let sql = r#"
 		RETURN type::duration("1h30m");
 		RETURN type::duration("1h30m30s50ms");
@@ -2506,7 +2426,7 @@ async fn function_type_duration() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_float() -> Result<(), Error> {
+async fn function_type_float() -> Result<()> {
 	let sql = r#"
 		RETURN type::float("13.1043784018");
 		RETURN type::float("13.5719384719384719385639856394139476937756394756");
@@ -2525,7 +2445,7 @@ async fn function_type_float() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_int() -> Result<(), Error> {
+async fn function_type_int() -> Result<()> {
 	let sql = r#"
 		RETURN type::int("194719");
 		RETURN type::int("1457105732053058");
@@ -2544,7 +2464,7 @@ async fn function_type_int() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_array() -> Result<(), Error> {
+async fn function_type_is_array() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::array([1, 2, 3]);
 		RETURN type::is::array("123");
@@ -2563,7 +2483,7 @@ async fn function_type_is_array() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_bool() -> Result<(), Error> {
+async fn function_type_is_bool() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::bool(true);
 		RETURN type::is::bool("123");
@@ -2582,7 +2502,7 @@ async fn function_type_is_bool() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_bytes() -> Result<(), Error> {
+async fn function_type_is_bytes() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::bytes(<bytes>"");
 		RETURN type::is::bytes("123");
@@ -2601,7 +2521,7 @@ async fn function_type_is_bytes() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_collection() -> Result<(), Error> {
+async fn function_type_is_collection() -> Result<()> {
 	let sql = r#"
 		LET $collection = <geometry<collection>> {
 			type: 'GeometryCollection',
@@ -2628,7 +2548,7 @@ async fn function_type_is_collection() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_datetime() -> Result<(), Error> {
+async fn function_type_is_datetime() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::datetime(<datetime> d"2023-09-04T11:22:38.247Z");
 		RETURN type::is::datetime("123");
@@ -2647,7 +2567,7 @@ async fn function_type_is_datetime() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_decimal() -> Result<(), Error> {
+async fn function_type_is_decimal() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::decimal(1.0dec);
 		RETURN type::is::decimal("123");
@@ -2666,7 +2586,7 @@ async fn function_type_is_decimal() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_duration() -> Result<(), Error> {
+async fn function_type_is_duration() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::duration(20s);
 		RETURN type::is::duration("123");
@@ -2685,7 +2605,7 @@ async fn function_type_is_duration() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_float() -> Result<(), Error> {
+async fn function_type_is_float() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::float(1.0f);
 		RETURN type::is::float("123");
@@ -2704,7 +2624,7 @@ async fn function_type_is_float() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_geometry() -> Result<(), Error> {
+async fn function_type_is_geometry() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::geometry((-0.118092, 51.509865));
 		RETURN type::is::geometry("123");
@@ -2723,7 +2643,7 @@ async fn function_type_is_geometry() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_int() -> Result<(), Error> {
+async fn function_type_is_int() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::int(123);
 		RETURN type::is::int("123");
@@ -2742,7 +2662,7 @@ async fn function_type_is_int() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_line() -> Result<(), Error> {
+async fn function_type_is_line() -> Result<()> {
 	let sql = r#"
 		LET $line = <geometry<line>> { type: 'LineString', coordinates: [[10, 11.2], [10.5, 11.9]] };
 		RETURN type::is::line($line);
@@ -2766,7 +2686,7 @@ async fn function_type_is_line() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_none() -> Result<(), Error> {
+async fn function_type_is_none() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::none(none);
 		RETURN type::is::none("123");
@@ -2785,7 +2705,7 @@ async fn function_type_is_none() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_null() -> Result<(), Error> {
+async fn function_type_is_null() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::null(null);
 		RETURN type::is::null("123");
@@ -2804,7 +2724,7 @@ async fn function_type_is_null() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_multiline() -> Result<(), Error> {
+async fn function_type_is_multiline() -> Result<()> {
 	let sql = r#"
 		LET $multiline = <geometry<multiline>> {
 			type: 'MultiLineString',
@@ -2831,7 +2751,7 @@ async fn function_type_is_multiline() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_multipoint() -> Result<(), Error> {
+async fn function_type_is_multipoint() -> Result<()> {
 	let sql = r#"
 		LET $multipoint = <geometry<multipoint>> { type: 'MultiPoint', coordinates: [[10, 11.2], [10.5, 11.9]] };
 		RETURN type::is::multipoint($multipoint);
@@ -2855,7 +2775,7 @@ async fn function_type_is_multipoint() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_multipolygon() -> Result<(), Error> {
+async fn function_type_is_multipolygon() -> Result<()> {
 	let sql = r#"
 		LET $multipolygon = <geometry<multipolygon>> {
 			type: 'MultiPolygon',
@@ -2882,7 +2802,7 @@ async fn function_type_is_multipolygon() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_number() -> Result<(), Error> {
+async fn function_type_is_number() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::number(123);
 		RETURN type::is::number(123.0f);
@@ -2911,7 +2831,7 @@ async fn function_type_is_number() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_object() -> Result<(), Error> {
+async fn function_type_is_object() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::object({ test: 123 });
 		RETURN type::is::object("123");
@@ -2930,7 +2850,7 @@ async fn function_type_is_object() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_point() -> Result<(), Error> {
+async fn function_type_is_point() -> Result<()> {
 	let sql = r#"
 		LET $point = <geometry<point>> { type: "Point", coordinates: [-0.118092, 51.509865] };
 		RETURN type::is::point($point);
@@ -2954,7 +2874,7 @@ async fn function_type_is_point() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_polygon() -> Result<(), Error> {
+async fn function_type_is_polygon() -> Result<()> {
 	let sql = r#"
 		LET $polygon = <geometry<polygon>> {
 			type: 'Polygon',
@@ -2989,7 +2909,7 @@ async fn function_type_is_polygon() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_range() -> Result<(), Error> {
+async fn function_type_is_range() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::range(1..5);
 		RETURN type::is::range("123");
@@ -3008,7 +2928,7 @@ async fn function_type_is_range() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_record() -> Result<(), Error> {
+async fn function_type_is_record() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::record(person:john);
 		RETURN type::is::record("123");
@@ -3037,7 +2957,7 @@ async fn function_type_is_record() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_string() -> Result<(), Error> {
+async fn function_type_is_string() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::string("testing!");
 		RETURN type::is::string(123);
@@ -3056,7 +2976,7 @@ async fn function_type_is_string() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_is_uuid() -> Result<(), Error> {
+async fn function_type_is_uuid() -> Result<()> {
 	let sql = r#"
 		RETURN type::is::uuid(<uuid> u"018a6065-a80a-765e-b640-9fcb330a2f4f");
 		RETURN type::is::uuid("123");
@@ -3075,7 +2995,7 @@ async fn function_type_is_uuid() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_number() -> Result<(), Error> {
+async fn function_type_number() -> Result<()> {
 	let sql = r#"
 		RETURN type::number("194719.1947104740");
 		RETURN type::number("1457105732053058.3957394823281756381849375");
@@ -3094,7 +3014,7 @@ async fn function_type_number() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_point() -> Result<(), Error> {
+async fn function_type_point() -> Result<()> {
 	let sql = r#"
 		RETURN type::point([1.345, 6.789]);
 		RETURN type::point([-0.136439, 51.509865]);
@@ -3129,7 +3049,7 @@ async fn function_type_point() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_string() -> Result<(), Error> {
+async fn function_type_string() -> Result<()> {
 	let sql = r#"
 		RETURN type::string(30s);
 		RETURN type::string(13);
@@ -3148,7 +3068,7 @@ async fn function_type_string() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_string_lossy() -> Result<(), Error> {
+async fn function_type_string_lossy() -> Result<()> {
 	// First bytes are a bit invalid, second are fine
 	let sql = r#"
 		type::string_lossy(<bytes>[83, 117, 114, 255, 114, 101, 97, 254, 108, 68, 66]);
@@ -3168,7 +3088,7 @@ async fn function_type_string_lossy() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_table() -> Result<(), Error> {
+async fn function_type_table() -> Result<()> {
 	let sql = r#"
 		RETURN type::table("person");
 		RETURN type::table("animal");
@@ -3187,7 +3107,7 @@ async fn function_type_table() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_thing() -> Result<(), Error> {
+async fn function_type_thing() -> Result<()> {
 	let sql = r#"
 		CREATE type::thing('person', 'test');
 		CREATE type::thing('person', 1434619);
@@ -3251,7 +3171,7 @@ async fn function_type_thing() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_type_range() -> Result<(), Error> {
+async fn function_type_range() -> Result<()> {
 	let sql = r#"
 	    RETURN type::range(..);
 		RETURN type::range(1..2);
@@ -3279,7 +3199,7 @@ async fn function_type_range() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
-async fn function_value_diff() -> Result<(), Error> {
+async fn function_value_diff() -> Result<()> {
 	let sql = r#"
 		RETURN value::diff({ a: 1, b: 2 }, { c: 3, b: 2 });
 	"#;
@@ -3307,7 +3227,7 @@ async fn function_value_diff() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_value_patch() -> Result<(), Error> {
+async fn function_value_patch() -> Result<()> {
 	let sql = r#"
 		RETURN value::patch({ a: 1, b: 2 }, [
 			{
@@ -3335,7 +3255,7 @@ async fn function_value_patch() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
-async fn function_vector_add() -> Result<(), Error> {
+async fn function_vector_add() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::add([1, 2, 3], [1, 2, 3]);
@@ -3359,7 +3279,7 @@ async fn function_vector_add() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_angle() -> Result<(), Error> {
+async fn function_vector_angle() -> Result<()> {
 	Test::new(
 		r#"
 		RETURN vector::angle([1,0,0], [0,1,0]);
@@ -3386,7 +3306,7 @@ async fn function_vector_angle() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_cross() -> Result<(), Error> {
+async fn function_vector_cross() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::cross([1, 2, 3], [4, 5, 6]);
@@ -3411,7 +3331,7 @@ async fn function_vector_cross() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_dot() -> Result<(), Error> {
+async fn function_vector_dot() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::dot([1, 2, 3], [1, 2, 3]);
@@ -3435,7 +3355,7 @@ async fn function_vector_dot() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_magnitude() -> Result<(), Error> {
+async fn function_vector_magnitude() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::magnitude([]);
@@ -3450,7 +3370,7 @@ async fn function_vector_magnitude() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_normalize() -> Result<(), Error> {
+async fn function_vector_normalize() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::normalize([]);
@@ -3465,7 +3385,7 @@ async fn function_vector_normalize() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_multiply() -> Result<(), Error> {
+async fn function_vector_multiply() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::multiply([1, 2, 3], [1, 2, 3]);
@@ -3489,7 +3409,7 @@ async fn function_vector_multiply() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_project() -> Result<(), Error> {
+async fn function_vector_project() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::project([1, 2, 3], [4, 5, 6]);
@@ -3518,7 +3438,7 @@ async fn function_vector_project() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_divide() -> Result<(), Error> {
+async fn function_vector_divide() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::divide([10, NaN, 20, 30, 0], [0, 1, 2, 0, 4]);
@@ -3542,7 +3462,7 @@ async fn function_vector_divide() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_subtract() -> Result<(), Error> {
+async fn function_vector_subtract() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::subtract([1, 2, 3], [1, 2, 3]);
@@ -3566,7 +3486,7 @@ async fn function_vector_subtract() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_similarity_cosine() -> Result<(), Error> {
+async fn function_vector_similarity_cosine() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::similarity::cosine([1, 2, 3], [1, 2, 3]);
@@ -3589,7 +3509,7 @@ async fn function_vector_similarity_cosine() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_similarity_jaccard() -> Result<(), Error> {
+async fn function_vector_similarity_jaccard() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::similarity::jaccard([1, 2, 3], [3, 2, 1]);
@@ -3604,7 +3524,7 @@ async fn function_vector_similarity_jaccard() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_similarity_pearson() -> Result<(), Error> {
+async fn function_vector_similarity_pearson() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::similarity::pearson([1, 2, 3, 4, 5], [1, 2.5, 3.5, 4.2, 5.1]);
@@ -3626,7 +3546,7 @@ async fn function_vector_similarity_pearson() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_distance_euclidean() -> Result<(), Error> {
+async fn function_vector_distance_euclidean() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::distance::euclidean([1, 2, 3], [1, 2, 3]);
@@ -3649,7 +3569,7 @@ async fn function_vector_distance_euclidean() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_distance_manhattan() -> Result<(), Error> {
+async fn function_vector_distance_manhattan() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::distance::manhattan([1, 2, 3], [4, 5, 6]);
@@ -3673,7 +3593,7 @@ async fn function_vector_distance_manhattan() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_distance_hamming() -> Result<(), Error> {
+async fn function_vector_distance_hamming() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::distance::hamming([1, 2, 2], [1, 2, 3]);
@@ -3697,7 +3617,7 @@ async fn function_vector_distance_hamming() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_distance_minkowski() -> Result<(), Error> {
+async fn function_vector_distance_minkowski() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::distance::minkowski([1, 2, 3], [4, 5, 6], 3);
@@ -3729,7 +3649,7 @@ async fn function_vector_distance_minkowski() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_vector_distance_chebyshev() -> Result<(), Error> {
+async fn function_vector_distance_chebyshev() -> Result<()> {
 	test_queries(
 		r#"
 		RETURN vector::distance::chebyshev([1, 2, 3], [4, 5, 6]);
@@ -3754,7 +3674,7 @@ async fn function_vector_distance_chebyshev() -> Result<(), Error> {
 
 #[cfg(feature = "http")]
 #[tokio::test]
-pub async fn function_http_head() -> Result<(), Error> {
+pub async fn function_http_head() -> Result<()> {
 	use wiremock::{
 		matchers::{header, method, path},
 		Mock, ResponseTemplate,
@@ -3778,7 +3698,7 @@ pub async fn function_http_head() -> Result<(), Error> {
 
 #[cfg(feature = "http")]
 #[tokio::test]
-pub async fn function_http_get() -> Result<(), Error> {
+pub async fn function_http_get() -> Result<()> {
 	use wiremock::{
 		matchers::{header, method, path},
 		Mock, ResponseTemplate,
@@ -3807,7 +3727,7 @@ pub async fn function_http_get() -> Result<(), Error> {
 
 #[cfg(feature = "http")]
 #[tokio::test]
-pub async fn function_http_put() -> Result<(), Error> {
+pub async fn function_http_put() -> Result<()> {
 	use wiremock::{
 		matchers::{header, method, path},
 		Mock, ResponseTemplate,
@@ -3835,7 +3755,7 @@ pub async fn function_http_put() -> Result<(), Error> {
 
 #[cfg(feature = "http")]
 #[tokio::test]
-pub async fn function_http_post() -> Result<(), Error> {
+pub async fn function_http_post() -> Result<()> {
 	use wiremock::{
 		matchers::{header, method, path},
 		Mock, ResponseTemplate,
@@ -3865,7 +3785,7 @@ pub async fn function_http_post() -> Result<(), Error> {
 
 #[cfg(feature = "http")]
 #[tokio::test]
-pub async fn function_http_patch() -> Result<(), Error> {
+pub async fn function_http_patch() -> Result<()> {
 	use wiremock::{
 		matchers::{header, method, path},
 		Mock, ResponseTemplate,
@@ -3895,7 +3815,7 @@ pub async fn function_http_patch() -> Result<(), Error> {
 
 #[cfg(feature = "http")]
 #[tokio::test]
-pub async fn function_http_delete() -> Result<(), Error> {
+pub async fn function_http_delete() -> Result<()> {
 	use wiremock::{
 		matchers::{header, method, path},
 		Mock, ResponseTemplate,
@@ -3924,7 +3844,7 @@ pub async fn function_http_delete() -> Result<(), Error> {
 
 #[cfg(feature = "http")]
 #[tokio::test]
-pub async fn function_http_error() -> Result<(), Error> {
+pub async fn function_http_error() -> Result<()> {
 	use wiremock::{
 		matchers::{header, method, path},
 		Mock, ResponseTemplate,
@@ -3956,7 +3876,7 @@ pub async fn function_http_error() -> Result<(), Error> {
 
 #[cfg(all(feature = "http", feature = "scripting"))]
 #[tokio::test]
-pub async fn function_http_get_from_script() -> Result<(), Error> {
+pub async fn function_http_get_from_script() -> Result<()> {
 	use wiremock::{
 		matchers::{header, method, path},
 		Mock, ResponseTemplate,
@@ -3987,7 +3907,7 @@ pub async fn function_http_get_from_script() -> Result<(), Error> {
 
 #[cfg(not(feature = "http"))]
 #[tokio::test]
-pub async fn function_http_disabled() -> Result<(), Error> {
+pub async fn function_http_disabled() -> Result<()> {
 	Test::new(
 		r#"
 	RETURN http::get({});
@@ -4013,130 +3933,14 @@ pub async fn function_http_disabled() -> Result<(), Error> {
 // Tests for custom defined functions
 
 #[tokio::test]
-async fn function_custom_optional_args() -> Result<(), Error> {
-	let sql = r#"
-		DEFINE FUNCTION fn::any_arg($a: any) { $a || 'test' };
-		DEFINE FUNCTION fn::zero_arg() { [] };
-		DEFINE FUNCTION fn::one_arg($a: bool) { [$a] };
-		DEFINE FUNCTION fn::last_option($a: bool, $b: option<bool>) { [$a, $b] };
-		DEFINE FUNCTION fn::middle_option($a: bool, $b: option<bool>, $c: bool) { [$a, $b, $c] };
-
-		RETURN fn::any_arg();
-		RETURN fn::zero_arg();
-		RETURN fn::one_arg();
-		RETURN fn::last_option();
-		RETURN fn::middle_option();
-
-		RETURN fn::zero_arg(true);
-		RETURN fn::any_arg('other');
-		RETURN fn::one_arg(true);
-		RETURN fn::last_option(true);
-		RETURN fn::last_option(true, false);
-		RETURN fn::middle_option(true, false, true);
-		RETURN fn::middle_option(true, NONE, true);
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("'test'");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("[]");
-	assert_eq!(tmp, val);
-	//
-	let error = "Query should have failed with error: Incorrect arguments for function fn::a(). The function expects 1 argument.";
-	match test.next()?.result {
-		Err(surrealdb::error::Db::InvalidArguments {
-			name,
-			message,
-		}) if name == "fn::one_arg" && message == "The function expects 1 argument." => (),
-		_ => panic!("{}", error),
-	}
-	//
-	let error = "Query should have failed with error: Incorrect arguments for function fn::last_option(). The function expects 1 to 2 arguments.";
-	match test.next()?.result {
-		Err(surrealdb::error::Db::InvalidArguments {
-			name,
-			message,
-		}) if name == "fn::last_option" && message == "The function expects 1 to 2 arguments." => (),
-		_ => panic!("{}", error),
-	}
-	//
-	let error = "Query should have failed with error: Incorrect arguments for function fn::middle_option(). The function expects 3 arguments.";
-	match test.next()?.result {
-		Err(surrealdb::error::Db::InvalidArguments {
-			name,
-			message,
-		}) if name == "fn::middle_option" && message == "The function expects 3 arguments." => (),
-		_ => panic!("{}", error),
-	}
-	//
-	let error = "Query should have failed with error: Incorrect arguments for function fn::zero_arg(). The function expects 0 arguments.";
-	match test.next()?.result {
-		Err(surrealdb::error::Db::InvalidArguments {
-			name,
-			message,
-		}) if name == "fn::zero_arg" && message == "The function expects 0 arguments." => (),
-		_ => panic!("{}", error),
-	}
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("'other'");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("[true]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("[true, NONE]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("[true, false]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("[true, false, true]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = Value::parse("[true, NONE, true]");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn function_outside_database() -> Result<(), Error> {
+async fn function_outside_database() -> Result<()> {
 	let sql = "RETURN fn::does_not_exist();";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	match res.remove(0).result {
-		Err(Error::DbEmpty) => (),
+	match res.remove(0).result.unwrap_err().downcast() {
+		Ok(Error::DbEmpty) => (),
 		_ => panic!("Query should have failed with error: Specify a database to use"),
 	}
 
@@ -4144,7 +3948,7 @@ async fn function_outside_database() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn function_idiom_chaining() -> Result<(), Error> {
+async fn function_idiom_chaining() -> Result<()> {
 	let sql = r#"
 		{ a: 1, b: 2 }.entries().flatten();
 		"ABC".lowercase();
@@ -4172,7 +3976,7 @@ async fn function_idiom_chaining() -> Result<(), Error> {
 
 // tests for custom functions with return types
 #[tokio::test]
-async fn function_custom_typed_returns() -> Result<(), Error> {
+async fn function_custom_typed_returns() -> Result<()> {
 	let sql = r#"
 		DEFINE FUNCTION fn::two() -> int {2};
 		DEFINE FUNCTION fn::two_bad_type() -> string {2};

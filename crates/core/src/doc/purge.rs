@@ -25,6 +25,7 @@ use crate::sql::FlowResultExt as _;
 use crate::sql::Operator;
 use crate::sql::Part;
 use crate::sql::Thing;
+use anyhow::{bail, Result};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 
@@ -35,7 +36,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check if changed
 		if !self.changed() {
 			return Ok(());
@@ -118,7 +119,7 @@ impl Document {
 									id: r#ref.fk.clone(),
 								};
 
-								return Err(Error::DeleteRejectedByReference(
+								bail!(Error::DeleteRejectedByReference(
 									rid.to_string(),
 									thing.to_string(),
 								));

@@ -3,11 +3,11 @@ use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn subquery_select() -> Result<(), Error> {
+async fn subquery_select() -> Result<()> {
 	let sql = "
 		-- Create a record
 		CREATE person:test SET name = 'Tobie', age = 21;
@@ -105,7 +105,7 @@ async fn subquery_select() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn subquery_ifelse_set() -> Result<(), Error> {
+async fn subquery_ifelse_set() -> Result<()> {
 	let sql = "
 		-- Check if the record exists
 		LET $record = (SELECT *, count() AS count FROM person:test);
@@ -230,7 +230,7 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn subquery_ifelse_array() -> Result<(), Error> {
+async fn subquery_ifelse_array() -> Result<()> {
 	let sql = "
 		-- Check if the record exists
 		LET $record = (SELECT *, count() AS count FROM person:test);

@@ -36,12 +36,6 @@ pub enum Error {
 	},
 }
 
-impl From<Error> for String {
-	fn from(e: Error) -> String {
-		e.to_string()
-	}
-}
-
 pub fn is_allowed(
 	actor: &Actor,
 	action: &Action,

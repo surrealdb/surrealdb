@@ -1,15 +1,12 @@
-use crate::err::Error;
 use crate::kvs::Datastore;
 use crate::kvs::{LockType::*, TransactionType::*};
 use crate::vs::VersionStamp;
+use anyhow::Result;
 
 impl Datastore {
 	/// Saves the current timestamp for each database's current versionstamp.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub(crate) async fn changefeed_versionstamp(
-		&self,
-		ts: u64,
-	) -> Result<Option<VersionStamp>, Error> {
+	pub(crate) async fn changefeed_versionstamp(&self, ts: u64) -> Result<Option<VersionStamp>> {
 		// Store the latest versionstamp
 		let mut vs: Option<VersionStamp> = None;
 		// Create a new transaction
@@ -40,7 +37,7 @@ impl Datastore {
 
 	/// Deletes all change feed entries that are older than the timestamp.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub(crate) async fn changefeed_cleanup(&self, ts: u64) -> Result<(), Error> {
+	pub(crate) async fn changefeed_cleanup(&self, ts: u64) -> Result<()> {
 		// Create a new transaction
 		let txn = self.transaction(Write, Optimistic).await?;
 		// Perform the garbage collection

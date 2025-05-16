@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::number::Number;
 use crate::sql::value::Value;
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -24,22 +25,22 @@ impl Limit {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<u32, Error> {
+	) -> Result<u32> {
 		match self.0.compute(stk, ctx, opt, doc).await.catch_return() {
 			// This is a valid limiting number
 			Ok(Value::Number(Number::Int(v))) if v >= 0 => {
 				if v > u32::MAX as i64 {
-					Err(Error::InvalidLimit {
+					Err(anyhow::Error::new(Error::InvalidLimit {
 						value: v.to_string(),
-					})
+					}))
 				} else {
 					Ok(v as u32)
 				}
 			}
 			// An invalid value was specified
-			Ok(v) => Err(Error::InvalidLimit {
+			Ok(v) => Err(anyhow::Error::new(Error::InvalidLimit {
 				value: v.as_string(),
-			}),
+			})),
 			// A different error occurred
 			Err(e) => Err(e),
 		}

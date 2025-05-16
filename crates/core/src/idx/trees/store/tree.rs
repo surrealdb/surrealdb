@@ -1,8 +1,8 @@
-use crate::err::Error;
 use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
 use crate::kvs::{Key, Transaction};
 use ahash::{HashMap, HashSet};
+use anyhow::Result;
 use std::fmt::{Debug, Display};
 use std::mem;
 use std::sync::Arc;
@@ -43,12 +43,12 @@ where
 		&mut self,
 		tx: &Transaction,
 		node_id: NodeId,
-	) -> Result<StoredNode<N>, Error> {
+	) -> Result<StoredNode<N>> {
 		#[cfg(debug_assertions)]
 		{
 			self.out.insert(node_id);
 			if self.removed.contains_key(&node_id) {
-				return Err(fail!("TreeTransactionWrite::get_node_mut"));
+				fail!("TreeTransactionWrite::get_node_mut");
 			}
 		}
 		if let Some(n) = self.nodes.remove(&node_id) {
@@ -59,7 +59,7 @@ where
 		Ok(StoredNode::new(r.n.clone(), r.id, r.key.clone(), r.size))
 	}
 
-	pub(super) fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
+	pub(super) fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<()> {
 		#[cfg(debug_assertions)]
 		self.out.remove(&node.id);
 
@@ -68,24 +68,24 @@ where
 			self.cached.remove(&node.id);
 		}
 		if self.removed.contains_key(&node.id) {
-			return Err(fail!("TreeTransactionWrite::set_node(2)"));
+			fail!("TreeTransactionWrite::set_node(2)");
 		}
 		self.nodes.insert(node.id, node);
 		Ok(())
 	}
 
-	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
+	pub(super) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>> {
 		#[cfg(debug_assertions)]
 		self.out.insert(id);
 
 		Ok(StoredNode::new(node, id, self.np.get_key(id)?, 0))
 	}
 
-	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
+	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<()> {
 		#[cfg(debug_assertions)]
 		{
 			if self.nodes.contains_key(&node_id) {
-				return Err(fail!("TreeTransactionWrite::remove_node"));
+				fail!("TreeTransactionWrite::remove_node")
 			}
 			self.out.remove(&node_id);
 		}
@@ -95,11 +95,11 @@ where
 		Ok(())
 	}
 
-	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<Option<TreeCache<N>>, Error> {
+	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<Option<TreeCache<N>>> {
 		#[cfg(debug_assertions)]
 		{
 			if !self.out.is_empty() {
-				return Err(fail!("TreeTransactionWrite::finish(1)"));
+				fail!("TreeTransactionWrite::finish(1)");
 			}
 		}
 		if self.updated.is_empty() && self.removed.is_empty() {
@@ -116,7 +116,7 @@ where
 				// Update the cache with updated entries.
 				new_cache.set_node(node).await;
 			} else {
-				return Err(fail!("TreeTransactionWrite::finish(2)"));
+				fail!("TreeTransactionWrite::finish(2)");
 			}
 		}
 		let removed = mem::take(&mut self.removed);
@@ -166,7 +166,7 @@ where
 		&self,
 		tx: &Transaction,
 		node_id: NodeId,
-	) -> Result<Arc<StoredNode<N>>, Error> {
+	) -> Result<Arc<StoredNode<N>>> {
 		let r = self.cache.get_node(tx, node_id).await?;
 		#[cfg(debug_assertions)]
 		debug!("GET: {}", node_id);

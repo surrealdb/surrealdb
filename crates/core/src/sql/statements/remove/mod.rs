@@ -31,8 +31,8 @@ pub use user::RemoveUserStatement;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::Value;
+use anyhow::Result;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -70,7 +70,7 @@ impl RemoveStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		match self {
 			Self::Namespace(ref v) => v.compute(ctx, opt).await,
 			Self::Database(ref v) => v.compute(ctx, opt).await,

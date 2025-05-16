@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, FlowResultExt, Ident, Permission, Strand, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
+use anyhow::{bail, Result};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -32,7 +33,7 @@ impl DefineBucketStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Bucket, &Base::Db)?;
 		// Fetch the transaction
@@ -43,7 +44,7 @@ impl DefineBucketStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::BuAlreadyExists {
+				bail!(Error::BuAlreadyExists {
 					value: self.name.to_string(),
 				});
 			}

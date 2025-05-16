@@ -1,9 +1,9 @@
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::block::Block;
 use crate::sql::value::Value;
 use crate::{ctx::Context, dbs::Futures};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ impl Future {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Process the future if enabled
 		match opt.futures {
 			Futures::Enabled => {

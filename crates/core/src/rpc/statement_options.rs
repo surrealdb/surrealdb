@@ -4,8 +4,8 @@ use crate::{
 	dbs::Capabilities,
 	sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, Start, Timeout, Value, Version},
 	syn::{
-		condition_with_capabilities, fetchs_with_capabilities, fields_with_capabilities,
-		output_with_capabilities, value_with_capabilities,
+		fetchs_with_capabilities, fields_with_capabilities, output_with_capabilities,
+		value_with_capabilities,
 	},
 };
 
@@ -172,7 +172,8 @@ impl StatementOptions {
 			// Process "cond" option
 			if let Some(v) = obj.remove("cond") {
 				if let Value::Strand(v) = v {
-					self.cond = Some(condition_with_capabilities(v.as_str(), capabilities)?)
+					let v = value_with_capabilities(v.as_str(), capabilities)?;
+					self.cond = Some(Cond(v))
 				} else {
 					return Err(RpcError::InvalidParams);
 				}

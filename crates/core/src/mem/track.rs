@@ -259,7 +259,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 		let mut prev: *mut ThreadCounterNode = null_mut();
 		// Traverse the list until we find the node or reach the end
 		while !current.is_null() {
-			if current == node {
+			if std::ptr::eq(current, node) {
 				// Found the node to remove
 				let next = unsafe { (*current).next.load(Ordering::Relaxed) };
 

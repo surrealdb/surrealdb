@@ -46,14 +46,15 @@ impl SetStatement {
 							name: self.name.to_string(),
 							error: Box::new(e),
 						})
+						.map_err(anyhow::Error::new)
 						.map_err(ControlFlow::from),
 					None => Ok(result),
 				}
 			}
 			// The user tried to set a protected variable
-			true => Err(ControlFlow::from(Error::InvalidParam {
+			true => Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
 				name: self.name.clone(),
-			})),
+			}))),
 		}
 	}
 }

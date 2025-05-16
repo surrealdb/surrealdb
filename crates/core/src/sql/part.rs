@@ -10,6 +10,7 @@ use crate::{
 		Value,
 	},
 };
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -263,7 +264,7 @@ impl<'a> RecursionPlan {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		rec: Recursion<'a>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		match rec.current {
 			Value::Array(value) => stk
 				.scope(|scope| {
@@ -288,7 +289,7 @@ impl<'a> RecursionPlan {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		rec: Recursion<'a>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		match self {
 			Self::Repeat => compute_idiom_recursion(stk, ctx, opt, doc, rec).await,
 			Self::Destructure {
@@ -325,10 +326,10 @@ impl<'a> RecursionPlan {
 						Ok(Value::Object(obj))
 					}
 					Value::None => Ok(Value::None),
-					v => Err(Error::Unreachable(format!(
+					v => Err(anyhow::Error::new(Error::unreachable(format_args!(
 						"Expected an object or none, found {}.",
 						v.kindof()
-					))),
+					)))),
 				}
 			}
 		}
@@ -509,8 +510,9 @@ pub enum Recurse {
 }
 
 impl TryInto<(u32, Option<u32>)> for Recurse {
-	type Error = Error;
-	fn try_into(self) -> Result<(u32, Option<u32>), Error> {
+	type Error = anyhow::Error;
+
+	fn try_into(self) -> Result<(u32, Option<u32>)> {
 		let v = match self {
 			Recurse::Fixed(v) => (v, Some(v)),
 			Recurse::Range(min, max) => {
@@ -520,14 +522,16 @@ impl TryInto<(u32, Option<u32>)> for Recurse {
 		};
 
 		match v {
-			(min, _) if min < 1 => Err(Error::InvalidBound {
+			(min, _) if min < 1 => Err(anyhow::Error::new(Error::InvalidBound {
 				found: min.to_string(),
 				expected: "at least 1".into(),
-			}),
-			(_, Some(max)) if max > (*IDIOM_RECURSION_LIMIT as u32) => Err(Error::InvalidBound {
-				found: max.to_string(),
-				expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
-			}),
+			})),
+			(_, Some(max)) if max > (*IDIOM_RECURSION_LIMIT as u32) => {
+				Err(anyhow::Error::new(Error::InvalidBound {
+					found: max.to_string(),
+					expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
+				}))
+			}
 			v => Ok(v),
 		}
 	}
@@ -694,7 +698,7 @@ impl RecurseInstruction {
 		doc: Option<&CursorDoc>,
 		rec: Recursion<'_>,
 		finished: &mut Vec<Value>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		match self {
 			Self::Path {
 				inclusive,

@@ -3,7 +3,7 @@ mod import;
 
 use self::export::ExportCommandArguments;
 use self::import::ImportCommandArguments;
-use crate::err::Error;
+use anyhow::Result;
 use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
@@ -14,7 +14,7 @@ pub enum MlCommand {
 	Export(ExportCommandArguments),
 }
 
-pub async fn init(command: MlCommand) -> Result<(), Error> {
+pub async fn init(command: MlCommand) -> Result<()> {
 	match command {
 		MlCommand::Import(args) => import::init(args).await,
 		MlCommand::Export(args) => export::init(args).await,

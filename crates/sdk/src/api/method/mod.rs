@@ -1,5 +1,4 @@
 //! Methods to use when interacting with a SurrealDB instance
-use self::query::ValidQuery;
 use crate::api::opt;
 use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
@@ -335,7 +334,7 @@ where
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: to_core_value(value).map_err(Into::into),
+			value: to_core_value(value),
 		}
 	}
 
@@ -647,29 +646,13 @@ where
 				let capabilities = &router.config.capabilities;
 				#[expect(deprecated)]
 				syn::parse_with_capabilities(surql, capabilities)
-					.map_err(Into::into)
 					.and_then(opt::IntoQuery::into_query)
 			}),
 			#[expect(deprecated)]
 			None => query.into_query(),
 		};
-		let inner = match result {
-			Ok(query) => Ok(ValidQuery::Normal {
-				query,
-				register_live_queries: true,
-				bindings: Default::default(),
-			}),
-			Err(crate::Error::Api(crate::api::err::Error::RawQuery(query))) => {
-				Ok(ValidQuery::Raw {
-					query,
-					bindings: Default::default(),
-				})
-			}
-			Err(error) => Err(error),
-		};
-
 		Query {
-			inner,
+			inner: result.map(|x| x.0),
 			client: Cow::Borrowed(self),
 		}
 	}

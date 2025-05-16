@@ -1,51 +1,51 @@
-use crate::err::Error;
 use crate::fnc::util::math::vector::{
 	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Scale,
 	Subtract,
 };
 use crate::sql::{Number, Value};
+use anyhow::Result;
 
-pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 	Ok(a.add(&b)?.into())
 }
 
-pub fn angle((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+pub fn angle((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 	Ok(a.angle(&b)?.into())
 }
 
-pub fn divide((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+pub fn divide((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 	Ok(a.divide(&b)?.into())
 }
 
-pub fn cross((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+pub fn cross((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 	Ok(a.cross(&b)?.into())
 }
 
-pub fn dot((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+pub fn dot((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 	Ok(a.dot(&b)?.into())
 }
 
-pub fn magnitude((a,): (Vec<Number>,)) -> Result<Value, Error> {
+pub fn magnitude((a,): (Vec<Number>,)) -> Result<Value> {
 	Ok(a.magnitude().into())
 }
 
-pub fn multiply((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+pub fn multiply((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 	Ok(a.multiply(&b)?.into())
 }
 
-pub fn normalize((a,): (Vec<Number>,)) -> Result<Value, Error> {
+pub fn normalize((a,): (Vec<Number>,)) -> Result<Value> {
 	Ok(a.normalize().into())
 }
 
-pub fn project((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+pub fn project((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 	Ok(a.project(&b)?.into())
 }
 
-pub fn subtract((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+pub fn subtract((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 	Ok(a.subtract(&b)?.into())
 }
 
-pub fn scale((a, b): (Vec<Number>, Number)) -> Result<Value, Error> {
+pub fn scale((a, b): (Vec<Number>, Number)) -> Result<Value> {
 	Ok(a.scale(&b)?.into())
 }
 
@@ -60,23 +60,24 @@ pub mod distance {
 	};
 	use crate::idx::planner::IterationStage;
 	use crate::sql::{Number, Value};
+	use anyhow::Result;
 
-	pub fn chebyshev((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	pub fn chebyshev((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.chebyshev_distance(&b)?.into())
 	}
 
-	pub fn euclidean((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	pub fn euclidean((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.euclidean_distance(&b)?.into())
 	}
 
-	pub fn hamming((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	pub fn hamming((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.hamming_distance(&b)?.into())
 	}
 
 	pub fn knn(
 		(ctx, doc): (&Context, Option<&CursorDoc>),
 		(Optional(knn_ref),): (Optional<Value>,),
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		if let Some((_exe, doc, thg)) = get_execution_context(ctx, doc) {
 			if let Some(ir) = &doc.ir {
 				if let Some(d) = ir.dist() {
@@ -97,17 +98,17 @@ pub mod distance {
 		Ok(Value::None)
 	}
 
-	pub fn mahalanobis((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "vector::distance::mahalanobis() function".to_string(),
-		})
+	pub fn mahalanobis((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value> {
+		Err(anyhow::Error::new(Error::Unimplemented(
+			"vector::distance::mahalanobis() function".to_string(),
+		)))
 	}
 
-	pub fn manhattan((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	pub fn manhattan((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.manhattan_distance(&b)?.into())
 	}
 
-	pub fn minkowski((a, b, o): (Vec<Number>, Vec<Number>, Number)) -> Result<Value, Error> {
+	pub fn minkowski((a, b, o): (Vec<Number>, Vec<Number>, Number)) -> Result<Value> {
 		Ok(a.minkowski_distance(&b, &o)?.into())
 	}
 }
@@ -117,23 +118,24 @@ pub mod similarity {
 	use crate::err::Error;
 	use crate::fnc::util::math::vector::{CosineSimilarity, JaccardSimilarity, PearsonSimilarity};
 	use crate::sql::{Number, Value};
+	use anyhow::Result;
 
-	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.cosine_similarity(&b)?.into())
 	}
 
-	pub fn jaccard((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	pub fn jaccard((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.jaccard_similarity(&b)?.into())
 	}
 
-	pub fn pearson((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
+	pub fn pearson((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.pearson_similarity(&b)?.into())
 	}
 
-	pub fn spearman((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "vector::similarity::spearman() function".to_string(),
-		})
+	pub fn spearman((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value> {
+		Err(anyhow::Error::new(Error::Unimplemented(
+			"vector::similarity::spearman() function".to_string(),
+		)))
 	}
 }
 
@@ -148,7 +150,7 @@ mod tests {
 		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
 		let scalar_int = Number::Int(2);
 
-		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_int));
+		let result: Result<Value> = scale((input_vector.clone(), scalar_int));
 
 		let expected_output: Vec<Number> = vec![2, 4, 6, 8].into_iter().map(Number::Int).collect();
 
@@ -160,7 +162,7 @@ mod tests {
 		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
 		let scalar_float = Number::Float(1.51);
 
-		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_float));
+		let result: Result<Value> = scale((input_vector.clone(), scalar_float));
 		let expected_output: Vec<Number> =
 			vec![1.51, 3.02, 4.53, 6.04].into_iter().map(Number::Float).collect();
 		assert_eq!(result.unwrap(), expected_output.into());
@@ -171,7 +173,7 @@ mod tests {
 		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
 		let scalar_decimal = Number::Decimal(Decimal::new(3141, 3));
 
-		let result: Result<Value, Error> = scale((input_vector.clone(), scalar_decimal));
+		let result: Result<Value> = scale((input_vector.clone(), scalar_decimal));
 		let expected_output: Vec<Number> = vec![
 			Number::Decimal(Decimal::new(3141, 3)),  // 3.141 * 1
 			Number::Decimal(Decimal::new(6282, 3)),  // 3.141 * 2

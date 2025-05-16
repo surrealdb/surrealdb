@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::{Base, Ident, Value};
+use anyhow::Result;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -23,47 +24,47 @@ pub struct RemoveEventStatement {
 
 impl RemoveEventStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
-		let future = async {
-			// Allowed to run?
-			opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
-			// Get the NS and DB
-			let (ns, db) = opt.ns_db()?;
-			// Get the transaction
-			let txn = ctx.tx();
-			// Get the definition
-			let ev = txn.get_tb_event(ns, db, &self.what, &self.name).await?;
-			// Delete the definition
-			let key = crate::key::table::ev::new(ns, db, &ev.what, &ev.name);
-			txn.del(key).await?;
-			// Refresh the table cache for events
-			let key = crate::key::database::tb::new(ns, db, &self.what);
-			let tb = txn.get_tb(ns, db, &self.what).await?;
-			txn.set(
-				key,
-				revision::to_vec(&DefineTableStatement {
-					cache_events_ts: Uuid::now_v7(),
-					..tb.as_ref().clone()
-				})?,
-				None,
-			)
-			.await?;
-			// Clear the cache
-			if let Some(cache) = ctx.get_cache() {
-				cache.clear_tb(ns, db, &self.what);
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
+		// Get the NS and DB
+		let (ns, db) = opt.ns_db()?;
+		// Get the transaction
+		let txn = ctx.tx();
+		// Get the definition
+		let ev = match txn.get_tb_event(ns, db, &self.what, &self.name).await {
+			Ok(x) => x,
+			Err(e) => {
+				if self.if_exists && matches!(e.downcast_ref(), Some(Error::EvNotFound { .. })) {
+					return Ok(Value::None);
+				} else {
+					return Err(e);
+				}
 			}
-			// Clear the cache
-			txn.clear();
-			// Ok all good
-			Ok(Value::None)
+		};
+		// Delete the definition
+		let key = crate::key::table::ev::new(ns, db, &ev.what, &ev.name);
+		txn.del(key).await?;
+		// Refresh the table cache for events
+		let key = crate::key::database::tb::new(ns, db, &self.what);
+		let tb = txn.get_tb(ns, db, &self.what).await?;
+		txn.set(
+			key,
+			revision::to_vec(&DefineTableStatement {
+				cache_events_ts: Uuid::now_v7(),
+				..tb.as_ref().clone()
+			})?,
+			None,
+		)
+		.await?;
+		// Clear the cache
+		if let Some(cache) = ctx.get_cache() {
+			cache.clear_tb(ns, db, &self.what);
 		}
-		.await;
-		match future {
-			Err(Error::EvNotFound {
-				..
-			}) if self.if_exists => Ok(Value::None),
-			v => v,
-		}
+		// Clear the cache
+		txn.clear();
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 

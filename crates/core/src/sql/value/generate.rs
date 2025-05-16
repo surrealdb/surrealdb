@@ -3,9 +3,10 @@ use crate::sql::id::Id;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use anyhow::Result;
 
 impl Value {
-	pub(crate) fn generate(self, tb: &Table, retable: bool) -> Result<Thing, Error> {
+	pub(crate) fn generate(self, tb: &Table, retable: bool) -> Result<Thing> {
 		match self {
 			// There is a floating point number for the id field
 			Value::Number(id) if id.is_float() => Ok(Thing {
@@ -61,9 +62,9 @@ impl Value {
 				},
 			},
 			// Any other value is wrong
-			id => Err(Error::IdInvalid {
+			id => Err(anyhow::Error::new(Error::IdInvalid {
 				value: id.to_string(),
-			}),
+			})),
 		}
 	}
 }

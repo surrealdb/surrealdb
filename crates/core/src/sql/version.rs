@@ -1,5 +1,6 @@
 use super::FlowResultExt;
 use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::datetime::Datetime};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -32,15 +33,17 @@ impl Version {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<u64, Error> {
+	) -> Result<u64> {
 		match self.0.compute(stk, ctx, opt, doc).await.catch_return()? {
 			Value::Datetime(v) => match v.to_u64() {
 				Some(ts) => Ok(ts),
-				_ => Err(Error::Unreachable("Failed to convert datetime to timestamp".into())),
+				_ => Err(anyhow::Error::new(Error::unreachable(
+					"Failed to convert datetime to timestamp",
+				))),
 			},
-			found => Err(Error::InvalidVersion {
+			found => Err(anyhow::Error::new(Error::InvalidVersion {
 				found,
-			}),
+			})),
 		}
 	}
 }

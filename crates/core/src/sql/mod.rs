@@ -81,6 +81,7 @@ pub mod serde;
 pub mod statements;
 
 use crate::err::Error;
+use anyhow::Result;
 
 pub use self::access::Access;
 pub use self::access::Accesses;
@@ -183,12 +184,12 @@ pub enum ControlFlow {
 	Break,
 	Continue,
 	Return(Value),
-	Err(Box<Error>),
+	Err(anyhow::Error),
 }
 
-impl From<Error> for ControlFlow {
-	fn from(error: Error) -> Self {
-		ControlFlow::Err(Box::new(error))
+impl From<anyhow::Error> for ControlFlow {
+	fn from(error: anyhow::Error) -> Self {
+		ControlFlow::Err(error)
 	}
 }
 
@@ -198,15 +199,17 @@ pub trait FlowResultExt {
 	///
 	/// If the error value is either `ControlFlow::Break` or `ControlFlow::Continue` it will
 	/// instead create an error that break/continue was used within an invalid location.
-	fn catch_return(self) -> Result<Value, Error>;
+	fn catch_return(self) -> Result<Value, anyhow::Error>;
 }
 
 impl FlowResultExt for FlowResult<Value> {
-	fn catch_return(self) -> Result<Value, Error> {
+	fn catch_return(self) -> Result<Value, anyhow::Error> {
 		match self {
-			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => Err(Error::InvalidControlFlow),
+			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+				Err(anyhow::Error::new(Error::InvalidControlFlow))
+			}
 			Err(ControlFlow::Return(x)) => Ok(x),
-			Err(ControlFlow::Err(e)) => Err(*e),
+			Err(ControlFlow::Err(e)) => Err(e),
 			Ok(x) => Ok(x),
 		}
 	}

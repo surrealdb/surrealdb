@@ -1,5 +1,6 @@
 use super::{Datastore, LockType, TransactionType};
 use crate::err::Error;
+use anyhow::Result;
 use std::sync::Arc;
 
 mod fixes;
@@ -60,7 +61,7 @@ impl Version {
 		self.0 == Self::LATEST
 	}
 	/// Fix
-	pub async fn fix(&self, ds: Arc<Datastore>) -> Result<(), Error> {
+	pub async fn fix(&self, ds: Arc<Datastore>) -> Result<()> {
 		// We iterate through each version from the current to the latest
 		// and apply the fixes for each version. We update storage version
 		// and commit changes each iteration, to keep transactions as small

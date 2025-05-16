@@ -6,6 +6,8 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::{Base, Ident, Object, Value, Version};
 use crate::sys::INFORMATION;
+use anyhow::bail;
+use anyhow::Result;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -52,7 +54,7 @@ impl InfoStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		match self {
 			InfoStatement::Root(structured) => {
 				// Allowed to run?
@@ -323,7 +325,7 @@ impl InfoStatement {
 						let (ns, db) = opt.ns_db()?;
 						txn.get_db_user(ns, db, user).await?
 					}
-					_ => return Err(Error::InvalidLevel(base.to_string())),
+					_ => bail!(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
 				Ok(match structured {

@@ -46,7 +46,7 @@ impl From<Vec<dbs::Response>> for Data {
 }
 
 impl TryFrom<Data> for Value {
-	type Error = crate::err::Error;
+	type Error = anyhow::Error;
 
 	fn try_from(val: Data) -> Result<Self, Self::Error> {
 		match val {

@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
+use anyhow::Result;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -21,70 +22,85 @@ pub struct RemoveUserStatement {
 
 impl RemoveUserStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
-		let future = async {
-			// Allowed to run?
-			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
-			// Check the statement type
-			match self.base {
-				Base::Root => {
-					// Get the transaction
-					let txn = ctx.tx();
-					// Get the definition
-					let us = txn.get_root_user(&self.name).await?;
-					// Process the statement
-					let key = crate::key::root::us::new(&us.name);
-					txn.del(key).await?;
-					// Clear the cache
-					txn.clear();
-					// Ok all good
-					Ok(Value::None)
-				}
-				Base::Ns => {
-					// Get the transaction
-					let txn = ctx.tx();
-					// Get the definition
-					let us = txn.get_ns_user(opt.ns()?, &self.name).await?;
-					// Delete the definition
-					let key = crate::key::namespace::us::new(opt.ns()?, &us.name);
-					txn.del(key).await?;
-					// Clear the cache
-					txn.clear();
-					// Ok all good
-					Ok(Value::None)
-				}
-				Base::Db => {
-					// Get the transaction
-					let txn = ctx.tx();
-					// Get the definition
-					let (ns, db) = opt.ns_db()?;
-					let us = txn.get_db_user(ns, db, &self.name).await?;
-					// Delete the definition
-					let key = crate::key::database::us::new(ns, db, &us.name);
-					txn.del(key).await?;
-					// Clear the cache
-					txn.clear();
-					// Ok all good
-					Ok(Value::None)
-				}
-				_ => Err(Error::InvalidLevel(self.base.to_string())),
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		// Check the statement type
+		match self.base {
+			Base::Root => {
+				// Get the transaction
+				let txn = ctx.tx();
+				// Get the definition
+				let us = match txn.get_root_user(&self.name).await {
+					Ok(x) => x,
+					Err(e) => {
+						if self.if_exists
+							&& matches!(e.downcast_ref(), Some(Error::UserRootNotFound { .. }))
+						{
+							return Ok(Value::None);
+						} else {
+							return Err(e);
+						}
+					}
+				};
+				// Process the statement
+				let key = crate::key::root::us::new(&us.name);
+				txn.del(key).await?;
+				// Clear the cache
+				txn.clear();
+				// Ok all good
+				Ok(Value::None)
 			}
-		}
-		.await;
-		match future {
-			Err(e) if self.if_exists => match e {
-				Error::UserRootNotFound {
-					..
-				} => Ok(Value::None),
-				Error::UserNsNotFound {
-					..
-				} => Ok(Value::None),
-				Error::UserDbNotFound {
-					..
-				} => Ok(Value::None),
-				e => Err(e),
-			},
-			v => v,
+			Base::Ns => {
+				// Get the transaction
+				let txn = ctx.tx();
+				// Get the definition
+				let us = match txn.get_ns_user(opt.ns()?, &self.name).await {
+					Ok(x) => x,
+					Err(e) => {
+						if self.if_exists
+							&& matches!(e.downcast_ref(), Some(Error::UserNsNotFound { .. }))
+						{
+							return Ok(Value::None);
+						} else {
+							return Err(e);
+						}
+					}
+				};
+				// Delete the definition
+				let key = crate::key::namespace::us::new(opt.ns()?, &us.name);
+				txn.del(key).await?;
+				// Clear the cache
+				txn.clear();
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Db => {
+				// Get the transaction
+				let txn = ctx.tx();
+				// Get the definition
+				let (ns, db) = opt.ns_db()?;
+				let us = match txn.get_db_user(ns, db, &self.name).await {
+					Ok(x) => x,
+					Err(e) => {
+						if self.if_exists
+							&& matches!(e.downcast_ref(), Some(Error::UserDbNotFound { .. }))
+						{
+							return Ok(Value::None);
+						} else {
+							return Err(e);
+						}
+					}
+				};
+				// Delete the definition
+				let key = crate::key::database::us::new(ns, db, &us.name);
+				txn.del(key).await?;
+				// Clear the cache
+				txn.clear();
+				// Ok all good
+				Ok(Value::None)
+			}
+			_ => Err(anyhow::Error::new(Error::InvalidLevel(self.base.to_string()))),
 		}
 	}
 }

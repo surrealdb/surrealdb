@@ -9,6 +9,7 @@ use crate::sql::{
 	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
 	Values, Version, With,
 };
+use anyhow::{ensure, Result};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -102,7 +103,7 @@ impl SelectStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Assign the statement
@@ -118,9 +119,10 @@ impl SelectStatement {
 		// Extract the limits
 		i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Fail for multiple targets without a limit
-		if self.only && !i.is_limit_one_or_zero() && self.what.0.len() > 1 {
-			return Err(Error::SingleOnlyOutput);
-		}
+		ensure!(
+			!self.only || i.is_limit_one_or_zero() || self.what.0.len() <= 1,
+			Error::SingleOnlyOutput
+		);
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(ctx)?;
 		// Get a query planner
@@ -136,9 +138,7 @@ impl SelectStatement {
 		// Process the statement
 		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
-		if ctx.is_timedout().await? {
-			return Err(Error::QueryTimedout);
-		}
+		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 		// Output the results
 		match res {
 			// This is a single record result
@@ -148,7 +148,7 @@ impl SelectStatement {
 				// There was exactly one result
 				1 => Ok(a.remove(0)),
 				// There were no results
-				_ => Err(Error::SingleOnlyOutput),
+				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
 			},
 			// This is standard query result
 			v => Ok(v),

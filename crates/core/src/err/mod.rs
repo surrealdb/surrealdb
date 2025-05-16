@@ -11,6 +11,7 @@ use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
+use core::fmt;
 #[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -811,12 +812,6 @@ pub enum Error {
 	#[error("There was an error with model computation: {0}")]
 	ModelComputation(String),
 
-	/// The feature has not yet being implemented
-	#[error("Feature not yet implemented: {feature}")]
-	FeatureNotYetImplemented {
-		feature: String,
-	},
-
 	/// Duplicated match references are not allowed
 	#[error("Duplicated Match reference: {mr}")]
 	DuplicatedMatchRef {
@@ -1349,6 +1344,15 @@ pub enum Error {
 
 	#[error("Failed to connect to bucket: {0}")]
 	BucketConnectionFailed(String),
+}
+
+impl Error {
+	#[track_caller]
+	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
+		let location = std::panic::Location::caller();
+		let message = format!("{}:{}: {}", location.file(), location.line(), message);
+		Error::Unreachable(message)
+	}
 }
 
 impl From<Error> for String {

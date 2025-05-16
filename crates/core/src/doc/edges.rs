@@ -11,6 +11,7 @@ use crate::sql::value::Value;
 use crate::sql::Dir;
 use crate::sql::Relation;
 use crate::sql::TableType;
+use anyhow::{ensure, Result};
 
 impl Document {
 	pub(super) async fn store_edges_data(
@@ -18,7 +19,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the table
 		let tb = self.tb(ctx, opt).await?;
 		// Check if the table is a view
@@ -45,18 +46,20 @@ impl Document {
 			) {
 				// Check that the `in` record exists
 				let key = crate::key::thing::new(ns, db, &l.tb, &l.id);
-				if !txn.exists(key, None).await? {
-					return Err(Error::IdNotFound {
+				ensure!(
+					txn.exists(key, None).await?,
+					Error::IdNotFound {
 						rid: l.to_string(),
-					});
-				}
+					}
+				);
 				// Check that the `out` record exists
 				let key = crate::key::thing::new(ns, db, &r.tb, &r.id);
-				if !txn.exists(key, None).await? {
-					return Err(Error::IdNotFound {
+				ensure!(
+					txn.exists(key, None).await?,
+					Error::IdNotFound {
 						rid: r.to_string(),
-					});
-				}
+					}
+				);
 			}
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);

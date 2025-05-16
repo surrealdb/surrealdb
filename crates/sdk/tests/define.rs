@@ -13,11 +13,12 @@ use surrealdb::iam::Role;
 use surrealdb::kvs::{LockType, TransactionType};
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
+use surrealdb::Result;
 use test_log::test;
 use tracing::info;
 
 #[tokio::test]
-async fn define_statement_namespace() -> Result<(), Error> {
+async fn define_statement_namespace() -> Result<()> {
 	let sql = "
 		DEFINE NAMESPACE test;
 		INFO FOR ROOT;
@@ -58,7 +59,7 @@ async fn define_statement_namespace() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_database() -> Result<(), Error> {
+async fn define_statement_database() -> Result<()> {
 	let sql = "
 		DEFINE DATABASE test;
 		INFO FOR NS;
@@ -85,7 +86,7 @@ async fn define_statement_database() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_event_when_event() -> Result<(), Error> {
+async fn define_statement_event_when_event() -> Result<()> {
 	let sql = "
 		DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (
 			CREATE activity SET user = $this, value = $after.email, action = $event
@@ -123,7 +124,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_event_when_logic() -> Result<(), Error> {
+async fn define_statement_event_when_logic() -> Result<()> {
 	let sql = "
 		DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (
 			CREATE activity SET user = $this, value = $after.email, action = $event
@@ -165,7 +166,7 @@ async fn define_statement_index_concurrently_building_status(
 	skip_def: usize,
 	initial_size: usize,
 	appended_size: usize,
-) -> Result<(), Error> {
+) -> Result<()> {
 	let session = Session::owner().with_ns("test").with_db("test");
 	let ds = new_ds().await?;
 	// Populate initial records
@@ -276,7 +277,7 @@ async fn define_statement_index_concurrently_building_status(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn define_statement_index_concurrently_building_status_standard() -> Result<(), Error> {
+async fn define_statement_index_concurrently_building_status_standard() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE INDEX test ON user FIELDS email CONCURRENTLY",
 		1,
@@ -287,8 +288,7 @@ async fn define_statement_index_concurrently_building_status_standard() -> Resul
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn define_statement_index_concurrently_building_status_standard_overwrite(
-) -> Result<(), Error> {
+async fn define_statement_index_concurrently_building_status_standard_overwrite() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE INDEX OVERWRITE test ON user FIELDS email CONCURRENTLY",
 		1,
@@ -299,7 +299,7 @@ async fn define_statement_index_concurrently_building_status_standard_overwrite(
 }
 
 #[test(tokio::test)]
-async fn define_statement_index_concurrently_building_status_full_text() -> Result<(), Error> {
+async fn define_statement_index_concurrently_building_status_full_text() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
@@ -311,8 +311,7 @@ async fn define_statement_index_concurrently_building_status_full_text() -> Resu
 }
 
 #[test(tokio::test)]
-async fn define_statement_index_concurrently_building_status_full_text_overwrite(
-) -> Result<(), Error> {
+async fn define_statement_index_concurrently_building_status_full_text_overwrite() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX OVERWRITE test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
@@ -323,7 +322,7 @@ async fn define_statement_index_concurrently_building_status_full_text_overwrite
 }
 
 #[tokio::test]
-async fn define_statement_analyzer() -> Result<(), Error> {
+async fn define_statement_analyzer() -> Result<()> {
 	let sql = r#"
 		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
 		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
@@ -363,7 +362,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_search_index() -> Result<(), Error> {
+async fn define_statement_search_index() -> Result<()> {
 	let sql = r#"
 		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
 		CREATE blog:3 SET title = 'This blog is going to be deleted';
@@ -426,7 +425,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_user_root() -> Result<(), Error> {
+async fn define_statement_user_root() -> Result<()> {
 	let sql = "
 		DEFINE USER test ON ROOT PASSWORD 'test';
 
@@ -453,7 +452,7 @@ async fn define_statement_user_root() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_user_ns() -> Result<(), Error> {
+async fn define_statement_user_ns() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner();
 
@@ -515,7 +514,7 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_user_db() -> Result<(), Error> {
+async fn define_statement_user_db() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner();
 
@@ -1253,7 +1252,7 @@ async fn permissions_checks_define_index() {
 }
 
 #[tokio::test]
-async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
+async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let ds = new_ds().await?;
 	let cache = ds.get_cache();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);

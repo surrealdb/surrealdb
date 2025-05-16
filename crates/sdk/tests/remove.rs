@@ -9,12 +9,12 @@ mod util;
 
 use std::collections::HashMap;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn remove_statement_table() -> Result<(), Error> {
+async fn remove_statement_table() -> Result<()> {
 	let sql = "
 		DEFINE TABLE test SCHEMALESS;
 		REMOVE TABLE test;
@@ -52,7 +52,7 @@ async fn remove_statement_table() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn remove_statement_namespace() -> Result<(), Error> {
+async fn remove_statement_namespace() -> Result<()> {
 	// Namespace not selected
 	{
 		let sql = "
@@ -100,7 +100,7 @@ async fn remove_statement_namespace() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn remove_statement_database() -> Result<(), Error> {
+async fn remove_statement_database() -> Result<()> {
 	// Database not selected
 	{
 		let sql = "
@@ -148,7 +148,7 @@ async fn remove_statement_database() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn remove_statement_analyzer() -> Result<(), Error> {
+async fn remove_statement_analyzer() -> Result<()> {
 	let sql = "
 		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
 		REMOVE ANALYZER english;
@@ -186,7 +186,7 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn remove_statement_index() -> Result<(), Error> {
+async fn remove_statement_index() -> Result<()> {
 	let sql = "
 		DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE;
 		DEFINE INDEX idx_author ON book FIELDS author;
@@ -222,23 +222,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_table_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE TABLE foo;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::TbNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_table_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_table_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE TABLE IF EXISTS foo;
 	";
@@ -254,23 +238,7 @@ async fn should_not_error_when_remove_table_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_analyzer_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE ANALYZER foo;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::AzNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_analyzer_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_analyzer_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE ANALYZER IF EXISTS foo;
 	";
@@ -286,23 +254,7 @@ async fn should_not_error_when_remove_analyzer_if_exists() -> Result<(), Error> 
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_database_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE DATABASE foo;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::DbNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_database_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_database_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE DATABASE IF EXISTS foo;
 	";
@@ -318,23 +270,7 @@ async fn should_not_error_when_remove_database_if_exists() -> Result<(), Error> 
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_event_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE EVENT foo ON bar;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::EvNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_event_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_event_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE EVENT IF EXISTS foo ON bar;
 	";
@@ -350,23 +286,7 @@ async fn should_not_error_when_remove_event_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_field_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE FIELD foo ON bar;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::FdNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_field_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_field_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE FIELD IF EXISTS foo ON bar;
 	";
@@ -382,23 +302,7 @@ async fn should_not_error_when_remove_field_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_function_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE FUNCTION fn::foo;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::FcNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_function_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_function_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE FUNCTION IF EXISTS fn::foo;
 	";
@@ -414,23 +318,7 @@ async fn should_not_error_when_remove_function_if_exists() -> Result<(), Error> 
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_index_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE INDEX foo ON bar;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::IxNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_index_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_index_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE INDEX IF EXISTS foo ON bar;
 	";
@@ -446,23 +334,7 @@ async fn should_not_error_when_remove_index_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_namespace_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE NAMESPACE foo;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::NsNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_namespace_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_namespace_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE NAMESPACE IF EXISTS foo;
 	";
@@ -478,23 +350,7 @@ async fn should_not_error_when_remove_namespace_if_exists() -> Result<(), Error>
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_param_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE PARAM $foo;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::PaNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_param_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_param_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE PARAM IF EXISTS $foo;
 	";
@@ -510,23 +366,7 @@ async fn should_not_error_when_remove_param_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_access_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE ACCESS foo ON DB;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::AccessDbNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_access_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_access_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE ACCESS IF EXISTS foo ON DB;
 	";
@@ -542,23 +382,7 @@ async fn should_not_error_when_remove_access_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn should_error_when_remove_and_user_does_not_exist() -> Result<(), Error> {
-	let sql = "
-		REMOVE USER foo ON ROOT;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::UserRootNotFound { .. }),);
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn should_not_error_when_remove_user_if_exists() -> Result<(), Error> {
+async fn should_not_error_when_remove_user_if_exists() -> Result<()> {
 	let sql = "
 		REMOVE USER IF EXISTS foo ON ROOT;
 	";

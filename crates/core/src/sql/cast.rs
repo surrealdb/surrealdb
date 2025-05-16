@@ -56,6 +56,7 @@ impl Cast {
 			.await?
 			.cast_to_kind(&self.0)
 			.map_err(Error::from)
+			.map_err(anyhow::Error::new)
 			.map_err(ControlFlow::from)
 	}
 }

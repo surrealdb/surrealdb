@@ -1,12 +1,12 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::operator::Operator;
 use crate::sql::part::Part;
 use crate::sql::paths::ID;
 use crate::sql::value::Value;
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -44,7 +44,7 @@ impl Data {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-	) -> Result<Option<Value>, Error> {
+	) -> Result<Option<Value>> {
 		self.pick(stk, ctx, opt, &*ID).await
 	}
 	/// Fetch a field path value if one is specified
@@ -54,7 +54,7 @@ impl Data {
 		ctx: &Context,
 		opt: &Options,
 		path: &[Part],
-	) -> Result<Option<Value>, Error> {
+	) -> Result<Option<Value>> {
 		match self {
 			Self::MergeExpression(v) => match v {
 				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
