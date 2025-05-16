@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value};
+use crate::iam::{Action, ResourceKind};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

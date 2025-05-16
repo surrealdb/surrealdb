@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::expr::{Base, Datetime, Table, Value};
+use crate::iam::{Action, ResourceKind};
 use crate::vs::VersionStamp;
 
 use revision::revisioned;

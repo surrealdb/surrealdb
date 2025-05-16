@@ -3,8 +3,6 @@ use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::kvs::Transaction;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::info::InfoStructure;
@@ -13,6 +11,8 @@ use crate::expr::{
 	Value, Values, View,
 };
 use crate::expr::{Idiom, Kind, TableType};
+use crate::iam::{Action, ResourceKind};
+use crate::kvs::Transaction;
 
 use reblessive::tree::Stk;
 use revision::revisioned;

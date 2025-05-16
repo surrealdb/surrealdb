@@ -3,7 +3,6 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::{fmt, ops::Deref, str};
 
-
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 
 #[revisioned(revision = 1)]

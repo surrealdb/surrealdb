@@ -1,7 +1,7 @@
 pub mod base64 {
 	use crate::err::Error;
-	use crate::fnc::args::Optional;
 	use crate::expr::{Bytes, Value};
+	use crate::fnc::args::Optional;
 	use base64::engine::general_purpose::{
 		GeneralPurpose, GeneralPurposeConfig, STANDARD, STANDARD_NO_PAD,
 	};
@@ -40,8 +40,8 @@ pub mod base64 {
 }
 pub mod cbor {
 	use crate::err::Error;
-	use crate::rpc::format::cbor::Cbor;
 	use crate::expr::{Bytes, Value};
+	use crate::rpc::format::cbor::Cbor;
 	use ciborium::Value as Data;
 
 	pub fn encode((arg,): (Value,)) -> Result<Value, Error> {
@@ -81,8 +81,8 @@ mod tests {
 	use super::*;
 
 	use crate::{
-		fnc::args::Optional,
 		expr::{Bytes, Value},
+		fnc::args::Optional,
 	};
 
 	#[test]

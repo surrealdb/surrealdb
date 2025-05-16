@@ -1,7 +1,7 @@
 use super::Range;
 use crate::cnf::ID_CHARS;
 use crate::err::Error;
-use crate::sql::{escape::EscapeRid, Array, Number, Object, Strand, Thing, Uuid, Value};
+use crate::sql::{escape::EscapeRid, Array, Number, Object, SqlValue, Strand, Thing, Uuid};
 use nanoid::nanoid;
 use range::IdRange;
 use revision::revisioned;
@@ -130,14 +130,14 @@ impl From<Vec<String>> for Id {
 	}
 }
 
-impl From<Vec<Value>> for Id {
-	fn from(v: Vec<Value>) -> Self {
+impl From<Vec<SqlValue>> for Id {
+	fn from(v: Vec<SqlValue>) -> Self {
 		Self::Array(v.into())
 	}
 }
 
-impl From<BTreeMap<String, Value>> for Id {
-	fn from(v: BTreeMap<String, Value>) -> Self {
+impl From<BTreeMap<String, SqlValue>> for Id {
+	fn from(v: BTreeMap<String, SqlValue>) -> Self {
 		Self::Object(v.into())
 	}
 }
@@ -172,15 +172,15 @@ impl TryFrom<Range> for Id {
 	}
 }
 
-impl TryFrom<Value> for Id {
+impl TryFrom<SqlValue> for Id {
 	type Error = Error;
-	fn try_from(v: Value) -> Result<Self, Self::Error> {
+	fn try_from(v: SqlValue) -> Result<Self, Self::Error> {
 		match v {
-			Value::Number(Number::Int(v)) => Ok(v.into()),
-			Value::Strand(v) => Ok(v.into()),
-			Value::Array(v) => Ok(v.into()),
-			Value::Object(v) => Ok(v.into()),
-			Value::Range(v) => v.deref().to_owned().try_into(),
+			SqlValue::Number(Number::Int(v)) => Ok(v.into()),
+			SqlValue::Strand(v) => Ok(v.into()),
+			SqlValue::Array(v) => Ok(v.into()),
+			SqlValue::Object(v) => Ok(v.into()),
+			SqlValue::Range(v) => v.deref().to_owned().try_into(),
 			v => Err(Error::IdInvalid {
 				value: v.kindof().to_string(),
 			}),
@@ -236,14 +236,14 @@ impl Id {
 		Self::Uuid(Uuid::new_v7())
 	}
 	/// Check if this Id matches a value
-	pub fn is(&self, val: &Value) -> bool {
+	pub fn is(&self, val: &SqlValue) -> bool {
 		match (self, val) {
-			(Self::Number(i), Value::Number(Number::Int(j))) if *i == *j => true,
-			(Self::String(i), Value::Strand(j)) if *i == j.0 => true,
-			(Self::Uuid(i), Value::Uuid(j)) if i == j => true,
-			(Self::Array(i), Value::Array(j)) if i == j => true,
-			(Self::Object(i), Value::Object(j)) if i == j => true,
-			(i, Value::Thing(t)) if i == &t.id => true,
+			(Self::Number(i), SqlValue::Number(Number::Int(j))) if *i == *j => true,
+			(Self::String(i), SqlValue::Strand(j)) if *i == j.0 => true,
+			(Self::Uuid(i), SqlValue::Uuid(j)) if i == j => true,
+			(Self::Array(i), SqlValue::Array(j)) if i == j => true,
+			(Self::Object(i), SqlValue::Object(j)) if i == j => true,
+			(i, SqlValue::Thing(t)) if i == &t.id => true,
 			_ => false,
 		}
 	}

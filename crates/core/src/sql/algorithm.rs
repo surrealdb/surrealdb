@@ -93,7 +93,6 @@ impl From<crate::expr::Algorithm> for Algorithm {
 			crate::expr::Algorithm::Rs512 => Self::Rs512,
 		}
 	}
-	
 }
 
 crate::sql::impl_display_from_sql!(Algorithm);

@@ -7,11 +7,6 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::{Document, IgnoreError};
 use crate::err::Error;
-use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
-use crate::idx::planner::{
-	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
-	StatementContext,
-};
 use crate::expr::array::Array;
 use crate::expr::edges::Edges;
 use crate::expr::mock::Mock;
@@ -20,6 +15,11 @@ use crate::expr::table::Table;
 use crate::expr::thing::Thing;
 use crate::expr::value::Value;
 use crate::expr::{Fields, Id, IdRange};
+use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
+use crate::idx::planner::{
+	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
+	StatementContext,
+};
 use reblessive::tree::Stk;
 use std::mem;
 use std::sync::Arc;

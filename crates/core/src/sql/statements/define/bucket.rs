@@ -1,8 +1,7 @@
-use crate::sql::{Ident, Permission, Strand, Value};
+use crate::sql::{Ident, Permission, SqlValue, Strand};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -12,7 +11,7 @@ pub struct DefineBucketStatement {
 	pub if_not_exists: bool,
 	pub overwrite: bool,
 	pub name: Ident,
-	pub backend: Option<Value>,
+	pub backend: Option<SqlValue>,
 	pub permissions: Permission,
 	pub readonly: bool,
 	pub comment: Option<Strand>,
@@ -77,8 +76,6 @@ impl crate::sql::DisplaySql for DefineBucketStatement {
 	}
 }
 
-
-
 // Computed bucket definition struct
 
 #[revisioned(revision = 1)]
@@ -106,8 +103,6 @@ impl From<BucketDefinition> for DefineBucketStatement {
 		}
 	}
 }
-
-
 
 crate::sql::impl_display_from_sql!(BucketDefinition);
 

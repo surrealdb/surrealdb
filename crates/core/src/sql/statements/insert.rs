@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value, Version};
+use crate::sql::{Data, Id, Output, SqlValue, Table, Thing, Timeout, Version};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct InsertStatement {
-	pub into: Option<Value>,
+	pub into: Option<SqlValue>,
 	pub data: Data,
 	/// Does the statement have the ignore clause.
 	pub ignore: bool,
@@ -97,11 +97,11 @@ impl crate::sql::DisplaySql for InsertStatement {
 	}
 }
 
-fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing, Error> {
+fn gen_id(v: &SqlValue, into: &Option<Table>) -> Result<Thing, Error> {
 	match into {
 		Some(into) => v.rid().generate(into, true),
 		None => match v.rid() {
-			Value::Thing(v) => match v {
+			SqlValue::Thing(v) => match v {
 				Thing {
 					id: Id::Generate(_),
 					..

@@ -40,6 +40,7 @@ pub(crate) mod idiom;
 pub(crate) mod kind;
 pub(crate) mod language;
 pub(crate) mod limit;
+pub(crate) mod logical_plan;
 pub(crate) mod mock;
 pub(crate) mod model;
 pub(crate) mod number;
@@ -60,7 +61,6 @@ pub(crate) mod scoring;
 pub(crate) mod script;
 pub(crate) mod split;
 pub(crate) mod start;
-pub(crate) mod logical_plan;
 pub(crate) mod strand;
 pub(crate) mod subquery;
 pub(crate) mod table;
@@ -125,6 +125,8 @@ pub use self::index::Index;
 pub use self::kind::Kind;
 pub use self::kind::Literal;
 pub use self::limit::Limit;
+pub use self::logical_plan::LogicalPlan;
+pub use self::logical_plan::LogicalPlans;
 pub use self::mock::Mock;
 pub use self::model::Model;
 pub use self::number::DecimalExt;
@@ -146,8 +148,6 @@ pub use self::script::Script;
 pub use self::split::Split;
 pub use self::split::Splits;
 pub use self::start::Start;
-pub use self::logical_plan::LogicalPlan;
-pub use self::logical_plan::LogicalPlans;
 pub use self::strand::Strand;
 pub use self::subquery::Subquery;
 pub use self::table::Table;
@@ -171,7 +171,6 @@ pub use self::with::With;
 // }
 
 // pub use self::parser::{idiom, json, parse, subquery, thing, value};
-
 
 /// A trait for types that can be formatted as SurrealQL.
 ///

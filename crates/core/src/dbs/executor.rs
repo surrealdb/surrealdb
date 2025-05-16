@@ -5,22 +5,22 @@ use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
 use crate::err::Error;
+use crate::expr::paths::DB;
+use crate::expr::paths::NS;
+use crate::expr::statements::{OptionStatement, UseStatement};
+use crate::expr::value::Value;
+use crate::expr::Base;
+use crate::expr::ControlFlow;
+use crate::expr::FlowResult;
 use crate::expr::LogicalPlan;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
 use crate::kvs::{LockType, Transaction};
-use crate::expr::paths::DB;
-use crate::expr::paths::NS;
-use crate::sql::Query;
-use crate::expr::statements::{OptionStatement, UseStatement};
-use crate::expr::value::Value;
-use crate::expr::Base;
-use crate::expr::ControlFlow;
-use crate::expr::FlowResult;
 use crate::sql::planner::SqlToLogical;
 use crate::sql::statement::Statement;
+use crate::sql::Query;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
 use std::pin::{pin, Pin};
@@ -575,7 +575,6 @@ impl Executor {
 
 			let planner = SqlToLogical::new();
 			let plan = planner.statement_to_logical_plan(stmt)?;
-	
 
 			match plan {
 				LogicalPlan::Option(stmt) => this.execute_option_statement(stmt)?,
@@ -592,8 +591,6 @@ impl Executor {
 					}
 				}
 				plan => {
-					
-
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, plan).await;
 					this.results.push(Response {

@@ -75,5 +75,3 @@ impl crate::sql::DisplaySql for DefineModelStatement {
 		Ok(())
 	}
 }
-
-

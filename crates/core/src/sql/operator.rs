@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 
-use super::Value;
+use super::SqlValue;
 
 /// Binary operators.
 #[revisioned(revision = 2)]
@@ -169,7 +169,7 @@ impl From<crate::expr::Operator> for Operator {
 			crate::expr::Operator::NoneInside => Self::NoneInside,
 			crate::expr::Operator::Outside => Self::Outside,
 			crate::expr::Operator::Intersects => Self::Intersects,
-			crate::expr::Operator::Knn(k, d) => Self::Knn(k,d.map(Into::into)),
+			crate::expr::Operator::Knn(k, d) => Self::Knn(k, d.map(Into::into)),
 			crate::expr::Operator::Ann(k, ef) => Self::Ann(k, ef),
 		}
 	}
@@ -324,9 +324,9 @@ impl BindingPower {
 	/// Returns the binding power for this expression. This is generally `BindingPower::Prime` as
 	/// most value variants are prime expressions, however some like Value::Expression and
 	/// Value::Range have a different binding power.
-	pub fn for_value(value: &Value) -> BindingPower {
+	pub fn for_value(value: &SqlValue) -> BindingPower {
 		match value {
-			Value::Expression(expr) => match **expr {
+			SqlValue::Expression(expr) => match **expr {
 				// All prefix expressions have the same binding power, regardless of the actual
 				// operator.
 				super::Expression::Unary {
@@ -337,7 +337,7 @@ impl BindingPower {
 					..
 				} => BindingPower::for_operator(o),
 			},
-			Value::Range(..) => BindingPower::Range,
+			SqlValue::Range(..) => BindingPower::Range,
 			_ => BindingPower::Prime,
 		}
 	}

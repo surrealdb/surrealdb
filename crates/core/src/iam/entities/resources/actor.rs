@@ -7,8 +7,8 @@ use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpres
 use serde::{Deserialize, Serialize};
 
 use super::{Level, Resource, ResourceKind};
-use crate::iam::{Error, Role};
 use crate::expr::statements::{DefineAccessStatement, DefineUserStatement};
+use crate::iam::{Error, Role};
 
 //
 // User

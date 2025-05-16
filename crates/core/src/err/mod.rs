@@ -1,12 +1,12 @@
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
-use crate::iam::Error as IamError;
-use crate::idx::ft::MatchRef;
-use crate::idx::trees::vector::SharedVector;
 use crate::expr::idiom::Idiom;
 use crate::expr::index::Distance;
 use crate::expr::thing::Thing;
 use crate::expr::value::{CastError, CoerceError, Value};
+use crate::iam::Error as IamError;
+use crate::idx::ft::MatchRef;
+use crate::idx::trees::vector::SharedVector;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;

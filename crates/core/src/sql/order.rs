@@ -1,6 +1,6 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
-use crate::sql::Value;
+use crate::sql::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
@@ -78,7 +78,7 @@ impl crate::sql::DisplaySql for OrderList {
 }
 
 impl OrderList {
-	pub(crate) fn compare(&self, a: &Value, b: &Value) -> cmp::Ordering {
+	pub(crate) fn compare(&self, a: &SqlValue, b: &SqlValue) -> cmp::Ordering {
 		for order in &self.0 {
 			// Reverse the ordering if DESC
 			let o = match order.direction {

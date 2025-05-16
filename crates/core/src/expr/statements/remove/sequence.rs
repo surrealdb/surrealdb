@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::expr::{Base, Ident, Value};
+use crate::iam::{Action, ResourceKind};
 
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;

@@ -1,9 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::{Base, Ident, Timeout, Value};
+use crate::iam::{Action, ResourceKind};
 
 use crate::key::database::sq::Sq;
 use revision::revisioned;

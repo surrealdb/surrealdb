@@ -8,12 +8,12 @@ use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::expr::statements::{access, AccessGrant, DefineAccessStatement};
+use crate::expr::{access_type, AccessType, Datetime, Object, Value};
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::expr::statements::{access, AccessGrant, DefineAccessStatement};
-use crate::expr::{access_type, AccessType, Datetime, Object, Value};
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use md5::Digest;
@@ -4107,12 +4107,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 	#[tokio::test]
 	async fn test_signin_nonexistent_role() {
-		use crate::iam::Error as IamError;
 		use crate::expr::{
 			statements::{define::DefineStatement, DefineUserStatement},
 			user::UserDuration,
 			Base, Statement,
 		};
+		use crate::iam::Error as IamError;
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",

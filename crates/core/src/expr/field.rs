@@ -234,7 +234,8 @@ impl Fields {
 									// This value is always an array, so we can convert it
 									for (name, expr) in args.into_iter().zip(expr) {
 										// This value is always a string, so we can convert it
-										let name: super::Idiom = syn::idiom(&name.to_raw_string())?.into();
+										let name: super::Idiom =
+											syn::idiom(&name.to_raw_string())?.into();
 										// Check if this is a single VALUE field expression
 										out.set(stk, ctx, opt, name.as_ref(), expr).await?
 									}

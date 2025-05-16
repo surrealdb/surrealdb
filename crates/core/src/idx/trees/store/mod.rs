@@ -7,6 +7,9 @@ pub(crate) mod tree;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::index::HnswParams;
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::Index;
 use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
@@ -15,9 +18,6 @@ use crate::idx::IndexKeyBase;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
-use crate::expr::index::HnswParams;
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::Index;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 

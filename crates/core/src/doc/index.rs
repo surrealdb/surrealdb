@@ -3,6 +3,10 @@ use crate::dbs::Options;
 use crate::dbs::{Force, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
+use crate::expr::array::Array;
+use crate::expr::index::{HnswParams, Index, MTreeParams, SearchParams};
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{FlowResultExt as _, Part, Thing, Value};
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
@@ -10,10 +14,6 @@ use crate::key;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
-use crate::expr::array::Array;
-use crate::expr::index::{HnswParams, Index, MTreeParams, SearchParams};
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{FlowResultExt as _, Part, Thing, Value};
 use reblessive::tree::Stk;
 
 impl Document {

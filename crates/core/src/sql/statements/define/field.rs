@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 
-use crate::sql::{Ident, Idiom, Kind, Permissions, Strand, Value};
+use crate::sql::{Ident, Idiom, Kind, Permissions, SqlValue, Strand};
 use crate::sql::{Literal, Part};
 
 use revision::revisioned;
@@ -25,9 +25,9 @@ pub struct DefineFieldStatement {
 	pub kind: Option<Kind>,
 	#[revision(start = 2)]
 	pub readonly: bool,
-	pub value: Option<Value>,
-	pub assert: Option<Value>,
-	pub default: Option<Value>,
+	pub value: Option<SqlValue>,
+	pub assert: Option<SqlValue>,
+	pub default: Option<SqlValue>,
 	pub permissions: Permissions,
 	pub comment: Option<Strand>,
 	#[revision(start = 3)]
@@ -249,5 +249,3 @@ impl crate::sql::DisplaySql for DefineFieldStatement {
 		Ok(())
 	}
 }
-
-

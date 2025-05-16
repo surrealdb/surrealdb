@@ -1,4 +1,4 @@
-use crate::sql::{Data, Output, Timeout, Value};
+use crate::sql::{Data, Output, SqlValue, Timeout};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -11,9 +11,9 @@ use std::fmt;
 pub struct RelateStatement {
 	#[revision(start = 2)]
 	pub only: bool,
-	pub kind: Value,
-	pub from: Value,
-	pub with: Value,
+	pub kind: SqlValue,
+	pub from: SqlValue,
+	pub with: SqlValue,
 	pub uniq: bool,
 	pub data: Option<Data>,
 	pub output: Option<Output>,

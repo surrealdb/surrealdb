@@ -1,9 +1,9 @@
 use crate::err::Error;
+use crate::expr::{Number, Value};
 use crate::fnc::util::math::vector::{
 	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Scale,
 	Subtract,
 };
-use crate::expr::{Number, Value};
 
 pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 	Ok(a.add(&b)?.into())
@@ -53,13 +53,13 @@ pub mod distance {
 	use crate::ctx::Context;
 	use crate::doc::CursorDoc;
 	use crate::err::Error;
+	use crate::expr::{Number, Value};
 	use crate::fnc::args::Optional;
 	use crate::fnc::get_execution_context;
 	use crate::fnc::util::math::vector::{
 		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
 	};
 	use crate::idx::planner::IterationStage;
-	use crate::expr::{Number, Value};
 
 	pub fn chebyshev((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		Ok(a.chebyshev_distance(&b)?.into())
@@ -115,8 +115,8 @@ pub mod distance {
 pub mod similarity {
 
 	use crate::err::Error;
-	use crate::fnc::util::math::vector::{CosineSimilarity, JaccardSimilarity, PearsonSimilarity};
 	use crate::expr::{Number, Value};
+	use crate::fnc::util::math::vector::{CosineSimilarity, JaccardSimilarity, PearsonSimilarity};
 
 	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 		Ok(a.cosine_similarity(&b)?.into())

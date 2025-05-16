@@ -1,10 +1,10 @@
 //! Stores a graph edge pointer
 use crate::err::Error;
+use crate::expr::id::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
 use crate::kvs::KeyEncode;
-use crate::expr::id::Id;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

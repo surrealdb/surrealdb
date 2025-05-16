@@ -1,14 +1,13 @@
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Start(pub Value);
+pub struct Start(pub SqlValue);
 
 impl From<Start> for crate::expr::Start {
 	fn from(value: Start) -> Self {

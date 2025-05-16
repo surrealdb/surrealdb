@@ -1,13 +1,13 @@
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::expr::access_type::{AccessType, Jwt, JwtAccessVerify};
 use crate::expr::Thing;
+use crate::expr::{statements::DefineUserStatement, Algorithm, Value};
 use crate::iam::access::{authenticate_generic, authenticate_record};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
 use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::expr::access_type::{AccessType, Jwt, JwtAccessVerify};
-use crate::expr::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
@@ -823,12 +823,12 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
-		use crate::iam::Error as IamError;
 		use crate::expr::{
 			statements::{define::DefineStatement, DefineUserStatement},
 			user::UserDuration,
 			Base, Statement,
 		};
+		use crate::iam::Error as IamError;
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",

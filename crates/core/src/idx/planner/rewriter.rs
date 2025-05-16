@@ -1,9 +1,9 @@
-use crate::idx::planner::executor::KnnExpressions;
 use crate::expr::id::range::IdRange;
 use crate::expr::part::DestructurePart;
 use crate::expr::{
 	Array, Cast, Cond, Expression, Function, Id, Idiom, Model, Object, Part, Range, Thing, Value,
 };
+use crate::idx::planner::executor::KnnExpressions;
 
 use std::collections::BTreeMap;
 use std::ops::Bound;

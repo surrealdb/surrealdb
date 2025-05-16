@@ -4,8 +4,6 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::iam::Action;
-use crate::kvs::KeyEncode as _;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
@@ -16,6 +14,8 @@ use crate::expr::thing::Thing;
 use crate::expr::value::every::ArrayBehaviour;
 use crate::expr::value::{CoerceError, Value};
 use crate::expr::{FlowResultExt as _, Part};
+use crate::iam::Action;
+use crate::kvs::KeyEncode as _;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 

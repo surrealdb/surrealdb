@@ -1,8 +1,8 @@
 use crate::buc::{self, BucketConnectionKey};
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::expr::{Base, FlowResultExt, Ident, Permission, Strand, Value};
+use crate::iam::{Action, ResourceKind};
 use crate::{ctx::Context, expr::statements::info::InfoStructure};
 use reblessive::tree::Stk;
 use revision::revisioned;

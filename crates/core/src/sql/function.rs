@@ -3,12 +3,11 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::operator::BindingPower;
 use crate::sql::script::Script;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
-
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
@@ -18,17 +17,17 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Function {
-	Normal(String, Vec<Value>),
-	Custom(String, Vec<Value>),
-	Script(Script, Vec<Value>),
+	Normal(String, Vec<SqlValue>),
+	Custom(String, Vec<SqlValue>),
+	Script(Script, Vec<SqlValue>),
 	#[revision(
 		end = 2,
 		convert_fn = "convert_anonymous_arg_computation",
 		fields_name = "OldAnonymousFields"
 	)]
-	Anonymous(Value, Vec<Value>),
+	Anonymous(SqlValue, Vec<SqlValue>),
 	#[revision(start = 2)]
-	Anonymous(Value, Vec<Value>, bool),
+	Anonymous(SqlValue, Vec<SqlValue>, bool),
 	// Add new variants here
 }
 
@@ -46,8 +45,12 @@ impl From<Function> for crate::expr::Function {
 		match v {
 			Function::Normal(s, e) => Self::Normal(s, e.into_iter().map(Into::into).collect()),
 			Function::Custom(s, e) => Self::Custom(s, e.into_iter().map(Into::into).collect()),
-			Function::Script(s, e) => Self::Script(s.into(), e.into_iter().map(Into::into).collect()),
-			Function::Anonymous(p, e, b) => Self::Anonymous(p.into(), e.into_iter().map(Into::into).collect(), b),
+			Function::Script(s, e) => {
+				Self::Script(s.into(), e.into_iter().map(Into::into).collect())
+			}
+			Function::Anonymous(p, e, b) => {
+				Self::Anonymous(p.into(), e.into_iter().map(Into::into).collect(), b)
+			}
 		}
 	}
 }
@@ -55,10 +58,18 @@ impl From<Function> for crate::expr::Function {
 impl From<crate::expr::Function> for Function {
 	fn from(v: crate::expr::Function) -> Self {
 		match v {
-			crate::expr::Function::Normal(s, e) => Self::Normal(s, e.into_iter().map(Into::into).collect()),
-			crate::expr::Function::Custom(s, e) => Self::Custom(s, e.into_iter().map(Into::into).collect()),
-			crate::expr::Function::Script(s, e) => Self::Script(s.into(), e.into_iter().map(Into::into).collect()),
-			crate::expr::Function::Anonymous(p, e, b) => Self::Anonymous(p.into(), e.into_iter().map(Into::into).collect(), b),
+			crate::expr::Function::Normal(s, e) => {
+				Self::Normal(s, e.into_iter().map(Into::into).collect())
+			}
+			crate::expr::Function::Custom(s, e) => {
+				Self::Custom(s, e.into_iter().map(Into::into).collect())
+			}
+			crate::expr::Function::Script(s, e) => {
+				Self::Script(s.into(), e.into_iter().map(Into::into).collect())
+			}
+			crate::expr::Function::Anonymous(p, e, b) => {
+				Self::Anonymous(p.into(), e.into_iter().map(Into::into).collect(), b)
+			}
 		}
 	}
 }
@@ -92,7 +103,7 @@ impl Function {
 		}
 	}
 	/// Get function arguments if applicable
-	pub fn args(&self) -> &[Value] {
+	pub fn args(&self) -> &[SqlValue] {
 		match self {
 			Self::Normal(_, a) => a,
 			Self::Custom(_, a) => a,
@@ -114,11 +125,11 @@ impl Function {
 			Self::Custom(_, _) => true,
 			Self::Script(_, _) => true,
 			Self::Normal(f, _) if f == "api::invoke" => true,
-			_ => self.args().iter().any(Value::writeable),
+			_ => self.args().iter().any(SqlValue::writeable),
 		}
 	}
 	/// Convert this function to an aggregate
-	pub fn aggregate(&self, val: Value) -> Result<Self, Error> {
+	pub fn aggregate(&self, val: SqlValue) -> Result<Self, Error> {
 		match self {
 			Self::Normal(n, a) => {
 				let mut a = a.to_owned();
@@ -147,7 +158,7 @@ impl Function {
 	/// Check if all arguments are static values
 	pub fn is_static(&self) -> bool {
 		match self {
-			Self::Normal(_, a) => a.iter().all(Value::is_static),
+			Self::Normal(_, a) => a.iter().all(SqlValue::is_static),
 			_ => false,
 		}
 	}

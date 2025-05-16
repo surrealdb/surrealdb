@@ -24,7 +24,9 @@ impl From<AnalyzeStatement> for crate::expr::statements::analyze::AnalyzeStateme
 impl From<crate::expr::statements::analyze::AnalyzeStatement> for AnalyzeStatement {
 	fn from(value: crate::expr::statements::analyze::AnalyzeStatement) -> Self {
 		match value {
-			crate::expr::statements::analyze::AnalyzeStatement::Idx(tb, idx) => Self::Idx(tb.into(), idx.into()),
+			crate::expr::statements::analyze::AnalyzeStatement::Idx(tb, idx) => {
+				Self::Idx(tb.into(), idx.into())
+			}
 		}
 	}
 }

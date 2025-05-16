@@ -6,7 +6,7 @@ use reblessive::Stk;
 
 use super::mac::{expected_whitespace, unexpected};
 use crate::sql::operator::BindingPower;
-use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
+use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, SqlValue};
 use crate::sql::{Function, Range};
 use crate::syn::error::bail;
 use crate::syn::token::{self, Token};
@@ -21,7 +21,7 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
 	/// idents as a table, see [`parse_value_field`] for parsing loose idents as fields
-	pub async fn parse_value_table(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub async fn parse_value_table(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
 		let res = self.pratt_parse_expr(ctx, BindingPower::Base).await;
@@ -34,7 +34,7 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
 	/// idents as a field, see [`parse_value`] for parsing loose idents as table
-	pub(crate) async fn parse_value_field(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub(crate) async fn parse_value_field(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
 		let res = self.pratt_parse_expr(ctx, BindingPower::Base).await;
@@ -45,7 +45,7 @@ impl Parser<'_> {
 	/// Parsers a generic value.
 	///
 	/// Inherits how loose identifiers are parsed from it's caller.
-	pub(super) async fn parse_value_inherit(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub(super) async fn parse_value_inherit(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		self.pratt_parse_expr(ctx, BindingPower::Base).await
 	}
 
@@ -158,7 +158,11 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_prefix_op(&mut self, ctx: &mut Stk, min_bp: BindingPower) -> ParseResult<Value> {
+	async fn parse_prefix_op(
+		&mut self,
+		ctx: &mut Stk,
+		min_bp: BindingPower,
+	) -> ParseResult<SqlValue> {
 		let token = self.peek();
 		let operator = match token.kind {
 			t!("+") => {
@@ -176,7 +180,7 @@ impl Parser<'_> {
 					self.lexer.backup_before(p.span);
 					self.token_buffer.clear();
 					self.token_buffer.push(token);
-					return self.next_token_value::<Number>().map(Value::Number);
+					return self.next_token_value::<Number>().map(SqlValue::Number);
 				}
 				self.pop_peek();
 
@@ -197,7 +201,7 @@ impl Parser<'_> {
 					self.lexer.backup_before(p.span);
 					self.token_buffer.clear();
 					self.token_buffer.push(token);
-					return self.next_token_value::<Number>().map(Value::Number);
+					return self.next_token_value::<Number>().map(SqlValue::Number);
 				}
 
 				self.pop_peek();
@@ -213,7 +217,7 @@ impl Parser<'_> {
 				let kind = self.parse_kind(ctx, token.span).await?;
 				let value = ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Cast)).await?;
 				let cast = Cast(kind, value);
-				return Ok(Value::Cast(Box::new(cast)));
+				return Ok(SqlValue::Cast(Box::new(cast)));
 			}
 			t!("..") => return self.parse_prefix_range(ctx).await,
 			// should be unreachable as we previously check if the token was a prefix op.
@@ -224,26 +228,26 @@ impl Parser<'_> {
 
 		// HACK: For compatiblity with the old parser apply + and - operator immediately if the
 		// left value is a number.
-		if let Value::Number(number) = v {
+		if let SqlValue::Number(number) = v {
 			// If the number was already negative we already did apply a - so just return a unary
 			// in this case.
 			if number.is_positive() {
 				if let Operator::Neg = operator {
 					// this can only panic if `number` is i64::MIN which currently can't be parsed.
-					return Ok(Value::Number(number.try_neg().unwrap()));
+					return Ok(SqlValue::Number(number.try_neg().unwrap()));
 				}
 			}
 
 			if let Operator::Add = operator {
 				// doesn't do anything.
-				return Ok(Value::Number(number));
+				return Ok(SqlValue::Number(number));
 			}
-			Ok(Value::Expression(Box::new(Expression::Unary {
+			Ok(SqlValue::Expression(Box::new(Expression::Unary {
 				o: operator,
-				v: Value::Number(number),
+				v: SqlValue::Number(number),
 			})))
 		} else {
-			Ok(Value::Expression(Box::new(Expression::Unary {
+			Ok(SqlValue::Expression(Box::new(Expression::Unary {
 				o: operator,
 				v,
 			})))
@@ -275,8 +279,8 @@ impl Parser<'_> {
 		Ok(op)
 	}
 
-	fn expression_is_relation(value: &Value) -> bool {
-		if let Value::Expression(x) = value {
+	fn expression_is_relation(value: &SqlValue) -> bool {
+		if let SqlValue::Expression(x) = value {
 			return Self::operator_is_relation(x.operator());
 		}
 		false
@@ -312,10 +316,10 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		min_bp: BindingPower,
-		lhs: Value,
+		lhs: SqlValue,
 		lhs_prime: bool, // if lhs was a prime expression, required for ensuring (a..b)..c does not
 		                 // fail.
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		let token = self.next();
 		let operator = match token.kind {
 			// TODO: change operator name?
@@ -401,7 +405,7 @@ impl Parser<'_> {
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
-		Ok(Value::Expression(Box::new(Expression::Binary {
+		Ok(SqlValue::Expression(Box::new(Expression::Binary {
 			l: lhs,
 			o: operator,
 			r: rhs,
@@ -412,9 +416,9 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		exclusive: bool,
-		lhs: Value,
+		lhs: SqlValue,
 		lhs_prime: bool,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		let inclusive = self.eat_whitespace(t!("="));
 
 		let before = self.recent_span();
@@ -431,7 +435,7 @@ impl Parser<'_> {
 			let rhs_covered = self.peek().kind == t!("(");
 			(ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?, rhs_covered)
 		} else {
-			return Ok(Value::Range(Box::new(Range {
+			return Ok(SqlValue::Range(Box::new(Range {
 				beg: if exclusive {
 					Bound::Excluded(lhs)
 				} else {
@@ -441,21 +445,21 @@ impl Parser<'_> {
 			})));
 		};
 
-		if matches!(lhs, Value::Range(_)) && !lhs_prime {
+		if matches!(lhs, SqlValue::Range(_)) && !lhs_prime {
 			let span = before.covers(self.recent_span());
 			// a..b..c is ambiguous, so throw an error
 			bail!("Chaining range operators has no specified associativity",
 				@span => "use parens, '()', to specify which operator must be evaluated first")
 		}
 
-		if matches!(rhs, Value::Range(_)) && !rhs_covered {
+		if matches!(rhs, SqlValue::Range(_)) && !rhs_covered {
 			let span = before.covers(self.recent_span());
 			// a..b..c is ambiguous, so throw an error
 			bail!("Chaining range operators has no specified associativity",
 				@span => "use parens, '()', to specify which operator must be evaluated first")
 		}
 
-		Ok(Value::Range(Box::new(Range {
+		Ok(SqlValue::Range(Box::new(Range {
 			beg: if exclusive {
 				Bound::Excluded(lhs)
 			} else {
@@ -469,7 +473,7 @@ impl Parser<'_> {
 		})))
 	}
 
-	async fn parse_prefix_range(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	async fn parse_prefix_range(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		expected_whitespace!(self, t!(".."));
 		let inclusive = self.eat_whitespace(t!("="));
 		let before = self.recent_span();
@@ -484,13 +488,13 @@ impl Parser<'_> {
 		} else if Self::kind_starts_expression(peek.kind) {
 			ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?
 		} else {
-			return Ok(Value::Range(Box::new(Range {
+			return Ok(SqlValue::Range(Box::new(Range {
 				beg: Bound::Unbounded,
 				end: Bound::Unbounded,
 			})));
 		};
 
-		if matches!(rhs, Value::Range(_)) {
+		if matches!(rhs, SqlValue::Range(_)) {
 			let span = before.covers(self.recent_span());
 			// a..b..c is ambiguous, so throw an error
 			bail!("Chaining range operators has no specified associativity",
@@ -505,10 +509,10 @@ impl Parser<'_> {
 				Bound::Excluded(rhs)
 			},
 		};
-		Ok(Value::Range(Box::new(range)))
+		Ok(SqlValue::Range(Box::new(range)))
 	}
 
-	async fn parse_call(&mut self, ctx: &mut Stk, lhs: Value) -> ParseResult<Value> {
+	async fn parse_call(&mut self, ctx: &mut Stk, lhs: SqlValue) -> ParseResult<SqlValue> {
 		let start = self.last_span();
 		let mut args = Vec::new();
 		loop {
@@ -525,7 +529,7 @@ impl Parser<'_> {
 			}
 		}
 
-		Ok(Value::Function(Box::new(Function::Anonymous(lhs, args, false))))
+		Ok(SqlValue::Function(Box::new(Function::Anonymous(lhs, args, false))))
 	}
 
 	/// The pratt parsing loop.
@@ -534,7 +538,7 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		min_bp: BindingPower,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		let peek = self.peek();
 		let (mut lhs, mut lhs_prime) = if let Some(bp) = self.prefix_binding_power(peek.kind) {
 			(self.parse_prefix_op(ctx, bp).await?, false)
@@ -584,103 +588,103 @@ mod test {
 	#[test]
 	fn cast_int() {
 		let sql = "<int>1.2345";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("<int> 1.2345f", format!("{}", out));
-		assert_eq!(out, Value::from(Cast(Kind::Int, 1.2345.into())));
+		assert_eq!(out, SqlValue::from(Cast(Kind::Int, 1.2345.into())));
 	}
 
 	#[test]
 	fn cast_string() {
 		let sql = "<string>1.2345";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("<string> 1.2345f", format!("{}", out));
-		assert_eq!(out, Value::from(Cast(Kind::String, 1.2345.into())));
+		assert_eq!(out, SqlValue::from(Cast(Kind::String, 1.2345.into())));
 	}
 
 	#[test]
 	fn expression_statement() {
 		let sql = "true AND false";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("true AND false", format!("{}", out));
 	}
 
 	#[test]
 	fn expression_left_opened() {
 		let sql = "3 * 3 * 3 = 27";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("3 * 3 * 3 = 27", format!("{}", out));
 	}
 
 	#[test]
 	fn expression_left_closed() {
 		let sql = "(3 * 3 * 3) = 27";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("3 * 3 * 3 = 27", format!("{}", out));
 	}
 
 	#[test]
 	fn expression_right_opened() {
 		let sql = "27 = 3 * 3 * 3";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("27 = 3 * 3 * 3", format!("{}", out));
 	}
 
 	#[test]
 	fn expression_right_closed() {
 		let sql = "27 = (3 * 3 * 3)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("27 = 3 * 3 * 3", format!("{}", out));
 	}
 
 	#[test]
 	fn expression_both_opened() {
 		let sql = "3 * 3 * 3 = 3 * 3 * 3";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", format!("{}", out));
 	}
 
 	#[test]
 	fn expression_both_closed() {
 		let sql = "(3 * 3 * 3) = (3 * 3 * 3)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", format!("{}", out));
 	}
 
 	#[test]
 	fn expression_closed_required() {
 		let sql = "(3 + 3) * 3";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("(3 + 3) * 3", format!("{}", out));
 	}
 
 	#[test]
 	fn range_closed_required() {
 		let sql = "(1..2)..3";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("(1..2)..3", format!("{}", out));
 	}
 
 	#[test]
 	fn expression_unary() {
 		let sql = "-a";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(sql, format!("{}", out));
 	}
 
 	#[test]
 	fn expression_with_unary() {
 		let sql = "-(5) + 5";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("-5 + 5", format!("{}", out));
 	}
 
 	#[test]
 	fn expression_left_associative() {
 		let sql = "1 - 1 - 1";
-		let out = Value::parse(sql);
-		let one = Value::Number(Number::Int(1));
-		let expected = Value::Expression(Box::new(Expression::Binary {
-			l: Value::Expression(Box::new(Expression::Binary {
+		let out = SqlValue::parse(sql);
+		let one = SqlValue::Number(Number::Int(1));
+		let expected = SqlValue::Expression(Box::new(Expression::Binary {
+			l: SqlValue::Expression(Box::new(Expression::Binary {
 				l: one.clone(),
 				o: Operator::Sub,
 				r: one.clone(),
@@ -694,14 +698,14 @@ mod test {
 	#[test]
 	fn parse_expression() {
 		let sql = "<future> { 5 + 10 }";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("<future> { 5 + 10 }", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Future(Block::from(Value::from(Expression::Binary {
-				l: Value::Number(Number::Int(5)),
+			SqlValue::from(Future(Block::from(SqlValue::from(Expression::Binary {
+				l: SqlValue::Number(Number::Int(5)),
 				o: Operator::Add,
-				r: Value::Number(Number::Int(10))
+				r: SqlValue::Number(Number::Int(10))
 			}))))
 		);
 	}

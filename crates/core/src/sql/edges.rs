@@ -1,6 +1,6 @@
+use crate::sql::dir::Dir;
 use crate::sql::table::Tables;
 use crate::sql::thing::Thing;
-use crate::sql::dir::Dir;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

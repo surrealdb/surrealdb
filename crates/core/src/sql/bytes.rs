@@ -116,11 +116,11 @@ impl<'de> Deserialize<'de> for Bytes {
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::{Bytes, Value};
+	use crate::sql::{Bytes, SqlValue};
 
 	#[test]
 	fn serialize() {
-		let val = Value::Bytes(Bytes(vec![1, 2, 3, 5]));
+		let val = SqlValue::Bytes(Bytes(vec![1, 2, 3, 5]));
 		let serialized: Vec<u8> = revision::to_vec(&val).unwrap();
 		println!("{serialized:?}");
 		let deserialized = revision::from_slice(&serialized).unwrap();

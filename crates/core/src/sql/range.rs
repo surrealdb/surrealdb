@@ -5,7 +5,9 @@ use super::{Array, Id};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::sql::operator::BindingPower;
-use crate::sql::Value;
+use crate::sql::value::Coerce;
+use crate::sql::value::CoerceError;
+use crate::sql::SqlValue;
 use crate::syn;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -13,8 +15,6 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
-use crate::sql::value::Coerce;
-use crate::sql::value::CoerceError;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
@@ -24,8 +24,8 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Range {
-	pub beg: Bound<Value>,
-	pub end: Bound<Value>,
+	pub beg: Bound<SqlValue>,
+	pub end: Bound<SqlValue>,
 }
 
 impl Range {
@@ -187,7 +187,7 @@ impl TypedRange<i64> {
 			_ => {}
 		}
 
-		Some(Array(self.map(Value::from).collect()))
+		Some(Array(self.map(SqlValue::from).collect()))
 	}
 }
 
@@ -260,12 +260,12 @@ impl Iterator for TypedRange<i64> {
 
 impl<T> From<TypedRange<T>> for Range
 where
-	Value: From<T>,
+	SqlValue: From<T>,
 {
 	fn from(value: TypedRange<T>) -> Self {
 		Range {
-			beg: value.beg.map(Value::from),
-			end: value.end.map(Value::from),
+			beg: value.beg.map(SqlValue::from),
+			end: value.end.map(SqlValue::from),
 		}
 	}
 }
@@ -282,7 +282,7 @@ impl FromStr for Range {
 
 impl Range {
 	/// Construct a new range
-	pub fn new(beg: Bound<Value>, end: Bound<Value>) -> Self {
+	pub fn new(beg: Bound<SqlValue>, end: Bound<SqlValue>) -> Self {
 		Self {
 			beg,
 			end,

@@ -118,8 +118,8 @@ pub mod argon2 {
 pub mod bcrypt {
 
 	use crate::err::Error;
-	use crate::fnc::crypto::COST_ALLOWANCE;
 	use crate::expr::value::Value;
+	use crate::fnc::crypto::COST_ALLOWANCE;
 	use bcrypt::HashParts;
 	use std::str::FromStr;
 

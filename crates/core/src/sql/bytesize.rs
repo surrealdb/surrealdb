@@ -288,8 +288,6 @@ impl<'a> Sum<&'a Self> for Bytesize {
 	}
 }
 
-
-
 #[cfg(test)]
 mod tests {
 	use super::Bytesize;

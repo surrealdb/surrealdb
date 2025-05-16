@@ -71,4 +71,3 @@ pub use self::remove::{
 	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
 	RemoveUserStatement,
 };
-

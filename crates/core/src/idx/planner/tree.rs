@@ -1,12 +1,5 @@
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::idx::planner::executor::{
-	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
-};
-use crate::idx::planner::plan::{IndexOperator, IndexOption};
-use crate::idx::planner::rewriter::KnnConditionRewriter;
-use crate::idx::planner::StatementContext;
-use crate::kvs::Transaction;
 use crate::expr::index::Index;
 use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::expr::FlowResultExt as _;
@@ -15,6 +8,13 @@ use crate::expr::{
 	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Part, Subquery, Table, Value,
 	With,
 };
+use crate::idx::planner::executor::{
+	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
+};
+use crate::idx::planner::plan::{IndexOperator, IndexOption};
+use crate::idx::planner::rewriter::KnnConditionRewriter;
+use crate::idx::planner::StatementContext;
+use crate::kvs::Transaction;
 use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::hash::Hash;

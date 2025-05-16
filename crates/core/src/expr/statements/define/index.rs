@@ -4,7 +4,6 @@ use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::DefineTableStatement;
 #[cfg(target_family = "wasm")]
@@ -12,6 +11,7 @@ use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::expr::{Base, Ident, Idioms, Index, Part, Strand, Value};
 #[cfg(target_family = "wasm")]
 use crate::expr::{Output, Values};
+use crate::iam::{Action, ResourceKind};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

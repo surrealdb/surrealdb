@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::dbs::Session;
-use crate::gql::functions::process_fns;
-use crate::gql::tables::process_tbs;
-use crate::kvs::Datastore;
 use crate::expr;
 use crate::expr::kind::Literal;
 use crate::expr::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use crate::expr::Geometry;
 use crate::expr::Kind;
+use crate::gql::functions::process_fns;
+use crate::gql::tables::process_tbs;
+use crate::kvs::Datastore;
 use async_graphql::dynamic::Interface;
 use async_graphql::dynamic::InterfaceField;
 use async_graphql::dynamic::Object;
@@ -25,11 +25,11 @@ use serde_json::Number;
 use super::error::{resolver_error, GqlError};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
+use crate::expr::Value as SqlValue;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::NamedContainer;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
-use crate::expr::Value as SqlValue;
 
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
@@ -400,7 +400,9 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 			GqlValue::String(s) => {
 				use Kind::*;
 				any_try_kinds!(val, Datetime, Duration, Uuid);
-				syn::value_legacy_strand(s.as_str()).map(Into::into).map_err(|_| type_error(kind, val))
+				syn::value_legacy_strand(s.as_str())
+					.map(Into::into)
+					.map_err(|_| type_error(kind, val))
 			}
 			GqlValue::Null => Ok(SqlValue::Null),
 			obj @ GqlValue::Object(_) => gql_to_sql_kind(obj, Kind::Object),

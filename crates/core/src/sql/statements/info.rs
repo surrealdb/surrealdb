@@ -57,9 +57,15 @@ impl From<crate::expr::statements::InfoStatement> for InfoStatement {
 			crate::expr::statements::InfoStatement::Root(v) => Self::Root(v),
 			crate::expr::statements::InfoStatement::Ns(v) => Self::Ns(v),
 			crate::expr::statements::InfoStatement::Db(v, ver) => Self::Db(v, ver.map(Into::into)),
-			crate::expr::statements::InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver.map(Into::into)),
-			crate::expr::statements::InfoStatement::User(u, b, v) => Self::User(u.into(), b.map(Into::into), v),
-			crate::expr::statements::InfoStatement::Index(i, t, v) => Self::Index(i.into(), t.into(), v),
+			crate::expr::statements::InfoStatement::Tb(t, v, ver) => {
+				Self::Tb(t.into(), v, ver.map(Into::into))
+			}
+			crate::expr::statements::InfoStatement::User(u, b, v) => {
+				Self::User(u.into(), b.map(Into::into), v)
+			}
+			crate::expr::statements::InfoStatement::Index(i, t, v) => {
+				Self::Index(i.into(), t.into(), v)
+			}
 		}
 	}
 }

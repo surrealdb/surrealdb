@@ -1,5 +1,5 @@
 use crate::sql::fetch::Fetchs;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct OutputStatement {
-	pub what: Value,
+	pub what: SqlValue,
 	pub fetch: Option<Fetchs>,
 }
 

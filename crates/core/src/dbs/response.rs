@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::sql::Statement;
 use crate::expr::Value;
+use crate::sql::Statement;
 use revision::revisioned;
 use revision::Revisioned;
 use serde::ser::SerializeStruct;

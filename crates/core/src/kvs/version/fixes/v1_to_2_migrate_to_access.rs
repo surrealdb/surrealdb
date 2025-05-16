@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::{
 	err::Error,
-	kvs::{KeyEncode as _, Transaction},
 	expr::{
 		access_type::{JwtAccessVerify, JwtAccessVerifyKey},
 		statements::{
@@ -11,6 +10,7 @@ use crate::{
 		},
 		AccessType, Ident,
 	},
+	kvs::{KeyEncode as _, Transaction},
 };
 
 pub async fn v1_to_2_migrate_to_access(tx: Arc<Transaction>) -> Result<(), Error> {

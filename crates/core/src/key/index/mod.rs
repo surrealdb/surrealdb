@@ -22,11 +22,11 @@ pub mod ip;
 pub mod vm;
 
 use crate::err::Error;
+use crate::expr::array::Array;
+use crate::expr::id::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::{impl_key, KeyEncode};
-use crate::expr::array::Array;
-use crate::expr::id::Id;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 

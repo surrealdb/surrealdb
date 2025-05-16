@@ -3,8 +3,8 @@ use crate::{
 	dbs::Options,
 	doc::CursorDoc,
 	err::Error,
-	iam::Action,
 	expr::{ident::Ident, value::Value, Permission},
+	iam::Action,
 };
 use reblessive::tree::Stk;
 use revision::revisioned;

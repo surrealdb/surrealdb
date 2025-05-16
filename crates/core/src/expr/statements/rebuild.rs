@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::expr::ident::Ident;
 use crate::expr::value::Value;
 use crate::expr::Base;
+use crate::iam::{Action, ResourceKind};
 
 use reblessive::tree::Stk;
 use revision::revisioned;

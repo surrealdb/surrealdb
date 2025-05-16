@@ -15,11 +15,11 @@ use crate::{
 	ctx::{Context, MutableContext},
 	dbs::{Options, Session},
 	err::Error,
-	kvs::{Datastore, Transaction},
 	expr::{
 		statements::define::{config::api::ApiConfig, ApiDefinition},
 		FlowResultExt as _, Object, Value,
 	},
+	kvs::{Datastore, Transaction},
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

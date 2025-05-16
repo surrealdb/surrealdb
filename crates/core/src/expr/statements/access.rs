@@ -2,12 +2,12 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::expr::access_type::BearerAccessSubject;
 use crate::expr::{
 	AccessType, Array, Base, Cond, Datetime, Duration, FlowResultExt as _, Ident, Object, Strand,
 	Thing, Uuid, Value,
 };
+use crate::iam::{Action, ResourceKind};
 use md5::Digest;
 use rand::Rng;
 use reblessive::tree::Stk;

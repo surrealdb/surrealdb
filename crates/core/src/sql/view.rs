@@ -1,4 +1,3 @@
-
 use crate::sql::{cond::Cond, field::Fields, group::Groups, table::Tables};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -51,4 +50,3 @@ impl crate::sql::DisplaySql for View {
 		Ok(())
 	}
 }
-

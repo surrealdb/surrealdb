@@ -444,5 +444,3 @@ impl crate::sql::DisplaySql for Index {
 		}
 	}
 }
-
-

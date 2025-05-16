@@ -782,8 +782,8 @@ pub mod sort {
 mod tests {
 	use super::{at, first, join, last, slice};
 	use crate::{
-		fnc::args::Optional,
 		expr::{Array, Value},
+		fnc::args::Optional,
 	};
 
 	#[test]

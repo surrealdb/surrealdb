@@ -4,7 +4,7 @@ use crate::rpc::RpcError;
 use crate::sql::Array;
 use crate::sql::Number;
 use crate::sql::Part;
-use crate::sql::Value;
+use crate::sql::SqlValue;
 use std::sync::LazyLock;
 
 pub static ID: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("id")]);
@@ -14,7 +14,7 @@ pub static VERSION: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("version"
 
 #[derive(Debug)]
 pub struct Request {
-	pub id: Option<Value>,
+	pub id: Option<SqlValue>,
 	pub version: Option<u8>,
 	pub method: Method,
 	pub params: Array,
@@ -23,13 +23,13 @@ pub struct Request {
 impl TryFrom<Cbor> for Request {
 	type Error = RpcError;
 	fn try_from(val: Cbor) -> Result<Self, RpcError> {
-		<Cbor as TryInto<Value>>::try_into(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
+		<Cbor as TryInto<SqlValue>>::try_into(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
 	}
 }
 
-impl TryFrom<Value> for Request {
+impl TryFrom<SqlValue> for Request {
 	type Error = RpcError;
-	fn try_from(val: Value) -> Result<Self, RpcError> {
+	fn try_from(val: SqlValue) -> Result<Self, RpcError> {
 		// Fetch the 'id' argument
 		let id = match val.pick(&*ID) {
 			v if v.is_none() => None,
@@ -44,7 +44,7 @@ impl TryFrom<Value> for Request {
 		let version = match val.pick(&*VERSION) {
 			v if v.is_none() => None,
 			v if v.is_null() => None,
-			Value::Number(v) => match v {
+			SqlValue::Number(v) => match v {
 				Number::Int(1) => Some(1),
 				Number::Int(2) => Some(2),
 				_ => return Err(RpcError::InvalidRequest),
@@ -53,12 +53,12 @@ impl TryFrom<Value> for Request {
 		};
 		// Fetch the 'method' argument
 		let method = match val.pick(&*METHOD) {
-			Value::Strand(v) => v.to_raw(),
+			SqlValue::Strand(v) => v.to_raw(),
 			_ => return Err(RpcError::InvalidRequest),
 		};
 		// Fetch the 'params' argument
 		let params = match val.pick(&*PARAMS) {
-			Value::Array(v) => v,
+			SqlValue::Array(v) => v,
 			_ => Array::new(),
 		};
 		// Parse the specified method

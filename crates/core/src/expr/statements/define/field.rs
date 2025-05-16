@@ -3,8 +3,6 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::kvs::Transaction;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
@@ -12,6 +10,8 @@ use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::expr::{Literal, Part};
 use crate::expr::{Relation, TableType};
+use crate::iam::{Action, ResourceKind};
+use crate::kvs::Transaction;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

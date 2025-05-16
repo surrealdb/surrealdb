@@ -42,7 +42,6 @@ impl From<crate::expr::Script> for Script {
 	}
 }
 
-
 crate::sql::impl_display_from_sql!(Script);
 
 impl crate::sql::DisplaySql for Script {

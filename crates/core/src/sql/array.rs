@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::sql::{
 	fmt::{pretty_indent, Fmt, Pretty},
-	Value,
+	SqlValue,
 };
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,6 @@ use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
 #[revisioned(revision = 1)]
@@ -19,24 +18,24 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 #[serde(rename = "$surrealdb::private::sql::Array")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Array(pub Vec<Value>);
+pub struct Array(pub Vec<SqlValue>);
 
-impl From<Value> for Array {
-	fn from(v: Value) -> Self {
+impl From<SqlValue> for Array {
+	fn from(v: SqlValue) -> Self {
 		vec![v].into()
 	}
 }
 
 impl<T> From<Vec<T>> for Array
 where
-	Value: From<T>,
+	SqlValue: From<T>,
 {
 	fn from(v: Vec<T>) -> Self {
-		v.into_iter().map(Value::from).collect()
+		v.into_iter().map(SqlValue::from).collect()
 	}
 }
 
-impl From<Array> for Vec<Value> {
+impl From<Array> for Vec<SqlValue> {
 	fn from(s: Array) -> Self {
 		s.0
 	}
@@ -54,14 +53,14 @@ impl From<crate::expr::Array> for Array {
 	}
 }
 
-impl FromIterator<Value> for Array {
-	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
+impl FromIterator<SqlValue> for Array {
+	fn from_iter<I: IntoIterator<Item = SqlValue>>(iter: I) -> Self {
 		Array(iter.into_iter().collect())
 	}
 }
 
 impl Deref for Array {
-	type Target = Vec<Value>;
+	type Target = Vec<SqlValue>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -74,7 +73,7 @@ impl DerefMut for Array {
 }
 
 impl IntoIterator for Array {
-	type Item = Value;
+	type Item = SqlValue;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
@@ -107,7 +106,7 @@ impl Array {
 
 	/// Checks whether all array values are static values
 	pub(crate) fn is_static(&self) -> bool {
-		self.iter().all(Value::is_static)
+		self.iter().all(SqlValue::is_static)
 	}
 
 	/// Validate that an Array contains only computed Values
@@ -133,9 +132,9 @@ impl crate::sql::DisplaySql for Array {
 
 // ------------------------------
 
-impl ops::Add<Value> for Array {
+impl ops::Add<SqlValue> for Array {
 	type Output = Self;
-	fn add(mut self, other: Value) -> Self {
+	fn add(mut self, other: SqlValue) -> Self {
 		self.0.push(other);
 		self
 	}
@@ -151,9 +150,9 @@ impl ops::Add for Array {
 
 // ------------------------------
 
-impl ops::Sub<Value> for Array {
+impl ops::Sub<SqlValue> for Array {
 	type Output = Self;
-	fn sub(mut self, other: Value) -> Self {
+	fn sub(mut self, other: SqlValue) -> Self {
 		if let Some(p) = self.0.iter().position(|x| *x == other) {
 			self.0.remove(p);
 		}
@@ -215,7 +214,7 @@ impl Clump<Array> for Array {
 		Ok(self
 			.0
 			.chunks(clump_size)
-			.map::<Value, _>(|chunk| chunk.to_vec().into())
+			.map::<SqlValue, _>(|chunk| chunk.to_vec().into())
 			.collect::<Vec<_>>()
 			.into())
 	}
@@ -289,7 +288,7 @@ impl Flatten<Array> for Array {
 		let mut out = Array::new();
 		for v in self.into_iter() {
 			match v {
-				Value::Array(mut a) => out.append(&mut a),
+				SqlValue::Array(mut a) => out.append(&mut a),
 				_ => out.push(v),
 			}
 		}
@@ -326,12 +325,15 @@ pub(crate) trait Matches<T> {
 	/// Admittedly, this is most often going to be used in `count(array::matches($arr, $val))`
 	/// to count the number of times an element appears in an array but it's nice to have
 	/// this in addition.
-	fn matches(self, compare_val: Value) -> T;
+	fn matches(self, compare_val: SqlValue) -> T;
 }
 
 impl Matches<Array> for Array {
-	fn matches(self, compare_val: Value) -> Array {
-		self.iter().map(|arr_val| (arr_val == &compare_val).into()).collect::<Vec<Value>>().into()
+	fn matches(self, compare_val: SqlValue) -> Array {
+		self.iter()
+			.map(|arr_val| (arr_val == &compare_val).into())
+			.collect::<Vec<SqlValue>>()
+			.into()
 	}
 }
 
@@ -380,15 +382,15 @@ impl Transpose<Array> for Array {
 		}
 		// I'm sure there's a way more efficient way to do this that I don't know about.
 		// The new array will be at *least* this large so we can start there;
-		let mut transposed_vec = Vec::<Value>::with_capacity(self.len());
+		let mut transposed_vec = Vec::<SqlValue>::with_capacity(self.len());
 		let mut iters = self
 			.iter()
 			.map(|v| {
-				if let Value::Array(arr) = v {
-					Box::new(arr.iter().cloned()) as Box<dyn ExactSizeIterator<Item = Value>>
+				if let SqlValue::Array(arr) = v {
+					Box::new(arr.iter().cloned()) as Box<dyn ExactSizeIterator<Item = SqlValue>>
 				} else {
 					Box::new(std::iter::once(v).cloned())
-						as Box<dyn ExactSizeIterator<Item = Value>>
+						as Box<dyn ExactSizeIterator<Item = SqlValue>>
 				}
 			})
 			.collect::<Vec<_>>();
@@ -399,7 +401,7 @@ impl Transpose<Array> for Array {
 			transposed_vec.push(
 				iters
 					.iter_mut()
-					.map(|i| i.next().unwrap_or(Value::None))
+					.map(|i| i.next().unwrap_or(SqlValue::None))
 					.collect::<Vec<_>>()
 					.into(),
 			);
@@ -430,7 +432,7 @@ pub(crate) trait Uniq<T> {
 impl Uniq<Array> for Array {
 	fn uniq(mut self) -> Array {
 		#[expect(clippy::mutable_key_type)]
-		let mut set: HashSet<&Value> = HashSet::new();
+		let mut set: HashSet<&SqlValue> = HashSet::new();
 		let mut to_remove: Vec<usize> = Vec::new();
 		for (i, item) in self.iter().enumerate() {
 			if !set.insert(item) {
@@ -462,7 +464,7 @@ impl Windows<Array> for Array {
 		Ok(self
 			.0
 			.windows(window_size)
-			.map::<Value, _>(|chunk| chunk.to_vec().into())
+			.map::<SqlValue, _>(|chunk| chunk.to_vec().into())
 			.collect::<Vec<_>>()
 			.into())
 	}

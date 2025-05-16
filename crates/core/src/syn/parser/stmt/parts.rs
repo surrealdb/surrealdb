@@ -10,7 +10,7 @@ use crate::{
 		changefeed::ChangeFeed,
 		index::{Distance, VectorType},
 		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, Tables, Timeout, Value, View,
+		Permission, Permissions, SqlValue, Tables, Timeout, View,
 	},
 	syn::{
 		parser::{
@@ -132,7 +132,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 	) -> ParseResult<Vec<Fetch>> {
 		match self.peek().kind {
-			t!("$param") => Ok(vec![Value::Param(self.next_token_value()?).into()]),
+			t!("$param") => Ok(vec![SqlValue::Param(self.next_token_value()?).into()]),
 			t!("TYPE") => {
 				let fields = self.parse_fields(ctx).await?;
 				let fetches = fields
@@ -152,7 +152,7 @@ impl Parser<'_> {
 					.collect();
 				Ok(fetches)
 			}
-			_ => Ok(vec![Value::Idiom(self.parse_plain_idiom(ctx).await?).into()]),
+			_ => Ok(vec![SqlValue::Idiom(self.parse_plain_idiom(ctx).await?).into()]),
 		}
 	}
 
@@ -189,7 +189,7 @@ impl Parser<'_> {
 			}
 
 			match expr {
-				Value::Idiom(x) => {
+				SqlValue::Idiom(x) => {
 					if idiom == x {
 						found = Some(field);
 						break;

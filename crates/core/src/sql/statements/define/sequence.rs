@@ -1,4 +1,3 @@
-
 use crate::sql::{Ident, Timeout};
 
 use revision::revisioned;
@@ -62,5 +61,3 @@ impl crate::sql::DisplaySql for DefineSequenceStatement {
 		Ok(())
 	}
 }
-
-

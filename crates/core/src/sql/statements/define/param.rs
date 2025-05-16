@@ -1,6 +1,6 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::sql::{Ident, Permission, Strand, Value};
+use crate::sql::{Ident, Permission, SqlValue, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use std::fmt::{self, Write};
 #[non_exhaustive]
 pub struct DefineParamStatement {
 	pub name: Ident,
-	pub value: Value,
+	pub value: SqlValue,
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
 	#[revision(start = 2)]
@@ -72,5 +72,3 @@ impl crate::sql::DisplaySql for DefineParamStatement {
 		Ok(())
 	}
 }
-
-

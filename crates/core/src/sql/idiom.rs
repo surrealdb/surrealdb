@@ -1,4 +1,3 @@
-
 use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
 	paths::{ID, IN, META, OUT},
@@ -11,7 +10,6 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
-
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
@@ -55,8 +53,6 @@ impl crate::sql::DisplaySql for Idioms {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
-
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -196,8 +192,6 @@ impl crate::sql::DisplaySql for Idiom {
 		)
 	}
 }
-
-
 
 /// A trie structure for storing idioms.
 ///

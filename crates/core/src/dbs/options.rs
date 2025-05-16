@@ -1,9 +1,9 @@
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
-use crate::iam::{Action, Auth, ResourceKind};
 use crate::expr::statements::define::{DefineIndexStatement, DefineTableStatement};
 use crate::expr::Base;
+use crate::iam::{Action, Auth, ResourceKind};
 use async_channel::Sender;
 use std::sync::Arc;
 use uuid::Uuid;

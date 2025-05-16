@@ -1,7 +1,7 @@
 use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use crate::err::Error;
-use crate::fnc::util::math::ToFloat;
 use crate::expr::strand::Strand;
+use crate::fnc::util::math::ToFloat;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};

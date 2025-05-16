@@ -1,7 +1,7 @@
 use crate::sql::part::Part;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 
-impl Value {
+impl SqlValue {
 	pub fn first(&self) -> Self {
 		self.pick(&[Part::First])
 	}

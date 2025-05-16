@@ -7,7 +7,7 @@ use crate::sql::statements::{
 	RelateStatement, RemoveStatement, SelectStatement, SetStatement, ThrowStatement,
 	UpdateStatement, UpsertStatement,
 };
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -32,8 +32,8 @@ impl Deref for Block {
 	}
 }
 
-impl From<Value> for Block {
-	fn from(v: Value) -> Self {
+impl From<SqlValue> for Block {
+	fn from(v: SqlValue) -> Self {
 		Block(vec![Entry::Value(v)])
 	}
 }
@@ -104,14 +104,12 @@ impl crate::sql::DisplaySql for Block {
 	}
 }
 
-
-
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Entry {
-	Value(Value),
+	Value(SqlValue),
 	Set(SetStatement),
 	Ifelse(IfelseStatement),
 	Select(SelectStatement),

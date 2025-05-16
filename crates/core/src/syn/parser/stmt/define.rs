@@ -10,7 +10,7 @@ use crate::sql::statements::define::{
 	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineSequenceStatement,
 };
 use crate::sql::statements::DefineApiStatement;
-use crate::sql::Value;
+use crate::sql::SqlValue;
 use crate::syn::error::bail;
 use crate::syn::token::Token;
 use crate::{
@@ -913,7 +913,7 @@ impl Parser<'_> {
 		let mut res = DefineEventStatement {
 			name,
 			what,
-			when: Value::Bool(true),
+			when: SqlValue::Bool(true),
 			if_not_exists,
 			overwrite,
 			..Default::default()
@@ -1529,7 +1529,7 @@ impl Parser<'_> {
 				t!("MIDDLEWARE") => {
 					self.pop_peek();
 
-					let mut middleware: Vec<(String, Vec<Value>)> = Vec::new();
+					let mut middleware: Vec<(String, Vec<SqlValue>)> = Vec::new();
 					// let mut parsed_custom = false;
 
 					loop {

@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::executor::QueryExecutor;
 use crate::expr::value::TryRem;
 use crate::expr::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
 use crate::expr::{Expression, Thing};
+use crate::idx::planner::executor::QueryExecutor;
 use reblessive::tree::Stk;
 
 pub fn neg(a: Value) -> Result<Value, Error> {

@@ -1,12 +1,12 @@
 use crate::err::Error;
-use crate::fnc::util::math::vector::{
-	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
-	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
-};
 use crate::expr::ident::Ident;
 use crate::expr::scoring::Scoring;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Number, Value};
+use crate::fnc::util::math::vector::{
+	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
+	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

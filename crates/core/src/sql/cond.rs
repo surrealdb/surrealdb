@@ -1,5 +1,4 @@
-
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -9,10 +8,10 @@ use std::ops::Deref;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Cond(pub Value);
+pub struct Cond(pub SqlValue);
 
 impl Deref for Cond {
-	type Target = Value;
+	type Target = SqlValue;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -37,5 +36,3 @@ impl crate::sql::DisplaySql for Cond {
 		write!(f, "WHERE {}", self.0)
 	}
 }
-
-

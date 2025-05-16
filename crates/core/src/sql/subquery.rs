@@ -4,7 +4,7 @@ use crate::sql::statements::{
 	InsertStatement, OutputStatement, RelateStatement, RemoveStatement, SelectStatement,
 	UpdateStatement, UpsertStatement,
 };
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -20,7 +20,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Subquery {
-	Value(Value),
+	Value(SqlValue),
 	Ifelse(IfelseStatement),
 	Output(OutputStatement),
 	Select(SelectStatement),

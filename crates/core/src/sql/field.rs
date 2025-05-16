@@ -1,5 +1,4 @@
-
-use crate::sql::{fmt::Fmt, Idiom, Value};
+use crate::sql::{fmt::Fmt, Idiom, SqlValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
@@ -26,7 +25,7 @@ impl Fields {
 	pub(crate) fn value_id() -> Self {
 		Self(
 			vec![Field::Single {
-				expr: Value::Idiom(Idiom(ID.to_vec())),
+				expr: SqlValue::Idiom(Idiom(ID.to_vec())),
 				alias: None,
 			}],
 			true,
@@ -52,7 +51,7 @@ impl Fields {
 		let mut is_count_only = false;
 		for field in &self.0 {
 			if let Field::Single {
-				expr: Value::Function(func),
+				expr: SqlValue::Function(func),
 				..
 			} = field
 			{
@@ -105,8 +104,6 @@ impl crate::sql::DisplaySql for Fields {
 	}
 }
 
-
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -117,7 +114,7 @@ pub enum Field {
 	All,
 	/// The 'rating' in `SELECT rating FROM ...`
 	Single {
-		expr: Value,
+		expr: SqlValue,
 		/// The `quality` in `SELECT rating AS quality FROM ...`
 		alias: Option<Idiom>,
 	},
@@ -127,7 +124,10 @@ impl From<Field> for crate::expr::field::Field {
 	fn from(v: Field) -> Self {
 		match v {
 			Field::All => Self::All,
-			Field::Single { expr, alias } => Self::Single {
+			Field::Single {
+				expr,
+				alias,
+			} => Self::Single {
 				expr: expr.into(),
 				alias: alias.map(Into::into),
 			},
@@ -139,7 +139,10 @@ impl From<crate::expr::field::Field> for Field {
 	fn from(v: crate::expr::field::Field) -> Self {
 		match v {
 			crate::expr::field::Field::All => Self::All,
-			crate::expr::field::Field::Single { expr, alias } => Self::Single {
+			crate::expr::field::Field::Single {
+				expr,
+				alias,
+			} => Self::Single {
 				expr: expr.into(),
 				alias: alias.map(Into::into),
 			},

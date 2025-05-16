@@ -1,9 +1,8 @@
-use crate::sql::{Idiom, Kind, Value};
+use crate::sql::{Idiom, Kind, SqlValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
-
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
 
@@ -12,7 +11,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
 #[serde(rename = "$surrealdb::private::sql::Cast")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Cast(pub Kind, pub Value);
+pub struct Cast(pub Kind, pub SqlValue);
 
 impl PartialOrd for Cast {
 	#[inline]

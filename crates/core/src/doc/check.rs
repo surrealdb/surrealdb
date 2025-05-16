@@ -5,13 +5,13 @@ use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
-use crate::iam::Action;
 use crate::expr::paths::ID;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
 use crate::expr::permission::Permission;
 use crate::expr::value::Value;
 use crate::expr::FlowResultExt as _;
+use crate::iam::Action;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;

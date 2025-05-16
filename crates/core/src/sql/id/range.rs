@@ -1,7 +1,7 @@
 use super::Id;
 use crate::{
 	err::Error,
-	sql::{Range, Value},
+	sql::{Range, SqlValue},
 };
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -57,11 +57,11 @@ impl TryFrom<Range> for IdRange {
 	}
 }
 
-impl TryFrom<Value> for IdRange {
+impl TryFrom<SqlValue> for IdRange {
 	type Error = Error;
-	fn try_from(v: Value) -> Result<Self, Self::Error> {
+	fn try_from(v: SqlValue) -> Result<Self, Self::Error> {
 		match v {
-			Value::Range(v) => IdRange::try_from(*v),
+			SqlValue::Range(v) => IdRange::try_from(*v),
 			v => Err(Error::IdInvalid {
 				value: v.kindof().to_string(),
 			}),

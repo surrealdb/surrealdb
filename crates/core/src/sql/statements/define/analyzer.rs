@@ -1,4 +1,3 @@
-
 use crate::sql::{filter::Filter, tokenizer::Tokenizer, Ident, Strand};
 
 use revision::revisioned;
@@ -79,5 +78,3 @@ impl crate::sql::DisplaySql for DefineAnalyzerStatement {
 		Ok(())
 	}
 }
-
-

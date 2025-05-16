@@ -1,4 +1,3 @@
-
 use crate::sql::{escape::EscapeIdent, strand::no_nul_bytes};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -77,5 +76,3 @@ impl crate::sql::DisplaySql for Ident {
 		EscapeIdent(&self.0).fmt(f)
 	}
 }
-
-

@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::sql::datetime::Datetime;
 
 use crate::sql::strand::Strand;
-use crate::sql::Value;
+use crate::sql::SqlValue;
 use crate::syn;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -49,7 +49,7 @@ impl From<Duration> for time::Duration {
 	}
 }
 
-impl From<time::Duration> for Value {
+impl From<time::Duration> for SqlValue {
 	fn from(value: time::Duration) -> Self {
 		Self::Duration(value.into())
 	}
@@ -397,5 +397,3 @@ impl<'a> Sum<&'a Self> for Duration {
 		iter.fold(Duration::default(), |a, b| &a + b)
 	}
 }
-
-

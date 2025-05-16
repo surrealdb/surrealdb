@@ -1,9 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::{self, Notification, Options};
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::{Base, Ident, Value};
+use crate::iam::{Action, ResourceKind};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

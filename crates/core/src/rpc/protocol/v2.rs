@@ -15,15 +15,15 @@ use crate::rpc::RpcError;
 use crate::sql::Uuid;
 use crate::{
 	dbs::{capabilities::MethodTarget, QueryType, Response},
+	expr::Value,
 	rpc::args::Take,
 	sql::{
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
-		Array, Fields, Function, Model, Output, Query, Strand, Value as SqlValue,
+		Array, Fields, Function, Model, Output, Query, SqlValue, Strand,
 	},
-	expr::Value,
 };
 
 #[expect(async_fn_in_trait)]
@@ -770,7 +770,8 @@ pub trait RpcProtocolV2: RpcContext {
 		let vars = match vars {
 			SqlValue::Object(v) => {
 				let mut v = sql_variables_to_expr_variables(&v.0);
-				Some(mrg! {v, self.session().parameters})},
+				Some(mrg! {v, self.session().parameters})
+			}
 			SqlValue::None | SqlValue::Null => Some(self.session().parameters.clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};

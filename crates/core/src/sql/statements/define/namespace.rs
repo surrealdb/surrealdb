@@ -1,4 +1,3 @@
-
 use crate::sql::{Ident, Strand};
 
 use revision::revisioned;
@@ -61,5 +60,3 @@ impl crate::sql::DisplaySql for DefineNamespaceStatement {
 		Ok(())
 	}
 }
-
-

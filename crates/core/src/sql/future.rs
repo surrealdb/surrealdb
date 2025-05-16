@@ -1,9 +1,8 @@
 use crate::sql::block::Block;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
@@ -14,8 +13,8 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 #[non_exhaustive]
 pub struct Future(pub Block);
 
-impl From<Value> for Future {
-	fn from(v: Value) -> Self {
+impl From<SqlValue> for Future {
+	fn from(v: SqlValue) -> Self {
 		Future(Block::from(v))
 	}
 }

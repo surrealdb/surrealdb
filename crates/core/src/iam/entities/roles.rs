@@ -1,5 +1,5 @@
-use crate::iam::Error;
 use crate::expr::Ident;
+use crate::iam::Error;
 use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

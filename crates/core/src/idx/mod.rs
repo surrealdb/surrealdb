@@ -5,6 +5,8 @@ pub mod planner;
 pub mod trees;
 
 use crate::err::Error;
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{Id, Thing};
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
@@ -29,8 +31,6 @@ use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::vm::Vm;
 use crate::kvs::{Key, KeyEncode as _, Val};
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Id, Thing};
 use revision::Revisioned;
 use serde::de::DeserializeOwned;
 use serde::Serialize;

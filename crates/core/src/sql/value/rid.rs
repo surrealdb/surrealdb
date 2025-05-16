@@ -1,8 +1,8 @@
 use crate::sql::paths::ID;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 
-impl Value {
-	pub fn rid(&self) -> Value {
+impl SqlValue {
+	pub fn rid(&self) -> SqlValue {
 		self.pick(&*ID)
 	}
 }
@@ -17,15 +17,15 @@ mod tests {
 
 	#[tokio::test]
 	async fn rid_none() {
-		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::None;
+		let val = SqlValue::parse("{ test: { other: null, something: 123 } }");
+		let res = SqlValue::None;
 		assert_eq!(res, val.rid());
 	}
 
 	#[tokio::test]
 	async fn rid_some() {
-		let val = Value::parse("{ id: test:id, test: { other: null, something: 123 } }");
-		let res = Value::Thing(Thing {
+		let val = SqlValue::parse("{ id: test:id, test: { other: null, something: 123 } }");
+		let res = SqlValue::Thing(Thing {
 			tb: String::from("test"),
 			id: Id::from("id"),
 		});

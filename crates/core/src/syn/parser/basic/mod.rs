@@ -249,7 +249,7 @@ mod test {
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Idiom(
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Idiom(
 					sql::Idiom(vec![Part::Field(Ident(ident.to_string()))])
 				))]))
 			)

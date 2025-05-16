@@ -1,4 +1,4 @@
-use crate::sql::Value;
+use crate::sql::SqlValue;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct ThrowStatement {
-	pub error: Value,
+	pub error: SqlValue,
 }
 
 impl ThrowStatement {

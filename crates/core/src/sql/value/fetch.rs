@@ -1,5 +1,3 @@
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 
-impl Value {
-
-}
+impl SqlValue {}

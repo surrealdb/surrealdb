@@ -90,5 +90,3 @@ impl crate::sql::DisplaySql for DefineFunctionStatement {
 		Ok(())
 	}
 }
-
-

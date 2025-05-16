@@ -38,7 +38,6 @@ pub use deprecated::token::DefineTokenStatement;
 
 pub use api::ApiAction;
 
-
 use crate::doc::CursorDoc;
 
 use revision::revisioned;

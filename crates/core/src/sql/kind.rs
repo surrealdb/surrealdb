@@ -6,7 +6,7 @@ use super::{
 
 use crate::sql::{
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
-	Table, Value,
+	SqlValue, Table,
 };
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
@@ -318,14 +318,14 @@ impl From<Kind> for crate::expr::Kind {
 			Kind::Regex => crate::expr::Kind::Regex,
 			Kind::Record(tables) => {
 				crate::expr::Kind::Record(tables.into_iter().map(Into::into).collect())
-			},
+			}
 			Kind::Geometry(geometries) => {
 				crate::expr::Kind::Geometry(geometries.into_iter().collect())
 			}
 			Kind::Option(k) => crate::expr::Kind::Option(Box::new(k.as_ref().clone().into())),
-			Kind::Either(kinds) => crate::expr::Kind::Either(
-				kinds.into_iter().map(Into::into).collect(),
-			),
+			Kind::Either(kinds) => {
+				crate::expr::Kind::Either(kinds.into_iter().map(Into::into).collect())
+			}
 			Kind::Set(k, l) => crate::expr::Kind::Set(Box::new(k.as_ref().clone().into()), l),
 			Kind::Array(k, l) => crate::expr::Kind::Array(Box::new(k.as_ref().clone().into()), l),
 			Kind::Function(args, ret) => crate::expr::Kind::Function(
@@ -334,10 +334,9 @@ impl From<Kind> for crate::expr::Kind {
 			),
 			Kind::Range => crate::expr::Kind::Range,
 			Kind::Literal(l) => crate::expr::Kind::Literal(l.into()),
-			Kind::References(t, i) => crate::expr::Kind::References(
-				t.map(Into::into),
-				i.map(Into::into),
-			),
+			Kind::References(t, i) => {
+				crate::expr::Kind::References(t.map(Into::into), i.map(Into::into))
+			}
 			Kind::File(k) => crate::expr::Kind::File(k.into_iter().map(Into::into).collect()),
 		}
 	}
@@ -363,7 +362,7 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::Regex => Kind::Regex,
 			crate::expr::Kind::Record(tables) => {
 				Kind::Record(tables.into_iter().map(Into::<Table>::into).collect())
-			},
+			}
 			crate::expr::Kind::Geometry(geometries) => {
 				Kind::Geometry(geometries.into_iter().collect())
 			}
@@ -383,11 +382,12 @@ impl From<crate::expr::Kind> for Kind {
 			),
 			crate::expr::Kind::Range => Self::Range,
 			crate::expr::Kind::Literal(l) => Self::Literal(l.into()),
-			crate::expr::Kind::References(t, i) => Self::References(
-				t.map(Into::into),
-				i.map(Into::into),
-			),
-			crate::expr::Kind::File(k) => Kind::File(k.into_iter().map(Into::<Ident>::into).collect()),
+			crate::expr::Kind::References(t, i) => {
+				Self::References(t.map(Into::into), i.map(Into::into))
+			}
+			crate::expr::Kind::File(k) => {
+				Kind::File(k.into_iter().map(Into::<Ident>::into).collect())
+			}
 		}
 	}
 }
@@ -587,8 +587,6 @@ impl crate::sql::DisplaySql for Kind {
 	}
 }
 
-
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -624,26 +622,26 @@ impl Literal {
 		}
 	}
 
-	pub fn validate_value(&self, value: &Value) -> bool {
+	pub fn validate_value(&self, value: &SqlValue) -> bool {
 		match self {
 			Self::String(v) => match value {
-				Value::Strand(s) => s == v,
+				SqlValue::Strand(s) => s == v,
 				_ => false,
 			},
 			Self::Number(v) => match value {
-				Value::Number(n) => n == v,
+				SqlValue::Number(n) => n == v,
 				_ => false,
 			},
 			Self::Duration(v) => match value {
-				Value::Duration(n) => n == v,
+				SqlValue::Duration(n) => n == v,
 				_ => false,
 			},
 			Self::Bool(v) => match value {
-				Value::Bool(b) => b == v,
+				SqlValue::Bool(b) => b == v,
 				_ => false,
 			},
 			Self::Array(a) => match value {
-				Value::Array(x) => {
+				SqlValue::Array(x) => {
 					if a.len() != x.len() {
 						return false;
 					}
@@ -663,7 +661,7 @@ impl Literal {
 				_ => false,
 			},
 			Self::Object(o) => match value {
-				Value::Object(x) => {
+				SqlValue::Object(x) => {
 					if o.len() < x.len() {
 						return false;
 					}
@@ -683,8 +681,8 @@ impl Literal {
 				_ => false,
 			},
 			Self::DiscriminatedObject(key, discriminants) => match value {
-				Value::Object(x) => {
-					let value = x.get(key).unwrap_or(&Value::None);
+				SqlValue::Object(x) => {
+					let value = x.get(key).unwrap_or(&SqlValue::None);
 					if let Some(o) = discriminants
 						.iter()
 						.find(|o| value.to_owned().coerce_to_kind(&o[key]).is_ok())
@@ -776,11 +774,7 @@ impl From<Literal> for crate::expr::Literal {
 			Literal::Number(n) => Self::Number(n.into()),
 			Literal::Duration(d) => Self::Duration(d.into()),
 			Literal::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
-			Literal::Object(o) => Self::Object(
-				o.into_iter()
-					.map(|(k, v)| (k, v.into()))
-					.collect(),
-			),
+			Literal::Object(o) => Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect()),
 			Literal::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
 				k,
 				o.into_iter()
@@ -799,11 +793,9 @@ impl From<crate::expr::Literal> for Literal {
 			crate::expr::Literal::Number(n) => Self::Number(n.into()),
 			crate::expr::Literal::Duration(d) => Self::Duration(d.into()),
 			crate::expr::Literal::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
-			crate::expr::Literal::Object(o) => Self::Object(
-				o.into_iter()
-					.map(|(k, v)| (k, v.into()))
-					.collect(),
-			),
+			crate::expr::Literal::Object(o) => {
+				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
+			}
 			crate::expr::Literal::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
 				k,
 				o.into_iter()

@@ -1,13 +1,13 @@
 use crate::sql::array::Array;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 
-impl Value {
+impl SqlValue {
 	pub fn flatten(self) -> Self {
 		match self {
-			Value::Array(v) => {
+			SqlValue::Array(v) => {
 				v.0.into_iter()
 					.flat_map(|v| match v {
-						Value::Array(v) => v,
+						SqlValue::Array(v) => v,
 						_ => Array::from(v),
 					})
 					.collect::<Vec<_>>()

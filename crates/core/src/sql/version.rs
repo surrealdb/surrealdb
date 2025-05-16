@@ -3,7 +3,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::Value;
+use super::SqlValue;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -11,7 +11,7 @@ use super::Value;
 #[non_exhaustive]
 pub struct Version(
 	#[revision(end = 2, convert_fn = "convert_version_datetime")] pub Datetime,
-	#[revision(start = 2)] pub Value,
+	#[revision(start = 2)] pub SqlValue,
 );
 
 impl Version {
@@ -20,7 +20,7 @@ impl Version {
 		_revision: u16,
 		old: Datetime,
 	) -> Result<(), revision::Error> {
-		self.0 = Value::Datetime(old);
+		self.0 = SqlValue::Datetime(old);
 		Ok(())
 	}
 }

@@ -75,7 +75,6 @@ impl From<crate::expr::Group> for Group {
 	}
 }
 
-
 crate::sql::impl_display_from_sql!(Group);
 
 impl crate::sql::DisplaySql for Group {

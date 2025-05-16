@@ -1,12 +1,12 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::statements::define::DefineSequenceStatement;
 use crate::key::sequence::ba::Ba;
 use crate::key::sequence::st::St;
 use crate::key::sequence::Prefix;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KeyEncode, LockType, Transaction, TransactionType};
-use crate::expr::statements::define::DefineSequenceStatement;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use rand::{thread_rng, Rng};

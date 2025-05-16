@@ -1,11 +1,11 @@
 //! Stores a graph edge pointer
 use crate::err::Error;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
 use crate::expr::dir::Dir;
 use crate::expr::id::Id;
 use crate::expr::thing::Thing;
+use crate::key::category::Categorise;
+use crate::key::category::Category;
+use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

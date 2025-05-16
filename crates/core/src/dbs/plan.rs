@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
-use crate::idx::planner::RecordStrategy;
 use crate::expr::{Object, Value};
+use crate::idx::planner::RecordStrategy;
 use std::collections::HashMap;
 
 pub(super) struct Plan {

@@ -1,11 +1,10 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::operator::Operator;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -13,15 +12,15 @@ use std::fmt::{self, Display, Formatter};
 #[non_exhaustive]
 pub enum Data {
 	EmptyExpression,
-	SetExpression(Vec<(Idiom, Operator, Value)>),
+	SetExpression(Vec<(Idiom, Operator, SqlValue)>),
 	UnsetExpression(Vec<Idiom>),
-	PatchExpression(Value),
-	MergeExpression(Value),
-	ReplaceExpression(Value),
-	ContentExpression(Value),
-	SingleExpression(Value),
-	ValuesExpression(Vec<Vec<(Idiom, Value)>>),
-	UpdateExpression(Vec<(Idiom, Operator, Value)>),
+	PatchExpression(SqlValue),
+	MergeExpression(SqlValue),
+	ReplaceExpression(SqlValue),
+	ContentExpression(SqlValue),
+	SingleExpression(SqlValue),
+	ValuesExpression(Vec<Vec<(Idiom, SqlValue)>>),
+	UpdateExpression(Vec<(Idiom, Operator, SqlValue)>),
 }
 
 impl Default for Data {
@@ -34,8 +33,12 @@ impl From<Data> for crate::expr::Data {
 	fn from(v: Data) -> Self {
 		match v {
 			Data::EmptyExpression => Self::EmptyExpression,
-			Data::SetExpression(v) => Self::SetExpression(v.into_iter().map(|(l, o, r)| (l.into(), o.into(), r.into())).collect()),
-			Data::UnsetExpression(v) => Self::UnsetExpression(v.into_iter().map(Into::into).collect()),
+			Data::SetExpression(v) => Self::SetExpression(
+				v.into_iter().map(|(l, o, r)| (l.into(), o.into(), r.into())).collect(),
+			),
+			Data::UnsetExpression(v) => {
+				Self::UnsetExpression(v.into_iter().map(Into::into).collect())
+			}
 			Data::PatchExpression(v) => Self::PatchExpression(v.into()),
 			Data::MergeExpression(v) => Self::MergeExpression(v.into()),
 			Data::ReplaceExpression(v) => Self::ReplaceExpression(v.into()),
@@ -59,9 +62,9 @@ impl From<crate::expr::Data> for Data {
 			crate::expr::Data::SetExpression(v) => Self::SetExpression(
 				v.into_iter().map(|(l, o, r)| (l.into(), o.into(), r.into())).collect(),
 			),
-			crate::expr::Data::UnsetExpression(v) => Self::UnsetExpression(
-				v.into_iter().map(Into::into).collect(),
-			),
+			crate::expr::Data::UnsetExpression(v) => {
+				Self::UnsetExpression(v.into_iter().map(Into::into).collect())
+			}
 			crate::expr::Data::PatchExpression(v) => Self::PatchExpression(v.into()),
 			crate::expr::Data::MergeExpression(v) => Self::MergeExpression(v.into()),
 			crate::expr::Data::ReplaceExpression(v) => Self::ReplaceExpression(v.into()),

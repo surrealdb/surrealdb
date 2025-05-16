@@ -6,7 +6,6 @@ pub use field::AlterFieldStatement;
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
 
-
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};

@@ -1,5 +1,4 @@
-
-use crate::sql::{Ident, Strand, Value, Values};
+use crate::sql::{Ident, SqlValue, Strand, Values};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -12,7 +11,7 @@ use std::fmt::{self};
 pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
-	pub when: Value,
+	pub when: SqlValue,
 	pub then: Values,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
@@ -67,5 +66,3 @@ impl crate::sql::DisplaySql for DefineEventStatement {
 		Ok(())
 	}
 }
-
-

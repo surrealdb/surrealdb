@@ -4,9 +4,7 @@ use crate::kvs::Transaction;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::paths::{IN, OUT};
 
-use crate::sql::{
-	changefeed::ChangeFeed, Ident, Permissions, Strand, View,
-};
+use crate::sql::{changefeed::ChangeFeed, Ident, Permissions, Strand, View};
 use crate::sql::{Idiom, Kind, TableType};
 
 use revision::revisioned;
@@ -231,5 +229,3 @@ impl crate::sql::DisplaySql for DefineTableStatement {
 		Ok(())
 	}
 }
-
-

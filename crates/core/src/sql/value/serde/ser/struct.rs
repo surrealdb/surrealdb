@@ -1,12 +1,12 @@
 use super::Content;
 use crate::err::Error;
 use crate::sql;
-use crate::sql::Value;
+use crate::sql::SqlValue;
 use serde::de::IntoDeserializer;
 use serde::Deserialize;
 use serde_content::{Data, Expected, Unexpected};
 
-pub(super) fn to_value(content: Content) -> Result<Value, Error> {
+pub(super) fn to_value(content: Content) -> Result<SqlValue, Error> {
 	match content {
 		Content::Struct(v) => match v.name.as_ref() {
 			sql::strand::TOKEN => sql::Strand::deserialize(Content::Struct(v).into_deserializer())
@@ -76,7 +76,7 @@ pub(super) fn to_value(content: Content) -> Result<Value, Error> {
 				.map(Into::into)
 				.map_err(Into::into),
 			_ => match v.data {
-				Data::Unit => Ok(Value::None),
+				Data::Unit => Ok(SqlValue::None),
 				Data::NewType {
 					value,
 				} => value.try_into(),

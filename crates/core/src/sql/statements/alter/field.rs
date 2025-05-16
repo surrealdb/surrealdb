@@ -1,5 +1,5 @@
 use crate::sql::reference::Reference;
-use crate::sql::{Ident, Permissions, Strand, Value};
+use crate::sql::{Ident, Permissions, SqlValue, Strand};
 use crate::sql::{Idiom, Kind};
 
 use revision::revisioned;
@@ -17,9 +17,9 @@ pub struct AlterFieldStatement {
 	pub flex: Option<bool>,
 	pub kind: Option<Option<Kind>>,
 	pub readonly: Option<bool>,
-	pub value: Option<Option<Value>>,
-	pub assert: Option<Option<Value>>,
-	pub default: Option<Option<Value>>,
+	pub value: Option<Option<SqlValue>>,
+	pub assert: Option<Option<SqlValue>>,
+	pub default: Option<Option<SqlValue>>,
 	pub permissions: Option<Permissions>,
 	pub comment: Option<Option<Strand>>,
 	pub reference: Option<Option<Reference>>,

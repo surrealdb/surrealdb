@@ -1,6 +1,6 @@
 use crate::sql::{
 	order::{OldOrders, Order, OrderList, Ordering},
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
+	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, SqlValue, Start, Timeout,
 	Values, Version, With,
 };
 
@@ -84,7 +84,7 @@ impl SelectStatement {
 		if self.what.iter().any(|v| v.writeable()) {
 			return true;
 		}
-		self.cond.as_deref().is_some_and(Value::writeable)
+		self.cond.as_deref().is_some_and(SqlValue::writeable)
 	}
 }
 

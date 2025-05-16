@@ -10,12 +10,12 @@ use futures::StreamExt;
 use http::header::CONTENT_TYPE;
 
 use crate::err::Error;
-use crate::rpc::format::cbor;
-use crate::rpc::format::json;
-use crate::rpc::format::revision;
 use crate::expr;
 use crate::expr::Bytesize;
 use crate::expr::Value;
+use crate::rpc::format::cbor;
+use crate::rpc::format::json;
+use crate::rpc::format::revision;
 
 use super::context::InvocationContext;
 use super::err::ApiError;
@@ -114,9 +114,7 @@ impl ApiBody {
 					_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
 				};
 
-				parsed
-					.map(Into::into)
-					.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
+				parsed.map(Into::into).map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
 			}
 		}
 	}

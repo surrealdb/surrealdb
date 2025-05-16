@@ -2,8 +2,8 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::planner::RecordStrategy;
 use crate::expr::{Data, FlowResultExt as _, Output, Timeout, Value};
+use crate::idx::planner::RecordStrategy;
 
 use reblessive::tree::Stk;
 use revision::revisioned;

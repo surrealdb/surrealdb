@@ -1,6 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{Array, Ident, Number, Thing, Value};
 use crate::idx::docids::DocId;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
@@ -9,8 +11,6 @@ use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
 use crate::kvs::{Key, Val};
 use crate::kvs::{KeyEncode, Transaction};
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Array, Ident, Number, Thing, Value};
 use radix_trie::Trie;
 use rust_decimal::Decimal;
 use std::borrow::Cow;

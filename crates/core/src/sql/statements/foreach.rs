@@ -1,5 +1,5 @@
 use crate::sql::range::TypedRange;
-use crate::sql::{Block, Param, Value};
+use crate::sql::{Block, Param, SqlValue};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use std::fmt::{self};
 #[non_exhaustive]
 pub struct ForeachStatement {
 	pub param: Param,
-	pub range: Value,
+	pub range: SqlValue,
 	pub block: Block,
 }
 
@@ -36,12 +36,12 @@ impl From<crate::expr::statements::ForeachStatement> for ForeachStatement {
 }
 
 enum ForeachIter {
-	Array(std::vec::IntoIter<Value>),
-	Range(std::iter::Map<TypedRange<i64>, fn(i64) -> Value>),
+	Array(std::vec::IntoIter<SqlValue>),
+	Range(std::iter::Map<TypedRange<i64>, fn(i64) -> SqlValue>),
 }
 
 impl Iterator for ForeachIter {
-	type Item = Value;
+	type Item = SqlValue;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		match self {

@@ -1,5 +1,5 @@
-use crate::sql::Value;
 use crate::sql::Kind;
+use crate::sql::SqlValue;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use std::fmt;
 #[non_exhaustive]
 pub struct SetStatement {
 	pub name: String,
-	pub what: Value,
+	pub what: SqlValue,
 	#[revision(start = 2)]
 	pub kind: Option<Kind>,
 }

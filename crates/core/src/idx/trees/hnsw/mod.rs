@@ -14,12 +14,12 @@ use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 
+use crate::expr::index::HnswParams;
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, Val};
-use crate::expr::index::HnswParams;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
@@ -435,6 +435,8 @@ where
 mod tests {
 	use crate::ctx::{Context, MutableContext};
 	use crate::err::Error;
+	use crate::expr::index::{Distance, HnswParams, VectorType};
+	use crate::expr::{Id, Value};
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
@@ -446,8 +448,6 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
-	use crate::expr::index::{Distance, HnswParams, VectorType};
-	use crate::expr::{Id, Value};
 	use ahash::{HashMap, HashSet};
 	use ndarray::Array1;
 	use reblessive::tree::Stk;

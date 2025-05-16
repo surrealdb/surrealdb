@@ -84,5 +84,3 @@ impl crate::sql::DisplaySql for DefineIndexStatement {
 		Ok(())
 	}
 }
-
-

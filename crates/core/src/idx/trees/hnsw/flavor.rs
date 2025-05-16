@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::expr::index::HnswParams;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{AHashSet, ArraySet};
 use crate::idx::trees::hnsw::docs::HnswDocs;
@@ -7,7 +8,6 @@ use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
-use crate::expr::index::HnswParams;
 use reblessive::tree::Stk;
 
 pub(super) enum HnswFlavor {

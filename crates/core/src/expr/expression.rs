@@ -1,9 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::fnc;
 use crate::expr::operator::Operator;
 use crate::expr::value::Value;
+use crate::fnc;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

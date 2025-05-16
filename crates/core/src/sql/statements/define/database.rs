@@ -1,4 +1,3 @@
-
 use crate::sql::{changefeed::ChangeFeed, Ident, Strand};
 
 use revision::revisioned;
@@ -67,5 +66,3 @@ impl crate::sql::DisplaySql for DefineDatabaseStatement {
 		Ok(())
 	}
 }
-
-

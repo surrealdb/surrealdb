@@ -1,7 +1,4 @@
-use crate::sql::{
-	Base, Cond, Datetime, Duration, Ident, Object, Strand,
-	Thing, Uuid, Value,
-};
+use crate::sql::{Base, Cond, Datetime, Duration, Ident, Object, SqlValue, Strand, Thing, Uuid};
 use md5::Digest;
 use rand::Rng;
 use revision::revisioned;
@@ -248,40 +245,40 @@ impl AccessGrant {
 impl From<AccessGrant> for Object {
 	fn from(grant: AccessGrant) -> Self {
 		let mut res = Object::default();
-		res.insert("id".to_owned(), Value::from(grant.id.to_raw()));
-		res.insert("ac".to_owned(), Value::from(grant.ac.to_raw()));
-		res.insert("type".to_owned(), Value::from(grant.grant.variant()));
-		res.insert("creation".to_owned(), Value::from(grant.creation));
-		res.insert("expiration".to_owned(), Value::from(grant.expiration));
-		res.insert("revocation".to_owned(), Value::from(grant.revocation));
+		res.insert("id".to_owned(), SqlValue::from(grant.id.to_raw()));
+		res.insert("ac".to_owned(), SqlValue::from(grant.ac.to_raw()));
+		res.insert("type".to_owned(), SqlValue::from(grant.grant.variant()));
+		res.insert("creation".to_owned(), SqlValue::from(grant.creation));
+		res.insert("expiration".to_owned(), SqlValue::from(grant.expiration));
+		res.insert("revocation".to_owned(), SqlValue::from(grant.revocation));
 		let mut sub = Object::default();
 		match grant.subject {
-			Subject::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
-			Subject::User(name) => sub.insert("user".to_owned(), Value::from(name.to_raw())),
+			Subject::Record(id) => sub.insert("record".to_owned(), SqlValue::from(id)),
+			Subject::User(name) => sub.insert("user".to_owned(), SqlValue::from(name.to_raw())),
 		};
-		res.insert("subject".to_owned(), Value::from(sub));
+		res.insert("subject".to_owned(), SqlValue::from(sub));
 
 		let mut gr = Object::default();
 		match grant.grant {
 			Grant::Jwt(jg) => {
-				gr.insert("jti".to_owned(), Value::from(jg.jti));
+				gr.insert("jti".to_owned(), SqlValue::from(jg.jti));
 				if let Some(token) = jg.token {
-					gr.insert("token".to_owned(), Value::from(token));
+					gr.insert("token".to_owned(), SqlValue::from(token));
 				}
 			}
 			Grant::Record(rg) => {
-				gr.insert("rid".to_owned(), Value::from(rg.rid));
-				gr.insert("jti".to_owned(), Value::from(rg.jti));
+				gr.insert("rid".to_owned(), SqlValue::from(rg.rid));
+				gr.insert("jti".to_owned(), SqlValue::from(rg.jti));
 				if let Some(token) = rg.token {
-					gr.insert("token".to_owned(), Value::from(token));
+					gr.insert("token".to_owned(), SqlValue::from(token));
 				}
 			}
 			Grant::Bearer(bg) => {
-				gr.insert("id".to_owned(), Value::from(bg.id.to_raw()));
-				gr.insert("key".to_owned(), Value::from(bg.key));
+				gr.insert("id".to_owned(), SqlValue::from(bg.id.to_raw()));
+				gr.insert("key".to_owned(), SqlValue::from(bg.key));
 			}
 		};
-		res.insert("grant".to_owned(), Value::from(gr));
+		res.insert("grant".to_owned(), SqlValue::from(gr));
 
 		res
 	}

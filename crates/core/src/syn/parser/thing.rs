@@ -372,7 +372,7 @@ mod tests {
 	use super::*;
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
-	use crate::sql::Value;
+	use crate::sql::SqlValue;
 	use crate::syn::parser::ParserSettings;
 	use crate::syn::Parse as _;
 
@@ -473,8 +473,8 @@ mod tests {
 	#[test]
 	fn thing_string() {
 		let sql = "r'test:001'";
-		let res = Value::parse(sql);
-		let Value::Thing(out) = res else {
+		let res = SqlValue::parse(sql);
+		let SqlValue::Thing(out) = res else {
 			panic!()
 		};
 		assert_eq!("test:1", format!("{}", out));
@@ -487,8 +487,8 @@ mod tests {
 		);
 
 		let sql = "r'test:001'";
-		let res = Value::parse(sql);
-		let Value::Thing(out) = res else {
+		let res = SqlValue::parse(sql);
+		let SqlValue::Thing(out) = res else {
 			panic!()
 		};
 		assert_eq!("test:1", format!("{}", out));
@@ -542,8 +542,8 @@ mod tests {
 			Thing {
 				tb: String::from("test"),
 				id: Id::from(Object::from(map! {
-					"location".to_string() => Value::from("GBR"),
-					"year".to_string() => Value::from(2022),
+					"location".to_string() => SqlValue::from("GBR"),
+					"year".to_string() => SqlValue::from(2022),
 				})),
 			}
 		);
@@ -559,7 +559,7 @@ mod tests {
 			out,
 			Thing {
 				tb: String::from("test"),
-				id: Id::from(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
+				id: Id::from(Array::from(vec![SqlValue::from("GBR"), SqlValue::from(2022)])),
 			}
 		);
 	}
@@ -593,7 +593,7 @@ mod tests {
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Thing(
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Thing(
 					sql::Thing {
 						tb: "t".to_string(),
 						id: Id::from(ident.to_string())

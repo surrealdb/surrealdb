@@ -1,8 +1,8 @@
 use crate::sql::idiom::Idiom;
 use crate::sql::part::Part;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 
-impl Value {
+impl SqlValue {
 	pub(crate) fn every(
 		&self,
 		path: Option<&[Part]>,
@@ -18,7 +18,7 @@ impl Value {
 	fn _every(&self, steps: bool, arrays: ArrayBehaviour, mut prev: Idiom) -> Vec<Idiom> {
 		match self {
 			// Current path part is an object and is not empty
-			Value::Object(v) if !v.is_empty() => {
+			SqlValue::Object(v) if !v.is_empty() => {
 				// Remove any trailing * path parts
 				prev.remove_trailing_all();
 				// Check if we should log intermediary nodes
@@ -42,7 +42,7 @@ impl Value {
 				}
 			}
 			// Current path part is an array and is not empty
-			Value::Array(v) if !v.is_empty() => {
+			SqlValue::Array(v) if !v.is_empty() => {
 				// Remove any trailing * path parts
 				prev.remove_trailing_all();
 				// Check if we should log individual array items
@@ -111,14 +111,14 @@ mod tests {
 
 	#[test]
 	fn every_empty() {
-		let val = Value::parse("{}");
+		let val = SqlValue::parse("{}");
 		let res: Vec<Idiom> = vec![];
 		assert_eq!(res, val.every(None, false, false));
 	}
 
 	#[test]
 	fn every_with_empty_objects_arrays() {
-		let val = Value::parse("{ test: {}, status: false, something: {age: 45}, tags: []}");
+		let val = SqlValue::parse("{ test: {}, status: false, something: {age: 45}, tags: []}");
 		let res = vec![
 			Idiom::parse("something.age"),
 			Idiom::parse("status"),
@@ -130,14 +130,14 @@ mod tests {
 
 	#[test]
 	fn every_without_array_indexes() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = SqlValue::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
 		let res = vec![Idiom::parse("test.something")];
 		assert_eq!(res, val.every(None, false, false));
 	}
 
 	#[test]
 	fn every_recursive_without_array_indexes() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = SqlValue::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
 		let res = vec![
 			Idiom::parse("test.something"),
 			Idiom::parse("test.something[1].age"),
@@ -150,7 +150,7 @@ mod tests {
 
 	#[test]
 	fn every_including_array_indexes() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = SqlValue::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
 		let res = vec![
 			Idiom::parse("test.something"),
 			Idiom::parse("test.something[1].age"),
@@ -167,14 +167,14 @@ mod tests {
 
 	#[test]
 	fn every_including_intermediary_nodes_without_array_indexes() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = SqlValue::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
 		let res = vec![Idiom::parse("test"), Idiom::parse("test.something")];
 		assert_eq!(res, val.every(None, true, false));
 	}
 
 	#[test]
 	fn every_including_intermediary_nodes_including_array_indexes() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = SqlValue::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
 		let res = vec![
 			Idiom::parse("test"),
 			Idiom::parse("test.something"),
@@ -194,7 +194,7 @@ mod tests {
 
 	#[test]
 	fn every_given_one_path_part() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = SqlValue::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
 		let res = vec![
 			Idiom::parse("test"),
 			Idiom::parse("test.something"),
@@ -214,7 +214,7 @@ mod tests {
 
 	#[test]
 	fn every_given_two_path_parts() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = SqlValue::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
 		let res = vec![
 			Idiom::parse("test.something"),
 			Idiom::parse("test.something[1]"),
@@ -233,7 +233,7 @@ mod tests {
 
 	#[test]
 	fn every_including_intermediary_nodes_including_array_indexes_ending_all() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = SqlValue::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
 		let res = vec![
 			Idiom::parse("test.something"),
 			Idiom::parse("test.something[1]"),
@@ -252,7 +252,7 @@ mod tests {
 
 	#[test]
 	fn every_wildcards() {
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"{ test: { a: { color: 'red' }, b: { color: 'blue' }, c: { color: 'green' } } }",
 		);
 

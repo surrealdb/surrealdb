@@ -1,4 +1,4 @@
-use crate::sql::Value;
+use crate::sql::SqlValue;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use std::fmt;
 pub struct KillStatement {
 	// Uuid of Live Query
 	// or Param resolving to Uuid of Live Query
-	pub id: Value,
+	pub id: SqlValue,
 }
 
 impl From<KillStatement> for crate::expr::statements::KillStatement {

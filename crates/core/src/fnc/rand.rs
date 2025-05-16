@@ -285,10 +285,10 @@ pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value, Erro
 pub mod uuid {
 
 	use crate::err::Error;
-	use crate::fnc::args::Optional;
 	use crate::expr::uuid::Uuid;
 	use crate::expr::value::Value;
 	use crate::expr::Datetime;
+	use crate::fnc::args::Optional;
 
 	pub fn v4(_: ()) -> Result<Value, Error> {
 		Ok(Uuid::new_v4().into())

@@ -1,9 +1,9 @@
 use crate::sql::part::Next;
 use crate::sql::part::Part;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 use std::cmp::Ordering;
 
-impl Value {
+impl SqlValue {
 	pub(crate) fn compare(
 		&self,
 		other: &Self,
@@ -15,7 +15,7 @@ impl Value {
 			// Get the current path part
 			Some(p) => match (self, other) {
 				// Current path part is an object
-				(Value::Object(a), Value::Object(b)) => match p {
+				(SqlValue::Object(a), SqlValue::Object(b)) => match p {
 					Part::Field(f) => match (a.get(f.as_str()), b.get(f.as_str())) {
 						(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
 						(Some(_), None) => Some(Ordering::Greater),
@@ -25,7 +25,7 @@ impl Value {
 					_ => None,
 				},
 				// Current path part is an array
-				(Value::Array(a), Value::Array(b)) => match p {
+				(SqlValue::Array(a), SqlValue::Array(b)) => match p {
 					Part::All => {
 						for (a, b) in a.iter().zip(b.iter()) {
 							match a.compare(b, path.next(), collate, numeric) {
@@ -97,8 +97,8 @@ mod tests {
 	#[test]
 	fn compare_none() {
 		let idi = Idiom::default();
-		let one = Value::parse("{ test: { other: null, something: 456 } }");
-		let two = Value::parse("{ test: { other: null, something: 123 } }");
+		let one = SqlValue::parse("{ test: { other: null, something: 456 } }");
+		let two = SqlValue::parse("{ test: { other: null, something: 123 } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -106,8 +106,8 @@ mod tests {
 	#[test]
 	fn compare_basic() {
 		let idi = Idiom::parse("test.something");
-		let one = Value::parse("{ test: { other: null, something: 456 } }");
-		let two = Value::parse("{ test: { other: null, something: 123 } }");
+		let one = SqlValue::parse("{ test: { other: null, something: 456 } }");
+		let two = SqlValue::parse("{ test: { other: null, something: 123 } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -115,8 +115,8 @@ mod tests {
 	#[test]
 	fn compare_basic_missing_left() {
 		let idi = Idiom::parse("test.something");
-		let one = Value::parse("{ test: { other: null } }");
-		let two = Value::parse("{ test: { other: null, something: 123 } }");
+		let one = SqlValue::parse("{ test: { other: null } }");
+		let two = SqlValue::parse("{ test: { other: null, something: 123 } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
@@ -124,8 +124,8 @@ mod tests {
 	#[test]
 	fn compare_basic_missing_right() {
 		let idi = Idiom::parse("test.something");
-		let one = Value::parse("{ test: { other: null, something: 456 } }");
-		let two = Value::parse("{ test: { other: null } }");
+		let one = SqlValue::parse("{ test: { other: null, something: 456 } }");
+		let two = SqlValue::parse("{ test: { other: null } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -133,8 +133,8 @@ mod tests {
 	#[test]
 	fn compare_array() {
 		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [4, 5, 6] } }");
-		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let one = SqlValue::parse("{ test: { other: null, something: [4, 5, 6] } }");
+		let two = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -142,8 +142,8 @@ mod tests {
 	#[test]
 	fn compare_array_longer_left() {
 		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
-		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let one = SqlValue::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
+		let two = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -151,8 +151,8 @@ mod tests {
 	#[test]
 	fn compare_array_longer_right() {
 		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
-		let two = Value::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
+		let one = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let two = SqlValue::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
@@ -160,8 +160,8 @@ mod tests {
 	#[test]
 	fn compare_array_missing_left() {
 		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: null } }");
-		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let one = SqlValue::parse("{ test: { other: null, something: null } }");
+		let two = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
@@ -169,8 +169,8 @@ mod tests {
 	#[test]
 	fn compare_array_missing_right() {
 		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [4, 5, 6] } }");
-		let two = Value::parse("{ test: { other: null, something: null } }");
+		let one = SqlValue::parse("{ test: { other: null, something: [4, 5, 6] } }");
+		let two = SqlValue::parse("{ test: { other: null, something: null } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -178,8 +178,8 @@ mod tests {
 	#[test]
 	fn compare_array_missing_value_left() {
 		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [1, null, 3] } }");
-		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let one = SqlValue::parse("{ test: { other: null, something: [1, null, 3] } }");
+		let two = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
@@ -187,8 +187,8 @@ mod tests {
 	#[test]
 	fn compare_array_missing_value_right() {
 		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
-		let two = Value::parse("{ test: { other: null, something: [1, null, 3] } }");
+		let one = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let two = SqlValue::parse("{ test: { other: null, something: [1, null, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -196,8 +196,8 @@ mod tests {
 	#[test]
 	fn compare_last() {
 		let idi = Idiom::parse("test[$]");
-		let one = Value::parse("{ test: [1,5] }");
-		let two = Value::parse("{ test: [2,4] }");
+		let one = SqlValue::parse("{ test: [1,5] }");
+		let two = SqlValue::parse("{ test: [2,4] }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater))
 	}

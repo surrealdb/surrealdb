@@ -4,7 +4,6 @@ pub mod graphql;
 use crate::err::Error;
 use crate::iam::ConfigKind;
 
-
 use api::ApiConfig;
 use graphql::GraphQLConfig;
 use revision::revisioned;
@@ -88,8 +87,12 @@ impl From<&ConfigInner> for ConfigKind {
 impl From<ConfigInner> for crate::expr::statements::define::config::ConfigInner {
 	fn from(v: ConfigInner) -> Self {
 		match v {
-			ConfigInner::GraphQL(v) => crate::expr::statements::define::config::ConfigInner::GraphQL(v.into()),
-			ConfigInner::Api(v) => crate::expr::statements::define::config::ConfigInner::Api(v.into()),
+			ConfigInner::GraphQL(v) => {
+				crate::expr::statements::define::config::ConfigInner::GraphQL(v.into())
+			}
+			ConfigInner::Api(v) => {
+				crate::expr::statements::define::config::ConfigInner::Api(v.into())
+			}
 		}
 	}
 }
@@ -97,8 +100,12 @@ impl From<ConfigInner> for crate::expr::statements::define::config::ConfigInner 
 impl From<crate::expr::statements::define::config::ConfigInner> for ConfigInner {
 	fn from(v: crate::expr::statements::define::config::ConfigInner) -> Self {
 		match v {
-			crate::expr::statements::define::config::ConfigInner::GraphQL(v) => ConfigInner::GraphQL(v.into()),
-			crate::expr::statements::define::config::ConfigInner::Api(v) => ConfigInner::Api(v.into()),
+			crate::expr::statements::define::config::ConfigInner::GraphQL(v) => {
+				ConfigInner::GraphQL(v.into())
+			}
+			crate::expr::statements::define::config::ConfigInner::Api(v) => {
+				ConfigInner::Api(v.into())
+			}
 		}
 	}
 }

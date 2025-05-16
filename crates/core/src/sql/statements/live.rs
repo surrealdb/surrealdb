@@ -1,6 +1,6 @@
 use crate::iam::Auth;
 
-use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
+use crate::sql::{Cond, Fetchs, Fields, SqlValue, Uuid};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub expr: Fields,
-	pub what: Value,
+	pub what: SqlValue,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
 	// When a live query is created, we must also store the
@@ -28,7 +28,7 @@ pub struct LiveStatement {
 	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
-	pub(crate) session: Option<Value>,
+	pub(crate) session: Option<SqlValue>,
 }
 
 impl LiveStatement {
@@ -41,7 +41,7 @@ impl LiveStatement {
 		}
 	}
 
-	pub fn new_from_what_expr(expr: Fields, what: Value) -> Self {
+	pub fn new_from_what_expr(expr: Fields, what: SqlValue) -> Self {
 		LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
@@ -54,7 +54,7 @@ impl LiveStatement {
 	/// Creates a live statement from parts that can be set during a query.
 	pub(crate) fn from_source_parts(
 		expr: Fields,
-		what: Value,
+		what: SqlValue,
 		cond: Option<Cond>,
 		fetch: Option<Fetchs>,
 	) -> Self {
@@ -114,16 +114,14 @@ impl crate::sql::DisplaySql for LiveStatement {
 	}
 }
 
-
-
 #[cfg(test)]
 mod tests {
 	use crate::dbs::{Action, Capabilities, Notification, Session};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
+	use crate::sql::SqlValue;
 	use crate::sql::Thing;
-	use crate::sql::Value;
 	use crate::syn::Parse;
 
 	pub async fn new_ds() -> Result<Datastore, crate::err::Error> {
@@ -151,7 +149,7 @@ mod tests {
 
 		let live_id = live_query_response.remove(0).result.unwrap();
 		let live_id = match live_id {
-			Value::Uuid(id) => id,
+			SqlValue::Uuid(id) => id,
 			_ => panic!("expected uuid"),
 		};
 
@@ -166,7 +164,7 @@ mod tests {
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
-		let expected_record = Value::parse(&format!(
+		let expected_record = SqlValue::parse(&format!(
 			"[{{
 				id: {tb}:test_true,
 				condition: true,
@@ -191,8 +189,8 @@ mod tests {
 			Notification::new(
 				live_id,
 				Action::Create,
-				Value::Thing(Thing::from((tb, "test_true"))),
-				Value::parse(&format!(
+				SqlValue::Thing(Thing::from((tb, "test_true"))),
+				SqlValue::parse(&format!(
 					"{{
 						id: {tb}:test_true,
 						condition: true,

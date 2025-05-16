@@ -56,8 +56,8 @@ pub mod key {
 	use serde::{Deserialize, Serialize};
 
 	use crate::{
-		kvs::impl_key,
 		expr::{id::Id as NewId, Dir},
+		kvs::impl_key,
 	};
 
 	use super::Id;

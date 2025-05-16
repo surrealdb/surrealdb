@@ -12,9 +12,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[cfg(feature = "ml")]
-use crate::iam::Action;
-#[cfg(feature = "ml")]
 use crate::expr::Permission;
+#[cfg(feature = "ml")]
+use crate::iam::Action;
 #[cfg(feature = "ml")]
 use futures::future::try_join_all;
 #[cfg(feature = "ml")]

@@ -9,18 +9,22 @@ use serde_content::{Data, Expected, Unexpected};
 pub(super) fn to_value(content: Content) -> Result<Value, Error> {
 	match content {
 		Content::Struct(v) => match v.name.as_ref() {
-			expr::strand::TOKEN => expr::Strand::deserialize(Content::Struct(v).into_deserializer())
-				.map(Into::into)
-				.map_err(Into::into),
+			expr::strand::TOKEN => {
+				expr::Strand::deserialize(Content::Struct(v).into_deserializer())
+					.map(Into::into)
+					.map_err(Into::into)
+			}
 			expr::model::TOKEN => expr::Model::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
 			expr::query::TOKEN => expr::Query::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::future::TOKEN => expr::Future::deserialize(Content::Struct(v).into_deserializer())
-				.map(Into::into)
-				.map_err(Into::into),
+			expr::future::TOKEN => {
+				expr::Future::deserialize(Content::Struct(v).into_deserializer())
+					.map(Into::into)
+					.map_err(Into::into)
+			}
 			expr::edges::TOKEN => expr::Edges::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
@@ -48,9 +52,11 @@ pub(super) fn to_value(content: Content) -> Result<Value, Error> {
 			expr::thing::TOKEN => expr::Thing::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::object::TOKEN => expr::Object::deserialize(Content::Struct(v).into_deserializer())
-				.map(Into::into)
-				.map_err(Into::into),
+			expr::object::TOKEN => {
+				expr::Object::deserialize(Content::Struct(v).into_deserializer())
+					.map(Into::into)
+					.map_err(Into::into)
+			}
 			expr::array::TOKEN => expr::Array::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),

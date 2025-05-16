@@ -1,4 +1,6 @@
 use crate::err::Error;
+use crate::expr::number::{Number, Sort};
+use crate::expr::value::{TryPow, Value};
 use crate::fnc::util::math::bottom::Bottom;
 use crate::fnc::util::math::deviation::Deviation;
 use crate::fnc::util::math::interquartile::Interquartile;
@@ -12,8 +14,6 @@ use crate::fnc::util::math::spread::Spread;
 use crate::fnc::util::math::top::Top;
 use crate::fnc::util::math::trimean::Trimean;
 use crate::fnc::util::math::variance::Variance;
-use crate::expr::number::{Number, Sort};
-use crate::expr::value::{TryPow, Value};
 
 pub fn abs((arg,): (Number,)) -> Result<Value, Error> {
 	let Some(x) = arg.checked_abs() else {

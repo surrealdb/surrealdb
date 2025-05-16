@@ -12,11 +12,11 @@ use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 
+use crate::expr::statements::DefineTableStatement;
+use crate::expr::thing::Thing;
 use crate::kvs::stash::Stash;
 use crate::kvs::KeyDecode as _;
-use crate::expr::thing::Thing;
 use crate::vs::VersionStamp;
-use crate::expr::statements::DefineTableStatement;
 use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;

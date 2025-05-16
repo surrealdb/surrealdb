@@ -10,7 +10,7 @@ use crate::sql::{
 		SelectStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
 		UpdateStatement, UpsertStatement, UseStatement,
 	},
-	value::Value,
+	value::SqlValue,
 };
 
 use revision::revisioned;
@@ -19,7 +19,6 @@ use std::{
 	fmt::{self, Display, Formatter, Write},
 	ops::Deref,
 };
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -70,7 +69,7 @@ impl crate::sql::DisplaySql for Statements {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Statement {
-	Value(Value),
+	Value(SqlValue),
 	Analyze(AnalyzeStatement),
 	Begin(BeginStatement),
 	Break(BreakStatement),
@@ -148,38 +147,38 @@ impl Statement {
 impl From<Statement> for crate::expr::LogicalPlan {
 	fn from(v: Statement) -> Self {
 		match v {
-            Statement::Value(v) => crate::expr::LogicalPlan::Value(v.into()),
-            Statement::Analyze(v) => crate::expr::LogicalPlan::Analyze(v.into()),
-            Statement::Begin(v) => crate::expr::LogicalPlan::Begin(v.into()),
-            Statement::Break(v) => crate::expr::LogicalPlan::Break(v.into()),
-            Statement::Continue(v) => crate::expr::LogicalPlan::Continue(v.into()),
-            Statement::Cancel(v) => crate::expr::LogicalPlan::Cancel(v.into()),
-            Statement::Commit(v) => crate::expr::LogicalPlan::Commit(v.into()),
-            Statement::Create(v) => crate::expr::LogicalPlan::Create(v.into()),
-            Statement::Define(v) => crate::expr::LogicalPlan::Define(v.into()),
-            Statement::Delete(v) => crate::expr::LogicalPlan::Delete(v.into()),
-            Statement::Foreach(v) => crate::expr::LogicalPlan::Foreach(v.into()),
-            Statement::Ifelse(v) => crate::expr::LogicalPlan::Ifelse(v.into()),
-            Statement::Info(v) => crate::expr::LogicalPlan::Info(v.into()),
-            Statement::Insert(v) => crate::expr::LogicalPlan::Insert(v.into()),
-            Statement::Kill(v) => crate::expr::LogicalPlan::Kill(v.into()),
-            Statement::Live(v) => crate::expr::LogicalPlan::Live(v.into()),
-            Statement::Option(v) => crate::expr::LogicalPlan::Option(v.into()),
-            Statement::Output(v) => crate::expr::LogicalPlan::Output(v.into()),
-            Statement::Relate(v) => crate::expr::LogicalPlan::Relate(v.into()),
-            Statement::Remove(v) => crate::expr::LogicalPlan::Remove(v.into()),
-            Statement::Select(v) => crate::expr::LogicalPlan::Select(v.into()),
-            Statement::Set(v) => crate::expr::LogicalPlan::Set(v.into()),
-            Statement::Show(v) => crate::expr::LogicalPlan::Show(v.into()),
-            Statement::Sleep(v) => crate::expr::LogicalPlan::Sleep(v.into()),
-            Statement::Update(v) => crate::expr::LogicalPlan::Update(v.into()),
-            Statement::Throw(v) => crate::expr::LogicalPlan::Throw(v.into()),
-            Statement::Use(v) => crate::expr::LogicalPlan::Use(v.into()),
-            Statement::Rebuild(v) => crate::expr::LogicalPlan::Rebuild(v.into()),
-            Statement::Upsert(v) => crate::expr::LogicalPlan::Upsert(v.into()),
-            Statement::Alter(v) => crate::expr::LogicalPlan::Alter(v.into()),
-            Statement::Access(v) => crate::expr::LogicalPlan::Access(v.into()),
-        }
+			Statement::Value(v) => crate::expr::LogicalPlan::Value(v.into()),
+			Statement::Analyze(v) => crate::expr::LogicalPlan::Analyze(v.into()),
+			Statement::Begin(v) => crate::expr::LogicalPlan::Begin(v.into()),
+			Statement::Break(v) => crate::expr::LogicalPlan::Break(v.into()),
+			Statement::Continue(v) => crate::expr::LogicalPlan::Continue(v.into()),
+			Statement::Cancel(v) => crate::expr::LogicalPlan::Cancel(v.into()),
+			Statement::Commit(v) => crate::expr::LogicalPlan::Commit(v.into()),
+			Statement::Create(v) => crate::expr::LogicalPlan::Create(v.into()),
+			Statement::Define(v) => crate::expr::LogicalPlan::Define(v.into()),
+			Statement::Delete(v) => crate::expr::LogicalPlan::Delete(v.into()),
+			Statement::Foreach(v) => crate::expr::LogicalPlan::Foreach(v.into()),
+			Statement::Ifelse(v) => crate::expr::LogicalPlan::Ifelse(v.into()),
+			Statement::Info(v) => crate::expr::LogicalPlan::Info(v.into()),
+			Statement::Insert(v) => crate::expr::LogicalPlan::Insert(v.into()),
+			Statement::Kill(v) => crate::expr::LogicalPlan::Kill(v.into()),
+			Statement::Live(v) => crate::expr::LogicalPlan::Live(v.into()),
+			Statement::Option(v) => crate::expr::LogicalPlan::Option(v.into()),
+			Statement::Output(v) => crate::expr::LogicalPlan::Output(v.into()),
+			Statement::Relate(v) => crate::expr::LogicalPlan::Relate(v.into()),
+			Statement::Remove(v) => crate::expr::LogicalPlan::Remove(v.into()),
+			Statement::Select(v) => crate::expr::LogicalPlan::Select(v.into()),
+			Statement::Set(v) => crate::expr::LogicalPlan::Set(v.into()),
+			Statement::Show(v) => crate::expr::LogicalPlan::Show(v.into()),
+			Statement::Sleep(v) => crate::expr::LogicalPlan::Sleep(v.into()),
+			Statement::Update(v) => crate::expr::LogicalPlan::Update(v.into()),
+			Statement::Throw(v) => crate::expr::LogicalPlan::Throw(v.into()),
+			Statement::Use(v) => crate::expr::LogicalPlan::Use(v.into()),
+			Statement::Rebuild(v) => crate::expr::LogicalPlan::Rebuild(v.into()),
+			Statement::Upsert(v) => crate::expr::LogicalPlan::Upsert(v.into()),
+			Statement::Alter(v) => crate::expr::LogicalPlan::Alter(v.into()),
+			Statement::Access(v) => crate::expr::LogicalPlan::Access(v.into()),
+		}
 	}
 }
 

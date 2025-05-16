@@ -1,6 +1,6 @@
 use super::id::range::IdRange;
 use super::{Cond, Expression, Ident, Idiom, Operator, Part, Table};
-use crate::sql::{escape::EscapeRid, id::Id, Strand, Value};
+use crate::sql::{escape::EscapeRid, id::Id, SqlValue, Strand};
 use crate::syn;
 use futures::StreamExt;
 use revision::revisioned;
@@ -30,42 +30,42 @@ impl Thing {
 			Id::Range(r) => match (&r.beg, &r.end) {
 				(Bound::Unbounded, Bound::Unbounded) => None,
 				(Bound::Unbounded, Bound::Excluded(id)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
+					Some(Cond(SqlValue::Expression(Box::new(Expression::new(
 						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 						Operator::LessThan,
 						Thing::from((self.tb, id.to_owned())).into(),
 					)))))
 				}
 				(Bound::Unbounded, Bound::Included(id)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
+					Some(Cond(SqlValue::Expression(Box::new(Expression::new(
 						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 						Operator::LessThanOrEqual,
 						Thing::from((self.tb, id.to_owned())).into(),
 					)))))
 				}
 				(Bound::Excluded(id), Bound::Unbounded) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
+					Some(Cond(SqlValue::Expression(Box::new(Expression::new(
 						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 						Operator::MoreThan,
 						Thing::from((self.tb, id.to_owned())).into(),
 					)))))
 				}
 				(Bound::Included(id), Bound::Unbounded) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
+					Some(Cond(SqlValue::Expression(Box::new(Expression::new(
 						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 						Operator::MoreThanOrEqual,
 						Thing::from((self.tb, id.to_owned())).into(),
 					)))))
 				}
 				(Bound::Included(lid), Bound::Included(rid)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Value::Expression(Box::new(Expression::new(
+					Some(Cond(SqlValue::Expression(Box::new(Expression::new(
+						SqlValue::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::MoreThanOrEqual,
 							Thing::from((self.tb.clone(), lid.to_owned())).into(),
 						))),
 						Operator::And,
-						Value::Expression(Box::new(Expression::new(
+						SqlValue::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::LessThanOrEqual,
 							Thing::from((self.tb, rid.to_owned())).into(),
@@ -73,14 +73,14 @@ impl Thing {
 					)))))
 				}
 				(Bound::Included(lid), Bound::Excluded(rid)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Value::Expression(Box::new(Expression::new(
+					Some(Cond(SqlValue::Expression(Box::new(Expression::new(
+						SqlValue::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::MoreThanOrEqual,
 							Thing::from((self.tb.clone(), lid.to_owned())).into(),
 						))),
 						Operator::And,
-						Value::Expression(Box::new(Expression::new(
+						SqlValue::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::LessThan,
 							Thing::from((self.tb, rid.to_owned())).into(),
@@ -88,14 +88,14 @@ impl Thing {
 					)))))
 				}
 				(Bound::Excluded(lid), Bound::Included(rid)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Value::Expression(Box::new(Expression::new(
+					Some(Cond(SqlValue::Expression(Box::new(Expression::new(
+						SqlValue::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::MoreThan,
 							Thing::from((self.tb.clone(), lid.to_owned())).into(),
 						))),
 						Operator::And,
-						Value::Expression(Box::new(Expression::new(
+						SqlValue::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::LessThanOrEqual,
 							Thing::from((self.tb, rid.to_owned())).into(),
@@ -103,14 +103,14 @@ impl Thing {
 					)))))
 				}
 				(Bound::Excluded(lid), Bound::Excluded(rid)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Value::Expression(Box::new(Expression::new(
+					Some(Cond(SqlValue::Expression(Box::new(Expression::new(
+						SqlValue::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::MoreThan,
 							Thing::from((self.tb.clone(), lid.to_owned())).into(),
 						))),
 						Operator::And,
-						Value::Expression(Box::new(Expression::new(
+						SqlValue::Expression(Box::new(Expression::new(
 							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 							Operator::LessThan,
 							Thing::from((self.tb, rid.to_owned())).into(),
@@ -118,7 +118,7 @@ impl Thing {
 					)))))
 				}
 			},
-			_ => Some(Cond(Value::Expression(Box::new(Expression::new(
+			_ => Some(Cond(SqlValue::Expression(Box::new(Expression::new(
 				Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
 				Operator::Equal,
 				Thing::from((self.tb, self.id)).into(),
@@ -251,7 +251,7 @@ impl crate::sql::DisplaySql for Thing {
 mod test {
 	use std::{ops::Bound, str::FromStr};
 
-	use crate::sql::{Array, Id, IdRange, Object, Value};
+	use crate::sql::{Array, Id, IdRange, Object, SqlValue};
 
 	use super::Thing;
 
@@ -285,7 +285,9 @@ mod test {
 			let string = "foo:{bar: 1}";
 			let thing = Thing {
 				tb: "foo".into(),
-				id: Id::Object(Object([("bar".to_string(), Value::from(1))].into_iter().collect())),
+				id: Id::Object(Object(
+					[("bar".to_string(), SqlValue::from(1))].into_iter().collect(),
+				)),
 			};
 			assert_eq!(thing, Thing::from_str(string).unwrap());
 		}

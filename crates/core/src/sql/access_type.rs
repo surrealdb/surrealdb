@@ -1,4 +1,4 @@
-use super::Value;
+use super::SqlValue;
 use crate::err::Error;
 use crate::sql::statements::DefineAccessStatement;
 use crate::sql::{escape::QuoteStr, Algorithm};
@@ -338,13 +338,17 @@ pub struct JwtAccessVerifyJwks {
 
 impl From<JwtAccessVerifyJwks> for crate::expr::access_type::JwtAccessVerifyJwks {
 	fn from(v: JwtAccessVerifyJwks) -> Self {
-		Self { url: v.url }
+		Self {
+			url: v.url,
+		}
 	}
 }
 
 impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks {
 	fn from(v: crate::expr::access_type::JwtAccessVerifyJwks) -> Self {
-		Self { url: v.url }
+		Self {
+			url: v.url,
+		}
 	}
 }
 
@@ -352,11 +356,11 @@ impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
-	pub signup: Option<Value>,
-	pub signin: Option<Value>,
+	pub signup: Option<SqlValue>,
+	pub signin: Option<SqlValue>,
 	pub jwt: JwtAccess,
 	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
-	pub authenticate: Option<Value>,
+	pub authenticate: Option<SqlValue>,
 	#[revision(start = 4)]
 	pub bearer: Option<BearerAccess>,
 }
@@ -365,7 +369,7 @@ impl RecordAccess {
 	fn authenticate_revision(
 		&self,
 		_revision: u16,
-		_value: Option<Value>,
+		_value: Option<SqlValue>,
 	) -> Result<(), RevisionError> {
 		Err(RevisionError::Conversion(
 			"The \"AUTHENTICATE\" clause has been moved to \"DEFINE ACCESS\"".to_string(),

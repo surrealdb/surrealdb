@@ -2,11 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::expr::reference::Reference;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, Ident, Permissions, Strand, Value};
 use crate::expr::{Idiom, Kind};
+use crate::iam::{Action, ResourceKind};
 
 use reblessive::tree::Stk;
 use revision::revisioned;

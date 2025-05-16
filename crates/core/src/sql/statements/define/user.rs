@@ -1,7 +1,4 @@
-
-use crate::sql::{
-	escape::QuoteStr, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Strand,
-};
+use crate::sql::{escape::QuoteStr, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Strand};
 use argon2::{
 	password_hash::{PasswordHasher, SaltString},
 	Argon2,
@@ -175,5 +172,3 @@ impl crate::sql::DisplaySql for DefineUserStatement {
 		Ok(())
 	}
 }
-
-

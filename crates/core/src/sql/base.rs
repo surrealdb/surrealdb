@@ -1,4 +1,3 @@
-
 use crate::sql::Ident;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -57,5 +56,3 @@ impl crate::sql::DisplaySql for Base {
 		}
 	}
 }
-
-

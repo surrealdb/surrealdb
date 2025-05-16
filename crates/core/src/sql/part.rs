@@ -1,8 +1,7 @@
 use crate::{
-	cnf::IDIOM_RECURSION_LIMIT, err::Error, sql::{
-		fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number,
-		Value,
-	}
+	cnf::IDIOM_RECURSION_LIMIT,
+	err::Error,
+	sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, SqlValue},
 };
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -23,11 +22,11 @@ pub enum Part {
 	First,
 	Field(Ident),
 	Index(Number),
-	Where(Value),
+	Where(SqlValue),
 	Graph(Graph),
-	Value(Value),
-	Start(Value),
-	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
+	Value(SqlValue),
+	Start(SqlValue),
+	Method(#[serde(with = "no_nul_bytes")] String, Vec<SqlValue>),
 	#[revision(start = 2)]
 	Destructure(Vec<DestructurePart>),
 	Optional,
@@ -123,9 +122,7 @@ impl From<Part> for crate::expr::Part {
 				Self::Method(method, values.into_iter().map(Into::into).collect())
 			}
 			Part::Destructure(parts) => {
-				Self::Destructure(
-					parts.into_iter().map(Into::into).collect(),
-				)
+				Self::Destructure(parts.into_iter().map(Into::into).collect())
 			}
 			Part::Optional => Self::Optional,
 			Part::Recurse(recurse, idiom, instructions) => {
@@ -135,7 +132,6 @@ impl From<Part> for crate::expr::Part {
 			}
 			Part::Doc => crate::expr::Part::Doc,
 			Part::RepeatRecurse => crate::expr::Part::RepeatRecurse,
-			
 		}
 	}
 }
@@ -154,17 +150,17 @@ impl From<crate::expr::Part> for Part {
 			crate::expr::Part::Value(value) => Self::Value(value.into()),
 			crate::expr::Part::Start(value) => Self::Start(value.into()),
 			crate::expr::Part::Method(method, values) => {
-				Self::Method(method, values.into_iter().map(Into::<Value>::into).collect())
+				Self::Method(method, values.into_iter().map(Into::<SqlValue>::into).collect())
 			}
 			crate::expr::Part::Destructure(parts) => {
-				Self::Destructure(
-					parts.into_iter().map(Into::<DestructurePart>::into).collect(),
-				)
+				Self::Destructure(parts.into_iter().map(Into::<DestructurePart>::into).collect())
 			}
 			crate::expr::Part::Optional => Self::Optional,
-			crate::expr::Part::Recurse(recurse, idiom, instructions) => {
-				Self::Recurse(recurse.into(), idiom.map(|idiom| idiom.into()), instructions.map(Into::into))
-			}
+			crate::expr::Part::Recurse(recurse, idiom, instructions) => Self::Recurse(
+				recurse.into(),
+				idiom.map(|idiom| idiom.into()),
+				instructions.map(Into::into),
+			),
 			crate::expr::Part::Doc => Self::Doc,
 			crate::expr::Part::RepeatRecurse => Self::RepeatRecurse,
 		}
@@ -182,7 +178,7 @@ impl Part {
 			Part::Start(v) => v.writeable(),
 			Part::Where(v) => v.writeable(),
 			Part::Value(v) => v.writeable(),
-			Part::Method(_, v) => v.iter().any(Value::writeable),
+			Part::Method(_, v) => v.iter().any(SqlValue::writeable),
 			_ => false,
 		}
 	}
@@ -482,9 +478,10 @@ impl From<crate::expr::part::DestructurePart> for DestructurePart {
 			crate::expr::part::DestructurePart::Aliased(v, idiom) => {
 				Self::Aliased(v.into(), idiom.into())
 			}
-			crate::expr::part::DestructurePart::Destructure(v, d) => {
-				Self::Destructure(v.into(), d.into_iter().map(Into::<DestructurePart>::into).collect())
-			}
+			crate::expr::part::DestructurePart::Destructure(v, d) => Self::Destructure(
+				v.into(),
+				d.into_iter().map(Into::<DestructurePart>::into).collect(),
+			),
 		}
 	}
 }
@@ -591,7 +588,7 @@ pub enum RecurseInstruction {
 	},
 	Shortest {
 		// What ending node are we looking for?
-		expects: Value,
+		expects: SqlValue,
 		// Do we include the starting point in the collection?
 		inclusive: bool,
 	},
@@ -715,11 +712,23 @@ macro_rules! walk_paths {
 impl From<RecurseInstruction> for crate::expr::part::RecurseInstruction {
 	fn from(v: RecurseInstruction) -> Self {
 		match v {
-			RecurseInstruction::Path { inclusive } => Self::Path { inclusive },
-			RecurseInstruction::Collect { inclusive } => Self::Collect { inclusive },
-			RecurseInstruction::Shortest { expects, inclusive } => {
-				Self::Shortest { expects: expects.into(), inclusive }
-			}
+			RecurseInstruction::Path {
+				inclusive,
+			} => Self::Path {
+				inclusive,
+			},
+			RecurseInstruction::Collect {
+				inclusive,
+			} => Self::Collect {
+				inclusive,
+			},
+			RecurseInstruction::Shortest {
+				expects,
+				inclusive,
+			} => Self::Shortest {
+				expects: expects.into(),
+				inclusive,
+			},
 		}
 	}
 }
@@ -727,11 +736,23 @@ impl From<RecurseInstruction> for crate::expr::part::RecurseInstruction {
 impl From<crate::expr::part::RecurseInstruction> for RecurseInstruction {
 	fn from(v: crate::expr::part::RecurseInstruction) -> Self {
 		match v {
-			crate::expr::part::RecurseInstruction::Path { inclusive } => Self::Path { inclusive },
-			crate::expr::part::RecurseInstruction::Collect { inclusive } => Self::Collect { inclusive },
-			crate::expr::part::RecurseInstruction::Shortest { expects, inclusive } => {
-				Self::Shortest { expects: expects.into(), inclusive }
-			}
+			crate::expr::part::RecurseInstruction::Path {
+				inclusive,
+			} => Self::Path {
+				inclusive,
+			},
+			crate::expr::part::RecurseInstruction::Collect {
+				inclusive,
+			} => Self::Collect {
+				inclusive,
+			},
+			crate::expr::part::RecurseInstruction::Shortest {
+				expects,
+				inclusive,
+			} => Self::Shortest {
+				expects: expects.into(),
+				inclusive,
+			},
 		}
 	}
 }

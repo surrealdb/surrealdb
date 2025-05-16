@@ -1,5 +1,5 @@
 use crate::sql::operator::Operator;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -18,28 +18,28 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 pub enum Expression {
 	Unary {
 		o: Operator,
-		v: Value,
+		v: SqlValue,
 	},
 	Binary {
-		l: Value,
+		l: SqlValue,
 		o: Operator,
-		r: Value,
+		r: SqlValue,
 	},
 }
 
 impl Default for Expression {
 	fn default() -> Expression {
 		Expression::Binary {
-			l: Value::Null,
+			l: SqlValue::Null,
 			o: Operator::default(),
-			r: Value::Null,
+			r: SqlValue::Null,
 		}
 	}
 }
 
 impl Expression {
 	/// Create a new binary expression
-	pub fn new(l: Value, o: Operator, r: Value) -> Self {
+	pub fn new(l: SqlValue, o: Operator, r: SqlValue) -> Self {
 		Self::Binary {
 			l,
 			o,

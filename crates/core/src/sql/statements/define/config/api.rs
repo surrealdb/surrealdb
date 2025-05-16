@@ -2,7 +2,7 @@ use std::fmt::{self};
 
 use crate::sql::fmt::Fmt;
 
-use crate::sql::{Permission, Value};
+use crate::sql::{Permission, SqlValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct RequestMiddleware(pub Vec<(String, Vec<Value>)>);
+pub struct RequestMiddleware(pub Vec<(String, Vec<SqlValue>)>);
 
 impl From<RequestMiddleware> for crate::api::middleware::RequestMiddleware {
 	fn from(v: RequestMiddleware) -> Self {
@@ -83,5 +83,3 @@ impl crate::sql::DisplaySql for ApiConfig {
 		Ok(())
 	}
 }
-
-

@@ -52,10 +52,10 @@ pub fn distance((v, w): (Geometry, Geometry)) -> Result<Value, Error> {
 pub mod hash {
 
 	use crate::err::Error;
-	use crate::fnc::args::Optional;
-	use crate::fnc::util::geo;
 	use crate::expr::geometry::Geometry;
 	use crate::expr::value::Value;
+	use crate::fnc::args::Optional;
+	use crate::fnc::util::geo;
 
 	pub fn encode((arg, Optional(len)): (Geometry, Optional<i64>)) -> Result<Value, Error> {
 		let len = match len {

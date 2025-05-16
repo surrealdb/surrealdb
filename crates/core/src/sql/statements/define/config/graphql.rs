@@ -2,7 +2,7 @@ use std::fmt::{self, Write};
 
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 
-use crate::sql::{Ident, Part, Value};
+use crate::sql::{Ident, Part, SqlValue};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -176,11 +176,11 @@ impl From<String> for TableConfig {
 	}
 }
 
-pub fn val_to_ident(val: Value) -> Result<Ident, Value> {
+pub fn val_to_ident(val: SqlValue) -> Result<Ident, SqlValue> {
 	match val {
-		Value::Strand(s) => Ok(s.0.into()),
-		Value::Table(n) => Ok(n.0.into()),
-		Value::Idiom(ref i) => match &i[..] {
+		SqlValue::Strand(s) => Ok(s.0.into()),
+		SqlValue::Table(n) => Ok(n.0.into()),
+		SqlValue::Idiom(ref i) => match &i[..] {
 			[Part::Field(n)] => Ok(n.to_raw().into()),
 			_ => Err(val),
 		},
@@ -188,12 +188,12 @@ pub fn val_to_ident(val: Value) -> Result<Ident, Value> {
 	}
 }
 
-impl TryFrom<Value> for TableConfig {
-	type Error = Value;
+impl TryFrom<SqlValue> for TableConfig {
+	type Error = SqlValue;
 
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
+	fn try_from(value: SqlValue) -> Result<Self, Self::Error> {
 		match value {
-			v @ Value::Strand(_) | v @ Value::Table(_) | v @ Value::Idiom(_) => {
+			v @ SqlValue::Strand(_) | v @ SqlValue::Table(_) | v @ SqlValue::Idiom(_) => {
 				val_to_ident(v).map(|i| i.0.into())
 			}
 			_ => Err(value),
@@ -242,11 +242,3 @@ impl crate::sql::DisplaySql for FunctionsConfig {
 		Ok(())
 	}
 }
-
-
-
-
-
-
-
-

@@ -8,7 +8,8 @@ use crate::expr::table::Table;
 use crate::expr::thing::Thing;
 use crate::expr::value::Value;
 use crate::expr::{
-	self, Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Kind, Number, Range, Strand, Uuid
+	self, Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Kind, Number,
+	Range, Strand, Uuid,
 };
 use crate::syn;
 use geo::Point;
@@ -182,10 +183,10 @@ pub fn uuid((val,): (Value,)) -> Result<Value, Error> {
 
 pub mod is {
 	use crate::err::Error;
-	use crate::fnc::args::Optional;
 	use crate::expr::table::Table;
 	use crate::expr::value::Value;
 	use crate::expr::Geometry;
+	use crate::fnc::args::Optional;
 
 	pub fn array((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(arg.is_array().into())
@@ -290,8 +291,8 @@ pub mod is {
 #[cfg(test)]
 mod tests {
 	use crate::err::Error;
-	use crate::fnc::args::Optional;
 	use crate::expr::value::Value;
+	use crate::fnc::args::Optional;
 
 	#[test]
 	fn is_array() {

@@ -53,5 +53,3 @@ impl Default for ChangeFeed {
 		}
 	}
 }
-
-

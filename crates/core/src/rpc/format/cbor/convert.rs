@@ -47,18 +47,18 @@ const TAG_GEOMETRY_COLLECTION: u64 = 94;
 #[derive(Debug)]
 pub struct Cbor(pub CborData);
 
-impl TryFrom<Cbor> for sql::Value {
+impl TryFrom<Cbor> for sql::SqlValue {
 	type Error = &'static str;
 	fn try_from(val: Cbor) -> Result<Self, &'static str> {
 		match val.0 {
-			CborData::Null => Ok(sql::Value::Null),
-			CborData::Bool(v) => Ok(sql::Value::from(v)),
-			CborData::Integer(v) => Ok(sql::Value::from(i128::from(v))),
-			CborData::Float(v) => Ok(sql::Value::from(v)),
-			CborData::Bytes(v) => Ok(sql::Value::Bytes(v.into())),
-			CborData::Text(v) => Ok(sql::Value::from(v)),
-			CborData::Array(v) => Ok(sql::Value::Array(sql::Array::try_from(v)?)),
-			CborData::Map(v) => Ok(sql::Value::Object(sql::Object::try_from(v)?)),
+			CborData::Null => Ok(sql::SqlValue::Null),
+			CborData::Bool(v) => Ok(sql::SqlValue::from(v)),
+			CborData::Integer(v) => Ok(sql::SqlValue::from(i128::from(v))),
+			CborData::Float(v) => Ok(sql::SqlValue::from(v)),
+			CborData::Bytes(v) => Ok(sql::SqlValue::Bytes(v.into())),
+			CborData::Text(v) => Ok(sql::SqlValue::from(v)),
+			CborData::Array(v) => Ok(sql::SqlValue::Array(sql::Array::try_from(v)?)),
+			CborData::Map(v) => Ok(sql::SqlValue::Object(sql::Object::try_from(v)?)),
 			CborData::Tag(t, v) => {
 				match t {
 					// A literal datetime
@@ -98,7 +98,7 @@ impl TryFrom<Cbor> for sql::Value {
 						_ => Err("Expected a CBOR array with 2 elements"),
 					},
 					// A literal NONE
-					TAG_NONE => Ok(sql::Value::None),
+					TAG_NONE => Ok(sql::SqlValue::None),
 					// A literal uuid
 					TAG_STRING_UUID => match *v {
 						CborData::Text(v) => match sql::Uuid::try_from(v) {
@@ -108,7 +108,7 @@ impl TryFrom<Cbor> for sql::Value {
 						_ => Err("Expected a CBOR text data type"),
 					},
 					// A byte string uuid
-					TAG_SPEC_UUID => v.deref().to_owned().try_into().map(sql::Value::Uuid),
+					TAG_SPEC_UUID => v.deref().to_owned().try_into().map(sql::SqlValue::Uuid),
 					// A literal decimal
 					TAG_STRING_DECIMAL => match *v {
 						CborData::Text(v) => match Decimal::from_str_normalized(v.as_str()) {
@@ -157,9 +157,9 @@ impl TryFrom<Cbor> for sql::Value {
 							_ => Err("Expected a valid RecordID value"),
 						},
 						CborData::Array(mut v) if v.len() == 2 => {
-							let tb = match sql::Value::try_from(Cbor(v.remove(0))) {
-								Ok(sql::Value::Strand(tb)) => tb.0,
-								Ok(sql::Value::Table(tb)) => tb.0,
+							let tb = match sql::SqlValue::try_from(Cbor(v.remove(0))) {
+								Ok(sql::SqlValue::Strand(tb)) => tb.0,
+								Ok(sql::SqlValue::Table(tb)) => tb.0,
 								_ => return Err(
 									"Expected the tb of a Record Id to be a String or Table value",
 								),
@@ -167,7 +167,7 @@ impl TryFrom<Cbor> for sql::Value {
 
 							let id = sql::Id::try_from(v.remove(0))?;
 
-							Ok(sql::Value::Thing(sql::Thing {
+							Ok(sql::SqlValue::Thing(sql::Thing {
 								tb,
 								id,
 							}))
@@ -176,28 +176,30 @@ impl TryFrom<Cbor> for sql::Value {
 					},
 					// A literal table
 					TAG_TABLE => match *v {
-						CborData::Text(v) => Ok(sql::Value::Table(v.into())),
+						CborData::Text(v) => Ok(sql::SqlValue::Table(v.into())),
 						_ => Err("Expected a CBOR text data type"),
 					},
 					// A range
-					TAG_RANGE => Ok(sql::Value::Range(Box::new(sql::Range::try_from(*v)?))),
+					TAG_RANGE => Ok(sql::SqlValue::Range(Box::new(sql::Range::try_from(*v)?))),
 					TAG_FUTURE => match *v {
 						CborData::Text(v) => {
 							let block = crate::syn::block(v.as_str())
 								.map_err(|_| "Failed to parse block")?;
-							Ok(sql::Value::Future(Box::new(sql::Future(block))))
+							Ok(sql::SqlValue::Future(Box::new(sql::Future(block))))
 						}
 						_ => Err("Expected a CBOR text data type"),
 					},
 					TAG_GEOMETRY_POINT => match *v {
 						CborData::Array(mut v) if v.len() == 2 => {
-							let x = sql::Value::try_from(Cbor(v.remove(0)))?;
-							let y = sql::Value::try_from(Cbor(v.remove(0)))?;
+							let x = sql::SqlValue::try_from(Cbor(v.remove(0)))?;
+							let y = sql::SqlValue::try_from(Cbor(v.remove(0)))?;
 
 							match (x, y) {
-								(sql::Value::Number(x), sql::Value::Number(y)) => Ok(sql::Value::Geometry(
-									sql::Geometry::Point((x.as_float(), y.as_float()).into()),
-								)),
+								(sql::SqlValue::Number(x), sql::SqlValue::Number(y)) => {
+									Ok(sql::SqlValue::Geometry(sql::Geometry::Point(
+										(x.as_float(), y.as_float()).into(),
+									)))
+								}
 								_ => Err("Expected a CBOR array with 2 decimal values"),
 							}
 						}
@@ -207,13 +209,15 @@ impl TryFrom<Cbor> for sql::Value {
 						CborData::Array(v) => {
 							let points = v
 								.iter()
-								.map(|v| match sql::Value::try_from(Cbor(v.clone()))? {
-									sql::Value::Geometry(sql::Geometry::Point(v)) => Ok(v),
+								.map(|v| match sql::SqlValue::try_from(Cbor(v.clone()))? {
+									sql::SqlValue::Geometry(sql::Geometry::Point(v)) => Ok(v),
 									_ => Err("Expected a CBOR array with Geometry Point values"),
 								})
 								.collect::<Result<Vec<Point>, &str>>()?;
 
-							Ok(sql::Value::Geometry(sql::Geometry::Line(LineString::from(points))))
+							Ok(sql::SqlValue::Geometry(sql::Geometry::Line(LineString::from(
+								points,
+							))))
 						}
 						_ => Err("Expected a CBOR array with Geometry Point values"),
 					},
@@ -221,8 +225,8 @@ impl TryFrom<Cbor> for sql::Value {
 						CborData::Array(v) if !v.is_empty() => {
 							let lines = v
 								.iter()
-								.map(|v| match sql::Value::try_from(Cbor(v.clone()))? {
-									sql::Value::Geometry(sql::Geometry::Line(v)) => Ok(v),
+								.map(|v| match sql::SqlValue::try_from(Cbor(v.clone()))? {
+									sql::SqlValue::Geometry(sql::Geometry::Line(v)) => Ok(v),
 									_ => Err("Expected a CBOR array with Geometry Line values"),
 								})
 								.collect::<Result<Vec<LineString>, &str>>()?;
@@ -235,7 +239,7 @@ impl TryFrom<Cbor> for sql::Value {
 							};
 							let interiors = Vec::from(&lines[1..]);
 
-							Ok(sql::Value::Geometry(sql::Geometry::Polygon(Polygon::new(
+							Ok(sql::SqlValue::Geometry(sql::Geometry::Polygon(Polygon::new(
 								exterior.clone(),
 								interiors,
 							))))
@@ -246,13 +250,15 @@ impl TryFrom<Cbor> for sql::Value {
 						CborData::Array(v) => {
 							let points = v
 								.iter()
-								.map(|v| match sql::Value::try_from(Cbor(v.clone()))? {
-									sql::Value::Geometry(sql::Geometry::Point(v)) => Ok(v),
+								.map(|v| match sql::SqlValue::try_from(Cbor(v.clone()))? {
+									sql::SqlValue::Geometry(sql::Geometry::Point(v)) => Ok(v),
 									_ => Err("Expected a CBOR array with Geometry Point values"),
 								})
 								.collect::<Result<Vec<Point>, &str>>()?;
 
-							Ok(sql::Value::Geometry(sql::Geometry::MultiPoint(MultiPoint::from(points))))
+							Ok(sql::SqlValue::Geometry(sql::Geometry::MultiPoint(
+								MultiPoint::from(points),
+							)))
 						}
 						_ => Err("Expected a CBOR array with Geometry Point values"),
 					},
@@ -260,13 +266,15 @@ impl TryFrom<Cbor> for sql::Value {
 						CborData::Array(v) => {
 							let lines = v
 								.iter()
-								.map(|v| match sql::Value::try_from(Cbor(v.clone()))? {
-									sql::Value::Geometry(sql::Geometry::Line(v)) => Ok(v),
+								.map(|v| match sql::SqlValue::try_from(Cbor(v.clone()))? {
+									sql::SqlValue::Geometry(sql::Geometry::Line(v)) => Ok(v),
 									_ => Err("Expected a CBOR array with Geometry Line values"),
 								})
 								.collect::<Result<Vec<LineString>, &str>>()?;
 
-							Ok(sql::Value::Geometry(sql::Geometry::MultiLine(MultiLineString::new(lines))))
+							Ok(sql::SqlValue::Geometry(sql::Geometry::MultiLine(
+								MultiLineString::new(lines),
+							)))
 						}
 						_ => Err("Expected a CBOR array with Geometry Line values"),
 					},
@@ -274,15 +282,15 @@ impl TryFrom<Cbor> for sql::Value {
 						CborData::Array(v) => {
 							let polygons = v
 								.iter()
-								.map(|v| match sql::Value::try_from(Cbor(v.clone()))? {
-									sql::Value::Geometry(sql::Geometry::Polygon(v)) => Ok(v),
+								.map(|v| match sql::SqlValue::try_from(Cbor(v.clone()))? {
+									sql::SqlValue::Geometry(sql::Geometry::Polygon(v)) => Ok(v),
 									_ => Err("Expected a CBOR array with Geometry Polygon values"),
 								})
 								.collect::<Result<Vec<Polygon>, &str>>()?;
 
-							Ok(sql::Value::Geometry(sql::Geometry::MultiPolygon(MultiPolygon::from(
-								polygons,
-							))))
+							Ok(sql::SqlValue::Geometry(sql::Geometry::MultiPolygon(
+								MultiPolygon::from(polygons),
+							)))
 						}
 						_ => Err("Expected a CBOR array with Geometry Polygon values"),
 					},
@@ -290,13 +298,13 @@ impl TryFrom<Cbor> for sql::Value {
 						CborData::Array(v) => {
 							let geometries = v
 								.iter()
-								.map(|v| match sql::Value::try_from(Cbor(v.clone()))? {
-									sql::Value::Geometry(v) => Ok(v),
+								.map(|v| match sql::SqlValue::try_from(Cbor(v.clone()))? {
+									sql::SqlValue::Geometry(v) => Ok(v),
 									_ => Err("Expected a CBOR array with Geometry values"),
 								})
 								.collect::<Result<Vec<sql::Geometry>, &str>>()?;
 
-							Ok(sql::Value::Geometry(sql::Geometry::Collection(geometries)))
+							Ok(sql::SqlValue::Geometry(sql::Geometry::Collection(geometries)))
 						}
 						_ => Err("Expected a CBOR array with Geometry values"),
 					},
@@ -310,7 +318,7 @@ impl TryFrom<Cbor> for sql::Value {
 								return Err("Expected the file key to be a string value");
 							};
 
-							Ok(sql::Value::File(sql::File {
+							Ok(sql::SqlValue::File(sql::File {
 								bucket,
 								key,
 							}))
@@ -326,22 +334,23 @@ impl TryFrom<Cbor> for sql::Value {
 	}
 }
 
-impl TryFrom<sql::Value> for Cbor {
+impl TryFrom<sql::SqlValue> for Cbor {
 	type Error = &'static str;
-	fn try_from(val: sql::Value) -> Result<Self, &'static str> {
+	fn try_from(val: sql::SqlValue) -> Result<Self, &'static str> {
 		match val {
-			sql::Value::None => Ok(Cbor(CborData::Tag(TAG_NONE, Box::new(CborData::Null)))),
-			sql::Value::Null => Ok(Cbor(CborData::Null)),
-			sql::Value::Bool(v) => Ok(Cbor(CborData::Bool(v))),
-			sql::Value::Number(v) => match v {
+			sql::SqlValue::None => Ok(Cbor(CborData::Tag(TAG_NONE, Box::new(CborData::Null)))),
+			sql::SqlValue::Null => Ok(Cbor(CborData::Null)),
+			sql::SqlValue::Bool(v) => Ok(Cbor(CborData::Bool(v))),
+			sql::SqlValue::Number(v) => match v {
 				sql::Number::Int(v) => Ok(Cbor(CborData::Integer(v.into()))),
 				sql::Number::Float(v) => Ok(Cbor(CborData::Float(v))),
-				sql::Number::Decimal(v) => {
-					Ok(Cbor(CborData::Tag(TAG_STRING_DECIMAL, Box::new(CborData::Text(v.to_string())))))
-				}
+				sql::Number::Decimal(v) => Ok(Cbor(CborData::Tag(
+					TAG_STRING_DECIMAL,
+					Box::new(CborData::Text(v.to_string())),
+				))),
 			},
-			sql::Value::Strand(v) => Ok(Cbor(CborData::Text(v.0))),
-			sql::Value::Duration(v) => {
+			sql::SqlValue::Strand(v) => Ok(Cbor(CborData::Text(v.0))),
+			sql::SqlValue::Duration(v) => {
 				let seconds = v.secs();
 				let nanos = v.subsec_nanos();
 
@@ -356,7 +365,7 @@ impl TryFrom<sql::Value> for Cbor {
 
 				Ok(Cbor(CborData::Tag(TAG_CUSTOM_DURATION, tag_value)))
 			}
-			sql::Value::Datetime(v) => {
+			sql::SqlValue::Datetime(v) => {
 				let seconds = v.timestamp();
 				let nanos = v.timestamp_subsec_nanos();
 
@@ -368,10 +377,11 @@ impl TryFrom<sql::Value> for Cbor {
 					])),
 				)))
 			}
-			sql::Value::Uuid(v) => {
-				Ok(Cbor(CborData::Tag(TAG_SPEC_UUID, Box::new(CborData::Bytes(v.into_bytes().into())))))
-			}
-			sql::Value::Array(v) => Ok(Cbor(CborData::Array(
+			sql::SqlValue::Uuid(v) => Ok(Cbor(CborData::Tag(
+				TAG_SPEC_UUID,
+				Box::new(CborData::Bytes(v.into_bytes().into())),
+			))),
+			sql::SqlValue::Array(v) => Ok(Cbor(CborData::Array(
 				v.into_iter()
 					.map(|v| {
 						let v = Cbor::try_from(v)?.0;
@@ -379,7 +389,7 @@ impl TryFrom<sql::Value> for Cbor {
 					})
 					.collect::<Result<Vec<CborData>, &str>>()?,
 			))),
-			sql::Value::Object(v) => Ok(Cbor(CborData::Map(
+			sql::SqlValue::Object(v) => Ok(Cbor(CborData::Map(
 				v.into_iter()
 					.map(|(k, v)| {
 						let k = CborData::Text(k);
@@ -388,32 +398,38 @@ impl TryFrom<sql::Value> for Cbor {
 					})
 					.collect::<Result<Vec<(CborData, CborData)>, &str>>()?,
 			))),
-			sql::Value::Bytes(v) => Ok(Cbor(CborData::Bytes(v.into_inner()))),
-			sql::Value::Thing(v) => Ok(Cbor(CborData::Tag(
+			sql::SqlValue::Bytes(v) => Ok(Cbor(CborData::Bytes(v.into_inner()))),
+			sql::SqlValue::Thing(v) => Ok(Cbor(CborData::Tag(
 				TAG_RECORDID,
 				Box::new(CborData::Array(vec![
 					CborData::Text(v.tb),
 					match v.id {
 						sql::Id::Number(v) => CborData::Integer(v.into()),
 						sql::Id::String(v) => CborData::Text(v),
-						sql::Id::Uuid(v) => Cbor::try_from(sql::Value::from(v))?.0,
-						sql::Id::Array(v) => Cbor::try_from(sql::Value::from(v))?.0,
-						sql::Id::Object(v) => Cbor::try_from(sql::Value::from(v))?.0,
+						sql::Id::Uuid(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
+						sql::Id::Array(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
+						sql::Id::Object(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
 						sql::Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
-						sql::Id::Range(v) => CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?)),
+						sql::Id::Range(v) => {
+							CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?))
+						}
 					},
 				])),
 			))),
-			sql::Value::Table(v) => Ok(Cbor(CborData::Tag(TAG_TABLE, Box::new(CborData::Text(v.0))))),
-			sql::Value::Geometry(v) => Ok(Cbor(encode_geometry(v)?)),
-			sql::Value::Range(v) => Ok(Cbor(CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?)))),
-			sql::Value::Future(v) => {
+			sql::SqlValue::Table(v) => {
+				Ok(Cbor(CborData::Tag(TAG_TABLE, Box::new(CborData::Text(v.0)))))
+			}
+			sql::SqlValue::Geometry(v) => Ok(Cbor(encode_geometry(v)?)),
+			sql::SqlValue::Range(v) => {
+				Ok(Cbor(CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?))))
+			}
+			sql::SqlValue::Future(v) => {
 				let bin = CborData::Text(format!("{}", (*v).0));
 				Ok(Cbor(CborData::Tag(TAG_FUTURE, Box::new(bin))))
 			}
-			sql::Value::File(sql::File {
+			sql::SqlValue::File(sql::File {
 				bucket,
 				key,
 			}) => Ok(Cbor(CborData::Tag(
@@ -486,10 +502,14 @@ fn encode_geometry(v: sql::Geometry) -> Result<CborData, &'static str> {
 impl TryFrom<CborData> for sql::Range {
 	type Error = &'static str;
 	fn try_from(val: CborData) -> Result<Self, &'static str> {
-		fn decode_bound(v: CborData) -> Result<Bound<sql::Value>, &'static str> {
+		fn decode_bound(v: CborData) -> Result<Bound<sql::SqlValue>, &'static str> {
 			match v {
-				CborData::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(sql::Value::try_from(Cbor(*v))?)),
-				CborData::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(sql::Value::try_from(Cbor(*v))?)),
+				CborData::Tag(TAG_BOUND_INCLUDED, v) => {
+					Ok(Bound::Included(sql::SqlValue::try_from(Cbor(*v))?))
+				}
+				CborData::Tag(TAG_BOUND_EXCLUDED, v) => {
+					Ok(Bound::Excluded(sql::SqlValue::try_from(Cbor(*v))?))
+				}
 				CborData::Null => Ok(Bound::Unbounded),
 				_ => Err("Expected a bound tag"),
 			}
@@ -510,7 +530,7 @@ impl TryFrom<CborData> for sql::Range {
 impl TryFrom<sql::Range> for CborData {
 	type Error = &'static str;
 	fn try_from(r: sql::Range) -> Result<CborData, &'static str> {
-		fn encode(b: Bound<sql::Value>) -> Result<CborData, &'static str> {
+		fn encode(b: Bound<sql::SqlValue>) -> Result<CborData, &'static str> {
 			match b {
 				Bound::Included(v) => {
 					Ok(CborData::Tag(TAG_BOUND_INCLUDED, Box::new(Cbor::try_from(v)?.0)))
@@ -556,8 +576,12 @@ impl TryFrom<sql::id::range::IdRange> for CborData {
 	fn try_from(r: sql::id::range::IdRange) -> Result<CborData, &'static str> {
 		fn encode(b: Bound<sql::Id>) -> Result<CborData, &'static str> {
 			match b {
-				Bound::Included(v) => Ok(CborData::Tag(TAG_BOUND_INCLUDED, Box::new(v.try_into()?))),
-				Bound::Excluded(v) => Ok(CborData::Tag(TAG_BOUND_EXCLUDED, Box::new(v.try_into()?))),
+				Bound::Included(v) => {
+					Ok(CborData::Tag(TAG_BOUND_INCLUDED, Box::new(v.try_into()?)))
+				}
+				Bound::Excluded(v) => {
+					Ok(CborData::Tag(TAG_BOUND_EXCLUDED, Box::new(v.try_into()?)))
+				}
 				Bound::Unbounded => Ok(CborData::Null),
 			}
 		}
@@ -574,7 +598,9 @@ impl TryFrom<CborData> for sql::Id {
 			CborData::Text(v) => Ok(sql::Id::String(v)),
 			CborData::Array(v) => Ok(sql::Id::Array(v.try_into()?)),
 			CborData::Map(v) => Ok(sql::Id::Object(v.try_into()?)),
-			CborData::Tag(TAG_RANGE, v) => Ok(sql::Id::Range(Box::new(sql::id::range::IdRange::try_from(*v)?))),
+			CborData::Tag(TAG_RANGE, v) => {
+				Ok(sql::Id::Range(Box::new(sql::id::range::IdRange::try_from(*v)?)))
+			}
 			CborData::Tag(TAG_STRING_UUID, v) => v.deref().to_owned().try_into().map(sql::Id::Uuid),
 			CborData::Tag(TAG_SPEC_UUID, v) => v.deref().to_owned().try_into().map(sql::Id::Uuid),
 			_ => Err("Expected a CBOR integer, text, array or map"),
@@ -588,9 +614,11 @@ impl TryFrom<sql::Id> for CborData {
 		match v {
 			sql::Id::Number(v) => Ok(CborData::Integer(v.into())),
 			sql::Id::String(v) => Ok(CborData::Text(v)),
-			sql::Id::Array(v) => Ok(Cbor::try_from(sql::Value::from(v))?.0),
-			sql::Id::Object(v) => Ok(Cbor::try_from(sql::Value::from(v))?.0),
-			sql::Id::Range(v) => Ok(CborData::Tag(TAG_RANGE, Box::new(v.deref().to_owned().try_into()?))),
+			sql::Id::Array(v) => Ok(Cbor::try_from(sql::SqlValue::from(v))?.0),
+			sql::Id::Object(v) => Ok(Cbor::try_from(sql::SqlValue::from(v))?.0),
+			sql::Id::Range(v) => {
+				Ok(CborData::Tag(TAG_RANGE, Box::new(v.deref().to_owned().try_into()?)))
+			}
 			sql::Id::Uuid(v) => {
 				Ok(CborData::Tag(TAG_SPEC_UUID, Box::new(CborData::Bytes(v.into_bytes().into()))))
 			}
@@ -602,7 +630,9 @@ impl TryFrom<sql::Id> for CborData {
 impl TryFrom<Vec<CborData>> for sql::Array {
 	type Error = &'static str;
 	fn try_from(val: Vec<CborData>) -> Result<Self, &'static str> {
-		val.into_iter().map(|v| sql::Value::try_from(Cbor(v))).collect::<Result<sql::Array, &str>>()
+		val.into_iter()
+			.map(|v| sql::SqlValue::try_from(Cbor(v)))
+			.collect::<Result<sql::Array, &str>>()
 	}
 }
 
@@ -612,11 +642,11 @@ impl TryFrom<Vec<(CborData, CborData)>> for sql::Object {
 		Ok(sql::Object(
 			val.into_iter()
 				.map(|(k, v)| {
-					let k = sql::Value::try_from(Cbor(k)).map(|k| k.as_raw_string());
-					let v = sql::Value::try_from(Cbor(v));
+					let k = sql::SqlValue::try_from(Cbor(k)).map(|k| k.as_raw_string());
+					let v = sql::SqlValue::try_from(Cbor(v));
 					Ok((k?, v?))
 				})
-				.collect::<Result<BTreeMap<String, sql::Value>, &str>>()?,
+				.collect::<Result<BTreeMap<String, sql::SqlValue>, &str>>()?,
 		))
 	}
 }
@@ -633,7 +663,6 @@ impl TryFrom<CborData> for sql::Uuid {
 		}
 	}
 }
-
 
 pub mod convert_expr {
 	use super::*;
@@ -764,7 +793,9 @@ pub mod convert_expr {
 									id,
 								}))
 							}
-							_ => Err("Expected a CBOR text data type, or a CBOR array with 2 elements"),
+							_ => Err(
+								"Expected a CBOR text data type, or a CBOR array with 2 elements",
+							),
 						},
 						// A literal table
 						TAG_TABLE => match *v {
@@ -787,9 +818,11 @@ pub mod convert_expr {
 								let y = expr::Value::try_from(Cbor(v.remove(0)))?;
 
 								match (x, y) {
-									(expr::Value::Number(x), expr::Value::Number(y)) => Ok(expr::Value::Geometry(
-										expr::Geometry::Point((x.as_float(), y.as_float()).into()),
-									)),
+									(expr::Value::Number(x), expr::Value::Number(y)) => {
+										Ok(expr::Value::Geometry(expr::Geometry::Point(
+											(x.as_float(), y.as_float()).into(),
+										)))
+									}
 									_ => Err("Expected a CBOR array with 2 decimal values"),
 								}
 							}
@@ -801,11 +834,15 @@ pub mod convert_expr {
 									.iter()
 									.map(|v| match expr::Value::try_from(Cbor(v.clone()))? {
 										expr::Value::Geometry(expr::Geometry::Point(v)) => Ok(v),
-										_ => Err("Expected a CBOR array with Geometry Point values"),
+										_ => {
+											Err("Expected a CBOR array with Geometry Point values")
+										}
 									})
 									.collect::<Result<Vec<Point>, &str>>()?;
 
-								Ok(expr::Value::Geometry(expr::Geometry::Line(LineString::from(points))))
+								Ok(expr::Value::Geometry(expr::Geometry::Line(LineString::from(
+									points,
+								))))
 							}
 							_ => Err("Expected a CBOR array with Geometry Point values"),
 						},
@@ -832,7 +869,9 @@ pub mod convert_expr {
 									interiors,
 								))))
 							}
-							_ => Err("Expected a CBOR array with at least one Geometry Line values"),
+							_ => {
+								Err("Expected a CBOR array with at least one Geometry Line values")
+							}
 						},
 						TAG_GEOMETRY_MULTIPOINT => match v.deref() {
 							CborData::Array(v) => {
@@ -840,11 +879,15 @@ pub mod convert_expr {
 									.iter()
 									.map(|v| match expr::Value::try_from(Cbor(v.clone()))? {
 										expr::Value::Geometry(expr::Geometry::Point(v)) => Ok(v),
-										_ => Err("Expected a CBOR array with Geometry Point values"),
+										_ => {
+											Err("Expected a CBOR array with Geometry Point values")
+										}
 									})
 									.collect::<Result<Vec<Point>, &str>>()?;
 
-								Ok(expr::Value::Geometry(expr::Geometry::MultiPoint(MultiPoint::from(points))))
+								Ok(expr::Value::Geometry(expr::Geometry::MultiPoint(
+									MultiPoint::from(points),
+								)))
 							}
 							_ => Err("Expected a CBOR array with Geometry Point values"),
 						},
@@ -858,7 +901,9 @@ pub mod convert_expr {
 									})
 									.collect::<Result<Vec<LineString>, &str>>()?;
 
-								Ok(expr::Value::Geometry(expr::Geometry::MultiLine(MultiLineString::new(lines))))
+								Ok(expr::Value::Geometry(expr::Geometry::MultiLine(
+									MultiLineString::new(lines),
+								)))
 							}
 							_ => Err("Expected a CBOR array with Geometry Line values"),
 						},
@@ -868,13 +913,15 @@ pub mod convert_expr {
 									.iter()
 									.map(|v| match expr::Value::try_from(Cbor(v.clone()))? {
 										expr::Value::Geometry(expr::Geometry::Polygon(v)) => Ok(v),
-										_ => Err("Expected a CBOR array with Geometry Polygon values"),
+										_ => Err(
+											"Expected a CBOR array with Geometry Polygon values",
+										),
 									})
 									.collect::<Result<Vec<Polygon>, &str>>()?;
 
-								Ok(expr::Value::Geometry(expr::Geometry::MultiPolygon(MultiPolygon::from(
-									polygons,
-								))))
+								Ok(expr::Value::Geometry(expr::Geometry::MultiPolygon(
+									MultiPolygon::from(polygons),
+								)))
 							}
 							_ => Err("Expected a CBOR array with Geometry Polygon values"),
 						},
@@ -928,9 +975,10 @@ pub mod convert_expr {
 				expr::Value::Number(v) => match v {
 					expr::Number::Int(v) => Ok(Cbor(CborData::Integer(v.into()))),
 					expr::Number::Float(v) => Ok(Cbor(CborData::Float(v))),
-					expr::Number::Decimal(v) => {
-						Ok(Cbor(CborData::Tag(TAG_STRING_DECIMAL, Box::new(CborData::Text(v.to_string())))))
-					}
+					expr::Number::Decimal(v) => Ok(Cbor(CborData::Tag(
+						TAG_STRING_DECIMAL,
+						Box::new(CborData::Text(v.to_string())),
+					))),
 				},
 				expr::Value::Strand(v) => Ok(Cbor(CborData::Text(v.0))),
 				expr::Value::Duration(v) => {
@@ -939,7 +987,9 @@ pub mod convert_expr {
 
 					let tag_value = match (seconds, nanos) {
 						(0, 0) => Box::new(CborData::Array(vec![])),
-						(_, 0) => Box::new(CborData::Array(vec![CborData::Integer(seconds.into())])),
+						(_, 0) => {
+							Box::new(CborData::Array(vec![CborData::Integer(seconds.into())]))
+						}
 						_ => Box::new(CborData::Array(vec![
 							CborData::Integer(seconds.into()),
 							CborData::Integer(nanos.into()),
@@ -960,9 +1010,10 @@ pub mod convert_expr {
 						])),
 					)))
 				}
-				expr::Value::Uuid(v) => {
-					Ok(Cbor(CborData::Tag(TAG_SPEC_UUID, Box::new(CborData::Bytes(v.into_bytes().into())))))
-				}
+				expr::Value::Uuid(v) => Ok(Cbor(CborData::Tag(
+					TAG_SPEC_UUID,
+					Box::new(CborData::Bytes(v.into_bytes().into())),
+				))),
 				expr::Value::Array(v) => Ok(Cbor(CborData::Array(
 					v.into_iter()
 						.map(|v| {
@@ -994,13 +1045,19 @@ pub mod convert_expr {
 							expr::Id::Generate(_) => {
 								return Err("Cannot encode an ungenerated Record ID into CBOR")
 							}
-							expr::Id::Range(v) => CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?)),
+							expr::Id::Range(v) => {
+								CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?))
+							}
 						},
 					])),
 				))),
-				expr::Value::Table(v) => Ok(Cbor(CborData::Tag(TAG_TABLE, Box::new(CborData::Text(v.0))))),
+				expr::Value::Table(v) => {
+					Ok(Cbor(CborData::Tag(TAG_TABLE, Box::new(CborData::Text(v.0)))))
+				}
 				expr::Value::Geometry(v) => Ok(Cbor(encode_geometry(v)?)),
-				expr::Value::Range(v) => Ok(Cbor(CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?)))),
+				expr::Value::Range(v) => {
+					Ok(Cbor(CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?))))
+				}
 				expr::Value::Future(v) => {
 					let bin = CborData::Text(format!("{}", (*v).0));
 					Ok(Cbor(CborData::Tag(TAG_FUTURE, Box::new(bin))))
@@ -1080,8 +1137,12 @@ pub mod convert_expr {
 		fn try_from(val: CborData) -> Result<Self, &'static str> {
 			fn decode_bound(v: CborData) -> Result<Bound<expr::Value>, &'static str> {
 				match v {
-					CborData::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(expr::Value::try_from(Cbor(*v))?)),
-					CborData::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(expr::Value::try_from(Cbor(*v))?)),
+					CborData::Tag(TAG_BOUND_INCLUDED, v) => {
+						Ok(Bound::Included(expr::Value::try_from(Cbor(*v))?))
+					}
+					CborData::Tag(TAG_BOUND_EXCLUDED, v) => {
+						Ok(Bound::Excluded(expr::Value::try_from(Cbor(*v))?))
+					}
 					CborData::Null => Ok(Bound::Unbounded),
 					_ => Err("Expected a bound tag"),
 				}
@@ -1123,8 +1184,12 @@ pub mod convert_expr {
 		fn try_from(val: CborData) -> Result<Self, &'static str> {
 			fn decode_bound(v: CborData) -> Result<Bound<expr::Id>, &'static str> {
 				match v {
-					CborData::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(expr::Id::try_from(*v)?)),
-					CborData::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(expr::Id::try_from(*v)?)),
+					CborData::Tag(TAG_BOUND_INCLUDED, v) => {
+						Ok(Bound::Included(expr::Id::try_from(*v)?))
+					}
+					CborData::Tag(TAG_BOUND_EXCLUDED, v) => {
+						Ok(Bound::Excluded(expr::Id::try_from(*v)?))
+					}
 					CborData::Null => Ok(Bound::Unbounded),
 					_ => Err("Expected a bound tag"),
 				}
@@ -1148,8 +1213,12 @@ pub mod convert_expr {
 		fn try_from(r: expr::id::range::IdRange) -> Result<CborData, &'static str> {
 			fn encode(b: Bound<expr::Id>) -> Result<CborData, &'static str> {
 				match b {
-					Bound::Included(v) => Ok(CborData::Tag(TAG_BOUND_INCLUDED, Box::new(v.try_into()?))),
-					Bound::Excluded(v) => Ok(CborData::Tag(TAG_BOUND_EXCLUDED, Box::new(v.try_into()?))),
+					Bound::Included(v) => {
+						Ok(CborData::Tag(TAG_BOUND_INCLUDED, Box::new(v.try_into()?)))
+					}
+					Bound::Excluded(v) => {
+						Ok(CborData::Tag(TAG_BOUND_EXCLUDED, Box::new(v.try_into()?)))
+					}
 					Bound::Unbounded => Ok(CborData::Null),
 				}
 			}
@@ -1166,9 +1235,15 @@ pub mod convert_expr {
 				CborData::Text(v) => Ok(expr::Id::String(v)),
 				CborData::Array(v) => Ok(expr::Id::Array(v.try_into()?)),
 				CborData::Map(v) => Ok(expr::Id::Object(v.try_into()?)),
-				CborData::Tag(TAG_RANGE, v) => Ok(expr::Id::Range(Box::new(expr::id::range::IdRange::try_from(*v)?))),
-				CborData::Tag(TAG_STRING_UUID, v) => v.deref().to_owned().try_into().map(expr::Id::Uuid),
-				CborData::Tag(TAG_SPEC_UUID, v) => v.deref().to_owned().try_into().map(expr::Id::Uuid),
+				CborData::Tag(TAG_RANGE, v) => {
+					Ok(expr::Id::Range(Box::new(expr::id::range::IdRange::try_from(*v)?)))
+				}
+				CborData::Tag(TAG_STRING_UUID, v) => {
+					v.deref().to_owned().try_into().map(expr::Id::Uuid)
+				}
+				CborData::Tag(TAG_SPEC_UUID, v) => {
+					v.deref().to_owned().try_into().map(expr::Id::Uuid)
+				}
 				_ => Err("Expected a CBOR integer, text, array or map"),
 			}
 		}
@@ -1182,10 +1257,13 @@ pub mod convert_expr {
 				expr::Id::String(v) => Ok(CborData::Text(v)),
 				expr::Id::Array(v) => Ok(Cbor::try_from(expr::Value::from(v))?.0),
 				expr::Id::Object(v) => Ok(Cbor::try_from(expr::Value::from(v))?.0),
-				expr::Id::Range(v) => Ok(CborData::Tag(TAG_RANGE, Box::new(v.deref().to_owned().try_into()?))),
-				expr::Id::Uuid(v) => {
-					Ok(CborData::Tag(TAG_SPEC_UUID, Box::new(CborData::Bytes(v.into_bytes().into()))))
+				expr::Id::Range(v) => {
+					Ok(CborData::Tag(TAG_RANGE, Box::new(v.deref().to_owned().try_into()?)))
 				}
+				expr::Id::Uuid(v) => Ok(CborData::Tag(
+					TAG_SPEC_UUID,
+					Box::new(CborData::Bytes(v.into_bytes().into())),
+				)),
 				expr::Id::Generate(_) => Err("Cannot encode an ungenerated Record ID into CBOR"),
 			}
 		}
@@ -1194,7 +1272,9 @@ pub mod convert_expr {
 	impl TryFrom<Vec<CborData>> for expr::Array {
 		type Error = &'static str;
 		fn try_from(val: Vec<CborData>) -> Result<Self, &'static str> {
-			val.into_iter().map(|v| expr::Value::try_from(Cbor(v))).collect::<Result<expr::Array, &str>>()
+			val.into_iter()
+				.map(|v| expr::Value::try_from(Cbor(v)))
+				.collect::<Result<expr::Array, &str>>()
 		}
 	}
 
@@ -1225,5 +1305,4 @@ pub mod convert_expr {
 			}
 		}
 	}
-
 }

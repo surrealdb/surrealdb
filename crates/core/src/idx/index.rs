@@ -3,14 +3,14 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::index::{HnswParams, MTreeParams, SearchParams};
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{Array, Index, Part, Thing, Value};
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::key;
 use crate::kvs::TransactionType;
-use crate::expr::index::{HnswParams, MTreeParams, SearchParams};
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Array, Index, Part, Thing, Value};
 use reblessive::tree::Stk;
 
 pub(crate) struct IndexOperation<'a> {

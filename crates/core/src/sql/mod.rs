@@ -160,7 +160,7 @@ pub use self::tokenizer::Tokenizer;
 pub use self::uuid::Uuid;
 pub use self::value::serde::from_value;
 pub use self::value::serde::to_value;
-pub use self::value::Value;
+pub use self::value::SqlValue;
 pub use self::value::Values;
 pub use self::version::Version;
 pub use self::view::View;
@@ -231,7 +231,7 @@ pub type FlowResult<T> = Result<T, ControlFlow>;
 pub enum ControlFlow {
 	Break,
 	Continue,
-	Return(Value),
+	Return(SqlValue),
 	Err(Box<Error>),
 }
 
@@ -247,11 +247,11 @@ pub trait FlowResultExt {
 	///
 	/// If the error value is either `ControlFlow::Break` or `ControlFlow::Continue` it will
 	/// instead create an error that break/continue was used within an invalid location.
-	fn catch_return(self) -> Result<Value, Error>;
+	fn catch_return(self) -> Result<SqlValue, Error>;
 }
 
-impl FlowResultExt for FlowResult<Value> {
-	fn catch_return(self) -> Result<Value, Error> {
+impl FlowResultExt for FlowResult<SqlValue> {
+	fn catch_return(self) -> Result<SqlValue, Error> {
 		match self {
 			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => Err(Error::InvalidControlFlow),
 			Err(ControlFlow::Return(x)) => Ok(x),

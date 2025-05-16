@@ -12,15 +12,15 @@ use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
 use crate::{
 	dbs::{capabilities::MethodTarget, QueryType, Response},
+	expr::Value,
 	rpc::args::Take,
 	sql::{
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
-		Array, Fields, Function, Model, Output, Query, Strand, Value as SqlValue
+		Array, Fields, Function, Model, Output, Query, SqlValue, Strand,
 	},
-	expr::Value
 };
 
 #[expect(async_fn_in_trait)]
@@ -773,7 +773,7 @@ pub trait RpcProtocolV1: RpcContext {
 			SqlValue::Object(v) => {
 				let mut v: crate::expr::Object = v.into();
 				Some(mrg! {v.0, self.session().parameters})
-			},
+			}
 			SqlValue::None | SqlValue::Null => Some(self.session().parameters.clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};
@@ -957,7 +957,11 @@ pub trait RpcProtocolV1: RpcContext {
 	// Private methods
 	// ------------------------------
 
-	async fn query_inner(&self, query: SqlValue, vars: Variables) -> Result<Vec<Response>, RpcError> {
+	async fn query_inner(
+		&self,
+		query: SqlValue,
+		vars: Variables,
+	) -> Result<Vec<Response>, RpcError> {
 		// If no live query handler force realtime off
 		if !Self::LQ_SUPPORT && self.session().rt {
 			return Err(RpcError::BadLQConfig);

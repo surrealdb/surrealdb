@@ -1,7 +1,7 @@
 use crate::api::method::Method;
 use crate::api::path::Path;
 use crate::sql::fmt::{pretty_indent, Fmt};
-use crate::sql::{Strand, Value};
+use crate::sql::{SqlValue, Strand};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -15,9 +15,9 @@ use super::config::api::ApiConfig;
 pub struct DefineApiStatement {
 	pub if_not_exists: bool,
 	pub overwrite: bool,
-	pub path: Value,
+	pub path: SqlValue,
 	pub actions: Vec<ApiAction>,
-	pub fallback: Option<Value>,
+	pub fallback: Option<SqlValue>,
 	pub config: Option<ApiConfig>,
 	#[revision(start = 2)]
 	pub comment: Option<Strand>,
@@ -93,8 +93,6 @@ impl crate::sql::DisplaySql for DefineApiStatement {
 	}
 }
 
-
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
@@ -102,7 +100,7 @@ pub struct ApiDefinition {
 	pub id: Option<u32>,
 	pub path: Path,
 	pub actions: Vec<ApiAction>,
-	pub fallback: Option<Value>,
+	pub fallback: Option<SqlValue>,
 	pub config: Option<ApiConfig>,
 	pub comment: Option<Strand>,
 }
@@ -121,8 +119,6 @@ impl From<ApiDefinition> for DefineApiStatement {
 	}
 }
 
-
-
 crate::sql::impl_display_from_sql!(ApiDefinition);
 
 impl crate::sql::DisplaySql for ApiDefinition {
@@ -138,7 +134,7 @@ impl crate::sql::DisplaySql for ApiDefinition {
 #[non_exhaustive]
 pub struct ApiAction {
 	pub methods: Vec<Method>,
-	pub action: Value,
+	pub action: SqlValue,
 	pub config: Option<ApiConfig>,
 }
 

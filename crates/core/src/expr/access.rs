@@ -1,4 +1,6 @@
-use crate::expr::{escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes, Duration, Id, Ident, Thing};
+use crate::expr::{
+	escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes, Duration, Id, Ident, Thing,
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

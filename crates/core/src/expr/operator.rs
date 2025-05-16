@@ -1,5 +1,5 @@
-use crate::idx::ft::MatchRef;
 use crate::expr::index::Distance;
+use crate::idx::ft::MatchRef;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

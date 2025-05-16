@@ -7,9 +7,9 @@ use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
-use crate::idx::planner::RecordStrategy;
 use crate::expr::order::Ordering;
 use crate::expr::Value;
+use crate::idx::planner::RecordStrategy;
 use reblessive::tree::Stk;
 
 pub(super) enum Results {

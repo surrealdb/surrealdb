@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::Auth;
-use crate::kvs::Live;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
+use crate::iam::Auth;
+use crate::kvs::Live;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -173,11 +173,11 @@ impl InfoStructure for LiveStatement {
 #[cfg(test)]
 mod tests {
 	use crate::dbs::{Action, Capabilities, Notification, Session};
+	use crate::expr::Thing;
+	use crate::expr::Value;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
-	use crate::expr::Thing;
-	use crate::expr::Value;
 	use crate::syn::Parse;
 
 	pub async fn new_ds() -> Result<Datastore, crate::err::Error> {

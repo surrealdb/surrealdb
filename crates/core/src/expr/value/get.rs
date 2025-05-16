@@ -7,7 +7,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-use crate::fnc::idiom;
 use crate::expr::edges::Edges;
 use crate::expr::field::{Field, Fields};
 use crate::expr::id::Id;
@@ -17,6 +16,7 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::thing::Thing;
 use crate::expr::value::{Value, Values};
 use crate::expr::{ControlFlow, FlowResult, FlowResultExt as _, Function};
+use crate::fnc::idiom;
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 

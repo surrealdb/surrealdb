@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
 use crate::err::Error;
-use crate::kvs::{Key, KeyEncode};
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::thing::Thing;
 use crate::expr::Idiom;
+use crate::kvs::{Key, KeyEncode};
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
 // The versionstamp key is the key that contains the current versionstamp and might be used by the
@@ -151,7 +151,6 @@ mod tests {
 	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 	use crate::expr::changefeed::ChangeFeed;
 	use crate::expr::id::Id;
 	use crate::expr::statements::show::ShowSince;
@@ -161,6 +160,7 @@ mod tests {
 	use crate::expr::thing::Thing;
 	use crate::expr::value::Value;
 	use crate::expr::Datetime;
+	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 	use crate::vs::VersionStamp;
 
 	const DONT_STORE_PREVIOUS: bool = false;

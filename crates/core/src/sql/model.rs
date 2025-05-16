@@ -1,4 +1,4 @@
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
 pub struct Model {
 	pub name: String,
 	pub version: String,
-	pub args: Vec<Value>,
+	pub args: Vec<SqlValue>,
 }
 
 impl From<Model> for crate::expr::Model {

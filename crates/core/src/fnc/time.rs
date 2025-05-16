@@ -243,8 +243,8 @@ pub fn year((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 
 pub mod is {
 	use crate::err::Error;
-	use crate::fnc::args::Optional;
 	use crate::expr::{Datetime, Value};
+	use crate::fnc::args::Optional;
 
 	pub fn leap_year((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 		Ok(match val {

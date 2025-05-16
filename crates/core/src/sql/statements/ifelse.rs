@@ -1,5 +1,5 @@
 use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::Value;
+use crate::sql::SqlValue;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -11,9 +11,9 @@ use std::fmt::{self, Write};
 #[non_exhaustive]
 pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of else if's
-	pub exprs: Vec<(Value, Value)>,
+	pub exprs: Vec<(SqlValue, SqlValue)>,
 	/// the final else body, if there is one
-	pub close: Option<Value>,
+	pub close: Option<SqlValue>,
 }
 
 impl IfelseStatement {
@@ -24,13 +24,13 @@ impl IfelseStatement {
 				return true;
 			}
 		}
-		self.close.as_ref().is_some_and(Value::writeable)
+		self.close.as_ref().is_some_and(SqlValue::writeable)
 	}
 	/// Check if we require a writeable transaction
 	pub(crate) fn bracketed(&self) -> bool {
-		self.exprs.iter().all(|(_, v)| matches!(v, Value::Block(_)))
+		self.exprs.iter().all(|(_, v)| matches!(v, SqlValue::Block(_)))
 			&& (self.close.as_ref().is_none()
-				|| self.close.as_ref().is_some_and(|v| matches!(v, Value::Block(_))))
+				|| self.close.as_ref().is_some_and(|v| matches!(v, SqlValue::Block(_))))
 	}
 }
 

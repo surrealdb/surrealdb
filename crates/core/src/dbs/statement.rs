@@ -1,6 +1,5 @@
 use crate::ctx::{Context, MutableContext};
 use crate::err::Error;
-use crate::idx::planner::QueryPlanner;
 use crate::expr::cond::Cond;
 use crate::expr::data::Data;
 use crate::expr::fetch::Fetchs;
@@ -24,6 +23,7 @@ use crate::expr::statements::update::UpdateStatement;
 use crate::expr::statements::upsert::UpsertStatement;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Explain, Permission, Timeout, With};
+use crate::idx::planner::QueryPlanner;
 use std::borrow::Cow;
 use std::fmt;
 

@@ -22,7 +22,7 @@ use crate::{
 			CommitStatement, ContinueStatement, ForeachStatement, InfoStatement, OutputStatement,
 			UseStatement,
 		},
-		Expression, Operator, Statement, Statements, Value,
+		Expression, Operator, SqlValue, Statement, Statements,
 	},
 	syn::parser::mac::unexpected,
 };
@@ -316,11 +316,11 @@ impl Parser<'_> {
 	}
 
 	/// Turns [Param] `=` [Value] into a set statment.
-	fn refine_stmt_value(value: Value) -> Statement {
+	fn refine_stmt_value(value: SqlValue) -> Statement {
 		match value {
-			Value::Expression(x) => {
+			SqlValue::Expression(x) => {
 				if let Expression::Binary {
-					l: Value::Param(x),
+					l: SqlValue::Param(x),
 					o: Operator::Equal,
 					r,
 				} = *x
@@ -331,17 +331,17 @@ impl Parser<'_> {
 						kind: None,
 					});
 				}
-				Statement::Value(Value::Expression(x))
+				Statement::Value(SqlValue::Expression(x))
 			}
 			_ => Statement::Value(value),
 		}
 	}
 
-	fn refine_entry_value(value: Value) -> Entry {
+	fn refine_entry_value(value: SqlValue) -> Entry {
 		match value {
-			Value::Expression(x) => {
+			SqlValue::Expression(x) => {
 				if let Expression::Binary {
-					l: Value::Param(x),
+					l: SqlValue::Param(x),
 					o: Operator::Equal,
 					r,
 				} = *x
@@ -352,7 +352,7 @@ impl Parser<'_> {
 						kind: None,
 					});
 				}
-				Entry::Value(Value::Expression(x))
+				Entry::Value(SqlValue::Expression(x))
 			}
 			_ => Entry::Value(value),
 		}
@@ -631,9 +631,9 @@ impl Parser<'_> {
 		let peek = self.peek();
 		let id = match peek.kind {
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
-				self.next_token_value().map(Value::Uuid)?
+				self.next_token_value().map(SqlValue::Uuid)?
 			}
-			t!("$param") => self.next_token_value().map(Value::Param)?,
+			t!("$param") => self.next_token_value().map(SqlValue::Param)?,
 			_ => unexpected!(self, peek, "a UUID or a parameter"),
 		};
 		Ok(KillStatement {
@@ -657,8 +657,8 @@ impl Parser<'_> {
 		};
 		expected!(self, t!("FROM"));
 		let what = match self.peek().kind {
-			t!("$param") => Value::Param(self.next_token_value()?),
-			_ => Value::Table(self.next_token_value()?),
+			t!("$param") => SqlValue::Param(self.next_token_value()?),
+			_ => SqlValue::Table(self.next_token_value()?),
 		};
 		let cond = self.try_parse_condition(stk).await?;
 		let fetch = self.try_parse_fetch(stk).await?;

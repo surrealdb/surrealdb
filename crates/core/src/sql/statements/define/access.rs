@@ -1,5 +1,4 @@
-
-use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Strand, Value};
+use crate::sql::{access::AccessDuration, AccessType, Base, Ident, SqlValue, Strand};
 
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -16,7 +15,7 @@ pub struct DefineAccessStatement {
 	pub base: Base,
 	pub kind: AccessType,
 	#[revision(start = 2)]
-	pub authenticate: Option<Value>,
+	pub authenticate: Option<SqlValue>,
 	pub duration: AccessDuration,
 	pub comment: Option<Strand>,
 	pub if_not_exists: bool,
@@ -137,5 +136,3 @@ impl crate::sql::DisplaySql for DefineAccessStatement {
 		Ok(())
 	}
 }
-
-

@@ -13,6 +13,8 @@ use tokio::sync::RwLock;
 
 use crate::err::Error;
 
+use crate::expr::index::{Distance, MTreeParams, VectorType};
+use crate::expr::{Number, Object, Thing, Value};
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::planner::checker::MTreeConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
@@ -22,8 +24,6 @@ use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider, T
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
-use crate::expr::index::{Distance, MTreeParams, VectorType};
-use crate::expr::{Number, Object, Thing, Value};
 
 #[non_exhaustive]
 pub struct MTreeIndex {
@@ -1470,6 +1470,7 @@ mod tests {
 
 	use crate::ctx::{Context, MutableContext};
 	use crate::err::Error;
+	use crate::expr::index::{Distance, VectorType};
 	use crate::idx::docids::{DocId, DocIds};
 	use crate::idx::planner::checker::MTreeConditionChecker;
 	use crate::idx::trees::knn::tests::TestCollection;
@@ -1480,7 +1481,6 @@ mod tests {
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::expr::index::{Distance, VectorType};
 	use ahash::{HashMap, HashMapExt, HashSet};
 	use reblessive::tree::Stk;
 	use std::collections::VecDeque;

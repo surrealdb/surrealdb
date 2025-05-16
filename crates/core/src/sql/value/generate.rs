@@ -2,48 +2,48 @@ use crate::err::Error;
 use crate::sql::id::Id;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 
-impl Value {
+impl SqlValue {
 	pub(crate) fn generate(self, tb: &Table, retable: bool) -> Result<Thing, Error> {
 		match self {
 			// There is a floating point number for the id field
-			Value::Number(id) if id.is_float() => Ok(Thing {
+			SqlValue::Number(id) if id.is_float() => Ok(Thing {
 				tb: tb.0.to_string(),
 				id: id.as_int().into(),
 			}),
 			// There is an integer number for the id field
-			Value::Number(id) if id.is_int() => Ok(Thing {
+			SqlValue::Number(id) if id.is_int() => Ok(Thing {
 				tb: tb.0.to_string(),
 				id: id.as_int().into(),
 			}),
 			// There is a string for the id field
-			Value::Strand(id) if !id.is_empty() => Ok(Thing {
+			SqlValue::Strand(id) if !id.is_empty() => Ok(Thing {
 				tb: tb.0.to_string(),
 				id: id.into(),
 			}),
 			// There is an object for the id field
-			Value::Object(id) => Ok(Thing {
+			SqlValue::Object(id) => Ok(Thing {
 				tb: tb.0.to_string(),
 				id: id.into(),
 			}),
 			// There is an array for the id field
-			Value::Array(id) => Ok(Thing {
+			SqlValue::Array(id) => Ok(Thing {
 				tb: tb.0.to_string(),
 				id: id.into(),
 			}),
 			// There is a UUID for the id field
-			Value::Uuid(id) => Ok(Thing {
+			SqlValue::Uuid(id) => Ok(Thing {
 				tb: tb.0.to_string(),
 				id: id.into(),
 			}),
 			// There is no record id field
-			Value::None => Ok(Thing {
+			SqlValue::None => Ok(Thing {
 				tb: tb.0.to_string(),
 				id: Id::rand(),
 			}),
 			// There is a record id defined
-			Value::Thing(id) => match retable {
+			SqlValue::Thing(id) => match retable {
 				// Let's re-table this record id
 				true => Ok(Thing {
 					tb: tb.0.to_string(),

@@ -1,8 +1,8 @@
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
-use crate::fnc::util::string;
 use crate::expr::value::Value;
 use crate::expr::Regex;
+use crate::fnc::util::string;
 
 use super::args::{Any, Cast, Optional};
 
@@ -249,9 +249,9 @@ pub mod html {
 
 pub mod is {
 	use crate::err::Error;
-	use crate::fnc::args::Optional;
 	use crate::expr::value::Value;
 	use crate::expr::{Datetime, Thing};
+	use crate::fnc::args::Optional;
 	use chrono::NaiveDateTime;
 	use regex::Regex;
 	use semver::Version;
@@ -361,8 +361,8 @@ pub mod is {
 pub mod similarity {
 
 	use crate::err::Error;
-	use crate::fnc::util::string::fuzzy::Fuzzy;
 	use crate::expr::Value;
+	use crate::fnc::util::string::fuzzy::Fuzzy;
 
 	use strsim;
 
@@ -438,8 +438,8 @@ pub mod semver {
 
 	pub mod inc {
 		use crate::err::Error;
-		use crate::fnc::string::semver::parse_version;
 		use crate::expr::Value;
+		use crate::fnc::string::semver::parse_version;
 
 		pub fn major((version,): (String,)) -> Result<Value, Error> {
 			parse_version(&version, "string::semver::inc::major", "Invalid semantic version").map(
@@ -474,8 +474,8 @@ pub mod semver {
 
 	pub mod set {
 		use crate::err::Error;
-		use crate::fnc::string::semver::parse_version;
 		use crate::expr::Value;
+		use crate::fnc::string::semver::parse_version;
 
 		pub fn major((version, value): (String, i64)) -> Result<Value, Error> {
 			// TODO: Deal with negative trunc:
@@ -518,8 +518,8 @@ mod tests {
 	use super::{contains, matches, replace, slice};
 	use crate::{
 		err::Error,
-		fnc::args::{Cast, Optional},
 		expr::Value,
+		fnc::args::{Cast, Optional},
 	};
 
 	#[test]

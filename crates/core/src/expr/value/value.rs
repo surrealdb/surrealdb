@@ -4,7 +4,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::expr::id::range::IdRange;
 use crate::expr::range::OldRange;
 use crate::expr::reference::Refs;
@@ -18,6 +17,7 @@ use crate::expr::{
 	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::fnc::util::string::fuzzy::Fuzzy;
 use chrono::{DateTime, Utc};
 
 use geo::Point;
