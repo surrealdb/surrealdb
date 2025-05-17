@@ -1,6 +1,7 @@
 use crate::api::engine::local::Db;
 use crate::api::engine::local::SurrealKv;
 use crate::api::err::Error;
+use crate::api::opt::endpoint::into_endpoint;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
@@ -15,7 +16,8 @@ const VERSIONED_SCHEME: &str = "surrealkv+versioned";
 macro_rules! endpoints {
 	($($name:ty),*) => {
 		$(
-			impl IntoEndpoint<SurrealKv> for $name {
+			impl IntoEndpoint<SurrealKv> for $name {}
+			impl into_endpoint::Sealed<SurrealKv> for $name {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
@@ -28,12 +30,12 @@ macro_rules! endpoints {
 				}
 			}
 
-			impl IntoEndpoint<SurrealKv> for ($name, Config) {
+			impl IntoEndpoint<SurrealKv> for ($name, Config) {}
+			impl into_endpoint::Sealed<SurrealKv> for ($name, Config) {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-		#[expect(deprecated)]
-					let mut endpoint = IntoEndpoint::<SurrealKv>::into_endpoint(self.0)?;
+					let mut endpoint = into_endpoint::Sealed::<SurrealKv>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
 				}

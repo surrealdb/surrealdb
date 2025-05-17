@@ -48,6 +48,9 @@ defaults:
 permissions:
   contents: read
   
+env:
+  RUST_VERSION: 1.86.0
+
 jobs:
   cargo-deny:
     name: Check dependencies for known issues
@@ -56,6 +59,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
 
       - name: Checkout sources
@@ -79,6 +83,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
 
       - name: Checkout sources
@@ -102,6 +107,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
 
       - name: Checkout sources

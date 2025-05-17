@@ -192,12 +192,6 @@ impl Capabilities {
 		self
 	}
 
-	/// Set the allow list to allow all functions
-	#[deprecated(since = "2.3.0", note = "Use `with_all_functions_allowed` instead")]
-	pub fn with_allow_all_functions(self) -> Self {
-		self.with_all_functions_allowed()
-	}
-
 	/// Set the deny list to deny all functions
 	pub fn deny_all_functions(&mut self) -> &mut Self {
 		*self.cap.denied_functions_mut() = Targets::All;
@@ -210,12 +204,6 @@ impl Capabilities {
 		self
 	}
 
-	/// Set the deny list to deny all functions
-	#[deprecated(since = "2.3.0", note = "Use `with_all_functions_denied` instead")]
-	pub fn with_deny_all_functions(self) -> Self {
-		self.with_all_functions_denied()
-	}
-
 	/// Set the allow list to allow no function
 	pub fn allow_no_functions(&mut self) -> &mut Self {
 		*self.cap.allowed_functions_mut() = Targets::None;
@@ -223,21 +211,9 @@ impl Capabilities {
 	}
 
 	/// Set the allow list to allow no function
-	#[deprecated(since = "2.3.0", note = "Use `allow_no_functions` instead")]
-	pub fn allow_none_functions(&mut self) -> &mut Self {
-		self.allow_no_functions()
-	}
-
-	/// Set the allow list to allow no function
 	pub fn with_no_functions_allowed(mut self) -> Self {
 		self.allow_no_functions();
 		self
-	}
-
-	/// Set the allow list to allow no function
-	#[deprecated(since = "2.3.0", note = "Use `with_no_functions_allowed` instead")]
-	pub fn with_allow_none_functions(self) -> Self {
-		self.with_no_functions_allowed()
 	}
 
 	/// Set the deny list to deny no function
@@ -247,21 +223,9 @@ impl Capabilities {
 	}
 
 	/// Set the deny list to deny no function
-	#[deprecated(since = "2.3.0", note = "Use `deny_no_functions` instead")]
-	pub fn deny_none_functions(&mut self) -> &mut Self {
-		self.deny_no_functions()
-	}
-
-	/// Set the deny list to deny no function
 	pub fn with_no_functions_denied(mut self) -> Self {
 		self.deny_no_functions();
 		self
-	}
-
-	/// Set the deny list to deny no function
-	#[deprecated(since = "2.3.0", note = "Use `with_no_functions_denied` instead")]
-	pub fn with_deny_none_function(self) -> Self {
-		self.with_no_functions_denied()
 	}
 
 	/// Add a function to the allow lists
@@ -285,15 +249,6 @@ impl Capabilities {
 	) -> Result<Self, ParseFuncTargetError> {
 		self.allow_function(func)?;
 		Ok(self)
-	}
-
-	/// Add a function to the allow lists
-	///
-	/// Adding a function to the allow list overwrites previously set allow-all or allow-none
-	/// filters.
-	#[deprecated(since = "2.3.0", note = "Use `with_function_allowed` instead")]
-	pub fn with_allow_function<S: AsRef<str>>(self, func: S) -> Result<Self, ParseFuncTargetError> {
-		self.with_function_allowed(func)
 	}
 
 	fn allow_function_str(&mut self, s: &str) -> Result<&mut Self, ParseFuncTargetError> {
@@ -335,15 +290,6 @@ impl Capabilities {
 		Ok(self)
 	}
 
-	/// Add a function to the deny lists
-	///
-	/// Adding a function to the deny list overwrites previously set deny-all or deny-none
-	/// filters.
-	#[deprecated(since = "2.3.0", note = "Use `with_function_denied` instead")]
-	pub fn with_deny_function<S: AsRef<str>>(self, func: S) -> Result<Self, ParseFuncTargetError> {
-		self.with_function_denied(func)
-	}
-
 	fn deny_function_str(&mut self, s: &str) -> Result<&mut Self, ParseFuncTargetError> {
 		let target: FuncTarget = s.parse()?;
 		match self.cap.denied_functions_mut() {
@@ -372,12 +318,6 @@ impl Capabilities {
 		self
 	}
 
-	/// Set the allow list to allow all net targets
-	#[deprecated(since = "2.3.0", note = "Use `with_all_net_targets_allowed` instead")]
-	pub fn with_allow_all_net_targets(self) -> Self {
-		self.with_all_net_targets_allowed()
-	}
-
 	/// Set the deny list to deny all net targets
 	pub fn deny_all_net_targets(&mut self) -> &mut Self {
 		*self.cap.denied_network_targets_mut() = Targets::All;
@@ -390,12 +330,6 @@ impl Capabilities {
 		self
 	}
 
-	/// Set the deny list to deny all net targets
-	#[deprecated(since = "2.3.0", note = "Use `with_all_net_targets_denied` instead")]
-	pub fn with_deny_all_net_targets(self) -> Self {
-		self.with_all_net_targets_denied()
-	}
-
 	/// Set the allow list to allow no net targets
 	pub fn allow_no_net_targets(&mut self) -> &mut Self {
 		*self.cap.allowed_network_targets_mut() = Targets::None;
@@ -403,21 +337,9 @@ impl Capabilities {
 	}
 
 	/// Set the allow list to allow no net targets
-	#[deprecated(since = "2.3.0", note = "Use `allow_no_net_targets` instead")]
-	pub fn allow_none_net_targets(&mut self) -> &mut Self {
-		self.allow_no_net_targets()
-	}
-
-	/// Set the allow list to allow no net targets
 	pub fn with_no_net_targets_allowed(mut self) -> Self {
 		self.allow_no_net_targets();
 		self
-	}
-
-	/// Set the allow list to allow no net targets
-	#[deprecated(since = "2.3.0", note = "Use `with_no_net_targets_allowed` instead")]
-	pub fn with_allow_none_net_targets(self) -> Self {
-		self.with_no_net_targets_allowed()
 	}
 
 	/// Set the deny list to deny no net targets
@@ -427,20 +349,7 @@ impl Capabilities {
 	}
 
 	/// Set the deny list to deny no net targets
-	#[deprecated(since = "2.3.0", note = "Use `deny_no_net_targets` instead")]
-	pub fn deny_none_net_targets(&mut self) -> &mut Self {
-		self.deny_no_net_targets()
-	}
-
-	/// Set the deny list to deny no net targets
 	pub fn with_no_net_targets_denied(mut self) -> Self {
-		self.deny_no_net_targets();
-		self
-	}
-
-	/// Set the deny list to deny no net targets
-	#[deprecated(since = "2.3.0", note = "Use `with_no_net_targets_denied` instead")]
-	pub fn with_deny_none_net_target(mut self) -> Self {
 		self.deny_no_net_targets();
 		self
 	}
@@ -466,18 +375,6 @@ impl Capabilities {
 	) -> Result<Self, ParseNetTargetError> {
 		self.allow_net_target(func)?;
 		Ok(self)
-	}
-
-	/// Add a net target to the allow lists
-	///
-	/// Adding a net target to the allow list overwrites previously set allow-all or allow-none
-	/// filters.
-	#[deprecated(since = "2.3.0", note = "Use `with_net_target_allowed` instead")]
-	pub fn with_allow_net_target<S: AsRef<str>>(
-		self,
-		func: S,
-	) -> Result<Self, ParseNetTargetError> {
-		self.with_net_target_allowed(func)
 	}
 
 	fn allow_net_target_str(&mut self, s: &str) -> Result<&mut Self, ParseNetTargetError> {
@@ -517,15 +414,6 @@ impl Capabilities {
 	) -> Result<Self, ParseNetTargetError> {
 		self.deny_net_target(func)?;
 		Ok(self)
-	}
-
-	/// Add a net target to the deny lists
-	///
-	/// Adding a net target to the deny list overwrites previously set deny-all or deny-none
-	/// filters.
-	#[deprecated(since = "2.3.0", note = "Use `with_net_target_denied` instead")]
-	pub fn with_deny_net_target<S: AsRef<str>>(self, func: S) -> Result<Self, ParseNetTargetError> {
-		self.with_net_target_denied(func)
 	}
 
 	fn deny_net_target_str(&mut self, s: &str) -> Result<&mut Self, ParseNetTargetError> {

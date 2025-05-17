@@ -438,7 +438,6 @@ impl Response {
 	where
 		R: DeserializeOwned,
 	{
-		#[expect(deprecated)]
 		index.query_result(self)
 	}
 
@@ -486,7 +485,6 @@ impl Response {
 	///
 	/// Consume the stream the same way you would any other type that implements `futures::Stream`.
 	pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> Result<QueryStream<R>> {
-		#[expect(deprecated)]
 		index.query_stream(self)
 	}
 
@@ -640,9 +638,7 @@ impl WithStats<Response> {
 	where
 		R: DeserializeOwned,
 	{
-		#[expect(deprecated)]
 		let stats = index.stats(&self.0)?;
-		#[expect(deprecated)]
 		let result = index.query_result(&mut self.0);
 		Some((stats, result))
 	}
