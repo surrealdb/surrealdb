@@ -48,8 +48,15 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  # contents: write
+  # pull-requests: write
+
 jobs:
   prepare-vars:
+    permissions:
+      contents: write
     name: Prepare vars
     runs-on: ubuntu-latest
     outputs:
@@ -62,12 +69,12 @@ jobs:
       release-branch: ${{ steps.outputs.outputs.release-branch }}
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
         with:
           toolchain: ${{ inputs.rust_version }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 
         with:
           ref: ${{ inputs.git-ref }}
 
@@ -186,22 +193,22 @@ jobs:
     runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
         with:
           toolchain: ${{ inputs.rust_version }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ inputs.git-ref == 'main' }}
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -219,7 +226,7 @@ jobs:
           cat /tmp/surrealdb.log || true
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
         with:
           name: code-coverage-report
           path: target/llvm-cov/html/
@@ -231,12 +238,12 @@ jobs:
     runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
         with:
           toolchain: ${{ inputs.rust_version }}
           targets: wasm32-unknown-unknown
@@ -266,15 +273,15 @@ jobs:
       tag: ${{ steps.image.outputs.tag }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # Actions must be pinned by hash
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # (Actions must be pinned by commit hash) v3.10.0
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
         with:
           aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
@@ -282,21 +289,21 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # (Actions must be pinned by commit hash) v2.0.1
 
       - name: Prepare docker image name
         id: image
         run: |
           set -x
 
-          # Use the github branch name so we can use modified builders on custom branches
+          # (Actions must be pinned by commit hash) Use the github branch name so we can use modified builders on custom branches
           tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
 
           echo "name=${{ steps.login-ecr.outputs.registry }}/surrealdb-builder" >> $GITHUB_OUTPUT
           echo "tag=${tag}" >> $GITHUB_OUTPUT
 
       - name: Build & Push builder image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # (Actions must be pinned by commit hash) v5.4.0
         id: build
         with:
           context: .
@@ -486,18 +493,18 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
         with:
           toolchain: ${{ inputs.rust_version }}
           targets: ${{ matrix.arch }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
         if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
         with:
           aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
@@ -507,7 +514,7 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # (Actions must be pinned by commit hash) v2.0.1
 
       - name: Output package versions
         run: |
@@ -521,7 +528,7 @@ jobs:
         run: ${{ matrix.build-step }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
         with:
           name: ${{ matrix.file }}
           path: |
@@ -532,16 +539,18 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
+    permissions: 
+      contents: write
     needs: [prepare-vars, test, lint, build]
     runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable (Actions must be pinned by commit hash)
 
       - name: Install release-plz
         run: |
@@ -626,12 +635,12 @@ jobs:
 
       - name: Download artifacts
         if: ${{ inputs.publish }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         with:
           path: artifacts
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # (Actions must be pinned by commit hash) v2.2.2
         if: ${{ inputs.publish && inputs.create-release }}
         with:
           tag_name: v${{ needs.prepare-vars.outputs.version }}
@@ -647,7 +656,7 @@ jobs:
             artifacts/surreal-${{ needs.prepare-vars.outputs.name }}.*/*.exe
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
         if: ${{ inputs.publish }}
         with:
           aws-region: us-east-2
@@ -695,19 +704,19 @@ jobs:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
     steps:
       - name: Download amd64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         with:
           name: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
           path: amd64
 
       - name: Download arm64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         with:
           name: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64
           path: arm64
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -734,7 +743,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -749,11 +758,13 @@ jobs:
 
   cleanup:
     name: Cleanup
+    permissions:
+      contents: write
     needs: [publish, prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Delete ${{ needs.prepare-vars.outputs.release-branch }}
         run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }} || true
