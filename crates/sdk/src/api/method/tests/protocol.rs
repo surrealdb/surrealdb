@@ -1,7 +1,8 @@
 use super::server;
-use crate::api::conn::Connection;
+use crate::api::conn;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
+use crate::api::opt::endpoint::into_endpoint;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
@@ -19,7 +20,8 @@ use url::Url;
 #[derive(Debug)]
 pub struct Test;
 
-impl IntoEndpoint<Test> for () {
+impl IntoEndpoint<Test> for () {}
+impl into_endpoint::Sealed<Test> for () {
 	type Client = Client;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
@@ -37,7 +39,6 @@ impl Surreal<Client> {
 	) -> Connect<Client, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
-			#[expect(deprecated)]
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
@@ -47,7 +48,7 @@ impl Surreal<Client> {
 
 impl crate::api::Connection for Client {}
 
-impl Connection for Client {
+impl conn::Sealed for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = async_channel::bounded(capacity);

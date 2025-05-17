@@ -349,57 +349,6 @@ mod mem {
 }
 
 #[cfg(feature = "kv-rocksdb")]
-#[expect(deprecated)]
-mod file {
-	use surrealdb::engine::local::Db;
-	use surrealdb::engine::local::File;
-	use surrealdb::opt::capabilities::Capabilities;
-
-	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::Config;
-	use surrealdb::Surreal;
-	use tokio::sync::Semaphore;
-	use tokio::sync::SemaphorePermit;
-	use ulid::Ulid;
-
-	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let path = TEMP_DIR.join(Ulid::new().to_string());
-		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
-		let db = Surreal::new::<File>((path, config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let db_dir = Ulid::new().to_string();
-		// Create a database directory using an absolute path
-		surrealdb::engine::any::connect(format!(
-			"file://{}",
-			TEMP_DIR.join("absolute").join(&db_dir).display()
-		))
-		.await
-		.unwrap();
-		// Switch to the temporary directory, if possible, to test relative paths
-		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
-			// Create a database directory using a relative path
-			surrealdb::engine::any::connect(format!("file://relative/{db_dir}")).await.unwrap();
-		}
-	}
-
-	include_tests!(new_db => basic, serialisation, live, backup);
-}
-
-#[cfg(feature = "kv-rocksdb")]
 mod rocksdb {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::RocksDb;

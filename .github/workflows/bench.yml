@@ -17,6 +17,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  RUST_VERSION: 1.86.0
+
 #
 # The bench jobs will:
 # 1. Run the benchmark and save the results as a baseline named "current"
@@ -121,6 +124,9 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
