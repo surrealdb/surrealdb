@@ -1276,13 +1276,13 @@ where
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// // Specify no args by not calling `.args()`
-	/// let foo = db.run("fn::foo").await?; // fn::foo()
+	/// let foo: usize = db.run("fn::foo").await?; // fn::foo()
 	/// // A single value will be turned into one argument
-	/// let bar = db.run("fn::bar").args(42).await?; // fn::bar(42)
+	/// let bar: usize = db.run("fn::bar").args(42).await?; // fn::bar(42)
 	/// // Arrays are treated as single arguments
-	/// let count = db.run("count").args(vec![1,2,3]).await?;
+	/// let count: usize = db.run("count").args(vec![1,2,3]).await?;
 	/// // Specify multiple args using a tuple
-	/// let two = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
+	/// let two: usize = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
 	///
 	/// # Ok(())
 	/// # }
