@@ -8,9 +8,9 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::sql::{
-	array::Uniq, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, Duration, File,
-	Geometry, Ident, Kind, Literal, Number, Object, Range, Regex, Strand, Table, Thing, Uuid,
-	Value,
+	array::Uniq, kind::HasKind, stream::Stream, value::Null, Array, Bytes, Closure, Datetime,
+	Duration, File, Geometry, Ident, Kind, Literal, Number, Object, Range, Regex, Strand, Table,
+	Thing, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -416,6 +416,7 @@ impl_direct! {
 	Strand => Strand,
 	Geometry => Geometry,
 	Regex => Regex,
+	Stream => Stream,
 }
 
 // Coerce to runtime value implementations
@@ -479,6 +480,7 @@ impl Value {
 					self.can_coerce_to_file_buckets(buckets)
 				}
 			}
+			Kind::Stream => self.can_coerce_to::<Stream>(),
 		}
 	}
 
@@ -593,6 +595,7 @@ impl Value {
 					self.coerce_to_file_buckets(buckets).map(Value::from)
 				}
 			}
+			Kind::Stream => self.coerce_to::<Stream>().map(Value::from),
 		}
 	}
 

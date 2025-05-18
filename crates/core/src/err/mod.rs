@@ -7,6 +7,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::{CastError, CoerceError, Value};
+use crate::sql::Bytesize;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
@@ -1349,6 +1350,12 @@ pub enum Error {
 
 	#[error("Failed to connect to bucket: {0}")]
 	BucketConnectionFailed(String),
+
+	#[error("The stream is already consumed")]
+	StreamConsumed,
+
+	#[error("Stream to large to consume, expected a size up to {0}")]
+	StreamTooLarge(Bytesize),
 }
 
 impl From<Error> for String {

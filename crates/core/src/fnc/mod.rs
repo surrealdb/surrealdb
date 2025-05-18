@@ -32,6 +32,7 @@ pub mod search;
 pub mod sequence;
 pub mod session;
 pub mod sleep;
+pub mod stream;
 pub mod string;
 pub mod time;
 pub mod r#type;
@@ -195,6 +196,7 @@ pub fn synchronous(
 		"array::windows" => array::windows,
 		//
 		"bytes::len" => bytes::len,
+		"bytes::stream" => bytes::stream,
 		//
 		"count" => count::count,
 		//
@@ -582,6 +584,8 @@ pub async fn asynchronous(
 		//
 		"sequence::nextval" => sequence::nextval((ctx, opt)).await,
 		//
+		"stream::consume" => stream::consume.await,
+		//
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 		//
@@ -702,6 +706,17 @@ pub async fn idiom(
 				"no such method found for the bytes type",
 				//
 				"len" => bytes::len,
+				"stream" => bytes::stream,
+			)
+		}
+		Value::Stream(_) => {
+			dispatch!(
+				ctx,
+				name,
+				args.clone(),
+				"no such method found for the stream type",
+				//
+				"consume" => stream::consume.await,
 			)
 		}
 		Value::Duration(_) => {

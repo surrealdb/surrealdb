@@ -70,6 +70,7 @@ impl Value {
 			Value::Closure(v) => serializer.serialize(v).map_err(Into::into),
 			Value::Refs(_) => Ok(Content::Seq(vec![])),
 			Value::File(v) => serializer.serialize(v).map_err(Into::into),
+			Value::Stream(v) => serializer.serialize(v).map_err(Into::into),
 		}
 	}
 }
