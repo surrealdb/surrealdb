@@ -345,7 +345,7 @@ impl TestReport {
 					}
 					MatcherMismatch::Failed {
 						matcher,
-						ref value,
+						value,
 					} => {
 						writeln!(f, "> Value failed to match matching expression")?;
 						f.indent(|f| {

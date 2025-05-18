@@ -249,7 +249,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	loop {
 		while join_set.len() < config.jobs as usize {
 			// Schedule new tasks.
-			if let Some(mut task) = task_iter.next() {
+			match task_iter.next() { Some(mut task) => {
 				// find a port.
 				let port = reuse_port.pop().or_else(|| {
 					while let Some(x) = start_port.checked_add(1) {
@@ -272,9 +272,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 				let name = task.name(&subset);
 				join_set.spawn(run_task(task, subset.clone(), config.clone()));
 				progress.start_item(id, &name).unwrap();
-			} else {
+			} _ => {
 				break;
-			}
+			}}
 		}
 
 		let Some(res) = join_set.join_next().await else {

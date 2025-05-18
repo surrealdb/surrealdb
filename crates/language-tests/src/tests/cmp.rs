@@ -105,7 +105,7 @@ macro_rules! impl_roughly_eq_enum {
     };
 
 
-    (@match_pattern $this:expr, $other:expr, $ty_name:ident, $config:ident, $name:ident) => {
+    (@match_pattern $this:expr_2021, $other:expr_2021, $ty_name:ident, $config:ident, $name:ident) => {
         if let $ty_name::$name = $this{
             if let $ty_name::$name = $other{
                 return true
@@ -114,7 +114,7 @@ macro_rules! impl_roughly_eq_enum {
         }
     };
 
-    (@match_pattern $this:expr, $other:expr, $ty_name:ident, $config:ident, $name:ident($($field:ident),* $(,)?)) => {
+    (@match_pattern $this:expr_2021, $other:expr_2021, $ty_name:ident, $config:ident, $name:ident($($field:ident),* $(,)?)) => {
         #[expect(non_camel_case_types)]
         struct $name<$($field,)*> {
             $($field: $field),*
