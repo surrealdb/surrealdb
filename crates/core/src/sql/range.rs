@@ -281,11 +281,11 @@ impl Range {
 	/// Validate that a Range contains only computed Values
 	pub fn validate_computed(&self) -> Result<()> {
 		match &self.beg {
-			Bound::Included(ref v) | Bound::Excluded(ref v) => v.validate_computed()?,
+			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
 			Bound::Unbounded => {}
 		}
 		match &self.end {
-			Bound::Included(ref v) | Bound::Excluded(ref v) => v.validate_computed()?,
+			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
 			Bound::Unbounded => {}
 		}
 

@@ -143,14 +143,14 @@ impl Display for AlterTableStatement {
 			})?;
 		}
 		if let Some(comment) = &self.comment {
-			if let Some(ref comment) = comment {
+			if let Some(comment) = comment {
 				write!(f, " COMMENT {}", comment.clone())?;
 			} else {
 				write!(f, " DROP COMMENT")?;
 			}
 		}
 		if let Some(changefeed) = &self.changefeed {
-			if let Some(ref changefeed) = changefeed {
+			if let Some(changefeed) = changefeed {
 				write!(f, " CHANGEFEED {}", changefeed.clone())?;
 			} else {
 				write!(f, " DROP CHANGEFEED")?;

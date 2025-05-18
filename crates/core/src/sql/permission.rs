@@ -188,7 +188,7 @@ impl Display for Permission {
 		match self {
 			Self::None => f.write_str("NONE"),
 			Self::Full => f.write_str("FULL"),
-			Self::Specific(ref v) => write!(f, "WHERE {v}"),
+			Self::Specific(v) => write!(f, "WHERE {v}"),
 		}
 	}
 }

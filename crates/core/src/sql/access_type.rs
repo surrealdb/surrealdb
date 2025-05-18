@@ -167,10 +167,10 @@ impl Jwt for JwtAccess {
 impl Display for JwtAccess {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self.verify {
-			JwtAccessVerify::Key(ref v) => {
+			JwtAccessVerify::Key(v) => {
 				write!(f, "ALGORITHM {} KEY {}", v.alg, QuoteStr(&v.key))?;
 			}
-			JwtAccessVerify::Jwks(ref v) => {
+			JwtAccessVerify::Jwks(v) => {
 				write!(f, "URL {}", QuoteStr(&v.url),)?;
 			}
 		}

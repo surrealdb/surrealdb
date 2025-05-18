@@ -120,12 +120,12 @@ mod tests {
 	#[test]
 	fn test_initialize_store_env_var() {
 		let url = "file:///tmp/test_store";
-		env::set_var("SURREAL_OBJECT_STORE", url);
+		unsafe { env::set_var("SURREAL_OBJECT_STORE", url) };
 		let store = initialize_store("SURREAL_OBJECT_STORE", "store");
 		// Assert the store is initialized with the correct URL
 		assert!(store.to_string().contains("store"));
 
-		env::remove_var("SURREAL_OBJECT_STORE");
+		unsafe { env::remove_var("SURREAL_OBJECT_STORE") };
 		assert!(env::var("SURREAL_OBJECT_STORE").is_err());
 		let store = initialize_store("SURREAL_OBJECT_STORE", "store");
 		debug!("{store:?}");

@@ -1141,7 +1141,7 @@ impl Datastore {
 		sess: &Session,
 		chn: Sender<Vec<u8>>,
 		cfg: export::Config,
-	) -> Result<impl Future<Output = Result<()>>> {
+	) -> Result<impl Future<Output = Result<()>> + use<>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Retrieve the provided NS and DB

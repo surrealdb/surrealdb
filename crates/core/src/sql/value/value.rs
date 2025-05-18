@@ -1167,7 +1167,7 @@ macro_rules! subtypes {
 
 		#[doc = concat!("Return a reference to [`",stringify!($name),"`] if the value is of that type")]
 		pub fn $as(&self) -> Option<&$t>{
-			if let Value::$name(ref x) = self{
+			if let Value::$name(x) = self{
 				Some(x)
 			}else{
 				None
