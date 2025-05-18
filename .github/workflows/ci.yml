@@ -248,6 +248,14 @@ jobs:
       - name: Check revision.lock
         run: revision-lock --check
 
+  check-binaries:
+    needs: [format, check, check-wasm]
+    uses: ./.github/workflows/build.yml
+    with:
+      name: ${{ github.head_ref || github.ref_name }}
+      release-branch: ${{ github.head_ref || github.ref_name }}
+    secrets: inherit
+
   # ----------------------------------------
   # Integration tests
   # ----------------------------------------
