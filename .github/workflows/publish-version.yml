@@ -265,6 +265,7 @@ jobs:
         run: cargo make ci-clippy
 
   build:
+    name: Release binaries
     needs: [prepare-vars]
     uses: ./.github/workflows/build.yml
     with:

@@ -249,6 +249,7 @@ jobs:
         run: revision-lock --check
 
   check-binaries:
+    name: Release binaries
     needs: [format, check, check-wasm]
     uses: ./.github/workflows/build.yml
     with:
