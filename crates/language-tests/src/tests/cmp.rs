@@ -120,11 +120,11 @@ macro_rules! impl_roughly_eq_enum {
             $($field: $field),*
         }
 
-        if let $ty_name::$name($(ref $field),*) = $this{
+        if let $ty_name::$name($($field),*) = $this{
             let __tmp = $name{
                 $($field,)*
             };
-            if let $ty_name::$name($(ref $field),*) = $other {
+            if let $ty_name::$name($($field),*) = $other {
                 return true $(&& __tmp.$field.roughly_equal($field,$config))*;
             }else{
                 return false
