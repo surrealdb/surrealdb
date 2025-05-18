@@ -20,12 +20,12 @@ pub fn graceful_shutdown(
 	// Spawn a new background asynchronous task
 	tokio::spawn(async move {
 		// Listen to the primary OS task signal
-		if let Ok(signal) = listen().await {
+		match listen().await { Ok(signal) => {
 			warn!(target: super::LOG, "{signal} received. Waiting for a graceful shutdown. A second signal will force an immediate shutdown.");
-		} else {
+		} _ => {
 			error!(target: super::LOG, "Failed to listen to shutdown signal. Terminating immediately.");
 			canceller.cancel();
-		}
+		}}
 		// Spawn a task to gracefully shutdown
 		let shutdown = {
 			// Clone the state

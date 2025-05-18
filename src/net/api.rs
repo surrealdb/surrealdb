@@ -87,7 +87,7 @@ async fn handler(
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
 	let (mut res, res_instruction) =
-		if let Some((api, params)) = apis.as_ref().find_api(segments, method) {
+		match apis.as_ref().find_api(segments, method) { Some((api, params)) => {
 			let invocation = ApiInvocation {
 				params,
 				method,
@@ -109,9 +109,9 @@ async fn handler(
 				Ok(None) => return Err(NetError::NotFound(url).into()),
 				Err(e) => return Err(ResponseError(e)),
 			}
-		} else {
+		} _ => {
 			return Err(NetError::NotFound(url).into());
-		};
+		}};
 
 	// Commit the transaction
 	tx.commit().await.map_err(ResponseError)?;

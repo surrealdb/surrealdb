@@ -43,9 +43,9 @@ impl AlterStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
-			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Sequence(ref v) => v.compute(ctx, opt).await,
-			Self::Field(ref v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Sequence(v) => v.compute(ctx, opt).await,
+			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }

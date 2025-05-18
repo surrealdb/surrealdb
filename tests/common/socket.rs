@@ -266,11 +266,11 @@ impl Socket {
 					};
 
 					// does the response have an id.
-					if let Some(sender) = res.get("id").and_then(|x| x.as_u64()).and_then(|x| awaiting.remove(&x)){
+					match res.get("id").and_then(|x| x.as_u64()).and_then(|x| awaiting.remove(&x)){ Some(sender) => {
 						let _ = sender.send(res);
-					}else if (other.send(res).await).is_err(){
+					} _ => if (other.send(res).await).is_err(){
 						 return Err("main thread quit unexpectedly".to_string().into())
-					 }
+					 }}
 				}
 			}
 		}

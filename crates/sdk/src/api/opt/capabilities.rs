@@ -259,7 +259,7 @@ impl Capabilities {
 				set.insert(target);
 				self.cap = mem::take(&mut self.cap).with_functions(Targets::Some(set));
 			}
-			Targets::Some(ref mut x) => {
+			Targets::Some(x) => {
 				x.insert(target);
 			}
 			_ => unreachable!(),
@@ -298,7 +298,7 @@ impl Capabilities {
 				set.insert(target);
 				*self.cap.denied_functions_mut() = Targets::Some(set);
 			}
-			Targets::Some(ref mut x) => {
+			Targets::Some(x) => {
 				x.insert(target);
 			}
 			_ => unreachable!(),
@@ -385,7 +385,7 @@ impl Capabilities {
 				set.insert(target);
 				*self.cap.allowed_network_targets_mut() = Targets::Some(set);
 			}
-			Targets::Some(ref mut x) => {
+			Targets::Some(x) => {
 				x.insert(target);
 			}
 			_ => unreachable!(),
@@ -424,7 +424,7 @@ impl Capabilities {
 				set.insert(target);
 				*self.cap.denied_network_targets_mut() = Targets::Some(set);
 			}
-			Targets::Some(ref mut x) => {
+			Targets::Some(x) => {
 				x.insert(target);
 			}
 			_ => unreachable!(),

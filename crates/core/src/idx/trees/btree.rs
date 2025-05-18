@@ -1510,7 +1510,7 @@ mod tests {
 		t: &mut BTree<BK>,
 		mut st: BTreeStore<BK>,
 		tx: Transaction,
-		mut gen: u64,
+		mut r#gen: u64,
 		info: String,
 	) -> Result<u64>
 	where
@@ -1519,10 +1519,10 @@ mod tests {
 		if st.finish(&tx).await?.is_some() {
 			t.state.generation += 1;
 		}
-		gen += 1;
-		assert_eq!(t.state.generation, gen, "{}", info);
+		r#gen += 1;
+		assert_eq!(t.state.generation, r#gen, "{}", info);
 		tx.commit().await?;
-		Ok(gen)
+		Ok(r#gen)
 	}
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501

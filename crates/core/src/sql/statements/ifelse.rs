@@ -44,7 +44,7 @@ impl IfelseStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
-		for (ref cond, ref then) in &self.exprs {
+		for (cond, then) in &self.exprs {
 			let v = cond.compute(stk, ctx, opt, doc).await?;
 			if v.is_truthy() {
 				return then.compute(stk, ctx, opt, doc).await;

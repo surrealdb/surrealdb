@@ -31,7 +31,7 @@ pub(crate) struct Document {
 	/// The record id of this document
 	pub(super) id: Option<Arc<Thing>>,
 	/// The table that we should generate a record id from
-	pub(super) gen: Option<Table>,
+	pub(super) r#gen: Option<Table>,
 	/// Whether this is the second iteration of the processing
 	pub(super) retry: bool,
 	pub(super) extras: Workable,
@@ -175,7 +175,7 @@ impl Document {
 	pub fn new(
 		id: Option<Arc<Thing>>,
 		ir: Option<Arc<IteratorRecord>>,
-		gen: Option<Table>,
+		r#gen: Option<Table>,
 		val: Arc<Value>,
 		extras: Workable,
 		retry: bool,
@@ -183,7 +183,7 @@ impl Document {
 	) -> Self {
 		Document {
 			id: id.clone(),
-			gen,
+			r#gen,
 			retry,
 			extras,
 			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
@@ -247,7 +247,7 @@ impl Document {
 	pub(crate) fn is_specific_record_id(&self) -> bool {
 		match self.extras {
 			Workable::Insert(ref v) if v.rid().is_some() => true,
-			Workable::Normal if self.gen.is_none() => true,
+			Workable::Normal if self.r#gen.is_none() => true,
 			_ => false,
 		}
 	}
@@ -261,7 +261,7 @@ impl Document {
 	pub fn modify_for_update_retry(&mut self, id: Thing, value: Arc<Value>) {
 		let retry = Arc::new(id);
 		self.id = Some(retry.clone());
-		self.gen = None;
+		self.r#gen = None;
 		self.retry = true;
 		self.record_strategy = RecordStrategy::KeysAndValues;
 

@@ -180,7 +180,7 @@ impl<R> Stream<R> {
 }
 
 macro_rules! poll_next {
-	($notification:ident => $body:expr) => {
+	($notification:ident => $body:expr_2021) => {
 		fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
 			let Some(ref mut rx) = self.as_mut().rx else {
 				return Poll::Ready(None);

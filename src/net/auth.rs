@@ -72,15 +72,15 @@ impl AsyncAuthorizeRequest<Body> for SurrealAuth {
 }
 
 async fn check_auth(parts: &mut Parts) -> Result<Session> {
-	let or = if let Ok(or) = parts.extract::<TypedHeader<Origin>>().await {
+	let or = match parts.extract::<TypedHeader<Origin>>().await { Ok(or) => {
 		if !or.is_null() {
 			Some(or.to_string())
 		} else {
 			None
 		}
-	} else {
+	} _ => {
 		None
-	};
+	}};
 
 	// Extract the session id from the headers or generate a new one.
 	let id = match parse_typed_header::<SurrealId>(parts.extract::<TypedHeader<SurrealId>>().await)?

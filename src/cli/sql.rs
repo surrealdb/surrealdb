@@ -422,11 +422,11 @@ impl Validator for InputValidator<'_> {
 			Incomplete // The line ends with a backslash
 		} else if input.is_empty() {
 			Valid(None) // Ignore empty lines
-		} else if let Err(e) = surrealdb::syn::parse_with_capabilities(input, self.capabilities) {
+		} else { match surrealdb::syn::parse_with_capabilities(input, self.capabilities) { Err(e) => {
 			Invalid(Some(format!(" --< {e}")))
-		} else {
+		} _ => {
 			Valid(None)
-		};
+		}}};
 		// Validation complete
 		Ok(result)
 	}

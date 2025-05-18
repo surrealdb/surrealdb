@@ -163,7 +163,7 @@ where
 	}
 
 	fn get_random_level(&mut self) -> usize {
-		let unif: f64 = self.rng.gen(); // generate a uniform random number between 0 and 1
+		let unif: f64 = self.rng.r#gen(); // generate a uniform random number between 0 and 1
 		(-unif.ln() * self.ml).floor() as usize // calculate the layer
 	}
 

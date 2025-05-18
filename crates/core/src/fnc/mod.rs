@@ -100,9 +100,9 @@ pub async fn run(
 /// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
 /// `cpu_intensive`.
 macro_rules! dispatch {
-    ($ctx: ident, $name: ident, $args: expr, $message: expr,
+    ($ctx: ident, $name: ident, $args: expr_2021, $message: expr_2021,
         $($(exp($exp_target: ident))? $function_name: literal =>
-            $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+
+            $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr_2021))* $(.$await:tt)*,)+
     ) => {
         {
             match $name {
@@ -543,13 +543,13 @@ pub async fn asynchronous(
 		"array::some" => array::any((stk, ctx, Some(opt), doc)).await,
 		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
-		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
+		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::r#gen.await,
 		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
-		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
+		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::r#gen.await,
 		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
-		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
+		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::r#gen.await,
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
-		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::r#gen.await,
 		//
 		exp(Files) "file::put" => file::put((stk, ctx, opt, doc)).await,
 		exp(Files) "file::put_if_not_exists" => file::put_if_not_exists((stk, ctx, opt, doc)).await,

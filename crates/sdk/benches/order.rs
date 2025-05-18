@@ -71,11 +71,11 @@ async fn run(i: &Input, q: &str, expected: usize) {
 	let mut r = i.dbs.execute(black_box(q), &i.ses, None).await.unwrap();
 	if cfg!(debug_assertions) {
 		assert_eq!(r.len(), 1);
-		if let Value::Array(a) = r.remove(0).result.unwrap() {
+		match r.remove(0).result.unwrap() { Value::Array(a) => {
 			assert_eq!(a.len(), expected);
-		} else {
+		} _ => {
 			panic!("Fail");
-		}
+		}}
 	}
 	black_box(r);
 }

@@ -10,7 +10,7 @@ use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
 use surrealdb::kvs::{Datastore, Key, LockType::*, TransactionType::*};
 use tokio::runtime::Runtime;
 macro_rules! get_key_value {
-	($idx:expr) => {{
+	($idx:expr_2021) => {{
 		(format!("{}", $idx).into(), ($idx * 10) as Payload)
 	}};
 }

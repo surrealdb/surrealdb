@@ -63,31 +63,31 @@ impl AlterFieldStatement {
 			}
 		};
 		// Process the statement
-		if let Some(ref flex) = &self.flex {
+		if let Some(flex) = &self.flex {
 			df.flex = *flex;
 		}
-		if let Some(ref kind) = &self.kind {
+		if let Some(kind) = &self.kind {
 			df.kind.clone_from(kind);
 		}
-		if let Some(ref readonly) = &self.readonly {
+		if let Some(readonly) = &self.readonly {
 			df.readonly = *readonly;
 		}
-		if let Some(ref value) = &self.value {
+		if let Some(value) = &self.value {
 			df.value.clone_from(value);
 		}
-		if let Some(ref assert) = &self.assert {
+		if let Some(assert) = &self.assert {
 			df.assert.clone_from(assert);
 		}
-		if let Some(ref default) = &self.default {
+		if let Some(default) = &self.default {
 			df.default.clone_from(default);
 		}
-		if let Some(ref permissions) = &self.permissions {
+		if let Some(permissions) = &self.permissions {
 			df.permissions = permissions.clone();
 		}
-		if let Some(ref comment) = &self.comment {
+		if let Some(comment) = &self.comment {
 			df.comment.clone_from(comment);
 		}
-		if let Some(ref reference) = &self.reference {
+		if let Some(reference) = &self.reference {
 			df.reference.clone_from(reference);
 
 			// Validate reference options
@@ -95,7 +95,7 @@ impl AlterFieldStatement {
 				df.validate_reference_options(ctx)?;
 			}
 		}
-		if let Some(ref default_always) = &self.default_always {
+		if let Some(default_always) = &self.default_always {
 			df.default_always = *default_always;
 		}
 

@@ -575,13 +575,13 @@ pub enum RecurseInstruction {
 }
 
 macro_rules! to_vec_value {
-	(&$v: expr) => {
+	(&$v: expr_2021) => {
 		match $v {
 			Value::Array(v) => &v.0,
 			v => &vec![v.to_owned()],
 		}
 	};
-	($v: expr) => {
+	($v: expr_2021) => {
 		match $v {
 			Value::Array(v) => v.0,
 			v => vec![v],
@@ -598,7 +598,7 @@ macro_rules! walk_paths {
 		$rec: ident,
 		$finished: ident,
 		$inclusive: ident,
-		$expects: expr
+		$expects: expr_2021
 	) => {{
 		// Collection of paths we will continue processing
 		// in the next iteration
@@ -721,7 +721,7 @@ impl RecurseInstruction {
 				inclusive,
 			} => {
 				macro_rules! persist {
-					($finished:ident, $subject:expr) => {
+					($finished:ident, $subject:expr_2021) => {
 						match $subject {
 							Value::Array(v) => {
 								for v in v.iter() {

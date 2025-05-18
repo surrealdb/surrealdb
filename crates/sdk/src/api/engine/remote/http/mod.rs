@@ -356,24 +356,24 @@ async fn router(
 				.into());
 			};
 
-			if let Ok(Credentials {
+			match from_core_value(credentials.into())
+			{ Ok(Credentials {
 				user,
 				pass,
 				ns,
 				db,
-			}) = from_core_value(credentials.into())
-			{
+			}) => {
 				*auth = Some(Auth::Basic {
 					user,
 					pass,
 					ns,
 					db,
 				});
-			} else {
+			} _ => {
 				*auth = Some(Auth::Bearer {
 					token: value.to_raw_string(),
 				});
-			}
+			}}
 
 			Ok(DbResponse::Other(value))
 		}

@@ -1073,9 +1073,9 @@ mod tests {
 		fn random_number() -> Number {
 			let mut rng = thread_rng();
 			match rng.gen_range(0..3) {
-				0 => Number::Int(rng.gen()),
-				1 => Number::Float(f64::from_bits(rng.gen())),
-				_ => Number::Decimal(Number::Float(f64::from_bits(rng.gen())).as_decimal()),
+				0 => Number::Int(rng.r#gen()),
+				1 => Number::Float(f64::from_bits(rng.r#gen())),
+				_ => Number::Decimal(Number::Float(f64::from_bits(rng.r#gen())).as_decimal()),
 			}
 		}
 
@@ -1103,7 +1103,7 @@ mod tests {
 		fn random_permutation(number: Number) -> Number {
 			let mut rng = thread_rng();
 			let value = match rng.gen_range(0..4) {
-				0 => number + Number::from(rng.gen::<f64>()),
+				0 => number + Number::from(rng.r#gen::<f64>()),
 				1 if !matches!(number, Number::Int(i64::MIN)) => number * Number::from(-1),
 				2 => Number::Float(next_down(number.as_float())),
 				_ => number,

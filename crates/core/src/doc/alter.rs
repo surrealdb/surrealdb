@@ -30,7 +30,7 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<()> {
 		// Check if we need to generate a record id
-		if let Some(tb) = &self.gen {
+		if let Some(tb) = &self.r#gen {
 			// This is a CREATE, UPSERT, UPDATE statement
 			if let Workable::Normal = &self.extras {
 				// Fetch the record id if specified

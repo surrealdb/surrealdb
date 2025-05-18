@@ -581,11 +581,11 @@ mod tests {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
-			let gen = RandomItemGenerator::new(&dist, dim);
+			let r#gen = RandomItemGenerator::new(&dist, dim);
 			let mut num_zero = 0;
 			for i in 0..size {
-				let v1 = new_random_vec(&mut rng, vt, dim, &gen);
-				let v2 = new_random_vec(&mut rng, vt, dim, &gen);
+				let v1 = new_random_vec(&mut rng, vt, dim, &r#gen);
+				let v2 = new_random_vec(&mut rng, vt, dim, &r#gen);
 				let d = dist.calculate(&v1, &v2);
 				assert!(
 					d.is_finite() && !d.is_nan(),

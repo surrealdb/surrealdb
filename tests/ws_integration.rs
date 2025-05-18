@@ -2295,7 +2295,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 macro_rules! define_include_tests {
 	( $( $( #[$m:meta] )* $test_name:ident),* $(,)? ) => {
 		macro_rules! include_tests {
-			($server:expr, $format:expr) => {
+			($server:expr_2021, $format:expr_2021) => {
 				$(
 					$(#[$m])*
 					async fn $test_name(){

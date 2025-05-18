@@ -86,13 +86,12 @@ where
 		let res = match app_state.client_ip {
 			ClientIp::None => ExtractClientIP(None),
 			ClientIp::Socket => {
-				if let Ok(ConnectInfo(addr)) =
-					ConnectInfo::<SocketAddr>::from_request_parts(parts, state).await
-				{
+				match ConnectInfo::<SocketAddr>::from_request_parts(parts, state).await
+				{ Ok(ConnectInfo(addr)) => {
 					ExtractClientIP(Some(addr.ip().to_string()))
-				} else {
+				} _ => {
 					ExtractClientIP(None)
-				}
+				}}
 			}
 			// Get the IP from the corresponding header
 			var if var.is_header() => {
@@ -123,13 +122,13 @@ pub(super) async fn client_ip_middleware(
 ) -> Result<Response, StatusCode> {
 	let (mut parts, body) = request.into_parts();
 
-	if let Ok(Extension(state)) = parts.extract::<Extension<AppState>>().await {
+	match parts.extract::<Extension<AppState>>().await { Ok(Extension(state)) => {
 		if let Ok(client_ip) = parts.extract_with_state::<ExtractClientIP, AppState>(&state).await {
 			parts.extensions.insert(client_ip);
 		}
-	} else {
+	} _ => {
 		trace!("No AppState found, skipping client_ip_middleware");
-	}
+	}}
 
 	Ok(next.run(Request::from_parts(parts, body)).await)
 }

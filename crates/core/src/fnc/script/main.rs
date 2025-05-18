@@ -31,7 +31,7 @@ pub unsafe fn create_query_data<'a>(
 	opt: &'a Options,
 	doc: Option<&'a CursorDoc>,
 	ctx: &Ctx<'_>,
-) -> Result<(), js::Error> {
+) -> Result<(), js::Error> { unsafe {
 	// remove the restricting lifetime.
 	let ctx = Ctx::from_raw(ctx.as_raw());
 
@@ -44,7 +44,7 @@ pub unsafe fn create_query_data<'a>(
 	.expect("userdata shouldn't be in use");
 
 	Ok(())
-}
+}}
 
 pub async fn run(
 	context: &Context,

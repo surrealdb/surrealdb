@@ -278,7 +278,7 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 					// If `id` is set this is a normal response
 					Some(id) => {
 						if let Ok(id) = id.coerce_to() {
-							if let Some(pending) = state.pending_requests.remove(&id) {
+							match state.pending_requests.remove(&id) { Some(pending) => {
 								let resp = match DbResponse::from_server_result(response.result) {
 									Ok(x) => x,
 									Err(e) => {
@@ -323,9 +323,9 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 									}
 								}
 								let _res = pending.response_channel.send(Ok(resp)).await;
-							} else {
+							} _ => {
 								warn!("got response for request with id '{id}', which was not in pending requests")
-							}
+							}}
 						}
 					}
 					// If `id` is not set, this may be a live query notification
@@ -376,22 +376,22 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 
 			// Let's try to find out the ID of the response that failed to deserialise
 			if let Message::Binary(binary) = response {
-				if let Ok(ErrorResponse {
+				match deserialize(&binary, true)
+				{ Ok(ErrorResponse {
 					id,
-				}) = deserialize(&binary, true)
-				{
+				}) => {
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
-						if let Some(pending) = state.pending_requests.remove(&id) {
+						match state.pending_requests.remove(&id) { Some(pending) => {
 							let _res = pending.response_channel.send(Err(error)).await;
-						} else {
+						} _ => {
 							warn!("got response for request with id '{id}', which was not in pending requests")
-						}
+						}}
 					}
-				} else {
+				} _ => {
 					// Unfortunately, we don't know which response failed to deserialize
 					warn!("Failed to deserialise message; {error:?}");
-				}
+				}}
 			}
 		}
 	}
@@ -657,7 +657,7 @@ mod tests {
 		let mut vector: Vec<i32> = Vec::new();
 		let mut rng = thread_rng();
 		for _ in 0..vector_size {
-			vector.push(rng.gen());
+			vector.push(rng.r#gen());
 		}
 		//	Store the results
 		let mut results = vec![];

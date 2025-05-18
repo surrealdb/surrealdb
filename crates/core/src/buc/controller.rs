@@ -222,7 +222,7 @@ impl<'a> BucketController<'a> {
 					})
 				}
 				Permission::Full => (),
-				Permission::Specific(ref e) => {
+				Permission::Specific(e) => {
 					// Disable permissions
 					let opt = &self.opt.new_with_perms(false);
 

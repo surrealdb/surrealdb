@@ -218,7 +218,7 @@ where
 
 	fn generation(&self) -> StoreGeneration {
 		match self {
-			Self::Lru(_, gen, _) | TreeCache::Full(_, gen, _) => *gen,
+			Self::Lru(_, r#gen, _) | TreeCache::Full(_, r#gen, _) => *r#gen,
 		}
 	}
 

@@ -1,7 +1,7 @@
 use crate::syn::token::{t, TokenKind};
 
 macro_rules! test_case(
-	($source:expr => [$($token:expr),*$(,)?]) => {
+	($source:expr_2021 => [$($token:expr_2021),*$(,)?]) => {
 		let mut lexer = crate::syn::lexer::Lexer::new($source.as_bytes());
 		let mut i = 0;
 		$(

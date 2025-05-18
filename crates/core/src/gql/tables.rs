@@ -29,13 +29,13 @@ use crate::gql::error::internal_error;
 use crate::gql::utils::{field_val_erase_owned, ErasedRecord, GQLTx, GqlValueUtils};
 
 macro_rules! order {
-	(asc, $field:expr) => {{
+	(asc, $field:expr_2021) => {{
 		let mut tmp = sql::Order::default();
 		tmp.value = $field.into();
 		tmp.direction = true;
 		tmp
 	}};
-	(desc, $field:expr) => {{
+	(desc, $field:expr_2021) => {{
 		let mut tmp = sql::Order::default();
 		tmp.value = $field.into();
 		tmp
@@ -240,7 +240,7 @@ pub async fn process_tbs(
                 })
             },
         )
-        .description(if let Some(ref c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
+        .description(if let Some(c) = &tb.comment { format!("{c}") } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
         .argument(limit_input!())
         .argument(start_input!())
         .argument(InputValue::new("order", TypeRef::named(&table_order_name)))
@@ -288,7 +288,7 @@ pub async fn process_tbs(
 						})
 					},
 				)
-				.description(if let Some(ref c) = &tb.comment {
+				.description(if let Some(c) = &tb.comment {
 					format!("{c}")
 				} else {
 					format!("Generated from table `{}`\nallows querying a single record in a table by ID", tb.name)
@@ -402,7 +402,7 @@ fn make_table_field_resolver(
 		let field_kind = kind.clone();
 		FieldFuture::new({
 			async move {
-				let (ref gtx, ref rid) = ctx
+				let (gtx, rid) = ctx
 					.parent_value
 					.downcast_ref::<ErasedRecord>()
 					.ok_or_else(|| internal_error("failed to downcast"))?;
@@ -438,7 +438,7 @@ fn make_table_field_resolver(
 }
 
 macro_rules! filter_impl {
-	($filter:ident, $ty:ident, $name:expr) => {
+	($filter:ident, $ty:ident, $name:expr_2021) => {
 		$filter = $filter.field(InputValue::new($name, $ty.clone()));
 	};
 }

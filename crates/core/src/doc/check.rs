@@ -130,7 +130,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Don't bother checking if we generated the document id
-		if self.gen.is_some() {
+		if self.r#gen.is_some() {
 			return Ok(());
 		}
 		// You cannot store a range id as the id field on a document
