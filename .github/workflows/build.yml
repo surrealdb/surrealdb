@@ -39,6 +39,10 @@ on:
       AWS_CI_SECRET_ACCESS_KEY:
         description: "AWS secret access key"
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   docker-builder:
     name: Prepare docker builder
