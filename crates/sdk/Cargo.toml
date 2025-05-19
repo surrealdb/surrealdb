@@ -42,6 +42,7 @@ jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
 allocation-tracking = ["surrealdb-core/allocation-tracking"]
 # FoundationDB features
+kv-fdb = ["kv-fdb-7_3"]
 kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
 kv-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]
 
