@@ -87,8 +87,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Check format
         run: cargo make ci-format
@@ -110,8 +110,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Run clippy
         run: cargo make ci-clippy
@@ -135,8 +135,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Check workspace
         run: cargo make ci-check
@@ -164,8 +164,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo +${{ env.msrv }} install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo +${{ env.msrv }} install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Check workspace on MSRV
         run: cargo +${{ env.msrv }} make ci-check
@@ -218,8 +218,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Check wasm
         run: cargo make ci-check-wasm
@@ -261,8 +261,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
             toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -282,8 +282,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -293,8 +293,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
@@ -315,8 +315,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Run WebSocket integration tests
         run: cargo make ci-ws-integration
@@ -328,8 +328,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -349,8 +349,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -377,8 +377,8 @@ jobs:
         with:
           components: llvm-tools-preview
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
       - uses: taiki-e/install-action@cargo-llvm-cov
         
 
@@ -437,8 +437,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
         
 
       - name: Checkout sources
@@ -467,8 +467,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -496,8 +496,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -525,8 +525,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -554,8 +554,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -583,8 +583,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -612,8 +612,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -641,8 +641,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -677,8 +677,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -711,8 +711,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -749,8 +749,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
             toolchain: ${{ env.RUST_VERSION }}
-      - uses: taiki-e/install-action@cargo-nextest
-      - uses: taiki-e/install-action@cargo-make
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
         
 
       - name: Checkout sources
