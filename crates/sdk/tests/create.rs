@@ -13,7 +13,7 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL PERMISSIONS FULL;
 		CREATE user:test;
-		DEFINE TABLE demo SCHEMAFULL PERMISSIONS FOR select, create, update WHERE user = $auth.id;
+		DEFINE TABLE demo SCHEMAFULL PERMISSIONS FOR select, create WHERE user = $auth.id;
 		DEFINE FIELD user ON TABLE demo VALUE $auth.id;
 	";
 	let dbs = new_ds().await?.with_auth_enabled(true);
