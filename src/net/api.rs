@@ -57,6 +57,8 @@ async fn handler(
 	let url = format!("/api/{ns}/{db}/{path}");
 	// Get a database reference
 	let ds = &state.datastore;
+	// Update the session with the NS & DB
+	let session = session.with_ns(&ns).with_db(&db);
 	// Check if the experimental capability is enabled
 	if !state.datastore.get_capabilities().allows_experimental(&ExperimentalTarget::DefineApi) {
 		warn!("Experimental capability for API routes is not enabled");
@@ -86,7 +88,7 @@ async fn handler(
 	let apis = tx.all_db_apis(&ns, &db).await.map_err(ResponseError)?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-	let (mut res, res_instruction) = match apis.as_ref().find_api(segments, method) {
+	let res = match apis.as_ref().find_api(segments, method) {
 		Some((api, params)) => {
 			let invocation = ApiInvocation {
 				params,
@@ -105,18 +107,23 @@ async fn handler(
 				)
 				.await
 			{
-				Ok(Some(v)) => v,
-				Ok(None) => return Err(NetError::NotFound(url).into()),
-				Err(e) => return Err(ResponseError(e)),
+				Ok(Some(v)) => Ok(v),
+				Ok(None) => Err(NetError::NotFound(url).into()),
+				Err(e) => Err(ResponseError(e)),
 			}
 		}
-		_ => {
-			return Err(NetError::NotFound(url).into());
-		}
+		_ => Err(NetError::NotFound(url).into()),
 	};
 
-	// Commit the transaction
-	tx.commit().await.map_err(ResponseError)?;
+	// Handle committing or cancelling the transaction
+	if res.is_ok() {
+		tx.commit().await.map_err(ResponseError)?;
+	} else {
+		tx.cancel().await.map_err(ResponseError)?;
+	}
+
+	// Process the result
+	let (mut res, res_instruction) = res?;
 
 	let res_body: Vec<u8> = if let Some(body) = res.body {
 		match res_instruction {
