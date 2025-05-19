@@ -207,7 +207,6 @@ storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
 storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 # Deprecated features
 # Doesn't do anything. Use a version specific `storage-fdb-*` feature instead.
-storage-fdb = ["surrealdb/kv-fdb"]
 enterprise = ["surrealdb-core/enterprise"]
 
 [dependencies]
