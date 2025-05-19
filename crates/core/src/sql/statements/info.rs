@@ -159,7 +159,7 @@ impl InfoStatement {
 						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
 						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
-						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
+						"functions".to_string() => process(txn.combined_db_functions(ns, db).await?),
 						"models".to_string() => process(txn.all_db_models(ns, db).await?),
 						"params".to_string() => process(txn.all_db_params(ns, db).await?),
 						"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
@@ -198,8 +198,8 @@ impl InfoStatement {
 						},
 						"functions".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_db_functions(ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+							for v in txn.combined_db_functions(ns, db).await?.iter() {
+								out.insert(v.full_name().to_raw(), v.to_string().into());
 							}
 							out.into()
 						},

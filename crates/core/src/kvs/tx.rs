@@ -826,6 +826,24 @@ impl Transaction {
 		}
 	}
 
+	/// Retrieve all function definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn combined_db_functions(
+		&self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineFunctionStatement]>, Error> {
+		let normal = self.all_db_functions(ns, db).await?;
+		let silo = self.all_silo_functions(ns, db).await?;
+		let mut combined: Vec<DefineFunctionStatement> =
+			Vec::with_capacity(normal.len() + silo.len());
+
+		combined.extend_from_slice(&normal);
+		combined.extend_from_slice(&silo);
+
+		Ok(Arc::from(combined.into_boxed_slice()))
+	}
+
 	/// Retrieve all param definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_params(

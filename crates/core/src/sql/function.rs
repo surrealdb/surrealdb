@@ -105,7 +105,6 @@ impl Function {
 		match self {
 			Self::Normal(n, _) => Some(n.as_str()),
 			Self::Custom(n, _) => Some(n.name.as_str()),
-			// Self::Silo(org, pkg, _, _, _) => Some(&format!("{org}::{pkg}")),
 			_ => None,
 		}
 	}
@@ -114,6 +113,10 @@ impl Function {
 		match self {
 			Self::Normal(_, a) => a,
 			Self::Custom(_, a) => a,
+			Self::Silo {
+				args,
+				..
+			} => args,
 			_ => &[],
 		}
 	}

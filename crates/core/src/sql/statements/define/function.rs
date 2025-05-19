@@ -81,6 +81,21 @@ impl DefineFunctionStatement {
 		Ok(())
 	}
 
+	pub(crate) fn full_name(&self) -> Ident {
+		if let Executable::SiloPackage {
+			organisation,
+			package,
+			..
+		} = &self.executable
+		{
+			if self.name.is_empty() {
+				return Ident(format!("silo::{}::{}", organisation.0, package.0));
+			}
+		}
+
+		Ident(format!("fn::{}", self.name.0))
+	}
+
 	pub(crate) async fn args<'a>(&'a self) -> Result<&'a Vec<(Ident, Kind)>, Error> {
 		match &self.executable {
 			Executable::Block {
@@ -336,7 +351,7 @@ impl InfoStructure for Executable {
 				args,
 				returns,
 			} => Value::from(map! {
-				"executable".to_string() => Value::from("block"),
+				"type".to_string() => Value::from("block"),
 				"block".to_string() => block.structure(),
 				"args".to_string() => args
 					.into_iter()
@@ -346,7 +361,7 @@ impl InfoStructure for Executable {
 				"returns".to_string(), if let Some(v) = returns => v.structure(),
 			}),
 			Self::SurrealismPackage(f) => Value::from(map! {
-				"executable".to_string() => Value::from("surrealism-package"),
+				"type".to_string() => Value::from("surrealism-package"),
 				"file".to_string() => f.structure(),
 			}),
 			Self::SiloPackage {
@@ -354,7 +369,7 @@ impl InfoStructure for Executable {
 				package,
 				versions,
 			} => Value::from(map! {
-				"executable".to_string() => Value::from("silo-package"),
+				"type".to_string() => Value::from("silo-package"),
 				"organisation".to_string() => Value::from(organisation.to_string()),
 				"package".to_string() => Value::from(package.to_string()),
 				"versions".to_string() => Value::from(versions),
