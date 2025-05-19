@@ -53,7 +53,7 @@ async fn info_for_db() {
 	let mut t = Test::new(sql).await.unwrap();
 	t.skip_ok(7).unwrap();
 	t.expect_regex(
-		r"\{ accesses: \{ jwt: .*, record: .* \}, analyzers: \{ analyzer: .* \}, functions: \{ greet: .* \}, params: \{ param: .* \}, tables: \{ TB: .* \}, users: \{ user: .* \} \}",
+		r#"\{ accesses: \{ jwt: .*, record: .* \}, analyzers: \{ analyzer: .* \}, functions: \{ "fn::greet": .* \}, params: \{ param: .* \}, tables: \{ TB: .* \}, users: \{ user: .* \} \}"#,
 	)
 		.unwrap();
 }
@@ -659,7 +659,7 @@ async fn function_info_structure() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let out_expected =
-        r#"{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!'; }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
+        r#"{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], functions: [{ executable: { args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!'; }", returns: 'string', type: 'block' }, name: 'example', permissions: true }], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
 	let out_str = out.unwrap().to_string();
 	assert_eq!(
 		out_str, out_expected,
