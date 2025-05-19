@@ -96,7 +96,7 @@ impl DefineFunctionStatement {
 		Ident(format!("fn::{}", self.name.0))
 	}
 
-	pub(crate) async fn args<'a>(&'a self) -> Result<&'a Vec<(Ident, Kind)>, Error> {
+	pub(crate) async fn args(&self) -> Result<&Vec<(Ident, Kind)>, Error> {
 		match &self.executable {
 			Executable::Block {
 				args,
@@ -106,7 +106,7 @@ impl DefineFunctionStatement {
 		}
 	}
 
-	pub(crate) async fn returns<'a>(&'a self) -> Result<Option<&'a Kind>, Error> {
+	pub(crate) async fn returns(&self) -> Result<Option<&Kind>, Error> {
 		match &self.executable {
 			Executable::Block {
 				returns,

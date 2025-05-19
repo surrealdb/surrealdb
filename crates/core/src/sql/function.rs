@@ -465,7 +465,7 @@ impl Function {
 				let result =
 					stk.run(|stk| val.execute(stk, &ctx, opt, doc, version, submodule)).await?;
 
-				if let Some(ref returns) = val.returns().await? {
+				if let Some(returns) = val.returns().await? {
 					result
 						.coerce_to_kind(returns)
 						.map_err(|e| Error::ReturnCoerce {
