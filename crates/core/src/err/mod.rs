@@ -336,6 +336,12 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The requested function does not exist
+	#[error("The function 'silo::{name}' does not exist")]
+	SiNotFound {
+		name: String,
+	},
+
 	/// The requested field does not exist
 	#[error("The field '{name}' does not exist")]
 	FdNotFound {
@@ -559,7 +565,7 @@ pub enum Error {
 	},
 
 	/// The permissions do not allow this query to be run on this table
-	#[error("You don't have permission to run the fn::{name} function")]
+	#[error("You don't have permission to run the {name} function")]
 	FunctionPermissions {
 		name: String,
 	},

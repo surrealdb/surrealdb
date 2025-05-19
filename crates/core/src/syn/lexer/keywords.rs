@@ -230,6 +230,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("SHOW") => TokenKind::Keyword(Keyword::Show),
 	UniCase::ascii("SIGNIN") => TokenKind::Keyword(Keyword::Signin),
 	UniCase::ascii("SIGNUP") => TokenKind::Keyword(Keyword::Signup),
+	UniCase::ascii("SILO") => TokenKind::Keyword(Keyword::SILO),
 	UniCase::ascii("SINCE") => TokenKind::Keyword(Keyword::Since),
 	UniCase::ascii("SLEEP") => TokenKind::Keyword(Keyword::Sleep),
 	UniCase::ascii("SNOWBALL") => TokenKind::Keyword(Keyword::Snowball),

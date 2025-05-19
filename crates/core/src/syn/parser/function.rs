@@ -1,10 +1,13 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Function, Ident, Model, Value},
+	sql::{
+		function::{CustomFunctionName, FunctionVersion},
+		Function, Ident, Model, Value,
+	},
 	syn::{
-		error::syntax_error,
-		parser::mac::{expected, expected_whitespace, unexpected},
+		error::{bail, syntax_error},
+		parser::mac::{expected, unexpected},
 		token::{t, TokenKind},
 	},
 };
@@ -16,15 +19,88 @@ impl Parser<'_> {
 	///
 	/// Expects `fn` to already be called.
 	pub(super) async fn parse_custom_function(&mut self, ctx: &mut Stk) -> ParseResult<Function> {
-		expected!(self, t!("::"));
-		let mut name = self.next_token_value::<Ident>()?.0;
-		while self.eat(t!("::")) {
-			name.push_str("::");
-			name.push_str(&self.next_token_value::<Ident>()?.0)
-		}
+		let name = self.parse_custom_function_name()?;
 		expected!(self, t!("(")).span;
 		let args = self.parse_function_args(ctx).await?;
 		Ok(Function::Custom(name, args))
+	}
+	/// Parse a custom function function call
+	///
+	/// Expects `fn` to already be called.
+	pub(super) async fn parse_silo_function(&mut self, ctx: &mut Stk) -> ParseResult<Function> {
+		expected!(self, t!("::"));
+		let organisation: Ident = self.next_token_value()?;
+		expected!(self, t!("::"));
+		let package: Ident = self.next_token_value()?;
+		let version = if self.eat(t!("<")) {
+			let start = self.last_span();
+			let version = self.parse_function_version_inner()?;
+			self.expect_closing_delimiter(t!(">"), start)?;
+			version
+		} else {
+			FunctionVersion::Latest
+		};
+
+		let submodule = if self.eat(t!("::")) {
+			let mut submodule = self.next_token_value::<Ident>()?;
+			while self.eat(t!("::")) {
+				submodule.0.push_str("::");
+				submodule.0.push_str(&self.next_token_value::<Ident>()?.0)
+			}
+
+			Some(submodule)
+		} else {
+			None
+		};
+
+		expected!(self, t!("(")).span;
+		let args = self.parse_function_args(ctx).await?;
+		Ok(Function::Silo {
+			organisation,
+			package,
+			version,
+			submodule,
+			args,
+		})
+	}
+
+	/// Parse a custom function name
+	///
+	/// Expects `fn` to already be called.
+	pub(super) fn parse_custom_function_name(&mut self) -> ParseResult<CustomFunctionName> {
+		expected!(self, t!("::"));
+		let mut name = self.next_token_value::<Ident>()?;
+		while self.eat(t!("::")) {
+			name.0.push_str("::");
+			name.0.push_str(&self.next_token_value::<Ident>()?.0)
+		}
+
+		let version = if self.eat(t!("<")) {
+			let start = self.last_span();
+			let version = self.parse_function_version_inner()?;
+			self.expect_closing_delimiter(t!(">"), start)?;
+			Some(version)
+		} else {
+			None
+		};
+
+		let submodule = if self.eat(t!("::")) {
+			let mut submodule = self.next_token_value::<Ident>()?;
+			while self.eat(t!("::")) {
+				submodule.0.push_str("::");
+				submodule.0.push_str(&self.next_token_value::<Ident>()?.0)
+			}
+
+			Some(submodule)
+		} else {
+			None
+		};
+
+		Ok(CustomFunctionName {
+			name,
+			version,
+			submodule,
+		})
 	}
 
 	pub(super) async fn parse_function_args(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Value>> {
@@ -46,6 +122,65 @@ impl Parser<'_> {
 		Ok(args)
 	}
 
+	pub(super) fn parse_function_version_fixed(&mut self) -> ParseResult<String> {
+		let start = self.peek().span;
+		let version = self.parse_function_version_inner()?;
+		if !version.is_patch() {
+			let span = start.covers(self.last_span());
+			let kind = version.kind();
+			bail!(
+				"Found a `{kind}` version, but expected a patch version",
+				@span => "Expected a version in the format of x.y.z",
+			)
+		}
+
+		Ok(version.to_string())
+	}
+
+	pub(super) fn parse_function_version_inner(&mut self) -> ParseResult<FunctionVersion> {
+		let token = self.next();
+		let span_str = self.lexer.span_str(token.span);
+		match token.kind {
+			TokenKind::Identifier if span_str.eq_ignore_ascii_case("latest") => {
+				Ok(FunctionVersion::Latest)
+			}
+			TokenKind::Digits => {
+				let major = span_str
+					.parse()
+					.map_err(|e| syntax_error!("Failed to parse version: {e}", @token.span))?;
+
+				if !self.eat_whitespace(t!(".")) {
+					return Ok(FunctionVersion::Major(major));
+				}
+
+				let token = self.next_whitespace();
+				let minor: u32 =
+					match token.kind {
+						TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
+							|e| syntax_error!("Failed to parse version: {e}", @token.span),
+						)?,
+						_ => unexpected!(self, token, "an integer"),
+					};
+
+				if !self.eat_whitespace(t!(".")) {
+					return Ok(FunctionVersion::Minor(major, minor));
+				}
+
+				let token = self.next_whitespace();
+				let patch: u32 =
+					match token.kind {
+						TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
+							|e| syntax_error!("Failed to parse version: {e}", @token.span),
+						)?,
+						_ => unexpected!(self, token, "an integer"),
+					};
+
+				Ok(FunctionVersion::Patch(major, minor, patch))
+			}
+			_ => unexpected!(self, token, "an integer or `latest`"),
+		}
+	}
+
 	/// Parse a model invocation
 	///
 	/// Expects `ml` to already be called.
@@ -57,38 +192,7 @@ impl Parser<'_> {
 			name.push_str(&self.next_token_value::<Ident>()?.0)
 		}
 		let start = expected!(self, t!("<")).span;
-
-		let token = self.next();
-		let major: u32 =
-			match token.kind {
-				TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
-					|e| syntax_error!("Failed to parse model version: {e}", @token.span),
-				)?,
-				_ => unexpected!(self, token, "an integer"),
-			};
-
-		expected_whitespace!(self, t!("."));
-
-		let token = self.next_whitespace();
-		let minor: u32 =
-			match token.kind {
-				TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
-					|e| syntax_error!("Failed to parse model version: {e}", @token.span),
-				)?,
-				_ => unexpected!(self, token, "an integer"),
-			};
-
-		expected_whitespace!(self, t!("."));
-
-		let token = self.next_whitespace();
-		let patch: u32 =
-			match token.kind {
-				TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
-					|e| syntax_error!("Failed to parse model version: {e}", @token.span),
-				)?,
-				_ => unexpected!(self, token, "an integer"),
-			};
-
+		let version = self.parse_function_version_fixed()?;
 		self.expect_closing_delimiter(t!(">"), start)?;
 
 		let start = expected!(self, t!("(")).span;
@@ -108,7 +212,7 @@ impl Parser<'_> {
 		}
 		Ok(Model {
 			name,
-			version: format!("{}.{}.{}", major, minor, patch),
+			version: version.to_string(),
 			args,
 		})
 	}

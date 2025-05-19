@@ -8,7 +8,7 @@ use crate::sql::statements::define::config::api::ApiConfig;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineSequenceStatement,
+	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineSequenceStatement, Executable,
 };
 use crate::sql::statements::DefineApiStatement;
 use crate::sql::Value;
@@ -148,41 +148,78 @@ impl Parser<'_> {
 		} else {
 			(false, false)
 		};
-		let name = self.parse_custom_function_name()?;
-		let token = expected!(self, t!("(")).span;
-		let mut args = Vec::new();
-		loop {
-			if self.eat(t!(")")) {
-				break;
-			}
 
-			let param = self.next_token_value::<Param>()?.0;
-			expected!(self, t!(":"));
-			let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
-
-			args.push((param, kind));
-
-			if !self.eat(t!(",")) {
-				self.expect_closing_delimiter(t!(")"), token)?;
-				break;
-			}
+		macro_rules! parse_silo {
+			() => {{
+				let (organisation, package) = self.parse_silo_function_name()?;
+				let start = expected!(self, t!("<")).span;
+				let mut versions = vec![self.parse_function_version_fixed()?];
+				while self.eat(t!("|")) {
+					versions.push(self.parse_function_version_fixed()?)
+				}
+				self.expect_closing_delimiter(t!(">"), start)?;
+				Executable::SiloPackage {
+					organisation,
+					package,
+					versions,
+				}
+			}};
 		}
-		let returns = if self.eat(t!("->")) {
-			Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?)
-		} else {
-			None
-		};
 
-		let next = expected!(self, t!("{")).span;
-		let block = self.parse_block(ctx, next).await?;
+		let (name, executable) = if matches!(self.peek_kind(), t!("silo")) {
+			(Default::default(), parse_silo!())
+		} else {
+			let name = self.parse_custom_function_basic_name()?;
+			let executable = if self.eat(t!("AS")) {
+				if matches!(self.peek_kind(), t!("silo")) {
+					parse_silo!()
+				} else {
+					let file = self.next_token_value()?;
+					Executable::SurrealismPackage(file)
+				}
+			} else {
+				let token = expected!(self, t!("(")).span;
+				let mut args = Vec::new();
+				loop {
+					if self.eat(t!(")")) {
+						break;
+					}
+
+					let param = self.next_token_value::<Param>()?.0;
+					expected!(self, t!(":"));
+					let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
+
+					args.push((param, kind));
+
+					if !self.eat(t!(",")) {
+						self.expect_closing_delimiter(t!(")"), token)?;
+						break;
+					}
+				}
+				let returns = if self.eat(t!("->")) {
+					Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?)
+				} else {
+					None
+				};
+
+				let next = expected!(self, t!("{")).span;
+				let block = self.parse_block(ctx, next).await?;
+
+				Executable::Block {
+					block,
+					args,
+					returns,
+				}
+			};
+
+			(name, executable)
+		};
 
 		let mut res = DefineFunctionStatement {
 			name,
-			args,
-			block,
 			if_not_exists,
 			overwrite,
-			returns,
+			executable,
 			..Default::default()
 		};
 
@@ -1385,14 +1422,7 @@ impl Parser<'_> {
 				t!("FUNCTION") => {
 					self.pop_peek();
 					expected!(self, t!("fn"));
-					expected!(self, t!("::"));
-					let mut ident = self.next_token_value::<Ident>()?;
-					while self.eat(t!("::")) {
-						let value = self.next_token_value::<Ident>()?;
-						ident.0.push_str("::");
-						ident.0.push_str(&value);
-					}
-					res.function = Some(ident);
+					res.function = Some(self.parse_custom_function_name()?);
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

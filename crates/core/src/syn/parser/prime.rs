@@ -108,6 +108,12 @@ impl Parser<'_> {
 				let value = self.parse_model(ctx).await.map(|x| Value::Model(Box::new(x)))?;
 				self.continue_parse_inline_call(ctx, value).await
 			}
+			t!("silo") => {
+				self.pop_peek();
+				let value =
+					self.parse_silo_function(ctx).await.map(|x| Value::Function(Box::new(x)))?;
+				self.continue_parse_inline_call(ctx, value).await
+			}
 			x if Self::kind_is_identifier(x) => {
 				let peek = self.peek1();
 				match peek.kind {
@@ -335,6 +341,10 @@ impl Parser<'_> {
 			t!("ml") => {
 				self.pop_peek();
 				self.parse_model(ctx).await.map(|x| Value::Model(Box::new(x)))?
+			}
+			t!("silo") => {
+				self.pop_peek();
+				self.parse_silo_function(ctx).await.map(|x| Value::Function(Box::new(x)))?
 			}
 			x if Self::kind_is_identifier(x) => {
 				let peek = self.peek1();

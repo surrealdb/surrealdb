@@ -268,14 +268,14 @@ impl Analyzer {
 		stage: FilteringStage,
 		mut input: String,
 	) -> Result<Tokens, Error> {
-		if let Some(function_name) = self.az.function.as_ref().map(|i| i.0.clone()) {
+		if let Some(function_name) = self.az.function.as_ref() {
 			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
 			let val = fns.compute(stk, ctx, opt, None).await.catch_return()?;
 			if let Value::Strand(val) = val {
 				input = val.0;
 			} else {
 				return Err(Error::InvalidFunction {
-					name: function_name,
+					name: function_name.to_string(),
 					message: "The function should return a string.".to_string(),
 				});
 			}

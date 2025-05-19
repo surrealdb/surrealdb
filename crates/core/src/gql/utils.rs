@@ -9,6 +9,7 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
 use crate::sql;
+use crate::sql::function::CustomFunctionName;
 use crate::sql::part::Part;
 use crate::sql::FlowResultExt;
 use crate::sql::Function;
@@ -119,7 +120,15 @@ impl GQLTx {
 
 	pub async fn run_fn(&self, name: &str, args: Vec<SqlValue>) -> Result<SqlValue, GqlError> {
 		let mut stack = TreeStack::new();
-		let fun = sql::Value::Function(Box::new(Function::Custom(name.to_string(), args)));
+		let fun = sql::Value::Function(Box::new(Function::Custom(
+			CustomFunctionName {
+				name: name.into(),
+				// TODO(kearfy): support version and submodule specification here
+				version: None,
+				submodule: None,
+			},
+			args,
+		)));
 
 		let res = stack
 			// .enter(|stk| fnc::run(stk, &self.ctx, &self.opt, None, name, args))

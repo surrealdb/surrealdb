@@ -5,12 +5,14 @@ use crate::{
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
+		function::CustomFunctionName,
 		graph::{GraphSubject, GraphSubjects},
 		index::{Distance, MTreeParams, SearchParams, VectorType},
 		language::Language,
 		order::{OrderList, Ordering},
 		statements::{
 			analyze::AnalyzeStatement,
+			define::Executable,
 			show::{ShowSince, ShowStatement},
 			sleep::SleepStatement,
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
@@ -201,19 +203,21 @@ fn statements() -> Vec<Statement> {
 		})),
 		Statement::Define(DefineStatement::Function(DefineFunctionStatement {
 			name: Ident("foo::bar".to_string()),
-			args: vec![
-				(Ident("a".to_string()), Kind::Number),
-				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3))),
-			],
-			block: Block(vec![Entry::Output(OutputStatement {
-				what: ident_field("a"),
-				fetch: None,
-			})]),
+			executable: Executable::Block {
+				args: vec![
+					(Ident("a".to_string()), Kind::Number),
+					(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3))),
+				],
+				block: Block(vec![Entry::Output(OutputStatement {
+					what: ident_field("a"),
+					fetch: None,
+				})]),
+				returns: None,
+			},
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
 			if_not_exists: false,
 			overwrite: false,
-			returns: None,
 		})),
 		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
@@ -408,7 +412,11 @@ fn statements() -> Vec<Statement> {
 				Filter::Snowball(Language::Dutch),
 				Filter::Uppercase,
 			]),
-			function: Some(Ident("foo::bar".to_string())),
+			function: Some(CustomFunctionName {
+				name: Ident("foo::bar".to_string()),
+				version: None,
+				submodule: None,
+			}),
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,

@@ -524,7 +524,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
+	pub fn parse_custom_function_basic_name(&mut self) -> ParseResult<Ident> {
 		expected!(self, t!("fn"));
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?;
@@ -534,6 +534,15 @@ impl Parser<'_> {
 			name.0.push_str(part.0.as_str());
 		}
 		Ok(name)
+	}
+
+	pub fn parse_silo_function_name(&mut self) -> ParseResult<(Ident, Ident)> {
+		expected!(self, t!("silo"));
+		expected!(self, t!("::"));
+		let organisation = self.next_token_value::<Ident>()?;
+		expected!(self, t!("::"));
+		let package = self.next_token_value::<Ident>()?;
+		Ok((organisation, package))
 	}
 	pub(super) fn try_parse_explain(&mut self) -> ParseResult<Option<Explain>> {
 		Ok(self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL")))))

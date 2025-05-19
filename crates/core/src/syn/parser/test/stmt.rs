@@ -8,6 +8,7 @@ use crate::{
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
+		function::CustomFunctionName,
 		graph::{GraphSubject, GraphSubjects},
 		index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType},
 		language::Language,
@@ -18,6 +19,7 @@ use crate::{
 				AccessStatementShow,
 			},
 			analyze::AnalyzeStatement,
+			define::Executable,
 			show::{ShowSince, ShowStatement},
 			sleep::SleepStatement,
 			AccessStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
@@ -211,19 +213,21 @@ fn parse_define_function() {
 		res,
 		Statement::Define(DefineStatement::Function(DefineFunctionStatement {
 			name: Ident("foo::bar".to_string()),
-			args: vec![
-				(Ident("a".to_string()), Kind::Number),
-				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
-			],
-			block: Block(vec![Entry::Output(OutputStatement {
-				what: ident_field("a"),
-				fetch: None,
-			})]),
+			executable: Executable::Block {
+				args: vec![
+					(Ident("a".to_string()), Kind::Number),
+					(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
+				],
+				block: Block(vec![Entry::Output(OutputStatement {
+					what: ident_field("a"),
+					fetch: None,
+				})]),
+				returns: None,
+			},
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
 			if_not_exists: false,
 			overwrite: false,
-			returns: None,
 		}))
 	)
 }
@@ -2110,7 +2114,11 @@ fn parse_define_analyzer() {
 				Filter::Uppercase,
 			]),
 			comment: None,
-			function: Some(Ident("foo::bar".to_string())),
+			function: Some(CustomFunctionName {
+				name: Ident("foo::bar".to_string()),
+				version: None,
+				submodule: None,
+			}),
 			if_not_exists: false,
 			overwrite: false,
 		})),

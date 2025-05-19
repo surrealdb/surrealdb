@@ -235,6 +235,19 @@ impl<'a> KnnConditionRewriter<'a> {
 			Function::Custom(s, args) => {
 				self.eval_values(args).map(|args| Function::Custom(s.clone(), args))
 			}
+			Function::Silo {
+				organisation,
+				package,
+				version,
+				submodule,
+				args,
+			} => self.eval_values(args).map(|args| Function::Silo {
+				organisation: organisation.clone(),
+				package: package.clone(),
+				version: version.clone(),
+				submodule: submodule.clone(),
+				args,
+			}),
 			Function::Script(s, args) => {
 				self.eval_values(args).map(|args| Function::Script(s.clone(), args))
 			}

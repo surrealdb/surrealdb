@@ -77,7 +77,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = self.parse_custom_function_name()?;
+				let name = self.parse_custom_function_basic_name()?;
 				let next = self.peek();
 				if self.eat(t!("(")) {
 					self.expect_closing_delimiter(t!(")"), next.span)?;

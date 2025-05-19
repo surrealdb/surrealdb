@@ -2,7 +2,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
 
-use super::Ident;
+use super::{statements::info::InfoStructure, Ident, Value};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::File";
 
@@ -59,4 +59,13 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 			}
 		})
 		.collect::<String>()
+}
+
+impl InfoStructure for File {
+	fn structure(self) -> super::Value {
+		Value::from(map! {
+			"bucket".to_string() => Value::from(self.bucket),
+			"key".to_string() => Value::from(self.key),
+		})
+	}
 }

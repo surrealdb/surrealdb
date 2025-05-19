@@ -59,6 +59,8 @@ pub(crate) enum Entry {
 	Dus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineFunctionStatement specified on a database.
 	Fcs(Arc<[DefineFunctionStatement]>),
+	/// A slice of DefineFunctionStatement specified on a database.
+	Sis(Arc<[DefineFunctionStatement]>),
 	/// A slice of DefineTableStatement specified on a database.
 	Tbs(Arc<[DefineTableStatement]>),
 	/// A slice of DefineModelStatement specified on a database.
@@ -226,6 +228,14 @@ impl Entry {
 		match self {
 			Entry::Fcs(v) => Ok(v),
 			_ => Err(fail!("Unable to convert type into Entry::Fcs")),
+		}
+	}
+	/// Converts this cache entry into a slice of [`DefineFunctionStatement`].
+	/// This panics if called on a cache entry that is not an [`Entry::Sis`].
+	pub(crate) fn try_into_sis(self) -> Result<Arc<[DefineFunctionStatement]>, Error> {
+		match self {
+			Entry::Sis(v) => Ok(v),
+			_ => Err(fail!("Unable to convert type into Entry::Sis")),
 		}
 	}
 	/// Converts this cache entry into a slice of [`DefineParamStatement`].

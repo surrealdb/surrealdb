@@ -32,6 +32,7 @@
 /// crate::key::database::fc             /*{ns}*{db}!fn{fc}
 /// crate::key::database::ml             /*{ns}*{db}!ml{ml}{vn}
 /// crate::key::database::pa             /*{ns}*{db}!pa{pa}
+/// crate::key::database::si             /*{ns}*{db}!si{si}
 /// crate::key::database::sq             /*{ns}*{db}!sq{sq}
 /// crate::key::database::tb             /*{ns}*{db}!tb{tb}
 /// crate::key::database::ti             /+{ns id}*{db id}!ti

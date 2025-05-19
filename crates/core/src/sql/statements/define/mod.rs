@@ -42,6 +42,8 @@ pub use api::FindApi;
 
 pub use bucket::BucketDefinition;
 
+pub use function::Executable;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

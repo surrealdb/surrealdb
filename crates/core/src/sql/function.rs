@@ -17,18 +17,26 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
-use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
+use super::statements::info::InfoStructure;
+use super::{ControlFlow, FlowResult, Ident, Kind};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Function {
 	Normal(String, Vec<Value>),
+	#[revision(
+		end = 3,
+		convert_fn = "convert_custom_add_version",
+		fields_name = "OldCustomFields"
+	)]
 	Custom(String, Vec<Value>),
+	#[revision(start = 3)]
+	Custom(CustomFunctionName, Vec<Value>),
 	Script(Script, Vec<Value>),
 	#[revision(
 		end = 2,
@@ -38,6 +46,14 @@ pub enum Function {
 	Anonymous(Value, Vec<Value>),
 	#[revision(start = 2)]
 	Anonymous(Value, Vec<Value>, bool),
+	#[revision(start = 3)]
+	Silo {
+		organisation: Ident,
+		package: Ident,
+		version: FunctionVersion,
+		submodule: Option<Ident>,
+		args: Vec<Value>,
+	},
 	// Add new variants here
 }
 
@@ -47,6 +63,20 @@ impl Function {
 		_revision: u16,
 	) -> Result<Self, revision::Error> {
 		Ok(Function::Anonymous(old.0, old.1, false))
+	}
+
+	fn convert_custom_add_version(
+		old: OldCustomFields,
+		_revision: u16,
+	) -> Result<Self, revision::Error> {
+		Ok(Function::Custom(
+			CustomFunctionName {
+				name: Ident(old.0),
+				version: None,
+				submodule: None,
+			},
+			old.1,
+		))
 	}
 }
 
@@ -74,7 +104,8 @@ impl Function {
 	pub fn name(&self) -> Option<&str> {
 		match self {
 			Self::Normal(n, _) => Some(n.as_str()),
-			Self::Custom(n, _) => Some(n.as_str()),
+			Self::Custom(n, _) => Some(n.name.as_str()),
+			// Self::Silo(org, pkg, _, _, _) => Some(&format!("{org}::{pkg}")),
 			_ => None,
 		}
 	}
@@ -92,13 +123,29 @@ impl Function {
 			Self::Anonymous(_, _, _) => "function".to_string().into(),
 			Self::Script(_, _) => "function".to_string().into(),
 			Self::Normal(f, _) => f.to_owned().into(),
-			Self::Custom(f, _) => format!("fn::{f}").into(),
+			Self::Custom(f, _) => f.to_string().into(),
+			Self::Silo {
+				organisation,
+				package,
+				version,
+				submodule,
+				..
+			} => {
+				if let Some(submodule) = submodule {
+					format!("silo::{organisation}::{package}<{version}>::{submodule}").into()
+				} else {
+					format!("silo::{organisation}::{package}<{version}>").into()
+				}
+			}
 		}
 	}
 	/// Checks if this function invocation is writable
 	pub fn writeable(&self) -> bool {
 		match self {
 			Self::Custom(_, _) => true,
+			Self::Silo {
+				..
+			} => true,
 			Self::Script(_, _) => true,
 			Self::Normal(f, _) if f == "api::invoke" => true,
 			_ => self.args().iter().any(Value::writeable),
@@ -275,21 +322,88 @@ impl Function {
 					})),
 				}
 			}
-			Self::Custom(s, x) => {
-				// Get the full name of this function
-				let name = format!("fn::{s}");
+			fnc @ Self::Silo {
+				..
+			}
+			| fnc @ Self::Custom(_, _) => {
+				let (name, key, x, version, submodule) = match fnc {
+					Self::Custom(s, x) => {
+						let name = s.to_string();
+						(name, s.name.0.clone(), x, s.version.as_ref(), s.submodule.as_ref())
+					}
+					Self::Silo {
+						organisation,
+						package,
+						version,
+						submodule,
+						args,
+					} => {
+						let name = if let Some(submodule) = submodule {
+							format!("silo::{organisation}::{package}::<{version}>::{submodule}")
+						} else {
+							format!("silo::{organisation}::{package}::<{version}>")
+						};
+						(
+							name,
+							format!("{organisation}::{package}"),
+							args,
+							Some(version),
+							submodule.as_ref(),
+						)
+					}
+					_ => {
+						return Err(fail!(
+							"Expected to find either custom or silo function as previously matched"
+						)
+						.into())
+					}
+				};
 				// Check this function is allowed
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
 				let (ns, db) = opt.ns_db()?;
-				let val = ctx.tx().get_db_function(ns, db, s).await?;
+				let val = if matches!(fnc, Function::Silo { .. }) {
+					match ctx.tx().get_silo_function(ns, db, &key).await {
+						Err(Error::SiNotFound {
+							name,
+						}) => {
+							let name = CustomFunctionName {
+								name: Ident(name),
+								version: version.cloned(),
+								submodule: submodule.cloned(),
+							};
+
+							Err(Error::SiNotFound {
+								name: name.to_string(),
+							})
+						}
+						x => x,
+					}?
+				} else {
+					match ctx.tx().get_db_function(ns, db, &key).await {
+						Err(Error::FcNotFound {
+							name,
+						}) => {
+							let name = CustomFunctionName {
+								name: Ident(name),
+								version: version.cloned(),
+								submodule: submodule.cloned(),
+							};
+
+							Err(Error::FcNotFound {
+								name: name.to_string(),
+							})
+						}
+						x => x,
+					}?
+				};
 				// Check permissions
 				if opt.check_perms(Action::View)? {
 					match &val.permissions {
 						Permission::Full => (),
 						Permission::None => {
 							return Err(ControlFlow::from(Error::FunctionPermissions {
-								name: s.to_owned(),
+								name,
 							}))
 						}
 						Permission::Specific(e) => {
@@ -298,18 +412,19 @@ impl Function {
 							// Process the PERMISSION clause
 							if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
 								return Err(ControlFlow::from(Error::FunctionPermissions {
-									name: s.to_owned(),
+									name,
 								}));
 							}
 						}
 					}
 				}
+				let args = val.args().await?;
 				// Get the number of function arguments
-				let max_args_len = val.args.len();
+				let max_args_len = args.len();
 				// Track the number of required arguments
 				let mut min_args_len = 0;
 				// Check for any final optional arguments
-				val.args.iter().rev().for_each(|(_, kind)| match kind {
+				args.iter().rev().for_each(|(_, kind)| match kind {
 					Kind::Option(_) if min_args_len == 0 => {}
 					Kind::Any if min_args_len == 0 => {}
 					_ => min_args_len += 1,
@@ -336,7 +451,7 @@ impl Function {
 				// Duplicate context
 				let mut ctx = MutableContext::new_isolated(ctx);
 				// Process the function arguments
-				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
+				for (val, (name, kind)) in a.into_iter().zip(args) {
 					ctx.add_value(
 						name.to_raw(),
 						val.coerce_to_kind(kind).map_err(Error::from)?.into(),
@@ -345,9 +460,9 @@ impl Function {
 				let ctx = ctx.freeze();
 				// Run the custom function
 				let result =
-					stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await.catch_return()?;
+					stk.run(|stk| val.execute(stk, &ctx, opt, doc, version, submodule)).await?;
 
-				if let Some(ref returns) = val.returns {
+				if let Some(ref returns) = val.returns().await? {
 					result
 						.coerce_to_kind(returns)
 						.map_err(|e| Error::ReturnCoerce {
@@ -392,6 +507,27 @@ impl fmt::Display for Function {
 		match self {
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
+			Self::Silo {
+				organisation,
+				package,
+				version,
+				submodule,
+				args,
+			} => {
+				if let Some(submodule) = submodule {
+					write!(
+						f,
+						"silo::{organisation}::{package}<{version}>::{submodule}({})",
+						Fmt::comma_separated(args)
+					)
+				} else {
+					write!(
+						f,
+						"silo::{organisation}::{package}<{version}>({})",
+						Fmt::comma_separated(args)
+					)
+				}
+			}
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
 			Self::Anonymous(p, e, _) => {
 				if BindingPower::for_value(p) < BindingPower::Postfix {
@@ -401,6 +537,88 @@ impl fmt::Display for Function {
 				}
 				write!(f, "({})", Fmt::comma_separated(e))
 			}
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Function")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+/// Does not store the function's prefix
+pub struct CustomFunctionName {
+	pub name: Ident,
+	pub version: Option<FunctionVersion>,
+	pub submodule: Option<Ident>,
+}
+
+impl CustomFunctionName {
+	pub fn new(name: Ident, version: Option<FunctionVersion>, submodule: Option<Ident>) -> Self {
+		CustomFunctionName {
+			name,
+			version,
+			submodule,
+		}
+	}
+}
+
+impl fmt::Display for CustomFunctionName {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}", self.name.0)?;
+		match (&self.version, &self.submodule) {
+			(Some(version), None) => write!(f, "<{version}>")?,
+			(Some(version), Some(submodule)) => write!(f, "<{version}>::{}", submodule.0)?,
+			(None, Some(submodule)) => write!(f, "<latest>::{}", submodule.0)?,
+			_ => (),
+		};
+
+		Ok(())
+	}
+}
+
+impl InfoStructure for CustomFunctionName {
+	fn structure(self) -> Value {
+		Value::from(self.to_string())
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Function")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+/// Does not store the function's prefix
+pub enum FunctionVersion {
+	#[default]
+	Latest,
+	Major(u32),
+	Minor(u32, u32),
+	Patch(u32, u32, u32),
+}
+
+impl FunctionVersion {
+	pub(crate) fn is_patch(&self) -> bool {
+		matches!(self, Self::Patch(_, _, _))
+	}
+
+	pub(crate) fn kind(&self) -> &str {
+		match self {
+			Self::Latest => "latest",
+			Self::Major(_) => "major",
+			Self::Minor(_, _) => "minor",
+			Self::Patch(_, _, _) => "patch",
+		}
+	}
+}
+
+impl fmt::Display for FunctionVersion {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Latest => write!(f, "latest"),
+			Self::Major(a) => write!(f, "{a}"),
+			Self::Minor(a, b) => write!(f, "{a}.{b}"),
+			Self::Patch(a, b, c) => write!(f, "{a}.{b}.{c}"),
 		}
 	}
 }

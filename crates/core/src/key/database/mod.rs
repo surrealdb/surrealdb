@@ -8,6 +8,7 @@ pub mod cg;
 pub mod fc;
 pub mod ml;
 pub mod pa;
+pub mod si;
 pub mod sq;
 pub mod tb;
 pub mod ti;
