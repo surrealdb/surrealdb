@@ -1,0 +1,318 @@
+on:
+  workflow_call:
+    inputs:
+      name:
+        required: true
+        type: string
+        description: "The name of output"
+      build-metadata:
+        required: false
+        type: string
+        description: "Build metadata"
+      release-branch:
+        required: true
+        type: string
+        description: "Release branch"
+      rust-version:
+        required: false
+        type: string
+        default: "1.86.0"
+        description: "The Rust version to use for building binaries"
+      onnx-version:
+        required: false
+        type: string
+        default: "1.16.3"
+        description: "The ONNX library version"
+      extra-features:
+        required: false
+        type: string
+        default: storage-tikv,http-compression,jwks,ml
+        description: "Extra features enabled in the binary"
+      upload:
+        required: false
+        type: boolean
+        default: true
+        description: "Upload build artifacts"
+    secrets:
+      AWS_CI_ACCESS_KEY_ID:
+        description: "AWS access key ID"
+      AWS_CI_SECRET_ACCESS_KEY:
+        description: "AWS secret access key"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  docker-builder:
+    name: Prepare docker builder
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.image.outputs.name }}
+      tag: ${{ steps.image.outputs.tag }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # Actions must be pinned by hash
+        with:
+          ref: ${{ inputs.release-branch }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # (Actions must be pinned by commit hash) v3.10.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # (Actions must be pinned by commit hash) v2.0.1
+
+      - name: Prepare docker image name
+        id: image
+        run: |
+          set -x
+
+          # (Actions must be pinned by commit hash) Use the github branch name so we can use modified builders on custom branches
+          tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
+
+          echo "name=${{ steps.login-ecr.outputs.registry }}/surrealdb-builder" >> $GITHUB_OUTPUT
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
+
+      - name: Build & Push builder image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # (Actions must be pinned by commit hash) v5.4.0
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          file: ./docker/Dockerfile
+          target: builder
+          cache-from: |
+            type=registry,ref=${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+            type=registry,ref=${{ steps.image.outputs.name }}:main
+          cache-to: type=inline
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+          build-args: |
+            RUST_VERSION=${{ inputs.rust-version }}
+
+  build:
+    name: Build ${{ matrix.arch }} binary
+    needs: [docker-builder]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # MacOS amd64
+          - arch: x86_64-apple-darwin
+            runner: macos-latest-xlarge
+            file: surreal-${{ inputs.name }}.darwin-amd64
+            build-step: |
+              set -x
+
+              # Prepare deps
+              brew install protobuf
+
+              # Build
+              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                extraFeatures="--features ${{ inputs.extra-features }}"
+              fi
+
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              mkdir /tmp/onnxruntime
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-osx-x86_64-static_lib-${{ inputs.onnx-version }}.tgz | \
+                tar -xz -C /tmp/onnxruntime/
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
+
+              cargo build $extraFeatures --release --locked --target x86_64-apple-darwin
+
+              # Package
+              cp target/x86_64-apple-darwin/release/surreal surreal
+              ./surreal version
+              tar -zcvf surreal-${{ inputs.name }}.darwin-amd64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ inputs.name }}.darwin-amd64.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.darwin-amd64.txt
+
+          # MacOS arm64
+          - arch: aarch64-apple-darwin
+            runner: macos-latest-xlarge
+            file: surreal-${{ inputs.name }}.darwin-arm64
+            build-step: |
+              set -x
+
+              # Prepare deps
+              brew install protobuf
+
+              # Build
+              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                extraFeatures="--features ${{ inputs.extra-features }}"
+              fi
+
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              mkdir /tmp/onnxruntime
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-osx-arm64-static_lib-${{ inputs.onnx-version }}.tgz | \
+                tar -xz -C /tmp/onnxruntime/
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
+
+              cargo build $extraFeatures --release --locked --target aarch64-apple-darwin
+
+              # Package
+              cp target/aarch64-apple-darwin/release/surreal surreal
+              ./surreal version
+              tar -zcvf surreal-${{ inputs.name }}.darwin-arm64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ inputs.name }}.darwin-arm64.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.darwin-arm64.txt
+
+          # Linux amd64
+          - arch: x86_64-unknown-linux-gnu
+            runner: [runner-amd64-2xlarge]
+            file: surreal-${{ inputs.name }}.linux-amd64
+            build-step: |
+              # Build
+              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                extraFeatures="--features ${{ inputs.extra-features }}"
+              fi
+
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              tmpdir=$(mktemp -d)
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-linux-x64-static_lib-${{ inputs.onnx-version }}.tgz | \
+                tar -xz -C $tmpdir
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
+
+              docker run \
+                --rm -t \
+                --pull always \
+                -v $(pwd):/surrealdb \
+                -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
+                -e RUSTFLAGS="${RUSTFLAGS}" \
+                -e ORT_STRATEGY=$ORT_STRATEGY \
+                -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
+                -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
+                ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
+                  --target x86_64-unknown-linux-gnu ${extraFeatures} --release --locked
+
+              # Package
+              cp target/x86_64-unknown-linux-gnu/release/surreal surreal
+              tar -zcvf surreal-${{ inputs.name }}.linux-amd64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ inputs.name }}.linux-amd64.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.linux-amd64.txt
+
+              # Verify the binary is compatible with various Linux distributions
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal ubuntu:20.04 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal rockylinux:8 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal debian:11 /surreal version
+
+          # Linux arm64
+          - arch: aarch64-unknown-linux-gnu
+            runner: [runner-arm64-2xlarge]
+            file: surreal-${{ inputs.name }}.linux-arm64
+            build-step: |
+              set -x
+
+              # Build
+              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                extraFeatures="--features ${{ inputs.extra-features }}"
+              fi
+
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              tmpdir=$(mktemp -d)
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-linux-aarch64-static_lib-${{ inputs.onnx-version }}.tgz | \
+                tar -xz -C $tmpdir
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
+
+              docker run \
+                --rm -t \
+                --pull always \
+                -v $(pwd):/surrealdb \
+                -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
+                -e RUSTFLAGS="${RUSTFLAGS}" \
+                -e ORT_STRATEGY=$ORT_STRATEGY \
+                -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
+                -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
+                ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
+                  --target aarch64-unknown-linux-gnu ${extraFeatures} --release --locked
+
+              # Package
+              cp target/aarch64-unknown-linux-gnu/release/surreal surreal
+              tar -zcvf surreal-${{ inputs.name }}.linux-arm64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ inputs.name }}.linux-arm64.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.linux-arm64.txt
+
+              # Verify the binary is compatible with various Linux distributions
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal ubuntu:20.04 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal rockylinux:8 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal debian:11 /surreal version
+
+          # Windows amd64
+          - arch: x86_64-pc-windows-msvc
+            runner: windows-latest-16-cores
+            file: surreal-${{ inputs.name }}.windows-amd64
+            build-step: |
+              set -x
+
+              # Prepare deps
+              vcpkg integrate install
+
+              # Build
+              if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+                extraFeatures="--features ${{ inputs.extra-features }}"
+              fi
+
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              tmp_dir=$(mktemp -d)
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-win-x64-static_lib-${{ inputs.onnx-version }}.zip -o $tmp_dir/onnxruntime.zip
+              unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
+
+              cargo build $extraFeatures --release --locked --target x86_64-pc-windows-msvc
+
+              # Package
+              ./target/x86_64-pc-windows-msvc/release/surreal.exe version
+              cp target/x86_64-pc-windows-msvc/release/surreal.exe surreal-${{ inputs.name }}.windows-amd64.exe
+              echo $(certutil -hashfile surreal-${{ inputs.name }}.windows-amd64.exe SHA256 | sed -n '2p') > surreal-${{ inputs.name }}.windows-amd64.txt
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.release-branch }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+        with:
+          toolchain: ${{ inputs.rust-version }}
+          targets: ${{ matrix.arch }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
+        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
+        with:
+          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # (Actions must be pinned by commit hash) v2.0.1
+
+      - name: Output package versions
+        run: |
+          set -x
+          set +e
+          go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
+
+      - name: Build step
+        env:
+          SURREAL_BUILD_METADATA: ${{ inputs.build-metadata }}
+        run: ${{ matrix.build-step }}
+
+      - name: Upload artifacts
+        if: ${{ inputs.upload }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
+        with:
+          name: ${{ matrix.file }}
+          path: |
+            surreal
+            ${{ matrix.file }}.tgz
+            ${{ matrix.file }}.txt
+            ${{ matrix.file }}.exe
